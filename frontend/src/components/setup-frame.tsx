@@ -1,63 +1,62 @@
 import type { ReactNode } from "react";
 import { Check } from "lucide-react";
-import { BrandMark } from "@/components/brand-mark";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { LocaleToggle } from "@/components/locale-toggle";
-import { Card } from "@/components/ui/card";
+import { AuthFrame } from "@/components/auth-frame";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
+const STEPS = ["stepAccount", "stepStorage", "stepReview"] as const;
+
+/**
+ * First-run setup inside the shared sign-in shell. The welcome heading greets the
+ * visitor once, on the first step; later steps keep it for assistive technology
+ * only, so each step's own title is the first thing a sighted visitor reads.
+ */
 export function SetupFrame({ step, children }: { step: 1 | 2 | 3; children: ReactNode }) {
   const { t } = useI18n();
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-6 sm:py-10">
-      <Card
-        role="region"
-        aria-label={t("setup.welcome")}
-        className="w-full max-w-2xl overflow-hidden border-outline-variant bg-surface-container-low"
+    <AuthFrame wide label={t("setup.welcome")}>
+      <h1
+        className={
+          step === 1 ? "text-[22px] font-semibold tracking-tight text-foreground" : "sr-only"
+        }
       >
-        <header className="flex items-center justify-between gap-4 px-5 py-5 sm:px-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <BrandMark className="h-7 w-7" />
-            </div>
-            <span className="text-base font-semibold tracking-tight">PrintStash</span>
-            <h1 className="sr-only">{t("setup.welcome")}</h1>
-          </div>
-          <div className="flex items-center gap-4">
-            <LocaleToggle />
-            <ThemeToggle />
-          </div>
-        </header>
-        <ol
-          aria-label={t("setup.progress")}
-          className="grid grid-cols-3 gap-2 border-y border-outline-variant bg-muted/30 px-5 py-3 sm:px-8"
-        >
-          {(["account", "files", "start"] as const).map((key, index) => (
+        {t("setup.welcome")}
+      </h1>
+      <ol
+        aria-label={t("setup.progress")}
+        className={cn("grid grid-cols-3 gap-2", step === 1 ? "mt-5" : "mt-0")}
+      >
+        {STEPS.map((key, index) => {
+          const position = index + 1;
+          const current = step === position;
+          const done = step > position;
+          return (
             <li
               key={key}
-              aria-current={step === index + 1 ? "step" : undefined}
+              aria-current={current ? "step" : undefined}
               className={cn(
-                "flex items-center justify-center gap-2 text-xs",
-                step === index + 1 ? "font-semibold text-foreground" : "text-muted-foreground",
+                "flex items-center gap-2 border-t-2 pt-2.5 text-[13px]",
+                current && "border-primary font-medium text-foreground",
+                done && "border-primary text-foreground",
+                !current && !done && "border-border text-muted-foreground",
               )}
             >
               <span
                 className={cn(
-                  "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-2xs",
-                  step === index + 1
-                    ? "bg-accent text-accent-foreground"
-                    : "bg-muted text-muted-foreground",
+                  "flex h-5 w-5 shrink-0 items-center justify-center font-mono text-2xs",
+                  current && "bg-primary text-primary-foreground",
+                  done && "bg-primary text-primary-foreground",
+                  !current && !done && "bg-muted text-muted-foreground",
                 )}
               >
-                {step > index + 1 ? <Check className="h-3 w-3" aria-hidden /> : index + 1}
+                {done ? <Check className="h-3 w-3" aria-hidden /> : position}
               </span>
               {t(`setup.${key}`)}
             </li>
-          ))}
-        </ol>
-        <div className="min-w-0 p-5 sm:p-8">{children}</div>
-      </Card>
-    </main>
+          );
+        })}
+      </ol>
+      <div className="pt-6">{children}</div>
+    </AuthFrame>
   );
 }

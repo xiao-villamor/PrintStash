@@ -5,6 +5,7 @@
     "playwright-report/**",
     "src/generated/**",
     "test-results/**",
-    "tools/oxlint/anti-slop/**"
+    "tools/oxlint/anti-slop/**",
+    "src/routeTree.gen.ts"
   ]
 }

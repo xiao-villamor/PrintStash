@@ -43,6 +43,10 @@ export function useMountTransition(open: boolean, exitMs: number) {
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+type OverlayLayer = { panel: HTMLElement | null };
+const layers: OverlayLayer[] = [];
+let previousBodyOverflow = "";
+
 /**
  * Shared dialog behavior: Escape closes, Tab is trapped inside the panel,
  * body scroll locks, and focus returns to the opener on close.
@@ -61,11 +65,19 @@ export function useOverlayBehavior(
     if (!open) return;
     const restoreTo = document.activeElement;
     const panel = panelRef.current;
+    const layer = { panel };
+    if (layers.length === 0) {
+      previousBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+    }
+    layers.push(layer);
     const initial = panel?.querySelector<HTMLElement>("[autofocus]") ?? panel;
-    initial?.focus();
+    initial?.focus({ preventScroll: true });
 
     function onKey(e: KeyboardEvent) {
+      if (layers.at(-1) !== layer || e.defaultPrevented) return;
       if (e.key === "Escape") {
+        e.preventDefault();
         e.stopPropagation();
         close.current();
         return;
@@ -79,21 +91,30 @@ export function useOverlayBehavior(
       const first = items[0];
       const last = items[items.length - 1];
       const active = document.activeElement;
-      if (e.shiftKey && (active === first || active === panel)) {
+      if (e.shiftKey && (active === first || active === panel || !panel?.contains(active))) {
         e.preventDefault();
         last.focus();
-      } else if (!e.shiftKey && active === last) {
+      } else if (!e.shiftKey && (active === last || !panel?.contains(active))) {
         e.preventDefault();
         first.focus();
       }
     }
 
     window.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-      if (restoreTo instanceof HTMLElement) restoreTo.focus();
+      const wasTop = layers.at(-1) === layer;
+      const index = layers.indexOf(layer);
+      if (index !== -1) layers.splice(index, 1);
+      if (layers.length === 0) document.body.style.overflow = previousBodyOverflow;
+      const remaining = layers.at(-1)?.panel;
+      if (
+        wasTop &&
+        restoreTo instanceof HTMLElement &&
+        restoreTo.isConnected &&
+        (!remaining || remaining.contains(restoreTo))
+      )
+        restoreTo.focus({ preventScroll: true });
     };
   }, [open, panelRef]);
 }

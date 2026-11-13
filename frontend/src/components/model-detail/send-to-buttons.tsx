@@ -9,9 +9,9 @@ import { uiMessage } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "@/lib/link";
-import { FileCode2, Loader2, Printer as PrinterIcon, Send, WifiOff } from "lucide-react";
+import { Loader2, Printer as PrinterIcon, Send, WifiOff } from "lucide-react";
 
 import {
   checkFleetCompatibility,
@@ -32,8 +32,9 @@ import {
   ModelPrinterFileRead,
   RoutingStrategy,
 } from "@/types";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { ChoiceField } from "./choice-field";
+import { providerLabel } from "@/lib/printer-providers";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Modal } from "@/components/ui/modal";
 import { Localized } from "@/components/ui/localized";
@@ -41,16 +42,6 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 
 const selectClassName =
   "h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-disabled disabled:opacity-50";
-
-/** Decode a `<select>` value into the routing strategy it names, or nothing. */
-function parseRoutingStrategy(value: string): RoutingStrategy | null {
-  return value === "manual" || value === "default" || value === "least_busy" ? value : null;
-}
-
-/** Decode a `<select>` value into the queue priority it names, or nothing. */
-function parseJobPriority(value: string): JobPriority | null {
-  return value === "low" || value === "normal" || value === "rush" ? value : null;
-}
 
 function printArtifactFormat(filename: string): "gcode_text" | "bgcode_binary" {
   return filename.toLowerCase().endsWith(".bgcode") ? "bgcode_binary" : "gcode_text";
@@ -76,13 +67,18 @@ const API_COMMANDS: SendToCommands = {
 };
 
 export function SendToButtons({
+  modelName,
   gcodeFiles,
   printerFiles,
   open,
   onOpenChange,
   preselectFileId,
+  preselectPrinterId,
   commands = API_COMMANDS,
+  compact = false,
+  initialDeliveryMode = "send",
 }: {
+  modelName?: string;
   gcodeFiles: Pick<
     FileRead,
     | "id"
@@ -97,7 +93,10 @@ export function SendToButtons({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   preselectFileId?: number;
+  preselectPrinterId?: number;
   commands?: SendToCommands;
+  compact?: boolean;
+  initialDeliveryMode?: "send" | "queue";
 }) {
   useUiLocale();
   const commandClient = useQueryClient();
@@ -125,7 +124,10 @@ export function SendToButtons({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSend, preselectFileId, gcodeFiles]);
   const [startPrint, setStartPrint] = useState(false);
-  const [deliveryMode, setDeliveryMode] = useState<"send" | "queue">("send");
+  const [deliveryMode, setDeliveryMode] = useState<"send" | "queue">(initialDeliveryMode);
+  useEffect(() => {
+    if (showSend) setDeliveryMode(initialDeliveryMode);
+  }, [showSend, initialDeliveryMode]);
   const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>("least_busy");
   const [quantity, setQuantity] = useState(1);
   const [priority, setPriority] = useState<JobPriority>("normal");
@@ -164,9 +166,13 @@ export function SendToButtons({
         .map((printer) => printer.id);
       if (capableIds.length === 0) return [];
       const kept = current.filter((id) => capableIds.includes(id));
-      return kept.length > 0 ? kept : [capableIds[0]];
+      return kept.length > 0
+        ? kept
+        : showSend && preselectPrinterId !== undefined
+          ? []
+          : [capableIds[0]];
     });
-  }, [printers, selectedFileFormat]);
+  }, [printers, selectedFileFormat, showSend, preselectPrinterId]);
 
   const selectedPrinters = useMemo(
     () => printers.filter((printer) => selectedPrinterIds.includes(printer.id)),
@@ -182,6 +188,27 @@ export function SendToButtons({
       ),
     [printers, selectedFileFormat],
   );
+  // Capture an inspector’s explicit target once per opening. Later user choices
+  // remain theirs; a denied/format-incompatible requested target stays unselected.
+  const appliedPrinterIntent = useRef<number | null>(null);
+  useEffect(() => {
+    if (!showSend) {
+      appliedPrinterIntent.current = null;
+      return;
+    }
+    if (
+      preselectPrinterId === undefined ||
+      printersLoading ||
+      appliedPrinterIntent.current === preselectPrinterId
+    )
+      return;
+    appliedPrinterIntent.current = preselectPrinterId;
+    setSelectedPrinterIds(
+      availablePrinters.some((printer) => printer.id === preselectPrinterId)
+        ? [preselectPrinterId]
+        : [],
+    );
+  }, [showSend, preselectPrinterId, printersLoading, availablePrinters]);
   const selectedPrintersCanStart = selectedPrinters.every(
     (printer) => printer.capabilities.can_start,
   );
@@ -436,53 +463,75 @@ export function SendToButtons({
           )}
           confirmLabel={uiText("Print anyway")}
         />
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-              {uiText("Printer status")}
-            </span>
-            <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1">
+        <div className={compact ? "detail-printer-status" : "space-y-3"}>
+          {compact ? (
+            <div className="detail-printer-summary">
+              <strong>{uiText("Printer status")}</strong>
               {printersLoading ? (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {uiText("Checking…")}
-                  </span>
-                </>
+                <span>{uiText("Checking…")}</span>
               ) : printers.length === 0 ? (
-                <>
-                  <WifiOff className="h-3 w-3 text-muted-foreground" />
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {uiText("No printers")}
-                  </span>
-                </>
-              ) : selectedPrinters.length > 0 && onlineCount > 0 ? (
-                <>
-                  <span className="h-2 w-2 rounded-full bg-success" />
-                  <span className="font-mono text-xs font-bold tracking-wider text-success">
-                    {uiText("{value1}/{value2} online", {
-                      value1: String(onlineCount ?? ""),
-                      value2: String(selectedPrinters.length ?? ""),
-                    })}
-                  </span>
-                </>
+                <span>{uiText("No printers")}</span>
               ) : (
-                <>
-                  <WifiOff className="h-3 w-3 text-warning" />
-                  <span className="font-mono text-xs capitalize text-warning">
-                    {uiText("No selected printer online")}
+                printers.map((printer) => (
+                  <span key={printer.id} data-status={printer.status}>
+                    <i aria-hidden="true" />
+                    {printer.name} <span>{knownUiText(printer.status)}</span>
                   </span>
-                </>
+                ))
               )}
             </div>
-          </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                {uiText("Printer status")}
+              </span>
+              <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1">
+                {printersLoading ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {uiText("Checking…")}
+                    </span>
+                  </>
+                ) : printers.length === 0 ? (
+                  <>
+                    <WifiOff className="h-3 w-3 text-muted-foreground" />
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {uiText("No printers")}
+                    </span>
+                  </>
+                ) : selectedPrinters.length > 0 && onlineCount > 0 ? (
+                  <>
+                    <span className="h-2 w-2 rounded-full bg-success" />
+                    <span className="font-mono text-xs font-bold tracking-wider text-success">
+                      {uiText("{value1}/{value2} online", {
+                        value1: String(onlineCount ?? ""),
+                        value2: String(selectedPrinters.length ?? ""),
+                      })}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <WifiOff className="h-3 w-3 text-warning" />
+                    <span className="font-mono text-xs capitalize text-warning">
+                      {uiText("No selected printer online")}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
           {displayError && !showSend && (
             <div className="rounded border border-error/30 bg-error-container/20 p-2 text-2xs text-error font-mono break-words">
               {displayError}
             </div>
           )}
 
-          {printers.length === 0 ? (
+          {compact ? (
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/printers">{uiText("Manage printers")}</Link>
+            </Button>
+          ) : printers.length === 0 ? (
             <div className="space-y-2 rounded border border-outline-variant bg-surface-container-lowest p-3">
               <div className="flex items-center gap-2">
                 <WifiOff className="h-4 w-4 text-on-surface-variant" />
@@ -537,297 +586,335 @@ export function SendToButtons({
           onClose={() => {
             if (!sending) setShowSend(false);
           }}
-          title={uiText("Send to printer")}
-          className="flex max-h-[calc(100vh-2rem)] max-w-2xl flex-col overflow-hidden"
+          title={
+            selectedFileDetails
+              ? uiText("Send Rev {value1} to printer", {
+                  value1: String(
+                    selectedFileDetails.gcode_revision_number ?? selectedFileDetails.version,
+                  ),
+                })
+              : uiText("Send to printer")
+          }
+          description={uiText(
+            "Upload the selected G-code Revision. Starting a print requires your explicit choice.",
+          )}
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setShowSend(false)} disabled={sending}>
+                {uiText("Cancel")}
+              </Button>
+              <Button
+                onClick={() => void send()}
+                loading={sending}
+                disabled={
+                  !selectedFile ||
+                  (deliveryMode === "send"
+                    ? selectedPrinters.length === 0 || (startPrint && !selectedPrintersCanStart)
+                    : quantity < 1 ||
+                      (routingStrategy === "manual" && selectedPrinters.length === 0))
+                }
+              >
+                {!sending && <Send className="h-4 w-4" />}
+                {sending
+                  ? deliveryMode === "queue"
+                    ? uiText("Queuing…")
+                    : uiText("Sending…")
+                  : deliveryMode === "queue"
+                    ? uiText("Add to queue")
+                    : startPrint
+                      ? uiText("Send & start print")
+                      : uiText("Send to printer")}
+              </Button>
+            </>
+          }
+          className="flex max-h-[calc(100dvh-2rem)] w-full max-w-7xl flex-col overflow-hidden"
         >
           <div
             data-testid="send-dialog-scroll-region"
             className="min-h-0 flex-1 space-y-5 overflow-y-auto px-1"
           >
-            <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/50 p-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-accent text-accent-foreground">
-                <FileCode2 className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-foreground">
-                  {selectedFileDetails?.original_filename ?? uiText("Select G-code revision")}
-                </p>
-                <p className="mt-0.5 font-mono text-2xs uppercase tracking-wider text-muted-foreground">
-                  {uiText("counts.selectedPrinters", { count: selectedPrinters.length })}
-                </p>
+            <div className="detail-delivery-context">
+              <span className="text-muted-foreground">
+                {modelName ? uiText("Model") : uiText("G-code revision")}
+              </span>
+              <strong className="min-w-0 break-all font-medium">
+                {modelName ??
+                  selectedFileDetails?.original_filename ??
+                  uiText("Select G-code revision")}
+              </strong>
+              <div className="detail-delivery-mode">
+                <ChoiceField<"send" | "queue">
+                  label={uiText("Action")}
+                  value={deliveryMode}
+                  inline
+                  disabled={sending}
+                  options={[
+                    { value: "send", label: uiText("Send now") },
+                    { value: "queue", label: uiText("Add to queue") },
+                  ]}
+                  onChange={(mode) => {
+                    setDeliveryMode(mode);
+                    if (mode === "queue") {
+                      setStartPrint(false);
+                      if (!user?.is_superuser) setRoutingStrategy("manual");
+                    }
+                  }}
+                />
               </div>
             </div>
+            <div className="detail-delivery-layout">
+              <div className="min-w-0 space-y-5">
+                {deliveryMode === "queue" && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <ChoiceField<RoutingStrategy>
+                      label={uiText("Routing")}
+                      value={routingStrategy}
+                      options={[
+                        ...(user?.is_superuser
+                          ? [
+                              {
+                                value: "least_busy" as const,
+                                label: uiText("Least busy eligible printer"),
+                              },
+                              { value: "default" as const, label: uiText("Default printer") },
+                            ]
+                          : []),
+                        { value: "manual", label: uiText("Choose printer") },
+                      ]}
+                      onChange={setRoutingStrategy}
+                    />
+                    <label className="block space-y-1.5 text-sm font-medium text-foreground">
+                      {uiText("Copies")}
+                      <input
+                        className={selectClassName}
+                        type="number"
+                        min={1}
+                        value={quantity || ""}
+                        onChange={(event) => setQuantity(Number(event.target.value))}
+                      />
+                    </label>
+                    <ChoiceField<JobPriority>
+                      label={uiText("Priority")}
+                      value={priority}
+                      options={[
+                        { value: "low", label: uiText("Low") },
+                        { value: "normal", label: uiText("Normal") },
+                        { value: "rush", label: uiText("Rush") },
+                      ]}
+                      onChange={setPriority}
+                      inline
+                    />
+                    <label className="block space-y-1.5 text-sm font-medium text-foreground">
+                      {uiText("Printer group")}
+                      <input
+                        className={selectClassName}
+                        value={targetGroup}
+                        onChange={(event) => setTargetGroup(event.target.value)}
+                        placeholder={uiText("Any group")}
+                      />
+                    </label>
+                  </div>
+                )}
 
-            <fieldset className="space-y-2">
-              <legend className="mb-2 text-sm font-medium text-foreground">
-                {uiText("Action")}
-              </legend>
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  type="button"
-                  variant={deliveryMode === "send" ? "secondary" : "outline"}
-                  onClick={() => setDeliveryMode("send")}
-                >
-                  {uiText("Send now")}
-                </Button>
-                <Button
-                  type="button"
-                  variant={deliveryMode === "queue" ? "secondary" : "outline"}
-                  onClick={() => {
-                    setDeliveryMode("queue");
-                    setStartPrint(false);
-                    if (!user?.is_superuser) setRoutingStrategy("manual");
-                  }}
-                >
-                  {uiText("Add to queue")}
-                </Button>
-              </div>
-            </fieldset>
+                {(deliveryMode === "send" || routingStrategy === "manual") && (
+                  <fieldset className="space-y-2">
+                    <legend className="mb-2 text-sm font-medium text-foreground">
+                      {uiText("Choose printers")}
+                    </legend>
+                    <div className="divide-y divide-border">
+                      {printers.map((printer) => {
+                        const formatSupported =
+                          printer.capabilities.accepted_print_formats.includes(selectedFileFormat);
+                        const disabled =
+                          !printer.access.can_print ||
+                          !printer.capabilities.can_upload ||
+                          !formatSupported;
+                        const selected = selectedPrinterIds.includes(printer.id);
+                        const offline =
+                          printer.status === "offline" || printer.status === "unknown";
+                        return (
+                          <div
+                            key={printer.id}
+                            onClick={() => {
+                              if (!disabled && !sending) togglePrinter(printer.id);
+                            }}
+                            className={`flex min-w-0 items-start gap-3 py-4 ${disabled ? "cursor-disabled opacity-60" : "cursor-action"}`}
+                          >
+                            <Checkbox
+                              checked={selected}
+                              onChange={() => togglePrinter(printer.id)}
+                              disabled={disabled || sending}
+                              ariaLabel={uiText("Select {value1}", {
+                                value1: String(printer.name),
+                              })}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-medium text-foreground">
+                                {printer.name} · {knownUiText(printer.status)}
+                              </span>
+                              <span className="mt-1 flex flex-wrap gap-1">
+                                <span
+                                  className={
+                                    offline
+                                      ? "text-xs text-muted-foreground"
+                                      : "text-xs text-foreground"
+                                  }
+                                >
+                                  {providerLabel(printer)} ·
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {!printer.access.can_print
+                                    ? uiText("No print access")
+                                    : !printer.capabilities.can_upload
+                                      ? uiText("Upload unsupported")
+                                      : !formatSupported
+                                        ? uiText("Format unsupported")
+                                        : printer.capabilities.can_start
+                                          ? uiText("Upload + start")
+                                          : uiText("Upload only")}
+                                </span>
+                              </span>
+                            </span>
+                            <span className="flex shrink-0 flex-col items-end gap-2 text-xs text-muted-foreground">
+                              {compatibility?.printers.find((row) => row.printer_id === printer.id)
+                                ?.verdict && (
+                                <span>
+                                  {knownUiText(
+                                    compatibility.printers.find(
+                                      (row) => row.printer_id === printer.id,
+                                    )!.verdict,
+                                  )}
+                                </span>
+                              )}
+                              <Link
+                                href={`/printers/${printer.id}`}
+                                onClick={(event) => event.stopPropagation()}
+                                className={buttonVariants({ variant: "outline", size: "xs" })}
+                              >
+                                {uiText("Printer details")}
+                              </Link>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="pt-2 text-[13px] leading-relaxed text-muted-foreground">
+                      {uiText(
+                        "Loaded material and nozzle come from recorded printer state. This is not a G-code safety check, and unknown state does not block sending.",
+                      )}
+                    </p>
+                  </fieldset>
+                )}
 
-            {deliveryMode === "queue" && (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  {uiText("Routing")}
-                  <select
-                    value={routingStrategy}
-                    onChange={(event) => {
-                      const strategy = parseRoutingStrategy(event.target.value);
-                      if (strategy) setRoutingStrategy(strategy);
-                    }}
-                    className={selectClassName}
-                  >
-                    {user?.is_superuser && (
-                      <option value="least_busy">{uiText("Least busy eligible printer")}</option>
-                    )}
-                    {user?.is_superuser && (
-                      <option value="default">{uiText("Default printer")}</option>
-                    )}
-                    <option value="manual">{uiText("Choose printer")}</option>
-                  </select>
-                </label>
-                <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  {uiText("Copies")}
-                  <input
-                    className={selectClassName}
-                    type="number"
-                    min={1}
-                    value={quantity || ""}
-                    onChange={(event) => setQuantity(Number(event.target.value))}
-                  />
-                </label>
-                <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  {uiText("Priority")}
-                  <select
-                    className={selectClassName}
-                    value={priority}
-                    onChange={(event) => {
-                      const next = parseJobPriority(event.target.value);
-                      if (next) setPriority(next);
-                    }}
-                  >
-                    <option value="low">{uiText("Low")}</option>
-                    <option value="normal">{uiText("Normal")}</option>
-                    <option value="rush">{uiText("Rush")}</option>
-                  </select>
-                </label>
-                <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                  {uiText("Printer group")}
-                  <input
-                    className={selectClassName}
-                    value={targetGroup}
-                    onChange={(event) => setTargetGroup(event.target.value)}
-                    placeholder={uiText("Any group")}
-                  />
-                </label>
-              </div>
-            )}
-
-            {compatibility && (deliveryMode === "send" || routingStrategy === "manual") && (
-              <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-                {uiText("Compatibility:")}{" "}
-                {compatibility.printers
-                  .map(
-                    (row) =>
-                      `${printers.find((printer) => printer.id === row.printer_id)?.name ?? row.printer_id}: ${row.verdict}`,
-                  )
-                  .join(" · ")}
-                {compatibility.printers.some((row) => row.verdict === "unknown") && (
-                  <span className="mt-1 block">
-                    {uiText("Unknown state remains usable and will not block this action.")}
-                  </span>
+                {availablePrinters.length === 0 && (
+                  <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+                    {uiText("No configured printer supports Vault upload/send.")}
+                  </div>
                 )}
               </div>
-            )}
-
-            {(deliveryMode === "send" || routingStrategy === "manual") && (
-              <fieldset className="space-y-2">
-                <legend className="mb-2 text-sm font-medium text-foreground">
-                  {uiText("Printers")}
-                </legend>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {printers.map((printer) => {
-                    const formatSupported =
-                      printer.capabilities.accepted_print_formats.includes(selectedFileFormat);
-                    const disabled =
-                      !printer.access.can_print ||
-                      !printer.capabilities.can_upload ||
-                      !formatSupported;
-                    const selected = selectedPrinterIds.includes(printer.id);
-                    const offline = printer.status === "offline" || printer.status === "unknown";
-                    return (
-                      <div
-                        key={printer.id}
-                        onClick={() => {
-                          if (!disabled && !sending) togglePrinter(printer.id);
-                        }}
-                        className={`flex min-w-0 items-center gap-3 rounded-lg border p-3 transition-[background-color,border-color] duration-press ${
-                          selected
-                            ? "border-primary bg-primary-soft"
-                            : "border-border bg-background hover:bg-popover-hover"
-                        } ${disabled ? "cursor-disabled opacity-60" : "cursor-action"}`}
-                      >
-                        <Checkbox
-                          checked={selected}
-                          onChange={() => togglePrinter(printer.id)}
-                          disabled={disabled || sending}
-                          ariaLabel={uiText("Select {value1}", { value1: String(printer.name) })}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-medium text-foreground">
-                            {printer.name}
-                          </span>
-                          <span className="mt-1 flex flex-wrap gap-1">
-                            <Badge
-                              variant={offline ? "warning" : "success"}
-                              className="font-mono text-3xs uppercase tracking-wider"
-                            >
-                              {knownUiText(printer.status)}
-                            </Badge>
-                            <Badge
-                              variant="outline"
-                              className="font-mono text-3xs uppercase tracking-wider"
-                            >
-                              {!printer.access.can_print
-                                ? uiText("No print access")
-                                : !printer.capabilities.can_upload
-                                  ? uiText("Upload unsupported")
-                                  : !formatSupported
-                                    ? uiText("Format unsupported")
-                                    : printer.capabilities.can_start
-                                      ? uiText("Upload + start")
-                                      : uiText("Upload only")}
-                            </Badge>
-                          </span>
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </fieldset>
-            )}
-
-            {availablePrinters.length === 0 && (
-              <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-                {uiText("No configured printer supports Vault upload/send.")}
-              </div>
-            )}
-
-            <div
-              className={`grid gap-4 ${spoolmanEnabled && spools.length > 0 ? "sm:grid-cols-2" : ""}`}
-            >
-              <label className="space-y-1.5 text-sm font-medium text-foreground">
-                {uiText("G-code revision")}
-                <select
-                  value={selectedFile}
-                  onChange={(e) => setSelectedFile(Number(e.target.value))}
-                  className={selectClassName}
-                >
-                  {gcodeFiles.map((file) => (
-                    <option key={file.id} value={file.id}>
-                      {uiText("Rev ")}
-                      {file.gcode_revision_number ?? file.version}
-                      {file.revision_label ? ` · ${file.revision_label}` : ""}
-                      {file.id === defaultFile?.id ? uiText(" · Recommended") : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {spoolmanEnabled && spools.length > 0 && (
-                <label className="space-y-1.5 text-sm font-medium text-foreground">
-                  {uiText("Spool")}
-                  <select
-                    value={selectedSpoolId}
-                    onChange={(e) =>
-                      setSelectedSpoolId(e.target.value ? Number(e.target.value) : "")
-                    }
-                    className={selectClassName}
-                  >
-                    <option value="">{uiText("No spool")}</option>
-                    {spools.map((spool) => (
-                      <option key={spool.id} value={spool.id}>
-                        {(spool.filament_name ||
-                          spool.name ||
-                          uiText("Spool {value1}", { value1: String(spool.id) })) +
-                          (spool.vendor_name ? ` · ${spool.vendor_name}` : "") +
-                          (spool.location ? ` · ${spool.location}` : "") +
-                          (spool.remaining_weight != null
-                            ? uiText(" ({value1} left)", {
-                                value1: String(formatGrams(spool.remaining_weight)),
-                              })
-                            : "")}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-            </div>
-
-            {spoolCoverageWarning && (
-              <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-                {spoolCoverageWarning}
-              </div>
-            )}
-
-            {deliveryMode === "send" && (
-              <label
-                className={`flex items-start gap-3 rounded-lg border p-3 ${startPrint ? "border-warning/50 bg-warning/10" : "border-border bg-background"}`}
-              >
-                <Checkbox
-                  checked={startPrint}
-                  onChange={setStartPrint}
-                  disabled={!selectedPrintersCanStart || sending}
-                  ariaLabel={uiText("Start print immediately")}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="block text-sm font-medium text-foreground">
-                    {uiText("Start print immediately")}
-                  </span>
-                  <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-                    {uiText(
-                      "Off by default. When enabled, selected printers begin printing after upload.",
-                    )}
-                  </span>
-                  {!selectedPrintersCanStart && selectedPrinters.length > 0 && (
-                    <span className="mt-1 block text-xs text-warning">
-                      {uiText("Remove upload-only printers to enable this option.")}
-                    </span>
+              <div className="min-w-0 space-y-5">
+                <div className="space-y-4">
+                  <ChoiceField
+                    label={uiText("G-code revision")}
+                    value={selectedFile}
+                    onChange={setSelectedFile}
+                    options={gcodeFiles.map((file) => ({
+                      value: file.id,
+                      label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}${file.revision_label ? ` · ${file.revision_label}` : ""}${file.id === defaultFile?.id ? uiText(" · Recommended") : ""}`,
+                      description:
+                        [
+                          file.metadata?.material_type,
+                          file.metadata?.layer_height_mm != null
+                            ? `${file.metadata.layer_height_mm} mm`
+                            : null,
+                          file.metadata?.nozzle_diameter_mm != null
+                            ? `${file.metadata.nozzle_diameter_mm} mm ${uiText("Nozzle")}`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || file.original_filename,
+                    }))}
+                  />
+                  <h3 className="border-t border-border pt-5 text-sm font-semibold">
+                    {uiText("Delivery")}
+                  </h3>
+                  {spoolmanEnabled && spools.length > 0 && (
+                    <ChoiceField<number | "">
+                      label={uiText("Spool")}
+                      inline
+                      value={selectedSpoolId}
+                      onChange={setSelectedSpoolId}
+                      options={[
+                        { value: "", label: uiText("No spool") },
+                        ...spools.map((spool) => ({
+                          value: spool.id,
+                          label:
+                            spool.filament_name ||
+                            spool.name ||
+                            uiText("Spool {value1}", { value1: String(spool.id) }),
+                          description: [
+                            spool.vendor_name,
+                            spool.location,
+                            spool.remaining_weight != null
+                              ? uiText(" ({value1} left)", {
+                                  value1: formatGrams(spool.remaining_weight),
+                                })
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · "),
+                        })),
+                      ]}
+                    />
                   )}
-                </span>
-              </label>
-            )}
+                </div>
 
-            {selectedUploads.length > 0 && (
-              <div className="rounded-md border border-success/30 bg-success/10 p-3 text-xs text-success">
-                {uiText("Already uploaded to {value1}.", {
-                  value1: String(
-                    selectedUploads
-                      .map((upload) => `${upload.printer_name} as ${upload.remote_filename}`)
-                      .join(", ") ?? "",
-                  ),
-                })}
+                {spoolCoverageWarning && (
+                  <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+                    {spoolCoverageWarning}
+                  </div>
+                )}
+
+                {deliveryMode === "send" && (
+                  <label className="flex items-start gap-3">
+                    <Checkbox
+                      checked={startPrint}
+                      onChange={setStartPrint}
+                      disabled={!selectedPrintersCanStart || sending}
+                      ariaLabel={uiText("Start print immediately")}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="block text-sm font-medium text-foreground">
+                        {uiText("Start after upload")}
+                      </span>
+                      <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+                        {uiText(
+                          "Off by default. When enabled, selected printers begin printing after upload.",
+                        )}
+                      </span>
+                      {!selectedPrintersCanStart && selectedPrinters.length > 0 && (
+                        <span className="mt-1 block text-xs text-warning">
+                          {uiText("Remove upload-only printers to enable this option.")}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                )}
+
+                {selectedUploads.length > 0 && (
+                  <div className="border-t border-border pt-3 text-xs text-muted-foreground">
+                    {uiText("Already uploaded to {value1}.", {
+                      value1: String(
+                        selectedUploads
+                          .map((upload) => `${upload.printer_name} as ${upload.remote_filename}`)
+                          .join(", ") ?? "",
+                      ),
+                    })}
+                  </div>
+                )}
               </div>
-            )}
+            </div>
             {displayError && (
               <div
                 role="alert"
@@ -836,33 +923,6 @@ export function SendToButtons({
                 {displayError}
               </div>
             )}
-          </div>
-
-          <div className="-mx-6 -mb-6 mt-5 flex shrink-0 justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
-            <Button variant="outline" onClick={() => setShowSend(false)} disabled={sending}>
-              {uiText("Cancel")}
-            </Button>
-            <Button
-              onClick={() => void send()}
-              loading={sending}
-              disabled={
-                !selectedFile ||
-                (deliveryMode === "send"
-                  ? selectedPrinters.length === 0 || (startPrint && !selectedPrintersCanStart)
-                  : quantity < 1 || (routingStrategy === "manual" && selectedPrinters.length === 0))
-              }
-            >
-              {!sending && <Send className="h-4 w-4" />}
-              {sending
-                ? deliveryMode === "queue"
-                  ? uiText("Queuing…")
-                  : uiText("Sending…")
-                : deliveryMode === "queue"
-                  ? uiText("Add to queue")
-                  : startPrint
-                    ? uiText("Send & start print")
-                    : uiText("Send to printer")}
-            </Button>
           </div>
         </Modal>
       </>

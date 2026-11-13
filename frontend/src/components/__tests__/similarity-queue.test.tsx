@@ -1,7 +1,8 @@
 /** Review states and filters stay discoverable, accurate and restorable across comparison navigation. */
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
+import { useRouter } from "@/lib/navigation";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { aCollection } from "@/test-support/factories";
@@ -12,16 +13,18 @@ import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
 
 function QueueNavigation() {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigation = useRouter();
   return (
     <>
-      <output aria-label="Current queue location">{location.pathname + location.search}</output>
+      <output aria-label="Current queue location">{location.pathname + location.searchStr}</output>
       <button
-        onClick={() => navigate("/library/similar?review=rejected&confidence=80&collection=9")}
+        onClick={() =>
+          navigation.push("/library/similar?review=rejected&confidence=80&collection=9")
+        }
       >
         Open another queue
       </button>
-      <button onClick={() => navigate(-1)}>Previous queue</button>
+      <button onClick={() => navigation.back()}>Previous queue</button>
     </>
   );
 }
@@ -48,6 +51,24 @@ afterEach(() => {
 });
 
 describe("SimilarityQueue", () => {
+  it("requests every review state from Model details", async () => {
+    const user = userEvent.setup();
+    const view = renderQueue({ at: "/models/1?tab=similar" }, 1);
+    await screen.findByRole("tab", { name: "All" });
+
+    await user.click(screen.getByRole("tab", { name: "All" }));
+
+    await waitFor(() => {
+      const reads = view
+        .requestsWithMethod("GET")
+        .filter((request) => request.url.includes("/similarity/candidates"));
+      expect(reads.length).toBeGreaterThan(0);
+      const params = new URL(reads.at(-1)!.url, "http://test").searchParams;
+      expect(params.get("model_id")).toBe("1");
+      expect(params.has("review_state")).toBe(false);
+    });
+  });
+
   it("keeps a new Model actionable while an old find resolves", async () => {
     function Subject() {
       const [id, setId] = useState(7);

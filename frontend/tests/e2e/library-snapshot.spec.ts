@@ -374,7 +374,7 @@ test.describe("Library snapshots", () => {
       const first = page.locator('main [data-library-entry="/models/110"]');
       await first.scrollIntoViewIfNeeded();
       const firstTop = await first.evaluate((node) => node.getBoundingClientRect().top);
-      const firstKey = await page.evaluate(() => history.state.key);
+      const firstKey = await page.evaluate(() => history.state.__TSR_key);
       const href = page.url();
       await page.route("**/api/v1/models/110", (route) =>
         route.fulfill({
@@ -408,7 +408,7 @@ test.describe("Library snapshots", () => {
         });
       await second.scrollIntoViewIfNeeded();
       const secondTop = await second.evaluate((node) => node.getBoundingClientRect().top);
-      const secondKey = await page.evaluate(() => history.state.key);
+      const secondKey = await page.evaluate(() => history.state.__TSR_key);
       expect(secondKey).not.toBe(firstKey);
 
       await page.goBack();
@@ -417,7 +417,7 @@ test.describe("Library snapshots", () => {
       ).toBeVisible();
       await page.goBack();
       await expect(page).toHaveURL(href);
-      expect(await page.evaluate(() => history.state.key)).toBe(firstKey);
+      expect(await page.evaluate(() => history.state.__TSR_key)).toBe(firstKey);
       await expect
         .poll(() => first.evaluate((node) => node.getBoundingClientRect().top))
         .toBeCloseTo(firstTop, 0);
@@ -427,7 +427,7 @@ test.describe("Library snapshots", () => {
       ).toBeVisible();
       await page.goForward();
       await expect(page).toHaveURL(href);
-      expect(await page.evaluate(() => history.state.key)).toBe(secondKey);
+      expect(await page.evaluate(() => history.state.__TSR_key)).toBe(secondKey);
       await expect
         .poll(() => second.evaluate((node) => node.getBoundingClientRect().top))
         .toBeCloseTo(secondTop, 0);

@@ -1,9 +1,9 @@
 import { currentLocale } from "@/lib/locale";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
+import { History } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SettingsCard } from "@/components/settings-card";
 import { backupRunsOptions, useBackupDestinationRetry } from "@/lib/queries/settings-backup-runs";
 import { useAuth } from "@/lib/auth-context";
 import { onAuthChange } from "@/lib/auth-store";
@@ -73,23 +73,22 @@ export function BackupRunHistory({ onPublished }: { onPublished: () => void }) {
 
   if (retired) return null;
   return (
-    <Card>
-      <CardHeader className="flex-row items-start justify-between gap-3">
-        <div className="space-y-1">
-          <CardTitle>{t("settings.backupRunsTitle")}</CardTitle>
-          <CardDescription>{t("settings.backupRunsDescription")}</CardDescription>
-        </div>
+    <SettingsCard
+      icon={History}
+      title={t("settings.backupRunsTitle")}
+      description={t("settings.backupRunsDescription")}
+      action={
         <Button
-          variant="ghost"
-          size="icon"
+          variant="outline"
+          size="sm"
           disabled={!user?.is_superuser || loading || retrying !== null}
-          aria-label={t("settings.backupRunRefresh")}
           onClick={() => void history.refetch()}
         >
-          <RefreshCw className="h-4 w-4" />
+          {t("settings.backupRunRefresh")}
         </Button>
-      </CardHeader>
-      <CardContent className="space-y-4" aria-busy={loading}>
+      }
+    >
+      <div className="space-y-4 p-4 sm:p-5" aria-busy={loading}>
         {failed && (
           <p role="alert" className="text-sm text-destructive">
             {t("settings.backupRunsLoadFailed")}
@@ -102,7 +101,7 @@ export function BackupRunHistory({ onPublished }: { onPublished: () => void }) {
           <article
             key={run.id}
             aria-label={`${run.backup_id}: ${runLabels[run.outcome]}`}
-            className="space-y-3 border-t border-border pt-4"
+            className="space-y-3 border-t border-border pt-4 first:border-t-0 first:pt-0"
           >
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <p className="text-sm font-medium">{runLabels[run.outcome]}</p>
@@ -157,7 +156,7 @@ export function BackupRunHistory({ onPublished }: { onPublished: () => void }) {
             </ul>
           </article>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </SettingsCard>
   );
 }

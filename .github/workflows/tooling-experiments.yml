@@ -15,7 +15,8 @@ permissions:
 jobs:
   frontend:
     name: Frontend timing experiments
-    runs-on: ubuntu-latest
+    # Playwright 1.60 cannot install Chromium on Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend

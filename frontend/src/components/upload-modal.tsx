@@ -1,5 +1,6 @@
 "use client";
 
+import { useContentMotion } from "@/lib/use-content-motion";
 import { useTaxonomyCommands } from "@/features/library/taxonomy";
 
 import { uiMessage } from "@/lib/locale";
@@ -10,17 +11,7 @@ import { useId, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { vaultConfigOptions } from "@/lib/queries/settings-config";
 import { librarySourcesOptions } from "@/lib/queries/settings-library-sources";
-import {
-  ChevronDown,
-  File as FileIcon,
-  Layers,
-  Link2,
-  Loader2,
-  Package,
-  Plus,
-  Upload,
-  X,
-} from "lucide-react";
+import { ChevronDown, File as FileIcon, Loader2, Plus, Upload, X } from "lucide-react";
 import { capturePendingImport } from "@/lib/api";
 import { useCollectionLookup, useCollectionSearch, useTags } from "@/lib/queries";
 import { CollectionPicker } from "@/components/collection-picker";
@@ -31,6 +22,8 @@ import { useAuth } from "@/lib/auth-context";
 import { formatBytes } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal";
+import { TabBar } from "@/components/ui/tabs";
+import "./upload-modal.css";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
 import {
@@ -137,6 +130,7 @@ export function UploadModal({
   const [meshFile, setMeshFile] = useState<File | null>(null);
   const [gcodeFile, setGcodeFile] = useState<File | null>(null);
   const [mode, setMode] = useState<UploadMode>("files");
+  const modeMotion = useContentMotion(mode, { enabled: open, scroll: "self" });
   // Bulk mode: each mesh becomes its own model, queued as an independent
   // ingest task. No mesh+G-code linking (that stays on the "Files" tab).
   // Picking/dropping a folder mirrors its subfolders into nested collections.
@@ -148,6 +142,7 @@ export function UploadModal({
   const zipRef = useRef<HTMLInputElement>(null);
   const [modelName, setModelName] = useState("");
   const [tagInput, setTagInput] = useState("");
+  const [tagSuggestionsOpen, setTagSuggestionsOpen] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [pendingTagCount, setPendingTagCount] = useState(0);
   const tagScope = useRef(0);
@@ -281,7 +276,8 @@ export function UploadModal({
 
   const shownTags = filteredTags.slice(0, 6);
   const tagItems = [...shownTags, ...(canCreateNewTag ? [tagInput.trim()] : [])];
-  const tagNav = useComboboxNav(tagInput ? tagItems.length : 0, {
+  const tagNav = useComboboxNav(tagInput && tagSuggestionsOpen ? tagItems.length : 0, {
+    onClose: () => setTagSuggestionsOpen(false),
     onSelect: (i) => {
       if (i < shownTags.length) {
         toggleTag(shownTags[i].slug);
@@ -495,34 +491,37 @@ export function UploadModal({
       open={open}
       onClose={close}
       labelledBy="upload-modal-title"
-      className="bg-surface-container-lowest border border-outline-variant rounded-md w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl"
+      className={`upload-dialog border border-border bg-card shadow-lg ${onboarding ? "upload-dialog-onboarding" : "upload-dialog-standard"}`}
     >
       <>
-        <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-outline-variant">
+        <div className="upload-dialog-heading flex items-start justify-between gap-4 border-b border-border px-6 py-6">
           <div>
             <h3
               id="upload-modal-title"
               className={
                 onboarding
                   ? "text-xl font-semibold tracking-tight text-on-surface"
-                  : "text-sm font-semibold text-on-surface"
+                  : "text-lg font-semibold text-foreground"
               }
             >
               {onboarding ? t("setup.firstUpload") : uiText("Upload model")}
             </h3>
-            <p className="text-xs text-on-surface-variant mt-0.5">
+            <p className="mt-1 text-sm text-muted-foreground">
               {onboarding
                 ? t("setup.firstUploadHelp")
-                : uiText("Drop a 3D model, a G-code, or both together")}
+                : uiText("Add a 3D Model, an existing G-code file, or both together.")}
             </p>
           </div>
-          <button
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={close}
             aria-label={uiText("Close")}
-            className="h-7 w-7 -mt-1 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant"
+            className="-mr-2 -mt-2 shrink-0 text-muted-foreground"
           >
             <X className="h-4 w-4" />
-          </button>
+          </Button>
         </div>
 
         {!auth.isAuthenticated && (
@@ -535,360 +534,415 @@ export function UploadModal({
           </div>
         )}
 
-        <form onSubmit={doSubmit} className="p-6 space-y-5">
+        <form onSubmit={doSubmit} className="upload-dialog-form">
           {/* Mode tabs */}
           {!onboarding && (
-            <div className="flex gap-1 rounded border border-outline-variant p-1">
-              {(
+            <TabBar
+              tabs={(
                 [
-                  ["files", "uploads.mode.files", Upload],
-                  ["bulk", "uploads.mode.bulk", Layers],
-                  ["url", "uploads.mode.url", Link2],
-                  ["zip", "uploads.mode.zip", Package],
+                  ["files", "uploads.mode.files"],
+                  ["bulk", "uploads.mode.bulk"],
+                  ["url", "uploads.mode.url"],
+                  ["zip", "uploads.mode.zip"],
                 ] as const
-              ).map(([m, label, Icon]) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMode(m)}
-                  className={`flex-1 flex items-center justify-center gap-1.5 rounded px-2 py-1.5 font-mono text-2xs uppercase tracking-wider transition-colors ${
-                    mode === m
-                      ? "bg-secondary-container text-on-secondary-container"
-                      : "text-on-surface-variant hover:bg-surface-container-low"
-                  }`}
-                >
-                  <Icon className="h-3.5 w-3.5" /> {t(label)}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Input area */}
-          {onboarding ? (
-            <div className="space-y-3">
-              <label htmlFor="setup-upload-file" className="block text-sm font-medium">
-                {t("setup.chooseFile")}
-              </label>
-              <label
-                htmlFor="setup-upload-file"
-                className="flex min-h-32 cursor-action flex-col items-center justify-center gap-3 rounded-md border border-dashed border-outline-variant bg-surface-container-low p-5 text-center hover:bg-surface-container focus-within:ring-2 focus-within:ring-ring"
-              >
-                <Upload className="h-6 w-6 text-muted-foreground" aria-hidden />
-                <span className="max-w-full break-all text-sm font-medium">
-                  {meshFile?.name || gcodeFile?.name || t("setup.chooseFileAction")}
-                </span>
-                <input
-                  id="setup-upload-file"
-                  type="file"
-                  accept={`${SOURCE_ACCEPT},${GCODE_ACCEPT}`}
-                  className="sr-only"
-                  aria-label={t("setup.chooseFile")}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0] ?? null;
-                    setMeshFile(file && isSourceFile(file.name) ? file : null);
-                    setGcodeFile(file && isGcodeFile(file.name) ? file : null);
-                    if (file) autoName(file);
-                  }}
-                  aria-describedby="setup-upload-formats"
-                />
-              </label>
-              <p
-                id="setup-upload-formats"
-                className="text-xs leading-relaxed text-muted-foreground"
-              >
-                {t("setup.fileFormats")}
-              </p>
-            </div>
-          ) : mode === "files" ? (
-            <div className="space-y-3">
-              <FileSlot
-                label={uiText("3D model / resin slice")}
-                accept={SOURCE_ACCEPT}
-                file={meshFile}
-                setFile={(f) => {
-                  setMeshFile(f);
-                  if (f) autoName(f);
-                }}
-                placeholder={uiText(
-                  ".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo",
-                )}
-                inputRef={meshRef}
-              />
-              <FileSlot
-                label="G-code"
-                accept={GCODE_ACCEPT}
-                file={gcodeFile}
-                setFile={(f) => {
-                  setGcodeFile(f);
-                  if (f) autoName(f);
-                }}
-                placeholder={uiText(".gcode .g .gco .bgcode")}
-                inputRef={gcodeRef}
-              />
-            </div>
-          ) : mode === "bulk" ? (
-            <BulkFiles
-              items={bulkFiles}
-              fileInputRef={bulkRef}
-              folderInputRef={bulkFolderRef}
-              onAddItems={addBulkItems}
-              onRemove={(idx) => setBulkFiles((prev) => prev.filter((_, i) => i !== idx))}
-              onClear={() => setBulkFiles([])}
-            />
-          ) : mode === "url" ? (
-            <div>
-              <label
-                htmlFor={sourceUrlId}
-                className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2"
-              >
-                {uiText("Source URL")}
-              </label>
-              <input
-                id={sourceUrlId}
-                type="url"
-                inputMode="url"
-                value={urlValue}
-                onChange={(e) => setUrlValue(e.target.value)}
-                className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                placeholder={uiText("Model page, collection, or direct .stl/.zip link")}
-              />
-              <p className="mt-1.5 font-mono text-3xs text-on-surface-variant/70">
-                {uiText(
-                  "Create a durable capture, then review its files and confirm or change the collection and tags.",
-                )}
-              </p>
-            </div>
-          ) : (
-            <FileSlot
-              label={uiText("Archive")}
-              accept={ARCHIVE_ACCEPT}
-              file={zipFile}
-              setFile={setZipFile}
-              placeholder={uiText(".zip .7z .rar .tar .tgz")}
-              inputRef={zipRef}
+              ).map(([key, label]) => ({ key, label: t(label) }))}
+              active={mode}
+              onChange={(next) => {
+                setCatOpen(false);
+                setTagSuggestionsOpen(false);
+                setMode(next);
+              }}
+              showIndicator={false}
+              className="upload-mode-tabs"
+              tabClassName="upload-mode-tab"
             />
           )}
 
-          {/* Model name (single-file uploads only; URL imports take their
-                  name from the downloaded file/page) */}
-          {mode === "files" && (
-            <div>
-              <label
-                htmlFor="upload-model-name"
-                className="block text-sm font-medium text-on-surface mb-2"
-              >
-                {uiText("Model name")}
-              </label>
-              <input
-                id="upload-model-name"
-                value={modelName}
-                onChange={(e) => setModelName(e.target.value)}
-                className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                placeholder={uiText("e.g. Bracket v2")}
-              />
-            </div>
-          )}
-
-          {/* First uploads need no collection or tags; these remain in the library upload dialog. */}
-          {!onboarding && (
-            <>
-              {/* Collection */}
-              <div>
-                <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
-                  {uiText("Collection")}
+          <div
+            ref={modeMotion}
+            className="upload-mode-content space-y-5"
+            role={onboarding ? undefined : "tabpanel"}
+            aria-label={onboarding ? undefined : t(`uploads.mode.${mode}`)}
+          >
+            {/* Input area */}
+            {onboarding ? (
+              <div className="space-y-3">
+                <label htmlFor="setup-upload-file" className="block text-sm font-medium">
+                  {t("setup.chooseFile")}
                 </label>
-                <DropdownMenu
-                  open={catOpen}
-                  onOpenChange={setCatOpen}
-                  align="start"
-                  role="dialog"
-                  contentClassName="w-full bg-surface-container-lowest border border-outline-variant rounded shadow-lg"
-                  trigger={
-                    <button
-                      type="button"
-                      data-menu-trigger
-                      onClick={() => setCatOpen((v) => !v)}
-                      aria-haspopup="dialog"
-                      aria-expanded={catOpen}
-                      title={selectedCollectionLabel || undefined}
-                      className="w-full h-10 flex min-w-0 items-center gap-2 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                    >
-                      <span
-                        className={`min-w-0 flex-1 truncate text-left ${collectionPath ? "" : "text-on-surface-variant/60"}`}
-                      >
-                        {selectedCollectionLabel ||
-                          (user?.is_superuser ? uiText("None") : uiText("Choose collection"))}
-                      </span>
-                      <ChevronDown className="h-4 w-4 shrink-0 text-on-surface-variant" />
-                    </button>
-                  }
+                <label
+                  htmlFor="setup-upload-file"
+                  className="flex min-h-32 cursor-action flex-col items-center justify-center gap-3 rounded-md border border-dashed border-outline-variant bg-surface-container-low p-5 text-center hover:bg-surface-container focus-within:ring-2 focus-within:ring-ring"
                 >
-                  <div className="p-2">
-                    <CollectionPicker
-                      minRole="edit"
-                      selectedPath={collectionPath}
-                      onSelect={(collection) => {
-                        setPickedCollection(collection ?? "none");
-                        setCatOpen(false);
-                      }}
-                      noneLabel={user?.is_superuser ? uiText("None") : undefined}
-                      emptyLabel={uiText("No editable collections.")}
-                    />
-                  </div>
-                </DropdownMenu>
+                  <Upload className="h-6 w-6 text-muted-foreground" aria-hidden />
+                  <span className="max-w-full break-all text-sm font-medium">
+                    {meshFile?.name || gcodeFile?.name || t("setup.chooseFileAction")}
+                  </span>
+                  <input
+                    id="setup-upload-file"
+                    type="file"
+                    accept={`${SOURCE_ACCEPT},${GCODE_ACCEPT}`}
+                    className="sr-only"
+                    aria-label={t("setup.chooseFile")}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] ?? null;
+                      setMeshFile(file && isSourceFile(file.name) ? file : null);
+                      setGcodeFile(file && isGcodeFile(file.name) ? file : null);
+                      if (file) autoName(file);
+                    }}
+                    aria-describedby="setup-upload-formats"
+                  />
+                </label>
+                <p
+                  id="setup-upload-formats"
+                  className="text-xs leading-relaxed text-muted-foreground"
+                >
+                  {t("setup.fileFormats")}
+                </p>
               </div>
+            ) : mode === "files" ? (
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <FileSlot
+                  label={uiText("3D model / resin slice")}
+                  accept={SOURCE_ACCEPT}
+                  file={meshFile}
+                  setFile={(f) => {
+                    setMeshFile(f);
+                    if (f) autoName(f);
+                  }}
+                  placeholder={uiText(
+                    ".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo",
+                  )}
+                  inputRef={meshRef}
+                />
+                <FileSlot
+                  label="G-code"
+                  accept={GCODE_ACCEPT}
+                  file={gcodeFile}
+                  setFile={(f) => {
+                    setGcodeFile(f);
+                    if (f) autoName(f);
+                  }}
+                  placeholder={uiText(".gcode .g .gco .bgcode")}
+                  inputRef={gcodeRef}
+                />
+              </div>
+            ) : mode === "bulk" ? (
+              <BulkFiles
+                items={bulkFiles}
+                fileInputRef={bulkRef}
+                folderInputRef={bulkFolderRef}
+                onAddItems={addBulkItems}
+                onRemove={(idx) => setBulkFiles((prev) => prev.filter((_, i) => i !== idx))}
+                onClear={() => setBulkFiles([])}
+              />
+            ) : mode === "url" ? (
+              <div>
+                <label htmlFor={sourceUrlId} className="mb-2 block text-sm text-foreground">
+                  {uiText("Source URL")}
+                </label>
+                <input
+                  id={sourceUrlId}
+                  type="url"
+                  inputMode="url"
+                  value={urlValue}
+                  onChange={(e) => setUrlValue(e.target.value)}
+                  className="h-10 w-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  placeholder={uiText("Model page, collection, or direct .stl/.zip link")}
+                />
+                <p className="mt-1.5 max-w-prose text-xs leading-5 text-muted-foreground">
+                  {uiText(
+                    "Create a durable capture, then review its files and confirm or change the collection and tags.",
+                  )}
+                </p>
+              </div>
+            ) : (
+              <FileSlot
+                label={uiText("Archive")}
+                large
+                accept={ARCHIVE_ACCEPT}
+                file={zipFile}
+                setFile={setZipFile}
+                placeholder={uiText(".zip .7z .rar .tar .tgz")}
+                inputRef={zipRef}
+              />
+            )}
 
-              {/* Destination (mounted-source write-back) — only when an eligible source exists */}
-              {sourceMode && (libraries.length > 0 || sourceSelected) && (
+            {!onboarding && (
+              <h4 className="text-sm font-semibold">{uiText("Library destination")}</h4>
+            )}
+            <div className={onboarding ? "space-y-5" : "grid grid-cols-1 gap-5 sm:grid-cols-2"}>
+              {/* Model name (single-file uploads only; URL imports take their
+                  name from the downloaded file/page) */}
+              {mode === "files" && (
                 <div>
-                  <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
-                    {uiText("Store in")}
-                  </label>
-                  <select
-                    aria-label={uiText("Store in")}
-                    value={targetLibraryId}
-                    onChange={(e) =>
-                      setTargetLibraryId(e.target.value === "" ? "" : Number(e.target.value))
-                    }
-                    className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  <label
+                    htmlFor="upload-model-name"
+                    className="block text-sm font-medium text-on-surface mb-2"
                   >
-                    <option value="">{uiText("Vault storage")}</option>
-                    {sourceSelected && !selectedAvailable && (
-                      <option value={targetLibraryId} disabled>
-                        {uiText("Selected source unavailable")}
-                      </option>
-                    )}
-                    {libraries.map((lib) => (
-                      <option key={lib.id} value={lib.id}>
-                        {uiText("{value1} (library source)", { value1: String(lib.name ?? "") })}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="mt-1 font-mono text-3xs text-on-surface-variant/70">
-                    {uiText(
-                      "Eligible mounted sources use create-only write-back. Revisions to a linked model follow that source automatically.",
-                    )}
+                    {uiText("Model name")}
+                  </label>
+                  <input
+                    id="upload-model-name"
+                    value={modelName}
+                    onChange={(e) => setModelName(e.target.value)}
+                    className="h-10 w-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    placeholder={uiText("e.g. Bracket v2")}
+                  />
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {uiText("Optional. Uses the selected filename when left blank.")}
                   </p>
                 </div>
               )}
 
-              {/* Tags */}
-              <div>
-                <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
-                  {uiText("Tags")}
-                </label>
-                <div className="relative">
-                  <input
-                    value={tagInput}
-                    onChange={(e) => {
-                      setTagInput(e.target.value);
-                      tagNav.setActiveIndex(-1);
-                    }}
-                    {...tagNav.inputProps}
-                    onKeyDown={(e) => {
-                      tagNav.inputProps.onKeyDown(e);
-                      if (e.defaultPrevented) return;
-                      if (e.key === "Backspace" && !tagInput && selectedTags.length) {
-                        setSelectedTags((p) => p.slice(0, -1));
+              {/* First uploads need no collection or tags; these remain in the library upload dialog. */}
+              {!onboarding && (
+                <>
+                  {/* Collection */}
+                  <div>
+                    <label className="mb-2 block text-sm text-foreground">
+                      {uiText("Collection")}
+                    </label>
+                    <DropdownMenu
+                      open={catOpen}
+                      onOpenChange={setCatOpen}
+                      portal
+                      align="start"
+                      role="dialog"
+                      contentClassName="w-96 bg-surface-container-lowest border border-outline-variant rounded shadow-lg"
+                      trigger={
+                        <button
+                          type="button"
+                          data-menu-trigger
+                          onClick={() => setCatOpen((v) => !v)}
+                          aria-haspopup="dialog"
+                          aria-expanded={catOpen}
+                          title={selectedCollectionLabel || undefined}
+                          className="flex h-10 w-full min-w-0 items-center gap-2 border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                        >
+                          <span
+                            className={`min-w-0 flex-1 truncate text-left ${collectionPath ? "" : "text-on-surface-variant/60"}`}
+                          >
+                            {selectedCollectionLabel ||
+                              (user?.is_superuser ? uiText("None") : uiText("Choose collection"))}
+                          </span>
+                          <ChevronDown className="h-4 w-4 shrink-0 text-on-surface-variant" />
+                        </button>
                       }
-                    }}
-                    placeholder={uiText("Search or create — press Enter")}
-                    className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                  />
-                  {tagInput && (filteredTags.length > 0 || canCreateNewTag) && (
-                    <div
-                      id={tagNav.listboxId}
-                      role="listbox"
-                      className="pop-in absolute left-0 right-0 top-full mt-1 z-dropdown bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 max-h-40 overflow-y-auto"
                     >
-                      {shownTags.map((t, i) => (
-                        <button
-                          key={t.id}
-                          id={tagNav.optionId(i)}
-                          role="option"
-                          aria-selected={i === tagNav.activeIndex}
-                          type="button"
-                          onClick={() => {
-                            toggleTag(t.slug);
-                            setTagInput("");
+                      <div className="p-2">
+                        <CollectionPicker
+                          minRole="edit"
+                          selectedPath={collectionPath}
+                          onSelect={(collection) => {
+                            setPickedCollection(collection ?? "none");
+                            setCatOpen(false);
                           }}
-                          className={`w-full text-left px-3 py-1.5 font-mono text-xs text-on-surface-variant hover:bg-surface-container-low flex justify-between ${i === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
-                        >
-                          <span>{t.name}</span>
-                          <span className="opacity-50">({t.model_count})</span>
-                        </button>
-                      ))}
-                      {canCreateNewTag && (
-                        <button
-                          type="button"
-                          id={tagNav.optionId(shownTags.length)}
-                          role="option"
-                          aria-selected={shownTags.length === tagNav.activeIndex}
-                          onClick={() => {
-                            doCreateTag(tagInput);
-                            setTagInput("");
-                          }}
-                          className={`w-full text-left px-3 py-1.5 font-mono text-xs text-primary hover:bg-surface-container-low flex items-center gap-2 ${shownTags.length === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
-                        >
-                          <Plus className="h-3 w-3" />
-                          {uiText(' Create "')}
-                          {tagInput.trim()}
-                          {uiText('"')}
-                        </button>
+                          noneLabel={user?.is_superuser ? uiText("None") : undefined}
+                          emptyLabel={uiText("No editable collections.")}
+                        />
+                      </div>
+                    </DropdownMenu>
+                  </div>
+
+                  {/* Destination (mounted-source write-back) — only when an eligible source exists */}
+                  {sourceMode && (
+                    <div>
+                      <label className="mb-2 block text-sm text-foreground">
+                        {uiText("Store in")}
+                      </label>
+                      <select
+                        aria-label={uiText("Store in")}
+                        value={targetLibraryId}
+                        onChange={(e) =>
+                          setTargetLibraryId(e.target.value === "" ? "" : Number(e.target.value))
+                        }
+                        className="h-10 w-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                      >
+                        <option value="">{uiText("Vault storage")}</option>
+                        {sourceSelected && !selectedAvailable && (
+                          <option value={targetLibraryId} disabled>
+                            {uiText("Selected source unavailable")}
+                          </option>
+                        )}
+                        {libraries.map((lib) => (
+                          <option key={lib.id} value={lib.id}>
+                            {uiText("{value1} (library source)", {
+                              value1: String(lib.name ?? ""),
+                            })}
+                          </option>
+                        ))}
+                      </select>
+                      {(libraries.length > 0 || sourceSelected) && (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {uiText(
+                            "Eligible mounted sources use create-only write-back. Revisions to a linked model follow that source automatically.",
+                          )}
+                        </p>
                       )}
                     </div>
                   )}
-                </div>
-                {selectedTags.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {selectedTags.map((slug) => {
-                      const t = tags.find((x) => x.slug === slug);
-                      return (
-                        <span
-                          key={slug}
-                          className="inline-flex items-center gap-1 bg-secondary-container text-on-secondary-container pl-2 pr-1 py-0.5 rounded font-mono text-3xs uppercase tracking-wider"
+
+                  {/* Tags */}
+                  <div className={mode === "files" ? "min-w-0" : "min-w-0 sm:col-span-2"}>
+                    <label className="mb-2 block text-sm text-foreground">{uiText("Tags")}</label>
+                    <div className="flex items-start gap-2">
+                      <DropdownMenu
+                        portal
+                        role="dialog"
+                        align="start"
+                        aria-label={uiText("Tags")}
+                        open={tagSuggestionsOpen && !!tagInput && tagItems.length > 0}
+                        onOpenChange={setTagSuggestionsOpen}
+                        className="min-w-0 flex-1"
+                        contentClassName="w-80 max-h-40 overflow-y-auto border border-border bg-popover py-1 shadow-lg"
+                        trigger={
+                          <input
+                            value={tagInput}
+                            data-menu-trigger
+                            onFocus={() => setTagSuggestionsOpen(true)}
+                            onChange={(e) => {
+                              setTagInput(e.target.value);
+                              setTagSuggestionsOpen(true);
+                              tagNav.setActiveIndex(-1);
+                            }}
+                            {...tagNav.inputProps}
+                            onKeyDown={(e) => {
+                              tagNav.inputProps.onKeyDown(e);
+                              if (e.defaultPrevented) return;
+                              if (e.key === "Backspace" && !tagInput && selectedTags.length) {
+                                setSelectedTags((p) => p.slice(0, -1));
+                              }
+                            }}
+                            placeholder={uiText("Search or create — press Enter")}
+                            className="h-10 w-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          />
+                        }
+                      >
+                        <div
+                          id={tagNav.listboxId}
+                          role="listbox"
+                          className="text-popover-foreground"
                         >
-                          {t?.name || slug}
-                          <button
-                            type="button"
-                            onClick={() => toggleTag(slug)}
-                            aria-label={uiText("Remove {value1}", {
-                              value1: String(t?.name || slug),
-                            })}
-                            className="h-3.5 w-3.5 rounded-sm flex items-center justify-center hover:bg-on-secondary-container/10"
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </span>
-                      );
-                    })}
+                          {shownTags.map((t, i) => (
+                            <button
+                              key={t.id}
+                              id={tagNav.optionId(i)}
+                              role="option"
+                              aria-selected={i === tagNav.activeIndex}
+                              type="button"
+                              onClick={() => {
+                                toggleTag(t.slug);
+                                setTagInput("");
+                              }}
+                              className={`w-full text-left px-3 py-1.5 font-mono text-xs text-on-surface-variant hover:bg-surface-container-low flex justify-between ${i === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
+                            >
+                              <span>{t.name}</span>
+                              <span className="opacity-50">({t.model_count})</span>
+                            </button>
+                          ))}
+                          {canCreateNewTag && (
+                            <button
+                              type="button"
+                              id={tagNav.optionId(shownTags.length)}
+                              role="option"
+                              aria-selected={shownTags.length === tagNav.activeIndex}
+                              onClick={() => {
+                                doCreateTag(tagInput);
+                                setTagInput("");
+                              }}
+                              className={`w-full text-left px-3 py-1.5 font-mono text-xs text-primary hover:bg-surface-container-low flex items-center gap-2 ${shownTags.length === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
+                            >
+                              <Plus className="h-3 w-3" />
+                              {uiText(' Create "')}
+                              {tagInput.trim()}
+                              {uiText('"')}
+                            </button>
+                          )}
+                        </div>
+                      </DropdownMenu>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 shrink-0"
+                        disabled={!tagInput.trim() || pendingTagCount > 0}
+                        onClick={() => {
+                          const found = tags.find(
+                            (tag) =>
+                              tag.name.toLocaleLowerCase() ===
+                                tagInput.trim().toLocaleLowerCase() || tag.slug === tagInput.trim(),
+                          );
+                          if (found) {
+                            if (!selectedTags.includes(found.slug)) toggleTag(found.slug);
+                            setTagInput("");
+                          } else if (canCreateNewTag) {
+                            void doCreateTag(tagInput);
+                            setTagInput("");
+                          }
+                        }}
+                      >
+                        {uiText("Add tag")}
+                      </Button>
+                    </div>
+                    {selectedTags.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {selectedTags.map((slug) => {
+                          const t = tags.find((x) => x.slug === slug);
+                          return (
+                            <span
+                              key={slug}
+                              className="inline-flex items-center gap-1 bg-secondary-container text-on-secondary-container pl-2 pr-1 py-0.5 rounded font-mono text-3xs uppercase tracking-wider"
+                            >
+                              {t?.name || slug}
+                              <button
+                                type="button"
+                                onClick={() => toggleTag(slug)}
+                                aria-label={uiText("Remove {value1}", {
+                                  value1: String(t?.name || slug),
+                                })}
+                                className="h-3.5 w-3.5 rounded-sm flex items-center justify-center hover:bg-on-secondary-container/10"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            </>
-          )}
-          {sourceMode && (catalogFailed || (sourceSelected && !selectedAvailable)) && (
-            <div role="alert" className="space-y-2 text-sm text-destructive">
-              {catalogFailed && <p>{uiText("Could not load upload destinations.")}</p>}
-              {sourceSelected && !selectedAvailable && (
-                <p>{uiText("Choose an available destination before uploading.")}</p>
-              )}
-              {catalogFailed && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    if (config.isError) void config.refetch();
-                    else void sources.refetch();
-                  }}
-                >
-                  {uiText("Retry")}
-                </Button>
+                </>
               )}
             </div>
-          )}
-          <div className="flex justify-end gap-3 pt-2">
-            <Button type="button" variant="outline" onClick={close} className="min-h-11">
+            {sourceMode && (catalogFailed || (sourceSelected && !selectedAvailable)) && (
+              <div role="alert" className="space-y-2 text-sm text-destructive">
+                {catalogFailed && <p>{uiText("Could not load upload destinations.")}</p>}
+                {sourceSelected && !selectedAvailable && (
+                  <p>{uiText("Choose an available destination before uploading.")}</p>
+                )}
+                {catalogFailed && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      if (config.isError) void config.refetch();
+                      else void sources.refetch();
+                    }}
+                  >
+                    {uiText("Retry")}
+                  </Button>
+                )}
+              </div>
+            )}
+            {!onboarding && (
+              <p className="pb-1 text-xs text-muted-foreground">
+                {uiText(
+                  "PrintStash stores existing files. It does not slice Models or verify G-code safety.",
+                )}
+              </p>
+            )}
+          </div>
+          <div className="upload-dialog-actions flex justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
+            <Button type="button" variant="outline" onClick={close} size="sm">
               {uiText("Cancel")}
             </Button>
             <Button
@@ -909,7 +963,7 @@ export function UploadModal({
                       ? !urlValue.trim()
                       : !zipFile)
               }
-              className="min-h-11"
+              size="sm"
             >
               {submitting ? (
                 <>
@@ -923,7 +977,7 @@ export function UploadModal({
                   uiText("Upload to vault")
                 )
               ) : mode === "url" ? (
-                uiText("Review URL")
+                uiText("Capture for review")
               ) : mode === "zip" ? (
                 uiText("Prepare archive")
               ) : onboarding ? (
@@ -946,8 +1000,10 @@ function FileSlot({
   setFile,
   placeholder,
   inputRef,
+  large = false,
 }: {
   label: string;
+  large?: boolean;
   accept: string;
   file: File | null;
   setFile: (f: File | null) => void;
@@ -961,9 +1017,7 @@ function FileSlot({
   const dragDepth = useRef(0);
   return (
     <div>
-      <span className="block font-mono text-3xs text-on-surface-variant tracking-wider uppercase mb-1.5">
-        {label}
-      </span>
+      <span className="mb-2 block text-sm text-foreground">{label}</span>
       <div
         onClick={() => {
           if (!file) inputRef.current?.click();
@@ -999,12 +1053,12 @@ function FileSlot({
           }
           setFile(dropped);
         }}
-        className={`flex items-center justify-between rounded border border-dashed px-3 py-2.5 transition-colors cursor-action ${
+        className={`flex ${large ? "min-h-[150px] flex-col items-center justify-center text-center" : "min-h-[104px] items-start justify-between"} gap-3 border border-dashed px-4 py-3 transition-colors cursor-action ${
           file
             ? "border-primary bg-primary/5"
             : dragActive
               ? "border-primary bg-primary/10"
-              : "border-outline-variant hover:border-outline"
+              : "border-input bg-muted/20 hover:border-ring"
         }`}
       >
         {file ? (
@@ -1027,7 +1081,29 @@ function FileSlot({
             </button>
           </div>
         ) : (
-          <span className="font-mono text-xs text-on-surface-variant/60">{placeholder}</span>
+          <>
+            <Upload className="mt-2 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+            <div className={large ? "flex min-w-0 flex-col items-center" : "min-w-0 flex-1"}>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={uiText("Choose file for {value1}", { value1: label })}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    inputRef.current?.click();
+                  }}
+                >
+                  {uiText("Choose file")}
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  {uiText("or drop files here")}
+                </span>
+              </div>
+              <p className="mt-2 break-words text-xs text-muted-foreground">{placeholder}</p>
+            </div>
+          </>
         )}
         <input
           ref={inputRef}
@@ -1037,6 +1113,9 @@ function FileSlot({
           className="hidden"
         />
       </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {file ? file.name : uiText("No files selected")}
+      </p>
     </div>
   );
 }
@@ -1088,6 +1167,7 @@ export function BulkFiles({
 
   return (
     <div>
+      <p className="mb-2 text-sm text-foreground">{uiText("Model files")}</p>
       <div
         onClick={() => fileInputRef.current?.click()}
         onDragEnter={(e) => {
@@ -1107,30 +1187,60 @@ export function BulkFiles({
           }
         }}
         onDrop={handleDrop}
-        className={`flex flex-col items-center justify-center gap-1.5 rounded border border-dashed px-3 py-6 text-center transition-colors cursor-action ${
+        className={`flex min-h-[150px] flex-col items-center justify-center gap-3 border border-dashed bg-muted/20 px-4 py-5 text-center transition-colors cursor-action ${
           dragActive
             ? "border-primary bg-primary/10"
             : "border-outline-variant hover:border-outline"
         }`}
       >
-        <Layers className="h-5 w-5 text-on-surface-variant" />
-        <span className="text-xs text-on-surface">{uiText("Drop 3D models or a folder here")}</span>
-        <span className="font-mono text-3xs text-on-surface-variant/60">
-          {uiText("{value1} · subfolders become nested collections", {
-            value1: String(SOURCE_ACCEPT ?? ""),
-          })}
-        </span>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            folderInputRef.current?.click();
-          }}
-          className="mt-1 font-mono text-3xs text-primary uppercase tracking-wider hover:underline"
-        >
-          {uiText("Or select a folder")}
-        </button>
+        <Upload className="h-5 w-5 text-muted-foreground" aria-hidden />
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={(event) => {
+              event.stopPropagation();
+              fileInputRef.current?.click();
+            }}
+          >
+            {uiText("Choose files")}
+          </Button>
+          <span className="text-xs text-muted-foreground">{uiText("or drop files here")}</span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {uiText("Choose Model files or drop a folder. G-code pairing is available on Files.")}
+        </p>
       </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => folderInputRef.current?.click()}
+        >
+          {uiText("Choose folder")}
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          {items.length ? (
+            <>
+              {uiText("counts.files", { count: items.length })}
+              {folderCount > 0
+                ? uiText("folders.count", { value1: String(folderCount), count: folderCount })
+                : ""}{" "}
+              · {formatBytes(totalBytes)}
+            </>
+          ) : (
+            uiText("No files selected")
+          )}
+        </span>
+        <Button type="button" variant="ghost" size="sm" onClick={onClear} disabled={!items.length}>
+          {uiText("Clear all")}
+        </Button>
+      </div>
+      <p className="mt-6 text-xs text-muted-foreground">
+        {uiText("Each Model file creates a separate Model. Subfolders become nested Collections.")}
+      </p>
       {/* Outside the drop zone: a programmatic click on either input bubbles, and the
           zone's own onClick would open the file picker over the folder picker. */}
       <input
@@ -1158,25 +1268,6 @@ export function BulkFiles({
       />
       {items.length > 0 && (
         <>
-          <div className="flex items-center justify-between mt-2 mb-1.5">
-            <span className="font-mono text-3xs text-on-surface-variant tracking-wider uppercase">
-              {uiText("counts.files", { count: items.length })}
-              {folderCount > 0
-                ? uiText("folders.count", {
-                    value1: String(folderCount),
-                    count: Number(folderCount),
-                  })
-                : ""}{" "}
-              · {formatBytes(totalBytes)}
-            </span>
-            <button
-              type="button"
-              onClick={onClear}
-              className="font-mono text-3xs text-on-surface-variant uppercase tracking-wider hover:text-on-surface"
-            >
-              {uiText("Clear")}
-            </button>
-          </div>
           <div className="rounded border border-outline-variant divide-y divide-outline-variant max-h-56 overflow-y-auto">
             {items.map((it, idx) => (
               <div

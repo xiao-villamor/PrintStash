@@ -10,7 +10,7 @@ import type { ComputeCapability, ComputeStatus } from "@/types/system";
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0 space-y-0.5">
-      <dt className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">{label}</dt>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="break-words text-sm">{children}</dd>
     </div>
   );
@@ -87,9 +87,7 @@ export function GpuServerStatus({ read }: { read: UseQueryResult<ComputeStatus> 
       </dl>
 
       <div className="space-y-1.5">
-        <p className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-          {t("gpu.server.capabilities")}
-        </p>
+        <p className="text-xs text-muted-foreground">{t("gpu.server.capabilities")}</p>
         <ul className="flex flex-wrap gap-2">
           {status.capabilities.map((capability: ComputeCapability) => (
             <li key={capability.operation}>

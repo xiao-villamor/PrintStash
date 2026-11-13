@@ -141,7 +141,7 @@ test.describe("pending imports", () => {
 
     await page.getByRole("link", { name: "Open model" }).click();
     expect(problems, "before opening the Source tab").toEqual([]);
-    await page.getByRole("tab", { name: "Source" }).click();
+    await page.getByRole("tab", { name: "Source info", exact: true }).click();
     await expect(page.getByText("Fixture maker")).toBeVisible();
     await expect(page.getByText("CC BY 4.0")).toBeVisible();
     await expect(page.getByText("Print with supports.")).toBeVisible();
@@ -161,7 +161,9 @@ test.describe("pending imports", () => {
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Restore" }).click();
     await expect(page.getByText("Fixture maker")).toBeVisible();
-    await expect(page.getByText("Source").last()).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Source information", exact: true }),
+    ).toBeVisible();
 
     expect(problems).toEqual([]);
   });

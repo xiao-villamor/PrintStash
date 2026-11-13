@@ -6,7 +6,6 @@ import { useTaxonomyCommands } from "@/features/library/taxonomy";
 
 import { captureEditingBase } from "@/lib/api/editing";
 
-import { LibraryBackLink } from "@/features/library/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   useModelDetail,
@@ -19,34 +18,21 @@ import { ApiError } from "@/lib/errors";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { Modal } from "@/components/ui/modal";
 import { TitleEditor } from "@/components/title-editor";
-import { FileHashes } from "./file-hashes";
+import { ModelInformation } from "./model-information";
+import { RevisionPicker } from "./revision-picker";
+import { inspectedRevision } from "./inspected-revision";
+import "./model-detail.css";
 import { ModelSearchAction } from "@/components/model-search-action";
 
-import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
+import { formatNumber } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useRouter, useSearchParams } from "@/lib/navigation";
-import { useLocation, useNavigate } from "react-router-dom";
-import {
-  ArrowLeft,
-  Check,
-  FileText,
-  Link2,
-  Loader2,
-  MoreHorizontal,
-  Minus,
-  Pencil,
-  Plus,
-  Printer as PrinterIcon,
-  RotateCcw,
-  Star,
-  Tags,
-  Trash2,
-  Wifi,
-} from "lucide-react";
+import { useLocation } from "@tanstack/react-router";
+import { FileText, Link2, Loader2, Pencil, Star, Trash2, Wifi } from "lucide-react";
 
 import type {
   STLViewerControls,
@@ -54,14 +40,21 @@ import type {
   ViewerDisplayMode,
 } from "@/components/stl-viewer";
 import type { ViewerMode } from "@/components/model-detail/viewer-toolbar";
-import { deleteModel, getAssetUrl, getModel, updateModel } from "@/lib/api";
+import { SlicerOpenButton } from "@/components/slicer-open-button";
+import {
+  downloadAuthenticatedFile,
+  deleteModel,
+  getAssetUrl,
+  getModel,
+  updateModel,
+} from "@/lib/api";
 import { useTags } from "@/lib/queries";
-import { timeAgo } from "@/lib/format";
 import { readMetadataPreferences } from "@/lib/metadata-preferences";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@/lib/auth-context";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { useRequireAuth } from "@/lib/use-require-auth";
+import { modalOverlayOpen } from "@/lib/keyboard-commands";
 import { ModelPrinterFileRead, ModelRead, TagRead } from "@/types";
 
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -72,15 +65,13 @@ import { TabBar } from "@/components/ui/tabs";
 import { AddGcodeRevisionModal } from "./add-revision-modal";
 import { SimilarityQueue } from "@/components/similarity-queue";
 import { FilesTab } from "./files-tab";
-import { OverviewTab } from "./overview-tab";
+import { OverviewTab, ModelMetadataFields, type ModelMetaEditor } from "./overview-tab";
 import {
   TABS,
   TabKey,
   buildPrintSettingRows,
-  headerStatusLabel,
   normalizeRecommendedGcodeFiles,
   plateLabel,
-  revisionStatusClass,
 } from "./presentation";
 import { PrintHistorySection } from "./print-history-section";
 import { RevisionsTab } from "./revisions-tab";
@@ -88,8 +79,9 @@ import { SendToButtons } from "./send-to-buttons";
 import { ShareDialog } from "./share-dialog";
 import { SettingsTab } from "./settings-tab";
 import { SourceTab } from "./source-tab";
+import { useContentMotion } from "@/lib/use-content-motion";
+import { DetailTabLoading } from "./tab-loading";
 import { useDerivativeRefresh } from "./use-derivative-refresh";
-import { useRevisionUpdater } from "./use-revision-updater";
 import { ViewerToolbar } from "./viewer-toolbar";
 import { PlatePicker } from "./plate-picker";
 import { useFilePlates } from "@/lib/queries/file-plates";
@@ -124,17 +116,17 @@ interface BedSize {
 
 const DEFAULT_BED_SIZE: BedSize = { x: 235, y: 235 };
 
-const DETAIL_SIDEBAR_STORAGE_KEY = "ps-model-detail-sidebar-width";
-const DETAIL_SIDEBAR_DEFAULT_WIDTH = 480;
+const DETAIL_SIDEBAR_STORAGE_KEY = "ps-model-detail-inspector-preferred-width";
 const DETAIL_SIDEBAR_MIN_WIDTH = 400;
-const DETAIL_SIDEBAR_MAX_WIDTH = 800;
+const DETAIL_SIDEBAR_MAX_WIDTH = 1100;
 
 const isBrowser = (): boolean => "window" in globalThis;
 
-function clampDetailSidebarWidth(width: number): number {
-  const viewportMax = isBrowser()
-    ? Math.max(DETAIL_SIDEBAR_MIN_WIDTH, window.innerWidth - 320)
-    : DETAIL_SIDEBAR_MAX_WIDTH;
+function clampDetailSidebarWidth(width: number, availableWidth?: number): number {
+  const viewportMax = Math.max(
+    DETAIL_SIDEBAR_MIN_WIDTH,
+    (availableWidth ?? (isBrowser() ? window.innerWidth - 93 : 1827)) - 376,
+  );
   return Math.round(
     Math.min(DETAIL_SIDEBAR_MAX_WIDTH, viewportMax, Math.max(DETAIL_SIDEBAR_MIN_WIDTH, width)),
   );
@@ -190,7 +182,6 @@ function ModelDetailPresentation({
   const router = useRouter();
   const searchParams = useSearchParams();
   const location = useLocation();
-  const navigate = useNavigate();
   const auth = useRequireAuth();
   const { user } = useAuth();
   const [deleting, setDeleting] = useState(false);
@@ -236,28 +227,85 @@ function ModelDetailPresentation({
   const [metadataPreferences] = useState(readMetadataPreferences);
   const [addRevisionOpen, setAddRevisionOpen] = useState(false);
   const requestedTab = TABS.find((tab) => tab.key === searchParams.get("tab"))?.key ?? "overview";
+  const tabIntent = useRef(requestedTab);
   function selectTab(tab: TabKey) {
+    // A click back to the visible tab must still supersede a pending navigation.
+    if (tab === activeTab && tabIntent.current === tab) return;
+    tabIntent.current = tab;
+    if (tab !== "revisions") setCompareRequested(false);
+    if (tab !== "history") setHistoryDraft(null);
     const params = new URLSearchParams(searchParams);
     params.set("tab", tab);
-    void navigate(`/models/${model.id}?${params}`, { replace: true, state: location.state });
+    router.replace(`/models/${model.id}?${params}`, {
+      state: location.state,
+    });
   }
   const [displayMode, setDisplayMode] = useState<ViewerDisplayMode>("solid");
-  const [detailSidebarWidth, setDetailSidebarWidth] = useState(() => {
-    try {
-      const stored = Number(localStorage.getItem(DETAIL_SIDEBAR_STORAGE_KEY));
-      return Number.isFinite(stored) && stored > 0
-        ? clampDetailSidebarWidth(stored)
-        : DETAIL_SIDEBAR_DEFAULT_WIDTH;
-    } catch {
-      return DETAIL_SIDEBAR_DEFAULT_WIDTH;
-    }
-  });
+  const detailLayout = useRef<HTMLDivElement>(null);
+  const [detailLayoutWidth, setDetailLayoutWidth] = useState(() =>
+    isBrowser() ? window.innerWidth - 93 : 1827,
+  );
+  const [preferredDetailSidebarWidth, setPreferredDetailSidebarWidth] = useState<number | null>(
+    () => {
+      try {
+        const stored = Number(localStorage.getItem(DETAIL_SIDEBAR_STORAGE_KEY));
+        return Number.isFinite(stored) && stored > 0 ? stored : null;
+      } catch {
+        return null;
+      }
+    },
+  );
+  const detailSidebarWidth = clampDetailSidebarWidth(
+    preferredDetailSidebarWidth ?? Math.min(1000, detailLayoutWidth * 0.45),
+    detailLayoutWidth,
+  );
+  function setDetailSidebarWidth(width: number | ((current: number) => number)) {
+    setPreferredDetailSidebarWidth(width instanceof Function ? width(detailSidebarWidth) : width);
+  }
 
   const [showGrid, setShowGrid] = useState(true);
+  const [showDimensions, setShowDimensions] = useState(true);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  useEffect(() => {
+    function toggleDetails(event: KeyboardEvent) {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.repeat ||
+        modalOverlayOpen() ||
+        event.getModifierState("AltGraph") ||
+        !(event.ctrlKey || event.metaKey) ||
+        !event.altKey ||
+        event.shiftKey ||
+        event.code !== "KeyB"
+      )
+        return;
+      event.preventDefault();
+      setPreviewExpanded((expanded) => !expanded);
+      if (event.target instanceof HTMLElement && event.target.closest(".model-detail-inspector")) {
+        requestAnimationFrame(() =>
+          detailLayout.current?.querySelector<HTMLButtonElement>("[data-preview-expand]")?.focus(),
+        );
+      }
+    }
+    window.addEventListener("keydown", toggleDetails);
+    return () => window.removeEventListener("keydown", toggleDetails);
+  }, []);
   // The plate chosen for one 3MF; another mesh file shows its whole build.
   const [chosenPlate, setChosenPlate] = useState<{ fileId: number; number: number } | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
-  const [sendFileId, setSendFileId] = useState<number | undefined>(undefined);
+  const [compareRequested, setCompareRequested] = useState(false);
+  const [comparisonMode, setComparisonMode] = useState<"gcode" | "source" | "all">("gcode");
+  const [deliveryMode, setDeliveryMode] = useState<"send" | "queue">("send");
+  const [historyDraft, setHistoryDraft] = useState<{
+    fileId: number;
+    state: "completed" | "failed";
+  } | null>(null);
+  const [toolpathSource, setToolpathSource] = useState<{
+    modelId: number;
+    revisionId: number | null;
+    fileId: number;
+  } | null>(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const { createTag, deleteTag } = useTaxonomyCommands();
@@ -265,9 +313,19 @@ function ModelDetailPresentation({
   const [deleteTagTarget, setDeleteTagTarget] = useState<TagRead | null>(null);
   const [deleteTagBusy, setDeleteTagBusy] = useState(false);
   const [viewerMode, setViewerMode] = useState<ViewerMode>("model");
+  const [revisionSelection, setRevisionSelection] = useState<{
+    modelId: number;
+    fileId: number;
+  } | null>(null);
   const [viewerReady, setViewerReady] = useState(false);
   const [previewFeedback, setPreviewFeedback] = useState<STLPreviewFeedback | null>(null);
   const viewerControls = useRef<STLViewerControls | null>(null);
+  const toolpathControls = useRef<STLViewerControls | null>(null);
+  const [toolpathReady, setToolpathReady] = useState(false);
+  const connectToolpathControls = useCallback((controls: STLViewerControls | null) => {
+    toolpathControls.current = controls;
+    setToolpathReady(controls !== null);
+  }, []);
   const canEditModel = model.effective_role === "edit" || model.effective_role === "admin";
   useEffect(() => {
     if (!canEditModel) editLifetime.current += 1;
@@ -295,6 +353,7 @@ function ModelDetailPresentation({
     (!canEditModel && requestedTab === "similar")
       ? "overview"
       : requestedTab;
+  const detailTabBody = useContentMotion(activeTab, { scroll: "parent" });
   const visibleTabs = useMemo(
     () =>
       TABS.filter(
@@ -305,7 +364,6 @@ function ModelDetailPresentation({
   );
 
   // Quick actions on the Overview card (mark failed / recommend).
-  const revisionUpdater = useRevisionUpdater(model.id, setModel);
   // Thumbnails and metadata arrive after upload, derived in the background.
   useDerivativeRefresh(model.id);
 
@@ -324,16 +382,19 @@ function ModelDetailPresentation({
 
   useEffect(() => {
     try {
-      localStorage.setItem(DETAIL_SIDEBAR_STORAGE_KEY, String(detailSidebarWidth));
+      if (preferredDetailSidebarWidth === null) localStorage.removeItem(DETAIL_SIDEBAR_STORAGE_KEY);
+      else localStorage.setItem(DETAIL_SIDEBAR_STORAGE_KEY, String(preferredDetailSidebarWidth));
     } catch {
       /* Storage can be unavailable in hardened browser contexts. */
     }
-  }, [detailSidebarWidth]);
+  }, [preferredDetailSidebarWidth]);
 
   useEffect(() => {
-    const onResize = () => setDetailSidebarWidth((width) => clampDetailSidebarWidth(width));
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    const element = detailLayout.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => setDetailLayoutWidth(element.clientWidth - 40));
+    observer.observe(element);
+    return () => observer.disconnect();
   }, []);
 
   function startDetailSidebarResize(event: ReactPointerEvent<HTMLDivElement>) {
@@ -573,8 +634,11 @@ function ModelDetailPresentation({
     [sortedFiles],
   );
   const recommendedGcode = gcodeFiles.find((f) => f.is_recommended) ?? null;
-  const latestFile =
-    recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1] ?? sortedFiles[sortedFiles.length - 1];
+  const inspectedGcode = inspectedRevision(
+    gcodeFiles,
+    revisionSelection?.modelId === model.id ? revisionSelection.fileId : null,
+  );
+  const latestFile = inspectedGcode ?? sortedFiles[sortedFiles.length - 1];
   const meta = latestFile?.metadata;
   const printSettingRows = buildPrintSettingRows(meta, metadataPreferences);
   const meshFile = model.files.find(
@@ -591,12 +655,29 @@ function ModelDetailPresentation({
   );
   const hasGcode = gcodeFiles.length > 0;
   const hasToolpathPreview = hasGcode || sourceFiles.some((file) => file.file_type === "3mf");
+  const previewSourceId =
+    toolpathSource?.modelId === model.id &&
+    toolpathSource.revisionId === (inspectedGcode?.id ?? null)
+      ? toolpathSource.fileId
+      : inspectedGcode?.id;
+  const previewSource =
+    sortedFiles.find((file) => file.id === previewSourceId) ??
+    inspectedGcode ??
+    sourceFiles.find((file) => file.file_type === "3mf");
+  function selectToolpathSource(fileId: number) {
+    const file = sortedFiles.find((source) => source.id === fileId);
+    if (file?.file_type === "gcode") {
+      setRevisionSelection({ modelId: model.id, fileId });
+      setToolpathSource(null);
+    } else if (file?.file_type === "3mf") {
+      setToolpathSource({ modelId: model.id, revisionId: inspectedGcode?.id ?? null, fileId });
+    }
+  }
   const filePlates = useFilePlates(model.id, meshFile?.file_type === "3mf" ? meshFile.id : null);
   // A single plate is the whole build; only a multi-plate project offers a choice.
   const plates = filePlates !== null && filePlates.plates.length > 1 ? filePlates.plates : [];
   const pickerShown = viewerMode === "model" && plates.length > 1;
   // The viewer's corner controls sit above the plate strip when it is shown.
-  const overlayBottom = pickerShown ? "bottom-24" : "bottom-4";
   const shownPlate =
     chosenPlate !== null && chosenPlate.fileId === meshFile?.id
       ? (plates.find((plate) => plate.number === chosenPlate.number) ?? null)
@@ -611,16 +692,6 @@ function ModelDetailPresentation({
     return grouped;
   }, [printerFiles]);
 
-  function requestSend(fileId: number) {
-    if (!auth.isAuthenticated) {
-      auth.showAuthRequiredToast();
-      return;
-    }
-    if (!canViewPrinters) return;
-    setSendFileId(fileId);
-    setSendOpen(true);
-  }
-
   function requestAddRevision() {
     if (!auth.isAuthenticated || !canEditModel) {
       auth.showAuthRequiredToast();
@@ -629,9 +700,34 @@ function ModelDetailPresentation({
     setAddRevisionOpen(true);
   }
 
+  const modelMetadataEditor: ModelMetaEditor = {
+    collection: editCollection,
+    collectionLabel: editCollectionLabel,
+    setCollection: (path, label) => {
+      setEditCollection(path);
+      setEditCollectionLabel(label);
+    },
+    catOpen,
+    setCatOpen,
+    allowRoot: !!user?.is_superuser,
+    description: editDescription,
+    setDescription: setEditDescription,
+    sourceUrl: editSourceUrl,
+    setSourceUrl: setEditSourceUrl,
+    tagInput,
+    setTagInput,
+    tags: editTags,
+    setTags: setEditTags,
+    toggleTag: editToggleTag,
+    createTag: editCreateTag,
+    deleteTag: editDeleteTag,
+    filteredTags: editFilteredTags,
+    canCreate: editCanCreate,
+  };
+
   return (
     <Localized>
-      <div className="flex flex-col h-full">
+      <div className="model-detail-page flex flex-col h-full">
         {readError && (
           <div role="alert" className="border-b border-border bg-muted px-4 py-3 text-sm">
             <p>{uiText("Couldn’t load this model")}</p>
@@ -669,6 +765,10 @@ function ModelDetailPresentation({
         />
         {addRevisionOpen && (
           <AddGcodeRevisionModal
+            modelName={model.name}
+            currentRecommendedRevision={
+              gcodeFiles.find((file) => file.is_recommended)?.gcode_revision_number ?? undefined
+            }
             modelId={model.id}
             onClose={() => setAddRevisionOpen(false)}
             onUploaded={async (updated) => {
@@ -679,6 +779,7 @@ function ModelDetailPresentation({
           />
         )}
         <ShareDialog
+          modelName={model.name}
           modelId={model.id}
           files={model.files}
           open={shareOpen}
@@ -694,23 +795,6 @@ function ModelDetailPresentation({
             void setModel((current) => ({ ...current, tags: nextTags, ...editVersion }));
           }}
         />
-        {editing && editProblem && (
-          <div role="alert" className="border-b border-border bg-muted px-4 py-3 text-sm">
-            <p>
-              {uiText(
-                editProblem === "conflict" ? "library.editConflict" : "library.saveUnconfirmed",
-              )}
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void reviewLatest()}
-              loading={reviewing}
-            >
-              {uiText("library.reviewLatest")}
-            </Button>
-          </div>
-        )}
         <Modal
           open={editing && reviewedModel !== null}
           onClose={() => setReviewedModel(null)}
@@ -751,463 +835,478 @@ function ModelDetailPresentation({
             </div>
           )}
         </Modal>
-        {/* Detail Header */}
-        <header className="flex flex-wrap items-center justify-between px-4 md:px-6 py-3 gap-2 border-b border-outline-variant bg-surface-container-lowest shrink-0">
-          <div className="flex w-full min-w-0 items-start gap-3 md:w-auto md:flex-1 md:gap-4">
-            <LibraryBackLink
-              href={model.collection ? `/?c=${encodeURIComponent(model.collection)}` : "/"}
-              aria-label={uiText("Back")}
-              className="w-10 h-10 shrink-0 flex items-center justify-center rounded hover:bg-surface-container-high text-on-surface-variant transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </LibraryBackLink>
-            <div className="min-w-0 flex-1">
-              {editing ? (
-                <Input
-                  ref={nameInput}
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  aria-invalid={!editName.trim()}
-                  aria-describedby={!editName.trim() ? "model-name-error" : undefined}
-                  className="h-9 bg-surface text-on-surface font-mono text-lg px-2 py-0.5"
-                  placeholder={uiText("Model name")}
-                />
-              ) : (
-                <TitleEditor
-                  open={renaming && canEditModel && auth.isAuthenticated}
-                  onOpenChange={(open) => {
-                    if (!open) cancelEdit();
-                  }}
-                  label={uiText("Rename {value1}", { value1: model.name })}
-                  fieldLabel={uiText("Model name")}
-                  value={editName}
-                  onValueChange={setEditName}
-                  onSave={() => void saveEdit()}
-                  busy={saving}
-                  requiredMessage={uiText("Model name is required.")}
-                  saveDisabled={editProblem !== null || !canEditModel}
-                  trigger={
-                    <div className="flex min-w-0 items-center gap-1">
-                      <h1
-                        onDoubleClick={() => {
-                          if (auth.isAuthenticated && canEditModel) enterEdit("name");
-                        }}
-                        className="min-w-0 break-words text-xl font-semibold text-on-surface leading-tight"
-                      >
-                        {model.name}
-                      </h1>
-                      {auth.isAuthenticated && canEditModel && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="shrink-0 text-on-surface-variant"
-                          aria-label={uiText("Rename {value1}", { value1: model.name })}
-                          title={uiText("Rename")}
-                          onClick={() => {
-                            if (!saving) {
-                              if (renaming) cancelEdit();
-                              else enterEdit("name");
-                            }
-                          }}
-                          data-menu-trigger
-                          aria-haspopup="dialog"
-                          aria-expanded={renaming}
-                        >
-                          <Pencil className="h-3.5 w-3.5" aria-hidden />
-                        </Button>
-                      )}
-                    </div>
-                  }
-                >
-                  {renaming && editProblem && (
-                    <div className="space-y-2 border-t border-border pt-3 text-xs">
-                      <p role="alert">
-                        {uiText(
-                          editProblem === "conflict"
-                            ? "library.editConflict"
-                            : "library.saveUnconfirmed",
-                        )}
-                      </p>
-                      {reviewedModel ? (
-                        <>
-                          <p className="font-medium">{uiText("library.latestVersion")}</p>
-                          <p className="break-words">{reviewedModel.name}</p>
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={useReviewedVersion}
-                              disabled={saving}
-                            >
-                              {uiText("library.useLatest")}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setReviewedModel(null)}
-                              disabled={saving}
-                            >
-                              {uiText("library.keepDraft")}
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              className="h-auto min-h-9 whitespace-normal"
-                              loading={saving}
-                              disabled={
-                                reviewedModel.effective_role !== "edit" &&
-                                reviewedModel.effective_role !== "admin"
-                              }
-                              onClick={() => void saveEdit(reviewedModel)}
-                            >
-                              {uiText("library.retryDraft")}
-                            </Button>
-                          </div>
-                        </>
-                      ) : (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void reviewLatest()}
-                          loading={reviewing}
-                        >
-                          {uiText("library.reviewLatest")}
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                </TitleEditor>
-              )}
-              <span className="font-mono text-xs text-on-surface-variant">
-                {(meshFile ?? sourceFiles[0]) && (
-                  <>
-                    {(meshFile ?? sourceFiles[0])!.file_type.toUpperCase()}
-                    {uiText(" source · ")}
-                  </>
-                )}
-                {uiText("counts.revisions", { count: gcodeFiles.length })}
-                {uiText(" · Last updated ")}
-                {timeAgo(model.updated_at)}
-              </span>
-              {editing && !editName.trim() && (
-                <p id="model-name-error" role="alert" className="mt-1 text-xs text-destructive">
-                  {uiText("Model name is required.")}
-                </p>
-              )}
-              {!editing && (recommendedGcode || meta?.material_type || meta?.printer_model) && (
-                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                  {recommendedGcode && (
-                    <span className="inline-flex items-center gap-1 border border-primary/30 bg-secondary-container text-on-secondary-container rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider">
-                      <Star className="h-3 w-3 fill-current" />
-                      {uiText(" Recommended Rev")}{" "}
-                      {recommendedGcode.gcode_revision_number ?? recommendedGcode.version}
-                    </span>
-                  )}
-                  {recommendedGcode?.revision_status && (
-                    <span
-                      className={`border rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider ${revisionStatusClass(recommendedGcode.revision_status)}`}
-                    >
-                      {headerStatusLabel(recommendedGcode.revision_status)}
-                    </span>
-                  )}
-                  {meta?.material_type && (
-                    <span className="inline-flex items-center gap-1 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 rounded px-2 py-0.5 font-mono text-2xs font-semibold uppercase tracking-wider">
-                      {meta.material_type}
-                    </span>
-                  )}
-                  {meta?.printer_model && (
-                    <span className="inline-flex items-center gap-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 rounded px-2 py-0.5 font-mono text-2xs font-semibold uppercase tracking-wider">
-                      <PrinterIcon className="h-3 w-3" /> {meta.printer_model}
-                    </span>
-                  )}
-                </div>
-              )}
+        <Modal
+          open={editing && reviewedModel === null}
+          onClose={() => {
+            if (!saving) cancelEdit();
+          }}
+          title={uiText("Edit Model details")}
+          className="absolute inset-y-0 right-0 h-dvh max-h-none max-w-[680px] rounded-none"
+          bodyClassName="flex-1"
+          description={uiText(
+            "Edit the Model’s own metadata. Captured source fields and Artifact tags remain separate.",
+          )}
+          footer={
+            <>
+              <Button variant="outline" onClick={cancelEdit} disabled={saving}>
+                {uiText("Cancel")}
+              </Button>
+              <Button
+                onClick={() => void saveEdit()}
+                loading={saving}
+                disabled={!editName.trim() || editProblem !== null || !canEditModel}
+              >
+                {uiText("Save changes")}
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-5">
+            <div className="grid grid-cols-[1fr_2fr] gap-4 bg-plate p-4 text-[13px]">
+              <span className="text-muted-foreground">{uiText("Model")}</span>
+              <span className="break-words">{model.name}</span>
             </div>
-          </div>
-          <div
-            className={`flex items-center gap-2 ${editing ? "w-full justify-end md:w-auto md:self-start" : ""}`}
-          >
-            {editing ? (
-              <>
-                <Button variant="outline" size="sm" onClick={cancelEdit}>
-                  {uiText("Cancel")}
-                </Button>
+            <p className="text-[13px] text-muted-foreground">
+              {uiText("Changes stay a draft until you save. Cancel restores the previous values.")}
+            </p>
+            {editing && editProblem && (
+              <div role="alert" className="border-b border-border bg-muted px-4 py-3 text-sm">
+                <p>
+                  {uiText(
+                    editProblem === "conflict" ? "library.editConflict" : "library.saveUnconfirmed",
+                  )}
+                </p>
                 <Button
-                  size="sm"
-                  onClick={() => void saveEdit()}
-                  loading={saving}
-                  disabled={!editName.trim() || editProblem !== null || !canEditModel}
-                >
-                  {!saving && <Check className="h-4 w-4" />}{" "}
-                  {saving ? uiText("Saving…") : uiText("Save")}
-                </Button>
-              </>
-            ) : (
-              <>
-                {canEditModel && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    aria-label={
-                      model.tags.length > 0
-                        ? uiText("Edit tags for {value1}", { value1: String(model.name) })
-                        : uiText("Add tags to {value1}", { value1: String(model.name) })
-                    }
-                    onClick={() => {
-                      setTagDialogSession((session) => session + 1);
-                      setTagDialogOpen(true);
-                    }}
-                  >
-                    <Tags className="h-4 w-4" />
-                    {model.tags.length > 0 ? uiText("Edit tags") : uiText("Add tags")}
-                  </Button>
-                )}
-                <Button
-                  type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => void toggleFavorite()}
-                  disabled={starBusy || !auth.isAuthenticated}
+                  onClick={() => void reviewLatest()}
+                  loading={reviewing}
                 >
-                  <Star className={`h-4 w-4 ${model.starred ? "fill-current text-primary" : ""}`} />
-                  {model.starred ? uiText("Favorited") : uiText("Favorite")}
+                  {uiText("library.reviewLatest")}
                 </Button>
-                <DropdownMenu
-                  open={actionsOpen}
-                  onOpenChange={setActionsOpen}
-                  trigger={
-                    <Button
-                      type="button"
-                      data-menu-trigger
-                      variant="outline"
-                      size="icon-sm"
-                      onClick={() => setActionsOpen((open) => !open)}
-                      aria-haspopup="menu"
-                      aria-expanded={actionsOpen}
-                      aria-label={uiText("Model actions")}
-                    >
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  }
-                  contentClassName="w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-                >
-                  <ModelSearchAction modelId={model.id} onSelect={() => setActionsOpen(false)} />
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setActionsOpen(false);
-                      if (auth.isAuthenticated && canEditModel) setShareOpen(true);
-                      else auth.showAuthRequiredToast();
-                    }}
-                    disabled={!auth.isAuthenticated || !canEditModel}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    <Link2 className="h-4 w-4" />
-                    {uiText(" Share")}
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setActionsOpen(false);
-                      if (auth.isAuthenticated && canEditModel) enterEdit();
-                      else auth.showAuthRequiredToast();
-                    }}
-                    disabled={!auth.isAuthenticated || !canEditModel}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    <Pencil className="h-4 w-4" />
-                    {uiText(" Edit details")}
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setActionsOpen(false);
-                      if (auth.isAuthenticated && canEditModel) setConfirmDeleteOpen(true);
-                      else auth.showAuthRequiredToast();
-                    }}
-                    disabled={deleting || !auth.isAuthenticated || !canEditModel}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    {uiText(" Delete model")}
-                  </button>
-                </DropdownMenu>
-              </>
+              </div>
             )}
+
+            <h3 className="text-sm font-semibold">{uiText("Model")}</h3>
+            <label className="block space-y-1.5 text-[13px] font-medium">
+              {uiText("Name (required)")}
+              <Input
+                ref={nameInput}
+                value={editName}
+                onChange={(event) => setEditName(event.target.value)}
+                aria-invalid={!editName.trim()}
+                aria-describedby={!editName.trim() ? "model-name-error" : undefined}
+                disabled={saving}
+              />
+            </label>
+            <p className="text-xs text-muted-foreground">
+              {uiText("Required; separate quick Rename uses the same validation.")}
+            </p>
+            {!editName.trim() && (
+              <p id="model-name-error" className="text-sm text-destructive">
+                {uiText("Model name is required.")}
+              </p>
+            )}
+            <ModelMetadataFields editor={modelMetadataEditor} />
           </div>
-        </header>
+        </Modal>
+        {/* Detail Header */}
+        <DropdownMenu
+          open={actionsOpen}
+          onOpenChange={setActionsOpen}
+          portal
+          className="shrink-0"
+          aria-label={uiText("Model actions")}
+          contentClassName="w-48 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+          trigger={
+            <header
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setActionsOpen(true);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+                  event.preventDefault();
+                  setActionsOpen(true);
+                }
+              }}
+              className="model-detail-heading flex flex-wrap items-center justify-between px-5 pt-4 pb-2.5 gap-2 bg-background shrink-0"
+            >
+              <div className="flex w-full min-w-0 items-start gap-3 md:w-auto md:flex-1 md:gap-4">
+                <div className="min-w-0 flex-1">
+                  <TitleEditor
+                    open={renaming && canEditModel && auth.isAuthenticated}
+                    onOpenChange={(open) => {
+                      if (!open) cancelEdit();
+                    }}
+                    label={uiText("Rename {value1}", { value1: model.name })}
+                    fieldLabel={uiText("Model name")}
+                    value={editName}
+                    onValueChange={setEditName}
+                    onSave={() => void saveEdit()}
+                    busy={saving}
+                    requiredMessage={uiText("Model name is required.")}
+                    saveDisabled={editProblem !== null || !canEditModel}
+                    trigger={
+                      <h1
+                        onDoubleClick={() => {
+                          if (auth.isAuthenticated && canEditModel && !renaming) enterEdit("name");
+                        }}
+                        aria-label={model.name}
+                        tabIndex={auth.isAuthenticated && canEditModel ? undefined : 0}
+                        data-menu-trigger={auth.isAuthenticated && canEditModel ? undefined : true}
+                        className="min-w-0 break-words text-2xl font-semibold text-on-surface leading-tight tracking-tight"
+                      >
+                        {auth.isAuthenticated && canEditModel ? (
+                          <button
+                            type="button"
+                            className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            aria-label={uiText("Rename {value1}", { value1: model.name })}
+                            title={uiText("Rename")}
+                            onClick={() => {
+                              if (!saving) {
+                                if (!renaming) enterEdit("name");
+                              }
+                            }}
+                            data-menu-trigger
+                            aria-haspopup="dialog"
+                            aria-expanded={renaming}
+                          >
+                            {model.name}
+                          </button>
+                        ) : (
+                          model.name
+                        )}
+                      </h1>
+                    }
+                  >
+                    {renaming && editProblem && (
+                      <div className="space-y-2 border-t border-border pt-3 text-xs">
+                        <p role="alert">
+                          {uiText(
+                            editProblem === "conflict"
+                              ? "library.editConflict"
+                              : "library.saveUnconfirmed",
+                          )}
+                        </p>
+                        {reviewedModel ? (
+                          <>
+                            <p className="font-medium">{uiText("library.latestVersion")}</p>
+                            <p className="break-words">{reviewedModel.name}</p>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={useReviewedVersion}
+                                disabled={saving}
+                              >
+                                {uiText("library.useLatest")}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setReviewedModel(null)}
+                                disabled={saving}
+                              >
+                                {uiText("library.keepDraft")}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="h-auto min-h-9 whitespace-normal"
+                                loading={saving}
+                                disabled={
+                                  reviewedModel.effective_role !== "edit" &&
+                                  reviewedModel.effective_role !== "admin"
+                                }
+                                onClick={() => void saveEdit(reviewedModel)}
+                              >
+                                {uiText("library.retryDraft")}
+                              </Button>
+                            </div>
+                          </>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void reviewLatest()}
+                            loading={reviewing}
+                          >
+                            {uiText("library.reviewLatest")}
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </TitleEditor>
+                </div>
+              </div>
+              <div
+                className={`flex items-center gap-2 ${editing ? "w-full justify-end md:w-auto md:self-start" : ""}`}
+              >
+                <>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="model-detail-favorite"
+                    aria-pressed={model.starred}
+                    aria-label={
+                      model.starred
+                        ? uiText("Remove {value1} from favorites", { value1: model.name })
+                        : uiText("Add {value1} to favorites", { value1: model.name })
+                    }
+                    title={model.starred ? uiText("Favorited") : uiText("Favorite")}
+                    onClick={() => void toggleFavorite()}
+                    disabled={starBusy || !auth.isAuthenticated}
+                  >
+                    <Star
+                      aria-hidden
+                      className={
+                        model.starred
+                          ? "h-5 w-5 fill-primary text-primary"
+                          : "h-5 w-5 text-muted-foreground"
+                      }
+                    />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!auth.isAuthenticated || !canEditModel}
+                    onClick={() => setShareOpen(true)}
+                  >
+                    {uiText("Share")}
+                  </Button>
+                </>
+              </div>
+            </header>
+          }
+        >
+          <ModelSearchAction modelId={model.id} onSelect={() => setActionsOpen(false)} />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setActionsOpen(false);
+              if (auth.isAuthenticated && canEditModel) setShareOpen(true);
+              else auth.showAuthRequiredToast();
+            }}
+            disabled={!auth.isAuthenticated || !canEditModel}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+          >
+            <Link2 className="h-4 w-4" />
+            {uiText(" Share")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setActionsOpen(false);
+              if (auth.isAuthenticated && canEditModel) enterEdit();
+              else auth.showAuthRequiredToast();
+            }}
+            disabled={!auth.isAuthenticated || !canEditModel}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+          >
+            <Pencil className="h-4 w-4" />
+            {uiText(" Edit details")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setActionsOpen(false);
+              if (auth.isAuthenticated && canEditModel) setConfirmDeleteOpen(true);
+              else auth.showAuthRequiredToast();
+            }}
+            disabled={deleting || !auth.isAuthenticated || !canEditModel}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" />
+            {uiText(" Delete model")}
+          </button>
+        </DropdownMenu>
+
+        {/* Segmented tab navigation */}
+        <TabBar
+          tabs={visibleTabs.map((tab) => ({
+            key: tab.key,
+            label: (
+              <>
+                {tab.label}
+                {tab.key === "revisions" && gcodeFiles.length > 0 && (
+                  <span className="model-detail-tab-count">{gcodeFiles.length}</span>
+                )}
+                {tab.key === "files" && sourceFiles.length > 0 && (
+                  <span className="model-detail-tab-count">{sourceFiles.length}</span>
+                )}
+                {tab.key === "history" && printJobs.length > 0 && (
+                  <span className="model-detail-tab-count">{printJobs.length}</span>
+                )}
+              </>
+            ),
+          }))}
+          active={activeTab}
+          onChange={selectTab}
+          showIndicator={false}
+          className="model-detail-tabs shrink-0 overflow-x-auto border-b"
+          tabClassName="relative inline-flex items-center gap-1.5 h-10 min-w-max whitespace-nowrap px-0 py-0 text-sm font-medium text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          activeTabClassName="text-foreground"
+        />
 
         {/* Two-Column Layout. On mobile the panels stack and the whole area
           scrolls; on desktop each pane keeps its own fixed height. */}
-        <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-hidden pb-24 md:pb-0">
-          {/* Left: 3D Model Preview */}
-          <div
-            role="region"
-            aria-label={uiText("Preview")}
-            className="relative m-2 flex min-h-80 flex-none flex-col items-center justify-center overflow-hidden rounded border-b border-outline-variant bg-surface-container-low md:m-4 md:min-h-0 md:flex-1 md:border-b-0 md:border-r"
-            style={{ boxShadow: "inset 0 0 0 1px var(--outline-variant)" }}
-          >
-            <div className="relative flex min-h-80 w-full flex-1 items-center justify-center md:min-h-0">
-              {viewerMode === "gcode" && hasToolpathPreview ? (
-                <Suspense fallback={ViewerFallback}>
-                  <GcodePreview
-                    files={sortedFiles}
-                    bedSizeFor={(file) => getBedSize(file.metadata?.printer_model)}
+        <div
+          ref={detailLayout}
+          className="model-detail-layout flex-1 min-h-0"
+          data-expanded={previewExpanded}
+        >
+          {/* Source preview and Model facts remain mounted across inspector tabs. */}
+          <div className="model-detail-visual">
+            <div
+              role="region"
+              aria-label={uiText("Preview")}
+              className="model-detail-preview relative min-h-80 overflow-hidden border border-outline-variant bg-surface-container-low"
+            >
+              <div className="detail-preview-canvas relative flex min-h-80 w-full items-center justify-center md:min-h-0">
+                {viewerMode === "gcode" && hasToolpathPreview ? (
+                  <Suspense fallback={ViewerFallback}>
+                    <GcodePreview
+                      files={sortedFiles}
+                      bedSizeFor={(file) => getBedSize(file.metadata?.printer_model)}
+                      selectedFileId={previewSource?.id}
+                      onSelectFile={selectToolpathSource}
+                      viewerProps={{
+                        screenshotName: model.slug || model.name,
+                        showGrid,
+                        showDimensions,
+                        onControlsReady: connectToolpathControls,
+                      }}
+                    />
+                  </Suspense>
+                ) : meshFile ? (
+                  <Suspense key={meshFile.id} fallback={ViewerFallback}>
+                    <STLViewer
+                      url={getAssetUrl(`/api/v1/files/${meshFile.id}/stl`)}
+                      modelId={model.id}
+                      onControlsReady={(api) => {
+                        viewerControls.current = api;
+                      }}
+                      onReadyChange={setViewerReady}
+                      onFailureChange={setPreviewFeedback}
+                      displayMode={displayMode}
+                      showGrid={showGrid}
+                      screenshotName={
+                        shownPlate
+                          ? `${model.slug || model.name}-plate-${plateLabel(shownPlate)}`
+                          : model.slug || model.name
+                      }
+                      plate={shownPlate?.region}
+                    />
+                  </Suspense>
+                ) : thumbUrl ? (
+                  <img
+                    src={thumbUrl}
+                    alt={model.name}
+                    className="max-w-full max-h-full object-contain"
                   />
-                </Suspense>
-              ) : meshFile ? (
-                <Suspense key={meshFile.id} fallback={ViewerFallback}>
-                  <STLViewer
-                    url={getAssetUrl(`/api/v1/files/${meshFile.id}/stl`)}
-                    modelId={model.id}
-                    onControlsReady={(api) => {
-                      viewerControls.current = api;
-                    }}
-                    onReadyChange={setViewerReady}
-                    onFailureChange={setPreviewFeedback}
-                    displayMode={displayMode}
-                    showGrid={showGrid}
-                    screenshotName={
-                      shownPlate
-                        ? `${model.slug || model.name}-plate-${plateLabel(shownPlate)}`
-                        : model.slug || model.name
-                    }
-                    plate={shownPlate?.region}
-                  />
-                </Suspense>
-              ) : thumbUrl ? (
-                <img
-                  src={thumbUrl}
-                  alt={model.name}
-                  className="max-w-full max-h-full object-contain"
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center gap-2 text-on-surface-variant">
-                  <FileText className="h-20 w-20 opacity-20" />
-                  {sourceFiles.some((file) => file.file_type === "dxf") && (
-                    <span>
-                      {uiText(
-                        "DXF preview is not supported yet. Download the original file below.",
-                      )}
-                    </span>
+                ) : (
+                  <div className="flex flex-col items-center justify-center gap-2 text-on-surface-variant">
+                    <FileText className="h-20 w-20 opacity-20" />
+                    {sourceFiles.some((file) => file.file_type === "dxf") && (
+                      <span>
+                        {uiText(
+                          "DXF preview is not supported yet. Download the original file below.",
+                        )}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {/* Dimensions overlay (bottom-left). They measure the whole build, so a
+                single plate does not claim them. */}
+                {viewerMode === "model" &&
+                  showDimensions &&
+                  viewerReady &&
+                  shownPlate === null &&
+                  meshFile?.metadata?.bbox_x_mm != null &&
+                  meshFile?.metadata?.bbox_y_mm != null &&
+                  meshFile?.metadata?.bbox_z_mm != null && (
+                    <div className="absolute bottom-4 left-4 z-10">
+                      <div className="bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-2 py-1 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span className="font-mono text-[13px] text-on-surface">
+                          {uiText("{value1}×{value2}×{value3} mm", {
+                            value1: formatNumber(meshFile.metadata.bbox_x_mm, {
+                              maximumFractionDigits: 1,
+                            }),
+                            value2: formatNumber(meshFile.metadata.bbox_y_mm, {
+                              maximumFractionDigits: 1,
+                            }),
+                            value3: formatNumber(meshFile.metadata.bbox_z_mm, {
+                              maximumFractionDigits: 1,
+                            }),
+                          })}
+                        </span>
+                      </div>
+                    </div>
                   )}
+              </div>
+              {pickerShown && meshFile && (
+                <PlatePicker
+                  plates={plates}
+                  selected={shownPlate?.number ?? null}
+                  onSelect={(number) =>
+                    setChosenPlate(number === null ? null : { fileId: meshFile.id, number })
+                  }
+                />
+              )}
+              {(meshFile || hasToolpathPreview) && (
+                <div className="contents">
+                  <ViewerToolbar
+                    displayMode={displayMode}
+                    setDisplayMode={setDisplayMode}
+                    showGrid={showGrid}
+                    setShowGrid={setShowGrid}
+                    controls={viewerMode === "gcode" ? toolpathControls : viewerControls}
+                    viewerMode={viewerMode}
+                    setViewerMode={setViewerMode}
+                    hasGcode={hasToolpathPreview}
+                    viewerReady={viewerMode === "gcode" ? toolpathReady : viewerReady}
+                    filename={
+                      viewerMode === "gcode"
+                        ? previewSource?.original_filename
+                        : shownPlate && meshFile
+                          ? `${meshFile.original_filename} · ${uiText("Plate {value1}", { value1: plateLabel(shownPlate) })}`
+                          : meshFile?.original_filename
+                    }
+                    expanded={previewExpanded}
+                    onExpand={() => setPreviewExpanded((value) => !value)}
+                    showDimensions={showDimensions}
+                    onDimensions={setShowDimensions}
+                  />
                 </div>
               )}
             </div>
-            {pickerShown && meshFile && (
-              <PlatePicker
-                plates={plates}
-                selected={shownPlate?.number ?? null}
-                onSelect={(number) =>
-                  setChosenPlate(number === null ? null : { fileId: meshFile.id, number })
-                }
-              />
-            )}
-            {/* On phones the toolbar owns space above the preview. Desktop
-                keeps the overlay without taking space from the 3D canvas. */}
-            {(meshFile || hasToolpathPreview) && (
-              <div className="pointer-events-none relative order-first m-3 flex min-w-0 self-stretch flex-col gap-2 md:absolute md:inset-x-4 md:top-4 md:z-10 md:m-0 xl:flex-row xl:items-start xl:justify-between">
-                <ViewerToolbar
-                  displayMode={displayMode}
-                  setDisplayMode={setDisplayMode}
-                  showGrid={showGrid}
-                  setShowGrid={setShowGrid}
-                  controls={viewerControls}
-                  viewerMode={viewerMode}
-                  setViewerMode={setViewerMode}
-                  hasGcode={hasToolpathPreview}
-                  viewerReady={viewerReady}
-                />
-                {meshFile && viewerMode === "model" && (
-                  <div className="min-w-0 max-w-full self-stretch xl:max-w-[60%] xl:self-start">
-                    <div className="rounded border border-outline-variant bg-surface-container-lowest/90 px-2.5 py-1.5 text-right backdrop-blur">
-                      <p className="truncate font-mono text-2xs text-on-surface">
-                        {uiText("Viewing: ")}
-                        {meshFile?.original_filename}
-                        {shownPlate &&
-                          uiText(" · Plate {value1}", { value1: plateLabel(shownPlate) })}
-                      </p>
-                      <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
-                        {uiText("Source model")}
-                        {recommendedGcode
-                          ? uiText(" · Recommended G-code: Rev {value1}", {
-                              value1: String(
-                                recommendedGcode.gcode_revision_number ?? recommendedGcode.version,
-                              ),
-                            })
-                          : ""}
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
 
-            {/* 3D Viewer Controls */}
-            {viewerMode === "model" && meshFile && viewerReady && (
-              <div className={`absolute ${overlayBottom} right-4 flex flex-col gap-1 z-10`}>
-                <div className="flex bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded overflow-hidden shadow-sm">
-                  <button
-                    onClick={() => viewerControls.current?.zoomIn()}
-                    className="flex h-11 w-11 items-center justify-center border-r border-outline-variant text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary sm:h-9 sm:w-9"
-                    title={uiText("Zoom in")}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => viewerControls.current?.zoomOut()}
-                    className="flex h-11 w-11 items-center justify-center text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary sm:h-9 sm:w-9"
-                    title={uiText("Zoom out")}
-                  >
-                    <Minus className="h-4 w-4" />
-                  </button>
-                </div>
-                <button
-                  onClick={() => viewerControls.current?.resetView()}
-                  className="flex h-11 items-center justify-center rounded border border-outline-variant bg-surface-container-lowest/90 px-3 text-on-surface-variant shadow-sm backdrop-blur transition-colors hover:bg-surface-container-high hover:text-primary sm:h-9"
-                  title={uiText("Reset view")}
-                >
-                  <RotateCcw className="h-4 w-4" />
-                </button>
-              </div>
-            )}
-
-            {/* Dimensions overlay (bottom-left). They measure the whole build, so a
-                single plate does not claim them. */}
-            {viewerMode === "model" &&
-              viewerReady &&
-              shownPlate === null &&
-              meta?.bbox_x_mm &&
-              meta?.bbox_y_mm &&
-              meta?.bbox_z_mm && (
-                <div className={`absolute ${overlayBottom} left-4 z-10`}>
-                  <div className="bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-2 py-1 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                    <span className="font-mono text-[13px] text-on-surface">
-                      {uiText("{value1}×{value2}×{value3} mm", {
-                        value1: String(meta.bbox_x_mm ?? ""),
-                        value2: String(meta.bbox_y_mm ?? ""),
-                        value3: String(meta.bbox_z_mm ?? ""),
-                      })}
-                    </span>
-                  </div>
-                </div>
-              )}
+            <ModelInformation
+              model={model}
+              sourceFile={meshFile ?? null}
+              canEdit={canEditModel}
+              onEdit={() => enterEdit("details")}
+              onTags={() => {
+                setTagDialogSession((value) => value + 1);
+                setTagDialogOpen(true);
+              }}
+            />
           </div>
 
           {/* Right: Settings & Files Panel */}
           <div
             data-testid="model-detail-sidebar"
             style={{ "--detail-sidebar-width": `${detailSidebarWidth}px` }}
-            className="relative flex h-auto min-h-0 w-full shrink-0 flex-col border-l-0 border-t border-outline-variant bg-surface-container-lowest md:h-full md:[width:var(--detail-sidebar-width)] md:border-l md:border-t-0"
+            className="model-detail-inspector relative flex min-h-0 w-full shrink-0 flex-col border border-outline-variant bg-surface-container-lowest md:[width:var(--detail-sidebar-width)]"
           >
             <div
               role="separator"
@@ -1219,7 +1318,7 @@ function ModelDetailPresentation({
               tabIndex={0}
               title={uiText("Drag to resize · Double-click to reset")}
               onPointerDown={startDetailSidebarResize}
-              onDoubleClick={() => setDetailSidebarWidth(DETAIL_SIDEBAR_DEFAULT_WIDTH)}
+              onDoubleClick={() => setPreferredDetailSidebarWidth(null)}
               onKeyDown={(event) => {
                 if (event.key === "ArrowLeft")
                   setDetailSidebarWidth((width) => clampDetailSidebarWidth(width + 16));
@@ -1236,160 +1335,220 @@ function ModelDetailPresentation({
               <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border transition-colors duration-press group-hover:bg-primary group-focus-visible:bg-primary" />
               <span className="absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-border transition-colors duration-press group-hover:bg-primary group-focus-visible:bg-primary" />
             </div>
-            {/* Segmented tab navigation */}
-            <TabBar
-              tabs={visibleTabs.map((tab) => ({
-                key: tab.key,
-                label: (
-                  <>
-                    {tab.label}
-                    {tab.key === "revisions" && gcodeFiles.length > 0 && (
-                      <span className="ml-1 opacity-60">{gcodeFiles.length}</span>
-                    )}
-                    {tab.key === "files" && sourceFiles.length > 0 && (
-                      <span className="ml-1 opacity-60">{sourceFiles.length}</span>
-                    )}
-                    {tab.key === "history" && printJobs.length > 0 && (
-                      <span className="ml-1 opacity-60">{printJobs.length}</span>
-                    )}
-                  </>
-                ),
-              }))}
-              active={activeTab}
-              onChange={selectTab}
-              showIndicator={false}
-              className="shrink-0 overflow-x-auto border-b border-outline-variant bg-surface-container-lowest p-1"
-              tabClassName="min-w-max grow whitespace-nowrap rounded-md px-0.5 py-3 text-xs font-medium transition-colors duration-press text-on-surface-variant hover:bg-muted hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              activeTabClassName="bg-accent text-accent-foreground"
-            />
+
             <div
-              key={activeTab}
-              className="animate-panel-in flex-1 overflow-y-auto p-4 md:p-6 space-y-6 md:space-y-8 [scrollbar-width:thin] [scrollbar-color:var(--outline-variant)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-outline-variant [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-primary/50"
+              role="tabpanel"
+              aria-label={visibleTabs.find((tab) => tab.key === activeTab)?.label}
+              className="model-detail-content flex-1 min-h-0 overflow-y-auto p-4"
             >
-              {activeTab === "overview" && (
-                <div className="space-y-4">
-                  <OverviewTab
-                    model={model}
-                    editing={editing}
-                    editor={{
-                      collection: editCollection,
-                      collectionLabel: editCollectionLabel,
-                      setCollection: (path, label) => {
-                        setEditCollection(path);
-                        setEditCollectionLabel(label);
-                      },
-                      catOpen,
-                      setCatOpen,
-                      allowRoot: !!user?.is_superuser,
-                      description: editDescription,
-                      setDescription: setEditDescription,
-                      sourceUrl: editSourceUrl,
-                      setSourceUrl: setEditSourceUrl,
-                      tagInput,
-                      setTagInput,
-                      tags: editTags,
-                      setTags: setEditTags,
-                      toggleTag: editToggleTag,
-                      createTag: editCreateTag,
-                      deleteTag: editDeleteTag,
-                      filteredTags: editFilteredTags,
-                      canCreate: editCanCreate,
-                    }}
-                    recommendedFile={recommendedGcode}
-                    hasGcode={hasGcode}
-                    revisionSaving={revisionUpdater.saving}
-                    onSend={requestSend}
-                    canSend={canViewPrinters}
-                    onCompare={() => selectTab("revisions")}
-                    onMark={(file, patch) => void revisionUpdater.update(file, patch)}
-                    onAddRevision={requestAddRevision}
-                  />
-                  {!editing && !hasGcode && latestFile?.file_type === "resin" && (
-                    <SettingsTab
-                      meta={meta}
-                      printSettingRows={printSettingRows}
-                      preferences={metadataPreferences}
+              <div ref={detailTabBody} className="model-detail-tab-body space-y-4">
+                {activeTab === "overview" && (
+                  <div className="space-y-4">
+                    <OverviewTab
+                      model={model}
+                      editing={false}
+                      editor={modelMetadataEditor}
+                      revision={{
+                        file: inspectedGcode,
+                        recommended: recommendedGcode,
+                        revisionCount: gcodeFiles.length,
+                        canEdit: canEditModel,
+                        canSend: canViewPrinters,
+                        jobs: canViewPrinters && printJobQuery.isSuccess ? printJobs : null,
+                        onRevisions: () => {
+                          setCompareRequested(false);
+                          selectTab("revisions");
+                        },
+                        onSettings: () => selectTab("settings"),
+                        onHistory: () => selectTab("history"),
+                        onCompare: () => {
+                          setComparisonMode("gcode");
+                          setCompareRequested(true);
+                          selectTab("revisions");
+                        },
+                        onInspect: (fileId) => setRevisionSelection({ modelId: model.id, fileId }),
+                        onSend: (mode) => {
+                          setDeliveryMode(mode);
+                          setSendOpen(true);
+                        },
+                        onLogPrint: (state) => {
+                          if (inspectedGcode) setHistoryDraft({ fileId: inspectedGcode.id, state });
+                          selectTab("history");
+                        },
+                        onAddRevision: requestAddRevision,
+                      }}
                     />
-                  )}
-                  {!editing && <FileHashes files={sortedFiles} />}
-                </div>
-              )}
+                    {!editing && !hasGcode && latestFile?.file_type === "resin" && (
+                      <SettingsTab
+                        meta={meta}
+                        printSettingRows={printSettingRows}
+                        preferences={metadataPreferences}
+                      />
+                    )}
+                  </div>
+                )}
 
-              {activeTab === "settings" && (
-                <SettingsTab
-                  meta={meta}
-                  printSettingRows={printSettingRows}
-                  preferences={metadataPreferences}
-                />
-              )}
-
-              {activeTab === "similar" && canEditModel && <SimilarityQueue modelId={model.id} />}
-              {activeTab === "source" && <SourceTab modelId={model.id} canEdit={canEditModel} />}
-
-              {activeTab === "revisions" && canViewPrinters && printerFileQuery.isError && (
-                <Button variant="outline" onClick={() => void printerFileQuery.refetch()}>
-                  {uiText("Retry")}
-                </Button>
-              )}
-              {activeTab === "revisions" && (
-                <RevisionsTab
-                  modelId={model.id}
-                  gcodeFiles={gcodeFiles}
-                  allFiles={model.files}
-                  printerFilesByFileId={printerFilesByFileId}
-                  onModel={setModel}
-                  onAddRevision={requestAddRevision}
-                  canEdit={canEditModel}
-                />
-              )}
-
-              {activeTab === "files" && (
-                <FilesTab
-                  modelId={model.id}
-                  sourceFiles={sourceFiles}
-                  previewFailure={
-                    meshFile &&
-                    previewFeedback?.url === getAssetUrl(`/api/v1/files/${meshFile.id}/stl`) &&
-                    previewFeedback.reason !== null
-                      ? { fileId: meshFile.id, reason: previewFeedback.reason }
-                      : null
-                  }
-                  trashedSourceFiles={model.trashed_source_files ?? []}
-                  canEdit={canEditModel}
-                  onModel={setModel}
-                />
-              )}
-
-              {activeTab === "history" && canViewPrinters && printJobQuery.isError && (
-                <Button variant="outline" onClick={() => void printJobQuery.refetch()}>
-                  {uiText("Retry")}
-                </Button>
-              )}
-              {activeTab === "history" && canViewPrinters && printJobQuery.isPending && (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              )}
-              {activeTab === "history" &&
-                canViewPrinters &&
-                printJobQuery.data &&
-                !printJobQuery.isError && (
-                  <PrintHistorySection
-                    jobs={printJobs}
-                    modelId={model.id}
-                    gcodeFiles={gcodeFiles}
-                    onJobCreated={(job) => void printJobQuery.publish(job)}
+                {activeTab === "settings" && (
+                  <SettingsTab
+                    meta={meta}
+                    printSettingRows={printSettingRows}
+                    preferences={metadataPreferences}
+                    headerActions={
+                      gcodeFiles.length > 1 ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setComparisonMode("gcode");
+                            setCompareRequested(true);
+                            selectTab("revisions");
+                          }}
+                        >
+                          {uiText("Compare")}
+                        </Button>
+                      ) : undefined
+                    }
+                    actions={
+                      inspectedGcode ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <SlicerOpenButton
+                            fileId={inspectedGcode.id}
+                            fileType={
+                              inspectedGcode.original_filename.toLowerCase().endsWith(".bgcode")
+                                ? "bgcode"
+                                : inspectedGcode.file_type
+                            }
+                            showLabel
+                          />
+                          <Button
+                            variant="outline"
+                            onClick={() =>
+                              void downloadAuthenticatedFile(
+                                `/api/v1/files/${inspectedGcode.id}/download`,
+                                inspectedGcode.original_filename,
+                              ).catch((error) => toast.error(error))
+                            }
+                          >
+                            {uiText("Download")}
+                          </Button>
+                        </div>
+                      ) : undefined
+                    }
+                    revisionPicker={
+                      <RevisionPicker
+                        files={gcodeFiles}
+                        selected={inspectedGcode}
+                        onSelect={(fileId) => setRevisionSelection({ modelId: model.id, fileId })}
+                      />
+                    }
                   />
                 )}
+
+                {activeTab === "similar" && canEditModel && <SimilarityQueue modelId={model.id} />}
+                {activeTab === "source" && (
+                  <SourceTab modelName={model.name} modelId={model.id} canEdit={canEditModel} />
+                )}
+
+                {activeTab === "revisions" && canViewPrinters && printerFileQuery.isError && (
+                  <Button variant="outline" onClick={() => void printerFileQuery.refetch()}>
+                    {uiText("Retry")}
+                  </Button>
+                )}
+                {activeTab === "revisions" && (
+                  <RevisionsTab
+                    inspectedFileId={inspectedGcode?.id}
+                    onInspect={(fileId) => setRevisionSelection({ modelId: model.id, fileId })}
+                    startComparing={compareRequested}
+                    comparisonMode={comparisonMode}
+                    jobs={canViewPrinters && printJobQuery.isSuccess ? printJobs : null}
+                    onSend={
+                      canViewPrinters
+                        ? (mode) => {
+                            setDeliveryMode(mode);
+                            setSendOpen(true);
+                          }
+                        : undefined
+                    }
+                    onSettings={() => selectTab("settings")}
+                    onLogPrint={
+                      canViewPrinters && canEditModel && auth.isAuthenticated
+                        ? (fileId, state) => {
+                            setHistoryDraft({ fileId, state });
+                            selectTab("history");
+                          }
+                        : undefined
+                    }
+                    modelId={model.id}
+                    gcodeFiles={gcodeFiles}
+                    allFiles={model.files}
+                    printerFilesByFileId={printerFilesByFileId}
+                    onModel={setModel}
+                    onAddRevision={requestAddRevision}
+                    canEdit={canEditModel}
+                  />
+                )}
+
+                {activeTab === "files" && (
+                  <>
+                    <FilesTab
+                      modelId={model.id}
+                      onCompare={() => {
+                        setComparisonMode("source");
+                        setCompareRequested(true);
+                        selectTab("revisions");
+                      }}
+                      sourceFiles={sourceFiles}
+                      previewFailure={
+                        meshFile &&
+                        previewFeedback?.url === getAssetUrl(`/api/v1/files/${meshFile.id}/stl`) &&
+                        previewFeedback.reason !== null
+                          ? { fileId: meshFile.id, reason: previewFeedback.reason }
+                          : null
+                      }
+                      trashedSourceFiles={model.trashed_source_files ?? []}
+                      canEdit={canEditModel}
+                      onModel={setModel}
+                    />
+                  </>
+                )}
+
+                {activeTab === "history" && canViewPrinters && printJobQuery.isError && (
+                  <Button variant="outline" onClick={() => void printJobQuery.refetch()}>
+                    {uiText("Retry")}
+                  </Button>
+                )}
+                {activeTab === "history" && canViewPrinters && !printJobQuery.isError && (
+                  <DetailTabLoading pending={printJobQuery.isPending} variant="history">
+                    {printJobQuery.data && (
+                      <PrintHistorySection
+                        modelName={model.name}
+                        initialEntry={historyDraft}
+                        jobs={printJobs}
+                        modelId={model.id}
+                        gcodeFiles={gcodeFiles}
+                        onJobCreated={(job) => {
+                          setHistoryDraft(null);
+                          void printJobQuery.publish(job);
+                        }}
+                      />
+                    )}
+                  </DetailTabLoading>
+                )}
+              </div>
             </div>
 
             {/* Klipper Sync Panel */}
-            <div className="p-4 md:p-6 border-t border-outline-variant bg-surface-container-low shrink-0 space-y-3">
+            <div className="detail-context-footer border-t border-outline-variant bg-surface-container-low shrink-0 space-y-2">
               {gcodeFiles.length > 0 && canViewPrinters && (
                 <SendToButtons
+                  modelName={model.name}
                   gcodeFiles={gcodeFiles}
                   printerFiles={printerFiles}
                   open={sendOpen}
                   onOpenChange={setSendOpen}
-                  preselectFileId={sendFileId}
+                  preselectFileId={inspectedGcode?.id}
+                  compact
+                  initialDeliveryMode={deliveryMode}
                 />
               )}
               {!hasGcode && (
@@ -1407,22 +1566,6 @@ function ModelDetailPresentation({
                   </div>
                 </div>
               )}
-              <div className="flex items-center justify-between border-t border-surface-container-highest pt-3">
-                <span className="font-mono text-xs text-on-surface-variant uppercase tracking-wider">
-                  {uiText("Files")}
-                </span>
-                <span className="font-mono text-sm text-on-surface font-semibold">
-                  {model.files.length}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-xs text-on-surface-variant uppercase tracking-wider">
-                  {uiText("Created")}
-                </span>
-                <span className="font-mono text-xs text-on-surface">
-                  {new Date(model.created_at).toLocaleDateString(currentLocale())}
-                </span>
-              </div>
             </div>
           </div>
         </div>

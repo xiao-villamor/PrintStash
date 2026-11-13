@@ -1,6 +1,5 @@
 "use client";
 
-import type { EditingBase } from "@/types/editing";
 import type { LibraryEntry } from "@/features/library/navigation-state";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { useMultipartPublication } from "@/features/library/multipart";
@@ -8,10 +7,9 @@ import { useLibraryStar } from "@/features/library/mutations";
 import { uiText } from "@/lib/locale";
 import { useUiLocale, useI18n } from "@/lib/i18n";
 import { LibraryCardSelection } from "@/components/library-card-selection";
-import { Star } from "lucide-react";
-import type { TagsReview } from "@/components/entity-tags-editor";
-import { EntityTagsDialog } from "@/components/entity-tags-dialog";
-import { getMultipartModel, replaceMultipartModelTags } from "@/lib/api";
+import { Star, Tags } from "lucide-react";
+import { MultipartModelTagsDialog } from "@/components/multipart-model-tags-dialog";
+import { Button } from "@/components/ui/button";
 import type { MultipartModelListItem, TagRead } from "@/types";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -26,9 +24,11 @@ export function MultipartModelCard({
   returnTo,
   availableTags = [],
   onDataChange,
+  onEditTags,
   selectable = false,
   selected = false,
   onToggleSelect,
+  favorites = false,
 }: {
   item: MultipartModelListItem;
   origin?: LibraryEntry;
@@ -37,14 +37,16 @@ export function MultipartModelCard({
   returnTo?: string;
   availableTags?: TagRead[];
   onDataChange?: () => void;
+  onEditTags?: (item: MultipartModelListItem) => void;
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number, range?: boolean) => void;
+  favorites?: boolean;
 }) {
   useUiLocale();
   const { t } = useI18n();
   const starMutation = useLibraryStar();
-  const { publish, isCurrent } = useMultipartPublication(item.id);
+  const { isCurrent } = useMultipartPublication(item.id);
   const starBusy = starMutation.isPending;
   const starred =
     starMutation.isPending && starMutation.variables
@@ -61,34 +63,11 @@ export function MultipartModelCard({
     }
   }
 
-  async function saveCardTags(
-    nextTags: string[],
-    signal: AbortSignal,
-    version: EditingBase = item,
-  ) {
-    if (!isCurrent() || signal.aborted) throw new DOMException("Editor retired", "AbortError");
-    const saved = await replaceMultipartModelTags(item.id, nextTags, version);
-    if (!(await publish(saved, signal)) || !isCurrent()) return;
-    onDataChange?.();
-    toast.success(t("multipart.tagsSaved"));
-  }
-
-  async function reviewCardTags(signal: AbortSignal): Promise<TagsReview> {
-    const latest = await getMultipartModel(item.id, { signal });
-    return {
-      tags: latest.tags,
-      canEdit: latest.effective_role === "edit" || latest.effective_role === "admin",
-      save: (tags, commandSignal) => saveCardTags(tags, commandSignal, latest),
-      adopt: async (commandSignal) => {
-        if (await publish(latest, commandSignal)) onDataChange?.();
-      },
-    };
-  }
-
   return (
     <article
+      data-favorites={favorites || undefined}
       className={cn(
-        `${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} group group/selection-card relative flex aspect-square h-full min-w-0 max-w-full flex-col overflow-hidden rounded border border-border bg-card text-card-foreground transition-[border-color,box-shadow,transform] duration-fast hover:-translate-y-0.5 hover:border-primary active:scale-[0.99] `,
+        `${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} library-model-card group group/selection-card relative flex h-full min-w-0 max-w-full flex-col overflow-hidden rounded border border-border bg-card text-card-foreground transition-[border-color,box-shadow,transform] duration-fast hover:border-primary active:scale-[0.99] `,
         selected && "bg-accent text-accent-foreground",
       )}
     >
@@ -100,32 +79,46 @@ export function MultipartModelCard({
           onChange={() => onToggleSelect(item.id)}
         />
       )}
-      <button
-        type="button"
-        onClick={() => void toggleStar()}
-        disabled={starBusy}
-        aria-label={
-          starred
-            ? uiText("Remove {value1} from favorites", { value1: String(item.name) })
-            : uiText("Add {value1} to favorites", { value1: String(item.name) })
-        }
-        className="absolute right-2 top-2 z-10 rounded bg-card/90 p-2 text-muted-foreground shadow-sm transition-[color,background-color,transform] duration-press ease-out hover:bg-card hover:text-primary active:scale-[0.98] disabled:opacity-50"
-      >
-        <Star className={cn("h-4 w-4", starred && "fill-current text-primary")} />
-      </button>
+      {!favorites && (
+        <button
+          type="button"
+          onClick={() => void toggleStar()}
+          disabled={starBusy}
+          aria-label={
+            starred
+              ? uiText("Remove {value1} from favorites", { value1: String(item.name) })
+              : uiText("Add {value1} to favorites", { value1: String(item.name) })
+          }
+          className="absolute right-2 top-2 z-10 rounded bg-card/90 p-2 text-muted-foreground shadow-sm transition-[color,background-color,transform] duration-press ease-out hover:bg-card hover:text-primary active:scale-[0.98] disabled:opacity-50"
+        >
+          <Star className={cn("h-4 w-4", starred && "fill-current text-primary")} />
+        </button>
+      )}
       {canEditTags && (
         <div className="absolute right-2 top-12 z-10">
-          <EntityTagsDialog
-            entityLabel={item.name}
-            tags={item.tags}
-            availableTags={availableTags}
-            canEdit
-            help={t("multipart.tagsHelp")}
-            onSave={saveCardTags}
-            reviewLatest={reviewCardTags}
-            triggerMode="icon"
-            triggerClassName="bg-card/90 text-muted-foreground shadow-sm hover:bg-card hover:text-primary"
-          />
+          {onEditTags ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={
+                item.tags.length
+                  ? uiText("Edit tags for {value1}", { value1: item.name })
+                  : uiText("Add tags to {value1}", { value1: item.name })
+              }
+              title={item.tags.length ? uiText("Edit tags") : uiText("Add tags")}
+              onClick={() => onEditTags(item)}
+              className="bg-card/90 text-muted-foreground shadow-sm hover:bg-card hover:text-primary"
+            >
+              <Tags className="h-4 w-4" />
+            </Button>
+          ) : (
+            <MultipartModelTagsDialog
+              item={item}
+              availableTags={availableTags}
+              onDataChange={onDataChange}
+            />
+          )}
         </div>
       )}
       <LibraryItemLink
@@ -140,16 +133,16 @@ export function MultipartModelCard({
         }}
         className="flex h-full min-w-0 flex-col overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
-        <div className="relative h-3/5 shrink-0 overflow-hidden border-b border-border bg-muted/40">
+        <div className="library-preview relative h-36 shrink-0 overflow-hidden">
           <Cover src={item.cover_thumbnail_url} alt="" />
-          <span className="absolute left-2 bottom-2 max-w-[calc(100%-6rem)] truncate rounded border border-primary/30 bg-card/90 px-2 py-1 font-mono text-3xs font-semibold uppercase tracking-wider text-primary shadow-sm">
+          <span className="absolute left-3.5 bottom-2.5 max-w-[calc(100%-6rem)] truncate font-mono text-3xs font-semibold uppercase tracking-wider text-muted-foreground">
             {t("multipart.badge")}
           </span>
         </div>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col p-3">
+        <div className="flex min-h-40 min-w-0 flex-1 flex-col p-3">
           <h3
             title={item.name}
-            className="line-clamp-2 break-words text-sm font-bold tracking-tight"
+            className="line-clamp-2 break-words text-sm font-semibold tracking-tight"
           >
             {item.name}
           </h3>
@@ -197,6 +190,24 @@ export function MultipartModelCard({
           </div>
         </div>
       </LibraryItemLink>
+      {favorites && (
+        <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
+          <Button variant="outline" size="xs" asChild>
+            <LibraryItemLink origin={origin} href={detailHref(item.id, returnTo)}>
+              {uiText("Open")}
+            </LibraryItemLink>
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
+            disabled={starBusy}
+            onClick={() => void toggleStar()}
+            aria-label={uiText("Remove {value1} from favorites", { value1: item.name })}
+          >
+            {uiText("Remove favorite")}
+          </Button>
+        </div>
+      )}
     </article>
   );
 }

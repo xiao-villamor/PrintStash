@@ -24,7 +24,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderOptions, type RenderResult } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { TestRouter, type TestRoute } from "@/test-support/router";
 import { vi } from "vitest";
 
 import { clearLogin, storeLogin } from "@/lib/auth-store";
@@ -100,6 +100,7 @@ export interface RenderAppOptions extends Omit<RenderOptions, "wrapper"> {
    * screen from the one under test.
    */
   routePath?: string;
+  routerRoutes?: TestRoute[];
   /** The session the tree sees. Defaults to a superuser. */
   auth?: AuthState;
   /** Locale for the i18n provider. Defaults to English. */
@@ -155,6 +156,7 @@ export function renderApp(ui: ReactElement, options: RenderAppOptions = {}): Ren
   const {
     at = "/",
     routePath,
+    routerRoutes,
     auth = adminSession(),
     locale = "en",
     matchesMedia = () => true,
@@ -220,21 +222,13 @@ export function renderApp(ui: ReactElement, options: RenderAppOptions = {}): Ren
   };
 
   function Providers({ children }: { children: ReactNode }) {
-    const routed =
-      routePath === undefined ? (
-        children
-      ) : (
-        <Routes>
-          <Route path={routePath} element={children} />
-        </Routes>
-      );
     return (
-      <MemoryRouter initialEntries={[at]}>
+      <TestRouter initialEntries={[at]} routePath={routePath} routes={routerRoutes}>
         <QueryClientProvider client={client}>
           <AuthContext.Provider value={auth}>
             <MobileFilterContext.Provider value={mobileFilters}>
               <I18nProvider>
-                {routed}
+                {children}
                 {/* The real toaster, because a toast is how most write paths report
                     what happened — "the batch skipped two" has no other rendering.
                     Without it those outcomes are unassertable, which is how a test
@@ -244,7 +238,7 @@ export function renderApp(ui: ReactElement, options: RenderAppOptions = {}): Ren
             </MobileFilterContext.Provider>
           </AuthContext.Provider>
         </QueryClientProvider>
-      </MemoryRouter>
+      </TestRouter>
     );
   }
 

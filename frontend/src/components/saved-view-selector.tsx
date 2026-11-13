@@ -3,6 +3,8 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useLibraryStartup } from "@/lib/library-startup-context";
+import { useNavigationShell } from "@/lib/navigation-shell";
+import { useCollectionsPane } from "@/lib/collections-pane-context";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -64,6 +66,7 @@ export function SavedViewSelector({
   triggerRole,
   triggerSize = "xs",
   triggerVariant = "outline",
+  railTrigger = false,
 }: {
   views: SavedViewRead[];
   activeId: number | null;
@@ -80,10 +83,28 @@ export function SavedViewSelector({
   triggerRole?: "menuitem";
   triggerSize?: "xs" | "sm";
   triggerVariant?: "outline" | "ghost";
+  railTrigger?: boolean;
 }) {
   useUiLocale();
-  const startup = useLibraryStartup();
-  const [open, setOpen] = useState(false);
+  const { request: requestStartup } = useLibraryStartup();
+  const pane = useCollectionsPane();
+  const railExpanded = railTrigger && pane?.open && pane.mode === "views";
+  const { savedViewsRequested, consumeSavedViewsRequest, setSavedViewsOpen } = useNavigationShell();
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = localOpen || (railTrigger && savedViewsRequested);
+  useEffect(() => {
+    if (!railTrigger || !savedViewsRequested) return;
+    requestStartup("saved-views");
+  }, [railTrigger, savedViewsRequested, requestStartup]);
+  useEffect(() => {
+    if (!railTrigger) return;
+    return () => consumeSavedViewsRequest();
+  }, [railTrigger, consumeSavedViewsRequest]);
+  useEffect(() => {
+    if (!railTrigger) return;
+    setSavedViewsOpen(open);
+    return () => setSavedViewsOpen(false);
+  }, [railTrigger, open, setSavedViewsOpen]);
   const [query, setQuery] = useState("");
   const [recentIds, setRecentIds] = useState<number[]>(readRecent);
   const [editing, setEditing] = useState<SavedViewRead | null>(null);
@@ -115,9 +136,12 @@ export function SavedViewSelector({
   const active = views.find((view) => view.id === activeId);
 
   function setMenuOpen(next: boolean) {
-    if (next) startup.request("saved-views");
-    setOpen(next);
-    if (!next) setQuery("");
+    if (next) requestStartup("saved-views");
+    setLocalOpen(next);
+    if (!next) {
+      if (railTrigger) consumeSavedViewsRequest();
+      setQuery("");
+    }
   }
 
   function choose(view: SavedViewRead) {
@@ -157,27 +181,48 @@ export function SavedViewSelector({
               variant={triggerVariant}
               data-menu-trigger
               role={triggerRole}
-              aria-haspopup="dialog"
-              aria-expanded={open}
-              onClick={() => setMenuOpen(!open)}
+              aria-haspopup={railTrigger && pane ? undefined : "dialog"}
+              aria-label={railTrigger ? uiText("Saved views") : undefined}
+              title={railTrigger ? uiText("Saved views") : undefined}
+              aria-expanded={railExpanded || open}
+              aria-controls={railTrigger && pane ? "collections-pane" : undefined}
+              onClick={() => {
+                if (railTrigger && pane) {
+                  if (railExpanded) pane.toggle();
+                  else pane.showSavedViews();
+                } else setMenuOpen(!open);
+              }}
               className={cn(
                 "max-w-44",
-                open && "bg-accent text-accent-foreground",
+                (open || railExpanded) && "bg-accent text-accent-foreground",
+                railTrigger &&
+                  (open || railExpanded) &&
+                  "relative before:absolute before:-left-1.5 before:bottom-[9px] before:top-[9px] before:w-[3px] before:bg-primary",
                 triggerClassName,
               )}
             >
-              <Bookmark className="h-4 w-4 shrink-0" />
-              <span className="truncate">{active?.name ?? uiText("Saved views")}</span>
-              {active && modified && (
+              <Bookmark
+                className={cn("shrink-0", railTrigger ? "h-5 w-5" : "h-4 w-4")}
+                strokeWidth={railTrigger ? 1.6 : undefined}
+                aria-hidden
+              />
+              <span className={railTrigger ? "sr-only" : "truncate"}>
+                {active?.name ?? uiText("Saved views")}
+              </span>
+              {!railTrigger && active && modified && (
                 <span className="text-warning" aria-label={uiText("Modified saved view")}>
                   •
                 </span>
               )}
-              {views.length > 0 && <span className="text-muted-foreground">{views.length}</span>}
-              <ChevronDown
-                aria-hidden
-                className={cn("ml-auto h-3.5 w-3.5 shrink-0", open && "rotate-180")}
-              />
+              {!railTrigger && views.length > 0 && (
+                <span className="text-muted-foreground">{views.length}</span>
+              )}
+              {!railTrigger && (
+                <ChevronDown
+                  aria-hidden
+                  className={cn("ml-auto h-3.5 w-3.5 shrink-0", open && "rotate-180")}
+                />
+              )}
             </Button>
           }
         >

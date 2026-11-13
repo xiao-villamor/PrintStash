@@ -77,7 +77,7 @@ test.describe("SSO settings", () => {
     await page.getByLabel("Client ID").fill("printstash-e2e");
     await page.getByLabel("Client secret", { exact: true }).fill("super-secret-value");
     await page.getByLabel("Login button label").fill(displayName);
-    await page.getByRole("checkbox", { name: "Enable SSO login" }).click();
+    await page.getByRole("switch", { name: "Enable SSO login" }).click();
 
     await Promise.all([
       page.waitForResponse(
@@ -124,8 +124,8 @@ test.describe("SSO settings", () => {
     // Cleanup: disable SSO so the shared DB doesn't drift for later runs and the
     // login page for other specs stays local-only.
     await page.goto("/settings?section=sso");
-    await page.getByRole("checkbox", { name: "Enable SSO login" }).click();
-    await page.getByRole("checkbox", { name: "Clear stored client secret", exact: true }).click();
+    await page.getByRole("switch", { name: "Enable SSO login" }).click();
+    await page.getByRole("switch", { name: "Clear stored client secret", exact: true }).click();
     await Promise.all([
       page.waitForResponse(
         (r) => r.url().includes("/api/v1/config") && r.request().method() === "PUT",

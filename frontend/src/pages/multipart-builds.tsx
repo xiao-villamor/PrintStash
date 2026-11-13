@@ -15,7 +15,9 @@ import { Cover, Count } from "@/components/multipart-model-presentation";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useState, useSyncExternalStore } from "react";
-import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, useParams } from "@tanstack/react-router";
+import { Link } from "@/lib/link";
+import { useSearchParams } from "@/lib/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -59,10 +61,10 @@ function errorKey(message: string): MessageKey {
   return "build.failed";
 }
 
-export default function MultipartBuildsPage() {
+export default function MultipartBuildsPage(): React.ReactNode {
   useUiLocale();
-  const { id } = useParams();
-  const [search] = useSearchParams();
+  const { id } = useParams({ strict: false });
+  const search = useSearchParams();
   const [session] = useState(getSessionVersion);
   const currentSession = useSyncExternalStore(onAuthChange, getSessionVersion);
   const { user, loading } = useAuth();
@@ -78,7 +80,7 @@ export default function MultipartBuildsPage() {
 function BuildList() {
   useUiLocale();
   const { t } = useI18n();
-  const [search] = useSearchParams();
+  const search = useSearchParams();
   const compositionId = Number(search.get("multipart"));
   const [archived, setArchived] = useState(false);
   const [offset, setOffset] = useState(0);
@@ -94,7 +96,7 @@ function BuildList() {
   const rows = denied(history.error) ? [] : (history.data ?? []);
   const readError = history.error ?? composition.error;
   const displayedError = error ?? (readError ? errorKey(readError.message) : null);
-  if (created) return <Navigate to={`/builds/${created}`} />;
+  if (created) return <Navigate to="/builds/$id" params={{ id: String(created) }} />;
   return (
     <PageContainer>
       <PageHeader
@@ -108,14 +110,14 @@ function BuildList() {
         actions={
           compositionId > 0 ? (
             <Button asChild variant="outline">
-              <Link to={`/multipart-models/${compositionId}`}>
+              <Link href={`/multipart-models/${compositionId}`}>
                 <ArrowLeft className="h-4 w-4" />
                 {t("build.backToSet")}
               </Link>
             </Button>
           ) : (
             <Button asChild>
-              <Link to="/?type=multipart">
+              <Link href="/?type=multipart">
                 <Plus className="h-4 w-4" />
                 {t("build.chooseMultipart")}
               </Link>
@@ -213,7 +215,7 @@ function BuildList() {
                       </div>
                       <div className="min-w-0">
                         <Link
-                          to={`/multipart-models/${compositionId}`}
+                          href={`/multipart-models/${compositionId}`}
                           className="break-words text-sm font-semibold hover:underline"
                         >
                           {composition.data.name}
@@ -259,7 +261,7 @@ function BuildList() {
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-muted/30 p-3">
               <Button asChild variant="outline">
-                <Link to={`/multipart-models/${compositionId}`}>{uiText("Cancel")}</Link>
+                <Link href={`/multipart-models/${compositionId}`}>{uiText("Cancel")}</Link>
               </Button>
               <Button
                 type="submit"
@@ -327,7 +329,7 @@ function BuildList() {
               {rows.map((build) => (
                 <li key={build.id}>
                   <Link
-                    to={`/builds/${build.id}`}
+                    href={`/builds/${build.id}`}
                     aria-label={build.name}
                     className="flex flex-wrap items-center gap-3 px-4 py-4 transition-colors duration-press hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5"
                   >
@@ -426,11 +428,11 @@ function BuildDetail({ id }: { id: number }) {
     void detail.refetch();
     void printerQuery.refetch();
   };
-  if (copyId) return <Navigate to={`/builds/${copyId}`} />;
+  if (copyId) return <Navigate to="/builds/$id" params={{ id: String(copyId) }} />;
   const canEdit = build?.effective_role === "edit" || build?.effective_role === "admin";
   return (
     <PageContainer>
-      <Link className="text-primary underline" to="/builds">
+      <Link className="text-primary underline" href="/builds">
         {t("build.title")}
       </Link>
       {displayedError && (

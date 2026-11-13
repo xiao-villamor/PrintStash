@@ -40,11 +40,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function openDisplayMenu(page: Page): Promise<void> {
-  await expect(
-    page.getByRole("main").getByRole("button", { name: "Upload", exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeVisible();
   const more = page.getByRole("main").getByRole("button", { name: "More", exact: true });
   if (await more.isVisible()) await more.click();
+  else await page.getByRole("heading", { name: "Models", exact: true }).click({ button: "right" });
   await page
     .getByRole("button", { name: "Display", exact: true })
     .or(page.getByRole("menuitem", { name: "Display", exact: true }))
@@ -53,47 +52,57 @@ async function openDisplayMenu(page: Page): Promise<void> {
 
 test.describe("Library responsive layout", () => {
   for (const width of [320, 824, 1440]) {
-    test(`keeps Recent folders inside the viewport at ${width}px`, async ({ page }) => {
-      const label = "PrintStash/Organization/Gridfinity/Workshop/" + "NestedCollection".repeat(8);
-      await page.setViewportSize({ width, height: 900 });
-      // Recent entries resolve their current server label when the menu opens.
-      await page.route("**/api/v1/collections/lookup?**", (route) =>
-        route.fulfill({
-          json: {
-            collection: aCollectionNode({
-              id: 1,
-              path: "maraio",
-              name: label,
-              display_path: label,
-            }),
-            ancestors: [],
-          },
-        }),
-      );
-      await page.addInitScript((folderLabel) => {
-        localStorage.setItem(
-          "ps-recent-folders-labelled",
-          JSON.stringify([["maraio", folderLabel]]),
+    test(
+      width < 768
+        ? "keeps secondary breadcrumbs out of the phone header"
+        : `keeps Recent folders inside the viewport at ${width}px`,
+      async ({ page }) => {
+        const label = "PrintStash/Organization/Gridfinity/Workshop/" + "NestedCollection".repeat(8);
+        await page.setViewportSize({ width, height: 900 });
+        // Recent entries resolve their current server label when the menu opens.
+        await page.route("**/api/v1/collections/lookup?**", (route) =>
+          route.fulfill({
+            json: {
+              collection: aCollectionNode({
+                id: 1,
+                path: "maraio",
+                name: label,
+                display_path: label,
+              }),
+              ancestors: [],
+            },
+          }),
         );
-      }, label);
-      await page.goto("/");
-      await page.getByRole("button", { name: "Recent", exact: true }).click();
+        await page.addInitScript((folderLabel) => {
+          localStorage.setItem(
+            "ps-recent-folders-labelled",
+            JSON.stringify([["maraio", folderLabel]]),
+          );
+        }, label);
+        await page.goto("/");
+        await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
+        if (width < 768) {
+          await expect(page.getByRole("button", { name: "Recent", exact: true })).toBeHidden();
+          return;
+        }
+        await page.getByRole("button", { name: "Recent", exact: true }).click();
 
-      const menu = page.getByRole("menu");
-      const folder = menu.getByRole("menuitem", { name: label, exact: true });
-      await expect(folder).toBeVisible();
-      await expect(folder).toHaveAttribute("title", label);
-      const bounds = await menu.evaluate((element) => ({
-        left: element.getBoundingClientRect().left,
-        right: element.getBoundingClientRect().right,
-        content: element.scrollWidth,
-        width: element.clientWidth,
-      }));
-      expect(bounds.left).toBeGreaterThanOrEqual(0);
-      expect(bounds.right).toBeLessThanOrEqual(width);
-      expect(bounds.content).toBeLessThanOrEqual(bounds.width + 1);
-      await expect(menu.getByRole("menuitem", { name: "Clear recent folders" })).toBeVisible();
-    });
+        const menu = page.getByRole("menu");
+        const folder = menu.getByRole("menuitem", { name: label, exact: true });
+        await expect(folder).toBeVisible();
+        await expect(folder).toHaveAttribute("title", label);
+        const bounds = await menu.evaluate((element) => ({
+          left: element.getBoundingClientRect().left,
+          right: element.getBoundingClientRect().right,
+          content: element.scrollWidth,
+          width: element.clientWidth,
+        }));
+        expect(bounds.left).toBeGreaterThanOrEqual(0);
+        expect(bounds.right).toBeLessThanOrEqual(width);
+        expect(bounds.content).toBeLessThanOrEqual(bounds.width + 1);
+        await expect(menu.getByRole("menuitem", { name: "Clear recent folders" })).toBeVisible();
+      },
+    );
   }
 
   for (const width of [320, 390, 640, 824, 1044, 1440]) {
@@ -142,10 +151,10 @@ test.describe("Library responsive layout", () => {
     }
   }
 
-  test("keeps optional collection actions in one compact band", async ({ page }) => {
+  test("keeps collection tag entry in the metadata band", async ({ page }) => {
     await page.setViewportSize({ width: 824, height: 1000 });
     await page.goto("/?c=maraio");
-    const tags = page.getByRole("button", { name: "Add tags", exact: true });
+    const tags = page.getByRole("button", { name: "+ Add tag", exact: true });
     const description = page.getByRole("button", {
       name: "Add a description for this collection",
       exact: true,
@@ -156,7 +165,8 @@ test.describe("Library responsive layout", () => {
     const descriptionBox = await description.boundingBox();
     expect(tagsBox).not.toBeNull();
     expect(descriptionBox).not.toBeNull();
-    expect(Math.abs(tagsBox!.y - descriptionBox!.y)).toBeLessThanOrEqual(4);
+    expect(tagsBox!.y).toBeGreaterThanOrEqual(descriptionBox!.y + descriptionBox!.height);
+    expect(tagsBox!.height).toBe(26);
   });
 
   test("keeps description editor actions reachable on a phone", async ({ page }) => {
@@ -185,8 +195,7 @@ test.describe("Library responsive layout", () => {
     await expect(heading).toBeVisible();
 
     const bounds = await page
-      .getByRole("main")
-      .getByRole("navigation")
+      .locator("header nav")
       .evaluate((nav) => ({ width: nav.scrollWidth, available: nav.clientWidth }));
     expect(bounds.width).toBeLessThanOrEqual(bounds.available + 1);
   });
@@ -197,10 +206,10 @@ test.describe("Library responsive layout", () => {
     const trigger = page.getByRole("button", { name: "Filters", exact: true });
     await trigger.click();
 
-    await expect(page.getByRole("region", { name: "Filters", exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Filter Models", exact: true })).toBeVisible();
     await expect(trigger).toHaveAttribute("aria-expanded", "true");
-    await trigger.click();
-    await expect(page.getByRole("region", { name: "Filters", exact: true })).toBeHidden();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Filter Models", exact: true })).toBeHidden();
   });
 
   test("opens the filter drawer on a phone", async ({ page }) => {
@@ -208,7 +217,7 @@ test.describe("Library responsive layout", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Filters", exact: true }).click();
 
-    await expect(page.getByRole("dialog", { name: "Filters", exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Filter Models", exact: true })).toBeVisible();
   });
 
   test("keeps secondary actions available in a narrow pane", async ({ page }) => {
@@ -231,7 +240,7 @@ test.describe("Library responsive layout", () => {
       await expect(toolbar.getByRole("button", { name: "Filters", exact: true })).toBeVisible();
       await expect(actions.getByRole("link", { name: "Similar models" })).toBeVisible();
       await expect(actions.getByRole("button", { name: "New collection" })).toBeVisible();
-      await expect(actions.getByRole("button", { name: "Select", exact: true })).toHaveCount(0);
+      await expect(actions.getByRole("button", { name: "Select", exact: true })).toBeVisible();
       await expect(
         page.getByRole("checkbox", { name: "Select Responsive bracket 1", exact: true }),
       ).toBeVisible();
@@ -311,7 +320,11 @@ test.describe("Library responsive layout", () => {
       .getByRole("button", { name: "New collection", exact: true })
       .click();
 
-    await expect(page.getByPlaceholder("Collection name...")).toBeVisible();
+    await expect(
+      page
+        .getByRole("dialog", { name: "New collection", exact: true })
+        .getByRole("textbox", { name: "Name", exact: true }),
+    ).toBeVisible();
   });
 
   test("navigates to Similar models from the phone toolbar", async ({ page }) => {
@@ -380,5 +393,152 @@ test.describe("Library responsive layout", () => {
     await expect(page.getByRole("textbox", { name: "Description", exact: true })).toHaveValue(
       "Parts for the cupholder.",
     );
+  });
+});
+
+test.describe("Collection header", () => {
+  test("uses the prototype collection header with inline tag persistence", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    const collection = aCollectionNode({
+      id: 1,
+      name: collectionName,
+      path: "maraio",
+      tags: ["functional"],
+      has_readme: true,
+    });
+    await page.route("**/api/v1/collections/lookup?**", (route) =>
+      route.fulfill({ json: { collection, ancestors: [] } }),
+    );
+    await page.route("**/api/v1/collections/1/readme", (route) =>
+      route.fulfill({ json: { readme: "Base in PETG for UV resistance." } }),
+    );
+    await page.route("**/api/v1/collections/1/tags", async (route) => {
+      expect(route.request().method()).toBe("PUT");
+      collection.tags = route.request().postDataJSON().tags;
+      await route.fulfill({ json: collection });
+    });
+    await page.goto("/?c=maraio");
+    const header = page.locator(".library-collection-header");
+    await expect(header.getByText("Base in PETG for UV resistance.")).toBeVisible();
+    expect((await header.locator(".collection-header-tag").first().boundingBox())!.height).toBe(28);
+    await header.getByRole("button", { name: "+ Add tag", exact: true }).click();
+    await header.getByRole("textbox", { name: "New tag" }).fill("outdoor");
+    await header.getByRole("textbox", { name: "New tag" }).press("Enter");
+    await expect(header.getByRole("button", { name: "Remove tag outdoor" })).toBeVisible();
+    await page.reload();
+    await header.getByRole("button", { name: "Remove tag functional" }).click();
+    await expect(header.getByRole("button", { name: "Remove tag functional" })).toHaveCount(0);
+    expect(collection.tags).toEqual(["outdoor"]);
+    await expect(header.getByRole("button", { name: "Remove tag outdoor" })).toBeVisible();
+  });
+
+  test("keeps the prototype desktop Models toolbar in one row", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto("/");
+    const toolbar = page.locator(".library-model-toolbar");
+    const filters = toolbar.getByRole("button", { name: /^Filters(?: \d+)?$/ });
+    const status = toolbar.getByRole("radiogroup", { name: "Filter models by status" });
+    await expect(filters).toBeVisible();
+    await expect(filters.locator("svg")).toHaveCount(0);
+    await expect(status.getByRole("radio", { name: "No G-code" })).toBeDisabled();
+    await expect(toolbar.getByRole("button", { name: "More", exact: true })).toBeHidden();
+    const boxes = await Promise.all(
+      [
+        toolbar.getByRole("heading", { name: "Models" }),
+        status,
+        filters,
+        toolbar.getByRole("button", { name: "Sort models" }),
+      ].map((locator) => locator.boundingBox()),
+    );
+    const centers = boxes.map((box) => box!.y + box!.height / 2);
+    expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
+    await status.getByRole("radio", { name: /^Ready/ }).click();
+    await expect(page).toHaveURL(/revision_status=known_good/);
+    await filters.focus();
+    await page.keyboard.press("Shift+F10");
+    await expect(page.getByRole("menuitem", { name: "Display", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(filters).toBeFocused();
+  });
+
+  test("persists the inline collection title", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const collection = aCollectionNode({
+      id: 1,
+      name: "Planter with legs",
+      path: "maraio",
+      has_readme: true,
+    });
+    let description =
+      "Base in PETG for UV resistance. Legs are fine in PLA. Use a brim on the large pieces.";
+    let renames = 0;
+    await page.route("**/api/v1/collections/lookup?**", (route) =>
+      route.fulfill({ json: { collection, ancestors: [] } }),
+    );
+    await page.route("**/api/v1/collections/1", async (route) => {
+      if (route.request().method() !== "PATCH") return route.fallback();
+      renames++;
+      collection.name = route.request().postDataJSON().name;
+      await route.fulfill({ json: collection });
+    });
+    await page.route("**/api/v1/collections/1/readme", async (route) => {
+      if (route.request().method() === "PUT") description = route.request().postDataJSON().readme;
+      await route.fulfill({ json: { readme: description } });
+    });
+    await page.goto("/?c=maraio");
+    const heading = page.getByRole("heading", { name: "Planter with legs", exact: true });
+    await expect(heading).toBeVisible();
+    const headingBounds = await heading.boundingBox();
+    await page.getByRole("button", { name: "Rename Planter with legs" }).click();
+    const name = page.getByRole("textbox", { name: "Collection name" });
+    await expect(name).toBeFocused();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    const inputBounds = await name.boundingBox();
+    expect(inputBounds!.height).toBe(40);
+    expect(Math.abs(inputBounds!.y - headingBounds!.y)).toBeLessThan(6);
+    await expect(name).toHaveCSS("font-size", "24px");
+    await name.fill("Discard this");
+    await name.press("Escape");
+    await expect(page.getByRole("button", { name: "Rename Planter with legs" })).toBeFocused();
+    expect(renames).toBe(0);
+    await page.keyboard.press("F2");
+    await expect(name).toHaveValue("Planter with legs");
+    await name.fill("Outdoor planter");
+    await name.press("Enter");
+    await expect(page.getByRole("heading", { name: "Outdoor planter", exact: true })).toBeVisible();
+    expect(renames).toBe(1);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Outdoor planter", exact: true })).toBeVisible();
+  });
+
+  test("persists a compact collection description", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const collection = aCollectionNode({
+      id: 1,
+      name: collectionName,
+      path: "maraio",
+      has_readme: true,
+    });
+    let description =
+      "Base in PETG for UV resistance. Legs are fine in PLA. Use a brim on the large pieces.";
+    await page.route("**/api/v1/collections/lookup?**", (route) =>
+      route.fulfill({ json: { collection, ancestors: [] } }),
+    );
+    await page.route("**/api/v1/collections/1/readme", async (route) => {
+      if (route.request().method() === "PUT") description = route.request().postDataJSON().readme;
+      await route.fulfill({ json: { readme: description } });
+    });
+    await page.goto("/?c=maraio");
+    await page.getByText(description, { exact: true }).hover();
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    const editor = page.getByRole("textbox", { name: "Description", exact: true });
+    await expect(editor).toBeFocused();
+    await expect(editor).toHaveAttribute("rows", "3");
+    await expect(editor).toHaveCSS("font-size", "13px");
+    await editor.fill("Use a brim on the large pieces.");
+    await editor.press("Control+Enter");
+    await expect(page.getByText("Use a brim on the large pieces.", { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByText("Use a brim on the large pieces.", { exact: true })).toBeVisible();
   });
 });

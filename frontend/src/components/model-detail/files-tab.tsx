@@ -18,6 +18,7 @@ import { useTags } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { FileRead, ModelRead, TrashedSourceFileRead } from "@/types";
 
+import { HashValue } from "./file-hashes";
 import { DerivativeStatus } from "@/components/derivative-status";
 import { SlicerOpenButton } from "@/components/slicer-open-button";
 import { Localized } from "@/components/ui/localized";
@@ -35,6 +36,7 @@ export function FilesTab({
   trashedSourceFiles = [],
   canEdit,
   onModel,
+  onCompare,
 }: {
   modelId: number;
   sourceFiles: FileRead[];
@@ -42,6 +44,7 @@ export function FilesTab({
   trashedSourceFiles?: TrashedSourceFileRead[];
   canEdit: boolean;
   onModel: (model: ModelRead) => void;
+  onCompare?: () => void;
 }) {
   useUiLocale();
   const { data: availableTags = [] } = useTags();
@@ -105,9 +108,19 @@ export function FilesTab({
           }
           confirmLabel={uiText("Move to trash")}
         />
-        <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant">
-          {uiText("Source Files")}
-        </h2>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-base font-semibold">
+            {uiText("Source files")}{" "}
+            <span className="ml-1 text-xs font-normal text-muted-foreground">
+              {sourceFiles.length}
+            </span>
+          </h2>
+          {onCompare && (
+            <Button variant="ghost" size="xs" onClick={onCompare}>
+              {uiText("Compare")}
+            </Button>
+          )}
+        </div>
         {sourceFiles.length === 0 && (
           <p className="font-mono text-xs text-on-surface-variant">
             {uiText(
@@ -115,16 +128,16 @@ export function FilesTab({
             )}
           </p>
         )}
-        <div className="space-y-2">
+        <div>
           {sourceFiles.map((f) => (
             <article
               key={f.id}
               aria-label={f.original_filename}
-              className="@container/source-file min-w-0 space-y-3 p-3 border border-outline-variant rounded hover:border-primary hover:shadow-sm transition-[border-color,box-shadow] group bg-surface"
+              className="@container/source-file min-w-0 space-y-3 border-b border-border py-5.5 min-[1500px]:py-5"
             >
-              <div className="grid min-w-0 grid-cols-1 items-start gap-2 @sm/source-file:grid-cols-[minmax(0,1fr)_auto]">
-                <div className="flex items-start gap-3 min-w-0">
-                  <FileText className="h-5 w-5 flex-shrink-0 text-outline group-hover:text-primary" />
+              <div className="flex min-w-0 flex-col gap-3 min-[1500px]:grid min-[1500px]:grid-cols-2 min-[1500px]:gap-x-6 min-[1500px]:gap-y-1.5">
+                <div className="flex min-w-0 items-start gap-2 min-[1500px]:col-start-1 min-[1500px]:row-start-1">
+                  <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
                     <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm text-on-surface font-medium">
                       <span className="min-w-0 break-all">{f.original_filename}</span>
@@ -140,20 +153,42 @@ export function FilesTab({
                         </span>
                       )}
                     </p>
-                    <p className="font-mono text-2xs text-on-surface-variant">
-                      {uiText("{value1} · v{value2} · Source", {
-                        value1: String(formatBytes(f.size_bytes) ?? ""),
-                        value2: String(f.version ?? ""),
-                      })}
-                    </p>
                   </div>
                 </div>
-                <div className="flex items-center justify-self-end gap-0.5 flex-shrink-0">
-                  {SLICEABLE_TYPES.has(f.file_type) && (
-                    <SlicerOpenButton fileId={f.id} fileType={f.file_type} />
+                <p className="-mt-1.5 ml-6 text-xs text-muted-foreground min-[1500px]:col-start-1 min-[1500px]:row-start-2 min-[1500px]:mt-0 min-[1500px]:ml-0">
+                  {f.file_type.toUpperCase()} · {uiText("v{value1}", { value1: String(f.version) })}{" "}
+                  · {formatBytes(f.size_bytes)} · {new Date(f.uploaded_at).toLocaleDateString()}
+                </p>
+                <dl className="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)] items-center gap-x-3 gap-y-2 text-xs min-[1500px]:col-start-2 min-[1500px]:row-start-1 min-[1500px]:row-span-3 min-[1500px]:grid-cols-[125px_minmax(0,1fr)] min-[1500px]:self-start">
+                  <dt className="text-muted-foreground">{uiText("File SHA-256")}</dt>
+                  <dd>
+                    <HashValue
+                      sha={f.sha256}
+                      label={uiText("File SHA-256")}
+                      filename={f.original_filename}
+                    />
+                  </dd>
+                  {f.geometric_sha256 !== null && (
+                    <>
+                      <dt className="text-muted-foreground">{uiText("Geometry SHA-256")}</dt>
+                      <dd>
+                        <HashValue
+                          sha={f.geometric_sha256}
+                          label={uiText("Geometry SHA-256")}
+                          filename={f.original_filename}
+                        />
+                      </dd>
+                    </>
                   )}
-                  <button
+                </dl>
+                <div className="flex flex-wrap items-center gap-1 min-[1500px]:col-start-1 min-[1500px]:row-start-3 min-[1500px]:mt-1.5">
+                  {SLICEABLE_TYPES.has(f.file_type) && (
+                    <SlicerOpenButton fileId={f.id} fileType={f.file_type} size="sm" showLabel />
+                  )}
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="xs"
                     onClick={() =>
                       downloadAuthenticatedFile(
                         `/api/v1/files/${f.id}/download`,
@@ -161,19 +196,31 @@ export function FilesTab({
                       ).catch((e) => toast.error(e))
                     }
                     title={uiText("Download")}
-                    className="text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors"
                   >
-                    <Download className="h-5 w-5" />
-                  </button>
+                    <Download className="h-3.5 w-3.5" />
+                    {uiText("Download")}
+                  </Button>
+                  <EntityTagsDialog
+                    triggerMode="command"
+                    entityLabel={f.original_filename}
+                    tags={f.tags}
+                    availableTags={availableTags}
+                    canEdit={canEdit}
+                    help={uiText(
+                      "Artifact tags make the owning Model discoverable without changing the Model’s direct tags.",
+                    )}
+                    onSave={(tags) => saveTags(f, tags)}
+                  />
                   <DropdownMenu
                     open={menuFileId === f.id}
                     onOpenChange={(open) => setMenuFileId(open ? f.id : null)}
+                    portal
                     trigger={
                       <Button
                         type="button"
                         data-menu-trigger
                         variant="ghost"
-                        size="icon-sm"
+                        size="xs"
                         aria-haspopup="menu"
                         aria-expanded={menuFileId === f.id}
                         aria-label={uiText("Actions for {value1}", {
@@ -181,7 +228,8 @@ export function FilesTab({
                         })}
                         onClick={() => setMenuFileId(menuFileId === f.id ? null : f.id)}
                       >
-                        <MoreHorizontal className="h-4 w-4" />
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                        {uiText("nav.more")}
                       </Button>
                     }
                     contentClassName="w-56 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg"
@@ -214,23 +262,11 @@ export function FilesTab({
                 canRetry={canEdit}
                 previewFailure={previewFailure?.fileId === f.id ? previewFailure.reason : null}
               />
-              <div className="mt-1.5">
-                <EntityTagsDialog
-                  entityLabel={f.original_filename}
-                  tags={f.tags}
-                  availableTags={availableTags}
-                  canEdit={canEdit}
-                  help={uiText(
-                    "Artifact tags make the owning Model discoverable without changing the Model’s direct tags.",
-                  )}
-                  onSave={(tags) => saveTags(f, tags)}
-                />
-              </div>
             </article>
           ))}
         </div>
         {trashedSourceFiles.length > 0 && (
-          <div className="mt-6 border-t border-outline-variant pt-4">
+          <div className="mt-4">
             <h3 className="mb-2 text-sm font-medium text-on-surface">
               {uiText("Trashed source files")}
             </h3>
@@ -238,7 +274,7 @@ export function FilesTab({
               {trashedSourceFiles.map((file) => (
                 <div
                   key={file.id}
-                  className="flex items-center justify-between gap-3 rounded border border-outline-variant bg-surface-container-low p-3"
+                  className="flex items-center justify-between gap-3 border-b border-dashed border-border py-3"
                 >
                   <span className="min-w-0 truncate text-sm text-on-surface-variant">
                     {file.original_filename}

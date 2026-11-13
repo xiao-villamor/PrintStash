@@ -5,9 +5,12 @@ import { useEffect, useState } from "react";
 import { useRouter } from "@/lib/navigation";
 
 import { BottomNavBar } from "@/components/bottom-nav-bar";
+import { CollectionsPaneProvider, CollectionsPaneHost } from "@/components/collections-pane";
+import { SidebarNav } from "@/components/sidebar-nav";
 import { Toaster } from "@/components/toaster";
 import { TopBar } from "@/components/top-bar";
 import { MobileFilterProvider } from "@/lib/mobile-filter-provider";
+import { NavigationShellProvider } from "@/lib/navigation-shell-provider";
 import { LibraryStartupProvider } from "@/lib/library-startup-provider";
 import { PreviewActivityTracker } from "@/components/preview-activity-tracker";
 import { useAuth } from "@/lib/auth-context";
@@ -20,14 +23,18 @@ import { subscribeImportJobCompletions } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
 import { uiText } from "@/lib/locale";
 import { refreshVaultAfterIngest } from "@/lib/query-client";
+import { useSystemTheme } from "@/lib/theme";
+import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
+import "./app-shell.css";
 
 const ArchiveReviewDialog = lazyImport(() =>
   import("@/components/archive-review").then((module) => ({ default: module.ArchiveReviewDialog })),
 );
 
-const CHROMELESS_PREFIXES = ["/setup", "/login", "/getting-started"];
+const CHROMELESS_PREFIXES = ["/setup", "/login"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  useSystemTheme();
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading } = useAuth();
@@ -131,33 +138,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           children
         ) : (
           <LibraryStartupProvider key={user?.id ?? "signed-out"} active={isVault}>
-            <MobileFilterProvider>
-              <div className="flex flex-col h-dvh overflow-hidden">
-                <TopBar />
-                <PreviewActivityTracker enabled={!!user?.is_superuser} />
-                <div className="flex flex-1 min-h-0 overflow-hidden">
-                  {isVault ? (
-                    children
-                  ) : (
-                    <main className="flex-1 min-w-0 overflow-hidden bg-background">{children}</main>
-                  )}
-                </div>
-                <BottomNavBar />
-                {archiveJobId && (
-                  <DeferredDialog
-                    open
-                    title={uiText("ZIP ready. Choose which files to add.")}
-                    onClose={() => setArchiveJobId(null)}
-                  >
-                    <ArchiveReviewDialog
-                      key={archiveJobId}
-                      jobId={archiveJobId}
-                      onClose={() => setArchiveJobId(null)}
-                    />
-                  </DeferredDialog>
-                )}
-              </div>
-            </MobileFilterProvider>
+            <CollectionsPaneProvider>
+              <NavigationShellProvider>
+                <MobileFilterProvider>
+                  <KeyboardShortcuts />
+                  <div className="flex h-dvh overflow-hidden">
+                    <SidebarNav />
+                    <CollectionsPaneHost />
+                    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                      <TopBar />
+                      <PreviewActivityTracker enabled={!!user?.is_superuser} />
+                      <div className="shell-route-viewport flex min-h-0 flex-1 overflow-hidden">
+                        <div
+                          role={isVault ? undefined : "main"}
+                          className="min-w-0 flex-1 overflow-hidden bg-background"
+                        >
+                          {children}
+                        </div>
+                      </div>
+                      <BottomNavBar />
+                    </div>
+                    {archiveJobId && (
+                      <DeferredDialog
+                        open
+                        title={uiText("ZIP ready. Choose which files to add.")}
+                        onClose={() => setArchiveJobId(null)}
+                      >
+                        <ArchiveReviewDialog
+                          key={archiveJobId}
+                          jobId={archiveJobId}
+                          onClose={() => setArchiveJobId(null)}
+                        />
+                      </DeferredDialog>
+                    )}
+                  </div>
+                </MobileFilterProvider>
+              </NavigationShellProvider>
+            </CollectionsPaneProvider>
           </LibraryStartupProvider>
         )}
       </>

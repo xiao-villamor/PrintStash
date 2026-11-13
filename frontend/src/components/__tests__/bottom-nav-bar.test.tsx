@@ -22,7 +22,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test-support/router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BottomNavBar } from "@/components/bottom-nav-bar";
@@ -61,7 +61,7 @@ function renderNav({
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
-      <MemoryRouter initialEntries={[at]}>
+      <TestRouter initialEntries={[at]}>
         <AuthContext.Provider value={auth}>
           <I18nProvider>
             {extra}
@@ -69,7 +69,7 @@ function renderNav({
             <CurrentPath />
           </I18nProvider>
         </AuthContext.Provider>
-      </MemoryRouter>
+      </TestRouter>
     </QueryClientProvider>,
   );
 }
@@ -105,9 +105,9 @@ describe("BottomNavBar", () => {
       renderNav();
 
       expect(screen.getAllByRole("link").map((tab) => tab.textContent)).toEqual([
-        "Vault",
+        "Library",
+        "Search",
         "Pending",
-        "Similar",
         "Printers",
       ]);
       expect(screen.getByRole("button", { name: "More" })).toBeInTheDocument();
@@ -117,9 +117,9 @@ describe("BottomNavBar", () => {
       renderNav({ auth: session({ is_superuser: false }) });
 
       expect(screen.getAllByRole("link").map((tab) => tab.textContent)).toEqual([
-        "Vault",
+        "Library",
+        "Search",
         "Pending",
-        "Similar",
         "Profiles",
       ]);
     });
@@ -139,13 +139,13 @@ describe("BottomNavBar", () => {
       expect(screen.getByTestId("current-path")).toHaveTextContent("/inbox");
     });
 
-    it("opens Similar models from its tab", async () => {
+    it("opens Search from its tab", async () => {
       const user = userEvent.setup();
       renderNav();
 
-      await user.click(screen.getByRole("link", { name: "Similar" }));
+      await user.click(screen.getByRole("link", { name: "Search" }));
 
-      expect(screen.getByTestId("current-path")).toHaveTextContent("/library/similar");
+      expect(screen.getByTestId("current-path")).toHaveTextContent("/search");
     });
   });
 
@@ -162,10 +162,10 @@ describe("BottomNavBar", () => {
       expect(screen.getByRole("link", { name: "Pending" })).toHaveAttribute("aria-current", "page");
     });
 
-    it("marks Similar for a comparison route", () => {
+    it("marks More for a comparison route", () => {
       renderNav({ at: "/library/similar/41" });
 
-      expect(screen.getByRole("link", { name: "Similar" })).toHaveAttribute("aria-current", "page");
+      expect(screen.getByRole("button", { name: "More" })).toHaveAttribute("aria-current", "page");
     });
 
     it("keeps Vault unmarked away from the root", () => {
@@ -173,7 +173,7 @@ describe("BottomNavBar", () => {
       // matched exactly. Prefix-matching it would light it up on every page.
       renderNav({ at: "/inbox" });
 
-      expect(screen.getByRole("link", { name: "Vault" })).not.toHaveAttribute("aria-current");
+      expect(screen.getByRole("link", { name: "Library" })).not.toHaveAttribute("aria-current");
     });
 
     it("marks More when the active destination folded into the sheet", () => {
@@ -221,7 +221,7 @@ describe("BottomNavBar", () => {
       renderNav();
 
       await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-      expect(screen.getByRole("link", { name: "Vault" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Library" })).toBeInTheDocument();
     });
   });
 
@@ -232,9 +232,11 @@ describe("BottomNavBar", () => {
         const user = userEvent.setup();
         renderNav({ at: "/builds/1", auth: session({ is_superuser }) });
         await user.click(screen.getByRole("button", { name: "More" }));
-        const sheet = within(screen.getByRole("dialog", { name: "More" }));
-        expect(sheet.queryByRole("link", { name: "Builds" })).not.toBeInTheDocument();
-        expect(screen.queryByRole("link", { name: "Profiles" })).toBeInTheDocument();
+        const sheet = within(screen.getByRole("menu"));
+        expect(sheet.queryByRole("menuitem", { name: "Builds" })).not.toBeInTheDocument();
+        expect(
+          screen.getByRole(is_superuser ? "menuitem" : "link", { name: "Profiles" }),
+        ).toBeInTheDocument();
       },
     );
 
@@ -244,7 +246,7 @@ describe("BottomNavBar", () => {
 
       await user.click(screen.getByRole("button", { name: "More" }));
 
-      expect(screen.getByRole("dialog", { name: "More" })).toBeInTheDocument();
+      expect(screen.getByRole("menu")).toBeInTheDocument();
     });
 
     it("holds the destinations that did not fit", async () => {
@@ -253,12 +255,22 @@ describe("BottomNavBar", () => {
 
       await user.click(screen.getByRole("button", { name: "More" }));
 
-      const sheet = screen.getByRole("dialog", { name: "More" });
+      const sheet = screen.getByRole("menu");
       expect(
         within(sheet)
-          .getAllByRole("link")
+          .getAllByRole("menuitem")
           .map((link) => link.textContent),
-      ).toEqual(["Profiles", "Stats", "Settings", "Wiki"]);
+      ).toEqual([
+        "Favorites",
+        "Profiles",
+        "Similar models",
+        "Trash",
+        "Statistics",
+        "Settings",
+        "Docsprintstash.org",
+        "Keyboard shortcuts",
+        "Log out",
+      ]);
     });
 
     it("sends an external destination to a plain link", async () => {
@@ -268,7 +280,7 @@ describe("BottomNavBar", () => {
 
       await user.click(screen.getByRole("button", { name: "More" }));
 
-      expect(screen.getByRole("link", { name: "Wiki" })).toHaveAttribute(
+      expect(screen.getByRole("menuitem", { name: /Docs/ })).toHaveAttribute(
         "href",
         "https://www.printstash.org/docs/",
       );
@@ -279,9 +291,9 @@ describe("BottomNavBar", () => {
       renderNav();
       await user.click(screen.getByRole("button", { name: "More" }));
 
-      await user.click(screen.getByRole("button", { name: "Close" }));
+      await user.keyboard("{Escape}");
 
-      await waitFor(() => expect(screen.queryByRole("dialog", { name: "More" })).toBeNull());
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     });
 
     it("closes when a destination inside it is chosen", async () => {
@@ -289,7 +301,7 @@ describe("BottomNavBar", () => {
       renderNav();
       await user.click(screen.getByRole("button", { name: "More" }));
 
-      await user.click(screen.getByRole("link", { name: "Settings" }));
+      await user.click(screen.getByRole("menuitem", { name: "Settings" }));
 
       expect(screen.getByTestId("current-path")).toHaveTextContent("/settings");
     });
@@ -300,7 +312,7 @@ describe("BottomNavBar", () => {
 
       await user.click(screen.getByRole("button", { name: "More" }));
 
-      expect(screen.getByRole("dialog", { name: "More" })).toHaveTextContent("admin");
+      expect(screen.getByRole("menu")).toHaveTextContent("admin");
     });
 
     it("signs the user out", async () => {
@@ -309,7 +321,7 @@ describe("BottomNavBar", () => {
       renderNav({ auth: { ...session(), logout } });
       await user.click(screen.getByRole("button", { name: "More" }));
 
-      await user.click(screen.getByRole("button", { name: "Log out" }));
+      await user.click(screen.getByRole("menuitem", { name: "Log out" }));
 
       expect(logout).toHaveBeenCalledTimes(1);
     });
@@ -319,22 +331,9 @@ describe("BottomNavBar", () => {
       renderNav({ auth: { ...session(), logout: async () => {} } });
       await user.click(screen.getByRole("button", { name: "More" }));
 
-      await user.click(screen.getByRole("button", { name: "Log out" }));
+      await user.click(screen.getByRole("menuitem", { name: "Log out" }));
 
       await waitFor(() => expect(screen.getByTestId("current-path")).toHaveTextContent("/login"));
-    });
-
-    it("expands the task list on request", async () => {
-      const user = userEvent.setup();
-      renderNav();
-      await user.click(screen.getByRole("button", { name: "More" }));
-
-      await user.click(screen.getByRole("button", { name: /Tasks/ }));
-
-      expect(screen.getByRole("button", { name: /Tasks/ })).toHaveAttribute(
-        "aria-expanded",
-        "true",
-      );
     });
   });
 
@@ -342,12 +341,12 @@ describe("BottomNavBar", () => {
     it("relabels itself when the locale changes under it", async () => {
       const user = userEvent.setup();
       renderNav({ extra: <LocaleToggle /> });
-      expect(screen.getByText("Vault")).toBeInTheDocument();
+      expect(screen.getByText("Library")).toBeInTheDocument();
 
       await user.click(screen.getByRole("button", { name: /Language/ }));
       await user.click(screen.getByRole("menuitemradio", { name: "Español" }));
 
-      expect(screen.getByText("Bóveda")).toBeInTheDocument();
+      expect(screen.getByText("Biblioteca")).toBeInTheDocument();
     });
   });
 });

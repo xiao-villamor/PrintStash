@@ -38,7 +38,7 @@ function renderChoice(routes: RouteTable = {}, onPrepared = vi.fn<() => void>())
 describe("SetupStorageChoice", () => {
   it("retains a storage draft when locale changes", async () => {
     const choice = renderChoice();
-    const root = await screen.findByLabelText("Models directory");
+    const root = await screen.findByRole("textbox", { name: "Your files" });
     await userEvent.clear(root);
     await userEvent.type(root, "/my/models");
     await act(async () => setLocale("es"));
@@ -60,7 +60,7 @@ describe("SetupStorageChoice", () => {
       },
       onPrepared,
     );
-    await screen.findByLabelText("Models directory");
+    await screen.findByRole("textbox", { name: "Your files" });
     await userEvent.click(screen.getByRole("button", { name: "Use this storage" }));
     choice.unmount();
     await act(async () => response.resolve(json(PREPARED)));
@@ -72,7 +72,9 @@ describe("SetupStorageChoice", () => {
       seed: [[queryKeys.vaultConfig, aVaultConfig({ data_dir: "/cached/models" })]],
       routes: { "GET /api/v1/storage/providers": json(storageProviderCatalogue) },
     });
-    expect(await screen.findByLabelText("Models directory")).toHaveValue("/cached/models");
+    expect(await screen.findByRole("textbox", { name: "Your files" })).toHaveValue(
+      "/cached/models",
+    );
     expect(choice.requestsWithMethod("GET").some((r) => r.url === "/api/v1/config")).toBe(false);
   });
 
@@ -89,7 +91,7 @@ describe("SetupStorageChoice", () => {
       },
       onPrepared,
     );
-    await screen.findByLabelText("Models directory");
+    await screen.findByRole("textbox", { name: "Your files" });
     await userEvent.click(screen.getByRole("button", { name: "Use this storage" }));
     expect(choice.client.getMutationCache().getAll()).toHaveLength(0);
     await act(async () => clearLogin());
@@ -99,7 +101,7 @@ describe("SetupStorageChoice", () => {
   });
   it("retains a storage draft during config refresh", async () => {
     const choice = renderChoice();
-    const root = await screen.findByLabelText("Models directory");
+    const root = await screen.findByRole("textbox", { name: "Your files" });
     await userEvent.clear(root);
     await userEvent.type(root, "/my/models");
     choice.route({ "GET /api/v1/config": json(aVaultConfig({ data_dir: "/new/default" })) });
@@ -112,12 +114,12 @@ describe("SetupStorageChoice", () => {
   it("starts from the deployment's own local roots", async () => {
     renderChoice();
 
-    expect(await screen.findByLabelText("Models directory")).toHaveValue("/data/files");
+    expect(await screen.findByRole("textbox", { name: "Your files" })).toHaveValue("/data/files");
   });
 
   it("sends the chosen storage", async () => {
     const choice = renderChoice();
-    await screen.findByLabelText("Models directory");
+    await screen.findByRole("textbox", { name: "Your files" });
 
     await userEvent.click(screen.getByRole("button", { name: "Use this storage" }));
 
@@ -138,7 +140,7 @@ describe("SetupStorageChoice", () => {
   it("continues once the storage is prepared", async () => {
     const onPrepared = vi.fn<() => void>();
     renderChoice({}, onPrepared);
-    await screen.findByLabelText("Models directory");
+    await screen.findByRole("textbox", { name: "Your files" });
 
     await userEvent.click(screen.getByRole("button", { name: "Use this storage" }));
 
@@ -149,7 +151,7 @@ describe("SetupStorageChoice", () => {
     renderChoice({
       "POST /api/v1/setup/prepare-storage": json({ detail: "data_dir_not_empty" }, 400),
     });
-    await screen.findByLabelText("Models directory");
+    await screen.findByRole("textbox", { name: "Your files" });
 
     await userEvent.click(screen.getByRole("button", { name: "Use this storage" }));
 

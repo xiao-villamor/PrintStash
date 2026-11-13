@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import SearchPage from "@/pages/search";
-import { Route, Routes } from "react-router-dom";
+import { Outlet } from "@tanstack/react-router";
 import { LibrarySearch } from "@/components/library-search";
 import { usePathname, useSearchParams } from "@/lib/navigation";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
@@ -64,36 +64,33 @@ describe("LibrarySearch", () => {
 
   it("discards a late response after clearing search", async () => {
     const user = userEvent.setup();
-    renderApp(
+    const pending = Promise.withResolvers<Response>();
+    const app = renderApp(
       <>
         <LibrarySearch />
-        <Routes>
-          <Route path="/" element={<h1>Library</h1>} />
-          <Route path="/search" element={<SearchPage />} />
-        </Routes>
+        <Outlet />
       </>,
-      { at: "/search?q=bracket" },
+      {
+        at: "/search?q=bracket",
+        routerRoutes: [
+          { path: "/", element: <h1>Library</h1> },
+          { path: "/search", element: <SearchPage /> },
+        ],
+        routes: {
+          "GET /api/v1/search?": () => pending.promise.then((response) => response.clone()),
+          "GET /api/v1/search/status": json(searchStatus()),
+          "GET /api/v1/saved-views": json([]),
+          "GET /api/v1/search/availability": json({ available: false, nl_filters_enabled: false }),
+        },
+      },
     );
-    let finish: (response: Response) => void = () => {};
-    const pending = new Promise<Response>((resolve) => {
-      finish = resolve;
-    });
-    const fetcher = vi.fn<typeof fetch>((url) => {
-      if (String(url).includes("/search?")) return pending;
-      if (String(url).includes("/status")) return Promise.resolve(json(searchStatus()));
-      return Promise.resolve(json({ available: false, nl_filters_enabled: false }));
-    });
-    vi.stubGlobal("fetch", fetcher);
-    // A fresh query drives the delayed request through the mounted results page.
     await user.type(screen.getByRole("searchbox"), " new{Enter}");
     await waitFor(() =>
-      expect(fetcher.mock.calls.some(([url]) => String(url).includes("/search?"))).toBe(true),
+      expect(app.requests().some((request) => request.url.includes("/search?"))).toBe(true),
     );
     await user.click(screen.getByRole("button", { name: "Clear search" }));
     expect(await screen.findByRole("heading", { name: "Library" })).toBeVisible();
-    await act(async () => {
-      finish(json(searchResponse({ items: [aSearchResult()] })));
-    });
+    await act(async () => pending.resolve(json(searchResponse({ items: [aSearchResult()] }))));
     expect(screen.queryByRole("link", { name: "Desk bracket" })).toBeNull();
     expect(screen.queryByText("Searching…")).toBeNull();
   });

@@ -111,7 +111,7 @@ describe("UploadModal", () => {
     await user.click(mode("From URL"));
     await user.type(screen.getByRole("textbox", { name: "Source URL" }), "not-a-url");
 
-    await user.click(screen.getByRole("button", { name: "Review URL" }));
+    await user.click(screen.getByRole("button", { name: "Capture for review" }));
 
     expect(screen.getByRole("textbox", { name: "Source URL" })).toBeInvalid();
     expect(app.requestsWithMethod("POST")).toEqual([]);
@@ -126,7 +126,7 @@ describe("UploadModal", () => {
       "ftp://example.invalid/model.stl",
     );
 
-    await user.click(screen.getByRole("button", { name: "Review URL" }));
+    await user.click(screen.getByRole("button", { name: "Capture for review" }));
 
     expect(
       await screen.findByText("Enter a valid http(s) URL for a model page or file."),
@@ -134,7 +134,7 @@ describe("UploadModal", () => {
     expect(screen.getByRole("textbox", { name: "Source URL" })).toHaveValue(
       "ftp://example.invalid/model.stl",
     );
-    expect(screen.getByRole("button", { name: "Review URL" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Capture for review" })).toBeEnabled();
   });
 
   it("shows the exact folder name in the destination picker", async () => {
@@ -223,7 +223,7 @@ describe("UploadModal", () => {
 
       await user.click(mode("From URL"));
 
-      expect(screen.getByRole("button", { name: "Review URL" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Capture for review" })).toBeDisabled();
     });
 
     it("refuses an empty archive import", async () => {
@@ -247,7 +247,7 @@ describe("UploadModal", () => {
         "https://example.test/model/1",
       );
 
-      expect(screen.getByRole("button", { name: "Review URL" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Capture for review" })).toBeEnabled();
     });
 
     it("refuses everything for a member with nowhere to write", async () => {
@@ -265,7 +265,7 @@ describe("UploadModal", () => {
         "https://example.test/model/1",
       );
 
-      expect(screen.getByRole("button", { name: "Review URL" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Capture for review" })).toBeDisabled();
     });
   });
 
@@ -277,7 +277,7 @@ describe("UploadModal", () => {
         screen.getByPlaceholderText(/Model page, collection/),
         "https://example.test/model/1",
       );
-      await user.click(screen.getByRole("button", { name: "Review URL" }));
+      await user.click(screen.getByRole("button", { name: "Capture for review" }));
     }
 
     it("captures the URL as a pending import rather than importing it", async () => {
@@ -326,7 +326,9 @@ describe("UploadModal", () => {
 
       await pasteAndReview(user);
 
-      await waitFor(() => expect(screen.getByRole("button", { name: "Review URL" })).toBeEnabled());
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Capture for review" })).toBeEnabled(),
+      );
       expect(onClose).not.toHaveBeenCalled();
     });
   });
@@ -485,10 +487,12 @@ describe("UploadModal", () => {
         screen.getByPlaceholderText(/Model page, collection/),
         "https://example.test/model/1",
       );
-      expect(screen.getByRole("button", { name: "Review URL" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Capture for review" })).toBeDisabled();
 
       resolveLookup(json({ collection: aCollectionNode(), ancestors: [] }));
-      await waitFor(() => expect(screen.getByRole("button", { name: "Review URL" })).toBeEnabled());
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Capture for review" })).toBeEnabled(),
+      );
     });
 
     it("offers the collections the user may write to", async () => {
@@ -553,7 +557,7 @@ describe("UploadModal", () => {
         dataTransfer: { files: [new File(["x"], "cube.stl")], types: ["Files"] },
       });
 
-      expect(await screen.findByText("cube.stl")).toBeInTheDocument();
+      expect(await screen.findAllByText("cube.stl")).toHaveLength(2);
     });
 
     it("refuses a file the slot does not take", async () => {
@@ -592,7 +596,7 @@ describe("UploadModal", () => {
 
       fireEvent.drop(meshSlot(), { dataTransfer: { files: [], types: [] } });
 
-      expect(screen.getByText("cube.stl")).toBeInTheDocument();
+      expect(screen.getAllByText("cube.stl")).toHaveLength(2);
     });
   });
 

@@ -5,6 +5,7 @@ import {
   type AriaAttributes,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -34,6 +35,8 @@ export interface DropdownMenuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   trigger: ReactNode;
+  /** Context menus may open from several controls in a shared trigger surface. */
+  returnFocusRef?: RefObject<HTMLElement | null>;
   align?: "start" | "end";
   role?: "menu" | "listbox" | "dialog";
   "aria-label"?: AriaAttributes["aria-label"];
@@ -49,6 +52,7 @@ export function DropdownMenu({
   open,
   onOpenChange,
   trigger,
+  returnFocusRef,
   align = "end",
   role = "menu",
   "aria-label": ariaLabel,
@@ -194,7 +198,13 @@ export function DropdownMenu({
   }, [open, role]);
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    const triggerElement = wrapperRef.current?.querySelector<HTMLElement>("[data-menu-trigger]");
+    // Portaled dialogs can bubble through a card's closed contextual menu.
+    // Only an open panel owns Escape or roving focus; otherwise its child
+    // dialog and the page's keyboard commands must receive the event.
+    if (!open) return;
+    const triggerElement =
+      returnFocusRef?.current ??
+      wrapperRef.current?.querySelector<HTMLElement>("[data-menu-trigger]");
     if (e.key === "Escape") {
       e.stopPropagation();
       onOpenChange(false);

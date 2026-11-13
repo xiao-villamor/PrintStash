@@ -181,7 +181,24 @@ export function EntityTagsEditor({
     <Modal
       open={open}
       onClose={close}
-      title={uiText("Tags · {value1}", { value1: String(entityLabel) })}
+      title={uiText("Edit tags — {value1}", { value1: String(entityLabel) })}
+      description={uiText(
+        "Direct Model tags and Artifact tags use the same compact picker with clear ownership.",
+      )}
+      footer={
+        <>
+          <Button type="button" variant="outline" onClick={close} disabled={saving}>
+            {uiText("Cancel")}
+          </Button>
+          <Button
+            type="button"
+            onClick={() => void submit()}
+            disabled={saving || reviewing || problem !== null}
+          >
+            {saving ? uiText("Saving…") : uiText("Save tags")}
+          </Button>
+        </>
+      }
     >
       {problem && (
         <div
@@ -221,9 +238,20 @@ export function EntityTagsEditor({
           )}
         </div>
       )}
-      <div className="space-y-4">
+      <div className="space-y-5">
+        <section className="space-y-3">
+          <h3 className="text-sm font-semibold">{uiText("Tag ownership")}</h3>
+          <div className="grid grid-cols-[1fr_2fr] gap-4 bg-plate p-4 text-[13px]">
+            <span className="text-muted-foreground">{uiText("Applies to")}</span>
+            <span className="break-words">{entityLabel}</span>
+          </div>
+        </section>
         <p className="text-sm leading-relaxed text-on-surface-variant">{help}</p>
-        <div className="flex flex-wrap gap-2" aria-label={uiText("Tags")}>
+        <h3 className="border-t border-border pt-5 text-sm font-semibold">{uiText("Tags")}</h3>
+        <div
+          className="flex min-h-10 flex-wrap items-center gap-2 border border-input p-2"
+          aria-label={uiText("Tags")}
+        >
           {selected.length === 0 ? (
             <span className="text-sm text-on-surface-variant">
               {uiText("No tags assigned yet.")}
@@ -239,7 +267,7 @@ export function EntityTagsEditor({
                     current.filter((value) => normalized(value) !== normalized(tag)),
                   )
                 }
-                className="inline-flex max-w-full items-center gap-1 rounded-full border border-outline-variant bg-surface-container-low px-2.5 py-1 text-xs text-on-surface hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex max-w-full items-center gap-1 bg-accent px-2 py-0.5 text-[13px] text-on-surface hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 title={uiText("Remove {value1}", { value1: String(tag) })}
               >
                 <span className="truncate">{tag}</span>
@@ -250,7 +278,7 @@ export function EntityTagsEditor({
         </div>
         <div className="space-y-2">
           <label htmlFor="entity-tag-input" className="text-sm font-medium text-on-surface">
-            {uiText("Tags to add")}
+            {uiText("Find or create tag")}
           </label>
           <Input
             id="entity-tag-input"
@@ -268,20 +296,28 @@ export function EntityTagsEditor({
           />
           {suggestions.length > 0 && (
             <div
-              className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto"
-              aria-label={uiText("Tags to add")}
+              className="max-h-60 divide-y divide-border overflow-y-auto"
+              aria-label={uiText("Find or create tag")}
             >
               {suggestions.slice(0, 30).map((tag) => (
-                <Button
-                  key={tag.id}
-                  disabled={saving || reviewed?.canEdit === false}
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  onClick={() => add(tag.name)}
-                >
-                  {tag.name}
-                </Button>
+                <div key={tag.id} className="flex items-start justify-between gap-4 py-3">
+                  <div>
+                    <p className="text-sm font-semibold">{tag.name}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {tag.model_count} {uiText("Models")}
+                    </p>
+                  </div>
+                  <Button
+                    disabled={saving || reviewed?.canEdit === false}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => add(tag.name)}
+                    aria-label={tag.name}
+                  >
+                    {uiText("Add")}
+                  </Button>
+                </div>
               ))}
             </div>
           )}
@@ -297,18 +333,6 @@ export function EntityTagsEditor({
                 {uiText("Create tag")}
               </Button>
             )}
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={close} disabled={saving}>
-            {uiText("Cancel")}
-          </Button>
-          <Button
-            type="button"
-            onClick={() => void submit()}
-            disabled={saving || reviewing || problem !== null}
-          >
-            {saving ? uiText("Saving…") : uiText("Save tags")}
-          </Button>
         </div>
       </div>
     </Modal>

@@ -1,12 +1,19 @@
 "use client";
 
+import { LibraryStatusFilters } from "@/components/library-status-filters";
+import { CollectionHeaderTags } from "@/components/collection-header-tags";
+import "./library-header.css";
+
 import { arrivingKeys, entryKeys } from "@/lib/library-arrivals";
 import {
   FOLDER_CARDS_CLASS,
+  FOLDER_ENTRANCE_MS,
   FOLDER_MOVE_CLASS,
   folderMove,
   type FolderMove,
 } from "@/lib/folder-transition";
+import { useEntranceWindow } from "@/lib/entrance-window";
+import { DURATION } from "@/lib/overlay";
 import { deleteLibraryMultipart } from "@/features/library/multipart";
 import { useLibraryNavigationReads } from "@/features/library/navigation-reads";
 import {
@@ -19,7 +26,11 @@ import { useTaxonomyCommands } from "@/features/library/taxonomy";
 import { LibraryCardSelection } from "@/components/library-card-selection";
 import { LibraryBatchRecovery } from "@/components/library-batch-recovery";
 
-import { useLibraryReadingPosition } from "@/features/library/reading-position";
+import {
+  useLibraryReadingPosition,
+  type LibraryReadingRenderer,
+} from "@/features/library/reading-position";
+import { LibraryItems } from "@/components/library-items";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { useModelOpenIntent } from "@/features/library/model-detail";
 import { useLibraryEntry, type LibraryEntry } from "@/features/library/navigation-state";
@@ -55,6 +66,13 @@ import {
 
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
 
+import {
+  consumeCollectionRename,
+  pendingCollectionRename,
+  isTypingTarget,
+  keyboardOverlayOpen,
+  modalOverlayOpen,
+} from "@/lib/keyboard-commands";
 import { uiText, type MessageKey } from "@/lib/locale";
 import { getErrorMessage, parseApiError, userMessage } from "@/lib/errors";
 import { filterValueText } from "@/lib/filter-labels";
@@ -62,8 +80,10 @@ import { filterValueText } from "@/lib/filter-labels";
 import { useUiLocale } from "@/lib/i18n";
 import { useIntentPrefetch } from "@/lib/use-intent-prefetch";
 import { useLibraryStartup } from "@/lib/library-startup-context";
+import { useNavigationShell } from "@/lib/navigation-shell";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import {
@@ -78,19 +98,31 @@ import {
   SavedViewRead,
   TagRead,
 } from "@/types";
+import { TabBar } from "@/components/ui/tabs";
+import { FavoriteSavedViewRow } from "@/components/favorite-saved-view-row";
 import { ModelCard } from "@/components/model-card";
-import { TitleEditor } from "@/components/title-editor";
+import { LibraryModelInspector } from "@/components/library-model-inspector";
+import { CollectionTitleEditor } from "@/components/collection-title-editor";
+import { CollectionOverviewCard } from "@/components/collection-overview";
+import { CollectionBreadcrumbs } from "@/components/collection-breadcrumbs";
+import { useModelDropTarget } from "@/lib/use-model-drop-target";
 import { DeferredDialog } from "@/components/deferred-dialog";
 import { lazyImport } from "@/lib/lazy-component";
 import { useModelMoves } from "@/features/library/moves";
 import { ModelMoveReview } from "@/components/model-move-review";
-import { MODEL_DND_MIME, captureModelDrag, readModelDrag, type ModelDrag } from "@/lib/model-dnd";
+import { MODEL_DND_MIME, captureModelDrag, type ModelDrag } from "@/lib/model-dnd";
 import { BatchToolbar } from "@/components/batch-toolbar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CollectionReadme } from "@/components/collection-readme";
+import { MultipartModelTagsDialog } from "@/components/multipart-model-tags-dialog";
 import { MultipartModelCard } from "@/components/multipart-model-card";
-import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { DocumentBrowser } from "@/components/document-browser";
+import { useCollectionsPane } from "@/lib/collections-pane-context";
+import {
+  LibraryCollectionsPane,
+  LibraryBreadcrumbs,
+  FavoritesSidebar,
+} from "@/components/collections-pane";
 import { FilterSidebar } from "@/components/filter-sidebar";
 import { readLibraryLocation, type LibraryViewMode } from "@/features/library/url";
 import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
@@ -101,7 +133,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalShell } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { SavedViewSelector } from "@/components/saved-view-selector";
 import { Localized } from "@/components/ui/localized";
@@ -109,8 +141,8 @@ import { translateUiText } from "@/lib/locale";
 import { useI18n } from "@/lib/i18n";
 import { useMobileFilterDrawer } from "@/lib/mobile-filter-context";
 import {
-  SlidersHorizontal,
   Grid,
+  LayoutGrid,
   List,
   FileText,
   X,
@@ -125,9 +157,10 @@ import {
   Check,
   ChevronDown,
   MoreHorizontal,
-  Boxes,
+  ListChecks,
+  SlidersHorizontal,
   ScanSearch,
-  Pencil,
+  Boxes,
 } from "lucide-react";
 import {
   listCollectionChildren,
@@ -160,11 +193,14 @@ import { Link } from "@/lib/link";
 import { timeAgo } from "@/lib/format";
 import { rememberLastCollection, readLastView, rememberLastView } from "@/lib/last-collection";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
+import {
+  LibraryCardFill,
+  LibraryCardDetailsPlaceholder,
+  LibraryPreviewPlaceholder,
+} from "@/components/library-card-placeholder";
 import { useStartupThumbnails } from "@/lib/use-startup-thumbnails";
 import { useThumbnailArrivals } from "@/lib/use-thumbnail-arrivals";
 import { cn } from "@/lib/utils";
-import { Spinner } from "@/components/ui/spinner";
-import { TabBar } from "@/components/ui/tabs";
 
 const loadUploadModal = () =>
   import("@/components/upload-modal").then((module) => ({ default: module.UploadModal }));
@@ -203,6 +239,7 @@ type LibraryItem =
 // Fill the initial viewport without projecting/mounting sixty cards at once.
 // Later pages keep the same bound and use the server cursor.
 const PAGE_SIZE = 24;
+const NO_ARRIVALS: ReadonlySet<string> = new Set();
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   {
     value: "relevance",
@@ -342,6 +379,64 @@ function SortMenu({
   );
 }
 
+interface PrinterMenuProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  value: string;
+  options: { value: string; label: string }[];
+  onSelect: (value: string) => void;
+  onIntent: () => void;
+}
+
+/** Same menu as Sort, so both toolbar choices open the same way (below, end-aligned). */
+function PrinterMenu({ open, onOpenChange, value, options, onSelect, onIntent }: PrinterMenuProps) {
+  useUiLocale();
+  const current = options.find((option) => option.value === value) ?? options[0];
+  return (
+    <DropdownMenu
+      open={open}
+      onOpenChange={onOpenChange}
+      align="end"
+      trigger={
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          data-menu-trigger
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label={uiText("Printer")}
+          onFocus={onIntent}
+          onPointerDown={onIntent}
+          onClick={() => onOpenChange(!open)}
+          className="h-8 w-40"
+        >
+          <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-left">{current?.label}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </Button>
+      }
+      contentClassName="w-52 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+    >
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            onSelect(option.value);
+            onOpenChange(false);
+          }}
+          className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${value === option.value ? "bg-accent text-accent-foreground" : ""}`}
+        >
+          <span className="min-w-0 flex-1 truncate">{option.label}</span>
+          {value === option.value && <Check className="h-3.5 w-3.5" />}
+        </button>
+      ))}
+    </DropdownMenu>
+  );
+}
+
 interface DisplayMenuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -462,7 +557,7 @@ function canWriteCollection(collection: CollectionRead | null | undefined): bool
 }
 
 type LibraryRefreshState = { entry: LibraryEntry } & (
-  | { status: "pending" }
+  | { status: "pending"; feedback: "visible" | "silent" }
   | { status: "failed" | "denied"; error: string }
 );
 
@@ -472,14 +567,24 @@ export interface BrowserInitialData {
   printers: PrinterRead[];
 }
 
+type InspectorIntent = { id: number; open: boolean };
+const libraryInspectorIntents = new Map<string, InspectorIntent>();
+
 export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   useUiLocale();
   const { locale, t } = useI18n();
   const ui = useCallback((value: string) => translateUiText(locale, value), [locale]);
   const router = useRouter();
+  const pane = useCollectionsPane();
+  const { savedViewsHost, setSavedViewsAvailable } = useNavigationShell();
   const searchParams = useSearchParams();
   const auth = useRequireAuth();
   const { user, refresh: refreshAuth } = useAuth();
+  useLayoutEffect(() => {
+    if (!savedViewsHost || !auth.isAuthenticated) return;
+    setSavedViewsAvailable(true);
+    return () => setSavedViewsAvailable(false);
+  }, [savedViewsHost, auth.isAuthenticated, setSavedViewsAvailable]);
   const {
     createCollection,
     moveCollection,
@@ -489,6 +594,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   } = useTaxonomyCommands();
   const startup = useLibraryStartup();
   const settleStartup = startup.settle;
+  const requestStartup = startup.request;
   const filtersEnabled = startup.canLoad("filters");
   const savedViewsEnabled = startup.canLoad("saved-views");
   // Shared taxonomy facets from the TanStack Query cache: one cache entry shared
@@ -534,9 +640,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   } | null>(null);
   const activeSavedViewId =
     savedViewSelection?.session === savedViewsOwner.session ? savedViewSelection.id : null;
-  function setActiveSavedViewId(id: number | null) {
-    setSavedViewSelection(id === null ? null : { session: savedViewsOwner.session, id });
-  }
+  const setActiveSavedViewId = useCallback(
+    (id: number | null) => {
+      setSavedViewSelection(id === null ? null : { session: savedViewsOwner.session, id });
+    },
+    [savedViewsOwner.session],
+  );
   const [saveViewOpen, setSaveViewOpen] = useState(false);
   const [saveViewName, setSaveViewName] = useState("");
   const [saveViewBusy, setSaveViewBusy] = useState(false);
@@ -572,15 +681,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [initialLibrarySection] = useState<"models" | "docs">(() =>
     readLastView() === "docs" ? "docs" : "models",
   );
-  const libraryLocation = useMemo(
-    () =>
-      readLibraryLocation(
-        new URLSearchParams(filterQuery),
-        initialLibraryPreferences,
-        initialLibrarySection,
-      ),
-    [filterQuery, initialLibraryPreferences, initialLibrarySection],
-  );
+  const libraryLocation = useMemo(() => {
+    const params = new URLSearchParams(filterQuery);
+    if (params.get("favorites") === "true") params.set("v", "models");
+    return readLibraryLocation(params, initialLibraryPreferences, initialLibrarySection);
+  }, [filterQuery, initialLibraryPreferences, initialLibrarySection]);
   const { view: libraryView, sort: sortKey, section: docView } = libraryLocation;
   const canViewPrinters = !!user?.is_superuser;
   const libraryFilters = useMemo(
@@ -625,9 +730,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [sortOpen, setSortOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
   const [desktopSortOpen, setDesktopSortOpen] = useState(false);
-  const [desktopDisplayOpen, setDesktopDisplayOpen] = useState(false);
+  const [printerMenuOpen, setPrinterMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const toolbarMenuOpener = useRef<HTMLElement | null>(null);
   const [filtersExpanded, setFiltersExpanded] = useState<boolean | null>(null);
+  const [favoritesPanel, setFavoritesPanel] = useState<"favorites" | "views">("favorites");
   const [compact, setCompact] = useState(
     () => readVaultPreference("ps-vault-density") === "compact",
   );
@@ -637,15 +744,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [tagTarget, setTagTarget] = useState<ModelListItem | null>(null);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [tagDialogSession, setTagDialogSession] = useState(0);
-  // `?upload=1` is a deep link into the upload dialog. Open it on the render that
-  // first sees the param; the effect below strips the param again so a reload (or
-  // a later deep link) behaves the same way.
+  // The URL owns a deep-linked upload until the dialog is dismissed. Permission
+  // still has to resolve before it can become visible to a member.
   const uploadRequested = searchParams.get("upload") === "1";
-  const [uploadDeepLinkSeen, setUploadDeepLinkSeen] = useState(false);
-  if (uploadDeepLinkSeen !== uploadRequested) {
-    setUploadDeepLinkSeen(uploadRequested);
-    if (uploadRequested) setUploadOpen(true);
-  }
   const [dropPreload, setDropPreload] = useState<{
     files: File[];
     items?: BulkItem[];
@@ -727,7 +828,19 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
-  const { open: filterDrawerOpen, openDrawer, closeDrawer } = useMobileFilterDrawer();
+  const createCollectionRequested = searchParams.get("newCollection") === "1";
+  const [createCollectionSeen, setCreateCollectionSeen] = useState(false);
+  if (createCollectionSeen !== createCollectionRequested) {
+    setCreateCollectionSeen(createCollectionRequested);
+    if (createCollectionRequested) setIsCreatingCollection(true);
+  }
+  useEffect(() => {
+    if (!createCollectionRequested) return;
+    const params = new URLSearchParams(searchParams);
+    params.delete("newCollection");
+    router.replace(`/?${params}`);
+  }, [createCollectionRequested, searchParams, router]);
+  const { open: filterDrawerOpen, closeDrawer } = useMobileFilterDrawer();
 
   // Collection selection lives in the URL (`?c=<path>`) so it resets when the
   // user navigates away (e.g. to Settings) and clicks "Vault" again — that link
@@ -747,6 +860,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     rememberLastView(docView);
   }, [docView]);
 
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectedMultipartRows, setSelectedMultipartRows] = useState<
+    Map<number, MultipartModelListItem>
+  >(new Map());
   const startNavigationReads = useLibraryNavigationReads();
   function handleCollectionChange(path: string | null, id: number | null = null) {
     if (
@@ -755,12 +872,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       (id === null || id === selectedCollectionId)
     )
       return;
-    startNavigationReads(path, {
-      ...folderModelFilters(path),
-      view: libraryView,
-      limit: PAGE_SIZE,
-      sort: sortKey,
-    });
+    startNavigationReads(
+      path,
+      {
+        ...folderModelFilters(path),
+        view: libraryView,
+        limit: PAGE_SIZE,
+        sort: sortKey,
+      },
+      id,
+    );
     // An already empty selection must not render the departing grid urgently
     // before Router can commit the destination and start its critical reads.
     setSelectedIds((current) => (current.size === 0 ? current : new Set()));
@@ -783,14 +904,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     params.set("type", view);
     router.replace(params.size ? `/?${params}` : "/");
   }
-
-  useEffect(() => {
-    if (!uploadRequested) return;
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("upload");
-    const qs = params.toString();
-    router.replace(qs ? `/?${qs}` : "/");
-  }, [uploadRequested, searchParams, router]);
 
   const query = searchParams.get("q") ?? "";
   const searchQuery = currentFilters.q ?? undefined;
@@ -827,18 +940,34 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     { enabled: filtersEnabled },
   );
 
-  function writeFilterUrl(filters: SavedViewRead["filters"]) {
-    const params = writeLibraryFilters(filters, canViewPrinters);
-    router.replace(`/?${params}`);
-  }
+  const writeFilterUrl = useCallback(
+    (filters: SavedViewRead["filters"]) => {
+      const params = writeLibraryFilters(filters, canViewPrinters);
+      router.replace(`/?${params}`);
+    },
+    [canViewPrinters, router],
+  );
 
-  function applySavedView(view: SavedViewRead) {
-    setFiltersExpanded(null);
-    setActiveSavedViewId(view.id);
-    setSelectedIds(new Set());
-    setSelectedMultipartRows(new Map());
-    writeFilterUrl(view.filters);
-  }
+  const applySavedView = useCallback(
+    (view: SavedViewRead) => {
+      setFiltersExpanded(null);
+      setActiveSavedViewId(view.id);
+      setSelectedIds(new Set());
+      setSelectedMultipartRows(new Map());
+      writeFilterUrl(view.filters);
+    },
+    [setActiveSavedViewId, setSelectedIds, setSelectedMultipartRows, writeFilterUrl],
+  );
+
+  useEffect(() => {
+    function selectFromPane(event: Event) {
+      if (!(event instanceof CustomEvent) || !Number.isSafeInteger(event.detail)) return;
+      const view = savedViews.find((item) => item.id === event.detail);
+      if (view) applySavedView(view);
+    }
+    window.addEventListener("printstash:select-saved-view", selectFromPane);
+    return () => window.removeEventListener("printstash:select-saved-view", selectFromPane);
+  }, [savedViews, applySavedView]);
 
   async function saveCurrentView() {
     const name = saveViewName.trim();
@@ -979,6 +1108,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     return {
       entry,
       items: orderedItems,
+      authorizationRevision: modelQuery.data?.pages[0]?.authorization_revision,
       modelPages: modelQuery.data?.pages.length ?? 0,
       folderPages: foldersHidden ? 0 : (folderPages.data?.pages.length ?? 0),
       collections: foldersHidden
@@ -1020,19 +1150,28 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       ? null
       : (nextSnapshot ?? settledSnapshot);
   const displayedCollection = snapshot?.collection ?? null;
-  // `null` until the first snapshot lands: opening a folder by URL is arriving,
-  // not moving, so the first settled folder must not animate.
+  // Loading fills the existing frame; navigation between populated folders moves cards.
   const displayedPath = snapshot === null ? null : (displayedCollection?.path ?? "");
   const [folderEntrance, setFolderEntrance] = useState<{
     path: string | null;
     move: FolderMove | null;
-  }>({ path: displayedPath, move: null });
+    fromPlaceholder: boolean;
+  }>({ path: displayedPath, move: displayedPath === null ? null : "jump", fromPlaceholder: false });
   if (displayedPath !== null && folderEntrance.path !== displayedPath) {
     setFolderEntrance({
       path: displayedPath,
-      move: folderEntrance.path === null ? null : folderMove(folderEntrance.path, displayedPath),
+      move: folderEntrance.path === null ? "jump" : folderMove(folderEntrance.path, displayedPath),
+      fromPlaceholder: folderEntrance.path === null,
     });
   }
+  const folderEntering = useEntranceWindow(folderEntrance, folderEntrance.move, FOLDER_ENTRANCE_MS);
+  const fillingCards = folderEntrance.fromPlaceholder && folderEntering !== null;
+  const loadingCardRects = useRef<readonly DOMRect[]>([]);
+  const rememberLoadingCards = useCallback((rects: readonly DOMRect[]) => {
+    loadingCardRects.current = rects;
+  }, []);
+  const folderCardsClass =
+    folderEntering && !fillingCards ? FOLDER_CARDS_CLASS[folderEntering] : undefined;
   const onAuthorityRetired = useCallback(() => {
     const session = getSessionVersion();
     void refreshAuth().catch((error) => {
@@ -1083,14 +1222,47 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setCollectionRenameBusy(false);
   }
 
-  function openCollectionRename() {
+  const openCollectionRename = useCallback(() => {
     if (!canRenameCollection || !displayedCollection || collectionRenameBusy || collectionRename) {
       return;
     }
     setCollectionRename({ entry, collection: displayedCollection });
     setCollectionRenameName(displayedCollection.name);
     setCollectionRenameBusy(false);
-  }
+  }, [
+    canRenameCollection,
+    displayedCollection,
+    collectionRenameBusy,
+    collectionRename,
+    entry,
+    setCollectionRename,
+    setCollectionRenameName,
+  ]);
+  useEffect(() => {
+    function consumePendingRename() {
+      if (!canRenameCollection || !displayedCollection || collectionRenameBusy || collectionRename)
+        return;
+      if (
+        pendingCollectionRename()?.path === displayedCollection.path &&
+        consumeCollectionRename(displayedCollection.path)
+      )
+        openCollectionRename();
+    }
+    function renameRequested(event: Event) {
+      if (!(event instanceof CustomEvent) || event.detail !== displayedCollection?.path) return;
+      if (pendingCollectionRename()) consumePendingRename();
+      else openCollectionRename();
+    }
+    consumePendingRename();
+    window.addEventListener("printstash:rename-collection", renameRequested);
+    return () => window.removeEventListener("printstash:rename-collection", renameRequested);
+  }, [
+    canRenameCollection,
+    displayedCollection,
+    collectionRenameBusy,
+    collectionRename,
+    openCollectionRename,
+  ]);
 
   async function saveCollectionRename() {
     const target = collectionRename;
@@ -1135,10 +1307,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const loadingMore = modelQuery.isFetchingNextPage || !browseReady;
   const hasMore = snapshot?.hasMore ?? false;
 
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [selectedMultipartRows, setSelectedMultipartRows] = useState<
-    Map<number, MultipartModelListItem>
-  >(new Map());
   const selectionEntry = useRef<LibraryEntry | null>(entry);
   useLayoutEffect(() => {
     selectionEntry.current = entry;
@@ -1146,9 +1314,19 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       selectionEntry.current = null;
     };
   }, [entry]);
-  useLayoutEffect(() => {
-    setSelectedMultipartRows((current) => (current.size === 0 ? current : new Map()));
-  }, [libraryView, selectedCollection, selectedCollectionId, docView]);
+  const multipartSelectionIdentity = JSON.stringify([
+    libraryView,
+    selectedCollection,
+    selectedCollectionId,
+    docView,
+  ]);
+  const [multipartSelectionScope, setMultipartSelectionScope] = useState(
+    multipartSelectionIdentity,
+  );
+  if (multipartSelectionScope !== multipartSelectionIdentity) {
+    setMultipartSelectionScope(multipartSelectionIdentity);
+    if (selectedMultipartRows.size > 0) setSelectedMultipartRows(new Map());
+  }
   // Selected folders are kept as the rows they were picked from: they may leave
   // the view (another folder opened) and still need their names and paths.
   const [selectedCollectionRows, setSelectedCollectionRows] = useState<
@@ -1162,27 +1340,58 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     selectedMultipartRows.size > 0;
 
   // What turned up since this view was last read eases in once; everything
-  // already on screen keeps its place. A different folder starts a new reading.
+  // already on screen keeps its place. A different folder, filter or sort
+  // starts a new reading: its results settle in together instead.
   const shownKeys = entryKeys(visibleCollections, libraryItems);
+  const displayedHref = snapshot?.entry.href ?? null;
   const [arrival, setArrival] = useState<{
-    path: string | null;
+    href: string | null;
     keys: ReadonlySet<string>;
-    arriving: ReadonlySet<string>;
-  }>({ path: displayedPath, keys: new Set(shownKeys), arriving: new Set() });
-  if (displayedPath !== null) {
-    if (arrival.path !== displayedPath) {
-      setArrival({ path: displayedPath, keys: new Set(shownKeys), arriving: new Set() });
+    arriving: ReadonlySet<string> | null;
+  }>({ href: displayedHref, keys: new Set(shownKeys), arriving: null });
+  if (displayedHref !== null) {
+    if (arrival.href !== displayedHref) {
+      setArrival({ href: displayedHref, keys: new Set(shownKeys), arriving: null });
     } else if (
       shownKeys.length !== arrival.keys.size ||
       shownKeys.some((key) => !arrival.keys.has(key))
     ) {
+      const arriving = arrivingKeys(arrival.keys, shownKeys);
       setArrival({
-        path: displayedPath,
+        href: displayedHref,
         keys: new Set(shownKeys),
-        arriving: arrivingKeys(arrival.keys, shownKeys),
+        arriving: arriving.size > 0 ? arriving : null,
       });
     }
   }
+  // Only for the arrival itself: a card that later remounts (scrolled back
+  // into view, or a reflowed row) keeps its place.
+  const arriving = useEntranceWindow(arrival, arrival.arriving, DURATION.fast) ?? NO_ARRIVALS;
+
+  // Filter, sort, view and pane-width changes retain their existing results settle.
+  const resultsLayout = `${viewMode}:${pane?.open ?? true}`;
+  const [resultsView, setResultsView] = useState<{
+    href: string | null;
+    path: string | null;
+    layout: string;
+    settles: boolean;
+  }>({ href: displayedHref, path: displayedPath, layout: resultsLayout, settles: false });
+  if (
+    displayedHref !== null &&
+    (resultsView.href !== displayedHref || resultsView.layout !== resultsLayout)
+  ) {
+    setResultsView({
+      href: displayedHref,
+      path: displayedPath,
+      layout: resultsLayout,
+      settles: resultsView.href !== null && resultsView.path === displayedPath,
+    });
+  }
+  const resultsSettling = useEntranceWindow(
+    resultsView,
+    resultsView.settles ? "results-settle" : null,
+    DURATION.fast,
+  );
 
   // A change to the library applies by itself while the view is a single page:
   // new Models ease in where they belong and a change elsewhere only moves the
@@ -1195,6 +1404,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     !selectMode &&
     (snapshot?.modelPages ?? 0) <= 1 &&
     (snapshot?.folderPages ?? 0) <= 1;
+  const showRefreshNotice =
+    refreshRequired &&
+    !settlesByItself &&
+    !(currentRefresh?.status === "pending" && currentRefresh.feedback === "silent");
   const lastSettled = useRef(0);
   // The timer must survive re-renders, so it reads the latest refresh through a
   // ref instead of depending on an object that is new on every render.
@@ -1202,7 +1415,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   useLayoutEffect(() => {
     settleNow.current = () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.outliner });
-      void authority.refresh();
+      void reading.refresh(() => refresh("silent"));
     };
   });
   useEffect(() => {
@@ -1219,8 +1432,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (browseReady) settleStartup("cards", "ready");
     else if (error !== null) settleStartup("cards", "failed");
   }, [browseReady, error, settleStartup]);
+  useEffect(() => {
+    if (!favoritesOnly || pane?.mode === "collections") return;
+    settleStartup("tree", browseReady ? "ready" : "pending");
+    return () => settleStartup("tree", "idle");
+  }, [favoritesOnly, pane?.mode, browseReady, settleStartup]);
   const startupContent = useRef<HTMLElement>(null);
   const listContent = useRef<HTMLDivElement>(null);
+  const readingRenderers = useRef(new Map<string, LibraryReadingRenderer>());
   const reading = useLibraryReadingPosition(
     snapshot?.entry,
     viewMode,
@@ -1244,6 +1463,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         next: () => void folderPages.fetchNextPage({ cancelRefetch: false }),
       },
     },
+    readingRenderers,
   );
   useStartupThumbnails(startupContent, browseReady, libraryItems.length > 0);
   const thumbnails = useLibraryThumbnails(
@@ -1257,7 +1477,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (hasMore && !loadingMore && !refreshRequired && !authority.authorizationChanged)
       void modelQuery.loadMore();
   }
-  async function refresh() {
+  async function refresh(feedback: "visible" | "silent" = "visible") {
     const session = getSessionVersion();
     if (
       entry.session !== session ||
@@ -1274,7 +1494,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     for (const queryKey of [queryKeys.models, queryKeys.collections])
       void queryClient.invalidateQueries({ queryKey, refetchType: "none" });
     void queryClient.invalidateQueries({ queryKey: queryKeys.vaultStats });
-    setRefreshState({ entry, status: "pending" });
+    setRefreshState({ entry, status: "pending", feedback });
     let lookupPending = selectedCollection !== null;
     try {
       const previousFolders =
@@ -1359,9 +1579,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function toggleStructuredFilters() {
     startup.request("filters");
-    setFiltersExpanded(
-      (current) => !(current ?? activeFilterItems.length > Number(!!query.trim())),
-    );
+    setFiltersExpanded((current) => !current);
   }
 
   const [batchBusy, setBatchBusy] = useState(false);
@@ -1384,6 +1602,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const lastSelectedModelId = useRef<number | null>(null);
   const selectedModelSnapshot = useRef<Map<number, ModelListItem>>(new Map());
   const sortedModels = visibleModels;
+  const [multipartTagTarget, setMultipartTagTarget] = useState<{
+    item: MultipartModelListItem;
+    intent: number;
+  } | null>(null);
+  const openMultipartTagEditor = useCallback(
+    (item: MultipartModelListItem) => {
+      requestStartup("filters");
+      setMultipartTagTarget((previous) => ({ item, intent: (previous?.intent ?? 0) + 1 }));
+    },
+    [requestStartup],
+  );
   const openTagEditor = useCallback(
     (model: ModelListItem) => {
       setTagTarget(model);
@@ -1455,7 +1684,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setKeyboardSelection(false);
     lastSelectedMultipartId.current = null;
     lastSelectedModelId.current = null;
-  }, []);
+  }, [setSelectedIds, setSelectedMultipartRows, setSelectedCollectionRows, setKeyboardSelection]);
 
   function selectAllVisible() {
     setSelectedMultipartRows(new Map(visibleMultipartModels.map((item) => [item.id, item])));
@@ -1521,23 +1750,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   );
   const selectionCount =
     selectedIds.size + selectedCollectionRows.size + selectedMultipartRows.size;
-
-  useEffect(() => {
-    function onShortcut(event: KeyboardEvent) {
-      const typing =
-        event.target instanceof HTMLElement &&
-        event.target.matches("input, textarea, select, [contenteditable=true]");
-      if (event.key === "/" && !typing) {
-        event.preventDefault();
-        document.querySelector<HTMLInputElement>("[data-model-search]")?.focus();
-      } else if (event.key.toLowerCase() === "s" && !typing && auth.isAuthenticated) {
-        event.preventDefault();
-        setKeyboardSelection(true);
-      } else if (event.key === "Escape" && selectMode && !typing) clearSelection();
-    }
-    window.addEventListener("keydown", onShortcut);
-    return () => window.removeEventListener("keydown", onShortcut);
-  }, [auth.isAuthenticated, clearSelection, selectMode]);
 
   async function runCollectionBatch(
     success: MessageKey,
@@ -1837,8 +2049,145 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     searchParams.has("uploaded_before") ||
     historyKeys.some((key) => searchParams.has(key));
   const displayCount = libraryItems.length;
+  const collectionOverview =
+    !favoritesOnly &&
+    docView === "models" &&
+    visibleCollections.length > 0 &&
+    displayCount === 0 &&
+    !hasMore &&
+    !hasActiveFilters;
   // Links belong to the displayed result even while another destination loads.
   const currentLibraryHref = snapshot?.entry.href ?? canonicalLibraryHref;
+  const inspectorScope = `${entry.session}:${entry.key}:${currentLibraryHref}`;
+  const [inspectorState, setInspectorState] = useState<{
+    scope: string;
+    intent: InspectorIntent;
+  } | null>(null);
+  const inspectorIntent =
+    inspectorState?.scope === inspectorScope
+      ? inspectorState.intent
+      : libraryInspectorIntents.get(inspectorScope);
+  // A background read retains this entry's displayed snapshot and controls.
+  // Navigation and authorization changes still retire the previous inspector.
+  const inspectorAvailable =
+    snapshot?.entry === entry &&
+    docView === "models" &&
+    !favoritesOnly &&
+    !authority.authorizationChanged &&
+    visibleModels.length > 0;
+  const inspectorOpen = inspectorAvailable && !!inspectorIntent?.open;
+  const inspectorOpener = useRef<HTMLElement | null>(null);
+  const setInspector = useCallback(
+    (intent: InspectorIntent) => {
+      libraryInspectorIntents.set(inspectorScope, intent);
+      while (libraryInspectorIntents.size > 20)
+        libraryInspectorIntents.delete(libraryInspectorIntents.keys().next().value!);
+      setInspectorState({ scope: inspectorScope, intent });
+    },
+    [inspectorScope],
+  );
+  const inspectModel = useCallback(
+    (id: number, opener: HTMLElement) => {
+      inspectorOpener.current = opener;
+      setInspector({ id, open: true });
+    },
+    [setInspector],
+  );
+  const closeInspector = useCallback(() => {
+    if (inspectorIntent) setInspector({ ...inspectorIntent, open: false });
+    requestAnimationFrame(() => {
+      const opener = inspectorOpener.current;
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+      else startupContent.current?.focus({ preventScroll: true });
+    });
+  }, [inspectorIntent, setInspector]);
+  const toggleInspector = useCallback(() => {
+    if (!inspectorAvailable) return;
+    if (inspectorOpen) closeInspector();
+    else {
+      const id = inspectorIntent?.id ?? visibleModels[0]?.id;
+      if (id !== undefined) setInspector({ id, open: true });
+    }
+  }, [
+    inspectorAvailable,
+    inspectorOpen,
+    inspectorIntent,
+    visibleModels,
+    closeInspector,
+    setInspector,
+  ]);
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("printstash:library-inspector-state", {
+        detail: { available: inspectorAvailable, open: inspectorOpen },
+      }),
+    );
+  }, [inspectorAvailable, inspectorOpen]);
+  useEffect(() => {
+    window.addEventListener("printstash:toggle-library-inspector", toggleInspector);
+    return () => window.removeEventListener("printstash:toggle-library-inspector", toggleInspector);
+  }, [toggleInspector]);
+  useEffect(
+    () => () => {
+      window.dispatchEvent(
+        new CustomEvent("printstash:library-inspector-state", {
+          detail: { available: false, open: false },
+        }),
+      );
+    },
+    [],
+  );
+  useEffect(() => {
+    function onShortcut(event: KeyboardEvent) {
+      if (
+        event.repeat ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.getModifierState("AltGraph") ||
+        modalOverlayOpen()
+      )
+        return;
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.altKey &&
+        !event.shiftKey &&
+        event.code === "KeyB"
+      ) {
+        if (inspectorAvailable) {
+          event.preventDefault();
+          toggleInspector();
+        }
+        return;
+      }
+      if (keyboardOverlayOpen() || isTypingTarget(event.target)) return;
+      if (
+        event.key.toLowerCase() === "s" &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        auth.isAuthenticated
+      ) {
+        event.preventDefault();
+        setKeyboardSelection(true);
+      } else if (event.key === "Escape" && inspectorOpen) {
+        event.preventDefault();
+        closeInspector();
+      } else if (event.key === "Escape" && selectMode) {
+        event.preventDefault();
+        clearSelection();
+      }
+    }
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  }, [
+    auth.isAuthenticated,
+    clearSelection,
+    selectMode,
+    inspectorAvailable,
+    inspectorOpen,
+    toggleInspector,
+    closeInspector,
+  ]);
   // While searching, the grid is a global result list, not a folder view: show
   // only collections whose name matches the query (anywhere in the tree), to
   // mirror the matching models. Without a query we fall back to the normal
@@ -1884,7 +2233,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     enabled: auth.isAuthenticated && !user?.is_superuser,
   });
   const hasWritableCollection =
-    !!user?.is_superuser || (writableProbe.data?.pages[0]?.items.length ?? 0) > 0;
+    !!user?.is_superuser ||
+    (!writableProbe.isError && (writableProbe.data?.pages[0]?.items.length ?? 0) > 0);
   const canUploadToVault =
     auth.isAuthenticated &&
     (user?.is_superuser || canWriteCollection(selectedCollectionRow) || hasWritableCollection);
@@ -1894,6 +2244,39 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       : !!(user?.is_superuser || canWriteCollection(selectedCollectionRow));
   const uploadDefaultCollection =
     user?.is_superuser || canWriteCollection(selectedCollectionRow) ? selectedCollection : null;
+  const showUpload = uploadOpen || (uploadRequested && canUploadToVault);
+  function closeUpload() {
+    setUploadOpen(false);
+    if (uploadRequested) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("upload");
+      router.replace(params.size ? `/?${params}` : "/");
+    }
+  }
+  useEffect(() => {
+    if (
+      !uploadRequested ||
+      !auth.isAuthenticated ||
+      canUploadToVault ||
+      (!user?.is_superuser && writableProbe.isPending && !canWriteCollection(selectedCollectionRow))
+    )
+      return;
+    if (writableProbe.isError) toast.error(writableProbe.error);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("upload");
+    router.replace(params.size ? `/?${params}` : "/");
+  }, [
+    uploadRequested,
+    auth.isAuthenticated,
+    user?.is_superuser,
+    writableProbe.isPending,
+    writableProbe.isError,
+    writableProbe.error,
+    selectedCollectionRow,
+    canUploadToVault,
+    searchParams,
+    router,
+  ]);
 
   async function handleCreateCollection() {
     const name = newCollectionName.trim();
@@ -1955,12 +2338,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
 
   async function saveCollectionTags(collection: CollectionRead, nextTags: string[]) {
+    const session = getSessionVersion();
     try {
       // The write invalidates every loaded collection query (request.ts).
-      await replaceCollectionTags(collection.id, nextTags);
+      const confirmed = await replaceCollectionTags(collection.id, nextTags);
       toast.success(uiText("Tags updated for {value1}", { value1: String(collection.name) }));
+      return confirmed.tags;
     } catch (error) {
-      toast.error(error);
+      if (session === getSessionVersion()) toast.error(error);
       throw error;
     }
   }
@@ -2089,6 +2474,57 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     }
     return items;
   })();
+  const emptyFavorites =
+    favoritesOnly && selectedCollection === null && activeFilterItems.length === 1;
+
+  const savedViewControl = (rail = savedViewsHost !== null) => (
+    <SavedViewSelector
+      key={savedViewsOwner.session}
+      railTrigger={rail}
+      readState={savedViewReadState}
+      views={savedViews}
+      activeId={activeSavedViewId}
+      modified={savedViewModified}
+      onSelect={applySavedView}
+      onCreate={openSaveView}
+      onUpdate={(view) =>
+        manageSavedView(
+          {
+            kind: "update",
+            id: view.id,
+            payload: { filters: currentFilters },
+          },
+          "savedView.updateSuccess",
+        )
+      }
+      onRename={(view, name) =>
+        manageSavedView(
+          { kind: "update", id: view.id, payload: { name } },
+          "savedView.renameSuccess",
+        )
+      }
+      onDuplicate={(view) =>
+        manageSavedView(
+          {
+            kind: "create",
+            name: duplicateViewName(view.name),
+            filters: effectiveLibraryView(view.filters, canViewPrinters),
+          },
+          "savedView.duplicateSuccess",
+        )
+      }
+      onDelete={(view) =>
+        manageSavedView({ kind: "delete", id: view.id }, "savedView.deleteSuccess")
+      }
+      align="start"
+      triggerClassName={
+        rail
+          ? "h-10 w-10 max-w-none justify-center p-0 text-muted-foreground hover:text-foreground"
+          : "h-8 w-full max-w-none justify-start px-3 text-sm"
+      }
+      triggerVariant="ghost"
+    />
+  );
 
   if (authority.authorizationChanged || thumbnails.authorizationChanged)
     return (
@@ -2101,11 +2537,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     <div
       role="group"
       aria-label={t("vault.libraryTools")}
-      className="order-3 flex basis-full flex-wrap items-center gap-2 @3xl/library:order-2 @3xl/library:basis-auto"
+      className="order-3 flex basis-full flex-wrap items-center gap-2 @3xl/library:order-2 @3xl/library:basis-auto @3xl/library:border-l @3xl/library:border-border @3xl/library:pl-3"
     >
-      <Button variant="outline" size="xs" className="h-10 @3xl/library:h-8" asChild>
+      <Button variant="ghost" size="xs" className="h-10 @3xl/library:h-8" asChild>
         <Link href="/library/similar">
-          <ScanSearch className="h-4 w-4 shrink-0" aria-hidden />
+          <ScanSearch className="h-3.5 w-3.5 shrink-0" aria-hidden />
           {t("similarity.title")}
         </Link>
       </Button>
@@ -2121,10 +2557,342 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         }
         onClick={handleOpenCreateCollection}
       >
-        <Plus className="h-4 w-4 shrink-0" aria-hidden />
+        <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
         {uiText("New collection")}
       </Button>
+      {auth.isAuthenticated && (
+        <Button
+          variant="ghost"
+          size="xs"
+          className="h-10 aria-pressed:bg-accent aria-pressed:text-accent-foreground @3xl/library:h-8"
+          aria-pressed={selectMode}
+          onClick={() => (selectMode ? clearSelection() : setKeyboardSelection(true))}
+        >
+          <ListChecks className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          {uiText("Select")}
+        </Button>
+      )}
     </div>
+  );
+
+  const libraryMoreActions = (
+    <>
+      <Button
+        variant="ghost"
+        role="menuitem"
+        className="w-full justify-start"
+        onClick={() => {
+          setMoreOpen(false);
+          const params = new URLSearchParams(searchParams.toString());
+          params.set("v", "docs");
+          router.replace(`/?${params}`);
+        }}
+      >
+        {t("vault.documents")}
+      </Button>
+      {docView === "models" && (
+        <Button
+          variant="ghost"
+          role="menuitem"
+          className="w-full justify-start"
+          disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
+          onClick={() => {
+            setMoreOpen(false);
+            setMultipartCreateOpen(true);
+          }}
+        >
+          <Plus className="h-4 w-4" aria-hidden />
+          {t("multipart.new")}
+        </Button>
+      )}
+      {auth.isAuthenticated && (
+        <>
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={favoritesOnly}
+            onClick={() => {
+              toggleFavorites();
+              setMoreOpen(false);
+            }}
+            className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${favoritesOnly ? "bg-accent text-accent-foreground" : ""}`}
+          >
+            <Star className={`h-4 w-4 ${favoritesOnly ? "fill-current" : ""}`} />
+            <span className="flex-1">{uiText("Favorites")}</span>
+            {favoritesOnly && <Check className="h-3.5 w-3.5" />}
+          </button>
+          <SavedViewSelector
+            key={savedViewsOwner.session}
+            readState={savedViewReadState}
+            views={savedViews}
+            activeId={activeSavedViewId}
+            modified={savedViewModified}
+            onSelect={(view) => {
+              applySavedView(view);
+              setMoreOpen(false);
+            }}
+            onCreate={() => {
+              setMoreOpen(false);
+              openSaveView();
+            }}
+            onUpdate={(view) =>
+              manageSavedView(
+                {
+                  kind: "update",
+                  id: view.id,
+                  payload: { filters: currentFilters },
+                },
+                "savedView.updateSuccess",
+              )
+            }
+            onRename={(view, name) =>
+              manageSavedView(
+                { kind: "update", id: view.id, payload: { name } },
+                "savedView.renameSuccess",
+              )
+            }
+            onDuplicate={(view) =>
+              manageSavedView(
+                {
+                  kind: "create",
+                  name: duplicateViewName(view.name),
+                  filters: effectiveLibraryView(view.filters, canViewPrinters),
+                },
+                "savedView.duplicateSuccess",
+              )
+            }
+            onDelete={(view) =>
+              manageSavedView({ kind: "delete", id: view.id }, "savedView.deleteSuccess")
+            }
+            triggerClassName="max-w-none w-full justify-start px-2.5 py-2 text-sm"
+            triggerRole="menuitem"
+            triggerSize="sm"
+            triggerVariant="ghost"
+          />
+        </>
+      )}
+      <DisplayMenu
+        open={displayOpen}
+        onOpenChange={setDisplayOpen}
+        viewMode={viewMode}
+        compact={compact}
+        onSelectMode={selectViewMode}
+        onSelectDensity={selectDensity}
+        labelFor={ui}
+        triggerSize="sm"
+        triggerVariant="ghost"
+        triggerRole="menuitem"
+        triggerClassName="w-full justify-start"
+        onSelectComplete={() => setMoreOpen(false)}
+      />
+    </>
+  );
+
+  const libraryToolbar = collectionOverview ? (
+    <div className="collection-overview-toolbar flex flex-wrap items-center justify-between gap-4">
+      <div className="min-w-0">
+        <h2 className="text-base font-semibold">{uiText("library.collectionOverview.title")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {uiText("library.collectionOverview.help")}
+        </p>
+      </div>
+      <div className="collection-overview-actions flex flex-wrap items-center gap-2">
+        <Button
+          variant="ghost"
+          size="xs"
+          className="h-9 aria-expanded:bg-accent aria-expanded:text-accent-foreground"
+          onClick={toggleStructuredFilters}
+          aria-expanded={!!filtersExpanded}
+          aria-controls="library-filter-panel"
+        >
+          {uiText("Filters")}
+        </Button>
+        {libraryActions}
+        <DropdownMenu
+          open={moreOpen}
+          onOpenChange={setMoreOpen}
+          align="end"
+          portal
+          trigger={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="h-9 w-9"
+              aria-label={t("nav.more")}
+              aria-haspopup="menu"
+              aria-expanded={moreOpen}
+              onClick={(event) => {
+                toolbarMenuOpener.current = event.currentTarget;
+                setMoreOpen(!moreOpen);
+              }}
+            >
+              <MoreHorizontal className="h-4 w-4" aria-hidden />
+            </Button>
+          }
+          contentClassName="w-64 border border-border bg-popover p-1 shadow-lg"
+        >
+          {libraryMoreActions}
+        </DropdownMenu>
+      </div>
+    </div>
+  ) : (
+    <DropdownMenu
+      open={moreOpen}
+      returnFocusRef={toolbarMenuOpener}
+      onOpenChange={setMoreOpen}
+      align="end"
+      contentClassName="w-64 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+      trigger={
+        <div
+          onContextMenu={(event) => {
+            event.preventDefault();
+            toolbarMenuOpener.current =
+              document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            setMoreOpen(true);
+          }}
+          onKeyDown={(event) => {
+            if (event.shiftKey && event.key === "F10") {
+              event.preventDefault();
+              toolbarMenuOpener.current = event.target instanceof HTMLElement ? event.target : null;
+              setMoreOpen(true);
+            }
+          }}
+          className="library-model-toolbar flex min-w-0 flex-wrap items-center gap-2"
+        >
+          <h2 className="mr-2 w-full shrink-0 text-base font-semibold @3xl/library:w-auto">
+            {t("vault.models")}
+          </h2>
+          {docView === "models" && (
+            <LibraryStatusFilters
+              value={structured.revision_status}
+              counts={facetQuery.data?.revision_status}
+              total={displayCount}
+              onChange={(value) => setStructuredFilter("revision_status", value)}
+              onIntent={() => startup.request("filters")}
+            />
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={toggleStructuredFilters}
+            className="order-2 h-10 min-w-0 flex-1 px-2 md:hidden"
+          >
+            <span className="min-w-0 truncate">{uiText("Filters")}</span>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={toggleStructuredFilters}
+            aria-expanded={!!filtersExpanded}
+            aria-controls="library-filter-panel"
+            className="order-1 aria-expanded:bg-accent aria-expanded:text-accent-foreground hidden h-10 min-w-0 flex-1 px-2 md:inline-flex @3xl/library:h-8 @3xl/library:flex-none @3xl/library:px-3"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span className="min-w-0 truncate">{uiText("Filters")}</span>
+            {activeFilterItems.length > Number(!!query.trim()) && (
+              <span className="font-mono tabular-nums">
+                {activeFilterItems.length - Number(!!query.trim())}
+              </span>
+            )}
+          </Button>
+          <div className="library-secondary-tools order-2 ml-auto grid min-w-0 flex-2 grid-cols-2 items-center gap-2 @3xl/library:hidden">
+            <div className="min-w-0 @3xl/library:hidden">
+              <SortMenu
+                open={sortOpen}
+                onOpenChange={setSortOpen}
+                sortKey={sortKey}
+                onSelect={selectSort}
+                labelFor={ui}
+                triggerSize="sm"
+                triggerClassName="h-10 w-full min-w-0 px-2 text-xs"
+                wrapperClassName="min-w-0"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              data-menu-trigger
+              aria-haspopup="menu"
+              aria-expanded={moreOpen}
+              aria-label={t("nav.more")}
+              onClick={(event) => {
+                toolbarMenuOpener.current = event.currentTarget;
+                setMoreOpen(!moreOpen);
+              }}
+              className="h-10 min-w-0 px-2 @3xl/library:h-8 @3xl/library:w-8 @3xl/library:[&>span]:sr-only @3xl/library:[&>svg:last-child]:hidden"
+            >
+              <MoreHorizontal className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{t("nav.more")}</span>
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            </Button>
+          </div>
+          {libraryActions}
+          <div className="library-display-controls order-4 ml-auto hidden shrink-0 items-center gap-2 @3xl/library:flex">
+            {canViewPrinters && (
+              <PrinterMenu
+                open={printerMenuOpen}
+                onOpenChange={setPrinterMenuOpen}
+                value={
+                  selectedPrinterId !== null
+                    ? String(selectedPrinterId)
+                    : (selectedPrinterPresence ?? "")
+                }
+                options={[
+                  { value: "", label: uiText("Any printer") },
+                  { value: "any", label: uiText("On a printer") },
+                  { value: "none", label: uiText("Vault only") },
+                  ...printers.map((printer) => ({
+                    value: String(printer.id),
+                    label: printer.name,
+                  })),
+                ]}
+                onIntent={() => startup.request("filters")}
+                onSelect={(value) => {
+                  if (value === "any" || value === "none") setSelectedPrinterPresence(value);
+                  else setSelectedPrinterId(value ? Number(value) : null);
+                }}
+              />
+            )}
+            <SortMenu
+              open={desktopSortOpen}
+              onOpenChange={setDesktopSortOpen}
+              sortKey={sortKey}
+              onSelect={selectSort}
+              labelFor={ui}
+              triggerSize="xs"
+              triggerClassName="h-8 w-40"
+            />
+            <div className="flex items-center bg-muted/50">
+              {(["grid", "list"] as const).map((mode) => (
+                <Button
+                  key={mode}
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={uiText("{value1} View", {
+                    value1: ui(mode === "grid" ? "Grid" : "List"),
+                  })}
+                  aria-pressed={viewMode === mode}
+                  onClick={() => selectViewMode(mode)}
+                  className={
+                    viewMode === mode ? "bg-accent text-accent-foreground" : "text-muted-foreground"
+                  }
+                >
+                  {mode === "grid" ? (
+                    <LayoutGrid className="h-3.5 w-3.5" />
+                  ) : (
+                    <List className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </div>
+      }
+    >
+      {libraryMoreActions}
+    </DropdownMenu>
   );
 
   return (
@@ -2180,15 +2948,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           </form>
         </Modal>
-        <DeferredDialog
-          open={uploadOpen}
-          title={uiText("Upload")}
-          onClose={() => setUploadOpen(false)}
-        >
+        <DeferredDialog open={showUpload} title={uiText("Upload")} onClose={closeUpload}>
           <UploadModal
-            open={uploadOpen}
+            open={showUpload}
             onClose={() => {
-              setUploadOpen(false);
+              closeUpload();
               setDropPreload(null);
               setDropCollection(null);
             }}
@@ -2268,93 +3032,69 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         />
 
         {/* Stitch layout: filter sidebar + main content */}
-        <FilterSidebar
-          filtersOpen={false}
-          outlinerFilters={baseFilters}
-          tags={tags}
-          printers={printers}
-          selectedCollection={selectedCollection}
-          selectedCollectionId={selectedCollectionId}
-          selectedTags={selectedTags}
-          selectedPrinterId={selectedPrinterId}
-          selectedPrinterPresence={selectedPrinterPresence}
-          onCollectionChange={handleCollectionChange}
-          onCollectionIntent={prefetchFolder}
-          onTagsChange={setSelectedTags}
-          onPrinterChange={setSelectedPrinterId}
-          onPrinterPresenceChange={setSelectedPrinterPresence}
-          onCreateCollection={handleOpenCreateCollection}
-          onMoveModel={handleMoveModel}
-          onMoveCollection={handleMoveCollection}
-          onDeleteCollection={handleDeleteCollection}
-          canViewPrinters={canViewPrinters}
-          canManageLibrary={!!user?.is_superuser}
-          quickAccess={
-            auth.isAuthenticated ? (
-              <>
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  aria-pressed={favoritesOnly}
-                  onClick={toggleFavorites}
-                  className={cn(
-                    "h-8 w-full justify-start px-3 text-sm",
-                    favoritesOnly && "bg-accent text-accent-foreground",
-                  )}
-                >
-                  <Star className={cn("h-4 w-4", favoritesOnly && "fill-current")} aria-hidden />
-                  {uiText("Favorites")}
-                </Button>
-                <SavedViewSelector
-                  key={savedViewsOwner.session}
-                  readState={savedViewReadState}
-                  views={savedViews}
-                  activeId={activeSavedViewId}
-                  modified={savedViewModified}
-                  onSelect={applySavedView}
-                  onCreate={openSaveView}
-                  onUpdate={(view) =>
-                    manageSavedView(
-                      {
-                        kind: "update",
-                        id: view.id,
-                        payload: { filters: currentFilters },
-                      },
-                      "savedView.updateSuccess",
-                    )
-                  }
-                  onRename={(view, name) =>
-                    manageSavedView(
-                      { kind: "update", id: view.id, payload: { name } },
-                      "savedView.renameSuccess",
-                    )
-                  }
-                  onDuplicate={(view) =>
-                    manageSavedView(
-                      {
-                        kind: "create",
-                        name: duplicateViewName(view.name),
-                        filters: effectiveLibraryView(view.filters, canViewPrinters),
-                      },
-                      "savedView.duplicateSuccess",
-                    )
-                  }
-                  onDelete={(view) =>
-                    manageSavedView({ kind: "delete", id: view.id }, "savedView.deleteSuccess")
-                  }
-                  align="start"
-                  triggerClassName="h-8 w-full max-w-none justify-start px-3 text-sm"
-                  triggerVariant="ghost"
-                />
-              </>
-            ) : null
-          }
-          libraryView={libraryView}
-          onLibraryViewChange={handleLibraryViewChange}
-        />
+        <LibraryCollectionsPane>
+          {favoritesOnly && pane?.mode !== "collections" ? (
+            <FavoritesSidebar
+              models={visibleModels}
+              multipartModels={visibleMultipartModels}
+              origin={snapshot?.entry}
+            />
+          ) : (
+            <FilterSidebar
+              collectionsOnly={pane !== null}
+              filtersOpen={false}
+              outlinerFilters={baseFilters}
+              tags={tags}
+              printers={printers}
+              selectedCollection={selectedCollection}
+              selectedCollectionId={selectedCollectionId}
+              selectedTags={selectedTags}
+              selectedPrinterId={selectedPrinterId}
+              selectedPrinterPresence={selectedPrinterPresence}
+              onCollectionChange={handleCollectionChange}
+              onCollectionIntent={prefetchFolder}
+              onTagsChange={setSelectedTags}
+              onPrinterChange={setSelectedPrinterId}
+              onPrinterPresenceChange={setSelectedPrinterPresence}
+              onCreateCollection={handleOpenCreateCollection}
+              onMoveModel={handleMoveModel}
+              onMoveCollection={handleMoveCollection}
+              onDeleteCollection={handleDeleteCollection}
+              canViewPrinters={canViewPrinters}
+              canManageLibrary={!!user?.is_superuser}
+              quickAccess={
+                auth.isAuthenticated ? (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      aria-pressed={favoritesOnly}
+                      onClick={toggleFavorites}
+                      className={cn(
+                        "h-8 w-full justify-start px-3 text-sm",
+                        favoritesOnly && "bg-accent text-accent-foreground",
+                      )}
+                    >
+                      <Star
+                        className={cn("h-4 w-4", favoritesOnly && "fill-current")}
+                        aria-hidden
+                      />
+                      {uiText("Favorites")}
+                    </Button>
+                    {!savedViewsHost && savedViewControl()}
+                  </>
+                ) : null
+              }
+              libraryView={libraryView}
+              onLibraryViewChange={handleLibraryViewChange}
+            />
+          )}
+        </LibraryCollectionsPane>
+        {savedViewsHost && auth.isAuthenticated && createPortal(savedViewControl(), savedViewsHost)}
 
         <main
           ref={startupContent}
+          tabIndex={-1}
           aria-busy={reading.status === "restoring"}
           className="@container/library relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-background pb-24 md:pb-0"
           onDragEnter={onMainDragEnter}
@@ -2370,427 +3110,329 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           )}
           {/* Breadcrumb */}
-          <nav className="flex min-w-0 items-center gap-2 border-b border-border bg-background px-4 py-2.5 text-sm tracking-tight sm:px-6">
-            {breadcrumbs.length > 0 ? (
-              <>
-                <button
-                  onClick={() => handleCollectionChange(null)}
-                  className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  {uiText("All Models")}
-                </button>
-                {breadcrumbs.map((crumb) => (
-                  <span key={crumb.id} className="flex min-w-0 items-center gap-2">
-                    <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/40" />
-                    <button
-                      onClick={() => handleCollectionChange(crumb.path)}
-                      className="min-w-0 truncate font-medium text-foreground"
-                      title={crumb.name}
-                    >
-                      {crumb.name}
-                    </button>
-                  </span>
-                ))}
-              </>
+          <LibraryBreadcrumbs>
+            {favoritesOnly ? (
+              <nav
+                aria-label={uiText("Favorites")}
+                className="flex min-w-0 items-center gap-2 text-sm"
+              >
+                <Link href="/" className="text-muted-foreground">
+                  PrintStash
+                </Link>
+                <span className="text-muted-foreground">/</span>
+                <span>{uiText("Favorites")}</span>
+              </nav>
             ) : (
-              <button
-                onClick={() => handleCollectionChange(null)}
-                className="text-foreground font-medium"
-              >
-                {uiText("All Models")}
-              </button>
-            )}
-            {availableRecentFolders.length > 0 && (
-              <DropdownMenu
-                className="ml-auto shrink-0"
-                open={recentFoldersOpen}
-                onOpenChange={setRecentFoldersOpen}
-                align="end"
-                trigger={
-                  <button
-                    type="button"
-                    data-menu-trigger
-                    aria-haspopup="menu"
-                    aria-expanded={recentFoldersOpen}
-                    aria-label={uiText("Recent")}
-                    onClick={() => setRecentFoldersOpen(!recentFoldersOpen)}
-                    className="ml-auto flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              <CollectionBreadcrumbs items={breadcrumbs} onNavigate={handleCollectionChange}>
+                {availableRecentFolders.length > 0 && (
+                  <DropdownMenu
+                    className="ml-2 shrink-0 border-l border-border pl-2"
+                    open={recentFoldersOpen}
+                    onOpenChange={setRecentFoldersOpen}
+                    align="start"
+                    trigger={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        data-menu-trigger
+                        aria-haspopup="menu"
+                        aria-expanded={recentFoldersOpen}
+                        aria-label={uiText("Recent")}
+                        onClick={() => setRecentFoldersOpen(!recentFoldersOpen)}
+                        className="h-7 gap-1.5 px-2 text-xs font-normal text-muted-foreground"
+                      >
+                        <History className="h-3.5 w-3.5" aria-hidden />
+                        <span className="hidden @xl/trail:inline">{ui("Recent")}</span>
+                      </Button>
+                    }
+                    contentClassName="w-64 max-w-[calc(100vw-2rem)] rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
                   >
-                    <History className="h-3.5 w-3.5" aria-hidden />
-                    <span className="hidden sm:inline">{ui("Recent")}</span>
-                  </button>
-                }
-                contentClassName="w-64 max-w-[calc(100vw-2rem)] rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-              >
-                <p className="px-2.5 py-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                  {uiText("Recent folders")}
-                </p>
-                {availableRecentFolders.map((folder) => (
-                  <button
-                    key={folder.id ?? folder.path}
-                    title={folder.label}
-                    disabled={folder.unavailable}
-                    role="menuitem"
-                    type="button"
-                    onClick={() => {
-                      handleCollectionChange(folder.path, folder.id);
-                      setRecentFoldersOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 truncate">
-                      {folder.label}
-                      {folder.unavailable ? ` — ${uiText("Unavailable")}` : ""}
-                    </span>
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    recent.clear();
-                    setRecentFoldersOpen(false);
-                  }}
-                  className="mt-1 w-full border-t border-border px-2.5 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-popover-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {uiText("Clear recent folders")}
-                </button>
-              </DropdownMenu>
+                    <p className="px-2.5 py-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                      {uiText("Recent folders")}
+                    </p>
+                    {availableRecentFolders.map((folder) => (
+                      <button
+                        key={folder.id ?? folder.path}
+                        title={folder.label}
+                        disabled={folder.unavailable}
+                        role="menuitem"
+                        type="button"
+                        onClick={() => {
+                          handleCollectionChange(folder.path, folder.id);
+                          setRecentFoldersOpen(false);
+                        }}
+                        className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 truncate">
+                          {folder.label}
+                          {folder.unavailable ? ` — ${uiText("Unavailable")}` : ""}
+                        </span>
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        recent.clear();
+                        setRecentFoldersOpen(false);
+                      }}
+                      className="mt-1 w-full border-t border-border px-2.5 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-popover-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {uiText("Clear recent folders")}
+                    </button>
+                  </DropdownMenu>
+                )}
+              </CollectionBreadcrumbs>
             )}
-          </nav>
+          </LibraryBreadcrumbs>
 
           {/* The pane owns breakpoints: an open outliner also consumes horizontal room. */}
-          <div className="sticky top-0 z-40 flex flex-col gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
-            <div className="flex min-w-0 items-start justify-between gap-4">
-              <div className="min-w-0 flex-1 space-y-1">
-                <TitleEditor
+          <div className="library-collection-header flex flex-col gap-3 px-4 sm:px-6">
+            <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
+              <div className="library-collection-identity min-w-0 flex-1 basis-full @3xl/library:basis-0">
+                <CollectionTitleEditor
+                  title={
+                    unavailableCollection
+                      ? uiText("library.collectionUnavailable")
+                      : (selectedName ??
+                        uiText(favoritesOnly ? "Favorites & saved views" : "All Models"))
+                  }
+                  canEdit={canRenameCollection}
                   open={collectionRename !== null}
-                  onOpenChange={(open) => {
-                    if (open) openCollectionRename();
-                    else if (!collectionRenameBusy) setCollectionRename(null);
+                  onOpen={openCollectionRename}
+                  onCancel={() => {
+                    if (!collectionRenameBusy) setCollectionRename(null);
                   }}
-                  label={uiText("Rename {value1}", { value1: selectedName ?? "" })}
-                  fieldLabel={uiText("inbox.collectionName")}
                   value={collectionRenameName}
                   onValueChange={setCollectionRenameName}
-                  onSave={() => void saveCollectionRename()}
+                  onSave={saveCollectionRename}
                   busy={collectionRenameBusy}
-                  maxLength={100}
-                  requiredMessage={uiText("{field} is required.", {
-                    field: uiText("inbox.collectionName"),
-                  })}
-                  trigger={
-                    <div className="flex min-w-0 items-center gap-1">
-                      <h1
-                        onDoubleClick={openCollectionRename}
-                        className="min-w-0 break-words text-lg font-bold tracking-tight text-foreground sm:text-2xl"
-                      >
-                        {unavailableCollection
-                          ? uiText("library.collectionUnavailable")
-                          : (selectedName ?? uiText("All Models"))}
-                      </h1>
-                      {canRenameCollection && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="shrink-0 text-muted-foreground"
-                          data-menu-trigger
-                          aria-haspopup="dialog"
-                          aria-expanded={collectionRename !== null}
-                          aria-label={uiText("Rename {value1}", { value1: selectedName ?? "" })}
-                          title={uiText("Rename")}
-                          onClick={openCollectionRename}
-                        >
-                          <Pencil className="h-3.5 w-3.5" aria-hidden />
-                        </Button>
-                      )}
-                    </div>
-                  }
                 />
-                <p className="text-sm text-muted-foreground">
-                  {unavailableCollection
-                    ? uiText("library.collectionUnavailableHelp")
-                    : loading
-                      ? uiText("Loading...")
-                      : uiText(selectedName ? "counts.collectionItems" : "counts.items", {
-                          count: displayCount,
-                        })}
-                  {refreshing && (
-                    <span className="ml-2 font-mono text-xs text-muted-foreground">
-                      {uiText("Updating...")}
+                {selectedCollection !== null && !displayedCollection ? (
+                  <CollectionHeaderSkeleton />
+                ) : (
+                  displayedCollection && (
+                    <CollectionReadme
+                      key={displayedCollection.id}
+                      collectionId={displayedCollection.id}
+                      compact
+                      hasReadme={displayedCollection.has_readme}
+                      canEdit={!!user?.is_superuser || canWriteCollection(displayedCollection)}
+                      disabled={!browseReady}
+                    />
+                  )
+                )}
+                <div className="library-collection-meta flex flex-wrap items-center">
+                  {collectionOverview && !displayedCollection && (
+                    <span className="library-meta-part">
+                      {uiText("library.header.collections", { count: visibleCollections.length })}
                     </span>
                   )}
-                </p>
-              </div>
-              <Button
-                onClick={() => {
-                  setDropPreload(null);
-                  setDropCollection(null);
-                  setUploadOpen(true);
-                }}
-                disabled={!canUploadToVault}
-                title={
-                  canUploadToVault
-                    ? uiText("Upload artifacts")
-                    : uiText("Sign in and get edit access to upload")
-                }
-                className="shrink-0 @3xl/library:h-8 @3xl/library:text-xs"
-              >
-                {uiText("Upload")}
-              </Button>
-            </div>
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={openDrawer}
-                className="order-1 h-10 min-w-0 flex-1 px-2 md:hidden"
-              >
-                <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-                <span className="min-w-0 truncate">{uiText("Filters")}</span>
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                onClick={toggleStructuredFilters}
-                aria-expanded={filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())}
-                aria-controls="library-filter-panel"
-                className="order-1 hidden h-10 min-w-0 flex-1 px-2 md:inline-flex @3xl/library:h-8 @3xl/library:flex-none @3xl/library:px-3"
-              >
-                <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-                <span className="min-w-0 truncate">{uiText("Filters")}</span>
-                {activeFilterItems.length > Number(!!query.trim()) && (
-                  <span className="font-mono tabular-nums">
-                    {activeFilterItems.length - Number(!!query.trim())}
-                  </span>
-                )}
-              </Button>
-              <div className="order-2 grid min-w-0 flex-2 grid-cols-2 gap-2 @3xl/library:hidden">
-                <SortMenu
-                  open={sortOpen}
-                  onOpenChange={setSortOpen}
-                  sortKey={sortKey}
-                  onSelect={selectSort}
-                  labelFor={ui}
-                  triggerSize="sm"
-                  triggerClassName="h-10 w-full min-w-0 px-2 text-xs"
-                  wrapperClassName="min-w-0"
-                />
-                <DropdownMenu
-                  open={moreOpen}
-                  onOpenChange={setMoreOpen}
-                  align="end"
-                  className="min-w-0"
-                  trigger={
-                    <Button
-                      type="button"
-                      variant="outline"
-                      data-menu-trigger
-                      aria-haspopup="menu"
-                      aria-expanded={moreOpen}
-                      aria-label={t("nav.more")}
-                      onClick={() => setMoreOpen(!moreOpen)}
-                      className="w-full min-w-0 px-2"
-                    >
-                      <MoreHorizontal className="h-4 w-4 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate">{t("nav.more")}</span>
-                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    </Button>
-                  }
-                  contentClassName="w-64 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-                >
-                  {docView === "models" && (
-                    <Button
-                      variant="ghost"
-                      role="menuitem"
-                      className="w-full justify-start"
-                      disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
-                      onClick={() => {
-                        setMoreOpen(false);
-                        setMultipartCreateOpen(true);
-                      }}
-                    >
-                      <Plus className="h-4 w-4" aria-hidden />
-                      {t("multipart.new")}
-                    </Button>
+                  {displayedCollection && displayedCollection.child_count > 0 && (
+                    <span className="library-meta-part">
+                      {uiText("library.header.collections", {
+                        count: displayedCollection.child_count,
+                      })}
+                    </span>
                   )}
-                  {auth.isAuthenticated && (
-                    <>
-                      <button
-                        type="button"
-                        role="menuitemcheckbox"
-                        aria-checked={favoritesOnly}
-                        onClick={() => {
-                          toggleFavorites();
-                          setMoreOpen(false);
-                        }}
-                        className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${favoritesOnly ? "bg-accent text-accent-foreground" : ""}`}
-                      >
-                        <Star className={`h-4 w-4 ${favoritesOnly ? "fill-current" : ""}`} />
-                        <span className="flex-1">{uiText("Favorites")}</span>
-                        {favoritesOnly && <Check className="h-3.5 w-3.5" />}
-                      </button>
-                      <SavedViewSelector
-                        key={savedViewsOwner.session}
-                        readState={savedViewReadState}
-                        views={savedViews}
-                        activeId={activeSavedViewId}
-                        modified={savedViewModified}
-                        onSelect={(view) => {
-                          applySavedView(view);
-                          setMoreOpen(false);
-                        }}
-                        onCreate={() => {
-                          setMoreOpen(false);
-                          openSaveView();
-                        }}
-                        onUpdate={(view) =>
-                          manageSavedView(
-                            {
-                              kind: "update",
-                              id: view.id,
-                              payload: { filters: currentFilters },
-                            },
-                            "savedView.updateSuccess",
-                          )
-                        }
-                        onRename={(view, name) =>
-                          manageSavedView(
-                            { kind: "update", id: view.id, payload: { name } },
-                            "savedView.renameSuccess",
-                          )
-                        }
-                        onDuplicate={(view) =>
-                          manageSavedView(
-                            {
-                              kind: "create",
-                              name: duplicateViewName(view.name),
-                              filters: effectiveLibraryView(view.filters, canViewPrinters),
-                            },
-                            "savedView.duplicateSuccess",
-                          )
-                        }
-                        onDelete={(view) =>
-                          manageSavedView(
-                            { kind: "delete", id: view.id },
-                            "savedView.deleteSuccess",
-                          )
-                        }
-                        triggerClassName="max-w-none w-full justify-start px-2.5 py-2 text-sm"
-                        triggerRole="menuitem"
-                        triggerSize="sm"
-                        triggerVariant="ghost"
-                      />
-                    </>
+                  {!collectionOverview && (
+                    <p className="library-meta-part text-sm text-muted-foreground">
+                      {unavailableCollection
+                        ? uiText("library.collectionUnavailableHelp")
+                        : favoritesOnly
+                          ? uiText(
+                              "Your frequently used Models and Multipart Models, kept together.",
+                            )
+                          : loading
+                            ? uiText("Loading...")
+                            : uiText(
+                                selectedName
+                                  ? visibleMultipartModels.length
+                                    ? "library.header.itemsHere"
+                                    : "library.header.modelsHere"
+                                  : "counts.items",
+                                {
+                                  count: displayCount,
+                                },
+                              )}
+                      {refreshing && (
+                        <span className="ml-2 font-mono text-xs text-muted-foreground">
+                          {uiText("Updating...")}
+                        </span>
+                      )}
+                    </p>
                   )}
-                  <DisplayMenu
-                    open={displayOpen}
-                    onOpenChange={setDisplayOpen}
-                    viewMode={viewMode}
-                    compact={compact}
-                    onSelectMode={selectViewMode}
-                    onSelectDensity={selectDensity}
-                    labelFor={ui}
-                    triggerSize="sm"
-                    triggerVariant="ghost"
-                    triggerRole="menuitem"
-                    triggerClassName="w-full justify-start"
-                    onSelectComplete={() => setMoreOpen(false)}
-                  />
-                </DropdownMenu>
+                  {displayedCollection && (
+                    <span className="library-meta-part">
+                      {uiText(
+                        collectionOverview
+                          ? "library.collectionOverview.modelsBelow"
+                          : "{count} in total",
+                        { count: displayedCollection.model_count },
+                      )}
+                    </span>
+                  )}
+                  {displayedCollection && (
+                    <CollectionHeaderTags
+                      key={displayedCollection.id}
+                      tags={displayedCollection.tags}
+                      canEdit={!!user?.is_superuser || canWriteCollection(displayedCollection)}
+                      onSave={(nextTags) => saveCollectionTags(displayedCollection, nextTags)}
+                    />
+                  )}
+                </div>
               </div>
-              {libraryActions}
-              {docView === "models" && (
+              {favoritesOnly && (
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    aria-pressed={viewMode === "grid"}
+                    onClick={() => selectViewMode("grid")}
+                  >
+                    {uiText("Grid")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    aria-pressed={viewMode === "list"}
+                    onClick={() => selectViewMode("list")}
+                  >
+                    {uiText("Table")}
+                  </Button>
+                  <Button variant="outline" size="xs" onClick={toggleStructuredFilters}>
+                    {uiText("Filters")}
+                  </Button>
+                </div>
+              )}
+              {!pane && !favoritesOnly && (
                 <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  onClick={() => setMultipartCreateOpen(true)}
-                  disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
+                  onClick={() => {
+                    setDropPreload(null);
+                    setDropCollection(null);
+                    setUploadOpen(true);
+                  }}
+                  disabled={!canUploadToVault}
                   title={
-                    user?.is_superuser || canWriteCollection(selectedCollectionRow)
-                      ? undefined
-                      : t("multipart.editAccess")
+                    canUploadToVault
+                      ? uiText("Upload artifacts")
+                      : uiText("Sign in and get edit access to upload")
                   }
-                  className="order-3 hidden h-8 @3xl/library:inline-flex"
+                  className="shrink-0 @3xl/library:h-8 @3xl/library:text-xs"
                 >
-                  <Plus className="h-4 w-4" aria-hidden />
-                  {t("multipart.new")}
+                  {uiText("Upload")}
                 </Button>
               )}
-
-              <div className="order-4 ml-auto hidden shrink-0 items-center gap-2 @3xl/library:flex">
-                <SortMenu
-                  open={desktopSortOpen}
-                  onOpenChange={setDesktopSortOpen}
-                  sortKey={sortKey}
-                  onSelect={selectSort}
-                  labelFor={ui}
-                  triggerSize="xs"
-                  triggerClassName="h-8"
-                />
-                <DisplayMenu
-                  open={desktopDisplayOpen}
-                  onOpenChange={setDesktopDisplayOpen}
-                  viewMode={viewMode}
-                  compact={compact}
-                  onSelectMode={selectViewMode}
-                  onSelectDensity={selectDensity}
-                  labelFor={ui}
-                  triggerSize="xs"
-                  triggerClassName="h-8"
-                />
-              </div>
             </div>
           </div>
 
-          {(filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())) && (
+          <Modal
+            open={!!filtersExpanded}
+            onClose={() => setFiltersExpanded(false)}
+            title={uiText("Filter Models")}
+            description={uiText(
+              "Filter the current collection. Printing on keeps its current printer scope.",
+            )}
+            className="max-w-[480px]"
+            footer={
+              <>
+                <Button type="button" variant="outline" size="sm" onClick={clearAllFilters}>
+                  {uiText("Reset filters")}
+                </Button>
+                <Button type="button" size="sm" onClick={() => setFiltersExpanded(false)}>
+                  {uiText("Apply filters")}
+                </Button>
+              </>
+            }
+          >
             <div
               id="library-filter-panel"
               role="region"
               aria-label={uiText("Filters")}
-              className="hidden border-b border-border bg-muted/30 px-4 py-3 md:block sm:px-6"
+              className="max-h-[60vh] overflow-y-auto"
               onFocusCapture={() => startup.request("filters")}
               onPointerDownCapture={() => startup.request("filters")}
             >
-              <StructuredFilters
-                layout="inline"
-                extraControls={
-                  <LibraryBaseFilters
-                    tags={tags}
-                    printers={printers}
-                    selectedTags={selectedTags}
-                    selectedPrinterId={selectedPrinterId}
-                    selectedPrinterPresence={selectedPrinterPresence}
-                    onTagsChange={setSelectedTags}
-                    onPrinterChange={setSelectedPrinterId}
-                    onPrinterPresenceChange={setSelectedPrinterPresence}
-                    canViewPrinters={canViewPrinters}
+              <label className="mb-5 block space-y-2 text-sm">
+                <span>{uiText("Material")}</span>
+                <select
+                  aria-label={uiText("Material")}
+                  className="h-10 w-full border border-input bg-card px-3 text-sm"
+                  value={
+                    structured.material_type?.length === 1
+                      ? structured.material_type[0]
+                      : structured.material_type?.length
+                        ? "__multiple"
+                        : ""
+                  }
+                  onChange={(event) => {
+                    if (event.target.value !== "__multiple")
+                      setStructuredFilter(
+                        "material_type",
+                        event.target.value ? [event.target.value] : [],
+                      );
+                  }}
+                >
+                  <option value="">{ui("Any material")}</option>
+                  {(structured.material_type?.length ?? 0) > 1 && (
+                    <option value="__multiple">{structured.material_type.join(" · ")}</option>
+                  )}
+                  {Array.from(
+                    new Set([
+                      ...(facetQuery.data?.material_type.map((item) => item.value) ?? []),
+                      ...(structured.material_type ?? []),
+                    ]),
+                  ).map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <details>
+                <summary className="text-xs text-muted-foreground">
+                  {t("similarity.moreFilters")}
+                </summary>
+                <div className="mt-3">
+                  <StructuredFilters
+                    layout="inline"
+                    extraControls={
+                      <LibraryBaseFilters
+                        tags={tags}
+                        printers={printers}
+                        selectedTags={selectedTags}
+                        selectedPrinterId={selectedPrinterId}
+                        selectedPrinterPresence={selectedPrinterPresence}
+                        onTagsChange={setSelectedTags}
+                        onPrinterChange={setSelectedPrinterId}
+                        onPrinterPresenceChange={setSelectedPrinterPresence}
+                        canViewPrinters={canViewPrinters}
+                      />
+                    }
+                    facets={facetQuery.data}
+                    loading={facetQuery.isLoading}
+                    error={facetQuery.isError}
+                    active={structured}
+                    onChange={setStructuredFilter}
+                    uploadedAfter={searchParams.get("uploaded_after") ?? undefined}
+                    uploadedBefore={searchParams.get("uploaded_before") ?? undefined}
+                    history={historyFilters(searchParams)}
+                    onDateChange={(key, value) => {
+                      const params = new URLSearchParams(searchParams.toString());
+                      if (value) params.set(key, value);
+                      else params.delete(key);
+                      router.replace(params.size ? `/?${params}` : "/");
+                    }}
+                    onClearAll={clearAllFilters}
                   />
-                }
-                facets={facetQuery.data}
-                loading={facetQuery.isLoading}
-                error={facetQuery.isError}
-                active={structured}
-                onChange={setStructuredFilter}
-                uploadedAfter={searchParams.get("uploaded_after") ?? undefined}
-                uploadedBefore={searchParams.get("uploaded_before") ?? undefined}
-                history={historyFilters(searchParams)}
-                onDateChange={(key, value) => {
-                  const params = new URLSearchParams(searchParams.toString());
-                  if (value) params.set(key, value);
-                  else params.delete(key);
-                  router.replace(params.size ? `/?${params}` : "/");
-                }}
-                onClearAll={clearAllFilters}
-              />
+                </div>
+              </details>
             </div>
-          )}
+          </Modal>
 
-          {activeFilterItems.length > 0 && (
+          {activeFilterItems.length > Number(favoritesOnly) && (
             <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3 sm:px-6">
               <span className="text-3xs font-mono uppercase tracking-wider text-muted-foreground">
                 {uiText("Filters")}
@@ -2815,96 +3457,78 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           )}
 
-          {selectedCollection !== null && !displayedCollection ? (
-            <CollectionHeaderSkeleton />
-          ) : (
-            displayedCollection && (
-              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-2 sm:px-6">
-                <EntityTagsDialog
-                  entityLabel={displayedCollection.name}
-                  tags={displayedCollection.tags}
-                  availableTags={tags}
-                  canEdit={!!user?.is_superuser || canWriteCollection(displayedCollection)}
-                  help={uiText(
-                    "Collection tags are inherited by Models in this collection and every descendant for search and filtering.",
-                  )}
-                  onSave={(nextTags) => saveCollectionTags(displayedCollection, nextTags)}
-                />
-                <CollectionReadme
-                  key={displayedCollection.id}
-                  collectionId={displayedCollection.id}
-                  hasReadme={displayedCollection.has_readme}
-                  canEdit={!!user?.is_superuser || canWriteCollection(displayedCollection)}
-                  disabled={!browseReady}
-                />
-              </div>
-            )
-          )}
-
-          {/* Models / Documents tabs */}
-          <TabBar
-            tabs={[
-              { key: "models", label: t("vault.models") },
-              { key: "docs", label: t("vault.documents") },
-            ]}
-            active={docView}
-            onChange={(view) => {
-              const params = new URLSearchParams(searchParams.toString());
-              params.set("v", view);
-              router.replace(params.size ? `/?${params}` : "/");
+          <ModalShell
+            open={isCreatingCollection}
+            onClose={() => {
+              setIsCreatingCollection(false);
+              setNewCollectionName("");
             }}
-            className="border-b border-border px-4 pt-3 sm:px-6"
-            tabClassName="px-3 py-2 text-sm font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            activeTabClassName="text-foreground"
-          />
-
-          {isCreatingCollection && (
-            <div className="px-6 py-3 bg-muted border-b border-border">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleCreateCollection();
+            labelledBy="library-create-title"
+            className="w-full max-w-[480px] border border-border bg-card shadow-lg"
+          >
+            <header className="relative border-b border-border px-6 py-6">
+              <h2 id="library-create-title" className="text-lg font-semibold">
+                {uiText("New collection")}
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {uiText("Create a collection inside the current collection.")}
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={uiText("Close")}
+                className="absolute right-5 top-5"
+                onClick={() => {
+                  setIsCreatingCollection(false);
+                  setNewCollectionName("");
                 }}
-                className="flex items-center gap-2"
               >
-                <input
-                  autoFocus
-                  value={newCollectionName}
-                  onChange={(e) => setNewCollectionName(e.target.value)}
-                  placeholder={
-                    auth.isAuthenticated
-                      ? selectedCollection
-                        ? uiText('New subcollection in "{value1}"...', {
-                            value1: String(selectedName ?? selectedCollection),
-                          })
-                        : uiText("Collection name...")
-                      : uiText("Sign in to add")
-                  }
-                  disabled={!auth.isAuthenticated}
-                  className="flex-1 max-w-xs bg-background text-foreground text-sm border border-border rounded px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-50"
-                />
-                <button
-                  type="submit"
-                  disabled={
-                    !newCollectionName.trim() || !auth.isAuthenticated || !canCreateCollection
-                  }
-                  className="px-3 py-1.5 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover transition-colors disabled:opacity-50"
-                >
-                  {uiText("Create")}
-                </button>
-                <button
+                <X className="h-4 w-4" />
+              </Button>
+            </header>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleCreateCollection();
+              }}
+            >
+              <div className="px-6 py-6">
+                <label className="block space-y-2 text-sm">
+                  <span>{uiText("Name")}</span>
+                  <Input
+                    autoFocus
+                    value={newCollectionName}
+                    onChange={(event) => setNewCollectionName(event.target.value)}
+                    disabled={!auth.isAuthenticated}
+                    maxLength={100}
+                  />
+                </label>
+              </div>
+              <footer className="flex justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
+                <Button
                   type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={() => {
                     setIsCreatingCollection(false);
                     setNewCollectionName("");
                   }}
-                  className="px-3 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted transition-colors"
                 >
                   {uiText("Cancel")}
-                </button>
-              </form>
-            </div>
-          )}
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={
+                    !newCollectionName.trim() || !auth.isAuthenticated || !canCreateCollection
+                  }
+                >
+                  {uiText("Create collection")}
+                </Button>
+              </footer>
+            </form>
+          </ModalShell>
 
           {selectMode && (
             <div className="px-4 sm:px-6 py-2 bg-muted border-b border-border flex flex-wrap items-center gap-3 text-xs">
@@ -2949,8 +3573,58 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           )}
 
+          {favoritesOnly && (
+            <div className="mx-4 mt-6 sm:mx-6">
+              <TabBar
+                tabs={[
+                  { key: "favorites", label: uiText("Favorites") },
+                  { key: "views", label: uiText("Saved views") },
+                ]}
+                active={favoritesPanel}
+                onChange={(panel) => {
+                  setFavoritesPanel(panel);
+                  if (panel === "views") startup.request("saved-views");
+                }}
+                className="gap-6 border-b border-border"
+                tabClassName="border-b-2 border-transparent pb-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                activeTabClassName="border-foreground font-medium"
+                showIndicator={false}
+              />
+              <div className="flex min-h-16 items-center justify-between gap-3 text-xs text-muted-foreground">
+                <span>
+                  {favoritesPanel === "favorites"
+                    ? uiText("counts.items", { count: displayCount })
+                    : uiText("Saved views")}
+                </span>
+                {favoritesPanel === "views" && (
+                  <Button variant="outline" size="xs" onClick={openSaveView}>
+                    {uiText("Save current view")}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+          {docView === "docs" && !favoritesOnly && (
+            <div className="flex items-center gap-4 px-4 pt-4 text-sm sm:px-6">
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  const params = new URLSearchParams(searchParams.toString());
+                  params.set("v", "models");
+                  router.replace(`/?${params}`);
+                }}
+              >
+                {t("vault.models")}
+              </button>
+              <span className="font-semibold">{t("vault.documents")}</span>
+            </div>
+          )}
+
           {/* Content */}
-          {docView === "docs" && (selectedCollection === null || selectedCollectionRow !== null) ? (
+          {docView === "docs" &&
+          !favoritesOnly &&
+          (selectedCollection === null || selectedCollectionRow !== null) ? (
             <DocumentBrowser
               collectionId={selectedCollectionRow?.id ?? null}
               collectionPath={selectedCollection}
@@ -2966,7 +3640,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   {uiText("library.readingPositionReset")}
                 </p>
               )}
-              {refreshRequired && !settlesByItself && (
+              {showRefreshNotice && (
                 <div
                   role="status"
                   className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-md border border-border bg-muted p-3 text-sm"
@@ -3028,37 +3702,161 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </div>
               )}
 
-              {loading ? (
+              {collectionOverview && (
+                <div className="collection-overview-toolbar-wrap px-4 sm:px-6">
+                  {libraryToolbar}
+                </div>
+              )}
+
+              {viewMode === "grid" && !loading && visibleCollections.length > 0 && (
+                <section
+                  className={`library-subcollections mx-4 sm:mx-6 ${collectionOverview ? "library-subcollections-overview" : ""}`}
+                  aria-label={uiText("Collections")}
+                >
+                  {!collectionOverview && (
+                    <h2 className="mb-2 text-xs font-medium text-foreground">
+                      {uiText("Collections")}{" "}
+                      <span className="font-mono font-normal">{visibleCollections.length}</span>
+                    </h2>
+                  )}
+                  <LibraryItems
+                    key={`collections:${folderEntrance.path ?? ""}`}
+                    items={visibleCollections}
+                    itemKey={(collection) => `collection:${collection.id}`}
+                    renderItem={(collection) => (
+                      <CollectionOverviewCard
+                        collection={collection}
+                        compact={!collectionOverview}
+                        arriving={arriving.has(`c:${collection.id}`)}
+                        authorizationRevision={snapshot?.authorizationRevision}
+                        onAuthorityRetired={onAuthorityRetired}
+                        onSelect={handleCollectionChange}
+                        onIntent={prefetchFolder}
+                        onDropModel={canUploadToVault ? handleMoveModel : undefined}
+                        selectable={selectMode}
+                        selected={selectedCollectionRows.has(collection.id)}
+                        onToggleSelect={auth.isAuthenticated ? toggleCollectionSelect : undefined}
+                      />
+                    )}
+                    scrollRef={startupContent}
+                    readingRenderers={readingRenderers}
+                    readingId="collections"
+                    layout="grid"
+                    className={folderCardsClass}
+                    compact={!collectionOverview && compact}
+                    estimateSize={collectionOverview ? 266 : 82}
+                  />
+                </section>
+              )}
+
+              {!favoritesOnly && !collectionOverview && (
+                <div className="library-model-toolbar-wrap px-4 sm:px-6">{libraryToolbar}</div>
+              )}
+
+              {favoritesOnly && favoritesPanel === "views" ? (
+                <section
+                  className="mx-4 mb-6 border border-border bg-card sm:mx-6"
+                  aria-label={uiText("Saved views")}
+                >
+                  {savedViewReadState.status === "loading" ? (
+                    <p role="status" className="p-5 text-sm text-muted-foreground">
+                      {uiText("savedView.loading")}
+                    </p>
+                  ) : savedViewReadState.status === "error" ? (
+                    <div role="alert" className="p-5">
+                      <p className="mb-3 text-sm">{uiText("savedView.loadError")}</p>
+                      <Button variant="outline" size="xs" onClick={savedViewReadState.retry}>
+                        {uiText("savedView.retry")}
+                      </Button>
+                    </div>
+                  ) : savedViews.length ? (
+                    savedViews.map((view) => (
+                      <FavoriteSavedViewRow
+                        key={`${savedViewsOwner.session}:${view.id}`}
+                        view={view}
+                        onOpen={() => applySavedView(view)}
+                        onRename={(name) =>
+                          manageSavedView(
+                            { kind: "update", id: view.id, payload: { name } },
+                            "savedView.renameSuccess",
+                          )
+                        }
+                        onUpdate={() =>
+                          manageSavedView(
+                            { kind: "update", id: view.id, payload: { filters: currentFilters } },
+                            "savedView.updateSuccess",
+                          )
+                        }
+                        onDuplicate={() =>
+                          manageSavedView(
+                            {
+                              kind: "create",
+                              name: duplicateViewName(view.name),
+                              filters: effectiveLibraryView(view.filters, canViewPrinters),
+                            },
+                            "savedView.duplicateSuccess",
+                          )
+                        }
+                        onDelete={() =>
+                          manageSavedView(
+                            { kind: "delete", id: view.id },
+                            "savedView.deleteSuccess",
+                          )
+                        }
+                      />
+                    ))
+                  ) : (
+                    <EmptyState
+                      title={uiText("No saved views yet")}
+                      description={uiText("Save a Library or Search view to keep it here.")}
+                      action={
+                        <Button variant="outline" size="xs" onClick={openSaveView}>
+                          {uiText("Save current view")}
+                        </Button>
+                      }
+                    />
+                  )}
+                </section>
+              ) : loading ? (
                 viewMode === "grid" ? (
-                  <ModelGridSkeleton compact={compact} />
+                  <ModelGridSkeleton compact={compact} onRetire={rememberLoadingCards} />
                 ) : (
                   <ModelListSkeleton />
                 )
-              ) : error && snapshot === null ? null : sortedModels.length === 0 &&
+              ) : error && snapshot === null ? null : collectionOverview &&
+                viewMode === "grid" ? null : sortedModels.length === 0 &&
                 visibleMultipartModels.length === 0 &&
                 visibleCollections.length === 0 &&
                 !hasMore ? (
                 <EmptyState
                   title={uiText(
-                    selectedCollection && !hasActiveFilters
-                      ? "library.collectionEmpty"
-                      : "No models found",
+                    emptyFavorites
+                      ? "No favorites yet"
+                      : selectedCollection && !hasActiveFilters
+                        ? "library.collectionEmpty"
+                        : "No models found",
                   )}
                   description={
-                    hasActiveFilters
-                      ? uiText("Try clearing some filters.")
-                      : selectedCollection
-                        ? uiText(
-                            canUploadHere
-                              ? "library.collectionEmptyHelp"
-                              : "library.collectionReadOnlyEmptyHelp",
-                          )
-                        : uiText(
-                            "Upload a model when you're ready, or skim the wiki first if this is a new install.",
-                          )
+                    emptyFavorites
+                      ? uiText("Star a model or multipart set to see it here.")
+                      : hasActiveFilters
+                        ? uiText("Try clearing some filters.")
+                        : selectedCollection
+                          ? uiText(
+                              canUploadHere
+                                ? "library.collectionEmptyHelp"
+                                : "library.collectionReadOnlyEmptyHelp",
+                            )
+                          : uiText(
+                              "Upload a model when you're ready, or skim the wiki first if this is a new install.",
+                            )
                   }
                   action={
-                    hasActiveFilters ? (
+                    emptyFavorites ? (
+                      <Button type="button" variant="outline" size="xs" onClick={toggleFavorites}>
+                        {uiText("aiSearch.backToLibrary")}
+                      </Button>
+                    ) : hasActiveFilters ? (
                       <Button type="button" variant="outline" size="xs" onClick={clearAllFilters}>
                         {uiText("Clear all filters")}
                       </Button>
@@ -3110,61 +3908,73 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               ) : viewMode === "grid" ? (
                 <div
                   key={`grid:${folderEntrance.path ?? ""}`}
-                  className={compact ? "p-3" : "p-4 sm:p-6"}
+                  className={compact ? "p-3" : favoritesOnly ? "px-4 pb-6 sm:px-6" : "p-4 sm:p-6"}
                 >
-                  <div
-                    className={cn(
-                      folderEntrance.move && FOLDER_CARDS_CLASS[folderEntrance.move],
-                      "grid",
-                      compact ? MODEL_GRID_LAYOUT.compact : MODEL_GRID_LAYOUT.comfortable,
+                  <LibraryItems
+                    items={libraryItems}
+                    itemKey={(item) =>
+                      item.kind === "model"
+                        ? `/models/${item.value.id}`
+                        : `/multipart-models/${item.value.id}`
+                    }
+                    renderItem={(item, index) => (
+                      <LibraryCardFill
+                        filling={fillingCards && !favoritesOnly}
+                        origins={loadingCardRects}
+                        index={index}
+                      >
+                        {item.kind === "multipart" ? (
+                          <MultipartModelCard
+                            key={`multipart-${item.value.id}`}
+                            item={item.value}
+                            favorites={favoritesOnly}
+                            arriving={arriving.has(`p:${item.value.id}`)}
+                            collectionLabel={item.value.collection_label}
+                            returnTo={currentLibraryHref}
+                            origin={snapshot?.entry}
+                            availableTags={tags}
+                            onDataChange={refresh}
+                            onEditTags={openMultipartTagEditor}
+                            selectable={selectMode}
+                            selected={selectedMultipartRows.has(item.value.id)}
+                            onToggleSelect={
+                              auth.isAuthenticated ? toggleMultipartSelect : undefined
+                            }
+                          />
+                        ) : (
+                          <ModelCard
+                            key={item.value.id}
+                            model={item.value}
+                            favorites={favoritesOnly}
+                            origin={snapshot?.entry}
+                            arriving={arriving.has(`m:${item.value.id}`)}
+                            collectionLabel={item.value.collection_label}
+                            selectable={selectMode}
+                            selected={selectedIds.has(item.value.id)}
+                            onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
+                            draggable={canUploadToVault && !selectMode}
+                            onEditTags={openTagEditor}
+                            onIntent={warmModel}
+                            onInspect={!favoritesOnly ? inspectModel : undefined}
+                            inspected={inspectorOpen && inspectorIntent?.id === item.value.id}
+                          />
+                        )}
+                      </LibraryCardFill>
                     )}
-                  >
-                    {visibleCollections.map((collection) => (
-                      <CollectionFolderCard
-                        key={collection.id}
-                        collection={collection}
-                        arriving={arrival.arriving.has(`c:${collection.id}`)}
-                        onSelect={handleCollectionChange}
-                        onIntent={prefetchFolder}
-                        onDropModel={canUploadToVault ? handleMoveModel : undefined}
-                        selectable={selectMode}
-                        selected={selectedCollectionRows.has(collection.id)}
-                        onToggleSelect={auth.isAuthenticated ? toggleCollectionSelect : undefined}
-                      />
-                    ))}
-                    {libraryItems.map((item) =>
-                      item.kind === "multipart" ? (
-                        <MultipartModelCard
-                          key={`multipart-${item.value.id}`}
-                          item={item.value}
-                          arriving={arrival.arriving.has(`p:${item.value.id}`)}
-                          collectionLabel={item.value.collection_label}
-                          returnTo={currentLibraryHref}
-                          origin={snapshot?.entry}
-                          availableTags={tags}
-                          onDataChange={refresh}
-                          selectable={selectMode}
-                          selected={selectedMultipartRows.has(item.value.id)}
-                          onToggleSelect={auth.isAuthenticated ? toggleMultipartSelect : undefined}
-                        />
-                      ) : (
-                        <ModelCard
-                          key={item.value.id}
-                          model={item.value}
-                          origin={snapshot?.entry}
-                          arriving={arrival.arriving.has(`m:${item.value.id}`)}
-                          collectionLabel={item.value.collection_label}
-                          selectable={selectMode}
-                          selected={selectedIds.has(item.value.id)}
-                          onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
-                          draggable={canUploadToVault && !selectMode}
-                          onEditTags={openTagEditor}
-                          onIntent={warmModel}
-                        />
-                      ),
-                    )}
-                  </div>
+                    scrollRef={startupContent}
+                    readingRenderers={readingRenderers}
+                    readingId="models"
+                    layout="grid"
+                    compact={compact}
+                    className={
+                      [folderCardsClass, !fillingCards && resultsSettling]
+                        .filter(Boolean)
+                        .join(" ") || undefined
+                    }
+                  />
                   <LoadMore
+                    paused={reading.status === "restoring" || !browseReady}
+                    layoutKey={`${viewMode}:${pane?.open ?? true}`}
                     hasMore={snapshot?.moreFolders ?? false}
                     loading={fetchingFolders || currentRefresh !== null}
                     failed={folderPages.isFetchNextPageError}
@@ -3174,6 +3984,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     folders
                   />
                   <LoadMore
+                    paused={reading.status === "restoring" || !browseReady}
+                    layoutKey={`${viewMode}:${pane?.open ?? true}`}
                     hasMore={hasMore && !refreshRequired}
                     loading={loadingMore}
                     failed={modelQuery.isFetchNextPageError}
@@ -3184,7 +3996,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 <div
                   key={`list:${folderEntrance.path ?? ""}`}
                   ref={listContent}
-                  className={`${folderEntrance.move ? FOLDER_MOVE_CLASS[folderEntrance.move] : ""} flex-1 overflow-y-auto`}
+                  data-library-list
+                  className={`${folderEntering ? FOLDER_MOVE_CLASS[folderEntering] : (resultsSettling ?? "")} flex-1 overflow-y-auto`}
                 >
                   <div className="flex flex-col">
                     <div className="flex items-center gap-3 px-4 py-2 border-b border-border text-xs font-mono text-muted-foreground uppercase tracking-wider bg-muted/50">
@@ -3197,20 +4010,31 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       <span className="w-20 text-right">{uiText("Contents")}</span>
                       <span className="w-24 text-right hidden md:block">{uiText("Updated")}</span>
                     </div>
-                    {visibleCollections.map((collection) => (
-                      <CollectionListRow
-                        key={collection.id}
-                        collection={collection}
-                        displayPath={collection.display_path}
-                        onSelect={handleCollectionChange}
-                        onIntent={prefetchFolder}
-                        onDropModel={canUploadToVault ? handleMoveModel : undefined}
-                        selectable={selectMode}
-                        selected={selectedCollectionRows.has(collection.id)}
-                        onToggleSelect={auth.isAuthenticated ? toggleCollectionSelect : undefined}
-                      />
-                    ))}
+                    <LibraryItems
+                      items={visibleCollections}
+                      itemKey={(collection) => `collection:${collection.id}`}
+                      renderItem={(collection) => (
+                        <CollectionListRow
+                          key={collection.id}
+                          collection={collection}
+                          displayPath={collection.display_path}
+                          onSelect={handleCollectionChange}
+                          onIntent={prefetchFolder}
+                          onDropModel={canUploadToVault ? handleMoveModel : undefined}
+                          selectable={selectMode}
+                          selected={selectedCollectionRows.has(collection.id)}
+                          onToggleSelect={auth.isAuthenticated ? toggleCollectionSelect : undefined}
+                        />
+                      )}
+                      scrollRef={startupContent}
+                      readingRenderers={readingRenderers}
+                      readingId="collections"
+                      layout="list"
+                      estimateSize={65}
+                    />
                     <LoadMore
+                      paused={reading.status === "restoring" || !browseReady}
+                      layoutKey={`${viewMode}:${pane?.open ?? true}`}
                       hasMore={snapshot?.moreFolders ?? false}
                       loading={fetchingFolders || currentRefresh !== null}
                       failed={folderPages.isFetchNextPageError}
@@ -3219,33 +4043,51 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       }}
                       folders
                     />
-                    {libraryItems.map((item) =>
-                      item.kind === "multipart" ? (
-                        <MultipartModelListRow
-                          key={`multipart-${item.value.id}`}
-                          selectable={selectMode}
-                          selected={selectedMultipartRows.has(item.value.id)}
-                          onToggleSelect={auth.isAuthenticated ? toggleMultipartSelect : undefined}
-                          item={item.value}
-                          collectionLabel={item.value.collection_label}
-                          returnTo={currentLibraryHref}
-                          origin={snapshot?.entry}
-                        />
-                      ) : (
-                        <ModelListRow
-                          key={item.value.id}
-                          model={item.value}
-                          origin={snapshot?.entry}
-                          collectionLabel={item.value.collection_label}
-                          selectable={selectMode}
-                          selected={selectedIds.has(item.value.id)}
-                          onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
-                          draggable={canUploadToVault && !selectMode}
-                        />
-                      ),
-                    )}
+                    <LibraryItems
+                      items={libraryItems}
+                      itemKey={(item) =>
+                        item.kind === "model"
+                          ? `/models/${item.value.id}`
+                          : `/multipart-models/${item.value.id}`
+                      }
+                      renderItem={(item) =>
+                        item.kind === "multipart" ? (
+                          <MultipartModelListRow
+                            key={`multipart-${item.value.id}`}
+                            selectable={selectMode}
+                            selected={selectedMultipartRows.has(item.value.id)}
+                            onToggleSelect={
+                              auth.isAuthenticated ? toggleMultipartSelect : undefined
+                            }
+                            item={item.value}
+                            collectionLabel={item.value.collection_label}
+                            returnTo={currentLibraryHref}
+                            origin={snapshot?.entry}
+                          />
+                        ) : (
+                          <ModelListRow
+                            key={item.value.id}
+                            model={item.value}
+                            origin={snapshot?.entry}
+                            collectionLabel={item.value.collection_label}
+                            selectable={selectMode}
+                            selected={selectedIds.has(item.value.id)}
+                            onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
+                            draggable={canUploadToVault && !selectMode}
+                            onInspect={!favoritesOnly ? inspectModel : undefined}
+                            inspected={inspectorOpen && inspectorIntent?.id === item.value.id}
+                          />
+                        )
+                      }
+                      scrollRef={startupContent}
+                      readingRenderers={readingRenderers}
+                      readingId="models"
+                      layout="list"
+                    />
                   </div>
                   <LoadMore
+                    paused={reading.status === "restoring" || !browseReady}
+                    layoutKey={`${viewMode}:${pane?.open ?? true}`}
                     hasMore={hasMore && !refreshRequired}
                     loading={loadingMore}
                     failed={modelQuery.isFetchNextPageError}
@@ -3256,6 +4098,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           )}
         </main>
+        {inspectorAvailable && inspectorIntent && (
+          <LibraryModelInspector
+            key={entry.session}
+            id={inspectorIntent.id}
+            open={inspectorOpen}
+            origin={snapshot?.entry}
+            canWrite={auth.isAuthenticated && !authority.authorizationChanged && inspectorOpen}
+            onOpenPage={() => reading.rememberAnchor(`/models/${inspectorIntent.id}`)}
+            onClose={closeInspector}
+          />
+        )}
 
         {currentBatchRecovery && (
           <LibraryBatchRecovery
@@ -3289,6 +4142,24 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             onClear={clearSelection}
           />
         )}
+        {multipartTagTarget && (
+          <MultipartModelTagsDialog
+            key={`${multipartTagTarget.item.id}:${multipartTagTarget.intent}`}
+            item={multipartTagTarget.item}
+            availableTags={tags}
+            onDataChange={refresh}
+            canEdit={
+              !authority.authorizationChanged &&
+              visibleMultipartModels.some(
+                (item) =>
+                  item.id === multipartTagTarget.item.id &&
+                  (item.effective_role === "edit" || item.effective_role === "admin"),
+              )
+            }
+            initialOpen
+            triggerMode="none"
+          />
+        )}
         {tagTarget && (
           <DeferredDialog
             open={tagDialogOpen}
@@ -3315,108 +4186,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   );
 }
 
-// Makes a collection card accept a dragged model: highlights on hover and calls
-// onDropModel(source, path) on drop. Ignores OS file drags (no MODEL_DND_MIME)
-// so those still bubble to the main upload handler.
-function useModelDropTarget(path: string, onDropModel?: (source: ModelDrag, path: string) => void) {
-  const [dragOver, setDragOver] = useState(false);
-  const handlers = {
-    onDragOver: (e: React.DragEvent) => {
-      if (!onDropModel || !e.dataTransfer.types.includes(MODEL_DND_MIME)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      e.dataTransfer.dropEffect = "move";
-      setDragOver(true);
-    },
-    onDragLeave: () => setDragOver(false),
-    onDrop: (e: React.DragEvent) => {
-      if (!onDropModel || !e.dataTransfer.types.includes(MODEL_DND_MIME)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setDragOver(false);
-      const source = readModelDrag(e.dataTransfer.getData(MODEL_DND_MIME));
-      if (source) onDropModel(source, path);
-    },
-  };
-  return { dragOver, handlers };
-}
-
-function CollectionFolderCard({
-  collection,
-  arriving = false,
-  onSelect,
-  onIntent,
-  onDropModel,
-  selectable,
-  selected,
-  onToggleSelect,
-}: {
-  collection: CollectionRead;
-  arriving?: boolean;
-  onSelect: (path: string) => void;
-  /** The user is about to open this folder (hover or focus): warm its data. */
-  onIntent?: (path: string | null) => void;
-  onDropModel?: (source: ModelDrag, path: string) => void;
-  selectable?: boolean;
-  selected?: boolean;
-  onToggleSelect?: (id: number) => void;
-}) {
-  useUiLocale();
-  const { dragOver, handlers } = useModelDropTarget(collection.path, onDropModel);
-  return (
-    <Localized>
-      <div
-        role="button"
-        tabIndex={0}
-        data-collection-path={collection.path}
-        onPointerEnter={() => !selectable && onIntent?.(collection.path)}
-        onFocus={() => !selectable && onIntent?.(collection.path)}
-        onPointerLeave={() => onIntent?.(null)}
-        onBlur={() => onIntent?.(null)}
-        onClick={() => (selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path))}
-        onKeyDown={(event) => {
-          if (event.target !== event.currentTarget) return;
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            if (selectable) onToggleSelect?.(collection.id);
-            else onSelect(collection.path);
-          }
-        }}
-        {...handlers}
-        className={`${arriving ? "animate-card-arrive" : ""} group group/selection-card flex flex-col text-left bg-muted border rounded-lg hover:shadow-sm transition-[border-color,box-shadow,transform] duration-fast active:scale-[0.99] relative overflow-hidden ${
-          selected
-            ? "border-primary bg-accent"
-            : dragOver
-              ? "border-primary ring-2 ring-primary-soft"
-              : "border-border hover:border-primary"
-        }`}
-      >
-        <div className="flex-1 flex items-center justify-center bg-muted/60 dark:bg-surface-container-high min-h-[100px] sm:min-h-[140px]">
-          {onToggleSelect && (
-            <LibraryCardSelection
-              selecting={!!selectable}
-              checked={!!selected}
-              onChange={() => onToggleSelect(collection.id)}
-              label={uiText("Select folder {value1}", { value1: String(collection.name) })}
-            />
-          )}
-          <Folder className="w-12 h-12 sm:w-16 sm:h-16 text-primary/30" />
-        </div>
-        <div className="p-3 border-t border-border">
-          <div className="flex items-center justify-end gap-2 mb-0.5">
-            <span className="text-3xs text-muted-foreground font-mono">
-              {uiText("{value1} models", { value1: String(collection.model_count ?? "") })}
-            </span>
-          </div>
-          <p className="text-sm font-bold text-foreground truncate tracking-tight">
-            {collection.name}
-          </p>
-        </div>
-      </div>
-    </Localized>
-  );
-}
-
 function CollectionListRow({
   collection,
   displayPath,
@@ -3429,7 +4198,7 @@ function CollectionListRow({
 }: {
   collection: CollectionRead;
   displayPath: string | null;
-  onSelect: (path: string) => void;
+  onSelect: (path: string, id: number) => void;
   /** The user is about to open this folder (hover or focus): warm its data. */
   onIntent?: (path: string | null) => void;
   onDropModel?: (source: ModelDrag, path: string) => void;
@@ -3445,17 +4214,20 @@ function CollectionListRow({
         role="button"
         tabIndex={0}
         data-collection-path={collection.path}
+        data-library-anchor={`collection:${collection.id}`}
         onPointerEnter={() => !selectable && onIntent?.(collection.path)}
         onFocus={() => !selectable && onIntent?.(collection.path)}
         onPointerLeave={() => onIntent?.(null)}
         onBlur={() => onIntent?.(null)}
-        onClick={() => (selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path))}
+        onClick={() =>
+          selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path, collection.id)
+        }
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
             if (selectable) onToggleSelect?.(collection.id);
-            else onSelect(collection.path);
+            else onSelect(collection.path, collection.id);
           }
         }}
         {...handlers}
@@ -3578,6 +4350,8 @@ function ModelListRow({
   selected = false,
   onToggleSelect,
   draggable = false,
+  onInspect,
+  inspected = false,
 }: {
   model: ModelListItem;
   origin?: LibraryEntry;
@@ -3586,6 +4360,8 @@ function ModelListRow({
   selected?: boolean;
   onToggleSelect?: (id: number, range?: boolean) => void;
   draggable?: boolean;
+  onInspect?: (id: number, opener: HTMLElement) => void;
+  inspected?: boolean;
 }) {
   useUiLocale();
   const printerPresence = model.printer_presence ?? [];
@@ -3607,11 +4383,21 @@ function ModelListRow({
           if (selectable) {
             e.preventDefault();
             onToggleSelect?.(model.id, e.shiftKey);
+          } else if (
+            onInspect &&
+            e.button === 0 &&
+            !e.metaKey &&
+            !e.ctrlKey &&
+            !e.shiftKey &&
+            !e.altKey
+          ) {
+            e.preventDefault();
+            onInspect(model.id, e.currentTarget);
           }
         }}
         className={`flex items-center gap-2 md:gap-3 px-4 py-3 border-b border-border transition-colors group active:bg-muted ${
           draggable ? "cursor-grab active:cursor-grabbing" : ""
-        } ${selected ? "bg-accent" : "hover:bg-muted"}`}
+        } ${selected || inspected ? "bg-accent" : "hover:bg-muted"}`}
       >
         {onToggleSelect && (
           <Checkbox
@@ -3676,19 +4462,22 @@ function ModelListRow({
 
 /**
  * The next page of a view loads as the list is scrolled toward its end, so
- * there is no button to press. A sentinel reaching up 600px above the end of the
- * list starts the read before the reader gets there. The button remains only
- * where it must: a browser that cannot observe scrolling, or after a read
- * failed, since a sentinel still in view would otherwise retry without end.
+ * a sentinel reaching up 600px above the end starts the read before the reader
+ * gets there. The explicit button is always available. A failed read retires
+ * the observer so a sentinel still in view cannot retry without end.
  */
 function LoadMore({
   hasMore,
   loading,
   failed = false,
+  paused = false,
+  layoutKey,
   onClick,
   folders = false,
 }: {
   hasMore: boolean;
+  paused?: boolean;
+  layoutKey: string;
   loading: boolean;
   failed?: boolean;
   onClick: () => void;
@@ -3700,41 +4489,61 @@ function LoadMore({
   useLayoutEffect(() => {
     load.current = onClick;
   });
-  const automatic = "IntersectionObserver" in globalThis && !failed;
+  const [awaitScroll, setAwaitScroll] = useState(paused);
+  const [readingLayout, setReadingLayout] = useState(layoutKey);
+  if (readingLayout !== layoutKey) {
+    setReadingLayout(layoutKey);
+    setAwaitScroll(true);
+  }
+  if (paused && !awaitScroll) setAwaitScroll(true);
+  // Reconstruct only the saved pages. Resume anticipation after the reader moves,
+  // so a restored near-end sentinel cannot fetch an unvisited cursor on its own.
+  useEffect(() => {
+    if (!awaitScroll || paused) return;
+    const main = sentinel.current?.closest("main");
+    if (!main) return;
+    const resume = (event: Event) => {
+      if (event instanceof KeyboardEvent && !["PageDown", "End", "ArrowDown"].includes(event.key))
+        return;
+      setAwaitScroll(false);
+    };
+    main.addEventListener("wheel", resume, { passive: true });
+    main.addEventListener("touchmove", resume, { passive: true });
+    main.addEventListener("keydown", resume);
+    return () => {
+      main.removeEventListener("wheel", resume);
+      main.removeEventListener("touchmove", resume);
+      main.removeEventListener("keydown", resume);
+    };
+  }, [awaitScroll, paused]);
+  const automatic = "IntersectionObserver" in globalThis && !failed && !paused && !awaitScroll;
+  const mayLoad = useRef(false);
+  useLayoutEffect(() => {
+    mayLoad.current = automatic && hasMore && !loading;
+  });
   useEffect(() => {
     const element = sentinel.current;
     if (!automatic || !hasMore || loading || element === null) return;
     // Observing reports the current state at once, so a list shorter than the
     // reach keeps loading until it fills it.
     const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) load.current();
+      if (mayLoad.current && entries.some((entry) => entry.isIntersecting)) load.current();
     });
     observer.observe(element);
     return () => observer.disconnect();
   }, [automatic, hasMore, loading]);
   if (!hasMore) return null;
-  if (automatic) {
-    return (
-      <Localized>
-        <div className="relative pb-6">
+  return (
+    <Localized>
+      <div className="relative flex justify-center mt-6 pb-6">
+        {"IntersectionObserver" in globalThis && (
           <div
             ref={sentinel}
             data-load-more-sentinel
             aria-hidden
             className="pointer-events-none absolute bottom-0 h-[600px] w-full"
           />
-          {loading && (
-            <div className="flex justify-center py-6">
-              <Spinner />
-            </div>
-          )}
-        </div>
-      </Localized>
-    );
-  }
-  return (
-    <Localized>
-      <div className="flex justify-center mt-6 pb-6">
+        )}
         <button
           onClick={onClick}
           disabled={loading}
@@ -3758,7 +4567,7 @@ export function CollectionHeaderSkeleton() {
     <div
       role="status"
       aria-label={uiText("Loading…")}
-      className="flex flex-wrap items-center gap-4 border-b border-border px-4 py-2 sm:px-6"
+      className="library-loading-placeholder flex flex-wrap items-center gap-4 border-b border-border px-4 py-2 sm:px-6"
     >
       <Skeleton className="h-8 w-28" />
       <Skeleton className="h-8 w-60 max-w-full" />
@@ -3766,27 +4575,78 @@ export function CollectionHeaderSkeleton() {
   );
 }
 
-const MODEL_GRID_LAYOUT = {
-  comfortable: "grid-cols-[repeat(auto-fill,minmax(min(100%,260px),1fr))] gap-4",
-  compact: "grid-cols-[repeat(auto-fill,minmax(min(100%,200px),1fr))] gap-2",
-};
+const SKELETON_CARDS = Array.from({ length: 8 }, (_, index) => index);
 
-export function ModelGridSkeleton({ compact = false }: { compact?: boolean }) {
+export function ModelGridSkeleton({
+  compact = false,
+  onRetire,
+}: {
+  compact?: boolean;
+  onRetire?: (rects: readonly DOMRect[]) => void;
+}) {
   useUiLocale();
+  const [scrollNode, setScrollNode] = useState<HTMLDivElement | null>(null);
+  const scroll = useMemo(() => ({ current: scrollNode }), [scrollNode]);
+  const renderers = useRef(new Map<string, LibraryReadingRenderer>());
+  useLayoutEffect(() => {
+    if (!scrollNode || !onRetire) return;
+    let rects: readonly DOMRect[] = [];
+    const measure = () => {
+      rects = Array.from(scrollNode.querySelectorAll("[data-library-key]")).map((node) =>
+        node.getBoundingClientRect(),
+      );
+    };
+    let tick = requestAnimationFrame(measure);
+    const schedule = () => {
+      cancelAnimationFrame(tick);
+      tick = requestAnimationFrame(measure);
+    };
+    const observer = new ResizeObserver(schedule);
+    observer.observe(scrollNode);
+    window.addEventListener("scroll", schedule, true);
+    return () => {
+      cancelAnimationFrame(tick);
+      observer.disconnect();
+      window.removeEventListener("scroll", schedule, true);
+      const grid = scrollNode.querySelector(".library-loading-placeholder");
+      // A suppressed fast-load placeholder never established a visual position.
+      if (!grid || Number(getComputedStyle(grid).opacity) === 0) return;
+      // Keep the last painted positions: earlier siblings may already have
+      // changed layout during the commit that retires this placeholder.
+      onRetire(rects);
+    };
+  }, [scrollNode, onRetire]);
   return (
-    <div role="status" aria-label={uiText("Loading...")} className={compact ? "p-3" : "p-4 sm:p-6"}>
-      <div
-        className={cn("grid", compact ? MODEL_GRID_LAYOUT.compact : MODEL_GRID_LAYOUT.comfortable)}
-      >
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="space-y-3 rounded-lg border border-border p-3 bg-card">
-            <Skeleton className="h-40 w-full rounded" />
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-3 w-1/2" />
-            <Skeleton className="h-12 w-full rounded" />
-          </div>
-        ))}
-      </div>
+    <div
+      ref={setScrollNode}
+      role="status"
+      aria-label={uiText("Loading...")}
+      className={compact ? "p-3" : "p-4 sm:p-6"}
+    >
+      {scrollNode && (
+        <LibraryItems
+          items={SKELETON_CARDS}
+          itemKey={(index) => `skeleton:${index}`}
+          scrollRef={scroll}
+          readingRenderers={renderers}
+          readingId="skeleton"
+          layout="grid"
+          className="library-loading-placeholder"
+          compact={compact}
+          virtualize={false}
+          renderItem={() => (
+            <div
+              className="library-model-card overflow-hidden border border-border bg-card"
+              aria-hidden
+            >
+              <div className="library-preview border-b border-border">
+                <LibraryPreviewPlaceholder />
+              </div>
+              <LibraryCardDetailsPlaceholder />
+            </div>
+          )}
+        />
+      )}
     </div>
   );
 }

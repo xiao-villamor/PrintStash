@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { localizationAssets } from "./scripts/localization-assets.ts";
@@ -9,6 +10,7 @@ const API_TARGET = process.env.VITE_API_URL || "http://localhost:8000";
 // the built `dist/` is served behind the same reverse proxy as the API.
 export default defineConfig(({ mode }) => ({
   plugins: [
+    tanstackRouter({ target: "react", autoCodeSplitting: true }),
     localizationAssets(),
     tailwindcss(),
     // Only measured tree components opt in with "use memo". Broad compilation

@@ -27,7 +27,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test-support/router";
 
 import { PrintersPage } from "@/components/printers-list";
 import { writePrinterCardImagePreference } from "@/lib/printer-card-display";
@@ -98,13 +98,13 @@ function renderPrintersPage(seed: { printers?: PrinterRead[]; dashboard?: Dashbo
   client.setQueryData(queryKeys.fleetSummary, EMPTY_FLEET_SUMMARY);
 
   return render(
-    <MemoryRouter>
+    <TestRouter>
       <QueryClientProvider client={client}>
         <AuthContext.Provider value={ADMIN_AUTH}>
           <PrintersPage />
         </AuthContext.Provider>
       </QueryClientProvider>
-    </MemoryRouter>,
+    </TestRouter>,
   );
 }
 
@@ -207,10 +207,7 @@ describe("PrinterSetupForm", () => {
     await openForm();
     await userEvent.type(screen.getByLabelText("Name"), "Voron");
     await userEvent.type(screen.getByLabelText("Moonraker URL"), "http://voron.local:7125");
-    const form = screen
-      .getAllByRole("button", { name: /^add printer$/i })
-      .at(-1)!
-      .closest("form")!;
+    const form = screen.getByLabelText("Name").closest("form")!;
 
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -310,7 +307,7 @@ describe("PrinterCard", () => {
   it("switches to global queue empty state", async () => {
     renderPrintersPage();
     await userEvent.click(screen.getByRole("tab", { name: "Queue" }));
-    expect(screen.getByText("No queued print jobs")).toBeInTheDocument();
+    expect(screen.getByText("No jobs match these filters.")).toBeInTheDocument();
   });
 
   it("summarizes fleet health and filters by printer group", async () => {
@@ -332,7 +329,7 @@ describe("PrinterCard", () => {
 
     expect(screen.getByLabelText("Fleet summary")).toHaveTextContent("1");
     // DOM implementations differ on whether adjacent text nodes insert a space.
-    await userEvent.click(screen.getByRole("button", { name: /Workshop\s*1/ }));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Group" }), "Workshop");
     expect(screen.getByRole("link", { name: "Workshop Voron" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Garage Prusa" })).not.toBeInTheDocument();
   });
@@ -367,9 +364,9 @@ describe("PrinterCard", () => {
     renderPrintersPage({ printers: [makePrinter()] });
 
     await user.click(screen.getByText("Set model"));
-    const picker = screen.getByRole("dialog", { name: "Select printer model" });
-    await user.click(within(picker).getByText("Voron 2.4"));
-    await user.click(within(picker).getByText("Save model"));
+    const picker = screen.getByRole("dialog", { name: "Choose printer model" });
+    await user.type(within(picker).getByRole("searchbox"), "Voron 2.4");
+    await user.click(within(picker).getByRole("button", { name: "Select" }));
 
     await waitFor(() => expect(requestsWithMethod("PATCH")).toHaveLength(1));
     const patched = requestsWithMethod("PATCH")[0]!;
@@ -407,20 +404,23 @@ describe("PrinterCard", () => {
     });
     renderPrintersPage({ printers: [original] });
     await user.click(screen.getByText("Set model"));
-    const dialog = screen.getByRole("dialog", { name: "Select printer model" });
-    await user.type(within(dialog).getByPlaceholderText("Enter model name"), "Homebrew CoreXY");
-    await user.click(within(dialog).getByRole("button", { name: "Save model" }));
+    await user.click(screen.getByRole("button", { name: "Use custom model" }));
+    const dialog = screen.getByRole("dialog", { name: "Custom printer model" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Manufacturer" }), "Homebrew");
+    await user.type(within(dialog).getByRole("textbox", { name: "Model" }), "CoreXY");
+    await user.click(within(dialog).getByRole("button", { name: "Use this model" }));
     await user.click(
       await within(dialog).findByRole("button", { name: "Review current settings" }),
     );
     expect(await within(dialog).findByText("Other model")).toBeVisible();
-    expect(within(dialog).getByRole("button", { name: "Save model" })).toBeDisabled();
-    expect(within(dialog).getByPlaceholderText("Enter model name")).toHaveValue("Homebrew CoreXY");
+    expect(within(dialog).getByRole("button", { name: "Use this model" })).toBeDisabled();
+    expect(within(dialog).getByRole("textbox", { name: "Manufacturer" })).toHaveValue("Homebrew");
+    expect(within(dialog).getByRole("textbox", { name: "Model" })).toHaveValue("CoreXY");
     expect(patches).toBe(1);
     await user.click(within(dialog).getByRole("button", { name: "Save revised changes" }));
     await waitFor(() =>
       expect(
-        screen.queryByRole("dialog", { name: "Select printer model" }),
+        screen.queryByRole("dialog", { name: "Custom printer model" }),
       ).not.toBeInTheDocument(),
     );
     expect(await screen.findByText("Homebrew CoreXY")).toBeVisible();
@@ -432,8 +432,9 @@ describe("PrinterCard", () => {
     renderPrintersPage({ printers: [makePrinter()] });
 
     await userEvent.click(screen.getByText("Set model"));
-    await userEvent.type(screen.getByPlaceholderText("Enter model name"), "Homebrew CoreXY");
-    await userEvent.click(screen.getByRole("button", { name: "Save model" }));
+    await userEvent.click(screen.getByRole("button", { name: "Use custom model" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Model" }), "Homebrew CoreXY");
+    await userEvent.click(screen.getByRole("button", { name: "Use this model" }));
 
     await waitFor(() => expect(requestsWithMethod("PATCH")).toHaveLength(1));
     const patched = requestsWithMethod("PATCH")[0]!;
@@ -449,7 +450,8 @@ describe("PrintersPage", () => {
       // Removing a printer takes its access grants and its job history with it.
       renderPrintersPage({ printers: [makePrinter()] });
 
-      await userEvent.click(screen.getByRole("button", { name: /Remove/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+      await userEvent.click(await screen.findByRole("button", { name: /Remove/ }));
 
       expect(requestsWithMethod("DELETE")).toHaveLength(0);
     });
@@ -457,7 +459,8 @@ describe("PrintersPage", () => {
     it("names the printer it is about to remove", async () => {
       renderPrintersPage({ printers: [makePrinter()] });
 
-      await userEvent.click(screen.getByRole("button", { name: /Remove/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+      await userEvent.click(await screen.findByRole("button", { name: /Remove/ }));
 
       expect(
         await screen.findByText('"Voron 2.4" will be removed from PrintStash.'),
@@ -466,7 +469,8 @@ describe("PrintersPage", () => {
 
     it("removes it once confirmed", async () => {
       renderPrintersPage({ printers: [makePrinter()] });
-      await userEvent.click(screen.getByRole("button", { name: /Remove/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+      await userEvent.click(await screen.findByRole("button", { name: /Remove/ }));
       const dialog = await screen.findByRole("dialog");
 
       await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
@@ -476,8 +480,7 @@ describe("PrintersPage", () => {
     });
 
     it("offers no removal to somebody who may not administer it", async () => {
-      // The control says "Restricted" rather than disappearing, so a viewer can
-      // see the action exists and is not theirs.
+      // The connection is visible, while administrative actions remain unavailable.
       renderPrintersPage({
         printers: [
           makePrinter({
@@ -492,7 +495,9 @@ describe("PrintersPage", () => {
         ],
       });
 
-      expect(screen.getByRole("button", { name: /Restricted/ })).toBeDisabled();
+      expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
+      expect(requestsWithMethod("DELETE")).toEqual([]);
     });
   });
 

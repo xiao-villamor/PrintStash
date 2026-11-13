@@ -17,13 +17,14 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RevisionsTab } from "@/components/model-detail/revisions-tab";
+import { clearLogin } from "@/lib/auth-store";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
-import type { FileRead, ModelPrinterFileRead, ModelRead } from "@/types";
+import type { ArtifactOutcomeRead, FileRead, ModelPrinterFileRead, ModelRead } from "@/types";
 
 const FROZEN_NOW = "2026-01-01T00:00:00Z";
 
@@ -75,33 +76,45 @@ function aModel(over: Partial<ModelRead> = {}): ModelRead {
   };
 }
 
-function renderRevisions(options: RenderAppOptions & { revisions?: FileRead[] } = {}) {
+function renderRevisions(
+  options: RenderAppOptions & { revisions?: FileRead[]; startComparing?: boolean } = {},
+) {
   const {
     revisions = [aRevision(), aRevision({ id: 21, gcode_revision_number: 2, version: 2 })],
     routes = {},
+    startComparing = false,
     ...rest
   } = options;
   const onModel = vi.fn<(model: ModelRead) => void>();
   const onAddRevision = vi.fn<() => void>();
-  const result = renderApp(
+  const onLogPrint = vi.fn<(fileId: number, state: "completed" | "failed") => void>();
+  const content = (files: FileRead[]) => (
     <RevisionsTab
       modelId={1}
-      gcodeFiles={revisions}
-      allFiles={revisions}
+      gcodeFiles={files.filter((file) => file.file_type === "gcode")}
+      allFiles={files}
+      startComparing={startComparing}
       printerFilesByFileId={new Map<number, ModelPrinterFileRead[]>()}
       onModel={onModel}
       onAddRevision={onAddRevision}
+      onLogPrint={onLogPrint}
       canEdit
-    />,
-    {
-      routes: {
-        "GET /api/v1/models/1/artifact-outcomes": json([]),
-        ...routes,
-      },
-      ...rest,
-    },
+    />
   );
-  return { ...result, onModel, onAddRevision };
+  const result = renderApp(content(revisions), {
+    routes: {
+      "GET /api/v1/models/1/artifact-outcomes": json([]),
+      ...routes,
+    },
+    ...rest,
+  });
+  return {
+    ...result,
+    onModel,
+    onAddRevision,
+    onLogPrint,
+    rerenderRevisions: (files: FileRead[]) => result.rerender(content(files)),
+  };
 }
 
 beforeEach(() => {
@@ -113,6 +126,173 @@ afterEach(() => {
 });
 
 describe("RevisionsTab", () => {
+  describe("keyboard revision selection", () => {
+    it("moves revision focus with the arrow selection", async () => {
+      const user = userEvent.setup();
+      renderRevisions();
+      await user.click(await screen.findByRole("button", { name: /^Rev 1\s*PLA draft$/ }));
+
+      await user.keyboard("{ArrowDown}");
+
+      const next = screen.getByRole("button", { name: /^Rev 2\s*PLA draft$/ });
+      expect(next).toHaveFocus();
+      expect(next).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("keeps focus on the last revision at the boundary", async () => {
+      const user = userEvent.setup();
+      renderRevisions();
+      await user.click(await screen.findByRole("button", { name: /^Rev 2\s*PLA draft$/ }));
+
+      await user.keyboard("{ArrowDown}");
+
+      expect(screen.getByRole("button", { name: /^Rev 2\s*PLA draft$/ })).toHaveFocus();
+    });
+  });
+
+  describe("revision print shortcuts", () => {
+    it.each([
+      ["1", "completed"],
+      ["2", "failed"],
+    ] as const)("logs %s for the focused revision", async (key, state) => {
+      const user = userEvent.setup();
+      const view = renderRevisions();
+      await user.click(await screen.findByRole("button", { name: /^Rev 2\s*PLA draft$/ }));
+      await user.keyboard(key);
+      expect(view.onLogPrint).toHaveBeenCalledExactlyOnceWith(21, state);
+    });
+
+    it("preserves native keyboard editing in the revision label draft", async () => {
+      const user = userEvent.setup();
+      const view = renderRevisions();
+      await user.click((await screen.findAllByRole("button", { name: "Edit revision" }))[0]);
+      const label = await screen.findByPlaceholderText("Revision label");
+      await user.clear(label);
+      await user.type(label, "12{ArrowLeft}");
+      expect(label).toHaveValue("12");
+      expect(label).toHaveFocus();
+      expect(view.onLogPrint).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("comparison outcome ownership", () => {
+    const recorded: ArtifactOutcomeRead = {
+      file_id: 20,
+      print_count: 7,
+      completed_count: 7,
+      failed_count: 0,
+      cancelled_count: 0,
+      success_rate: 1,
+      average_duration_s: null,
+      total_filament_g: null,
+      total_cost: null,
+    };
+
+    it("reads the resolved pair when a second file arrives", async () => {
+      const first = aRevision();
+      const second = aRevision({ id: 21, version: 2, gcode_revision_number: 2 });
+      const view = renderRevisions({
+        revisions: [first],
+        startComparing: true,
+        routes: { "GET /api/v1/models/1/artifact-outcomes": json([recorded]) },
+      });
+      view.rerenderRevisions([first, second]);
+
+      expect(
+        await within(await screen.findByRole("row", { name: /^Print count/ })).findByText("7"),
+      ).toBeVisible();
+      expect(
+        view
+          .requests()
+          .filter(({ url }) => url.includes("artifact-outcomes"))
+          .map(({ url }) => new URL(url, "http://test").searchParams.getAll("file_id")),
+      ).toEqual([["20", "21"]]);
+    });
+
+    it("ignores an outcome response for a removed selection", async () => {
+      const first = aRevision();
+      const second = aRevision({ id: 21, version: 2, gcode_revision_number: 2 });
+      const third = aRevision({ id: 22, version: 3, gcode_revision_number: 3 });
+      let release!: (response: Response) => void;
+      const pending = new Promise<Response>((resolve) => {
+        release = resolve;
+      });
+      const view = renderRevisions({
+        revisions: [first, second],
+        startComparing: true,
+        routes: {
+          "GET /api/v1/models/1/artifact-outcomes": (url) =>
+            new URL(url, "http://test").searchParams.getAll("file_id").includes("21")
+              ? pending
+              : json([{ ...recorded, print_count: 3 }]),
+        },
+      });
+      await waitFor(() =>
+        expect(view.requests().some(({ url }) => url.includes("artifact-outcomes"))).toBe(true),
+      );
+      view.rerenderRevisions([first, third]);
+      expect(
+        await within(await screen.findByRole("row", { name: /^Print count/ })).findByText("3"),
+      ).toBeVisible();
+
+      await act(async () => {
+        release(json([{ ...recorded, print_count: 99 }]));
+        await pending;
+      });
+
+      const count = within(screen.getByRole("row", { name: /^Print count/ }));
+      expect(count.getByText("3")).toBeVisible();
+      expect(count.queryByText("99")).not.toBeInTheDocument();
+    });
+
+    it("ignores an outcome response after session retirement", async () => {
+      let release!: (response: Response) => void;
+      const pending = new Promise<Response>((resolve) => {
+        release = resolve;
+      });
+      const view = renderRevisions({
+        startComparing: true,
+        routes: { "GET /api/v1/models/1/artifact-outcomes": () => pending },
+      });
+      await waitFor(() =>
+        expect(view.requests().some(({ url }) => url.includes("artifact-outcomes"))).toBe(true),
+      );
+
+      await act(async () => {
+        clearLogin();
+        release(json([recorded]));
+        await pending;
+      });
+
+      const count = within(screen.getByRole("row", { name: /^Print count/ }));
+      expect(count.getAllByText("Not recorded")).toHaveLength(2);
+      expect(count.queryByText("7")).not.toBeInTheDocument();
+      expect(view.requests().filter(({ url }) => url.includes("artifact-outcomes"))).toHaveLength(
+        1,
+      );
+    });
+
+    it("keeps comparison modes available when the chosen scope is empty", async () => {
+      const user = userEvent.setup();
+      renderRevisions({ startComparing: true });
+      await user.click(
+        within(screen.getByRole("group", { name: "Comparison type" })).getByRole("button", {
+          name: "Source files",
+        }),
+      );
+      expect(screen.getByText("Add a second file to compare recorded information.")).toBeVisible();
+
+      await user.click(
+        within(screen.getByRole("group", { name: "Comparison type" })).getByRole("button", {
+          name: "G-code revisions",
+        }),
+      );
+
+      expect(screen.getByRole("heading", { name: "Compare revisions" })).toBeVisible();
+      expect(screen.getAllByRole("table")).not.toHaveLength(0);
+    });
+  });
+
   describe("listing revisions", () => {
     it("lists every revision", async () => {
       renderRevisions();
@@ -130,7 +310,7 @@ describe("RevisionsTab", () => {
       const user = userEvent.setup();
       const { onAddRevision } = renderRevisions();
 
-      await user.click(await screen.findByRole("button", { name: "Add" }));
+      await user.click(await screen.findByRole("button", { name: "Add revision" }));
 
       expect(onAddRevision).toHaveBeenCalledTimes(1);
     });
@@ -158,7 +338,7 @@ describe("RevisionsTab", () => {
       await user.clear(label);
       await user.type(label, "PETG fast");
 
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save Revision" }));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
@@ -175,7 +355,7 @@ describe("RevisionsTab", () => {
       });
       await user.click((await screen.findAllByRole("button", { name: "Editar revisión" }))[0]);
 
-      await user.click(screen.getByRole("button", { name: "Guardar" }));
+      await user.click(screen.getByRole("button", { name: "Guardar revisión" }));
 
       expect(await screen.findByText("Revisión actualizada")).toBeInTheDocument();
     });

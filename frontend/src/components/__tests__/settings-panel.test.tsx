@@ -144,6 +144,18 @@ function renderSettings(options: RenderAppOptions = {}) {
   });
 }
 
+async function openCreateUser() {
+  const button = await screen.findByRole("button", { name: "Create user" });
+  await waitFor(() => expect(button).toBeEnabled());
+  await userEvent.click(button);
+}
+
+async function openPasswordReset() {
+  const button = await screen.findByRole("button", { name: "Reset password" });
+  await waitFor(() => expect(button).toBeEnabled());
+  await userEvent.click(button);
+}
+
 beforeEach(() => {
   window.localStorage.clear();
 });
@@ -182,7 +194,6 @@ describe("SettingsPanel", () => {
       "design",
       "previews",
       "gpu",
-      "trash",
       "about",
     ])("opens the %s section from the URL", async (section) => {
       renderSettings({ at: `/settings?section=${section}` });
@@ -391,6 +402,7 @@ describe("SettingsPanel", () => {
         routes: { "POST /api/v1/admin/users": json(aUser({ id: 2, username: "maker" })) },
       });
       await screen.findByRole("navigation", { name: "Settings sections" });
+      await openCreateUser();
       await user.click(screen.getByLabelText("Username"));
       await user.paste("maker");
       await user.click(screen.getByLabelText("Initial password"));
@@ -412,6 +424,7 @@ describe("SettingsPanel", () => {
         routes: { "POST /api/v1/admin/users": json(aUser({ id: 2, username: "maker" })) },
       });
       await screen.findByRole("navigation", { name: "Settings sections" });
+      await openCreateUser();
       await user.click(screen.getByLabelText("Username"));
       await user.paste("maker");
       await user.click(screen.getByLabelText("Email"));
@@ -434,6 +447,7 @@ describe("SettingsPanel", () => {
       const user = userEvent.setup();
       renderSettings({ at: "/settings?section=access" });
       await screen.findByRole("navigation", { name: "Settings sections" });
+      await openCreateUser();
       await user.click(screen.getByLabelText("Username"));
       await user.paste("maker");
 
@@ -544,9 +558,14 @@ describe("SettingsPanel", () => {
           "POST /api/v1/admin/users/2/password": json(aUser({ id: 2 })),
         },
       });
+      await openPasswordReset();
       await user.type(await screen.findByPlaceholderText("New password"), "Password123");
 
-      await user.click(screen.getByRole("button", { name: "Reset password" }));
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Reset password" })).getByRole("button", {
+          name: "Reset password",
+        }),
+      );
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("POST").at(-1)?.body ?? "{}")).toMatchObject({
@@ -562,9 +581,14 @@ describe("SettingsPanel", () => {
         routes: { "GET /api/v1/admin/users": json([aUser({ id: 2 })]) },
       });
 
+      await openPasswordReset();
       await user.type(await screen.findByPlaceholderText("New password"), "short");
 
-      expect(screen.getByRole("button", { name: "Reset password" })).toBeDisabled();
+      expect(
+        within(screen.getByRole("dialog", { name: "Reset password" })).getByRole("button", {
+          name: "Reset password",
+        }),
+      ).toBeDisabled();
     });
 
     it("hides administration from a non-admin", async () => {
@@ -713,7 +737,9 @@ describe("SettingsPanel", () => {
       await user.selectOptions(choice, "2");
       await pickParts(user);
 
-      expect(await screen.findByTitle("Remove collection access")).toBeInTheDocument();
+      expect(
+        await screen.findByRole("button", { name: "Remove collection access" }),
+      ).toBeInTheDocument();
     });
 
     it("revokes a grant", async () => {
@@ -732,7 +758,7 @@ describe("SettingsPanel", () => {
       await user.selectOptions(choice, "2");
       await pickParts(user);
 
-      await user.click(await screen.findByTitle("Remove collection access"));
+      await user.click(await screen.findByRole("button", { name: "Remove collection access" }));
 
       await waitFor(() =>
         expect(
@@ -787,7 +813,7 @@ describe("SettingsPanel", () => {
       await waitFor(() => expect(choice).toBeEnabled());
       await user.selectOptions(choice, "2");
 
-      await user.click(await screen.findByTitle("Remove printer access"));
+      await user.click(await screen.findByRole("button", { name: "Remove printer access" }));
 
       await waitFor(() =>
         expect(
@@ -1270,13 +1296,13 @@ describe("SettingsPanel", () => {
     it("keeps backup controls out of the storage section", async () => {
       renderSettings({ at: "/settings?section=storage" });
 
-      expect(await screen.findByRole("button", { name: "Move storage" })).toBeVisible();
+      const migration = await screen.findByRole("button", { name: "Plan migration" });
+      expect(migration).toBeVisible();
+      await userEvent.click(migration);
+      expect(await screen.findByRole("region", { name: "Move Vault storage" })).toBeVisible();
       expect(screen.queryByRole("button", { name: /Backup now/ })).toBeNull();
-      const move = screen.getByRole("region", { name: "Move Vault storage" });
-      const insights = screen.getByRole("heading", { name: "Storage insights" });
-      expect(
-        insights.compareDocumentPosition(move) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy();
+      await userEvent.click(screen.getByRole("tab", { name: "Usage" }));
+      expect(screen.getByRole("heading", { name: "Storage insights" })).toBeVisible();
     });
 
     it("opens backup controls in their own section", async () => {
@@ -2252,9 +2278,16 @@ describe("SettingsPanel", () => {
   });
 
   describe("retention configuration editing", () => {
+    it("returns from the Trash workspace to Settings", async () => {
+      const user = userEvent.setup();
+      renderSettings({ at: "/settings?section=trash" });
+      expect(await screen.findByRole("heading", { name: "Trash" })).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Settings" }));
+      expect(await screen.findByRole("navigation", { name: "Settings sections" })).toBeVisible();
+    });
     it("keeps retention editing unavailable to members", async () => {
       const app = renderSettings({ at: "/settings?section=trash", auth: memberSession() });
-      const input = await screen.findByLabelText("Days");
+      const input = await screen.findByLabelText("Keep deleted items for");
       expect(input).toBeDisabled();
       await waitFor(() =>
         expect(
@@ -2276,7 +2309,7 @@ describe("SettingsPanel", () => {
             ++reads === 1 ? json({ detail: "unavailable" }, 503) : json(VAULT_CONFIG),
         },
       });
-      const input = await screen.findByLabelText("Days");
+      const input = await screen.findByLabelText("Keep deleted items for");
       expect(input).toBeDisabled();
       await userEvent.click(await screen.findByRole("button", { name: "Retry" }));
       await waitFor(() => expect(input).toBeEnabled());
@@ -2284,7 +2317,7 @@ describe("SettingsPanel", () => {
     });
     it.each([
       { section: "backup", label: "Retention (days)", field: "backup_retention_days" },
-      { section: "trash", label: "Days", field: "trash_retention_days" },
+      { section: "trash", label: "Keep deleted items for", field: "trash_retention_days" },
     ])(
       "$section: keeps a retention draft across configuration refresh",
       async ({ section, label, field }) => {
@@ -2317,7 +2350,7 @@ describe("SettingsPanel", () => {
     );
     it.each([
       { section: "backup", label: "Retention (days)", field: "backup_retention_days" },
-      { section: "trash", label: "Days", field: "trash_retention_days" },
+      { section: "trash", label: "Keep deleted items for", field: "trash_retention_days" },
     ])(
       "$section: reviews a retention conflict before saving revised days",
       async ({ section, label, field }) => {
@@ -2349,10 +2382,8 @@ describe("SettingsPanel", () => {
         await userEvent.click(
           screen.getByRole("button", { name: "Save my draft against this version" }),
         );
-        await waitFor(() =>
-          expect(screen.getByRole("button", { name: "Save retention" })).toBeEnabled(),
-        );
-        expect(writes).toHaveLength(2);
+        await waitFor(() => expect(writes).toHaveLength(2));
+        await waitFor(() => expect(input).toBeEnabled());
         expect(writes[1].get("If-Match")).toBe(`"vault-config-e${VAULT_CONFIG.edit_epoch}-v2"`);
         expect(JSON.parse(app.requestsWithMethod("PUT")[1].body)).toEqual({ [field]: 18 });
         expect(input).toHaveValue(18);
@@ -2360,12 +2391,12 @@ describe("SettingsPanel", () => {
     );
     it("refreshes trash without replacing retention input", async () => {
       const app = renderSettings({ at: "/settings?section=trash" });
-      const input = await screen.findByLabelText("Days");
+      const input = await screen.findByLabelText("Keep deleted items for");
       await waitFor(() => expect(input).toBeEnabled());
       await userEvent.clear(input);
       await userEvent.type(input, "14");
       const reads = app.requestsWithMethod("GET").filter((r) => r.url === "/api/v1/config").length;
-      await userEvent.click(screen.getByTitle("Refresh trash"));
+      await userEvent.click(screen.getByRole("button", { name: /^Refresh$/ }));
       await waitFor(() =>
         expect(
           app.requestsWithMethod("GET").filter((r) => r.url === "/api/v1/models/trash"),
@@ -2378,7 +2409,7 @@ describe("SettingsPanel", () => {
     });
     it("rejects an empty trash retention draft", async () => {
       const app = renderSettings({ at: "/settings?section=trash" });
-      const input = await screen.findByLabelText("Days");
+      const input = await screen.findByLabelText("Keep deleted items for");
       await waitFor(() => expect(input).toBeEnabled());
       await userEvent.clear(input);
       expect(screen.getByRole("button", { name: "Save retention" })).toBeDisabled();
@@ -2395,7 +2426,7 @@ describe("SettingsPanel", () => {
           "PUT /api/v1/config": json({ ...VAULT_CONFIG, edit_version: 2, trash_retention_days: 7 }),
         },
       });
-      const days = await screen.findByLabelText("Days");
+      const days = await screen.findByLabelText("Keep deleted items for");
       await waitFor(() => expect(days).toBeEnabled());
       await user.clear(days);
       await user.type(days, "7");
@@ -2413,7 +2444,7 @@ describe("SettingsPanel", () => {
       // -1 means nothing ever expires, so "purge expired" would delete nothing
       // and read as though the setting were being ignored.
       renderSettings({ at: "/settings?section=trash" });
-      const days = await screen.findByLabelText("Days");
+      const days = await screen.findByLabelText("Keep deleted items for");
 
       fireEvent.change(days, { target: { value: "-1" } });
 
@@ -2710,6 +2741,39 @@ describe("SettingsPanel", () => {
       expect(await screen.findByText("v0.12.1")).toBeInTheDocument();
     });
 
+    it("names the installed version and its source repository", async () => {
+      renderSettings({ at: "/settings?section=about" });
+
+      const version = await screen.findByRole("group", { name: "Version" });
+      expect(within(version).getByText("Installed")).toBeVisible();
+      expect(within(version).getByText(/^github\.com\//)).toBeVisible();
+      expect(within(version).getByRole("link", { name: "GitHub" })).toHaveAttribute(
+        "href",
+        expect.stringContaining("https://github.com/"),
+      );
+    });
+
+    it("links the release notes from the update notice", async () => {
+      renderSettings({
+        at: "/settings?section=about",
+        routes: {
+          "GET /api/v1/health/releases/latest": json({
+            status: "update_available",
+            update_available: true,
+            current_version: "0.12.1",
+            latest_version: "0.14.0",
+            release_url: "https://example.test/releases/v0.14.0",
+          }),
+        },
+      });
+
+      const version = await screen.findByRole("group", { name: "Version" });
+      expect(await within(version).findByRole("link", { name: "View release" })).toHaveAttribute(
+        "href",
+        "https://example.test/releases/v0.14.0",
+      );
+    });
+
     it("says the deployment is current", async () => {
       renderSettings({ at: "/settings?section=about" });
 
@@ -2797,7 +2861,7 @@ describe("SettingsPanel", () => {
       renderSettings();
       const nav = await screen.findByRole("navigation", { name: "Settings sections" });
 
-      await user.click(within(nav).getByRole("button", { name: /^GPU$/ }));
+      await user.click(within(nav).getByRole("button", { name: "GPU & rendering" }));
 
       expect(await screen.findByRole("combobox", { name: "Mesh renderer" })).toHaveValue("webgl");
     });
@@ -2861,14 +2925,14 @@ describe("SettingsPanel", () => {
         routes: { "GET /api/v1/models/trash": json([TRASHED]) },
       });
 
-      expect(await screen.findByLabelText("Trash size")).toBeInTheDocument();
+      expect(await screen.findByText(/Known model storage:/)).toBeVisible();
     });
 
     it("says so when the trash is empty", async () => {
       renderSettings({ at: "/settings?section=trash" });
 
-      expect(await screen.findByText("Deleted models and multipart sets")).toBeInTheDocument();
-      expect(screen.queryByLabelText("Trash size")).toBeNull();
+      expect(await screen.findByText("Trash is empty.")).toBeVisible();
+      expect(screen.queryByText(/Known model storage:/)).toBeNull();
     });
   });
 
@@ -3250,9 +3314,10 @@ describe("SettingsPanel", () => {
       renderSettings({ at: "/settings?section=design" });
       await screen.findByText("Model card metrics");
 
-      await user.click(screen.getAllByRole("button", { name: "MaterialMAT", pressed: false })[0]);
+      await user.selectOptions(screen.getByRole("combobox", { name: "Metric 1" }), "material");
 
       expect(window.localStorage.getItem("printstash.card.metrics")).toContain("material");
+      expect(screen.getByRole("combobox", { name: "Metric 1" })).toHaveValue("material");
     });
 
     it("cannot put one metric in two slots", async () => {
@@ -3261,7 +3326,12 @@ describe("SettingsPanel", () => {
       renderSettings({ at: "/settings?section=design" });
 
       await screen.findByText("Model card metrics");
-      expect(screen.getAllByRole("button", { name: /^Layer heightSlot \d/ })[0]).toBeDisabled();
+      const second = screen.getByRole("combobox", { name: "Metric 2" });
+      const first = screen.getByRole("combobox", { name: "Metric 1" });
+      const taken = within(second).getByRole("option", {
+        name: within(first).getByRole<HTMLOptionElement>("option", { selected: true }).text,
+      });
+      expect(taken).toBeDisabled();
     });
 
     it("tells the grid about the change without a reload", async () => {
@@ -3273,7 +3343,7 @@ describe("SettingsPanel", () => {
       renderSettings({ at: "/settings?section=design" });
       await screen.findByText("Model card metrics");
 
-      await user.click(screen.getAllByRole("button", { name: "MaterialMAT", pressed: false })[0]);
+      await user.selectOptions(screen.getByRole("combobox", { name: "Metric 1" }), "material");
 
       expect(events).toContain("printstash.card.metrics");
     });
@@ -3282,12 +3352,12 @@ describe("SettingsPanel", () => {
       const user = userEvent.setup();
       renderSettings({ at: "/settings?section=design" });
       await screen.findByText("Model card metrics");
-      await user.click(screen.getAllByRole("button", { name: "MaterialMAT", pressed: false })[0]);
+      await user.selectOptions(screen.getByRole("combobox", { name: "Metric 1" }), "material");
 
-      // Two cards on this section carry a Reset; the metrics card is the first.
-      await user.click(screen.getAllByRole("button", { name: "Reset" })[0]);
+      await user.click(screen.getByRole("button", { name: "Reset metrics" }));
 
       expect(await screen.findByText("Card metrics reset.")).toBeInTheDocument();
+      expect(screen.getByRole("combobox", { name: "Metric 1" })).not.toHaveValue("material");
     });
   });
 
@@ -3419,6 +3489,7 @@ describe("Settings account intent", () => {
         "POST /api/v1/admin/users": json({ detail: "User creation unavailable" }, 503),
       },
     });
+    await openCreateUser();
     const username = await screen.findByLabelText("Username");
     fireEvent.change(username, { target: { value: "retry-maker" } });
     fireEvent.change(screen.getByLabelText("Initial password"), {
@@ -3462,6 +3533,7 @@ describe("Settings account draft lifetime", () => {
         "GET /api/v1/admin/users": json([aUser()]),
       },
     });
+    await openCreateUser();
     const username = await screen.findByLabelText("Username");
     await userEvent.type(username, "new-maker");
     await userEvent.type(screen.getByLabelText("Initial password"), "FakePassword123");
@@ -3481,6 +3553,7 @@ describe("Settings account draft lifetime", () => {
         "POST /api/v1/admin/users": () => pending.promise,
       },
     });
+    await openCreateUser();
     const username = await screen.findByLabelText("Username");
     fireEvent.change(username, { target: { value: "original-maker" } });
     fireEvent.change(screen.getByLabelText("Initial password"), {
@@ -3493,7 +3566,11 @@ describe("Settings account draft lifetime", () => {
       pending.resolve(json(aUser({ username: "original-maker" })));
     });
     expect(await screen.findByText("original-maker", { selector: "p" })).toBeVisible();
-    expect(username).toHaveValue("next-maker");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Create user" })).not.toBeInTheDocument(),
+    );
+    await openCreateUser();
+    expect(await screen.findByLabelText("Username")).toHaveValue("next-maker");
     expect(screen.getByLabelText("Initial password")).toHaveValue("FakePassword123");
     expect(JSON.parse(app.requestsWithMethod("POST")[0].body).username).toBe("original-maker");
   });
@@ -3506,18 +3583,24 @@ describe("Settings account draft lifetime", () => {
         "POST /api/v1/admin/users/2/password": () => pending.promise,
       },
     });
+    await openPasswordReset();
     const field = await screen.findByPlaceholderText("New password");
     fireEvent.change(field, { target: { value: "OldFakePassword123" } });
-    await userEvent.click(screen.getByRole("button", { name: "Reset password" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog", { name: "Reset password" })).getByRole("button", {
+        name: "Reset password",
+      }),
+    );
     await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
     fireEvent.change(field, { target: { value: "NextFakePassword123" } });
     await act(async () => {
       pending.resolve(json(aUser()));
     });
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Reset password" })).toBeEnabled(),
+      expect(screen.queryByRole("dialog", { name: "Reset password" })).not.toBeInTheDocument(),
     );
-    expect(field).toHaveValue("NextFakePassword123");
+    await openPasswordReset();
+    expect(await screen.findByPlaceholderText("New password")).toHaveValue("NextFakePassword123");
     expect(JSON.parse(app.requestsWithMethod("POST")[0].body).password).toBe("OldFakePassword123");
   });
   it("dismisses the one-time key receipt without revoking its key", async () => {
@@ -3591,17 +3674,19 @@ describe("Settings resource access recovery", () => {
     await userEvent.selectOptions(within(collection).getByLabelText("User"), "2");
     await userEvent.click(within(collection).getByRole("button", { name: "Select collection" }));
     await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
-    await within(collection).findByTitle("Remove collection access");
+    await within(collection).findByRole("button", { name: "Remove collection access" });
     await userEvent.selectOptions(within(printer).getByLabelText("User"), "2");
-    await within(printer).findByTitle("Remove printer access");
+    await within(printer).findByRole("button", { name: "Remove printer access" });
     app.route({ "GET /api/v1/admin/users": json([aUser({ is_superuser: true })]) });
     await act(async () => {
       await app.client.refetchQueries({ queryKey: ["admin", "users"] });
     });
     await waitFor(() => expect(within(collection).getByLabelText("User")).toHaveValue(""));
     expect(within(printer).getByLabelText("User")).toHaveValue("");
-    expect(within(collection).queryByTitle("Remove collection access")).toBeNull();
-    expect(within(printer).queryByTitle("Remove printer access")).toBeNull();
+    expect(
+      within(collection).queryByRole("button", { name: "Remove collection access" }),
+    ).toBeNull();
+    expect(within(printer).queryByRole("button", { name: "Remove printer access" })).toBeNull();
     expect(within(collection).getByRole("button", { name: "Grant" })).toBeDisabled();
   });
   it("hides denied cached printer grants", async () => {
@@ -3616,14 +3701,14 @@ describe("Settings resource access recovery", () => {
     const card = await screen.findByRole("group", { name: "Printer access" });
     await within(card).findByRole("option", { name: "maker" });
     await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
-    await within(card).findByTitle("Remove printer access");
+    await within(card).findByRole("button", { name: "Remove printer access" });
     await userEvent.selectOptions(within(card).getByLabelText("Printer"), "4");
     app.route({ "GET /api/v1/printers/4/permissions": json({ detail: "denied" }, 403) });
     await act(async () => {
       await app.client.refetchQueries({ queryKey: ["printer-permissions"] });
     });
     expect(await within(card).findByRole("alert")).toHaveTextContent("Voron");
-    expect(within(card).queryByTitle("Remove printer access")).toBeNull();
+    expect(within(card).queryByRole("button", { name: "Remove printer access" })).toBeNull();
     expect(within(card).queryByText(/has no direct printer access/)).toBeNull();
     expect(within(card).getByRole("button", { name: "Save" })).toBeDisabled();
   });
@@ -3655,7 +3740,9 @@ describe("Settings resource access recovery", () => {
     await waitFor(() => expect(signal).toBeDefined());
     await userEvent.click(within(card).getByRole("button", { name: "Parts" }));
     await userEvent.click(await screen.findByRole("option", { name: /Tools/ }));
-    expect(await within(card).findByTitle("Remove collection access")).toBeVisible();
+    expect(
+      await within(card).findByRole("button", { name: "Remove collection access" }),
+    ).toBeVisible();
     expect(signal?.aborted).toBe(true);
     await act(async () => {
       held.resolve(json([aCollectionPermission()]));
@@ -3770,7 +3857,9 @@ describe("Settings resource access recovery", () => {
       "GET /api/v1/printers/4/permissions": json([aPrinterPermission()]),
     });
     await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
-    expect(await within(card).findByTitle("Remove printer access")).toBeVisible();
+    expect(
+      await within(card).findByRole("button", { name: "Remove printer access" }),
+    ).toBeVisible();
   });
   it("preserves healthy printer grants when another source fails", async () => {
     const app = renderSettings({
@@ -3788,7 +3877,9 @@ describe("Settings resource access recovery", () => {
     const card = await screen.findByRole("group", { name: "Printer access" });
     await within(card).findByRole("option", { name: "maker" });
     await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
-    expect(await within(card).findByTitle("Remove printer access")).toBeVisible();
+    expect(
+      await within(card).findByRole("button", { name: "Remove printer access" }),
+    ).toBeVisible();
     const alert = within(card).getByRole("alert");
     expect(alert).toHaveTextContent("Prusa");
     app.route({
@@ -3796,7 +3887,9 @@ describe("Settings resource access recovery", () => {
     });
     await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
     await waitFor(() =>
-      expect(within(card).getAllByTitle("Remove printer access")).toHaveLength(2),
+      expect(within(card).getAllByRole("button", { name: "Remove printer access" })).toHaveLength(
+        2,
+      ),
     );
   });
   it("blocks collection writes until its permission read succeeds", async () => {
@@ -3918,7 +4011,7 @@ describe("Settings remote read recovery", () => {
     expect(await screen.findByText("Trash could not be loaded.")).toBeVisible();
     expect(screen.queryByText("Trash is empty.")).not.toBeInTheDocument();
     app.route({ "GET /api/v1/models/trash": json([TRASHED_MODEL]) });
-    await userEvent.click(screen.getByTitle("Refresh trash"));
+    await userEvent.click(screen.getByRole("button", { name: /^Refresh$/ }));
     expect(await screen.findByText(TRASHED_MODEL.name)).toBeVisible();
   });
   it("keeps trash available when the GC read fails", async () => {

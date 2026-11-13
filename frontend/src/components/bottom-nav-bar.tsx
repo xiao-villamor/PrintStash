@@ -1,340 +1,130 @@
 "use client";
 
-import { uiText } from "@/lib/locale";
-import { useUiLocale } from "@/lib/i18n";
-import { useLibraryStartup } from "@/lib/library-startup-context";
-
-import { useEffect, useState } from "react";
-import { Link } from "@/lib/link";
-import { usePathname, useRouter } from "@/lib/navigation";
+import { useState } from "react";
 import {
-  BarChart3,
-  Bell,
-  BookOpen,
-  Box,
-  SlidersHorizontal,
-  LogOut,
-  MoreHorizontal,
+  FolderClosed,
   Inbox,
-  ScanSearch,
+  MoreHorizontal,
   Printer,
-  Settings,
-  User,
-  X,
+  Search,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
+import { WorkspaceMenu } from "@/components/workspace-menu";
+import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n, type MessageKey } from "@/lib/i18n";
-import { Drawer } from "@/components/ui/drawer";
-import { TaskList } from "@/components/task-list";
-import { subscribeArchiveReviewRequests } from "@/lib/archive-review-events";
-import { clearCompletedTasks, listTasks, subscribeTasks, type TaskItem } from "@/lib/task-center";
+import { useLibraryStartup } from "@/lib/library-startup-context";
 import { useInboxCount } from "@/lib/queries/inbox";
 
-type NavItem = {
-  href: string;
-  labelKey: MessageKey;
-  icon: LucideIcon;
-  adminOnly?: boolean;
-  external?: boolean;
-};
-
-// Ordered by priority — the first few become the persistent tabs, the rest fold
-// into the "More" sheet. Wiki and Settings sit last because they're also one tap
-// away from the avatar menu in the top bar.
-const NAV_ITEMS: NavItem[] = [
-  { href: "/", labelKey: "nav.vault", icon: Box },
-  { href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
-  { href: "/library/similar", labelKey: "nav.similar", icon: ScanSearch },
-  { href: "/printers", labelKey: "nav.printers", icon: Printer, adminOnly: true },
-  { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
-  { href: "/statistics", labelKey: "nav.stats", icon: BarChart3, adminOnly: true },
-  { href: "/settings", labelKey: "nav.settings", icon: Settings },
-  {
-    href: "https://www.printstash.org/docs/",
-    labelKey: "nav.wiki",
-    icon: BookOpen,
-    external: true,
-  },
-];
-
-// Persistent tabs shown in the bar. The final slot is always a "More" button
-// (5 slots total): it holds any overflow destinations plus the account actions,
-// so the tabs never get crushed and logging out is always one tap away.
-const MAX_TABS = 4;
-
-function isItemActive(item: NavItem, pathname: string): boolean {
-  if (item.external) return false;
-  return item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
-}
+type NavItem = { href: string; labelKey: MessageKey; icon: LucideIcon };
 
 export function BottomNavBar() {
-  useUiLocale();
   const { t } = useI18n();
   const pathname = usePathname();
+  const params = useSearchParams();
   const router = useRouter();
   const { user, logout } = useAuth();
   const startup = useLibraryStartup();
-  const inboxEnabled = startup.canLoad("inbox");
-  // The sheet remembers which route it was opened on, so navigating away closes
-  // it by derivation instead of by an after-the-fact effect.
+  const inbox = useInboxCount(startup.canLoad("inbox"));
   const [openedOnPath, setOpenedOnPath] = useState<string | null>(null);
   const moreOpen = openedOnPath === pathname;
-  const [tasks, setTasks] = useState<TaskItem[]>(listTasks);
-  const inbox = useInboxCount(inboxEnabled);
-  const pendingImports = inbox.data ?? 0;
-
-  const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || user?.is_superuser);
-
-  useEffect(() => subscribeTasks(() => setTasks(listTasks())), []);
-
-  useEffect(() => subscribeArchiveReviewRequests(() => setOpenedOnPath(null)), []);
-
-  const tabs = visibleItems.slice(0, MAX_TABS);
-  const overflow = visibleItems.slice(MAX_TABS);
-  const moreActive = overflow.some((item) => isItemActive(item, pathname));
-
+  const tabs: NavItem[] = [
+    { href: "/", labelKey: "Library", icon: FolderClosed },
+    { href: "/search", labelKey: "Search", icon: Search },
+    { href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
+    user?.is_superuser
+      ? { href: "/printers", labelKey: "nav.printers", icon: Printer }
+      : { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
+  ];
+  const moreActive =
+    [
+      "/statistics",
+      "/settings",
+      ...(user?.is_superuser ? ["/profiles"] : []),
+      "/library/similar",
+    ].some((path) => pathname.startsWith(path)) ||
+    (pathname === "/" && params.get("favorites") === "true");
   async function handleLogout() {
     await logout();
     setOpenedOnPath(null);
     router.push("/login");
   }
-
   return (
-    <>
-      <nav className="md:hidden fixed bottom-0 left-0 z-40 flex w-full items-stretch border-t border-border bg-card/95 backdrop-blur-md pb-safe">
-        {tabs.map((item) => (
-          <NavTab
+    <nav
+      aria-label={t("Navigation")}
+      className="shell-bottom-nav fixed bottom-0 left-0 z-40 flex min-h-16 w-full items-stretch border-t border-border bg-card px-1 pb-safe md:hidden"
+    >
+      {tabs.map((item) => {
+        const active =
+          item.href === "/"
+            ? pathname === "/" && params.get("favorites") !== "true"
+            : pathname.startsWith(item.href);
+        return (
+          <a
             key={item.href}
-            item={item}
-            active={isItemActive(item, pathname)}
-            badge={item.href === "/inbox" ? pendingImports : 0}
-          />
-        ))}
-        <button
-          type="button"
-          onClick={() => setOpenedOnPath(pathname)}
-          aria-label={t("nav.more")}
-          aria-expanded={moreOpen}
-          aria-current={moreActive ? "page" : undefined}
-          className="group flex flex-1 flex-col items-center justify-center gap-1 pt-2 pb-1.5"
-        >
-          <TabIcon icon={MoreHorizontal} active={moreActive || moreOpen} />
-          <TabLabel active={moreActive || moreOpen}>{t("nav.more")}</TabLabel>
-        </button>
-      </nav>
-
-      <MoreSheet
+            href={item.href}
+            aria-current={active ? "page" : undefined}
+            className={`relative mx-0.5 my-1.5 flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 text-2xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${active ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted"}`}
+            onClick={(event) => {
+              if (
+                event.defaultPrevented ||
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.altKey
+              )
+                return;
+              event.preventDefault();
+              router.push(item.href);
+            }}
+          >
+            <item.icon className="h-5 w-5" strokeWidth={1.6} aria-hidden />
+            {item.href === "/inbox" && (inbox.data ?? 0) > 0 && (
+              <span className="absolute left-[calc(50%+4px)] top-0.5 min-w-4 rounded-full bg-secondary px-1 font-mono text-3xs leading-4 text-secondary-foreground">
+                {(inbox.data ?? 0) > 99 ? "99+" : inbox.data}
+              </span>
+            )}
+            <span>{t(item.labelKey)}</span>
+          </a>
+        );
+      })}
+      <DropdownMenu
         open={moreOpen}
-        items={overflow}
-        pathname={pathname}
-        username={user?.username}
-        tasks={tasks}
-        onClearTasks={() => {
-          clearCompletedTasks();
-          setTasks(listTasks());
-        }}
-        onLogout={user ? handleLogout : undefined}
-        onClose={() => setOpenedOnPath(null)}
-      />
-    </>
-  );
-}
-
-function NavTab({ item, active, badge = 0 }: { item: NavItem; active: boolean; badge?: number }) {
-  useUiLocale();
-  const { t } = useI18n();
-  const className =
-    "group flex flex-1 flex-col items-center justify-center gap-1 pt-2 pb-1.5 active:scale-95 transition-transform duration-press";
-  const content = (
-    <>
-      <span className="relative">
-        <TabIcon icon={item.icon} active={active} />
-        {badge > 0 && (
-          <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-destructive px-1 text-center text-3xs font-bold text-destructive-foreground">
-            {badge > 99 ? "99+" : badge}
-          </span>
-        )}
-      </span>
-      <TabLabel active={active}>{t(item.labelKey)}</TabLabel>
-    </>
-  );
-  if (item.external) {
-    return (
-      <a href={item.href} className={className} aria-current={active ? "page" : undefined}>
-        {content}
-      </a>
-    );
-  }
-  return (
-    <Link href={item.href} className={className} aria-current={active ? "page" : undefined}>
-      {content}
-    </Link>
-  );
-}
-
-// The active destination gets a filled "pill" behind the icon (Material-style),
-// so the highlight reads clearly without the label crowding into its neighbours.
-function TabIcon({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) {
-  useUiLocale();
-  return (
-    <span
-      className={`flex h-7 w-[3.25rem] items-center justify-center rounded-full transition-colors ${
-        active
-          ? "bg-accent text-primary"
-          : "text-muted-foreground group-hover:bg-muted group-hover:text-foreground"
-      }`}
-    >
-      <Icon className="h-5 w-5" {...(active ? { strokeWidth: 2.4 } : {})} />
-    </span>
-  );
-}
-
-function TabLabel({ active, children }: { active: boolean; children: React.ReactNode }) {
-  useUiLocale();
-  return (
-    <span
-      className={`text-3xs font-medium leading-none tracking-tight ${
-        active ? "text-primary" : "text-muted-foreground"
-      }`}
-    >
-      {children}
-    </span>
-  );
-}
-
-function MoreSheet({
-  open,
-  items,
-  pathname,
-  username,
-  tasks,
-  onClearTasks,
-  onLogout,
-  onClose,
-}: {
-  open: boolean;
-  items: NavItem[];
-  pathname: string;
-  username?: string;
-  tasks: TaskItem[];
-  onClearTasks: () => void;
-  onLogout?: () => void;
-  onClose: () => void;
-}) {
-  useUiLocale();
-  const { t } = useI18n();
-  const [tasksOpen, setTasksOpen] = useState(false);
-  const startup = useLibraryStartup();
-  const activeTasks = tasks.filter(
-    (task) => task.status === "pending" || task.status === "running",
-  ).length;
-
-  return (
-    <Drawer
-      open={open}
-      onClose={onClose}
-      side="bottom"
-      ariaLabel={t("nav.more")}
-      containerClassName="md:hidden"
-      className="max-h-[85dvh] overflow-y-auto rounded-t-2xl border-t border-border bg-card px-4 pt-3 pb-safe shadow-2xl"
-    >
-      <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-muted-foreground/25" />
-      <div className="mb-3 flex items-center justify-between">
-        <span className="text-sm font-semibold text-foreground">{t("nav.more")}</span>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={t("nav.close")}
-          className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-      {items.length > 0 && (
-        <div className="grid grid-cols-3 gap-2">
-          {items.map((item) => {
-            const active = isItemActive(item, pathname);
-            const className = `flex flex-col items-center justify-center gap-2 rounded-xl border p-4 text-center transition-[color,background-color,border-color,transform] duration-press active:scale-[0.98] ${
-              active
-                ? "border-primary-soft bg-accent text-primary"
-                : "border-border bg-background text-foreground hover:bg-muted"
-            }`;
-            const inner = (
-              <>
-                <item.icon className="h-5 w-5" />
-                <span className="text-xs font-medium">{t(item.labelKey)}</span>
-              </>
-            );
-            if (item.external) {
-              return (
-                <a
-                  key={item.href}
-                  href={item.href}
-                  aria-current={active ? "page" : undefined}
-                  onClick={onClose}
-                  className={className}
-                >
-                  {inner}
-                </a>
-              );
-            }
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={active ? "page" : undefined}
-                onClick={onClose}
-                className={className}
-              >
-                {inner}
-              </Link>
-            );
-          })}
-        </div>
-      )}
-
-      <div className="mt-3 overflow-hidden rounded-lg border border-border bg-background">
-        <button
-          type="button"
-          onClick={() => {
-            startup.request("activity");
-            setTasksOpen((open) => !open);
-          }}
-          aria-expanded={tasksOpen}
-          className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-        >
-          <Bell className="h-4 w-4 text-muted-foreground" />
-          <span className="flex-1">{t("nav.tasks")}</span>
-          <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-3xs text-muted-foreground">
-            {activeTasks
-              ? uiText("{value1} active", { value1: String(activeTasks) })
-              : tasks.length}
-          </span>
-        </button>
-        {tasksOpen && (
-          <TaskList tasks={tasks} onClear={onClearTasks} onNavigate={onClose} compact />
-        )}
-      </div>
-
-      {onLogout && (
-        <div className="mt-3 flex items-center gap-3 border-t border-border pt-3 pb-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
-            <User className="h-4 w-4" />
-          </div>
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-            {username ?? t("nav.account")}
-          </span>
+        onOpenChange={(value) => setOpenedOnPath(value ? pathname : null)}
+        portal
+        role="menu"
+        align="end"
+        className="mx-0.5 my-1.5 flex min-w-0 flex-1"
+        contentClassName="mobile-workspace-popover"
+        trigger={
           <button
             type="button"
-            onClick={onLogout}
-            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
+            data-menu-trigger
+            aria-label={t("nav.more")}
+            aria-expanded={moreOpen}
+            aria-haspopup="menu"
+            aria-current={moreActive ? "page" : undefined}
+            className={`flex w-full flex-col items-center justify-center gap-0.5 text-2xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${moreActive || moreOpen ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted"}`}
+            onClick={() => setOpenedOnPath(moreOpen ? null : pathname)}
           >
-            <LogOut className="h-4 w-4" />
-            {t("nav.logOut")}
+            <MoreHorizontal className="h-5 w-5" strokeWidth={1.6} aria-hidden />
+            <span>{t("nav.more")}</span>
           </button>
-        </div>
-      )}
-    </Drawer>
+        }
+      >
+        <WorkspaceMenu
+          mobile
+          pathname={pathname}
+          username={user?.username ?? t("nav.account")}
+          printersInQuickAccess={!!user?.is_superuser}
+          isAdmin={!!user?.is_superuser}
+          onNavigate={() => setOpenedOnPath(null)}
+          onLogout={handleLogout}
+        />
+      </DropdownMenu>
+    </nav>
   );
 }

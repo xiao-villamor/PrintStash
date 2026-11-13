@@ -373,7 +373,7 @@ export function VaultMigrationPanel() {
         ) : (
           <>
             {error && (
-              <p role="alert" className="border-b bg-destructive/10 p-4 text-sm text-destructive">
+              <p role="alert" className="border-b border-border p-4 text-sm text-destructive">
                 {t(error)}
               </p>
             )}
@@ -463,6 +463,7 @@ export function VaultMigrationPanel() {
                 {backupPicker}
                 <p className="text-xs text-muted-foreground">{t("migration.preflightHelp")}</p>
                 <Button
+                  size="sm"
                   loading={busy}
                   disabled={!selectedBackup || !providerAvailable}
                   onClick={() => void preflight()}
@@ -666,7 +667,7 @@ export function VaultMigrationPanel() {
                   {run.recovery_required ? (
                     <>
                       <p className="text-sm text-muted-foreground">{t("migration.recoveryHelp")}</p>
-                      <Button loading={busy} onClick={() => void act("recover")}>
+                      <Button size="sm" loading={busy} onClick={() => void act("recover")}>
                         {t("migration.recover")}
                       </Button>
                     </>
@@ -686,6 +687,7 @@ export function VaultMigrationPanel() {
                             </p>
                           )}
                           <Button
+                            size="sm"
                             disabled={running || planExpired}
                             onClick={() => setConfirmation("start")}
                           >
@@ -705,6 +707,7 @@ export function VaultMigrationPanel() {
                                 {t("migration.continueBackground")}
                               </p>
                               <Button
+                                size="sm"
                                 disabled={running}
                                 variant="outline"
                                 onClick={() => void act("pause")}
@@ -717,7 +720,11 @@ export function VaultMigrationPanel() {
                               <p className="text-xs text-muted-foreground">
                                 {t("migration.paused")}
                               </p>
-                              <Button disabled={running} onClick={() => void act("resume")}>
+                              <Button
+                                size="sm"
+                                disabled={running}
+                                onClick={() => void act("resume")}
+                              >
                                 {t("migration.resume")}
                               </Button>
                             </>
@@ -730,7 +737,7 @@ export function VaultMigrationPanel() {
                         </p>
                       )}
                       {run.retryable && run.failed_objects > 0 && (
-                        <Button disabled={running} onClick={() => void act("retry")}>
+                        <Button size="sm" disabled={running} onClick={() => void act("retry")}>
                           {t("migration.retry")}
                         </Button>
                       )}
@@ -740,6 +747,7 @@ export function VaultMigrationPanel() {
                             {t("migration.readyHelp")}
                           </p>
                           <Button
+                            size="sm"
                             loading={busy}
                             disabled={running}
                             onClick={() => setConfirmation("cutover")}
@@ -779,6 +787,7 @@ export function VaultMigrationPanel() {
                             </p>
                           )}
                           <Button
+                            size="sm"
                             variant="outline"
                             disabled={
                               running || ["pending", "running"].includes(fullAuditState ?? "")
@@ -810,6 +819,7 @@ export function VaultMigrationPanel() {
                                   {backupPicker}
                                   <div className="flex flex-wrap gap-2">
                                     <Button
+                                      size="sm"
                                       variant="outline"
                                       disabled={!cleanupAllowed || !selectedBackup || running}
                                       onClick={() => setConfirmation("source")}
@@ -817,6 +827,7 @@ export function VaultMigrationPanel() {
                                       {t("migration.cleanup")}
                                     </Button>
                                     <Button
+                                      size="sm"
                                       variant="outline"
                                       disabled={running}
                                       onClick={() => void act("retain")}
@@ -824,6 +835,7 @@ export function VaultMigrationPanel() {
                                       {t("migration.retain")}
                                     </Button>
                                     <Button
+                                      size="sm"
                                       variant="ghost"
                                       disabled={running}
                                       onClick={() => setConfirmation("manual")}
@@ -841,6 +853,7 @@ export function VaultMigrationPanel() {
                   )}
                   <div className="flex flex-wrap items-center gap-3">
                     <Button
+                      size="sm"
                       variant="outline"
                       disabled={running}
                       onClick={() => void downloadReport()}
@@ -891,6 +904,7 @@ export function VaultMigrationPanel() {
                   ["planned", "paused", "ready", "failed"].includes(run.state) && (
                     <div className="p-4">
                       <Button
+                        size="sm"
                         variant="outline"
                         disabled={running}
                         onClick={() => setConfirmation("discard")}
@@ -902,6 +916,7 @@ export function VaultMigrationPanel() {
                 {["active", "cleaned", "discarded", "complete"].includes(run.state) && (
                   <div className="p-4">
                     <Button
+                      size="sm"
                       variant="outline"
                       disabled={running}
                       onClick={() => {

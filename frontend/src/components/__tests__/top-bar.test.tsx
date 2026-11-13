@@ -7,8 +7,7 @@
  * bar — from a back navigation, a bookmark, or a shared link — has to land in the
  * box, and typing has to end up back in the URL after a debounce. Break either
  * direction and the results stop matching what the user sees they searched for.
- * It is also deliberately absent everywhere except the vault: a search box on the
- * settings page that silently searches models is worse than no box.
+ * Search on other pages must open the existing results route with the entered term.
  *
  * The account menu is the desktop half of the navigation, and it carries the same
  * prefix-matched active state and admin-only filtering as the mobile bar. A route
@@ -16,13 +15,17 @@
  * on.
  */
 
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TopBar } from "@/components/top-bar";
 import { type AuthState } from "@/lib/auth-context";
-import { json, renderApp } from "@/test-support/render";
+import { useCollectionSearch } from "@/lib/queries";
+import { queryKeys } from "@/lib/query-client";
+import { aCollection, aModel } from "@/test-support/factories";
+import { collectionTreeRoutes } from "@/test-support/collection-tree";
+import { json, memberSession, renderApp, type RenderAppOptions } from "@/test-support/render";
 import { searchStatus } from "@/test-support/search";
 import { usePathname, useSearchParams } from "@/lib/navigation";
 
@@ -49,7 +52,9 @@ function renderTopBar({
   at = "/",
   auth = session(),
   matchesMedia,
-}: { at?: string; auth?: AuthState; matchesMedia?: (query: string) => boolean } = {}) {
+  routes = {},
+  seed,
+}: Pick<RenderAppOptions, "at" | "auth" | "matchesMedia" | "routes" | "seed"> = {}) {
   return renderApp(
     <>
       <TopBar />
@@ -59,16 +64,14 @@ function renderTopBar({
       at,
       auth,
       matchesMedia,
+      seed,
       routes: {
         "GET /api/v1/search/status": json(searchStatus()),
         "GET /api/v1/jobs": json([]),
+        ...routes,
       },
     },
   );
-}
-
-function openProfileMenu(user: ReturnType<typeof userEvent.setup>) {
-  return user.click(screen.getByRole("button", { name: "My workspace" }));
 }
 
 beforeEach(() => {
@@ -86,13 +89,159 @@ afterEach(() => {
 });
 
 describe("TopBar", () => {
-  it("links Wiki to the documentation site", () => {
+  it("reflects the Library inspector owner state", async () => {
     renderTopBar();
-
-    expect(screen.getByRole("link", { name: "Wiki" })).toHaveAttribute(
-      "href",
-      "https://www.printstash.org/docs/",
+    fireEvent(
+      window,
+      new CustomEvent("printstash:library-inspector-state", {
+        detail: { available: true, open: true },
+      }),
     );
+    expect(screen.getByRole("button", { name: "Show or hide details" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    fireEvent(
+      window,
+      new CustomEvent("printstash:library-inspector-state", {
+        detail: { available: false, open: false },
+      }),
+    );
+    expect(screen.queryByRole("button", { name: "Show or hide details" })).not.toBeInTheDocument();
+  });
+  it("ignores malformed inspector events", () => {
+    renderTopBar();
+    fireEvent(
+      window,
+      new CustomEvent("printstash:library-inspector-state", {
+        detail: { available: "yes", open: true },
+      }),
+    );
+    expect(screen.queryByRole("button", { name: "Show or hide details" })).not.toBeInTheDocument();
+  });
+  it("labels an unknown page in the breadcrumb", () => {
+    renderTopBar({ at: "/page-that-does-not-exist" });
+
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumbs" });
+    expect(within(breadcrumb).getByText("Page not found")).toHaveAttribute("aria-current", "page");
+  });
+
+  describe("model breadcrumb", () => {
+    it.each([
+      { collection: null, expected: null },
+      { collection: "parts/brackets", expected: "parts/brackets" },
+      { collection: "parts/A & B #1", expected: "parts/A & B #1" },
+    ])("returns to the model's containing collection: $collection", ({ collection, expected }) => {
+      const app = renderTopBar({
+        at: "/models/1",
+        seed: [[queryKeys.model(1), aModel({ name: "Garden bracket", collection })]],
+      });
+
+      expect(
+        within(screen.getByRole("navigation", { name: "Breadcrumbs" })).getByText("Garden bracket"),
+      ).toBeVisible();
+      const link = screen.getByRole("link", { name: "Back" });
+      const target = new URL(link.getAttribute("href") ?? "", "http://test");
+      expect(target.pathname).toBe("/");
+      expect(target.searchParams.get("c")).toBe(expected);
+      expect(app.requests().some((request) => request.url.includes("/api/v1/models/1"))).toBe(
+        false,
+      );
+    });
+
+    it("preserves a safe Library origin", () => {
+      renderTopBar({
+        at: "/models/1?return=%2F%3Fq%3Dplanter",
+        seed: [[queryKeys.model(1), aModel({ collection: "parts" })]],
+      });
+
+      expect(screen.getByRole("link", { name: "Back" })).toHaveAttribute("href", "/?q=planter");
+    });
+
+    it("keeps the return link on narrow screens", () => {
+      renderTopBar({
+        at: "/models/1",
+        matchesMedia: () => false,
+        seed: [[queryKeys.model(1), aModel({ collection: "parts/brackets" })]],
+      });
+
+      const target = new URL(
+        screen.getByRole("link", { name: "Back" }).getAttribute("href") ?? "",
+        "http://test",
+      );
+      expect(target.searchParams.get("c")).toBe("parts/brackets");
+    });
+
+    it("keeps the return link for a trailing-slash model URL", () => {
+      renderTopBar({
+        at: "/models/1/",
+        matchesMedia: () => false,
+        seed: [[queryKeys.model(1), aModel({ collection: "parts" })]],
+      });
+
+      const target = new URL(
+        screen.getByRole("link", { name: "Back" }).getAttribute("href") ?? "",
+        "http://test",
+      );
+      expect(target.searchParams.get("c")).toBe("parts");
+    });
+  });
+
+  describe("global upload", () => {
+    it("keeps Upload disabled for a member with no editable collection", async () => {
+      const app = renderTopBar({
+        at: "/settings",
+        auth: memberSession(),
+        routes: collectionTreeRoutes([aCollection({ effective_role: "view" })]),
+      });
+
+      await waitFor(() =>
+        expect(app.requests().some((request) => request.url.includes("/collections/search"))).toBe(
+          true,
+        ),
+      );
+      expect(screen.getByRole("button", { name: "Upload" })).toBeDisabled();
+    });
+
+    it("opens the existing upload intent for a member with edit access", async () => {
+      const user = userEvent.setup();
+      renderTopBar({
+        at: "/settings",
+        auth: memberSession(),
+        routes: collectionTreeRoutes([aCollection({ effective_role: "edit" })]),
+      });
+
+      const upload = screen.getByRole("button", { name: "Upload" });
+      await waitFor(() => expect(upload).toBeEnabled());
+      await user.click(upload);
+      await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("upload=1"));
+    });
+
+    it("shares the Library permission probe rather than issuing a second request", async () => {
+      function LibraryProbe() {
+        useCollectionSearch("", "edit");
+        return null;
+      }
+      const app = renderApp(
+        <>
+          <TopBar />
+          <LibraryProbe />
+        </>,
+        {
+          at: "/",
+          auth: memberSession(),
+          routes: {
+            ...collectionTreeRoutes([aCollection({ effective_role: "edit" })]),
+            "GET /api/v1/search/status": json(searchStatus()),
+          },
+        },
+      );
+
+      await waitFor(() => expect(screen.getByRole("button", { name: "Upload" })).toBeEnabled());
+      expect(
+        app.requests().filter((request) => request.url.includes("/collections/search")),
+      ).toHaveLength(1);
+    });
   });
 
   describe("search", () => {
@@ -102,10 +251,25 @@ describe("TopBar", () => {
       expect(screen.getByRole("searchbox", { name: "Search library" })).toBeInTheDocument();
     });
 
-    it("hides the search box away from the vault", () => {
+    it("starts a search from another page", async () => {
+      const user = userEvent.setup();
       renderTopBar({ at: "/settings" });
+      const box = screen.getByRole("searchbox", { name: "Search library" });
 
-      expect(screen.queryByRole("searchbox", { name: "Search library" })).toBeNull();
+      await user.type(box, "benchy{Enter}");
+
+      await waitFor(() =>
+        expect(screen.getByTestId("location")).toHaveTextContent("/search?q=benchy"),
+      );
+    });
+
+    it("does not read search capability on another page before the field is used", async () => {
+      const app = renderTopBar({ at: "/settings" });
+
+      await waitFor(() =>
+        expect(screen.getByRole("searchbox", { name: "Search library" })).toBeVisible(),
+      );
+      expect(app.requests().some((request) => request.url.includes("/search/status"))).toBe(false);
     });
 
     it("starts from the term already in the URL", () => {
@@ -162,183 +326,6 @@ describe("TopBar", () => {
     });
   });
 
-  describe("account menu", () => {
-    it.each([true, false])(
-      "keeps Builds out of the workspace menu for either role (%s)",
-      async (isAdmin) => {
-        const user = userEvent.setup();
-        renderTopBar({
-          at: "/builds/1",
-          auth: session({ user: { id: 1, username: "admin", email: null, is_superuser: isAdmin } }),
-        });
-        await openProfileMenu(user);
-        expect(screen.queryByRole("menuitem", { name: "Builds" })).not.toBeInTheDocument();
-        expect(screen.getByRole("menuitem", { name: "Profiles" })).toHaveAttribute(
-          "href",
-          "/profiles",
-        );
-      },
-    );
-
-    it("offers a log-in link to a signed-out visitor", () => {
-      renderTopBar({ auth: session({ user: null }) });
-
-      expect(screen.getByRole("link", { name: "Log in" })).toHaveAttribute("href", "/login");
-    });
-
-    it("names the signed-in user inside My workspace", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-      await openProfileMenu(user);
-      expect(screen.getByRole("menu")).toHaveTextContent("admin");
-    });
-
-    it("does not duplicate the Library printer quick access", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-      await openProfileMenu(user);
-      expect(screen.queryByRole("menuitem", { name: "Printers" })).not.toBeInTheDocument();
-    });
-
-    it.each(["/settings", "/models/1", "/library/similar"])(
-      "keeps Printers reachable away from the sidebar at %s",
-      async (at) => {
-        const user = userEvent.setup();
-        renderTopBar({ at });
-        await openProfileMenu(user);
-        expect(screen.getByRole("menuitem", { name: "Printers" })).toHaveAttribute(
-          "href",
-          "/printers",
-        );
-      },
-    );
-
-    it("keeps Printers reachable when the desktop sidebar is hidden", async () => {
-      const user = userEvent.setup();
-      renderTopBar({ matchesMedia: () => false });
-      await openProfileMenu(user);
-      expect(screen.getByRole("menuitem", { name: "Printers" })).toHaveAttribute(
-        "href",
-        "/printers",
-      );
-    });
-
-    it("retains the existing workspace destination names", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-      await openProfileMenu(user);
-      expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
-        "Vault",
-        "Pending",
-        "Statistics",
-        "Profiles",
-        "Settings",
-        "Log out",
-      ]);
-    });
-
-    it("returns focus to My workspace after Escape", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-      await openProfileMenu(user);
-      await user.keyboard("{Escape}");
-      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
-      expect(screen.getByRole("button", { name: "My workspace" })).toHaveFocus();
-    });
-
-    it.each([
-      { label: "administrator", isAdmin: true },
-      { label: "regular user", isAdmin: false },
-    ])("omits Wiki from the profile dropdown for a $label", async ({ isAdmin }) => {
-      const user = userEvent.setup();
-      renderTopBar({
-        auth: session({ user: { id: 1, username: "admin", email: null, is_superuser: isAdmin } }),
-      });
-
-      await openProfileMenu(user);
-
-      expect(screen.getByRole("menu")).toBeInTheDocument();
-      expect(screen.queryByRole("menuitem", { name: "Wiki" })).toBeNull();
-    });
-
-    it("links Pending at the inbox route", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-
-      await openProfileMenu(user);
-
-      expect(screen.getByRole("menuitem", { name: "Pending" })).toHaveAttribute("href", "/inbox");
-    });
-
-    it("navigates when a destination is chosen", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-      await openProfileMenu(user);
-
-      await user.click(screen.getByRole("menuitem", { name: "Pending" }));
-
-      expect(screen.getByTestId("location")).toHaveTextContent("/inbox");
-    });
-
-    it("marks the destination for the current route", async () => {
-      const user = userEvent.setup();
-      renderTopBar({ at: "/inbox" });
-
-      await openProfileMenu(user);
-
-      expect(screen.getByRole("menuitem", { name: "Pending" })).toHaveAttribute(
-        "aria-current",
-        "page",
-      );
-    });
-
-    it("marks Pending for a nested inbox route", async () => {
-      const user = userEvent.setup();
-      renderTopBar({ at: "/inbox/41" });
-
-      await openProfileMenu(user);
-
-      expect(screen.getByRole("menuitem", { name: "Pending" })).toHaveAttribute(
-        "aria-current",
-        "page",
-      );
-    });
-
-    it("drops the admin-only destinations for an ordinary user", async () => {
-      const user = userEvent.setup();
-      renderTopBar({
-        at: "/settings",
-        auth: session({ user: { id: 2, username: "maker", email: null, is_superuser: false } }),
-      });
-
-      await user.click(screen.getByRole("button", { name: "My workspace" }));
-
-      expect(screen.queryByRole("menuitem", { name: "Printers" })).toBeNull();
-      expect(screen.queryByRole("menuitem", { name: "Statistics" })).toBeNull();
-    });
-
-    it("signs the user out", async () => {
-      const logout = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
-      const user = userEvent.setup();
-      renderTopBar({ auth: session({ logout }) });
-      await openProfileMenu(user);
-
-      await user.click(screen.getByRole("menuitem", { name: "Log out" }));
-
-      expect(logout).toHaveBeenCalledTimes(1);
-    });
-
-    it("sends the signed-out user to the login page", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-      await openProfileMenu(user);
-
-      await user.click(screen.getByRole("menuitem", { name: "Log out" }));
-
-      await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/login"));
-    });
-  });
-
   it("keeps Similar models out of the desktop header", () => {
     renderTopBar();
     expect(screen.queryByRole("link", { name: "Similar models" })).toBeNull();
@@ -348,7 +335,11 @@ describe("TopBar", () => {
     it("returns to the vault root by default", () => {
       renderTopBar({ at: "/settings" });
 
-      expect(screen.getByRole("link", { name: /PrintStash/ })).toHaveAttribute("href", "/");
+      expect(
+        within(screen.getByRole("navigation", { name: "Breadcrumbs" })).getByRole("link", {
+          name: "PrintStash",
+        }),
+      ).toHaveAttribute("href", "/");
     });
 
     it("returns to the collection the user was last in", () => {
@@ -358,10 +349,11 @@ describe("TopBar", () => {
 
       renderTopBar({ at: "/settings" });
 
-      expect(screen.getByRole("link", { name: /PrintStash/ })).toHaveAttribute(
-        "href",
-        "/?c=Calibration%2FBoats",
-      );
+      expect(
+        within(screen.getByRole("navigation", { name: "Breadcrumbs" })).getByRole("link", {
+          name: "PrintStash",
+        }),
+      ).toHaveAttribute("href", "/?c=Calibration%2FBoats");
     });
   });
 

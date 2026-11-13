@@ -76,6 +76,28 @@ describe("GcodePreview", () => {
     );
   });
 
+  it("follows the inspected Revision after an external selection change", () => {
+    const other = aRevision({ id: 13, file_type: "gcode", original_filename: "other.gcode" });
+    const view = renderApp(
+      <GcodePreview
+        files={[revision, other]}
+        bedSizeFor={bedSizeFor}
+        ToolpathViewer={Toolpath}
+        selectedFileId={12}
+      />,
+    );
+    expect(screen.getByRole("img", { name: "Toolpath" })).toHaveTextContent("/files/12/toolpath");
+    view.rerender(
+      <GcodePreview
+        files={[revision, other]}
+        bedSizeFor={bedSizeFor}
+        ToolpathViewer={Toolpath}
+        selectedFileId={13}
+      />,
+    );
+    expect(screen.getByRole("img", { name: "Toolpath" })).toHaveTextContent("/files/13/toolpath");
+  });
+
   it("preserves the recommended ordinary G-code preview", () => {
     const view = renderApp(preview([sliced, revision]));
 

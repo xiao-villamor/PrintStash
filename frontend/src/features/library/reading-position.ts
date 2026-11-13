@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useRouter } from "@tanstack/react-router";
 import { getSessionVersion } from "@/lib/session-transport";
 import {
   readLibraryPosition,
@@ -8,6 +8,20 @@ import {
   type LibraryLayout,
   type LibraryReadingPosition,
 } from "./navigation-state";
+
+/** Reading anchors also cover Collection buttons without changing navigation-link identities. */
+export function libraryReadingSelector(key?: string): string {
+  if (key === undefined) return "[data-library-entry], [data-library-anchor]";
+  const escaped = CSS.escape(key);
+  return `[data-library-entry="${escaped}"], [data-library-anchor="${escaped}"]`;
+}
+function readingKey(node: HTMLElement | undefined): string | undefined {
+  return node?.dataset.libraryEntry ?? node?.dataset.libraryAnchor;
+}
+
+export interface LibraryReadingRenderer {
+  reveal: (key: string) => "mounted" | "pending" | "missing";
+}
 
 interface ReadingPages {
   count: number;
@@ -39,10 +53,21 @@ export function useLibraryReadingPosition(
   listRef: RefObject<HTMLDivElement | null>,
   enabled: boolean,
   pagination: LibraryReadingPagination,
+  renderers?: RefObject<Map<string, LibraryReadingRenderer>>,
 ) {
   const location = useLocation();
-  const current = enabled && entry?.session === getSessionVersion() && entry.key === location.key;
+  const router = useRouter();
+  const current =
+    enabled && entry?.session === getSessionVersion() && entry.key === location.state.__TSR_key;
   const operation = useRef(0);
+  const [renderAttempt, setRenderAttempt] = useState(0);
+  const renderAttempts = useRef({ entry, count: 0 });
+  const renderFrame = useRef<number | null>(null);
+  const preparedDeparture = useRef<{
+    entry: LibraryEntry;
+    layout: LibraryLayout;
+    position: LibraryReadingPosition;
+  } | null>(null);
   const captured = useRef<{
     entry: LibraryEntry;
     layout: LibraryLayout;
@@ -64,6 +89,7 @@ export function useLibraryReadingPosition(
   useLayoutEffect(() => {
     return () => {
       operation.current += 1;
+      if (renderFrame.current !== null) cancelAnimationFrame(renderFrame.current);
     };
   }, [entry, layout, current]);
   useLayoutEffect(() => {
@@ -99,9 +125,25 @@ export function useLibraryReadingPosition(
     main.scrollTop = saved.main;
     if (list) list.scrollTop = saved.list ?? 0;
     if (saved.anchor && restored) {
-      const anchor = main.querySelector<HTMLElement>(
-        `[data-library-entry="${CSS.escape(saved.anchor.key)}"]`,
-      );
+      const anchor = main.querySelector<HTMLElement>(libraryReadingSelector(saved.anchor.key));
+      if (
+        renderers &&
+        (renderAttempts.current.entry !== entry || renderAttempts.current.count < 8)
+      ) {
+        const pending = Array.from(renderers.current.values()).some(
+          (renderer) => renderer.reveal(saved.anchor!.key) === "pending",
+        );
+        if (pending) {
+          renderAttempts.current = {
+            entry,
+            count: renderAttempts.current.entry === entry ? renderAttempts.current.count + 1 : 1,
+          };
+          renderFrame.current = requestAnimationFrame(() =>
+            setRenderAttempt((attempt) => attempt + 1),
+          );
+          return;
+        }
+      }
       const container = saved.anchor.container === "list" ? list : main;
       if (!anchor || !container) restored = false;
       else
@@ -124,9 +166,15 @@ export function useLibraryReadingPosition(
         adjacent: null,
         pages: { models: pagination.models.count, folders: pagination.folders.count },
       });
+    } else {
+      // Geometry can require a different raw offset for the same anchor. Its
+      // queued scroll notification must compare with these accepted pixels.
+      const position = { ...saved, main: main.scrollTop, list: list?.scrollTop ?? null };
+      saveLibraryPosition(entry, layout, position);
+      captured.current = { entry, layout, position };
     }
     setRecovery({ entry, layout, current, status: restored ? "ready" : "reset" });
-  }, [current, entry, layout, recovery, pagination, mainRef, listRef]);
+  }, [current, entry, layout, recovery, pagination, mainRef, listRef, renderers, renderAttempt]);
 
   useEffect(() => {
     if (
@@ -163,6 +211,13 @@ export function useLibraryReadingPosition(
     ) => {
       const main = departing ? departing.main : mainRef.current;
       if (!current || !entry || !main) return;
+      const prepared = preparedDeparture.current;
+      if (departing && prepared?.entry === entry && prepared.layout === layout) {
+        // An external Open page command already captured the visible source.
+        // Route layout/row measurements can change before React detaches main.
+        saveLibraryPosition(entry, layout, prepared.position);
+        return prepared.position;
+      }
       const list = departing ? departing.list : listRef.current;
       const previous = readLibraryPosition(entry, layout);
       const offsetChanged =
@@ -178,14 +233,25 @@ export function useLibraryReadingPosition(
         // A list may grow inside main instead of owning an independent scroll range.
         const container = list && list.scrollHeight > list.clientHeight ? list : main;
         const bounds = container.getBoundingClientRect();
-        const candidates = Array.from(main.querySelectorAll<HTMLElement>("[data-library-entry]"));
+        const seen = new Set<string>();
+        const candidates = Array.from(
+          main.querySelectorAll<HTMLElement>(libraryReadingSelector()),
+        ).filter((node) => {
+          const key = readingKey(node);
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        // A card and its explicit Open action name one entity. Its next reading
+        // neighbor must be another entity rather than the same card's second link.
+        const targetKey = readingKey(target ?? undefined);
         const visible =
-          target ??
+          (targetKey ? candidates.find((node) => readingKey(node) === targetKey) : undefined) ??
           candidates.find((node) => {
             const rect = node.getBoundingClientRect();
             return rect.bottom > bounds.top && rect.top < bounds.bottom;
           });
-        const key = visible?.dataset.libraryEntry;
+        const key = readingKey(visible);
         if (visible && key) {
           anchor = {
             key,
@@ -194,7 +260,7 @@ export function useLibraryReadingPosition(
           };
           const index = candidates.indexOf(visible);
           const neighbor = candidates[index + 1] ?? candidates[index - 1];
-          const neighborKey = neighbor?.dataset.libraryEntry;
+          const neighborKey = readingKey(neighbor);
           adjacent =
             neighbor && neighborKey
               ? {
@@ -251,10 +317,8 @@ export function useLibraryReadingPosition(
       previous.position.adjacent?.key !== after.key
     )
       return;
-    if (main.querySelector(`[data-library-entry="${CSS.escape(before.key)}"]`)) return;
-    const anchor = main.querySelector<HTMLElement>(
-      `[data-library-entry="${CSS.escape(after.key)}"]`,
-    );
+    if (main.querySelector(libraryReadingSelector(before.key))) return;
+    const anchor = main.querySelector<HTMLElement>(libraryReadingSelector(after.key));
     const container = after.container === "list" ? listRef.current : main;
     if (!anchor || !container) return;
     container.scrollTop +=
@@ -266,6 +330,7 @@ export function useLibraryReadingPosition(
     const saved = capturePosition(true);
     if (!saved || !entry || !current) return;
     const token = ++operation.current;
+    renderAttempts.current = { entry, count: 0 };
     requested.current = { models: null, folders: null };
     setRecovery({ entry, layout, current, status: "refreshing", saved });
     let failed = false;
@@ -294,11 +359,14 @@ export function useLibraryReadingPosition(
       return;
     const list = listRef.current;
     const capture = (event: Event) => {
+      if (event.type === "click") preparedDeparture.current = null;
       capturePosition(
         event.type === "click",
         event.target instanceof Element
-          ? (event.target.closest<HTMLElement>("[data-library-entry]") ??
-              event.target.closest("article")?.querySelector<HTMLElement>("[data-library-entry]") ??
+          ? (event.target.closest<HTMLElement>(libraryReadingSelector()) ??
+              event.target
+                .closest("article")
+                ?.querySelector<HTMLElement>(libraryReadingSelector()) ??
               null)
           : null,
       );
@@ -314,7 +382,7 @@ export function useLibraryReadingPosition(
       // because React may have detached their refs already.
       const anchor = readLibraryPosition(entry, layout)?.anchor;
       const target = anchor
-        ? main.querySelector<HTMLElement>(`[data-library-entry="${CSS.escape(anchor.key)}"]`)
+        ? main.querySelector<HTMLElement>(libraryReadingSelector(anchor.key))
         : null;
       // A missing selected anchor must still reset on return, not adopt another row.
       capturePosition(!anchor || target !== null, target, { main, list });
@@ -330,7 +398,47 @@ export function useLibraryReadingPosition(
     pagination.models.count,
     pagination.folders.count,
   ]);
+  const rememberAnchor = useCallback(
+    (key: string) => {
+      if (
+        recovery?.entry !== entry ||
+        recovery.layout !== layout ||
+        recovery.status === "restoring" ||
+        recovery.status === "refreshing"
+      )
+        return;
+      const target = mainRef.current?.querySelector<HTMLElement>(libraryReadingSelector(key));
+      const position = capturePosition(true, target ?? null);
+      if (entry && position) preparedDeparture.current = { entry, layout, position };
+    },
+    [recovery, entry, layout, mainRef, capturePosition],
+  );
+  useLayoutEffect(() => {
+    if (!current || !entry) return;
+    return router.subscribe("onBeforeNavigate", ({ fromLocation, toLocation }) => {
+      if (
+        fromLocation?.state.__TSR_key !== entry.key ||
+        toLocation.state.__TSR_key === entry.key ||
+        entry.session !== getSessionVersion() ||
+        recovery.entry !== entry ||
+        recovery.layout !== layout ||
+        recovery.status === "restoring" ||
+        recovery.status === "refreshing"
+      )
+        return;
+      const prepared = preparedDeparture.current;
+      if (prepared?.entry === entry && prepared.layout === layout) return;
+      // Browser Forward/Back has no card click. Capture before Router changes
+      // the shell geometry, while the committed source DOM is still intact.
+      const saved = readLibraryPosition(entry, layout);
+      const target = saved?.anchor
+        ? mainRef.current?.querySelector<HTMLElement>(libraryReadingSelector(saved.anchor.key))
+        : null;
+      const position = capturePosition(!saved?.anchor || !!target, target ?? null);
+      if (position) preparedDeparture.current = { entry, layout, position };
+    });
+  }, [router, current, entry, layout, recovery, mainRef, capturePosition]);
   const status =
     recovery?.entry === entry && recovery.layout === layout ? recovery.status : "ready";
-  return { status: status === "refreshing" ? "restoring" : status, refresh };
+  return { status: status === "refreshing" ? "restoring" : status, refresh, rememberAnchor };
 }

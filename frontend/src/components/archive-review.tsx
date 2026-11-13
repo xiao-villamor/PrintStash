@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { File } from "lucide-react";
+import { ChevronDown, File } from "lucide-react";
 
 import { getJobStatus } from "@/lib/api/jobs";
 import { selectArchiveEntries } from "@/lib/api/models";
@@ -220,9 +220,81 @@ function ArchiveReview({
       onClose={onClose}
       title={uiText("Choose ZIP files")}
       className="flex max-h-[90dvh] max-w-5xl flex-col"
+      bodyClassName="flex min-h-0 flex-col"
+      footer={
+        manifest && (
+          <div className="flex w-full flex-wrap items-end justify-between gap-3">
+            <p role="status" className="text-sm text-muted-foreground">
+              {uiText("{value1} of {value2} files selected", {
+                value1: String(selected.size),
+                value2: String(importable.length),
+              })}
+            </p>
+            <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-end sm:gap-2">
+              <div className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
+                {uiText("Destination collection")}
+                <DropdownMenu
+                  open={pickerOpen}
+                  onOpenChange={setPickerOpen}
+                  align="end"
+                  role="dialog"
+                  contentClassName="w-72 rounded border border-border bg-popover p-2 text-popover-foreground shadow-lg"
+                  trigger={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      aria-haspopup="dialog"
+                      aria-expanded={pickerOpen}
+                      onClick={() => setPickerOpen((value) => !value)}
+                      className="w-full justify-between text-left sm:max-w-56"
+                    >
+                      <span className="truncate">
+                        {destinationLabel ??
+                          (collection === null
+                            ? user?.is_superuser
+                              ? uiText("Vault root")
+                              : uiText("Choose a collection")
+                            : collection)}
+                      </span>
+                      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    </Button>
+                  }
+                >
+                  <CollectionPicker
+                    autoFocus
+                    minRole="edit"
+                    selectedPath={collection ?? ""}
+                    onSelect={(picked) => {
+                      setPickedCollection(picked ?? "none");
+                      setPickerOpen(false);
+                    }}
+                    noneLabel={user?.is_superuser ? uiText("Vault root") : undefined}
+                    emptyLabel={uiText("No editable collections.")}
+                  />
+                </DropdownMenu>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button variant="outline" onClick={onClose}>
+                  {uiText("Cancel")}
+                </Button>
+                <Button
+                  disabled={
+                    selected.size === 0 || submitting || (!user?.is_superuser && !collection)
+                  }
+                  onClick={() => void importSelected()}
+                >
+                  {submitting
+                    ? uiText("Importing…")
+                    : uiText("Import {value1} selected", { value1: String(selected.size) })}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )
+      }
     >
-      <div className="flex min-h-0 flex-col gap-4">
-        <p className="text-sm text-muted-foreground">
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
+        <p className="break-words text-sm text-muted-foreground">
           {manifest
             ? uiText(
                 "Choose the files to add from {value1}. Your selection stays while you browse.",
@@ -351,67 +423,6 @@ function ArchiveReview({
                 ))}
               </ul>
             </SelectionBrowserViewport>
-            <div className="flex flex-wrap items-end justify-between gap-3 border-t border-border pt-3">
-              <p role="status" className="text-sm text-muted-foreground">
-                {uiText("{value1} of {value2} files selected", {
-                  value1: String(selected.size),
-                  value2: String(importable.length),
-                })}
-              </p>
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                  {uiText("Destination collection")}
-                  <DropdownMenu
-                    open={pickerOpen}
-                    onOpenChange={setPickerOpen}
-                    align="end"
-                    role="dialog"
-                    contentClassName="w-72 rounded border border-border bg-popover p-2 text-popover-foreground shadow-lg"
-                    trigger={
-                      <button
-                        type="button"
-                        aria-haspopup="dialog"
-                        aria-expanded={pickerOpen}
-                        onClick={() => setPickerOpen((value) => !value)}
-                        className="min-h-9 max-w-56 truncate rounded border border-border bg-background px-2 text-left text-sm text-foreground"
-                      >
-                        {destinationLabel ??
-                          (collection === null
-                            ? user?.is_superuser
-                              ? uiText("Vault root")
-                              : uiText("Choose a collection")
-                            : collection)}
-                      </button>
-                    }
-                  >
-                    <CollectionPicker
-                      autoFocus
-                      minRole="edit"
-                      selectedPath={collection ?? ""}
-                      onSelect={(picked) => {
-                        setPickedCollection(picked ?? "none");
-                        setPickerOpen(false);
-                      }}
-                      noneLabel={user?.is_superuser ? uiText("Vault root") : undefined}
-                      emptyLabel={uiText("No editable collections.")}
-                    />
-                  </DropdownMenu>
-                </div>
-                <Button variant="outline" onClick={onClose}>
-                  {uiText("Cancel")}
-                </Button>
-                <Button
-                  disabled={
-                    selected.size === 0 || submitting || (!user?.is_superuser && !collection)
-                  }
-                  onClick={() => void importSelected()}
-                >
-                  {submitting
-                    ? uiText("Importing…")
-                    : uiText("Import {value1} selected", { value1: String(selected.size) })}
-                </Button>
-              </div>
-            </div>
           </>
         )}
       </div>

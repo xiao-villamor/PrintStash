@@ -239,7 +239,7 @@ function SettingsForm({ initial, readOnly }: { initial: SimilaritySettings; read
           </label>
         </details>
       </fieldset>
-      <Button type="submit" loading={save.isPending} disabled={readOnly}>
+      <Button size="sm" type="submit" loading={save.isPending} disabled={readOnly}>
         {t("similarity.save")}
       </Button>
     </form>
@@ -338,7 +338,11 @@ export function SimilaritySettingsPanel({
         {view === "scan" && status.isError && (
           <EmptyState
             title={t("similarity.loadError")}
-            action={<Button onClick={() => void status.refetch()}>{t("similarity.retry")}</Button>}
+            action={
+              <Button size="sm" onClick={() => void status.refetch()}>
+                {t("similarity.retry")}
+              </Button>
+            }
           />
         )}
         {status.isPending && (
@@ -412,6 +416,7 @@ export function SimilaritySettingsPanel({
             )}
           </div>
           <Button
+            size="sm"
             loading={start.isPending}
             disabled={
               status.isError ||
@@ -537,7 +542,11 @@ export function SimilaritySettingsPanel({
         {view === "settings" && status.isError && (
           <EmptyState
             title={t("similarity.loadError")}
-            action={<Button onClick={() => void status.refetch()}>{t("similarity.retry")}</Button>}
+            action={
+              <Button size="sm" onClick={() => void status.refetch()}>
+                {t("similarity.retry")}
+              </Button>
+            }
           />
         )}
         {status.data?.settings ? (
@@ -675,6 +684,7 @@ export function SimilaritySettingsPanel({
         {history.hasNextPage && !history.isFetchNextPageError && (
           <div className="border-t p-3">
             <Button
+              size="sm"
               variant="outline"
               disabled={history.isFetchingNextPage}
               onClick={() => void history.fetchNextPage()}

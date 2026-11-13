@@ -23,8 +23,8 @@ test.describe("Vault migration", () => {
     await page.goto("/settings?section=storage");
     await expect(page.getByRole("region", { name: "Move Vault storage" })).toBeVisible();
     const panel = page.getByRole("region", { name: "Move Vault storage" });
-    await panel.getByLabel("Models directory", { exact: true }).fill(data);
-    await panel.getByLabel("Thumbnail directory", { exact: true }).fill(thumbs);
+    await panel.getByLabel("Your files", { exact: true }).fill(data);
+    await panel.getByLabel("Previews", { exact: true }).fill(thumbs);
     const backupOption = panel
       .getByLabel("Recent backup")
       .getByRole("option")

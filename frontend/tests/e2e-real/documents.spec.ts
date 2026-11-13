@@ -73,7 +73,7 @@ test.describe("documents", () => {
       .fill(
         "# Step one\n\nGlue part A to part B.\n\n| Part | Material |\n| --- | --- |\n| A | PLA |\n| B | PETG |",
       );
-    await page.getByRole("button", { name: "Save" }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
 
     // Saved → real row; the app keeps you in the editor. Switch to Preview to see
     // the rendered markdown.
@@ -90,7 +90,7 @@ test.describe("documents", () => {
     // Edit an existing doc → Save returns to preview automatically.
     await page.getByRole("button", { name: "Edit" }).click();
     await page.getByPlaceholder(/Write markdown/).fill("# Step one\n\nUse the M3 bolts.");
-    await page.getByRole("button", { name: "Save" }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Use the M3 bolts.")).toBeVisible();
 
     // It shows up as a card back on the Documents tab.

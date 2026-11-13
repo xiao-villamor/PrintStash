@@ -77,8 +77,9 @@ test.describe("search clarity", () => {
     const results = page.getByRole("list", { name: "Search results" });
     await expect(results.getByRole("listitem")).toHaveCount(30);
     const desktop = await results.boundingBox();
-    expect(desktop?.x).toBeLessThan(40);
-    expect(desktop?.width).toBeGreaterThan(1800);
+    const rail = await page.getByRole("navigation", { name: "Navigation" }).boundingBox();
+    expect(desktop!.x - (rail!.x + rail!.width)).toBeLessThan(40);
+    expect(desktop!.width).toBeGreaterThan(1920 - rail!.width - 80);
     const cards = results.getByRole("listitem");
     expect((await cards.nth(5).boundingBox())?.y).toBe((await cards.first().boundingBox())?.y);
     await cards.last().scrollIntoViewIfNeeded();

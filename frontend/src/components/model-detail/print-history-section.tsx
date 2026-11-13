@@ -5,8 +5,8 @@ import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useState } from "react";
-import { Check, CheckCircle2, Clock, Loader2, Plus, RefreshCw, XCircle } from "lucide-react";
+import { useId, useState } from "react";
+import { CheckCircle2, XCircle } from "lucide-react";
 
 import { createManualPrintJob, getModelPrintJobs, importPrintJobsFromPrinter } from "@/lib/api";
 import { usePrinters, useSpoolmanStatus, useSpools } from "@/lib/queries";
@@ -16,25 +16,32 @@ import { FileRead, ModelPrintJobRead } from "@/types";
 import { PrintJobReproducibility } from "@/components/print-job-reproducibility";
 import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
 
-import { PRINT_JOB_PRESENTATION, printJobToneClass } from "./presentation";
+import { PRINT_JOB_PRESENTATION } from "./presentation";
+import { Modal } from "@/components/ui/modal";
+import { Button } from "@/components/ui/button";
+import { ChoiceField } from "./choice-field";
 import { Localized } from "@/components/ui/localized";
 
-const PRINT_HISTORY_MODES = ["manual", "auto"] as const;
-type PrintHistoryMode = (typeof PRINT_HISTORY_MODES)[number];
+type PrintHistoryMode = "manual" | "auto";
 
 export function PrintHistorySection({
   jobs,
+  modelName,
   modelId,
   gcodeFiles,
   onJobCreated,
+  initialEntry,
 }: {
   jobs: ModelPrintJobRead[];
+  modelName?: string;
   modelId: number;
   gcodeFiles: FileRead[];
   onJobCreated: (job: ModelPrintJobRead) => void;
+  initialEntry?: { fileId: number; state: "completed" | "failed" } | null;
 }) {
   useUiLocale();
-  const [showAdd, setShowAdd] = useState(false);
+  const formId = useId();
+  const [showAdd, setShowAdd] = useState(!!initialEntry);
   const [mode, setMode] = useState<PrintHistoryMode>("manual");
 
   // Manual form state
@@ -45,9 +52,11 @@ export function PrintHistorySection({
   // When the printer isn't a registered one, log against this free-text name.
   const [adhocPrinter, setAdhocPrinter] = useState(false);
   const [adhocPrinterName, setAdhocPrinterName] = useState("");
-  const [selectedFileId, setSelectedFileId] = useState<number | null>(gcodeFiles[0]?.id ?? null);
+  const [selectedFileId, setSelectedFileId] = useState<number | null>(
+    initialEntry?.fileId ?? gcodeFiles[0]?.id ?? null,
+  );
   const [selectedSpoolId, setSelectedSpoolId] = useState<number | null>(null);
-  const [jobState, setJobState] = useState("completed");
+  const [jobState, setJobState] = useState<string>(initialEntry?.state ?? "completed");
   const [startedAt, setStartedAt] = useState("");
   const [finishedAt, setFinishedAt] = useState("");
   const [jobError, setJobError] = useState("");
@@ -84,7 +93,7 @@ export function PrintHistorySection({
     : !!selectedPrinterId;
 
   async function submitManual() {
-    if (!manualPrinterReady || !selectedFileId) return;
+    if (submitting || !manualPrinterReady || !selectedFileId) return;
     setSubmitting(true);
     try {
       const spool =
@@ -144,242 +153,266 @@ export function PrintHistorySection({
   return (
     <Localized>
       <section>
-        <div className="flex items-center justify-between mb-4 pb-1 border-b border-outline-variant">
-          <h2 className="text-lg font-semibold text-on-surface flex items-center gap-2">
-            <Clock className="h-4 w-4" />
-            {uiText(" Print History")}
-          </h2>
-          <button
-            onClick={openAdd}
-            className="inline-flex items-center gap-1.5 rounded border border-outline-variant px-2 py-1 font-mono text-3xs uppercase tracking-wider text-on-surface-variant transition-colors hover:bg-surface-container-low"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {uiText(" Add Record")}
-          </button>
+        <div className="detail-history-heading">
+          <h2>{uiText("Print history")}</h2>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={openAdd}>
+              {uiText("Add record")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                openAdd();
+                setMode("auto");
+              }}
+            >
+              {uiText("Import from printer")}
+            </Button>
+          </div>
         </div>
+        <p className="detail-history-intro">
+          {uiText("Recorded results for each printer and revision.")}
+        </p>
 
         {/* Add record panel */}
-        {showAdd && (
-          <div className="mb-4 border border-outline-variant rounded bg-surface-container-low p-3 space-y-3">
-            {/* Mode toggle */}
-            <div className="flex gap-1">
-              {PRINT_HISTORY_MODES.map((m) => (
-                <button
-                  key={m}
-                  onClick={() => {
-                    setMode(m);
-                    setImportResults([]);
-                    setImportDone(false);
-                  }}
-                  className={`px-3 py-1 font-mono text-3xs uppercase tracking-wider rounded transition-colors ${
-                    mode === m
-                      ? "bg-accent text-accent-foreground"
-                      : "text-on-surface-variant hover:bg-surface-container-high"
-                  }`}
+        <Modal
+          open={showAdd}
+          onClose={() => {
+            if (!submitting && !importing) setShowAdd(false);
+          }}
+          title={mode === "manual" ? uiText("Add print record") : uiText("Import from printer")}
+          description={
+            mode === "manual"
+              ? uiText(
+                  "Record an observed result for one Revision on one printer. This does not change the recommended Revision.",
+                )
+              : undefined
+          }
+          className={
+            mode === "manual"
+              ? "absolute inset-y-0 right-0 h-dvh max-h-none max-w-[680px] rounded-none"
+              : "max-w-160"
+          }
+          bodyClassName={mode === "manual" ? "flex-1" : undefined}
+          footer={
+            <>
+              <Button
+                variant="outline"
+                disabled={submitting || importing}
+                onClick={() => setShowAdd(false)}
+              >
+                {mode === "manual" ? uiText("Cancel") : uiText("Close")}
+              </Button>
+              {mode === "manual" ? (
+                <Button
+                  onClick={submitManual}
+                  loading={submitting}
+                  disabled={!manualPrinterReady || !selectedFileId}
                 >
-                  {m === "manual" ? uiText("Manual Entry") : uiText("Auto from Printer")}
-                </button>
-              ))}
-            </div>
-
+                  {uiText("Save record")}
+                </Button>
+              ) : (
+                <Button onClick={runAutoImport} loading={importing} disabled={!selectedPrinterId}>
+                  {uiText("Fetch & Import")}
+                </Button>
+              )}
+            </>
+          }
+        >
+          <div
+            className="space-y-4"
+            onKeyDown={(event) => {
+              if (
+                event.defaultPrevented ||
+                event.nativeEvent.isComposing ||
+                event.repeat ||
+                event.altKey ||
+                event.shiftKey ||
+                !(event.ctrlKey || event.metaKey) ||
+                event.key !== "Enter" ||
+                mode !== "manual"
+              )
+                return;
+              event.preventDefault();
+              void submitManual();
+            }}
+          >
             {mode === "manual" ? (
-              <div className="space-y-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                      {uiText("Printer")}
-                    </label>
-                    <select
-                      value={adhocPrinter ? "__adhoc__" : (selectedPrinterId ?? "")}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (v === "__adhoc__") {
-                          setAdhocPrinter(true);
-                          setSelectedPrinterId(null);
-                        } else {
-                          setAdhocPrinter(false);
-                          setSelectedPrinterId(v ? Number(v) : null);
-                        }
-                      }}
-                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                    >
-                      <option value="">{uiText("Select printer…")}</option>
-                      {printers.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                      <option value="__adhoc__">{uiText("Other (not listed)…")}</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                      {uiText("G-code Revision")}
-                    </label>
-                    <select
-                      value={selectedFileId ?? ""}
-                      onChange={(e) =>
-                        setSelectedFileId(e.target.value ? Number(e.target.value) : null)
-                      }
-                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                    >
-                      <option value="">{uiText("Select revision…")}</option>
-                      {gcodeFiles.map((f, i) => (
-                        <option key={f.id} value={f.id}>
-                          {uiText("Rev ")}
-                          {i + 1} — {f.original_filename}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+              <div className="space-y-4">
+                {modelName && (
+                  <dl className="grid grid-cols-[1fr_2fr] gap-x-4 gap-y-2 bg-plate p-4 text-[13px]">
+                    <dt className="text-muted-foreground">{uiText("Model")}</dt>
+                    <dd>{modelName}</dd>
+                    <dt className="text-muted-foreground">{uiText("Revision")}</dt>
+                    <dd>
+                      {selectedFileId != null
+                        ? `${uiText("Rev ")}${gcodeFiles.find((file) => file.id === selectedFileId)?.gcode_revision_number ?? gcodeFiles.find((file) => file.id === selectedFileId)?.version ?? "—"}`
+                        : "—"}
+                    </dd>
+                  </dl>
+                )}
+                <h3 className="text-sm font-semibold">{uiText("Print context")}</h3>
+                <div className="space-y-4">
+                  <ChoiceField<number | "other">
+                    label={uiText("Printer")}
+                    inline
+                    value={adhocPrinter ? "other" : selectedPrinterId}
+                    options={[
+                      ...printers.map((printer) => ({ value: printer.id, label: printer.name })),
+                      { value: "other", label: uiText("Other (not listed)…") },
+                    ]}
+                    onChange={(value) => {
+                      setAdhocPrinter(value === "other");
+                      setSelectedPrinterId(value === "other" ? null : value);
+                    }}
+                  />
+                  <ChoiceField
+                    label={uiText("G-code Revision")}
+                    inline
+                    value={selectedFileId}
+                    options={gcodeFiles.map((file) => ({
+                      value: file.id,
+                      label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}`,
+                      description: file.original_filename,
+                    }))}
+                    onChange={setSelectedFileId}
+                  />
                 </div>
                 {adhocPrinter && (
                   <div>
-                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                    <label
+                      className="block text-xs font-medium text-on-surface-variant mb-1"
+                      htmlFor={`${formId}-3`}
+                    >
                       {uiText("Printer name")}
                     </label>
                     <input
+                      id={`${formId}-3`}
                       value={adhocPrinterName}
                       onChange={(e) => setAdhocPrinterName(e.target.value)}
                       maxLength={128}
                       placeholder={uiText("e.g. Garage Prusa MK4")}
-                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="min-w-0 w-full h-10 bg-card text-foreground text-sm border border-input rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                 )}
-                <div>
-                  <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                    {uiText("Result")}
-                  </label>
-                  <select
-                    value={jobState}
-                    onChange={(e) => setJobState(e.target.value)}
-                    className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                  >
-                    <option value="completed">{uiText("Completed")}</option>
-                    <option value="failed">{uiText("Failed")}</option>
-                    <option value="cancelled">{uiText("Cancelled")}</option>
-                  </select>
-                </div>
                 {spoolmanEnabled && spools.length > 0 && (
-                  <div>
-                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                      {uiText("Spool (opt.)")}
-                    </label>
-                    <select
-                      value={selectedSpoolId ?? ""}
-                      onChange={(e) =>
-                        setSelectedSpoolId(e.target.value ? Number(e.target.value) : null)
-                      }
-                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                    >
-                      <option value="">{uiText("No spool")}</option>
-                      {spools.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {(s.filament_name ||
-                            s.name ||
-                            uiText("Spool {value1}", { value1: String(s.id) })) +
-                            (s.vendor_name ? ` · ${s.vendor_name}` : "") +
-                            (s.remaining_weight != null
-                              ? uiText(" ({value1} left)", {
-                                  value1: String(formatGrams(s.remaining_weight)),
-                                })
-                              : "")}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <ChoiceField<number | "none">
+                    label={uiText("Spool (opt.)")}
+                    inline
+                    value={selectedSpoolId ?? "none"}
+                    onChange={(value) => setSelectedSpoolId(value === "none" ? null : value)}
+                    options={[
+                      { value: "none", label: uiText("No spool") },
+                      ...spools.map((spool) => ({
+                        value: spool.id,
+                        label:
+                          spool.filament_name ||
+                          spool.name ||
+                          uiText("Spool {value1}", { value1: String(spool.id) }),
+                        description: [
+                          spool.vendor_name,
+                          spool.remaining_weight != null
+                            ? uiText(" ({value1} left)", {
+                                value1: formatGrams(spool.remaining_weight),
+                              })
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · "),
+                      })),
+                    ]}
+                  />
                 )}
-                <div className="grid grid-cols-2 gap-2">
+                <h3 className="border-t border-border pt-5 text-sm font-semibold">
+                  {uiText("Observed outcome")}
+                </h3>
+                <ChoiceField
+                  label={uiText("Result")}
+                  value={jobState}
+                  options={[
+                    { value: "completed", label: uiText("Completed") },
+                    { value: "failed", label: uiText("Failed") },
+                    { value: "cancelled", label: uiText("Cancelled") },
+                  ]}
+                  onChange={setJobState}
+                  inline
+                />
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div>
-                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                    <label
+                      className="block text-xs font-medium text-on-surface-variant mb-1"
+                      htmlFor={`${formId}-6`}
+                    >
                       {uiText("Started (opt.)")}
                     </label>
                     <input
+                      id={`${formId}-6`}
                       type="datetime-local"
                       value={startedAt}
                       onChange={(e) => setStartedAt(e.target.value)}
-                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="min-w-0 w-full h-10 bg-card text-foreground text-sm border border-input rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                   <div>
-                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                    <label
+                      className="block text-xs font-medium text-on-surface-variant mb-1"
+                      htmlFor={`${formId}-7`}
+                    >
                       {uiText("Finished (opt.)")}
                     </label>
                     <input
+                      id={`${formId}-7`}
                       type="datetime-local"
                       value={finishedAt}
                       onChange={(e) => setFinishedAt(e.target.value)}
-                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="min-w-0 w-full h-10 bg-card text-foreground text-sm border border-input rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                 </div>
-                {jobState === "failed" && (
+                {(jobState === "failed" || jobState === "cancelled") && (
                   <div>
-                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                    <label
+                      className="block text-xs font-medium text-on-surface-variant mb-1"
+                      htmlFor={`${formId}-8`}
+                    >
                       {uiText("Error (opt.)")}
                     </label>
                     <input
+                      id={`${formId}-8`}
+                      ref={(node) => {
+                        if (initialEntry?.state === "failed") node?.setAttribute("autofocus", "");
+                      }}
                       value={jobError}
                       onChange={(e) => setJobError(e.target.value)}
                       placeholder={uiText("Describe what went wrong…")}
-                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="min-w-0 w-full h-10 bg-card text-foreground text-sm border border-input rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                 )}
-                <div className="flex gap-2 pt-1">
-                  <button
-                    onClick={submitManual}
-                    disabled={submitting || !manualPrinterReady || !selectedFileId}
-                    className="flex-1 h-8 bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider rounded disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
-                  >
-                    {submitting ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Check className="h-3.5 w-3.5" />
-                    )}
-                    {uiText("Save")}
-                  </button>
-                  <button
-                    onClick={() => setShowAdd(false)}
-                    className="px-3 h-8 border border-outline-variant rounded font-mono text-xs text-on-surface-variant hover:bg-surface-container-high transition-colors"
-                  >
-                    {uiText("Cancel")}
-                  </button>
-                </div>
               </div>
             ) : (
               <div className="space-y-2">
-                <p className="font-mono text-2xs text-on-surface-variant">
+                <p className="text-xs text-on-surface-variant">
                   {uiText(
                     "Fetch recent print history from a Moonraker printer and import jobs matching this model's G-code files.",
                   )}
                 </p>
-                <div>
-                  <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
-                    {uiText("Printer")}
-                  </label>
-                  <select
-                    value={selectedPrinterId ?? ""}
-                    onChange={(e) => {
-                      setSelectedPrinterId(e.target.value ? Number(e.target.value) : null);
-                      setImportResults([]);
-                      setImportDone(false);
-                    }}
-                    className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                  >
-                    <option value="">{uiText("Select printer…")}</option>
-                    {printers.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <ChoiceField
+                  label={uiText("Printer")}
+                  value={selectedPrinterId}
+                  options={printers.map((printer) => ({ value: printer.id, label: printer.name }))}
+                  onChange={(value) => {
+                    setSelectedPrinterId(value);
+                    setImportResults([]);
+                    setImportDone(false);
+                  }}
+                />
                 {importDone && importResults.length > 0 && (
                   <div className="space-y-1">
                     {importResults.map((r) => (
-                      <div key={r.filename} className="flex items-center gap-2 font-mono text-2xs">
+                      <div key={r.filename} className="flex items-center gap-2 text-xs">
                         {r.imported ? (
                           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
                         ) : (
@@ -398,93 +431,61 @@ export function PrintHistorySection({
                   </div>
                 )}
                 {importDone && importResults.length === 0 && (
-                  <p className="font-mono text-2xs text-on-surface-variant">
+                  <p className="text-xs text-on-surface-variant">
                     {uiText("No matching jobs found on this printer.")}
                   </p>
                 )}
-                <div className="flex gap-2 pt-1">
-                  <button
-                    onClick={runAutoImport}
-                    disabled={importing || !selectedPrinterId}
-                    className="flex-1 h-8 bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider rounded disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
-                  >
-                    {importing ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    )}
-                    {uiText("Fetch & Import")}
-                  </button>
-                  <button
-                    onClick={() => setShowAdd(false)}
-                    className="px-3 h-8 border border-outline-variant rounded font-mono text-xs text-on-surface-variant hover:bg-surface-container-high transition-colors"
-                  >
-                    {uiText("Close")}
-                  </button>
-                </div>
               </div>
             )}
           </div>
-        )}
+        </Modal>
 
         {jobs.length === 0 ? (
-          <p className="font-mono text-xs text-on-surface-variant">
+          <p className="text-sm text-on-surface-variant">
             {uiText("No print history yet. Add a record manually or import from a printer.")}
           </p>
         ) : (
-          <div className="space-y-2">
+          <div>
             {jobs.map((job) => {
               const present = PRINT_JOB_PRESENTATION[job.state];
-              const Icon =
-                present.tone === "success"
-                  ? CheckCircle2
-                  : present.tone === "error"
-                    ? XCircle
-                    : Clock;
               return (
-                <div
-                  key={job.id}
-                  className="p-3 border border-outline-variant rounded bg-surface space-y-1"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Icon
-                        className={`h-4 w-4 shrink-0 ${
-                          present.tone === "success"
-                            ? "text-emerald-600"
-                            : present.tone === "error"
-                              ? "text-error"
-                              : "text-amber-600"
-                        }`}
-                      />
-                      <span className="font-mono text-[13px] text-on-surface truncate">
-                        {job.source === "external"
-                          ? printJobArtifactLabel(job)
-                          : uiText("Rev {value1}", {
-                              value1: String(job.gcode_revision_number ?? "—"),
-                            })}{" "}
-                        · {job.printer_name}
+                <article key={job.id} className="detail-history-record">
+                  <div className="detail-history-identity">
+                    <span className="break-words">
+                      {job.source === "external"
+                        ? printJobArtifactLabel(job)
+                        : uiText("Rev {value1}", {
+                            value1: String(job.gcode_revision_number ?? "—"),
+                          })}
+                      {" · "}
+                      {job.printer_name}
+                      {" · "}
+                      <span
+                        className={
+                          present.tone === "error" ? "text-destructive" : "text-foreground"
+                        }
+                      >
+                        {present.label}
                       </span>
-                    </div>
-                    <span
-                      className={`shrink-0 border rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider ${printJobToneClass(present.tone)}`}
-                    >
-                      {present.label}
                     </span>
                   </div>
-                  <p className="font-mono text-2xs text-on-surface-variant">
+                  <p className="text-xs text-on-surface-variant">
                     {job.material_type ? `${job.material_type} · ` : ""}
                     {timeAgo(job.created_at)}
                   </p>
                   {job.source === "external" && (
-                    <p className="font-mono text-2xs uppercase tracking-wider text-on-surface-variant">
+                    <p className="text-xs uppercase tracking-wider text-on-surface-variant">
                       {knownUiText(job.artifact_evidence)}
                     </p>
                   )}
-                  <PrintJobReproducibility job={job} previewHref={`/models/${modelId}`} />
+                  <PrintJobReproducibility
+                    job={job}
+                    previewHref={`/models/${modelId}`}
+                    presentation="history"
+                  />
                   {(job.actual_duration_s != null || job.filament_used_g != null) && (
-                    <p className="font-mono text-2xs text-on-surface-variant">
-                      <span className="text-emerald-600">{uiText("measured")}</span>
+                    <p className="text-xs text-on-surface-variant">
+                      <span>{uiText("measured")}</span>
                       {job.actual_duration_s != null
                         ? ` · ${formatDuration(job.actual_duration_s)}`
                         : ""}
@@ -493,14 +494,12 @@ export function PrintHistorySection({
                     </p>
                   )}
                   {job.spool_name && (
-                    <p className="font-mono text-2xs text-on-surface-variant">
+                    <p className="text-xs text-on-surface-variant">
                       {uiText("spool · {value1}", { value1: String(job.spool_name ?? "") })}
                     </p>
                   )}
-                  {job.error && (
-                    <p className="font-mono text-2xs text-error break-words">{job.error}</p>
-                  )}
-                </div>
+                  {job.error && <p className="text-xs text-error break-words">{job.error}</p>}
+                </article>
               );
             })}
           </div>

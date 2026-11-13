@@ -7,7 +7,7 @@
  * Deletion being recoverable is the promise the trash makes, and this is where it is kept.
  */
 import { test, expect } from "./helpers";
-import { clickModelAction, modelCard, uploadModel } from "./util";
+import { clickModelAction, modelCard, openModelPage, uploadModel } from "./util";
 
 // Full lifecycle on the REAL backend: upload G-code → real ingestion creates the
 // model → edit it → soft-delete to trash → restore → purge forever.
@@ -25,8 +25,19 @@ test.describe("model library", () => {
       // ── Upload ────────────────────────────────────────────────────────────────
       await uploadModel(page, name, { gcode: true, tag });
 
+      // Resolve the uploaded revision through the existing API from the card.
+      const card = modelCard(page, name).locator("xpath=ancestor::article");
+      const download = page.waitForEvent("download");
+      await card.getByRole("button", { name: "Download Rev 1", exact: true }).click();
+      expect((await download).suggestedFilename()).toContain(name);
+      await card.getByRole("button", { name: "Print Rev 1", exact: true }).click();
+      await expect(
+        page.getByRole("dialog", { name: "Send Rev 1 to printer", exact: true }),
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+
       // ── Quick rename keeps the existing Model and its tags ────────────────────
-      await modelCard(page, name).click();
+      await openModelPage(page, name);
       const modelUrl = page.url();
       await page.getByRole("button", { name: `Rename ${name}`, exact: true }).click();
       const titleEditor = page.getByRole("dialog", { name: `Rename ${name}`, exact: true });
@@ -45,9 +56,9 @@ test.describe("model library", () => {
 
       // ── Edit ──────────────────────────────────────────────────────────────────
       await clickModelAction(page, "Edit details");
-      const nameInput = page.getByPlaceholder("Model name");
+      const nameInput = page.getByRole("textbox", { name: "Name (required)" });
       await nameInput.fill(renamed);
-      await page.getByRole("button", { name: /^Save$/ }).click();
+      await page.getByRole("button", { name: "Save changes", exact: true }).click();
       await expect(page.getByRole("heading", { name: renamed })).toBeVisible();
 
       // ── Soft-delete to trash ────────────────────────────────────────────────────
@@ -56,8 +67,7 @@ test.describe("model library", () => {
       await expect(modelCard(page, renamed)).toHaveCount(0);
 
       // ── Restore from Settings → Trash ───────────────────────────────────────────
-      await page.goto("/settings");
-      await page.getByRole("button", { name: "Trash" }).click();
+      await page.goto("/settings?section=trash");
       await expect(page.getByText(renamed)).toBeVisible();
       const trashRow = page.getByText(renamed, { exact: true }).locator("../../..");
       await trashRow.getByRole("button", { name: "Restore", exact: true }).click();
@@ -70,11 +80,10 @@ test.describe("model library", () => {
       }).toPass({ timeout: 15_000 });
 
       // ── Delete + purge forever (cleanup) ────────────────────────────────────────
-      await modelCard(page, renamed).click();
+      await openModelPage(page, renamed);
       await clickModelAction(page, "Delete model");
       await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
-      await page.goto("/settings");
-      await page.getByRole("button", { name: "Trash" }).click();
+      await page.goto("/settings?section=trash");
       await expect(page.getByText(renamed)).toBeVisible();
       await trashRow.getByRole("button", { name: "Delete", exact: true }).click();
       await page.getByRole("button", { name: "Delete forever" }).click();

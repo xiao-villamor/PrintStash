@@ -1,0 +1,102 @@
+.upload-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: calc(100dvh - 32px);
+  overflow: hidden;
+}
+.upload-dialog-standard {
+  max-width: 880px;
+  height: min(760px, calc(100dvh - 32px));
+}
+.upload-dialog-onboarding {
+  max-width: 512px;
+}
+.upload-dialog-heading,
+.upload-dialog-actions {
+  flex-shrink: 0;
+}
+.upload-dialog-form {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+.upload-mode-tabs {
+  flex-shrink: 0;
+  gap: 4px;
+  margin: 12px 24px 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+}
+.upload-mode-tab {
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 8px 14px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  font-weight: 500;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+.upload-mode-tab:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
+.upload-mode-tab[data-active="true"] {
+  color: var(--foreground);
+}
+.upload-mode-tab:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -3px;
+}
+/* Selection is local, like model tabs; the indicator never travels. */
+.upload-mode-tab {
+  position: relative;
+}
+.upload-mode-tab::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--foreground);
+  visibility: hidden;
+  transform: scaleX(0.65);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.upload-mode-tab[data-active="true"]::after {
+  visibility: visible;
+  transform: scaleX(1);
+}
+.upload-mode-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 24px;
+  transform-origin: center top;
+}
+.upload-dialog-standard .upload-dialog-actions > button:last-child {
+  min-width: 160px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .upload-mode-tab::after {
+    transition: none;
+  }
+}
+@media (max-width: 639px) {
+  .upload-dialog-heading,
+  .upload-mode-content,
+  .upload-dialog-actions {
+    padding: 16px;
+  }
+  .upload-mode-tabs {
+    margin-inline: 16px;
+  }
+  .upload-mode-tab {
+    padding-inline: 10px;
+    font-size: 13px;
+  }
+}

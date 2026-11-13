@@ -11,26 +11,29 @@ only when nothing fits, and add it as a token, never as a one-off value.**
 
 ## Personality
 
-PrintStash is a **productivity app** — a crisp dashboard, not a showy consumer
-product. Motion is subtle, fast, and functional. It exists to explain where
-something came from, to confirm a press landed, or to soften a jarring swap.
-Nothing bounces. Nothing announces itself. If an animation draws attention to
-itself, it is wrong.
+PrintStash is a **productivity app** for working with a print library. Its
+OpenDesign language is compact and technical: neutral surfaces, fine dividers,
+square controls, and restrained blue for actions. Inter carries interface text;
+JetBrains Mono is reserved for compact technical values and labels. Motion is
+subtle, fast, and functional. It explains a change or confirms an action; it
+never turns routine navigation into a performance.
 
 ## Tokens
 
 Theme and motion tokens are CSS custom properties in `frontend/src/globals.css`,
-mapped into Tailwind in `frontend/tailwind.config.cjs`. Cursor tokens and their
+mapped into Tailwind in `frontend/tailwind.config.cjs`. Shared depth and spring
+curve tokens live in `frontend/packages/ui/src/motion.css` and its UI preset. Cursor tokens and their
 named utilities share `frontend/packages/ui/src/cursors.css` (see Cursors below).
 **Use the Tailwind class, not the raw
 variable** — `bg-primary`, not `bg-[var(--primary)]`.
 
 ### Color
 
-Every color has a light and a dark value. Primary actions stay blue in both
-themes so their meaning does not change with appearance. Never hand-encode a
-theme swap (`blue-600 dark:orange-400`) — use the semantic token and it follows
-the theme for free.
+Every color has a light and a dark value. The base palette is `#F6F7F9` /
+`#0C0F14`, panels are `#FFFFFF` / `#13171E`, and primary actions use
+`#4D6F9B` in both themes. Neutral selection uses `#EEF0F3` in light and a
+translucent white fill in dark. Use semantic tokens instead of hand-encoding a
+theme swap so colors remain consistent throughout the application.
 
 | Token | Use |
 | --- | --- |
@@ -40,7 +43,7 @@ the theme for free.
 | `popover-hover` | Perceptible hover/focus fill for items inside floating panels |
 | `muted` / `muted-foreground` | Recessed fills, secondary text |
 | `primary` / `primary-foreground` | Primary action only. `primary-hover` for hover, `primary-soft` for focus/selection rings |
-| `accent` / `accent-foreground` | Tinted hover/selected controls; use together without an additional border or ring |
+| `accent` / `accent-foreground` | Neutral hover/selected controls; use together without a colored border or ring |
 | `destructive` / `destructive-foreground` | Delete and other irreversible actions |
 | `success`, `warning` | Status only — never as decoration |
 | `border`, `input`, `ring` | Edges and focus rings |
@@ -62,25 +65,32 @@ Primary actions and selected controls are deliberately different:
   `bg-primary text-primary-foreground hover:bg-primary-hover` or the default
   `Button` variant.
 - A control that represents current state (segmented option, view mode, active
-  filter or selected tab) uses `bg-accent text-accent-foreground`.
+  filter or selected tab) uses neutral `bg-accent text-accent-foreground`.
 - Do not put `bg-primary text-primary-foreground` on selected controls. It gives
   navigation the same weight as a primary action.
-- Do not add a border or ring to a filled selected control. Its tinted fill is
-  the state indicator; outlines are reserved for keyboard focus via
+- Do not add a colored border or ring to a filled selected control. Its neutral
+  fill is the state indicator; outlines are reserved for keyboard focus via
   `focus-visible:ring-ring`.
 - Orange belongs to `warning` or explicitly tertiary/status content. It is not
   an action or selection color.
 
 ### Radius, type, elevation
 
-- Radius derives from `--radius` (0.375rem): `rounded-sm|md|DEFAULT|lg`. No
-  arbitrary `rounded-[6px]`.
+- Standard control and panel radii derive from `--radius` (zero):
+  `rounded-sm|md|DEFAULT|lg`. Circular avatars, status dots and count badges
+  remain circular where their shape communicates their role.
 - Type ramp adds `text-2xs` (0.6875rem) and `text-3xs` (0.625rem) for the mono
   label style. No `text-[11px]`.
 - Layering uses the named scale: `z-dropdown` (50) for menus and popovers,
   `z-overlay` (100) for modals and drawers. No arbitrary `z-[60]`.
 
 ## Layout
+
+On desktop, a 53px rail keeps primary destinations visible beside the work
+area. A compact header carries search and global actions; the library retains
+its resizable collection panel. On narrow screens a bottom navigation and its
+More drawer replace the rail. Labels remain available to assistive technology
+for icon-only destinations, and keyboard focus is always visible.
 
 A page is either a **document** or a **surface**, and the choice is not a matter
 of taste.
@@ -89,9 +99,9 @@ of taste.
   Profiles, Settings, printer detail. These compose
   `PageContainer` (`components/ui/page-container.tsx`), which owns the scroll
   container, the padding, the mobile bottom-nav clearance, and **one** content
-  width: `max-w-screen-2xl`, centered. There is no second width to choose from, and no
-  page may hand-roll its own scroll container — that is exactly how Printers
-  ended up spanning a 2560px monitor while Statistics sat in a 1024px column.
+  width: the full available work area, with 24px desktop padding. There is no second width to choose from, and no
+  page may hand-roll its own scroll container. The approved workbench keeps
+  document pages aligned to the same full-width frame on large monitors.
 - **Surfaces** — the vault grid, model detail's split pane, the public share
   page. These own the whole viewport and do not use `PageContainer`. A grid of
   print models *should* use every pixel of a farm monitor.
@@ -155,7 +165,7 @@ Compose the pattern from existing primitives:
 1. Start with `Card className="overflow-hidden"` below the `PageHeader`.
 2. Put local tabs, filters, and batch actions in a compact toolbar using
    `border-b bg-muted/30 p-3`. `TabBar` uses an inset background frame and
-   `accent` for the active state; commands remain regular `Button` variants.
+   neutral `accent` for the active state; commands remain regular `Button` variants.
 3. Introduce the current section with `border-b px-4 py-4 sm:px-5`, a square
    `h-8 w-8 rounded-md bg-muted` icon anchor, a `text-sm font-semibold` title,
    and a `text-xs text-muted-foreground` description.
@@ -203,9 +213,82 @@ ordinary action cursors from drifting between components.
 --duration-press: 150ms;
 --duration-fast:  200ms;
 --duration-slow:  300ms;
+/* Loading preview handoffs preserve the existing card surface. */
+--ease-library-enter: cubic-bezier(0.2, 0.6, 0.35, 1);
+--duration-library-enter: 240ms;
+--scale-content-enter: 0.98;
+/* --ease-content-settle is the sampled curve in packages/ui/src/motion.css. */
 ```
 
-In Tailwind: `ease-out`, `ease-in-out`, `duration-press|fast|slow`.
+Use three related behaviors: edge movement for drawers, a small opaque depth settle
+for section changes, and opacity-only handoffs for loading surfaces. Do not invent
+new directions, bounce, cascades, or text crossfades for individual features.
+
+Collections, Search, Favorites, Pending, Saved views and Settings use one shell
+sidebar and one persisted width (`--workbench-sidebar-width`, 320px by default,
+resizable from 280px to 520px). The model inspector uses the same width on desktop.
+Section navigation preserves the sidebar's open state, boundary and workspace
+position. Settings navigation occupies this frame rather than adding another column.
+The border and background belong to the stationary shell, outside animated content.
+
+Model detail tabs, Settings sections and Upload modes share
+`useContentMotion`: content commits immediately at full opacity, then settles from
+`--scale-content-enter` to its natural size, anchored at the top center. The
+critically damped spring uses the fast token as a 200ms response and settles in
+about 300ms, without overshoot. Rapid selections inherit the current presentation
+and velocity. Initial mount and data refreshes do not replay section motion.
+The frame remains mounted; reduced motion makes selection immediate and static.
+Tab press feedback begins on pointer-down and underline feedback stays local.
+
+Search, Favorites and Settings main destinations use this same depth spring. The
+route outlet keeps one mounted content surface; its readiness signal lives inside
+Suspense so even a cold destination starts motion when its content commits. Sidebar
+navigation and the top bar sit outside that surface and remain stationary during
+these switches. Search in the rail opens the main Search destination without
+changing the sidebar's open preference. Back/Forward uses the same treatment.
+Typing, filters, Settings sub-sections and data refreshes do not replay the main
+transition; internal controls retain their own local feedback. First load is static.
+
+Library card entrances use the same depth range and sampled spring curve, together,
+without directional travel or staggering. Resolving a loading grid instead keeps
+frames opaque: text placeholders dissolve over content and decoded images fill
+the fixed preview. Loading cards and populated cards share geometry. If collection
+metadata moves the destination grid, cards continue from visible placeholder
+positions; reduced motion omits that translation. Missing-preview icons appear
+only for missing or failed assets. Counts update in place without motion.
+
+The Library model inspector is a solid, non-modal surface docked to the right.
+It enters from beyond that edge and returns along the same path, including on
+mobile. A critically damped spring is sampled into compositor keyframes so preview
+initialization does not drive its frame loop. It uses the fast token as its response; reversing
+open/close preserves its current displacement and velocity. Hide only when the
+spring reaches the closed position, never on a fixed exit timer. Switching Models
+keeps the panel stationary. Closed panels become inert immediately. Reduced motion
+uses immediate visibility changes and retains the existing focus handoff.
+
+The left Collections pane uses a smooth cubic ease into rest over the slow timing,
+with zero starting/ending velocity at rest and inherited velocity on interruption.
+It has no spring response or oscillation. Its shell column releases and restores space continuously; the inner outliner keeps its intrinsic width,
+clipped and anchored to the moving right boundary. This deliberately animates one
+layout width so the sidebar and workspace cannot drift onto separate timelines.
+Retain the outliner DOM, filter, expansion and scroll state while closed; make it
+inert immediately and hide its contents only at rest. Drag resizing remains 1:1,
+initial page layout does not replay entry, and reduced motion settles immediately.
+Local sidebar tool changes use `useContentReveal`: stationary geometry with opacity
+0.86→1 over the library timing. Cross-route navigation keeps the sidebar static.
+Reduced motion makes these reveals immediate.
+
+Source, History and Similar loading states use quiet row placeholders aligned to
+their content. Delay placeholders by 200 ms to avoid flashing on fast reads; cached
+content remains visible during background reads. Real content appears fully opaque
+as soon as it is ready; only the placeholder cover clears over the 150 ms press
+timing. Reserve the section footprint, and omit pulse or spatial movement.
+
+Mobile drawers use the same sampled settle profile over the slow timing token;
+their presence timer matches that timing. Floating menus and modals use the same
+0.98 depth range with a brief opacity handoff.
+
+In Tailwind: `ease-out`, `ease-in-out`, `ease-settle`, `duration-press|fast|slow`.
 
 **Never type a raw duration or cubic-bezier into a component.** `duration-200`
 is a finding — it is `duration-fast`. This is the single rule that keeps the
@@ -216,7 +299,7 @@ Choosing:
 | Situation | Curve | Duration |
 | --- | --- | --- |
 | Entering or exiting (modal, menu, panel, toast) | `ease-out` | `fast` |
-| Moving or morphing on screen (tab indicator) | `ease-in-out` | `fast` |
+| Content/section settle | critical spring / `ease-settle` | 200ms response / `slow` |
 | Press feedback | `ease-out` | `press` |
 | Hover, color change | default | `press` |
 | Constant motion (progress fill) | `linear` | n/a |
@@ -229,20 +312,22 @@ the user is watching. **Nothing in the app may exceed 300ms.**
 
 1. **Animate `transform` and `opacity` only.** Animating `width`, `height`,
    `top`, or `margin` triggers layout on every frame. Progress bars use
-   `transform: scaleX()`, not `width`.
+   `transform: scaleX()`, not `width`. The docked sidebar is an explicit exception:
+   one width animation keeps its boundary and the workspace on the same timeline.
 2. **`transition-all` is banned.** It animates properties you did not intend,
    off the GPU. List them: `transition-[background-color,border-color,transform]`.
    The count in `frontend/src/` must stay at zero.
 3. **Never scale from 0.** Nothing in the real world appears from nothing.
-   Entrances start at `scale(0.97)` + `opacity: 0`.
+   Floating entrances start at `scale-content-enter` + `opacity: 0`; section
+   content stays opaque.
 4. **Floating panels scale from their trigger**, not their center — a menu opened
    from the top-right corner grows out of that corner
    (`transform-origin: top right`). Modals are the exception: they are centered,
    so `transform-origin: center` is correct there.
-5. **Reversible or rapidly-triggered motion uses CSS transitions, not
-   keyframes.** Transitions retarget from wherever they are; keyframes restart
-   from zero. A drawer whose backdrop is tapped mid-open must reverse smoothly,
-   which keyframes cannot do.
+5. **Retarget from the current presentation.** Interactive drawer and section
+   springs preserve both position and velocity. Never restart a spring from its
+   initial state or lock input while it runs. Non-gesture CSS transitions retarget
+   from the current computed value.
 6. **Enter and exit are symmetric.** An overlay that keyframes in and then
    vanishes in one frame on close is a bug (`useMountTransition` exists to
    prevent exactly this).
@@ -254,9 +339,10 @@ the user is watching. **Nothing in the app may exceed 300ms.**
    primitive exists to prevent. Always pass a `DURATION` constant from
    `lib/overlay.ts` and match it to the class the panel actually uses:
    `DURATION.press` ↔ `duration-press`, `DURATION.fast` ↔ `duration-fast`.
-7. **High-frequency actions do not animate.** Route navigation happens hundreds
-   of times a day — there is deliberately **no page transition**, and none should
-   be added. Animation is for occasional events: overlays, state swaps, feedback.
+7. **High-frequency actions do not replay page motion.** Search, Favorites and
+   Settings destination changes are the scoped workbench exception described
+   above. Other route navigation stays immediate. Typing, query changes and data
+   updates never animate the whole page.
    Commit a folder's description with its browsing result, so it cannot arrive
    afterward and push the cards down. Clamp long descriptions before the first
    paint. Cached library thumbnails stay visible when their cards remount.
@@ -265,35 +351,37 @@ the user is watching. **Nothing in the app may exceed 300ms.**
 
 ### Reduced motion
 
-`@media (prefers-reduced-motion: reduce)` in `globals.css` degrades every
-movement utility to a plain opacity fade. **Reduced motion means less movement,
-not less feedback** — the fade stays so the user still sees that something
-happened. Any new keyframe utility must be added to that block.
-
-Two traps, both hit in practice:
-
-- The stagger rules are `:nth-child(...)` (specificity 0,2,0). A reduced-motion
-  override written as `.stagger-children > *` (0,1,0) **loses on specificity and
-  silently does nothing.** Match the specificity.
-- Gate hover-only motion behind `@media (hover: hover)`; touch devices fire a
-  false hover on tap.
-
-Both are covered by e2e tests in `frontend/tests/e2e/app-routes.spec.ts`.
+`@media (prefers-reduced-motion: reduce)` in `globals.css` removes section and
+card movement. Native spring hooks settle immediately. Loading surfaces may retain
+brief opacity feedback; selection, focus and active states remain immediate.
+Match the full animation selector's specificity, and gate hover-only motion behind
+`@media (hover: hover)`.
 
 ### Entrance utilities
 
 | Class | Use |
 | --- | --- |
-| `animate-card-in` | Grid/list items — fade + 4px rise |
-| `animate-panel-in` | Tab bodies, section swaps, empty states |
-| `pop-in` | Floating panels — from `scale(0.97)` |
-| `slide-up`, `slide-in-left` | Drawers and sheets |
-| `folder-in-forward`, `folder-in-back` | Library content after a folder change: from the right when drilling in, from the left when climbing out (24px, `slow`). X-axis only — a vertical offset would move the entries reading-position restoration measures. Unrelated jumps use `fade-in` |
-| `animate-count-up`, `animate-count-down` | A collection tree count that changed: moves 4px toward the new value (up when it grew, down when it shrank) over `press`. Not played on first mount, so a whole tree never ticks in; a count that still describes the previous filters is dimmed to 50% instead |
-| `stagger-children` | On a grid container: children settle 30ms apart, **capped at 10** so a 60-card page still lands inside the 300ms budget |
+| `animate-card-in`, `animate-panel-in`, `animate-card-arrive`, `results-settle` | Shared opaque depth settle for newly inserted content; use the hook for persistent, interruptible section bodies |
+| `pop-in` | Floating panels, from the shared 0.98 scale with brief opacity feedback |
+| `folder-in-forward`, `folder-in-back`, `slide-up`, `slide-in-left`, `pane-in` | Compatibility names for the same content settle; no directional movement |
+| `animate-count-up`, `animate-count-down` | Compatibility names; counts update without animation |
+| `stagger-children` | Compatibility name; children now arrive together without delay |
 
-Stagger is decorative sequencing. It must never delay interaction, and it is
-dropped entirely under reduced motion.
+Do not combine a section hook with entrance utilities on its nested content.
+Actual drawers use the shared edge motion, not an entrance utility.
+
+**Entrance classes live only for their entrance.** The Library grid is
+virtualized: rows and cards mount again whenever the grid reflows (the pane or
+a column count changes) or scrolls back into view. A `folder-cards-*`,
+`results-settle` or `animate-card-arrive` class left in place replays on each
+of those mounts, so content the reader has already seen slides in again. Apply
+them through `useEntranceWindow` (`lib/entrance-window.ts`), which releases the
+class once its entrance has played.
+
+The Library details panel (`.library-model-inspector`) is one panel for every
+Model it shows: it eases in 12px from its edge on open (`fast`), leaves the
+same way on close (`press`, kept mounted by `useMountTransition`), and swaps
+its contents in place with a `fade-in` when pointed at another Model.
 
 ## Primitives
 
@@ -316,7 +404,34 @@ these calls at zero.
 | `Drawer` | The above, sliding from an edge, interruptible mid-flight |
 | `DropdownMenu` | Origin-aware scale/fade, outside-`pointerdown` dismiss, Escape refocuses trigger, arrow-key roving |
 | `TabBar` | ARIA `tablist`, arrow-key nav, sliding indicator |
+| `Switch` | The one binary toggle: square 36×20 track, On/Off written as text |
 | `Input`, `Checkbox`, `Badge`, `Spinner`, `EmptyState`, `Card`, `Skeleton` | Token-correct defaults |
+
+`Button` variants: `default` is the one filled primary action of a group,
+`outline` every other action, and `danger` an irreversible action offered
+beside ordinary ones (neutral outline, label in `destructive`). The filled
+`destructive` variant is reserved for the confirm button inside a destructive
+dialog. Buttons carry text, not decorative leading icons, and are never
+uppercase.
+
+**Settings** composes one more layer from `frontend/src/components/`:
+`settings-card.tsx` (`SettingsCard`, `SettingsGroupHead`, `SettingsSwitch`,
+`SettingsNotice`, `SettingsStatus`) and `settings-controls.ts`
+(`SETTINGS_BUTTON_PRIMARY`, `SETTINGS_BUTTON`, `SETTINGS_BUTTON_DANGER`,
+`SETTINGS_FIELD`). A Settings panel uses these instead of its own header,
+toggle, callout, status chip or button classes: every button is 34px/13px,
+statuses are aligned text, and notices are neutral panels whose tone is only a
+small icon. Rows place label and help on the left and the control on the
+right (`settings-preference-row`); lists use `settings-list-row`.
+
+**Single-choice dropdowns are native `<select>`.** `globals.css` gives every
+`<select>` without `multiple`/`size` the customizable-select menu (`appearance:
+base-select`): the same square popover, 12px rows, neutral hover and trailing
+check as `DropdownMenu`, plus a muted chevron on the trigger. Style the trigger
+with size and border classes only; do not add `appearance: none`, a hand-drawn
+chevron or a custom listbox. Browsers without customizable select show their
+native list. Use `DropdownMenu` for actions or rich rows, not to re-implement a
+plain value choice.
 
 Supporting hooks in `frontend/src/lib/`:
 

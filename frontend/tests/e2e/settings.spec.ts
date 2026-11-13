@@ -47,6 +47,30 @@ const accessibleGpu = {
 };
 
 test.describe("settings route", () => {
+  test("dropdowns open the shared square menu and still choose a value", async ({ page }) => {
+    await page.goto("/settings?section=design");
+    const theme = page.getByRole("combobox", { name: "Theme", exact: true });
+    await expect(theme).toBeVisible();
+    const style = await theme.evaluate((select) => {
+      const picker = getComputedStyle(select, "::picker(select)");
+      const chosen = select.querySelector("option:checked");
+      return {
+        appearance: getComputedStyle(select).appearance,
+        pickerRadius: picker.borderTopLeftRadius,
+        chosenBackground: chosen ? getComputedStyle(chosen).backgroundColor : null,
+        accent: getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(),
+      };
+    });
+    expect(style.appearance).toBe("base-select");
+    expect(style.pickerRadius).toBe("0px");
+    expect(style.chosenBackground).not.toBe("rgba(0, 0, 0, 0)");
+
+    await theme.click();
+    await page.getByRole("option", { name: "Dark", exact: true }).click();
+    await expect(theme).toHaveValue("dark");
+    await theme.selectOption("light");
+  });
+
   test("rejects a stale configuration write in the browser fake", async ({ request }) => {
     const before = await (await request.get("/api/v1/config")).json();
     const headers = {
@@ -84,7 +108,7 @@ test.describe("settings route", () => {
 
     await page.getByRole("button", { name: "About" }).click();
     await expect(page.getByRole("heading", { name: "Latest changes" })).toBeVisible();
-    await page.getByRole("button", { name: "GPU", exact: true }).click();
+    await page.getByRole("button", { name: "GPU & rendering", exact: true }).click();
     await expect(card.getByText("GPU accessible from the API")).toBeVisible();
     expect(probes).toBe(answered);
 
@@ -160,8 +184,9 @@ test.describe("settings route", () => {
   test("settings sections are deep-linkable and preserve navigation state", async ({ page }) => {
     await page.goto("/settings?section=trash");
     await expect(page.getByRole("heading", { name: "Trash retention" })).toBeVisible();
-    await expect(page.getByLabel("Trash size")).toHaveText("1.5 MB reclaimable");
+    await expect(page.getByText("Known model storage: 1.5 MB")).toBeVisible();
     await expect(page.getByText("1 deleted item")).toBeVisible();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "About" }).click();
     await expect(page).toHaveURL(/\/settings\?section=about$/);
     await expect(page.getByRole("heading", { name: "Latest changes" })).toBeVisible();
@@ -351,7 +376,9 @@ test.describe("settings route", () => {
   test("background work cancels a queue only after confirmation", async ({ page }) => {
     await page.goto("/settings?section=work");
 
-    await expect(page.getByRole("heading", { name: "What's happening now" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Preview and metadata processing" }),
+    ).toBeVisible();
     await expect(
       page.getByText("Preview or metadata failures across the library: 1", { exact: false }),
     ).toBeVisible();
@@ -379,7 +406,9 @@ test.describe("settings route", () => {
   test("background work leads a new user to a model's preview status", async ({ page }) => {
     await page.goto("/settings?section=work", { waitUntil: "networkidle" });
 
-    await expect(page.getByRole("heading", { name: "What's happening now" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Preview and metadata processing" }),
+    ).toBeVisible();
     await expect(page.getByRole("heading", { name: "In progress" })).toBeVisible();
     await expect(page.getByText("Preview of skadis kitchen roll screw")).toBeVisible();
     await expect(
@@ -427,7 +456,9 @@ test.describe("settings route", () => {
     const selected = page.getByRole("tab", { name: "Background work" });
     await expect(selected).toHaveAttribute("aria-selected", "true");
     await expect(selected).toBeInViewport();
-    await expect(page.getByRole("heading", { name: "What's happening now" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Preview and metadata processing" }),
+    ).toBeVisible();
     await expect(page).toHaveURL(/\/settings\?section=work$/);
   });
 });

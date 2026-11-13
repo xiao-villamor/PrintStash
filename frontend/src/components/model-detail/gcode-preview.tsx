@@ -18,10 +18,16 @@ export function GcodePreview({
   files,
   bedSizeFor,
   ToolpathViewer = GcodeViewer,
+  selectedFileId,
+  onSelectFile,
+  viewerProps,
 }: {
   files: FileRead[];
   bedSizeFor: (file: FileRead) => { x: number; y: number } | null;
   ToolpathViewer?: ComponentType<GcodeViewerProps>;
+  selectedFileId?: number;
+  onSelectFile?: (fileId: number) => void;
+  viewerProps?: Omit<GcodeViewerProps, "url" | "printerBedMm">;
 }) {
   useUiLocale();
   const sources = files.filter((file) => file.file_type === "gcode" || file.file_type === "3mf");
@@ -30,7 +36,7 @@ export function GcodePreview({
     null,
   );
   const file =
-    sources.find((source) => source.id === selectedFile) ??
+    sources.find((source) => source.id === (selectedFileId ?? selectedFile)) ??
     sources.find((source) => source.is_recommended) ??
     sources.findLast((source) => source.file_type === "gcode") ??
     sources[0];
@@ -72,7 +78,12 @@ export function GcodePreview({
             </div>
           ) : url ? (
             <Suspense fallback={<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />}>
-              <ToolpathViewer key={url} url={url} printerBedMm={bedSizeFor(file)} />
+              <ToolpathViewer
+                {...viewerProps}
+                key={url}
+                url={url}
+                printerBedMm={bedSizeFor(file)}
+              />
             </Suspense>
           ) : (
             <p
@@ -91,7 +102,11 @@ export function GcodePreview({
               {uiText("G-code file")}
               <select
                 value={file.id}
-                onChange={(event) => setSelectedFile(Number(event.target.value))}
+                onChange={(event) => {
+                  const id = Number(event.target.value);
+                  setSelectedFile(id);
+                  onSelectFile?.(id);
+                }}
                 className="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1.5 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {sources.map((source) => (

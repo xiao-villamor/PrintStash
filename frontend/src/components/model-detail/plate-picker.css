@@ -1,0 +1,101 @@
+.model-plate-picker {
+  grid-row: 5;
+  min-width: 0;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  background: var(--background);
+}
+.model-plate-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.model-plate-count {
+  margin-left: 4px;
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+.model-plate-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 8px;
+}
+.model-plate-choice {
+  display: flex;
+  justify-content: flex-start;
+  gap: 12px;
+  min-width: 0;
+  height: auto;
+  min-height: 80px;
+  padding: 10px;
+  white-space: normal;
+  text-align: left;
+  background: var(--card);
+}
+.model-plate-choice[aria-pressed="true"] {
+  border-color: var(--primary);
+  background: var(--card);
+  color: var(--foreground);
+}
+.model-plate-thumbnail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--muted);
+}
+.model-plate-copy {
+  flex: 1;
+  min-width: 0;
+}
+.model-plate-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-bottom: 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 400;
+}
+.model-plate-meta > span:first-child {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.model-plate-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  min-height: 40px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+.model-plate-check {
+  color: var(--primary);
+  opacity: 0;
+}
+[aria-pressed="true"] > .model-plate-check {
+  opacity: 1;
+}
+.model-plate-all[aria-pressed="true"] {
+  color: var(--primary);
+  background: transparent;
+}
+@media (max-width: 399px) {
+  .model-plate-choice {
+    gap: 8px;
+  }
+  .model-plate-thumbnail {
+    width: 44px;
+    height: 44px;
+  }
+}

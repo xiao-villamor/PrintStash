@@ -23,7 +23,9 @@ import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
-import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
+import { Outlet } from "@tanstack/react-router";
+import { TestRouter } from "@/test-support/router";
+import { Link } from "@/lib/link";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import InboxDetailPage, { type InboxDetailApi } from "@/pages/inbox-detail";
@@ -106,13 +108,16 @@ function renderPage(collections: CollectionRead[] = [], extra: React.ReactNode =
             },
           }}
         >
-          <MemoryRouter initialEntries={["/inbox/7"]}>
+          <TestRouter
+            initialEntries={["/inbox/7"]}
+            routes={[
+              { path: "/inbox/:id", element: <InboxDetailPage api={api} /> },
+              { path: "/inbox", element: <p>Inbox destination</p> },
+            ]}
+          >
             {extra}
-            <Routes>
-              <Route path="/inbox/:id" element={<InboxDetailPage api={api} />} />
-              <Route path="/inbox" element={<p>Inbox destination</p>} />
-            </Routes>
-          </MemoryRouter>
+            <Outlet />
+          </TestRouter>
         </QueryApiProvider>
       </QueryClientProvider>
     </I18nProvider>,
@@ -426,7 +431,7 @@ describe("InboxDetailPage", () => {
       source_url: "HTTPS://EXAMPLE.TEST/model",
     });
     renderPage();
-    expect(await screen.findByRole("link", { name: /example\.test/i })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: "Open source" })).toHaveAttribute(
       "href",
       "https://example.test/model",
     );
@@ -439,14 +444,17 @@ describe("InboxDetailPage", () => {
     renderPage();
 
     expect(await screen.findByText("Calibration cube")).toBeInTheDocument();
-    expect(screen.getByText("Fuente")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Abrir origen" })).toHaveAttribute(
+      "href",
+      reviewItem.source_url,
+    );
     expect(screen.getByText("Archivos para importar")).toBeInTheDocument();
     expect(screen.getByLabelText("Seleccionar cube.stl")).toBeChecked();
     expect(screen.getByText("Destino")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("separadas por comas")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Importar seleccionados" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Eliminar importación" })).toBeInTheDocument();
-    expect(screen.getByText("example.test")).toBeInTheDocument();
+    expect(screen.getByText(/Example · example\.test/)).toBeInTheDocument();
     expect(screen.getByText("cube.stl")).toBeInTheDocument();
   });
 
@@ -512,7 +520,7 @@ describe("InboxDetailPage", () => {
 
       renderPage();
 
-      expect(await screen.findByText(label)).toBeInTheDocument();
+      expect(await screen.findByText(new RegExp(`^${label} ·`))).toBeInTheDocument();
     });
 
     it("capitalises a host it has no brand name for", async () => {
@@ -523,7 +531,7 @@ describe("InboxDetailPage", () => {
 
       renderPage();
 
-      expect(await screen.findByText("Example")).toBeInTheDocument();
+      expect(await screen.findByText(/^Example ·/)).toBeInTheDocument();
     });
 
     it("says the web when there is no host at all", async () => {
@@ -535,7 +543,7 @@ describe("InboxDetailPage", () => {
 
       renderPage();
 
-      expect(await screen.findByText("Web")).toBeInTheDocument();
+      expect(await screen.findByText(/^Web ·/)).toBeInTheDocument();
     });
   });
   it("preserves an Inbox review draft during polling", async () => {
@@ -574,7 +582,7 @@ describe("InboxDetailPage", () => {
     );
     vi.mocked(api.searchCollections).mockReturnValue(pending);
     const user = userEvent.setup();
-    renderPage([], <Link to="/inbox/8">Another import</Link>);
+    renderPage([], <Link href="/inbox/8">Another import</Link>);
     await user.click(await screen.findByRole("button", { name: "Import selected" }));
     await waitFor(() => expect(api.searchCollections).toHaveBeenCalledTimes(1));
 
@@ -603,7 +611,7 @@ describe("InboxDetailPage", () => {
         : Promise.resolve({ ...reviewItem, id: 8, display_title: "Current import" }),
     );
     const user = userEvent.setup();
-    renderPage([], <Link to="/inbox/8">Another import</Link>);
+    renderPage([], <Link href="/inbox/8">Another import</Link>);
     await user.click(screen.getByRole("link", { name: "Another import" }));
     expect(await screen.findByRole("heading", { name: "Current import" })).toBeInTheDocument();
     await act(async () => {

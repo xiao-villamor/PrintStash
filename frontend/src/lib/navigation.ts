@@ -1,44 +1,54 @@
 "use client";
 
-/**
- * Application navigation backed by React Router.
- *
- * Push and replace update the URL; Back and Forward traverse browser history.
- * Server data and library reading position are owned by their feature modules.
- */
-
+/** Application navigation; server reads and Library restoration stay at their feature owners. */
 import {
   useLocation,
-  useNavigate,
-  useSearchParams as useRouterSearchParams,
-} from "react-router-dom";
-import { useMemo } from "react";
+  useRouter as useTanStackRouter,
+  type HistoryState,
+  type RouterHistory,
+} from "@tanstack/react-router";
+import { useLayoutEffect, useMemo, useState } from "react";
 
+type NavigationOptions = { state?: HistoryState };
 export interface AppRouter {
-  push: (href: string) => void;
-  replace: (href: string) => void;
+  push: (href: string, options?: NavigationOptions) => void;
+  replace: (href: string, options?: NavigationOptions) => void;
   back: () => void;
   forward: () => void;
 }
 
 export function useRouter(): AppRouter {
-  const navigate = useNavigate();
+  const router = useTanStackRouter();
   return useMemo(
     () => ({
-      push: (href: string) => navigate(href),
-      replace: (href: string) => navigate(href, { replace: true }),
-      back: () => navigate(-1),
-      forward: () => navigate(1),
+      push: (href: string, options?: NavigationOptions) => {
+        void router.navigate({ href, state: options?.state });
+      },
+      replace: (href: string, options?: NavigationOptions) => {
+        void router.navigate({ href, replace: true, state: options?.state });
+      },
+      back: () => router.history.back(),
+      forward: () => router.history.forward(),
     }),
-    [navigate],
+    [router],
   );
 }
 
 export function usePathname(): string {
-  return useLocation().pathname;
+  return useLocation({ select: (location) => location.pathname });
 }
 
+/** Keep existing feature codecs authoritative, including repeated tag parameters. */
 export function useSearchParams(): URLSearchParams {
-  const [params] = useRouterSearchParams();
-  return params;
+  const search = useLocation({ select: (location) => location.searchStr });
+  return useMemo(() => new URLSearchParams(search), [search]);
+}
+
+type HistoryEvent = Parameters<Parameters<RouterHistory["subscribe"]>[0]>[0];
+/** Distinguish our URL acknowledgements from Back/Forward to an older draft. */
+export function useHistoryAction() {
+  const router = useTanStackRouter();
+  const [action, setAction] = useState<HistoryEvent["action"]["type"] | null>(null);
+  useLayoutEffect(() => router.history.subscribe(({ action }) => setAction(action.type)), [router]);
+  return action;
 }

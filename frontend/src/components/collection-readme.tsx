@@ -5,7 +5,7 @@ import { useTaxonomyCommands } from "@/features/library/taxonomy";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { FileText, Loader2, Pencil } from "lucide-react";
 
 import { useQueryClient } from "@tanstack/react-query";
@@ -15,6 +15,7 @@ import { invalidateCachedAsset } from "@/lib/asset-cache";
 import { useCollectionReadme } from "@/lib/queries";
 import { queryKeys } from "@/lib/query-client";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { MarkdownView } from "@/components/markdown-view";
 import { toast } from "@/lib/toast";
 
@@ -23,6 +24,7 @@ export function CollectionReadme({
   canEdit,
   disabled = false,
   hasReadme,
+  compact = false,
 }: {
   collectionId: number;
   canEdit: boolean;
@@ -30,6 +32,7 @@ export function CollectionReadme({
   disabled?: boolean;
   /** From `CollectionRead.has_readme`; false skips the request entirely. */
   hasReadme: boolean;
+  compact?: boolean;
 }) {
   useUiLocale();
   const queryClient = useQueryClient();
@@ -47,6 +50,10 @@ export function CollectionReadme({
   const [overflows, setOverflows] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const focusEditor = useCallback((textarea: HTMLTextAreaElement | null) => {
+    textareaRef.current = textarea;
+    textarea?.focus();
+  }, []);
 
   // Collapse tall descriptions so a long/technical one doesn't bury the model
   // list. CLAMP_PX must match the max-h-* class below.
@@ -80,6 +87,7 @@ export function CollectionReadme({
   }
 
   function startEdit() {
+    if (editing) return;
     setDraft(readme ?? "");
     setEditing(true);
   }
@@ -131,61 +139,75 @@ export function CollectionReadme({
   if (loading) return null;
   if (!readme && !editing && !canEdit) return null;
 
-  if (editing) {
-    return (
-      <div className="min-w-0 basis-full space-y-2">
-        <textarea
-          ref={textareaRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onPaste={(e) => {
-            if (e.clipboardData.files.length) {
-              e.preventDefault();
-              handleFiles(e.clipboardData.files);
-            }
-          }}
-          onDrop={(e) => {
-            if (e.dataTransfer.files.length) {
-              e.preventDefault();
-              handleFiles(e.dataTransfer.files);
-            }
-          }}
-          rows={8}
-          aria-label={uiText("Description")}
-          placeholder={uiText(
-            "A short description of this collection. Markdown — paste or drop images.",
-          )}
-          className="w-full bg-surface text-on-surface font-mono text-sm border border-border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring"
-        />
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Button type="button" size="sm" onClick={save} loading={saving}>
-            {uiText("Save")}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setEditing(false)}
-            disabled={saving}
-          >
-            {uiText("Cancel")}
-          </Button>
-          {uploading && (
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              {uiText(" Uploading image…")}
-            </span>
-          )}
-          <span className="min-w-0 basis-full text-xs text-muted-foreground sm:ml-auto sm:basis-auto">
-            {uiText("Markdown · paste or drop images")}
+  const editor = (
+    <div
+      className={`${compact ? "collection-description-editor" : ""} min-w-0 basis-full space-y-2`}
+    >
+      <textarea
+        ref={focusEditor}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onPaste={(e) => {
+          if (e.clipboardData.files.length) {
+            e.preventDefault();
+            handleFiles(e.clipboardData.files);
+          }
+        }}
+        onDrop={(e) => {
+          if (e.dataTransfer.files.length) {
+            e.preventDefault();
+            handleFiles(e.dataTransfer.files);
+          }
+        }}
+        rows={compact ? 3 : 8}
+        disabled={saving}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || saving || uploading) return;
+          if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+            event.preventDefault();
+            void save();
+          } else if (event.key === "Escape" && !compact) {
+            event.preventDefault();
+            event.stopPropagation();
+            setEditing(false);
+          }
+        }}
+        aria-label={uiText("Description")}
+        placeholder={uiText(
+          "A short description of this collection. Markdown — paste or drop images.",
+        )}
+        className={`${compact ? "" : "font-mono"} w-full bg-surface text-on-surface text-sm border border-border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring`}
+      />
+      <div className="collection-description-actions flex min-w-0 flex-wrap items-center gap-2">
+        <Button type="button" size="sm" onClick={save} loading={saving} disabled={uploading}>
+          {uiText("Save")}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setEditing(false)}
+          disabled={saving}
+        >
+          {uiText("Cancel")}
+        </Button>
+        {uploading && (
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            {uiText(" Uploading image…")}
           </span>
-        </div>
+        )}
+        <span className="min-w-0 basis-full text-xs text-muted-foreground sm:ml-auto sm:basis-auto">
+          {uiText("Markdown · paste or drop images")}
+        </span>
       </div>
-    );
-  }
+    </div>
+  );
 
-  return (
-    <div className={readme ? "min-w-0 basis-full" : "min-w-0"}>
+  const reading = (
+    <div
+      className={`${compact ? "collection-header-readme" : ""} ${readme ? "min-w-0 basis-full" : "min-w-0"}`}
+    >
       {readme ? (
         <div>
           <div
@@ -197,7 +219,13 @@ export function CollectionReadme({
               <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background to-transparent" />
             )}
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div
+            className={
+              compact && !overflows
+                ? "collection-readme-actions"
+                : "mt-2 flex flex-wrap items-center gap-2"
+            }
+          >
             {overflows && (
               <Button
                 type="button"
@@ -215,6 +243,9 @@ export function CollectionReadme({
                 size="xs"
                 onClick={startEdit}
                 disabled={disabled}
+                data-menu-trigger
+                aria-haspopup={compact ? "dialog" : undefined}
+                aria-expanded={compact ? editing : undefined}
               >
                 <Pencil className="h-3.5 w-3.5" aria-hidden />
                 {uiText(" Edit")}
@@ -229,12 +260,37 @@ export function CollectionReadme({
           size="xs"
           onClick={startEdit}
           disabled={disabled}
-          className="h-auto min-h-8 max-w-full justify-start whitespace-normal text-left text-muted-foreground"
+          data-menu-trigger
+          aria-haspopup={compact ? "dialog" : undefined}
+          aria-expanded={compact ? editing : undefined}
+          className={
+            compact
+              ? "collection-description-empty max-w-full justify-start whitespace-normal text-left"
+              : "h-auto min-h-8 max-w-full justify-start whitespace-normal text-left text-muted-foreground"
+          }
         >
-          <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          {!compact && <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden />}
           {uiText(" Add a description for this collection")}
         </Button>
       )}
     </div>
+  );
+  if (!compact) return editing ? editor : reading;
+  return (
+    <DropdownMenu
+      open={editing}
+      onOpenChange={(open) => {
+        if (!saving && !uploading) setEditing(open);
+      }}
+      trigger={reading}
+      role="dialog"
+      aria-label={uiText("Description")}
+      align="start"
+      portal
+      className="min-w-0 basis-full"
+      contentClassName="w-xl border border-border bg-popover p-3 text-popover-foreground shadow-lg"
+    >
+      {editor}
+    </DropdownMenu>
   );
 }

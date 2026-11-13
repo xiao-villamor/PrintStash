@@ -13,7 +13,7 @@ import {
   aPrinter,
 } from "@/test-support/factories";
 import { adminSession, json, renderApp, type RouteTable } from "@/test-support/render";
-import { Link } from "react-router-dom";
+import { Link } from "@/lib/link";
 import { focusManager } from "@tanstack/react-query";
 import { storeLogin } from "@/lib/auth-store";
 import type { MultipartBuild } from "@/types/multipart-builds";
@@ -611,7 +611,7 @@ describe("Manufacturing discovery", () => {
   function renderList(extra: RouteTable = {}, at = "/builds?multipart=7") {
     return renderApp(<MultipartBuildsPage />, {
       at,
-      routePath: "/builds/:id?",
+      routePath: "/builds/{-$id}",
       auth: adminSession(),
       routes: {
         "GET /api/v1/multipart-builds": json([]),
@@ -712,12 +712,12 @@ describe("Manufacturing discovery", () => {
     const pending = Promise.withResolvers<Response>();
     const app = renderApp(
       <>
-        <Link to="/builds?multipart=8">Other composition</Link>
+        <Link href="/builds?multipart=8">Other composition</Link>
         <MultipartBuildsPage />
       </>,
       {
         at: "/builds?multipart=7",
-        routePath: "/builds/:id?",
+        routePath: "/builds/{-$id}",
         auth: adminSession(),
         routes: {
           "GET /api/v1/multipart-builds": json([]),

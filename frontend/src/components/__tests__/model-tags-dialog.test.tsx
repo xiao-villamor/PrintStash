@@ -75,7 +75,7 @@ describe("ModelTagsDialog", () => {
     const user = userEvent.setup();
     const { requestsWithMethod } = renderDialog();
 
-    await user.type(screen.getByLabelText("Search or create a tag"), "Func");
+    await user.type(screen.getByRole("combobox", { name: "Find or create tag" }), "Func");
     await user.click(screen.getByRole("option", { name: /Functional/ }));
     await user.click(screen.getByRole("button", { name: "Save tags" }));
 
@@ -93,7 +93,7 @@ describe("ModelTagsDialog", () => {
     const user = userEvent.setup();
     const { requestsWithMethod } = renderDialog();
 
-    await user.type(screen.getByLabelText("Search or create a tag"), "Prototype");
+    await user.type(screen.getByRole("combobox", { name: "Find or create tag" }), "Prototype");
     await user.click(screen.getByRole("option", { name: /Create tag/ }));
     await user.click(screen.getByRole("button", { name: "Save tags" }));
 
@@ -129,7 +129,7 @@ describe("ModelTagsDialog", () => {
     const user = userEvent.setup();
     renderDialog();
 
-    await user.type(screen.getByLabelText("Search or create a tag"), "FUNCTIONAL");
+    await user.type(screen.getByRole("combobox", { name: "Find or create tag" }), "FUNCTIONAL");
 
     expect(screen.queryByRole("option", { name: /Create tag/ })).toBeNull();
     await user.keyboard("{Enter}");
@@ -158,7 +158,7 @@ describe("ModelTagsDialog", () => {
     }
 
     renderApp(<Harness />);
-    await user.type(screen.getByLabelText("Search or create a tag"), "Prototype");
+    await user.type(screen.getByRole("combobox", { name: "Find or create tag" }), "Prototype");
     await user.click(screen.getByRole("option", { name: /Create tag/ }));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await user.click(screen.getByRole("button", { name: "Open tags" }));
@@ -171,11 +171,11 @@ describe("ModelTagsDialog", () => {
     const user = userEvent.setup();
     renderDialog(json({ detail: "forbidden" }, 403));
 
-    await user.type(screen.getByLabelText("Search or create a tag"), "Prototype");
+    await user.type(screen.getByRole("combobox", { name: "Find or create tag" }), "Prototype");
     await user.click(screen.getByRole("option", { name: /Create tag/ }));
     await user.click(screen.getByRole("button", { name: "Save tags" }));
 
-    expect(await screen.findByRole("dialog", { name: "Model tags" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Edit Model tags" })).toBeInTheDocument();
     expect(screen.getByText("Prototype")).toBeInTheDocument();
   });
 });
@@ -308,7 +308,7 @@ describe("ModelTagsDialog conflict recovery", () => {
     renderDialog();
     await act(async () => clearLogin());
     expect(screen.queryByText("Cable guide")).toBeNull();
-    expect(screen.queryByLabelText("Search or create a tag")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Find or create tag" })).toBeNull();
   });
 
   it.each([403, 404])("hides the private draft after a denied review (%s)", async (status) => {
@@ -319,7 +319,7 @@ describe("ModelTagsDialog conflict recovery", () => {
     await user.click(screen.getByRole("button", { name: "Save tags" }));
     await user.click(await screen.findByRole("button", { name: "Review latest version" }));
     await waitFor(() => expect(screen.queryByText("Cable guide")).toBeNull());
-    expect(screen.queryByLabelText("Search or create a tag")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Find or create tag" })).toBeNull();
     expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
   });
 
@@ -349,10 +349,10 @@ describe("ModelTagsDialog conflict recovery", () => {
     const user = userEvent.setup();
     const pending = Promise.withResolvers<Response>();
     const result = renderDialog(() => pending.promise);
-    await user.type(screen.getByLabelText("Search or create a tag"), "Functional");
+    await user.type(screen.getByRole("combobox", { name: "Find or create tag" }), "Functional");
     await user.keyboard("{Enter}");
     await user.click(screen.getByRole("button", { name: "Save tags" }));
-    expect(screen.getByLabelText("Search or create a tag")).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Find or create tag" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Remove Functional" })).toBeDisabled();
     await act(async () => pending.resolve(json(success)));
     expect(result.onSaved).toHaveBeenCalledWith(

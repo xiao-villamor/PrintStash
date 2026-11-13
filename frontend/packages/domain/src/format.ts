@@ -17,7 +17,7 @@ export function formatBytes(bytes: number | null | undefined, locale = "en"): st
 }
 
 export function formatDuration(seconds: number | null | undefined, locale = "en"): string {
-  if (!seconds || seconds <= 0) return "—";
+  if (seconds == null || Number.isNaN(seconds) || seconds < 0) return "—";
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
@@ -31,9 +31,9 @@ export function formatDuration(seconds: number | null | undefined, locale = "en"
 }
 
 export function formatMillimeters(value: number | null | undefined, locale = "en"): string {
-  return value
-    ? `${new Intl.NumberFormat(locale, { maximumFractionDigits: 3 }).format(value)}mm`
-    : "—";
+  return value == null || Number.isNaN(value)
+    ? "—"
+    : `${new Intl.NumberFormat(locale, { maximumFractionDigits: 3 }).format(value)}mm`;
 }
 
 export function formatPercent(value: number | null | undefined, locale = "en"): string {
@@ -41,7 +41,7 @@ export function formatPercent(value: number | null | undefined, locale = "en"): 
 }
 
 export function formatGrams(value: number | null | undefined, locale = "en"): string {
-  return value ? `${formatDecimal(value, locale)}g` : "—";
+  return value == null || Number.isNaN(value) ? "—" : `${formatDecimal(value, locale)}g`;
 }
 
 function formatDecimal(value: number, locale: string): string {
@@ -53,13 +53,13 @@ export function formatTemperature(value: number | null | undefined, locale = "en
 }
 
 export function formatCost(value: number | null | undefined, locale = "en"): string {
-  return value
-    ? new Intl.NumberFormat(locale, {
+  return value == null || Number.isNaN(value)
+    ? "—"
+    : new Intl.NumberFormat(locale, {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
         useGrouping: false,
-      }).format(value)
-    : "—";
+      }).format(value);
 }
 
 // Locale formatters are expensive to construct for every visible card. Keep

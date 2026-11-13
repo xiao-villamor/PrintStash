@@ -9,12 +9,12 @@ import { DURATION, useMountTransition, useOverlayBehavior } from "../lib/overlay
 const SIDE_CLASSES = {
   left: cn(
     "absolute left-0 top-0 bottom-0",
-    "transition-transform duration-fast ease-out data-[state=closed]:-translate-x-full",
+    "transition-transform duration-slow ease-settle data-[state=closed]:-translate-x-full",
     "motion-reduce:transition-opacity motion-reduce:data-[state=closed]:translate-x-0 motion-reduce:data-[state=closed]:opacity-0",
   ),
   bottom: cn(
     "absolute inset-x-0 bottom-0",
-    "transition-transform duration-fast ease-out data-[state=closed]:translate-y-full",
+    "transition-transform duration-slow ease-settle data-[state=closed]:translate-y-full",
     "motion-reduce:transition-opacity motion-reduce:data-[state=closed]:translate-y-0 motion-reduce:data-[state=closed]:opacity-0",
   ),
 } as const;
@@ -38,7 +38,7 @@ export function Drawer({
   className,
   children,
 }: DrawerProps) {
-  const { mounted, state } = useMountTransition(open, DURATION.fast);
+  const { mounted, state } = useMountTransition(open, DURATION.slow);
   const panelRef = useRef<HTMLDivElement>(null);
   useOverlayBehavior(open, onClose, panelRef);
 
@@ -49,13 +49,14 @@ export function Drawer({
         data-state={state}
         onClick={onClose}
         aria-hidden
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-fast ease-out data-[state=closed]:opacity-0"
+        className="absolute inset-0 bg-overlay-scrim transition-opacity duration-fast ease-out data-[state=closed]:opacity-0"
       />
       <div
         ref={panelRef}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
+        data-overlay-open={open}
         aria-label={ariaLabel}
         data-state={state}
         className={cn(SIDE_CLASSES[side], className)}

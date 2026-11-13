@@ -26,6 +26,7 @@ import { clearLogin, storeLogin, retirePrivateSessionScope } from "@/lib/auth-st
 import { PrinterDetailPage } from "@/components/printer-detail";
 import {
   aPrinter,
+  aPrintJob,
   aPrinterFile,
   aPrinterDiagnostics,
   printerAccess,
@@ -38,6 +39,7 @@ import type { PrinterRead } from "@/types";
 
 /** The subset of a live snapshot these tests push, named so it is not a dictionary. */
 interface LiveSnapshot {
+  virtual_sdcard?: { progress?: number };
   print_stats?: {
     state?: string;
     filename?: string;
@@ -134,7 +136,7 @@ describe("PrinterDetailPage", () => {
   describe("what it shows", () => {
     it("explains the offline command requirement", async () => {
       renderPrinter({ printer: aPrinter({ id: 4, status: "offline" }) });
-
+      await userEvent.click(await screen.findByRole("button", { name: "Set temperatures" }));
       expect(
         await screen.findByText(
           "Printer is offline. Check its address and connection before sending commands.",
@@ -219,7 +221,7 @@ describe("PrinterDetailPage", () => {
 
       await user.click(screen.getByRole("tab", { name: "Files" }));
 
-      expect(await screen.findByText("Printer files")).toBeInTheDocument();
+      expect(await screen.findByText("No printer files synced yet.")).toBeInTheDocument();
     });
 
     it("shows the print history", async () => {
@@ -229,7 +231,23 @@ describe("PrinterDetailPage", () => {
 
       await user.click(screen.getByRole("tab", { name: "Jobs" }));
 
-      expect(await screen.findByText("Print history")).toBeInTheDocument();
+      expect(await screen.findByText("No print jobs yet.")).toBeInTheDocument();
+    });
+
+    it("opens the selected job evidence on demand", async () => {
+      renderPrinter({
+        routes: {
+          "GET /api/v1/printers/4/jobs": json([
+            aPrintJob({ printer_id: 4, remote_filename: "mount.gcode" }),
+          ]),
+        },
+      });
+      await userEvent.click(await screen.findByRole("tab", { name: "Jobs" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      await userEvent.click(await screen.findByRole("button", { name: "Evidence" }));
+      expect(screen.getByRole("dialog", { name: "mount.gcode" })).toHaveTextContent(
+        "Exactly reproducible",
+      );
     });
 
     it("offers the settings tab to an admin", async () => {
@@ -274,9 +292,8 @@ describe("PrinterDetailPage", () => {
 
       await pushSnapshot(PRINTING);
 
-      // Pause, resume and cancel all relabel, so every control says the same thing.
-      const blocked = await screen.findAllByRole("button", { name: /No access/ });
-      expect(blocked.every((button) => button.hasAttribute("disabled"))).toBe(true);
+      expect(await screen.findByRole("button", { name: "Pause" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     });
 
     it("withholds a control the provider cannot perform", async () => {
@@ -350,9 +367,8 @@ describe("PrinterDetailPage", () => {
       renderPrinter();
       await screen.findByText("Voron");
 
-      await pushSnapshot(PRINTING);
-
-      expect(await screen.findByText("Current print")).toBeInTheDocument();
+      await pushSnapshot({ ...PRINTING, virtual_sdcard: { progress: 0.1 } });
+      expect(await screen.findByText("10%")).toBeVisible();
     });
   });
 
@@ -364,9 +380,14 @@ describe("PrinterDetailPage", () => {
       });
       await screen.findByText("Voron");
 
+      await user.click(screen.getByRole("button", { name: "Set temperatures" }));
       const inputs = screen.getAllByPlaceholderText("°C");
       await user.type(inputs[0], "215");
-      await user.click(screen.getAllByRole("button", { name: /Set/ })[0]);
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Set temperatures" })).getAllByRole("button", {
+          name: "Set",
+        })[0],
+      );
 
       await waitFor(() =>
         expect(
@@ -387,8 +408,13 @@ describe("PrinterDetailPage", () => {
       });
       await screen.findByText("Voron");
 
+      await user.click(screen.getByRole("button", { name: "Set temperatures" }));
       await user.type(screen.getAllByPlaceholderText("°C")[1], "60");
-      await user.click(screen.getAllByRole("button", { name: /Set/ })[1]);
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Set temperatures" })).getAllByRole("button", {
+          name: "Set",
+        })[1],
+      );
 
       await waitFor(() =>
         expect(JSON.parse(temperatureBody(requestsWithMethod))).toMatchObject({
@@ -409,6 +435,7 @@ describe("PrinterDetailPage", () => {
       });
       await screen.findByText("Voron");
 
+      await user.click(screen.getByRole("button", { name: "Set temperatures" }));
       await user.click(screen.getByRole("button", { name: "PETG" }));
 
       await waitFor(() =>
@@ -430,6 +457,7 @@ describe("PrinterDetailPage", () => {
       });
       await screen.findByText("Voron");
 
+      await user.click(screen.getByRole("button", { name: "Set temperatures" }));
       await user.click(screen.getByRole("button", { name: "Cooldown" }));
 
       await waitFor(() =>
@@ -452,6 +480,7 @@ describe("PrinterDetailPage", () => {
       });
       await screen.findByText("Voron");
 
+      await user.click(screen.getByRole("button", { name: "Ajustar temperaturas" }));
       await user.click(screen.getByRole("button", { name: "Enfriar" }));
 
       expect(await screen.findByText("Enfriando")).toBeInTheDocument();
@@ -469,7 +498,7 @@ describe("PrinterDetailPage", () => {
       });
 
       await screen.findByText("Voron");
-      expect(screen.queryByRole("button", { name: "PETG" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Set temperatures" })).toBeDisabled();
     });
 
     it("keeps preheating from someone who may not control the printer", async () => {
@@ -482,7 +511,7 @@ describe("PrinterDetailPage", () => {
       });
 
       await screen.findByText("Voron");
-      expect(screen.getByRole("button", { name: "PETG" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Set temperatures" })).toBeDisabled();
     });
   });
 
@@ -528,7 +557,7 @@ describe("PrinterDetailPage", () => {
     async function openFiles(user: ReturnType<typeof userEvent.setup>) {
       await screen.findByText("Voron");
       await user.click(screen.getByRole("tab", { name: "Files" }));
-      await screen.findByText("Printer files");
+      await screen.findByRole("button", { name: "Sync printer files" });
     }
 
     it("lists what is on the machine", async () => {
@@ -683,7 +712,7 @@ describe("PrinterDetailPage", () => {
       await user.clear(name);
       await user.type(name, "Voron 2.4");
 
-      await user.click(screen.getByRole("button", { name: /Save changes/ }));
+      await user.click(screen.getAllByRole("button", { name: /Save changes/ })[0]);
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
@@ -702,7 +731,7 @@ describe("PrinterDetailPage", () => {
       });
       await openSettings(user);
 
-      await user.click(screen.getByRole("button", { name: /Save changes/ }));
+      await user.click(screen.getAllByRole("button", { name: /Save changes/ })[0]);
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).not.toHaveProperty(
@@ -719,7 +748,7 @@ describe("PrinterDetailPage", () => {
       await openSettings(user);
       await user.type(screen.getByPlaceholderText("Unchanged"), "not-a-real-key");
 
-      await user.click(screen.getByRole("button", { name: /Save changes/ }));
+      await user.click(screen.getAllByRole("button", { name: /Save changes/ })[0]);
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
@@ -750,7 +779,7 @@ describe("PrinterDetailPage", () => {
       await openSettings(user);
       await user.clear(screen.getByLabelText("Name"));
       await user.type(screen.getByLabelText("Name"), "My draft");
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await user.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
       const review = await screen.findByRole("button", { name: "Review current settings" });
       expect(screen.getByLabelText("Name")).toHaveValue("My draft");
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
@@ -787,9 +816,9 @@ describe("PrinterDetailPage", () => {
       await openSettings(user);
       await user.clear(screen.getByLabelText("Name"));
       await user.type(screen.getByLabelText("Name"), "Possibly saved");
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await user.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
       expect(await screen.findByRole("button", { name: "Review current settings" })).toBeVisible();
-      expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+      expect(screen.getAllByRole("button", { name: "Save changes" })[0]).toBeDisabled();
       expect(screen.getByLabelText("Name")).toHaveValue("Possibly saved");
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
       app.route({
@@ -821,10 +850,8 @@ describe("PrinterDetailPage", () => {
       app.route({
         "GET /api/v1/printers/4": json({ ...base, edit_version: 7, name: "Other editor" }),
       });
-      await act(async () =>
-        queryClient.invalidateQueries({ queryKey: ["printers", 4], exact: true }),
-      );
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await act(async () => queryClient.invalidateQueries({ queryKey: ["printers", 4] }));
+      await user.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
       await screen.findByRole("button", { name: "Review current settings" });
       expect(sent[0]?.get("If-Match")).toBe(`"printer-4-e${base.edit_epoch}-v1"`);
       expect(sent[0]?.get("X-PrintStash-Edit-Contract")).toBe("conditional-v1");
@@ -838,7 +865,7 @@ describe("PrinterDetailPage", () => {
       });
       await openSettings(user);
       await user.type(screen.getByPlaceholderText("Unchanged"), "draft-only-credential");
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await user.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
       await screen.findByRole("button", { name: "Review current settings" });
       expect(
         JSON.stringify(
@@ -875,7 +902,7 @@ describe("PrinterDetailPage", () => {
       });
       await openSettings(user);
       await user.type(screen.getByPlaceholderText("Unchanged"), "draft-only-credential");
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await user.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
       app.route({
         "GET /api/v1/printers/4": json(
           aPrinter({
@@ -903,7 +930,7 @@ describe("PrinterDetailPage", () => {
         routes: { "PATCH /api/v1/printers/4": json({ detail: "edit_conflict" }, 412) },
       });
       await openSettings(user);
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await user.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
       app.route({ "GET /api/v1/printers/4": json({ detail: "printer_permission_denied" }, 403) });
       await user.click(await screen.findByRole("button", { name: "Review current settings" }));
       await waitFor(() => expect(screen.queryByLabelText("Name")).not.toBeInTheDocument());
@@ -921,7 +948,7 @@ describe("PrinterDetailPage", () => {
       });
       await openSettings(user);
       await user.type(screen.getByLabelText("Name"), " draft");
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await user.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
       app.route({ "GET /api/v1/printers/4": json(aPrinter({ id: 4, edit_version: 2 })) });
       await user.click(await screen.findByRole("button", { name: "Review current settings" }));
       await user.click(await screen.findByRole("button", { name: "Save revised changes" }));
@@ -930,7 +957,7 @@ describe("PrinterDetailPage", () => {
       expect(
         screen.queryByRole("button", { name: "Save revised changes" }),
       ).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+      expect(screen.getAllByRole("button", { name: "Save changes" })[0]).toBeDisabled();
     });
 
     it("validates the revised settings draft before sending it", async () => {
@@ -939,7 +966,7 @@ describe("PrinterDetailPage", () => {
         routes: { "PATCH /api/v1/printers/4": json({ detail: "edit_conflict" }, 412) },
       });
       await openSettings(user);
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await user.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
       app.route({ "GET /api/v1/printers/4": json(aPrinter({ id: 4, edit_version: 2 })) });
       await user.click(await screen.findByRole("button", { name: "Review current settings" }));
       await user.clear(screen.getByLabelText("Name"));
@@ -953,7 +980,7 @@ describe("PrinterDetailPage", () => {
       const pending = Promise.withResolvers<Response>();
       const app = renderPrinter({ routes: { "PATCH /api/v1/printers/4": () => pending.promise } });
       await openSettings(user);
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await user.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
       await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
       act(() => retirePrivateSessionScope());
       await act(async () =>
@@ -979,7 +1006,7 @@ describe("PrinterDetailPage", () => {
         routes: { "PATCH /api/v1/printers/4": json({ detail: "edit_conflict" }, 412) },
       });
       await openSettings(user);
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await user.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
       let reads = 0;
       app.route({
         "GET /api/v1/printers/4": () => {
@@ -1010,7 +1037,7 @@ describe("PrinterDetailPage", () => {
       const pending = Promise.withResolvers<Response>();
       const app = renderPrinter({ routes: { "PATCH /api/v1/printers/4": () => pending.promise } });
       await openSettings(user);
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await user.click(screen.getAllByRole("button", { name: "Save changes" })[0]);
       await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
       act(() =>
         queryClient.setQueryData(
@@ -1059,7 +1086,7 @@ describe("PrinterDetailPage", () => {
       });
       await openSettings(user);
 
-      await user.click(screen.getByRole("button", { name: /Save changes/ }));
+      await user.click(screen.getAllByRole("button", { name: /Save changes/ })[0]);
 
       expect(await screen.findByText(/printer_unreachable/)).toBeInTheDocument();
     });
@@ -1304,9 +1331,7 @@ describe("PrinterDetailPage HTTP ownership", () => {
     await waitFor(() => expect(FakeSocket.latest?.onmessage).not.toBeNull());
     const socket = FakeSocket.latest;
     app.route({ "GET /api/v1/printers/4": json({ detail: "printer_permission_denied" }, status) });
-    await act(async () =>
-      queryClient.invalidateQueries({ queryKey: ["printers", 4], exact: true }),
-    );
+    await act(async () => queryClient.invalidateQueries({ queryKey: ["printers", 4] }));
     await waitFor(() =>
       expect(screen.queryByRole("heading", { name: "Voron" })).not.toBeInTheDocument(),
     );
@@ -1340,9 +1365,7 @@ describe("PrinterDetailPage HTTP ownership", () => {
     const name = screen.getByRole("textbox", { name: "Name" });
     await user.clear(name);
     await user.type(name, "Unsaved machine");
-    await act(async () =>
-      queryClient.invalidateQueries({ queryKey: ["printers", 4], exact: true }),
-    );
+    await act(async () => queryClient.invalidateQueries({ queryKey: ["printers", 4] }));
     expect(name).toHaveValue("Unsaved machine");
   });
 
@@ -1392,7 +1415,7 @@ describe("PrinterDetailPage HTTP ownership", () => {
     });
     const user = userEvent.setup();
     await user.click(await screen.findByRole("tab", { name: "Files" }));
-    await user.click(screen.getByRole("button", { name: "Sync" }));
+    await user.click(screen.getByRole("button", { name: "Sync printer files" }));
     await waitFor(() =>
       expect(app.requestsWithMethod("POST").some((call) => call.url.includes("files/sync"))).toBe(
         true,
@@ -1411,7 +1434,7 @@ describe("PrinterDetailPage HTTP ownership", () => {
       pending.resolve(json([aPrinterFile({ remote_filename: "obsolete.gcode" })])),
     );
     expect(screen.queryByText("obsolete.gcode")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sync" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sync printer files" })).not.toBeDisabled();
   });
 
   it("surfaces printer lookup failure for retry", async () => {
@@ -1473,7 +1496,7 @@ describe("PrinterDetailPage HTTP ownership", () => {
     });
     const user = userEvent.setup();
     await user.click(await screen.findByRole("tab", { name: "Files" }));
-    await user.click(screen.getByRole("button", { name: "Sync" }));
+    await user.click(screen.getByRole("button", { name: "Sync printer files" }));
     expect(await screen.findByText("confirmed.gcode")).toBeInTheDocument();
     expect(signal?.aborted).toBe(true);
     await act(async () =>
@@ -1495,8 +1518,10 @@ describe("PrinterDetailPage HTTP ownership", () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("tab", { name: "Files" }));
     expect(await screen.findByText("bracket.gcode")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Sync" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Sync" })).not.toBeDisabled());
+    await user.click(screen.getByRole("button", { name: "Sync printer files" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Sync printer files" })).not.toBeDisabled(),
+    );
     expect(screen.getByText("bracket.gcode")).toBeInTheDocument();
     expect(
       app.requestsWithMethod("GET").filter((call) => call.url.endsWith("/printers/4")),

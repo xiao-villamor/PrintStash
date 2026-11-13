@@ -128,3 +128,7 @@ screenshots/gif-frames/
 
 # Extension publishing validation is a private work record.
 /browser-extension/STORE-VALIDATION.md
+
+# TanStack Router regenerates this tree for dev, tests, and typechecking.
+frontend/src/routeTree.gen.ts
+frontend/.tanstack/

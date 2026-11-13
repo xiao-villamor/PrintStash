@@ -26,7 +26,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import LoginPage from "@/pages/login";
-import { Link, Route, Routes } from "react-router-dom";
+import { Outlet } from "@tanstack/react-router";
+import { Link } from "@/lib/link";
 import { adminSession, json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { AuthState } from "@/lib/auth-context";
 import type { AuthProvidersRead } from "@/types";
@@ -49,7 +50,7 @@ function renderLogin(options: RenderAppOptions & { providers?: AuthProvidersRead
 }
 
 /**
- * The OIDC outcome is read from `window.location.search`, not from the router:
+ * The OIDC outcome is read from `window.location.searchStr`, not from the router:
  * the identity provider redirects the whole browser back here, so the query
  * string is the only thing carrying the result.
  */
@@ -96,6 +97,16 @@ describe("LoginPage", () => {
       expect(screen.getByLabelText("Remember me")).toBeInTheDocument();
     });
 
+    it("points a forgotten password to administrator recovery", () => {
+      renderLogin({ auth: signedOut() });
+
+      expect(screen.getByText(/Another administrator can reset it/)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "How recovery works" })).toHaveAttribute(
+        "href",
+        expect.stringContaining("first-run.md#forgotten-password"),
+      );
+    });
+
     it("says credentials never leave the server", () => {
       // The reassurance is the product's whole pitch; losing it is a
       // self-hosting promise quietly dropped.
@@ -139,6 +150,19 @@ describe("LoginPage", () => {
       );
     });
 
+    it("toggles remember-me from its visible text", async () => {
+      // The text is the larger target; a dead label makes people miss the box.
+      const user = userEvent.setup();
+      renderLogin();
+      const box = screen.getByRole("checkbox", { name: "Remember me" });
+
+      await user.click(screen.getByText("Remember me on this device"));
+      expect(box).toHaveAttribute("aria-checked", "true");
+
+      await user.click(box);
+      expect(box).toHaveAttribute("aria-checked", "false");
+    });
+
     it("says the credentials were wrong for a 401", async () => {
       const user = userEvent.setup();
       renderLogin({
@@ -173,7 +197,7 @@ describe("LoginPage", () => {
       );
     });
 
-    it("marks the fields as the thing that failed", async () => {
+    it("describes a refusal on both fields", async () => {
       // Screen-reader users get the error announced against the input, not as
       // loose text somewhere on the page.
       const user = userEvent.setup();
@@ -188,8 +212,31 @@ describe("LoginPage", () => {
       await user.click(screen.getByRole("button", { name: "Sign in" }));
 
       await waitFor(() =>
-        expect(screen.getByLabelText("Username")).toHaveAttribute("aria-invalid", "true"),
+        expect(screen.getByLabelText("Username")).toHaveAttribute(
+          "aria-describedby",
+          "login-error",
+        ),
       );
+      expect(screen.getByLabelText("Password")).toHaveAttribute("aria-describedby", "login-error");
+    });
+
+    it("does not blame one field for a refusal that names neither", async () => {
+      // A 401 cannot say whether the username or the password was wrong, so
+      // neither field is marked invalid; the banner carries the message.
+      const user = userEvent.setup();
+      renderLogin({
+        auth: signedOut({
+          login: vi.fn<AuthState["login"]>().mockRejectedValue(new Error("HTTP 401: nope")),
+        }),
+      });
+      await user.type(screen.getByLabelText("Username"), "maker");
+      await user.type(screen.getByLabelText("Password"), "wrong");
+
+      await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+      await screen.findByRole("alert");
+      expect(screen.getByLabelText("Username")).not.toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByLabelText("Password")).not.toHaveAttribute("aria-invalid", "true");
     });
   });
 
@@ -352,15 +399,16 @@ describe("Login entry lifetime", () => {
     const user = userEvent.setup();
     renderApp(
       <>
-        <Link to="/leave">Leave entry</Link>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/leave" element={<p>Another entry</p>} />
-          <Route path="/" element={<p>Private destination</p>} />
-        </Routes>
+        <Link href="/leave">Leave entry</Link>
+        <Outlet />
       </>,
       {
         at: "/login",
+        routerRoutes: [
+          { path: "/login", element: <LoginPage /> },
+          { path: "/leave", element: <p>Another entry</p> },
+          { path: "/", element: <p>Private destination</p> },
+        ],
         auth: signedOut({ refresh: () => refresh.promise }),
         routes: { "GET /api/v1/auth/providers": json(NO_SSO) },
       },
@@ -379,15 +427,16 @@ describe("Login entry lifetime", () => {
     const user = userEvent.setup();
     renderApp(
       <>
-        <Link to="/leave">Leave entry</Link>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/leave" element={<p>Another entry</p>} />
-          <Route path="/" element={<p>Private destination</p>} />
-        </Routes>
+        <Link href="/leave">Leave entry</Link>
+        <Outlet />
       </>,
       {
         at: "/login",
+        routerRoutes: [
+          { path: "/login", element: <LoginPage /> },
+          { path: "/leave", element: <p>Another entry</p> },
+          { path: "/", element: <p>Private destination</p> },
+        ],
         auth: signedOut({
           login: (_username, _password, _remember, caller) => {
             signal = caller;

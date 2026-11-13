@@ -158,6 +158,19 @@ export function useCollectionChildren(parentId: number | null, options?: { enabl
   });
 }
 
+/**
+ * An authorized leaf already proves the entire child page is empty. Seed the
+ * ordinary Query entry, so navigation avoids a serial redundant read while
+ * mutations/focus still use its normal invalidation and freshness.
+ */
+function publishEmptyChildPage(client: QueryClient, lookup: CollectionLookupRead) {
+  if (lookup.collection.child_count !== 0) return;
+  client.setQueryData<InfiniteData<CollectionPage, string | null>>(
+    queryKeys.collectionChildren(lookup.collection.id),
+    (existing) => existing ?? { pages: [{ items: [], next_cursor: null }], pageParams: [null] },
+  );
+}
+
 /** Shared lookup and empty child-page publication for observers and explicit navigation. */
 export function collectionLookupOptions(
   path: string | null,
@@ -170,15 +183,7 @@ export function collectionLookupOptions(
       if (path === null || path === "") throw new Error("Collection lookup requires a path");
       const lookup = await api.lookupCollection(path, { signal });
       signal.throwIfAborted();
-      // An authorized leaf already proves the entire child page is empty. Seed
-      // the ordinary Query entry, so navigation avoids a serial redundant read
-      // while mutations/focus still use its normal invalidation and freshness.
-      if (lookup.collection.child_count === 0)
-        client.setQueryData<InfiniteData<CollectionPage, string | null>>(
-          queryKeys.collectionChildren(lookup.collection.id),
-          (existing) =>
-            existing ?? { pages: [{ items: [], next_cursor: null }], pageParams: [null] },
-        );
+      publishEmptyChildPage(client, lookup);
       return lookup;
     },
   });
@@ -191,7 +196,7 @@ export function useCollectionLookup(path: string | null, id: number | null = nul
   return useQuery({
     ...(id === null
       ? collectionLookupOptions(path, client, api)
-      : collectionLookupByIdOptions(id, api)),
+      : collectionLookupByIdOptions(id, client, api)),
     enabled: path !== null && path !== "",
     placeholderData: keepPreviousData,
   });
@@ -200,13 +205,17 @@ export function useCollectionLookup(path: string | null, id: number | null = nul
 /** Resolve a saved identity through the bounded authorized lookup endpoint. */
 export function collectionLookupByIdOptions(
   id: number | null,
+  client: QueryClient,
   api: Pick<QueryApi, "lookupCollectionById"> = defaultQueryApi,
 ) {
   return queryOptions<CollectionLookupRead>({
     queryKey: queryKeys.collectionLookupById(id),
-    queryFn: ({ signal }) => {
+    queryFn: async ({ signal }) => {
       if (id === null) throw new Error("Collection lookup requires an id");
-      return api.lookupCollectionById(id, { signal });
+      const lookup = await api.lookupCollectionById(id, { signal });
+      signal.throwIfAborted();
+      publishEmptyChildPage(client, lookup);
+      return lookup;
     },
   });
 }
@@ -214,8 +223,9 @@ export function collectionLookupByIdOptions(
 /** A saved collection id and its named path; idle while no id is selected. */
 export function useCollectionLookupById(id: number | null) {
   const api = useQueryApi();
+  const client = useQueryClient();
   return useQuery({
-    ...collectionLookupByIdOptions(id, api),
+    ...collectionLookupByIdOptions(id, client, api),
     enabled: id !== null,
   });
 }

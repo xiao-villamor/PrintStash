@@ -14,11 +14,13 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
 import { SidebarNav } from "@/components/sidebar-nav";
+import { usePathname, useSearchParams } from "@/lib/navigation";
 import {
   adminSession,
   json,
@@ -32,12 +34,30 @@ function anInboxItem(state = "review") {
   return { id: 1, state, source_kind: "url", display_title: "Benchy", results: [] };
 }
 
+function CurrentLocation() {
+  const pathname = usePathname();
+  const search = useSearchParams().toString();
+  return (
+    <output data-testid="rail-location">
+      {pathname}
+      {search ? `?${search}` : ""}
+    </output>
+  );
+}
+
 function renderNav(options: RenderAppOptions & { pending?: unknown[] } = {}) {
   const { pending = [], routes = {}, ...rest } = options;
-  return renderApp(<SidebarNav />, {
-    routes: { "GET /api/v1/inbox": json(pending), ...routes },
-    ...rest,
-  });
+  return renderApp(
+    <>
+      <SidebarNav />
+      <KeyboardShortcuts />
+      <CurrentLocation />
+    </>,
+    {
+      routes: { "GET /api/v1/inbox": json(pending), ...routes },
+      ...rest,
+    },
+  );
 }
 
 beforeEach(() => {
@@ -59,7 +79,51 @@ describe("SidebarNav", () => {
     it("links to the vault", () => {
       renderNav();
 
-      expect(screen.getByRole("link", { name: /Vault/i })).toHaveAttribute("href", "/");
+      expect(screen.getByRole("link", { name: "Collections" })).toHaveAttribute("href", "/");
+    });
+
+    it("opens Favorites using the existing library filter", () => {
+      renderNav();
+
+      expect(screen.getByRole("link", { name: "Favorites" })).toHaveAttribute(
+        "href",
+        "/?favorites=true",
+      );
+    });
+
+    it("navigates to Favorites through the client router", async () => {
+      const user = userEvent.setup();
+      renderNav({ at: "/inbox" });
+      await user.click(screen.getByRole("link", { name: "Favorites" }));
+      await waitFor(() =>
+        expect(screen.getByTestId("rail-location")).toHaveTextContent("/?favorites=true"),
+      );
+    });
+
+    it("leaves modified link clicks to the browser", () => {
+      renderNav({ at: "/inbox" });
+      const link = screen.getByRole("link", { name: "Favorites" });
+      let intercepted: boolean | undefined;
+      document.addEventListener(
+        "click",
+        (event) => {
+          intercepted = event.defaultPrevented;
+          event.preventDefault();
+        },
+        { once: true },
+      );
+      fireEvent.click(link, { button: 0, ctrlKey: true });
+      expect(intercepted).toBe(false);
+      expect(screen.getByTestId("rail-location")).toHaveTextContent("/inbox");
+    });
+
+    it("opens Trash through its settings section", () => {
+      renderNav({ auth: adminSession() });
+
+      expect(screen.getByRole("link", { name: "Trash" })).toHaveAttribute(
+        "href",
+        "/settings?section=trash",
+      );
     });
 
     it("links to the inbox", () => {
@@ -68,18 +132,23 @@ describe("SidebarNav", () => {
       expect(screen.getByRole("link", { name: /Pending/i })).toHaveAttribute("href", "/inbox");
     });
 
-    it("links to settings", () => {
+    it("links to settings from the account menu", async () => {
+      const user = userEvent.setup();
       renderNav();
+      await user.click(screen.getByRole("button", { name: "My workspace" }));
 
-      expect(screen.getByRole("link", { name: /Settings/i })).toHaveAttribute("href", "/settings");
+      expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveAttribute(
+        "href",
+        "/settings",
+      );
     });
 
-    it("sends the wiki link out to the docs site", () => {
-      // It leaves the app, so it is a plain anchor rather than a router link —
-      // routing to it would 404 inside the SPA.
+    it("sends the wiki link out to the docs site", async () => {
+      const user = userEvent.setup();
       renderNav();
+      await user.click(screen.getByRole("button", { name: "My workspace" }));
 
-      expect(screen.getByRole("link", { name: /Wiki/i })).toHaveAttribute(
+      expect(screen.getByRole("menuitem", { name: /Docs/ })).toHaveAttribute(
         "href",
         "https://www.printstash.org/docs/",
       );
@@ -99,6 +168,65 @@ describe("SidebarNav", () => {
       renderNav({ auth: memberSession() });
 
       expect(screen.queryByRole("link", { name: /Printers/i })).toBeNull();
+    });
+  });
+
+  describe("the current destination", () => {
+    it("marks Favorites when the filter is active", () => {
+      renderNav({ at: "/?favorites=true" });
+
+      expect(screen.getByRole("link", { name: "Favorites" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      expect(screen.getByRole("link", { name: "Collections" })).not.toHaveAttribute("aria-current");
+    });
+
+    it("keeps Pending reachable from a nested inbox route", () => {
+      renderNav({ at: "/inbox/41" });
+
+      expect(screen.getByRole("link", { name: "Pending" })).toHaveAttribute("href", "/inbox");
+    });
+
+    it("does not mark the vault on a different route", () => {
+      renderNav({ at: "/inbox" });
+
+      expect(screen.getByRole("link", { name: "Collections" })).not.toHaveAttribute("aria-current");
+    });
+
+    it("returns the brand link to the remembered collection", () => {
+      localStorage.setItem("printstash.last.collection", "Calibration/Boats");
+      renderNav({ at: "/settings" });
+
+      expect(screen.getByRole("link", { name: "PrintStash" })).toHaveAttribute(
+        "href",
+        "/?c=Calibration%2FBoats",
+      );
+    });
+
+    it("returns focus to the account button after Escape", async () => {
+      const user = userEvent.setup();
+      renderNav();
+      const account = screen.getByRole("button", { name: "My workspace" });
+      await user.click(account);
+
+      await user.keyboard("{Escape}");
+
+      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+      expect(account).toHaveFocus();
+    });
+  });
+
+  describe("keyboard help", () => {
+    it("lists the supported library shortcut", async () => {
+      const user = userEvent.setup();
+      renderNav();
+
+      await user.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
+
+      expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveTextContent(
+        "Search panel",
+      );
     });
   });
 
@@ -149,7 +277,8 @@ describe("SidebarNav", () => {
       const logout = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
       renderNav({ auth: adminSession({ logout }) });
 
-      await user.click(screen.getByTitle("Sign out"));
+      await user.click(screen.getByRole("button", { name: "My workspace" }));
+      await user.click(screen.getByRole("menuitem", { name: "Log out" }));
 
       expect(logout).toHaveBeenCalled();
     });

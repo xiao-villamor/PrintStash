@@ -495,7 +495,7 @@ def update_model(
 
         if payload.name is not None:
             m.name = payload.name.strip() or m.name
-        if payload.description is not None:
+        if "description" in payload.model_fields_set:
             m.description = payload.description
         if "source_url" in payload.model_fields_set:
             m.source_url = payload.source_url

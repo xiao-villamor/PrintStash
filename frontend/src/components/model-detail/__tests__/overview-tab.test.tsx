@@ -1,15 +1,4 @@
-/*
- * The legacy source link on the overview tab, and the scheme check on it.
- *
- * `source_url` on a Model is the pre-provenance field: a URL a user pasted or an
- * older release scraped, stored with no validation at all. Rendering it as an
- * anchor without checking the scheme is stored XSS — a `javascript:` URL that
- * fires when somebody clicks through to where their model came from.
- *
- * Safe URLs are normalized rather than passed through, so the two cases here are
- * the whole contract: `http`/`https` become links, everything else becomes text.
- */
-
+/* The detail edit form retains tag keyboard behavior and writable model fields. */
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -61,39 +50,7 @@ const model: ModelRead = {
   derivatives_revision: "0",
 };
 
-function renderOverview(sourceUrl: string) {
-  return render(
-    <OverviewTab
-      model={{ ...model, source_url: sourceUrl }}
-      editing={false}
-      editor={editor}
-      recommendedFile={null}
-      hasGcode={false}
-      revisionSaving={null}
-      onSend={() => {}}
-      canSend={false}
-      onCompare={() => {}}
-      onMark={() => {}}
-      onAddRevision={() => {}}
-    />,
-  );
-}
-
 describe("OverviewTab", () => {
-  it("renders a normalized safe HTTP(S) source URL as a link", () => {
-    renderOverview("HTTPS://EXAMPLE.TEST/cube");
-
-    expect(screen.getByRole("link", { name: "Source model" })).toHaveAttribute(
-      "href",
-      "https://example.test/cube",
-    );
-  });
-
-  it("does not render unsafe source URLs as links", () => {
-    renderOverview("https://user:secret@example.test/cube");
-
-    expect(screen.queryByRole("link", { name: "Source model" })).not.toBeInTheDocument();
-  });
   describe("choosing tags while editing", () => {
     /** The overview in edit mode, with a tag vocabulary to pick from. */
     function renderEditing(over: Partial<typeof editor> = {}) {
@@ -113,14 +70,22 @@ describe("OverviewTab", () => {
             setTags,
             ...over,
           }}
-          recommendedFile={null}
-          hasGcode={false}
-          revisionSaving={null}
-          onSend={() => {}}
-          canSend={false}
-          onCompare={() => {}}
-          onMark={() => {}}
-          onAddRevision={() => {}}
+          revision={{
+            file: null,
+            canEdit: true,
+            canSend: false,
+            revisionCount: 0,
+            recommended: null,
+            jobs: null,
+            onRevisions: () => {},
+            onSettings: () => {},
+            onHistory: () => {},
+            onLogPrint: () => {},
+            onSend: () => {},
+            onInspect: () => {},
+            onAddRevision: () => {},
+            onCompare: () => {},
+          }}
         />,
       );
       return { ...result, setTagInput, toggleTag, createTag, setTags };

@@ -1,22 +1,22 @@
 import { EditLibrarySourceModal } from "@/components/edit-library-source-modal";
+import { cn } from "@/lib/utils";
+import {
+  SETTINGS_BUTTON,
+  SETTINGS_BUTTON_DANGER,
+  SETTINGS_BUTTON_PRIMARY,
+  SETTINGS_FIELD,
+} from "@/components/settings-controls";
+import { SettingsNotice, SettingsStatus, SettingsGroupHead } from "@/components/settings-card";
+import { Switch } from "@/components/ui/switch";
 import { describeSourceLocation } from "@/lib/library-source-location";
 import { Link } from "@/lib/link";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  FolderSync,
-  HardDrive,
-  Pencil,
-  Plus,
-  RefreshCw,
-  ShieldAlert,
-  Trash2,
-} from "lucide-react";
+import { FolderSync, Plus, RefreshCw } from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { Modal } from "@/components/ui/modal";
 import { useQuery } from "@tanstack/react-query";
 import {
   defaultLibrarySourcesApi,
@@ -56,12 +56,9 @@ type SourceToggleReview =
       snapshot: VaultConfigRead;
     };
 
-const BTN_PRIMARY =
-  "inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-primary text-primary-foreground text-xs font-medium uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-disabled";
-const BTN_SECONDARY =
-  "inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted transition-colors text-xs font-medium uppercase tracking-wider disabled:opacity-50 disabled:cursor-disabled";
-const INPUT =
-  "w-full px-3 py-2 bg-background border border-border rounded text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-50";
+const BTN_PRIMARY = SETTINGS_BUTTON_PRIMARY;
+const BTN_SECONDARY = SETTINGS_BUTTON;
+const INPUT = SETTINGS_FIELD;
 
 // Cron presets surfaced as a dropdown; "" = manual only. Anything not in this
 // list shows the "Custom" option with a raw cron input.
@@ -327,6 +324,7 @@ function AdminLibrarySourcesPanel({
   }, [allowed]);
   const live = useRef(true);
   const [retired, setRetired] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [configWriteDenied, setConfigWriteDenied] = useState(false);
   const draftRevision = useRef(0);
   useEffect(() => {
@@ -514,6 +512,7 @@ function AdminLibrarySourcesPanel({
         setScanSchedule("0 * * * *");
         setWatchMode("auto");
         setMode("mirror");
+        setAddOpen(false);
       }
       toast.success(uiText("Library source added."));
     } catch (error) {
@@ -610,6 +609,7 @@ function AdminLibrarySourcesPanel({
                 )}
               </p>
               <Button
+                size="sm"
                 variant="outline"
                 onClick={() =>
                   void (config.isError || configWriteDenied ? recoverConfig() : recoverSources())
@@ -625,38 +625,34 @@ function AdminLibrarySourcesPanel({
 
   return (
     <Localized>
-      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-        <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3 min-w-0">
-            <div className="w-8 h-8 rounded bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0">
-              <FolderSync className="h-4 w-4" />
-            </div>
-            <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-foreground">{uiText("Library sources")}</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {uiText(
-                  "Index existing models from mounted folders, S3, WebDAV, or SFTP without copying them into Vault storage. Source files stay externally owned and are never deleted by PrintStash. Off by default.",
-                )}
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-label={uiText("Library sources enabled")}
-            aria-checked={enabled}
-            disabled={!allowed || config.isError || enableBusy || toggleReview.phase !== "idle"}
-            onClick={() => toggleFeature(!enabled)}
-            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
-              enabled ? "bg-primary" : "bg-outline-variant"
-            }`}
-          >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                enabled ? "translate-x-6" : "translate-x-1"
-              }`}
+      <div className="overflow-hidden border border-border bg-card">
+        <SettingsGroupHead
+          icon={FolderSync}
+          level={3}
+          title={uiText("Scanning")}
+          description={uiText("Applies to every Library source.")}
+          className="settings-card-head--flush"
+        />
+        <div className="settings-section-body">
+          <div className="settings-preference-row">
+            <span>{uiText("Library sources enabled")}</span>
+            <Switch
+              className="settings-row-switch"
+              checked={enabled}
+              onChange={(value) => toggleFeature(value)}
+              label={uiText("Library sources enabled")}
+              stateLabels={{ on: uiText("On"), off: uiText("Off") }}
+              disabled={!allowed || config.isError || enableBusy || toggleReview.phase !== "idle"}
             />
-          </button>
+          </div>
+          <div className="settings-preference-row">
+            <span>{uiText("Auto-scan enabled")}</span>
+            <span className="text-xs text-muted-foreground">{uiText("Configured per source")}</span>
+          </div>
+          <div className="settings-preference-row">
+            <span>{uiText("Scan schedule")}</span>
+            <span className="text-xs text-muted-foreground">{uiText("Configured per source")}</span>
+          </div>
         </div>
 
         {toggleReview.phase !== "idle" && (
@@ -669,6 +665,7 @@ function AdminLibrarySourcesPanel({
               )}
             </p>
             <Button
+              size="sm"
               variant="outline"
               disabled={enableBusy || toggleReview.phase === "loading"}
               onClick={() => void reviewToggle()}
@@ -686,6 +683,7 @@ function AdminLibrarySourcesPanel({
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <Button
+                    size="sm"
                     variant="outline"
                     disabled={enableBusy || config.isError}
                     onClick={() => setToggleReview({ phase: "idle" })}
@@ -693,6 +691,7 @@ function AdminLibrarySourcesPanel({
                     {uiText("library.useLatest")}
                   </Button>
                   <Button
+                    size="sm"
                     disabled={enableBusy || config.isError}
                     onClick={() => void toggleFeature(toggleReview.next, toggleReview.snapshot)}
                   >
@@ -706,7 +705,7 @@ function AdminLibrarySourcesPanel({
         {config.isError && (
           <div role="alert" className="p-4">
             <p>{t("librarySources.configFailed")}</p>
-            <Button variant="outline" onClick={() => void recoverConfig()}>
+            <Button size="sm" variant="outline" onClick={() => void recoverConfig()}>
               {t("Retry")}
             </Button>
           </div>
@@ -745,6 +744,7 @@ function AdminLibrarySourcesPanel({
             <div className="flex flex-wrap gap-2">
               {command.review.phase !== "retired" && (
                 <Button
+                  size="sm"
                   variant="outline"
                   disabled={busyId !== null || command.review.phase === "loading"}
                   onClick={() => {
@@ -760,6 +760,7 @@ function AdminLibrarySourcesPanel({
               {command.review.phase === "ready" && (
                 <>
                   <Button
+                    size="sm"
                     variant="outline"
                     disabled={busyId !== null}
                     onClick={() => {
@@ -772,6 +773,7 @@ function AdminLibrarySourcesPanel({
                     {uiText("Use current values")}
                   </Button>
                   <Button
+                    size="sm"
                     disabled={busyId !== null || !command.review.sameIdentity}
                     onClick={() => {
                       const session = getSessionVersion();
@@ -787,12 +789,30 @@ function AdminLibrarySourcesPanel({
             </div>
           </section>
         )}
+        <SettingsGroupHead
+          icon={FolderSync}
+          level={3}
+          title={uiText("Sources")}
+          description={uiText(
+            "PrintStash stores catalog metadata and thumbnails only; source files stay in their original location.",
+          )}
+          action={
+            <Button
+              size="sm"
+              disabled={!enabled || !commandsAllowed}
+              onClick={() => setAddOpen(true)}
+            >
+              {uiText("Add source")}
+            </Button>
+          }
+          className="settings-card-head--flush border-t"
+        />
         {enabled && (
-          <div className="p-4 sm:p-5 space-y-5">
+          <div className="settings-section-body space-y-4">
             {(sources.isError || sources.data?.kind === "disabled") && (
               <div role="alert">
                 <p>{t("librarySources.sourcesFailed")}</p>
-                <Button variant="outline" onClick={() => void recoverSources()}>
+                <Button size="sm" variant="outline" onClick={() => void recoverSources()}>
                   {t("Retry")}
                 </Button>
               </div>
@@ -815,75 +835,81 @@ function AdminLibrarySourcesPanel({
                 </p>
               </div>
             ) : (
-              <ul className="space-y-3">
+              <ul>
                 {libraries.map((lib) => {
                   const busy = busyId === lib.id || command.blocked;
                   const s = lib.last_scan_summary;
                   const binding = bindingStatus(lib);
                   const rootBound = lib.binding_state === "bound";
                   return (
-                    <li
-                      key={lib.id}
-                      className="rounded border border-border bg-background p-3 sm:p-4"
-                    >
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="min-w-0 w-full">
-                          <div className="flex items-center gap-2">
-                            <HardDrive className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="text-sm font-medium text-foreground truncate">
-                              {lib.name}
+                    <li key={lib.id} className="settings-list-row items-start">
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <p className="settings-list-title truncate">
+                          {lib.name}
+                          {!lib.enabled && (
+                            <span className="font-normal text-muted-foreground">
+                              {" · "}
+                              {uiText("paused")}
                             </span>
-                            {!lib.enabled && (
-                              <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground/70 border border-border rounded px-1.5 py-0.5">
-                                {uiText("paused")}
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground font-mono mt-1 truncate">
-                            {describeSourceLocation(lib, connections)}
-                          </p>
-                          {(lib.source_kind ?? "mounted") !== "mounted" && (
-                            <p className="mt-1 text-2xs text-muted-foreground">
-                              {uiText("{value1} · remote source · read-only", {
-                                value1: String((lib.source_kind ?? "mounted").toUpperCase() ?? ""),
-                              })}
+                          )}
+                        </p>
+                        <p className="settings-list-meta truncate font-mono">
+                          {describeSourceLocation(lib, connections)}
+                        </p>
+                        <p className="settings-list-meta">
+                          {[
+                            (lib.source_kind ?? "mounted") !== "mounted"
+                              ? uiText("{value1} · remote source · read-only", {
+                                  value1: String((lib.source_kind ?? "mounted").toUpperCase()),
+                                })
+                              : null,
+                            lib.collection_mode === "mirror"
+                              ? uiText("Mirrors subfolders → collections")
+                              : uiText("Single collection"),
+                            describeSchedule(lib.scan_schedule),
+                            watchStatus(lib),
+                            uiText("Last scan {date}", { date: formatDate(lib.last_scanned_at) }),
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                        {(lib.last_scan_status === "ok" || lib.last_scan_status === "partial") &&
+                          s && (
+                            <p className="settings-list-meta">
+                              +{s.added}
+                              {uiText(" added · ")}
+                              {s.updated}
+                              {uiText(" updated · ")}
+                              {s.removed}
+                              {uiText(" removed")}
+                              {s.errors.length > 0
+                                ? uiText(" · {value1} errors", {
+                                    value1: String(s.errors.length),
+                                  })
+                                : ""}
                             </p>
                           )}
-                          <div
-                            className={`mt-2 flex items-start gap-2 rounded border p-2 ${
-                              binding.tone === "bound"
-                                ? "border-success/30 bg-success/10"
-                                : "border-warning/30 bg-warning/10"
-                            }`}
-                            role={rootBound ? undefined : "alert"}
-                          >
-                            {rootBound ? (
-                              <CheckCircle2
-                                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success"
-                                aria-hidden
-                              />
-                            ) : (
-                              <ShieldAlert
-                                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning"
-                                aria-hidden
-                              />
-                            )}
-                            <div className="min-w-0">
-                              <p className="text-2xs font-semibold text-foreground">
-                                {binding.label}
-                              </p>
-                              <p className="mt-0.5 text-2xs leading-relaxed text-muted-foreground">
-                                {binding.description}
-                              </p>
-                              {lib.binding_reason && !rootBound && (
-                                <p className="mt-0.5 font-mono text-3xs text-muted-foreground">
-                                  {lib.binding_reason}
-                                </p>
-                              )}
-                              {lib.root_enrollable && commandsAllowed && (
+                        {lib.last_scan_status === "error" && (
+                          <p className="text-xs text-destructive">
+                            {s?.error || uiText("Last scan failed")}
+                          </p>
+                        )}
+                        {lib.last_scan_status === "partial" && (
+                          <p className="text-xs text-destructive">
+                            {uiText("Some files could not be indexed")}
+                          </p>
+                        )}
+                        {!rootBound && (
+                          <SettingsNotice
+                            tone="warning"
+                            role="alert"
+                            className="mt-2"
+                            title={binding.label}
+                            action={
+                              lib.root_enrollable && commandsAllowed ? (
                                 <button
                                   type="button"
-                                  className={`${BTN_SECONDARY} mt-2`}
+                                  className={BTN_SECONDARY}
                                   disabled={busy}
                                   onClick={() =>
                                     setEnrollTarget({
@@ -895,165 +921,114 @@ function AdminLibrarySourcesPanel({
                                 >
                                   {uiText("Review and enroll")}
                                 </button>
-                              )}
-                            </div>
-                          </div>
-                          <p className="text-2xs text-muted-foreground mt-1">
-                            {lib.collection_mode === "mirror"
-                              ? uiText("Mirrors subfolders → collections")
-                              : uiText("Single collection")}{" "}
-                            · {describeSchedule(lib.scan_schedule)}
-                            {uiText(" · last scan")} {formatDate(lib.last_scanned_at)}
-                          </p>
-                          <p className="text-2xs text-muted-foreground mt-0.5">
-                            {watchStatus(lib)}
-                          </p>
-                          {commandsAllowed && (
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2 max-w-md">
-                              <ScheduleControl
-                                label={`${uiText("Scan schedule")} ${lib.name}`}
-                                value={lib.scan_schedule}
+                              ) : undefined
+                            }
+                          >
+                            <p>{binding.description}</p>
+                            {lib.binding_reason && (
+                              <p className="font-mono">{lib.binding_reason}</p>
+                            )}
+                          </SettingsNotice>
+                        )}
+                        {(lib.last_scan_status === "ok" || lib.last_scan_status === "partial") &&
+                          s?.no_files_found === true && (
+                            <SettingsNotice tone="warning" role="status" className="mt-2">
+                              <p>
+                                {uiText(
+                                  "No model files found at {value1}. Check the folder name: remote paths are case-sensitive.",
+                                  { value1: describeSourceLocation(lib, connections) },
+                                )}{" "}
+                                {(lib.source_kind ?? "mounted") !== "mounted" && (
+                                  <Link
+                                    href="/settings?section=remote-storage"
+                                    className="font-medium underline"
+                                  >
+                                    {uiText("Edit connection")}
+                                  </Link>
+                                )}
+                              </p>
+                            </SettingsNotice>
+                          )}
+                        {commandsAllowed && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <ScheduleControl
+                              label={`${uiText("Scan schedule")} ${lib.name}`}
+                              value={lib.scan_schedule}
+                              disabled={busy}
+                              inputClass={cn(INPUT, "w-56")}
+                              onChange={(cron) => handleUpdate(lib, { scan_schedule: cron })}
+                            />
+                            {(lib.source_kind ?? "mounted") === "mounted" && (
+                              <select
+                                className={cn(INPUT, "w-56 self-start")}
+                                value={lib.watch_mode}
                                 disabled={busy}
-                                inputClass={`${INPUT} !py-1.5 text-xs`}
-                                onChange={(cron) => handleUpdate(lib, { scan_schedule: cron })}
-                              />
-                              {(lib.source_kind ?? "mounted") === "mounted" && (
-                                <select
-                                  className={`${INPUT} !py-1.5 text-xs self-start`}
-                                  value={lib.watch_mode}
-                                  disabled={busy}
-                                  onChange={(e) =>
-                                    handleUpdate(lib, {
-                                      watch_mode: parseWatchMode(e.target.value),
-                                    })
-                                  }
-                                >
-                                  {WATCH_OPTIONS.map((o) => (
-                                    <option key={o.value} value={o.value}>
-                                      {o.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
-                            </div>
-                          )}
-                          {lib.last_scan_status === "error" && (
-                            <p className="mt-1 inline-flex items-center gap-1 text-2xs text-destructive">
-                              <AlertTriangle className="h-3 w-3" />
-                              {s?.error || uiText("Last scan failed")}
-                            </p>
-                          )}
-                          {(lib.last_scan_status === "ok" || lib.last_scan_status === "partial") &&
-                            s && (
-                              <p className="text-2xs text-muted-foreground mt-1">
-                                +{s.added}
-                                {uiText(" added · ")}
-                                {s.updated}
-                                {uiText(" updated · ")}
-                                {s.removed}
-                                {uiText(" removed")}
-                                {s.errors.length > 0
-                                  ? uiText(" · {value1} errors", {
-                                      value1: String(s.errors.length),
-                                    })
-                                  : ""}
-                              </p>
-                            )}
-                          {(lib.last_scan_status === "ok" || lib.last_scan_status === "partial") &&
-                            s?.no_files_found === true && (
-                              <p
-                                role="status"
-                                className="mt-2 flex items-start gap-1.5 rounded border border-warning/30 bg-warning/10 p-2 text-2xs text-foreground"
+                                onChange={(e) =>
+                                  handleUpdate(lib, {
+                                    watch_mode: parseWatchMode(e.target.value),
+                                  })
+                                }
                               >
-                                <AlertTriangle
-                                  className="mt-0.5 h-3 w-3 shrink-0 text-warning"
-                                  aria-hidden
-                                />
-                                <span>
-                                  {uiText(
-                                    "No model files found at {value1}. Check the folder name: remote paths are case-sensitive.",
-                                    { value1: describeSourceLocation(lib, connections) },
-                                  )}{" "}
-                                  {(lib.source_kind ?? "mounted") !== "mounted" && (
-                                    <Link
-                                      href="/settings?section=remote-storage"
-                                      className="font-medium underline"
-                                    >
-                                      {uiText("Edit connection")}
-                                    </Link>
-                                  )}
-                                </span>
-                              </p>
+                                {WATCH_OPTIONS.map((o) => (
+                                  <option key={o.value} value={o.value}>
+                                    {o.label}
+                                  </option>
+                                ))}
+                              </select>
                             )}
-                          {lib.last_scan_status === "partial" && (
-                            <p className="mt-1 inline-flex items-center gap-1 text-2xs text-destructive">
-                              <AlertTriangle className="h-3 w-3" />
-                              {uiText("Some files could not be indexed")}
-                            </p>
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        {rootBound && <SettingsStatus>{binding.label}</SettingsStatus>}
+                        <Switch
+                          checked={lib.enabled}
+                          onChange={() => handleToggleEnabled(lib)}
+                          label={uiText("Auto-scan enabled")}
+                          stateLabels={{ on: uiText("Auto-scan on"), off: uiText("Auto-scan off") }}
+                          disabled={
+                            !commandsAllowed || command.blocked || busyId !== null || !rootBound
+                          }
+                        />
+                        <button
+                          type="button"
+                          disabled={
+                            !commandsAllowed || command.blocked || busyId !== null || !rootBound
+                          }
+                          onClick={() => handleScan(lib)}
+                          title={
+                            rootBound ? undefined : uiText("Verify the source before scanning.")
+                          }
+                          className={BTN_SECONDARY}
+                        >
+                          {busyId === lib.id && (
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden />
                           )}
-                        </div>
-                        <div className="flex flex-shrink-0 items-center gap-1.5 self-end sm:self-auto">
-                          <button
-                            type="button"
-                            disabled={
-                              !commandsAllowed || command.blocked || busyId !== null || !rootBound
-                            }
-                            onClick={() => handleScan(lib)}
-                            title={
-                              rootBound ? undefined : uiText("Verify the source before scanning.")
-                            }
-                            className={BTN_SECONDARY}
-                          >
-                            <RefreshCw
-                              className={`h-3.5 w-3.5 ${busyId === lib.id ? "animate-spin" : ""}`}
-                            />
-                            {busyId === lib.id ? uiText("Scanning") : uiText("Scan now")}
-                          </button>
-                          <button
-                            type="button"
-                            role="switch"
-                            aria-checked={lib.enabled}
-                            aria-label={uiText("Auto-scan enabled")}
-                            disabled={
-                              !commandsAllowed || command.blocked || busyId !== null || !rootBound
-                            }
-                            onClick={() => handleToggleEnabled(lib)}
-                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
-                              lib.enabled ? "bg-primary" : "bg-outline-variant"
-                            }`}
-                          >
-                            <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                lib.enabled ? "translate-x-6" : "translate-x-1"
-                              }`}
-                            />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={!commandsAllowed || command.blocked || busyId !== null}
-                            onClick={() => setEditTarget(lib)}
-                            aria-label={uiText("Edit source")}
-                            title={uiText("Edit source")}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={!commandsAllowed || command.blocked || busyId !== null}
-                            onClick={() =>
-                              setDeleteTarget({
-                                source: lib,
-                                session: getSessionVersion(),
-                                readVersion: sources.dataUpdatedAt,
-                              })
-                            }
-                            className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-muted-foreground hover:bg-muted hover:text-destructive transition-colors disabled:opacity-50"
-                            aria-label={uiText("Remove library source")}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
+                          {busyId === lib.id ? uiText("Scanning") : uiText("Scan now")}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!commandsAllowed || command.blocked || busyId !== null}
+                          onClick={() => setEditTarget(lib)}
+                          className={BTN_SECONDARY}
+                        >
+                          {uiText("Edit source")}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!commandsAllowed || command.blocked || busyId !== null}
+                          onClick={() =>
+                            setDeleteTarget({
+                              source: lib,
+                              session: getSessionVersion(),
+                              readVersion: sources.dataUpdatedAt,
+                            })
+                          }
+                          className={SETTINGS_BUTTON_DANGER}
+                          aria-label={uiText("Remove library source")}
+                        >
+                          {uiText("Remove…")}
+                        </button>
                       </div>
                     </li>
                   );
@@ -1061,186 +1036,197 @@ function AdminLibrarySourcesPanel({
               </ul>
             )}
 
-            <p className="rounded-md bg-muted p-3 text-xs leading-relaxed text-muted-foreground">
-              {uiText(
-                "Remote connection profiles are managed in Settings → Remote storage. Create one there, allow Library sources, then select it below.",
-              )}
-            </p>
+            <SettingsNotice tone="info">
+              <p>
+                {uiText(
+                  "Remote connection profiles are managed in Settings → Remote storage. Create one there, allow Library sources, then select it below.",
+                )}
+              </p>
+            </SettingsNotice>
 
             {connectionRead.isError && (
-              <div role="alert">
-                <p>{t("librarySources.connectionsFailed")}</p>
-                <Button variant="outline" onClick={() => void connectionRead.refetch()}>
-                  {t("Retry")}
-                </Button>
-              </div>
+              <SettingsNotice
+                tone="danger"
+                role="alert"
+                title={t("librarySources.connectionsFailed")}
+                action={
+                  <Button variant="outline" size="sm" onClick={() => void connectionRead.refetch()}>
+                    {t("Retry")}
+                  </Button>
+                }
+              />
             )}
             {/* Add a library source */}
-            <div
-              className="rounded border border-dashed border-border p-3 sm:p-4 space-y-3"
-              onChangeCapture={() => {
-                draftRevision.current += 1;
+            <Modal
+              open={addOpen}
+              onClose={() => {
+                if (busyId !== "create") setAddOpen(false);
               }}
+              title={uiText("Add a library source")}
             >
-              <p className="text-2xs font-mono uppercase tracking-wider text-primary">
-                {uiText("Add a library source")}
-              </p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                  {uiText("Source name")}
-                  <input
-                    className={INPUT}
-                    aria-label={uiText("Source name")}
-                    placeholder={uiText("e.g. Workshop NAS")}
-                    value={name}
-                    disabled={!commandsAllowed}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                  {uiText("Source type")}
-                  <select
-                    className={INPUT}
-                    aria-label={uiText("Library source type")}
-                    value={sourceKind}
-                    disabled={!commandsAllowed}
-                    onChange={(event) => {
-                      if (!isLibrarySourceKind(event.target.value)) return;
-                      setSourceKind(event.target.value);
-                      setConnectionId("");
-                    }}
-                  >
-                    <option value="mounted">{uiText("Mounted folder (SMB/NFS/local)")}</option>
-                    <option value="s3">{uiText("S3 / compatible")}</option>
-                    <option value="webdav">{uiText("WebDAV / Nextcloud")}</option>
-                    <option value="sftp">SFTP</option>
-                    <option value="gdrive">{uiText("Google Drive")}</option>
-                  </select>
-                </label>
-                {sourceKind === "mounted" ? (
-                  <label className="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">
-                    {uiText("Mounted folder path")}
+              <div
+                className="space-y-3"
+                onChangeCapture={() => {
+                  draftRevision.current += 1;
+                }}
+              >
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    {uiText("Source name")}
                     <input
                       className={INPUT}
-                      aria-label={uiText("Mounted folder path")}
-                      placeholder={uiText("e.g. /mnt/nas/3d")}
-                      value={rootPath}
+                      aria-label={uiText("Source name")}
+                      placeholder={uiText("e.g. Workshop NAS")}
+                      value={name}
                       disabled={!commandsAllowed}
-                      onChange={(e) => setRootPath(e.target.value)}
+                      onChange={(e) => setName(e.target.value)}
                     />
                   </label>
-                ) : (
-                  <>
-                    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                      {uiText("Remote connection")}
-                      <select
-                        className={INPUT}
-                        aria-label={uiText("Remote source connection")}
-                        value={connectionId}
-                        disabled={
-                          !commandsAllowed || connectionRead.isPending || connectionRead.isError
-                        }
-                        onChange={(event) =>
-                          setConnectionId(event.target.value ? Number(event.target.value) : "")
-                        }
-                      >
-                        <option value="">{uiText("Choose an enabled connection")}</option>
-                        {connections
-                          .filter(
-                            (connection) =>
-                              connection.kind === sourceKind &&
-                              connection.enabled &&
-                              ["library", "both"].includes(connection.purpose ?? "library"),
-                          )
-                          .map((connection) => (
-                            <option key={connection.id} value={connection.id}>
-                              {connection.name}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                      {uiText("Path within connection (optional)")}
-                      <input
-                        className={INPUT}
-                        aria-label={uiText("Source path within connection")}
-                        placeholder={uiText("e.g. production/models")}
-                        value={sourcePrefix}
-                        disabled={!commandsAllowed}
-                        onChange={(event) => setSourcePrefix(event.target.value)}
-                      />
-                    </label>
-                  </>
-                )}
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                  {uiText("Scan schedule")}
-                  <ScheduleControl
-                    value={scanSchedule}
-                    disabled={!commandsAllowed}
-                    inputClass={INPUT}
-                    onChange={setScanSchedule}
-                  />
-                </label>
-                {sourceKind === "mounted" && (
                   <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                    {uiText("Real-time watching")}
+                    {uiText("Source type")}
                     <select
                       className={INPUT}
-                      value={watchMode}
+                      aria-label={uiText("Library source type")}
+                      value={sourceKind}
                       disabled={!commandsAllowed}
-                      onChange={(e) => setWatchMode(parseWatchMode(e.target.value))}
+                      onChange={(event) => {
+                        if (!isLibrarySourceKind(event.target.value)) return;
+                        setSourceKind(event.target.value);
+                        setConnectionId("");
+                      }}
                     >
-                      {WATCH_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
+                      <option value="mounted">{uiText("Mounted folder (SMB/NFS/local)")}</option>
+                      <option value="s3">{uiText("S3 / compatible")}</option>
+                      <option value="webdav">{uiText("WebDAV / Nextcloud")}</option>
+                      <option value="sftp">SFTP</option>
+                      <option value="gdrive">{uiText("Google Drive")}</option>
                     </select>
                   </label>
-                )}
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                  {uiText("Collection layout")}
-                  <select
-                    className={INPUT}
-                    aria-label={uiText("Collection layout")}
-                    value={mode}
-                    disabled={!commandsAllowed}
-                    onChange={(e) => setMode(parseCollectionMode(e.target.value))}
+                  {sourceKind === "mounted" ? (
+                    <label className="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">
+                      {uiText("Mounted folder path")}
+                      <input
+                        className={INPUT}
+                        aria-label={uiText("Mounted folder path")}
+                        placeholder={uiText("e.g. /mnt/nas/3d")}
+                        value={rootPath}
+                        disabled={!commandsAllowed}
+                        onChange={(e) => setRootPath(e.target.value)}
+                      />
+                    </label>
+                  ) : (
+                    <>
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        {uiText("Remote connection")}
+                        <select
+                          className={INPUT}
+                          aria-label={uiText("Remote source connection")}
+                          value={connectionId}
+                          disabled={
+                            !commandsAllowed || connectionRead.isPending || connectionRead.isError
+                          }
+                          onChange={(event) =>
+                            setConnectionId(event.target.value ? Number(event.target.value) : "")
+                          }
+                        >
+                          <option value="">{uiText("Choose an enabled connection")}</option>
+                          {connections
+                            .filter(
+                              (connection) =>
+                                connection.kind === sourceKind &&
+                                connection.enabled &&
+                                ["library", "both"].includes(connection.purpose ?? "library"),
+                            )
+                            .map((connection) => (
+                              <option key={connection.id} value={connection.id}>
+                                {connection.name}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        {uiText("Path within connection (optional)")}
+                        <input
+                          className={INPUT}
+                          aria-label={uiText("Source path within connection")}
+                          placeholder={uiText("e.g. production/models")}
+                          value={sourcePrefix}
+                          disabled={!commandsAllowed}
+                          onChange={(event) => setSourcePrefix(event.target.value)}
+                        />
+                      </label>
+                    </>
+                  )}
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    {uiText("Scan schedule")}
+                    <ScheduleControl
+                      value={scanSchedule}
+                      disabled={!commandsAllowed}
+                      inputClass={INPUT}
+                      onChange={setScanSchedule}
+                    />
+                  </label>
+                  {sourceKind === "mounted" && (
+                    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                      {uiText("Real-time watching")}
+                      <select
+                        className={INPUT}
+                        value={watchMode}
+                        disabled={!commandsAllowed}
+                        onChange={(e) => setWatchMode(parseWatchMode(e.target.value))}
+                      >
+                        {WATCH_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    {uiText("Collection layout")}
+                    <select
+                      className={INPUT}
+                      aria-label={uiText("Collection layout")}
+                      value={mode}
+                      disabled={!commandsAllowed}
+                      onChange={(e) => setMode(parseCollectionMode(e.target.value))}
+                    >
+                      <option value="mirror">{uiText("Map subfolders to collections")}</option>
+                      <option value="single">{uiText("Single collection (flat)")}</option>
+                    </select>
+                  </label>
+                </div>
+                <p className="text-2xs text-muted-foreground">
+                  {uiText(
+                    "PrintStash stores catalog metadata and thumbnails only; source files stay in their original location.",
+                  )}{" "}
+                  {sourceKind === "mounted"
+                    ? uiText(
+                        "Mounted sources support manual and scheduled scans. Local folders can also be watched and may accept create-only write-back.",
+                      )
+                    : uiText(
+                        "Remote sources use bounded manual or scheduled scans and are always read-only.",
+                      )}
+                </p>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    disabled={
+                      !commandsAllowed ||
+                      busyId !== null ||
+                      (sourceKind !== "mounted" &&
+                        (connectionRead.isPending || connectionRead.isError))
+                    }
+                    onClick={handleCreate}
+                    className={BTN_PRIMARY}
                   >
-                    <option value="mirror">{uiText("Map subfolders to collections")}</option>
-                    <option value="single">{uiText("Single collection (flat)")}</option>
-                  </select>
-                </label>
+                    <Plus className="h-3.5 w-3.5" />
+                    {busyId === "create" ? uiText("Adding") : uiText("Add source")}
+                  </button>
+                </div>
               </div>
-              <p className="text-2xs text-muted-foreground">
-                {uiText(
-                  "PrintStash stores catalog metadata and thumbnails only; source files stay in their original location.",
-                )}{" "}
-                {sourceKind === "mounted"
-                  ? uiText(
-                      "Mounted sources support manual and scheduled scans. Local folders can also be watched and may accept create-only write-back.",
-                    )
-                  : uiText(
-                      "Remote sources use bounded manual or scheduled scans and are always read-only.",
-                    )}
-              </p>
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  disabled={
-                    !commandsAllowed ||
-                    busyId !== null ||
-                    (sourceKind !== "mounted" &&
-                      (connectionRead.isPending || connectionRead.isError))
-                  }
-                  onClick={handleCreate}
-                  className={BTN_PRIMARY}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  {busyId === "create" ? uiText("Adding") : uiText("Add source")}
-                </button>
-              </div>
-            </div>
+            </Modal>
           </div>
         )}
 

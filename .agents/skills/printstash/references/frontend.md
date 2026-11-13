@@ -31,11 +31,43 @@ harness and the relevant browser flow before reporting the change complete.
       animates. `duration-200` is a finding — it's `duration-fast`.
 - [ ] New value needed? Add it as a token in `globals.css` +
       `tailwind.config.cjs`, never as a one-off.
-- [ ] Dark theme: primary swaps blue→orange automatically via tokens — never
-      hand-encode the swap.
+- [ ] Check light and dark themes with the semantic tokens in `DESIGN.md`;
+      keep action and foreground tokens paired.
 - [ ] Provider/feature gating: disable unsupported actions from the API's
       capability flags; label beta providers as beta. Don't present roadmap
       features as available.
+
+## Prototype fidelity
+
+When implementing a supplied prototype or correcting a visual mismatch:
+
+1. Read the current source HTML, CSS, event handlers and assets for the exact
+   page and state. Record the source-to-component mapping and required states
+   in the private work record. Include reading, empty, editing, focus, pending,
+   error and narrow layouts where the control supports them.
+2. Compare the rendered prototype and application at the same viewport, theme
+   and zoom. Inspect computed dimensions and box sizing where source CSS values
+   render differently. Match the reference's interaction contract as well as
+   its appearance: keyboard submission, blur, cancellation and validation.
+3. Identify data differences separately from layout differences. Use real
+   response fields for product data. Report absent API capabilities or undefined
+   prototype states explicitly; sample values are demonstration data, not product
+   defaults. An adaptation must be identified as an adaptation.
+4. Exercise the exact preview URL given to the user with its normal data source.
+   Confirm successful requests, visible receipts and persistence after reload.
+   For editable controls cover empty input, duplicates, repeated edits, focus
+   movement and failed saves as applicable. Resolve unexpected network or console
+   failures before handing off the affected flow.
+5. Isolated fixtures and request overrides may support regression tests or
+   same-content visual comparisons. Label that evidence and also validate the
+   ordinary preview without per-capture response overrides. Keep a demonstration
+   server's read/write behavior consistent with the endpoints the UI calls.
+6. Finish the visual correction before running the affected functional checks
+   when the user requests that order. Passing tests establishes only the
+   behaviors asserted; it does not establish visual parity.
+7. Report only pages and states actually compared. Each claimed corrected state
+   needs a reference comparison and each claimed working action needs a successful
+   interaction on the shared preview. List remaining mismatches specifically.
 
 ## Validate
 

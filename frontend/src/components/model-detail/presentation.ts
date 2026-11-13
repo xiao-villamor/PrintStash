@@ -34,13 +34,13 @@ export const TABS: { key: TabKey; label: string }[] = [
   {
     key: "source",
     get label() {
-      return uiText("Source");
+      return uiText("Source info");
     },
   },
   {
     key: "settings",
     get label() {
-      return uiText("Settings");
+      return uiText("Print settings");
     },
   },
   {

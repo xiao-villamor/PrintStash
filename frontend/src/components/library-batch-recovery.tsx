@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "@/lib/link";
 import { Modal } from "@/components/ui/modal";
 import { uiText } from "@/lib/locale";
 import { userMessage } from "@/lib/errors";
@@ -121,7 +121,7 @@ function Outcome({
         if (name === undefined) throw new Error("Missing batch review identity");
         return (
           <li key={id}>
-            <Link to={`/models/${id}`} className="text-primary underline">
+            <Link href={`/models/${id}`} className="text-primary underline">
               {name}
             </Link>
           </li>

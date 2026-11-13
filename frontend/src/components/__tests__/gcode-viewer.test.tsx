@@ -14,7 +14,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -128,23 +128,93 @@ describe("GcodeViewer", () => {
 
     const slider = await screen.findByRole("slider", { name: "Current layer" });
     expect(slider).toHaveAttribute("max", "0");
-    expect(screen.getByText(/Layer 1 \/ 1/)).toBeInTheDocument();
+    expect(slider).toHaveAttribute("aria-valuetext", "Layer 1 / 1");
 
-    const travel = screen.getByRole("button", { name: "Show travel moves" });
-    const bed = screen.getByRole("button", { name: "Hide build plate" });
+    const travel = screen.getByRole("button", { name: "Travel" });
+    const bed = screen.getByRole("button", { name: "Bed 220×220" });
     expect(travel).toHaveAttribute("aria-pressed", "false");
     expect(bed).toHaveAttribute("aria-pressed", "true");
 
     await user.click(travel);
     await user.click(bed);
 
-    expect(screen.getByRole("button", { name: "Hide travel moves" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "Show build plate" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Travel" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Bed 220×220" })).toHaveAttribute(
       "aria-pressed",
       "false",
+    );
+  });
+
+  it("offers the camera views as one compact choice and keeps it while the layer changes", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(TOOLPATH));
+
+    render(
+      <I18nProvider>
+        <GcodeViewer
+          url="/api/v1/files/7/toolpath-preview"
+          canvasRenderer={TestCanvas}
+          toolpathParser={async (text) => parseGcode(text)}
+        />
+      </I18nProvider>,
+    );
+
+    const view = await screen.findByRole("combobox", { name: "Camera view" });
+    expect(view).toHaveValue("isometric");
+    expect(Array.from(view.querySelectorAll("option")).map((option) => option.textContent)).toEqual(
+      ["Isometric", "Front", "Top"],
+    );
+
+    await user.selectOptions(view, "top");
+    fireEvent.change(screen.getByRole("slider", { name: "Current layer" }), {
+      target: { value: "0" },
+    });
+
+    expect(screen.getByRole("combobox", { name: "Camera view" })).toHaveValue("top");
+    await user.click(screen.getByRole("button", { name: "Fit to view" }));
+    expect(screen.getByRole("combobox", { name: "Camera view" })).toHaveValue("isometric");
+  });
+
+  it("steps through layers from the layer rail and isolates the current layer", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(
+      textResponse("G1 Z0.2 F600\nG1 X1 Y1 E1\nG1 Z0.4\nG1 X2 Y2 E2\nG1 Z0.6\nG1 X3 Y3 E3\n"),
+    );
+
+    render(
+      <I18nProvider>
+        <GcodeViewer
+          url="/api/v1/files/7/toolpath-preview"
+          canvasRenderer={TestCanvas}
+          toolpathParser={async (text) => parseGcode(text)}
+        />
+      </I18nProvider>,
+    );
+
+    const slider = await screen.findByRole("slider", { name: "Current layer" });
+    const last = Number(slider.getAttribute("max"));
+    expect(last).toBeGreaterThan(0);
+    const next = screen.getByRole("button", { name: "Next layer" });
+    const previous = screen.getByRole("button", { name: "Previous layer" });
+    // The preview opens on the finished print: the top layer.
+    expect(slider).toHaveValue(String(last));
+    expect(next).toBeDisabled();
+
+    await user.click(previous);
+    expect(slider).toHaveValue(String(last - 1));
+    expect(slider).toHaveAttribute("aria-valuetext", `Layer ${last} / ${last + 1}`);
+    await user.click(next);
+    expect(slider).toHaveValue(String(last));
+
+    fireEvent.change(slider, { target: { value: "0" } });
+    expect(screen.getByRole("button", { name: "Previous layer" })).toBeDisabled();
+
+    const only = screen.getByRole("button", { name: "This layer" });
+    expect(only).toHaveAttribute("aria-pressed", "false");
+    await user.click(only);
+    expect(screen.getByRole("button", { name: "This layer" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
   });
 

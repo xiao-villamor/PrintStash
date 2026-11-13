@@ -1,9 +1,10 @@
 "use client";
 
+import { SettingsGroupHead } from "@/components/settings-card";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { ExternalLink, Puzzle, ShieldCheck } from "lucide-react";
+import { Download, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Localized } from "@/components/ui/localized";
 
@@ -16,21 +17,32 @@ export function MakerWorldConnectCard() {
   return (
     <Localized>
       <div className="overflow-hidden rounded border border-border bg-card">
-        <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-4 sm:px-6 sm:py-5 lg:px-8">
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-foreground">
-              {uiText("MakerWorld browser import")}
-            </h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {uiText("Import authenticated models with the PrintStash browser extension")}
-            </p>
-          </div>
-          <Puzzle className="h-5 w-5 flex-shrink-0 text-muted-foreground" aria-hidden />
-        </div>
+        <SettingsGroupHead
+          icon={Download}
+          level={3}
+          title={uiText("MakerWorld browser import")}
+          description={uiText("Import authenticated models with the PrintStash browser extension")}
+          action={
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant="outline" size="sm">
+                <a href={EXTENSION_URL} target="_blank" rel="noreferrer">
+                  {uiText("Open extension source")}
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                </a>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <a href={CHROME_EXTENSION_URL} target="_blank" rel="noopener noreferrer">
+                  {uiText("Install Chrome extension")}
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                </a>
+              </Button>
+            </div>
+          }
+          className="settings-card-head--flush"
+        />
 
-        <div className="space-y-4 p-3 sm:p-4 lg:p-6">
-          <div className="flex items-start gap-2 text-sm text-foreground">
-            <ShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0 text-success" aria-hidden />
+        <div className="space-y-3 px-4 pb-4 text-[13px] sm:pl-16 sm:pr-5">
+          <div className="text-foreground">
             <p>
               {uiText(
                 "PrintStash does not store your MakerWorld password, session token, or cookies. The extension downloads the selected package inside your signed-in browser and sends only the model file to Pending Imports.",
@@ -49,20 +61,6 @@ export function MakerWorldConnectCard() {
               "MakerWorld collections are not supported; capture their model pages individually.",
             )}
           </p>
-          <div className="flex flex-wrap gap-2">
-            <Button asChild size="sm">
-              <a href={CHROME_EXTENSION_URL} target="_blank" rel="noopener noreferrer">
-                {uiText("Install Chrome extension")}
-                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-              </a>
-            </Button>
-            <Button asChild variant="outline" size="sm">
-              <a href={EXTENSION_URL} target="_blank" rel="noreferrer">
-                {uiText("Open extension source")}
-                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-              </a>
-            </Button>
-          </div>
         </div>
       </div>
     </Localized>

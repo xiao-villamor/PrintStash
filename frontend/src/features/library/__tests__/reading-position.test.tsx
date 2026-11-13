@@ -1,7 +1,9 @@
 /** A Library history entry owns its nested reading offsets for one session. */
 import "@testing-library/jest-dom/vitest";
-import { useRef, useState } from "react";
-import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { useLayoutEffect, useRef, useState } from "react";
+import { useLocation } from "@tanstack/react-router";
+import { Link } from "@/lib/link";
+import { useRouter } from "@/lib/navigation";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearLogin } from "@/lib/auth-store";
@@ -29,22 +31,22 @@ function Library({ layout }: { layout: LibraryLayout }) {
   return (
     <main ref={main} aria-label="Library">
       <div ref={list} role="region" aria-label="Rows">
-        <Link to="/detail">Open Model</Link>
+        <Link href="/detail">Open Model</Link>
       </div>
     </main>
   );
 }
 function Detail() {
-  const navigate = useNavigate();
-  return <button onClick={() => navigate(-1)}>Back</button>;
+  const navigate = useRouter();
+  return <button onClick={() => navigate.back()}>Back</button>;
 }
 function Browser({ layout = "grid" }: { layout?: LibraryLayout }) {
-  return (
-    <Routes>
-      <Route path="/" element={<Library layout={layout} />} />
-      <Route path="/detail" element={<Detail />} />
-    </Routes>
-  );
+  const location = useLocation();
+  return location.pathname === "/detail" ? <Detail /> : <Library layout={layout} />;
+}
+function FolderBrowser() {
+  const location = useLocation();
+  return location.pathname === "/detail" ? <Detail /> : <FolderLibrary />;
 }
 
 describe("Library reading position", () => {
@@ -66,7 +68,7 @@ describe("Library reading position", () => {
     (layout) => {
       renderApp(
         <>
-          <Link to="/detail">Other page</Link>
+          <Link href="/detail">Other page</Link>
           <Browser layout={layout} />
         </>,
       );
@@ -125,7 +127,7 @@ function FolderLibrary() {
       <button disabled={!query.hasNextPage} onClick={() => void query.fetchNextPage()}>
         More folders
       </button>
-      <Link to="/detail">Open Model</Link>
+      <Link href="/detail">Open Model</Link>
     </main>
   );
 }
@@ -134,30 +136,24 @@ it.each([false, true])(
   "bounds folder reconstruction after eviction (failure=%s)",
   async (failed) => {
     let returning = false;
-    const app = renderApp(
-      <Routes>
-        <Route path="/" element={<FolderLibrary />} />
-        <Route path="/detail" element={<Detail />} />
-      </Routes>,
-      {
-        routes: {
-          "GET /api/v1/collections/children": (url) => {
-            const cursor = new URL(url, "http://test").searchParams.get("cursor");
-            if (returning && cursor && failed)
-              return json({ detail: "browse_refresh_required" }, 409);
-            return json({
-              items: [
-                aCollectionNode({
-                  id: cursor ? 2 : 1,
-                  name: cursor ? "Recovered folder" : "First folder",
-                }),
-              ],
-              next_cursor: cursor ? "unvisited" : "second",
-            });
-          },
+    const app = renderApp(<FolderBrowser />, {
+      routes: {
+        "GET /api/v1/collections/children": (url) => {
+          const cursor = new URL(url, "http://test").searchParams.get("cursor");
+          if (returning && cursor && failed)
+            return json({ detail: "browse_refresh_required" }, 409);
+          return json({
+            items: [
+              aCollectionNode({
+                id: cursor ? 2 : 1,
+                name: cursor ? "Recovered folder" : "First folder",
+              }),
+            ],
+            next_cursor: cursor ? "unvisited" : "second",
+          });
         },
       },
-    );
+    });
     await screen.findByText("First folder");
     fireEvent.click(screen.getByRole("button", { name: "More folders" }));
     await screen.findByText("Recovered folder");
@@ -210,7 +206,7 @@ function RefreshLibrary({ replace }: { replace: () => Promise<void> }) {
         Refresh
       </button>
       <button onClick={() => setLayout("list")}>List layout</button>
-      <Link to="/another">Another Library</Link>
+      <Link href="/another">Another Library</Link>
     </main>
   );
 }
@@ -279,9 +275,11 @@ describe("Explicit Library refresh", () => {
 function FavoriteRemoval({
   confirmed,
   displayed,
+  duplicateLink = false,
 }: {
   confirmed: Promise<void>;
   displayed: Promise<void>;
+  duplicateLink?: boolean;
 }) {
   const entry = useLibraryEntry("/?favorites=true", true);
   const main = useRef<HTMLElement>(null);
@@ -314,6 +312,11 @@ function FavoriteRemoval({
           <a href="/models/2" data-library-entry="/models/2">
             Removed
           </a>
+          {duplicateLink && (
+            <a href="/models/2" data-library-entry="/models/2">
+              Open removed
+            </a>
+          )}
           <button onClick={() => void remove()}>Unstar</button>
         </article>
       )}
@@ -329,15 +332,34 @@ function FavoriteRemoval({
 describe("Confirmed favorite reading position", () => {
   afterEach(() => vi.restoreAllMocks());
   it.each([
-    { label: "active", retire: false, queuedScroll: false, expected: 0 },
-    { label: "active with queued scroll", retire: false, queuedScroll: true, expected: 0 },
-    { label: "retired", retire: true, queuedScroll: false, expected: 100 },
+    { label: "active", retire: false, queuedScroll: false, duplicateLink: false, expected: 0 },
+    {
+      label: "card with a second Open link",
+      retire: false,
+      queuedScroll: false,
+      duplicateLink: true,
+      expected: 0,
+    },
+    {
+      label: "active with queued scroll",
+      retire: false,
+      queuedScroll: true,
+      duplicateLink: false,
+      expected: 0,
+    },
+    { label: "retired", retire: true, queuedScroll: false, duplicateLink: false, expected: 100 },
   ])(
     "applies the promoted anchor only for the $label session after DOM removal",
-    async ({ retire, queuedScroll, expected }) => {
+    async ({ retire, queuedScroll, duplicateLink, expected }) => {
       const confirmed = Promise.withResolvers<void>();
       const displayed = Promise.withResolvers<void>();
-      renderApp(<FavoriteRemoval confirmed={confirmed.promise} displayed={displayed.promise} />);
+      renderApp(
+        <FavoriteRemoval
+          confirmed={confirmed.promise}
+          displayed={displayed.promise}
+          duplicateLink={duplicateLink}
+        />,
+      );
       const main = screen.getByRole("main");
       const earlier = screen.getByRole("link", { name: "Earlier" });
       const removed = screen.getByRole("link", { name: "Removed" });
@@ -372,9 +394,13 @@ describe("Confirmed favorite reading position", () => {
 function HistoryLibrary({
   layout,
   anchorVisible,
+  externalOpening = false,
+  onPrepared,
 }: {
   layout: LibraryLayout;
   anchorVisible: boolean;
+  externalOpening?: boolean;
+  onPrepared?: () => void;
 }) {
   const entry = useLibraryEntry("/?type=all", true);
   const main = useRef<HTMLElement>(null);
@@ -384,36 +410,65 @@ function HistoryLibrary({
     models: { count: 1, more: false, pending: false, failed: false, next: () => {} },
     folders: { count: 1, more: false, pending: false, failed: false, next: () => {} },
   });
+  const neighbor = (
+    <Link href="/detail" data-library-entry="/models/2">
+      Neighbor
+    </Link>
+  );
   return (
-    <main ref={main} aria-label="Library">
-      <output aria-label="Reading status">{reading.status}</output>
-      {anchorVisible && (
-        <Link to="/detail" data-library-entry="/models/1">
-          Reading anchor
+    <>
+      {externalOpening && (
+        <Link
+          href="/detail"
+          onClick={() => {
+            reading.rememberAnchor("/models/1");
+            onPrepared?.();
+          }}
+        >
+          Open selected Model
         </Link>
       )}
-      <Link to="/detail" data-library-entry="/models/2">
-        Neighbor
-      </Link>
-    </main>
+      <main ref={main} aria-label="Library">
+        <output aria-label="Reading status">{reading.status}</output>
+        {externalOpening && neighbor}
+        {anchorVisible && (
+          <Link href="/detail" data-library-entry="/models/1">
+            Reading anchor
+          </Link>
+        )}
+        {!externalOpening && neighbor}
+      </main>
+    </>
   );
 }
 
-function HistoryBrowser({ layout }: { layout: LibraryLayout }) {
-  const navigate = useNavigate();
+function HistoryBrowser({
+  layout,
+  externalOpening = false,
+  onPrepared,
+}: {
+  layout: LibraryLayout;
+  externalOpening?: boolean;
+  onPrepared?: () => void;
+}) {
+  const location = useLocation();
+  const navigate = useRouter();
   const [anchorVisible, setAnchorVisible] = useState(true);
   return (
     <>
-      <button onClick={() => navigate(-1)}>History Back</button>
-      <button onClick={() => navigate(1)}>History Forward</button>
+      <button onClick={() => navigate.back()}>History Back</button>
+      <button onClick={() => navigate.forward()}>History Forward</button>
       <button onClick={() => setAnchorVisible(false)}>Remove anchor</button>
-      <Routes>
-        <Route
-          path="/"
-          element={<HistoryLibrary layout={layout} anchorVisible={anchorVisible} />}
+      {location.pathname === "/detail" ? (
+        <p>Model detail</p>
+      ) : (
+        <HistoryLibrary
+          layout={layout}
+          anchorVisible={anchorVisible}
+          externalOpening={externalOpening}
+          onPrepared={onPrepared}
         />
-        <Route path="/detail" element={<p>Model detail</p>} />
-      </Routes>
+      )}
     </>
   );
 }
@@ -421,7 +476,8 @@ function HistoryBrowser({ layout }: { layout: LibraryLayout }) {
 function installReadingGeometry(header: { height: number }) {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
     function (this: HTMLElement) {
-      if (!this.hasAttribute("data-library-entry")) return new DOMRect(0, 0, 300, 500);
+      if (!this.hasAttribute("data-library-entry") && !this.hasAttribute("data-library-anchor"))
+        return new DOMRect(0, 0, 300, 500);
       const main = this.closest("main");
       if (!main) throw new Error("Reading geometry requires a Library container");
       const top = this.dataset.libraryEntry === "/models/2" ? 450 : 300;
@@ -462,6 +518,58 @@ describe("History departure reading anchor", () => {
     },
   );
 
+  it("preserves the prepared offset when the departing layout changes", () => {
+    const header = { height: 0 };
+    installReadingGeometry(header);
+    renderApp(
+      <HistoryBrowser
+        layout="grid"
+        externalOpening
+        onPrepared={() => {
+          header.height = 84;
+        }}
+      />,
+    );
+    screen.getByRole("main").scrollTop = 200;
+    fireEvent.scroll(screen.getByRole("main"));
+    fireEvent.click(screen.getByRole("link", { name: "Open selected Model" }));
+    header.height = 0;
+    fireEvent.click(screen.getByRole("button", { name: "History Back" }));
+    expect(screen.getByRole("link", { name: "Reading anchor" }).getBoundingClientRect().top).toBe(
+      100,
+    );
+  });
+
+  it("retains the restored anchor through its queued scroll notification", () => {
+    const header = { height: 0 };
+    installReadingGeometry(header);
+    renderApp(<HistoryBrowser layout="grid" externalOpening />);
+    screen.getByRole("main").scrollTop = 200;
+    fireEvent.scroll(screen.getByRole("main"));
+    fireEvent.click(screen.getByRole("link", { name: "Open selected Model" }));
+    header.height = 160;
+    fireEvent.click(screen.getByRole("button", { name: "History Back" }));
+    expect(screen.getByRole("main").scrollTop).toBe(360);
+    fireEvent.scroll(screen.getByRole("main"));
+    fireEvent.click(screen.getByRole("button", { name: "History Forward" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove anchor" }));
+    fireEvent.click(screen.getByRole("button", { name: "History Back" }));
+    expect(screen.getByLabelText("Reading status")).toHaveTextContent("reset");
+  });
+
+  it("retains the selected anchor when opening outside the reading surface", () => {
+    installReadingGeometry({ height: 0 });
+    renderApp(<HistoryBrowser layout="grid" externalOpening />);
+    const main = screen.getByRole("main");
+    main.scrollTop = 200;
+    fireEvent.scroll(main);
+    fireEvent.click(screen.getByRole("link", { name: "Open selected Model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove anchor" }));
+    fireEvent.click(screen.getByRole("button", { name: "History Back" }));
+    expect(screen.getByLabelText("Reading status")).toHaveTextContent("reset");
+    expect(screen.getByRole("main").scrollTop).toBe(0);
+  });
+
   it("resets when the selected history anchor is missing", () => {
     installReadingGeometry({ height: 0 });
     renderApp(<HistoryBrowser layout="grid" />);
@@ -474,6 +582,132 @@ describe("History departure reading anchor", () => {
     fireEvent.click(screen.getByRole("button", { name: "History Back" }));
 
     expect(screen.getByLabelText("Reading status")).toHaveTextContent("reset");
+    expect(screen.getByRole("main").scrollTop).toBe(0);
+  });
+});
+
+function VirtualReadingLibrary({
+  missing,
+  initiallyVisible,
+  onOpen,
+  kind = "model",
+}: {
+  missing: boolean;
+  initiallyVisible: boolean;
+  onOpen: () => void;
+  kind?: "model" | "collection";
+}) {
+  const anchorKey = kind === "model" ? "/models/1" : "collection:1";
+  const entry = useLibraryEntry("/", true);
+  const main = useRef<HTMLElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const renderers = useRef(new Map<string, import("../reading-position").LibraryReadingRenderer>());
+  const [visible, setVisible] = useState(initiallyVisible);
+  useLayoutEffect(() => {
+    renderers.current.set("models", {
+      reveal(key) {
+        if (missing || key !== anchorKey) return "missing";
+        if (
+          main.current?.querySelector(
+            `[data-library-entry="${anchorKey}"], [data-library-anchor="${anchorKey}"]`,
+          )
+        )
+          return "mounted";
+        setVisible(true);
+        return "pending";
+      },
+    });
+  }, [missing, anchorKey]);
+  const reading = useLibraryReadingPosition(
+    entry,
+    "grid",
+    main,
+    list,
+    true,
+    {
+      ready: true,
+      models: { count: 1, more: false, pending: false, failed: false, next: () => {} },
+      folders: { count: 1, more: false, pending: false, failed: false, next: () => {} },
+    },
+    renderers,
+  );
+  return (
+    <main ref={main}>
+      <output aria-label="Virtual reading status">{reading.status}</output>
+      {visible && (
+        <Link
+          href="/detail"
+          data-library-entry={kind === "model" ? anchorKey : undefined}
+          data-library-anchor={kind === "collection" ? anchorKey : undefined}
+          onClick={onOpen}
+        >
+          Virtual anchor
+        </Link>
+      )}
+    </main>
+  );
+}
+
+function VirtualReadingBrowser({
+  missing,
+  kind = "model",
+}: {
+  missing: boolean;
+  kind?: "model" | "collection";
+}) {
+  const location = useLocation();
+  const [departed, setDeparted] = useState(false);
+  return location.pathname === "/detail" ? (
+    <Detail />
+  ) : (
+    <VirtualReadingLibrary
+      missing={missing}
+      kind={kind}
+      initiallyVisible={!departed}
+      onOpen={() => setDeparted(true)}
+    />
+  );
+}
+
+describe("Virtual reading anchors", () => {
+  beforeEach(() => clearLogin());
+  afterEach(() => vi.restoreAllMocks());
+  it("mounts an offscreen anchor before restoring its offset", async () => {
+    installReadingGeometry({ height: 0 });
+    renderApp(<VirtualReadingBrowser missing={false} />);
+    screen.getByRole("main").scrollTop = 200;
+    fireEvent.click(screen.getByRole("link", { name: "Virtual anchor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Virtual reading status")).toHaveTextContent("ready"),
+    );
+    expect(screen.getByRole("link", { name: "Virtual anchor" }).getBoundingClientRect().top).toBe(
+      100,
+    );
+  });
+  it("restores a Collection reading anchor after revealing its row", async () => {
+    installReadingGeometry({ height: 0 });
+    renderApp(<VirtualReadingBrowser missing={false} kind="collection" />);
+    screen.getByRole("main").scrollTop = 200;
+    fireEvent.click(screen.getByRole("link", { name: "Virtual anchor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Virtual reading status")).toHaveTextContent("ready"),
+    );
+    expect(screen.getByRole("link", { name: "Virtual anchor" }).getBoundingClientRect().top).toBe(
+      100,
+    );
+  });
+
+  it("resets an anchor absent from the reconstructed loaded pages", async () => {
+    installReadingGeometry({ height: 0 });
+    renderApp(<VirtualReadingBrowser missing />);
+    screen.getByRole("main").scrollTop = 200;
+    fireEvent.click(screen.getByRole("link", { name: "Virtual anchor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Virtual reading status")).toHaveTextContent("reset"),
+    );
     expect(screen.getByRole("main").scrollTop).toBe(0);
   });
 });

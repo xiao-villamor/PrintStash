@@ -97,7 +97,7 @@ async function choose(user: ReturnType<typeof userEvent.setup>, file: File) {
  * drop is the only way a non-G-code file reaches the modal at all.
  */
 function drop(file: File) {
-  fireEvent.drop(screen.getByRole("button", { name: /Choose G-code/ }), {
+  fireEvent.drop(screen.getByRole("button", { name: "Choose file" }), {
     dataTransfer: { files: [file], types: ["Files"] },
   });
 }
@@ -117,15 +117,18 @@ describe("AddGcodeRevisionModal", () => {
 
       expect(
         screen.getByText(
-          "Upload another slice while keeping earlier settings and print history available.",
+          "Select a sliced file. PrintStash stores it as a Revision; it does not slice or validate G-code.",
         ),
       ).toBeInTheDocument();
     });
 
-    it("names the file formats it takes", () => {
+    it("limits the file chooser to supported G-code formats", () => {
       renderModal();
 
-      expect(screen.getByText(".gcode, .g, .gco, or .bgcode")).toBeInTheDocument();
+      expect(document.querySelector("input[type=file]")).toHaveAttribute(
+        "accept",
+        ".gcode,.g,.gco,.bgcode",
+      );
     });
 
     it("cannot be submitted before a file is chosen", () => {
@@ -256,23 +259,23 @@ describe("AddGcodeRevisionModal", () => {
       await waitFor(() => expect(sent()?.get("is_recommended")).toBe("false"));
     });
 
-    it("shows the recommendation as a star that fills when chosen", async () => {
+    it("selects the explicit recommendation choice", async () => {
       const user = userEvent.setup();
       renderModal();
-      const toggle = screen.getByRole("checkbox", { name: "Mark as recommended" });
-      expect(toggle).toHaveAttribute("aria-checked", "false");
+      const toggle = screen.getByRole("radio", { name: "Make this Revision recommended" });
+      expect(toggle).not.toBeChecked();
 
       await user.click(toggle);
 
-      expect(toggle).toHaveAttribute("aria-checked", "true");
-      expect(toggle.querySelector("svg")).toHaveClass("fill-current");
+      expect(toggle).toBeChecked();
+      expect(screen.getByRole("radio", { name: "Keep current recommendation" })).not.toBeChecked();
     });
 
     it("recommends it when the user asks", async () => {
       const user = userEvent.setup();
       const { sent } = renderModal();
       await choose(user, aGcodeFile());
-      await user.click(screen.getByLabelText("Mark as recommended"));
+      await user.click(screen.getByRole("radio", { name: "Make this Revision recommended" }));
 
       await user.click(screen.getByRole("button", { name: /Add revision/ }));
 

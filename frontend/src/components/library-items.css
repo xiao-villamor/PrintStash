@@ -1,0 +1,275 @@
+.library-virtual-row {
+  display: grid;
+  align-items: stretch;
+}
+.library-items-grid > [data-library-key],
+.library-virtual-row > [data-library-key] {
+  height: 100%;
+}
+.library-preview {
+  background-color: var(--plate);
+}
+
+/* Data and image readiness fill a stationary frame, independently of navigation. */
+.library-preview-placeholder {
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
+}
+.library-card-fill-preview {
+  aspect-ratio: 8 / 5;
+  border-bottom: 1px solid transparent;
+}
+.library-card-fill {
+  animation: library-card-fill var(--duration-library-enter) var(--ease-library-enter) both;
+}
+.library-card-fill-position {
+  animation: library-card-fill-position var(--duration-library-enter) var(--ease-library-enter) both;
+}
+@keyframes library-card-fill-position {
+  from {
+    transform: translate(var(--card-fill-x), var(--card-fill-y));
+  }
+  to {
+    transform: translate(0, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .library-card-fill-position {
+    animation: none;
+  }
+}
+@keyframes library-card-fill {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.library-thumbnail-fill {
+  transition-property: opacity;
+  transition-duration: var(--duration-library-enter);
+  transition-timing-function: var(--ease-library-enter);
+}
+
+.library-card-facts > span + span::before {
+  content: "·";
+  margin-right: 0.375rem;
+}
+.library-card-content {
+  min-height: 0;
+}
+.library-model-card[data-favorites] .library-card-content {
+  min-height: 128px;
+}
+.library-model-card[data-favorites] .library-preview {
+  height: 156px;
+}
+
+.library-model-card[data-favorites] [data-library-card-tags] {
+  opacity: 0;
+}
+.library-model-card[data-favorites]:hover [data-library-card-tags],
+.library-model-card[data-favorites]:focus-within [data-library-card-tags] {
+  opacity: 1;
+}
+
+.library-model-card[data-inspected] {
+  border-color: var(--foreground);
+  outline: 1px solid var(--foreground);
+  outline-offset: -1px;
+}
+
+.library-model-card:not([data-favorites]) .library-preview {
+  height: auto;
+  aspect-ratio: 8 / 5;
+}
+.library-card-standard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 8px;
+}
+.library-card-standard h2 {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.3;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.library-card-standard h2 > span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.library-card-revision-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.library-card-revision-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+}
+.library-card-revision-line strong {
+  font: 600 13px/1.4 var(--font-mono);
+}
+.library-card-revision-line > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.library-card-result {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+}
+.library-card-summary-container .library-card-facts {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font: 400 12px/1.4 var(--font-mono);
+}
+
+.library-card-summary-container {
+  padding: 0 14px 14px;
+  min-width: 0;
+}
+.library-card-status {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  max-width: calc(100% - 48px);
+}
+.library-card-status > span {
+  height: 22px;
+  padding: 0 8px;
+  gap: 5px;
+  font-weight: 500;
+  background: transparent;
+}
+.library-card-dimensions {
+  position: absolute;
+  left: 14px;
+  bottom: 10px;
+  color: var(--muted-foreground);
+  font: 400 11px/1.4 var(--font-mono);
+}
+.library-card-revision-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  margin-right: -4px;
+}
+.library-card-revision-actions > button {
+  width: 28px;
+  height: 28px;
+}
+.library-card-revision-actions svg {
+  width: 14px;
+  height: 14px;
+}
+.library-card-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 24px;
+  align-items: center;
+}
+.library-card-outcome {
+  color: var(--foreground);
+  font: 500 12px/1.4 var(--font-mono);
+}
+.library-card-outcome + .library-card-outcome::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--muted-foreground);
+}
+.library-card-outcome-failed {
+  color: var(--destructive);
+}
+.library-card-no-gcode {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.library-card-no-gcode time {
+  font: 400 11px/1.4 var(--font-mono);
+}
+.library-card-menu-item {
+  display: flex;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 13px;
+}
+.library-card-menu-item:hover,
+.library-card-menu-item:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+.library-card-menu-item:disabled {
+  opacity: 0.5;
+}
+
+.library-card-summary-container .library-card-facts > span + span::before {
+  margin-left: 6px;
+}
+.library-card-status > span {
+  color: var(--secondary);
+}
+.library-card-status [data-revision-status="needs_test"] > span:first-child {
+  background: var(--status-test-dot);
+}
+
+.library-model-card {
+  container-type: inline-size;
+}
+@container (max-width: 240px) {
+  .library-card-recommended > span {
+    display: none;
+  }
+}
+
+.library-model-card:not([data-inspected]):hover {
+  border-color: var(--border-strong);
+}
+
+.library-model-card:not([data-favorites]) .library-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.library-card-thumbnail {
+  width: 45%;
+  height: auto;
+  max-height: 80%;
+  object-fit: contain;
+}
+
+/* Preview shape and type stay consistent as the shared track grows. */
+.collection-card-collage {
+  aspect-ratio: 2 / 1;
+}
+[data-compact] .collection-card-collage {
+  width: 96px;
+  height: 64px;
+  aspect-ratio: auto;
+}
+.collection-card-name,
+.library-card-standard h2 {
+  font-size: 1rem;
+}

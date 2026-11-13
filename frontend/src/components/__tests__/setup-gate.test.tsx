@@ -21,7 +21,7 @@ import "@testing-library/jest-dom/vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import userEvent from "@testing-library/user-event";
-import { Link } from "react-router-dom";
+import { Link } from "@/lib/link";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SetupGate } from "@/components/setup-gate";
@@ -164,7 +164,7 @@ describe("setup gate entry lifetime", () => {
     let probes = 0;
     renderApp(
       <>
-        <Link to="/next">Next entry</Link>
+        <Link href="/next">Next entry</Link>
         <Path />
         <SetupGate>
           <p>the vault</p>
@@ -196,7 +196,7 @@ describe("setup gate entry lifetime", () => {
     }
     renderApp(
       <>
-        <Link to="/next">Next entry</Link>
+        <Link href="/next">Next entry</Link>
         <Path />
         <SetupGate>
           <Subscriber />
@@ -217,7 +217,7 @@ describe("setup gate entry lifetime", () => {
     let probes = 0;
     renderApp(
       <>
-        <Link to="/getting-started">Storage step</Link>
+        <Link href="/getting-started">Storage step</Link>
         <Path />
         <SetupGate>
           <p>the vault</p>
@@ -241,7 +241,7 @@ describe("setup gate entry lifetime", () => {
     let probes = 0;
     renderApp(
       <>
-        <Link to="/next">Next entry</Link>
+        <Link href="/next">Next entry</Link>
         <Path />
         <SetupGate>
           <p>the vault</p>
@@ -269,7 +269,7 @@ describe("setup gate entry lifetime", () => {
     let probes = 0;
     renderApp(
       <>
-        <Link to="/next">Next entry</Link>
+        <Link href="/next">Next entry</Link>
         <SetupGate>
           <input aria-label="Draft" defaultValue="" />
         </SetupGate>
@@ -294,7 +294,7 @@ describe("setup gate entry lifetime", () => {
     let probes = 0;
     renderApp(
       <>
-        <Link to="/next">Next entry</Link>
+        <Link href="/next">Next entry</Link>
         <Path />
         <SetupGate>
           <input aria-label="Draft" defaultValue="" />
@@ -321,7 +321,7 @@ describe("setup gate entry lifetime", () => {
     let probes = 0;
     renderApp(
       <>
-        <Link to="/next">Next entry</Link>
+        <Link href="/next">Next entry</Link>
         <Path />
         <SetupGate>
           <p>the vault</p>

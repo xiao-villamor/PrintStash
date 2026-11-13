@@ -1,5 +1,6 @@
 @import "tailwindcss" source(none);
 @import "../packages/ui/src/cursors.css";
+@import "../packages/ui/src/motion.css";
 @config "../tailwind.config.cjs";
 @plugin "@tailwindcss/typography";
 @source "./app";
@@ -12,80 +13,91 @@
     /* Font families (previously injected by next/font; now from @fontsource). */
     --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
     --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
-    --background: #f8fafc;
-    --foreground: #1e293b;
+    --background: #f6f7f9;
+    --foreground: #101828;
     --card: #ffffff;
-    --card-foreground: #1e293b;
+    --card-foreground: #101828;
     --popover: #ffffff;
-    --popover-foreground: #1e293b;
-    --popover-hover: #f1f5f9;
-    --sidebar-bg: #eef2f7;
-    --primary: #2563eb;
+    --popover-foreground: #101828;
+    --popover-hover: #f1f3f6;
+    --sidebar-bg: #fbfbfc;
+    --rail-bg: #eef0f3;
+    --primary: #4d6f9b;
     --primary-foreground: #ffffff;
-    --secondary: #475569;
+    --secondary: #344054;
     --secondary-foreground: #ffffff;
-    --muted: #f1f5f9;
-    --muted-foreground: #64748b;
-    --accent: #eff6ff;
-    --accent-foreground: #1e40af;
-    --destructive: #dc2626;
+    --muted: #f1f3f6;
+    --muted-foreground: #5d6b7e;
+    --accent: #eef0f3;
+    --accent-foreground: #101828;
+    --destructive: #b42318;
     --destructive-foreground: #ffffff;
-    --border: #d8e1eb;
-    --input: #d8e1eb;
-    --ring: #2563eb;
-    --radius: 0.375rem;
+    --border: #e4e7ec;
+    --border-strong: #cdd3db;
+    --overlay-scrim: rgb(16 24 40 / 0.28);
+    --plate: #f8fafc;
+    --dialog-shadow: rgb(16 24 40 / 0.12);
+    --input: #8190a3;
+    --ring: #4d6f9b;
+    --radius: 4px;
+    color-scheme: light;
 
     /* Interaction shades of primary (hover = one step darker; soft = 40% for
        selection rings and tinted borders). */
-    --primary-hover: #1d4ed8;
-    --primary-soft: rgb(37 99 235 / 0.4);
+    --primary-hover: #41638e;
+    --primary-soft: rgb(77 111 155 / 0.4);
 
     /* Status */
-    --success: #16a34a;
+    --success: #067647;
     --success-foreground: #ffffff;
-    --warning: #d97706;
+    --warning: #b54708;
+    --status-test-dot: #f79009;
     --warning-foreground: #ffffff;
 
     /* Data visualisation palette. Stable semantic order across themes. */
-    --chart-1: #2563eb;
+    --chart-1: #4d6f9b;
     --chart-2: #0891b2;
     --chart-3: #7c3aed;
-    --chart-grid: #cbd5e1;
+    --chart-grid: #cdd3db;
 
-    /* Motion tokens — the single source of truth for easing and duration.
-       --ease-out is the curve this codebase already used in slide-up/card-in. */
+    /* Shared feedback timing and a critically damped content-settle profile. */
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
     --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
     --duration-press: 150ms;
     --duration-fast: 200ms;
     --duration-slow: 300ms;
+    --ease-library-enter: cubic-bezier(0.2, 0.6, 0.35, 1);
+    --duration-library-enter: 240ms;
+    --opacity-content-enter: 0.86;
+    --scale-detail-enter: var(--scale-content-enter);
+    --workbench-sidebar-width: 320px;
 
     --surface: #ffffff;
-    --surface-container: #f1f5f9;
-    --surface-container-low: #f8fafc;
+    --surface-container: #f1f3f6;
+    --surface-container-low: #f6f7f9;
     --surface-container-lowest: #ffffff;
-    --surface-container-high: #e2e8f0;
-    --surface-container-highest: #cbd5e1;
-    --surface-dim: #cbd5e1;
+    --surface-container-high: #e4e7ec;
+    --surface-container-highest: #cdd3db;
+    --surface-dim: #cdd3db;
     --surface-bright: #ffffff;
-    --on-surface: #1e293b;
-    --on-surface-variant: #64748b;
-    --outline: #94a3b8;
-    --outline-variant: #e2e8f0;
-    --surface-tint: #c2410c;
-    --primary-container: #2563eb;
+    --on-surface: #101828;
+    --on-surface-variant: #5d6b7e;
+    --outline: #8190a3;
+    --outline-variant: #e4e7ec;
+    --surface-tint: #4d6f9b;
+    --primary-container: #4d6f9b;
     --on-primary-container: #ffffff;
-    --secondary-container: #eff6ff;
-    --on-secondary-container: #1e40af;
+    --secondary-container: #eef0f3;
+    --on-secondary-container: #101828;
     --tertiary: #c2410c;
     --tertiary-container: #ffedd5;
     --on-tertiary-container: #7c2d12;
     --error: #dc2626;
     --error-container: #fef2f2;
     --on-error-container: #991b1b;
-    --inverse-surface: #1e293b;
-    --inverse-on-surface: #f8fafc;
-    --inverse-primary: #93c5fd;
+    --inverse-surface: #101828;
+    --inverse-on-surface: #f6f7f9;
+    --inverse-primary: #7896bc;
     --primary-fixed: #dbeafe;
     --primary-fixed-dim: #93c5fd;
     --secondary-fixed: #eff6ff;
@@ -95,71 +107,78 @@
   }
 
   .dark {
+    color-scheme: dark;
+
     /* Surfaces — distinct contrast steps */
-    --background: #0b1017;
-    --sidebar-bg: #080b10;
-    --foreground: #e3eaf3;
-    --card: #131b26;
-    --card-foreground: #e3eaf3;
-    --popover: #151f2c;
-    --popover-foreground: #e3eaf3;
-    --popover-hover: #26384d;
+    --background: #0c0f14;
+    --sidebar-bg: #0f1318;
+    --rail-bg: #090c10;
+    --foreground: #edf1f7;
+    --card: #13171e;
+    --card-foreground: #edf1f7;
+    --popover: #13171e;
+    --popover-foreground: #edf1f7;
+    --popover-hover: #1a2029;
 
     /* Interactive — action semantics stay blue in both themes. */
-    --primary: #2563eb;
+    --primary: #4d6f9b;
     --primary-foreground: #ffffff;
-    --secondary: #94a3b8;
-    --secondary-foreground: #0b1017;
+    --secondary: #c3cbd7;
+    --secondary-foreground: #0c0f14;
 
     /* Muted */
-    --muted: #1d2a3a;
-    --muted-foreground: #a5b5c9;
+    --muted: #1a2029;
+    --muted-foreground: #8c97a8;
 
-    /* Selected and hovered controls use a quiet blue tint. */
-    --accent: #172554;
-    --accent-foreground: #bfdbfe;
+    /* Selected controls use a quiet neutral fill. */
+    --accent: rgb(255 255 255 / 0.08);
+    --accent-foreground: #edf1f7;
 
     /* Status */
     --destructive: #f87171;
     --destructive-foreground: #450a0a;
 
     /* Borders & inputs */
-    --border: #2a3b50;
-    --input: #1d2a3a;
-    --ring: #60a5fa;
+    --border: #232a35;
+    --border-strong: #36404e;
+    --overlay-scrim: rgb(0 0 0 / 0.45);
+    --plate: #10151c;
+    --dialog-shadow: rgb(0 0 0 / 0.5);
+    --input: #697b92;
+    --ring: #7896bc;
 
-    --primary-hover: #1d4ed8;
-    --primary-soft: rgb(96 165 250 / 0.4);
+    --primary-hover: #5276a5;
+    --primary-soft: rgb(120 150 188 / 0.4);
 
-    --success: #4ade80;
+    --success: #86efac;
     --success-foreground: #052e16;
-    --warning: #fbbf24;
+    --warning: #fcd34d;
     --warning-foreground: #451a03;
-    --chart-1: #60a5fa;
+    --chart-1: #7896bc;
     --chart-2: #22d3ee;
     --chart-3: #a78bfa;
-    --chart-grid: #48617c;
+    --chart-grid: #36404e;
 
     /* Surface scale — clear luminosity steps */
-    --surface: #0b1017;
-    --surface-container: #131b26;
-    --surface-container-low: #0b1017;
-    --surface-container-lowest: #080c12;
-    --surface-container-high: #1d2a3a;
-    --surface-container-highest: #2a3b50;
-    --surface-dim: #080c12;
-    --surface-bright: #314861;
-    --on-surface: #e3eaf3;
-    --on-surface-variant: #a5b5c9;
-    --outline: #48617c;
-    --outline-variant: #2a3b50;
-    --surface-tint: #60a5fa;
+    --surface: #0c0f14;
+    --surface-container: #13171e;
+    --surface-container-low: #0c0f14;
+    --surface-container-lowest: #090c10;
+    --surface-container-high: #1a2029;
+    --surface-container-highest: #232a35;
+    --surface-dim: #090c10;
+    --surface-bright: #36404e;
+    --on-surface: #edf1f7;
+    --on-surface-variant: #8c97a8;
+    --outline: #697b92;
+    --outline-variant: #232a35;
+    --surface-tint: #7896bc;
 
     /* Containers */
-    --primary-container: #1b3356;
-    --on-primary-container: #dbeafe;
-    --secondary-container: #1d2a3a;
-    --on-secondary-container: #bfdbfe;
+    --primary-container: #4d6f9b;
+    --on-primary-container: #ffffff;
+    --secondary-container: #1a2029;
+    --on-secondary-container: #edf1f7;
     --tertiary: #fb923c;
     --tertiary-container: #332316;
     --on-tertiary-container: #fed7aa;
@@ -168,9 +187,9 @@
     --on-error-container: #fef2f2;
 
     /* Inverse */
-    --inverse-surface: #dce4ef;
-    --inverse-on-surface: #0b1017;
-    --inverse-primary: #2563eb;
+    --inverse-surface: #edf1f7;
+    --inverse-on-surface: #0c0f14;
+    --inverse-primary: #4d6f9b;
 
     /* Fixed */
     --primary-fixed: #dbeafe;
@@ -216,6 +235,98 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
+
+  /* Every single-choice <select> opens the same menu as the app's dropdown
+     menus (Sort, Display): square popover, 12px rows, neutral hover, the
+     chosen row tinted with a trailing check. Browsers without customizable
+     select keep their native list; the trigger styling below still applies. */
+  @supports (appearance: base-select) {
+    select:not([multiple]):not([size]) {
+      appearance: base-select;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      cursor: pointer;
+    }
+
+    select:not([multiple]):not([size]):disabled {
+      cursor: not-allowed;
+    }
+
+    select:not([multiple]):not([size])::picker-icon {
+      content: "";
+      flex: none;
+      width: 14px;
+      height: 14px;
+      margin-left: auto;
+      background-color: var(--muted-foreground);
+      mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+        center / contain no-repeat;
+    }
+
+    select:not([multiple]):not([size])::picker(select) {
+      appearance: base-select;
+      min-width: anchor-size(width);
+      max-height: min(20rem, 60vh);
+      margin: 4px 0;
+      padding: 4px;
+      border: 1px solid var(--border);
+      border-radius: 0;
+      background: var(--popover);
+      color: var(--popover-foreground);
+      box-shadow:
+        0 10px 15px -3px rgb(0 0 0 / 0.1),
+        0 4px 6px -4px rgb(0 0 0 / 0.1);
+    }
+
+    select:not([multiple]):not([size]) option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      padding: 8px 10px;
+      border-radius: 0;
+      font-size: 12px;
+      line-height: 16px;
+      color: var(--popover-foreground);
+      white-space: nowrap;
+    }
+
+    select:not([multiple]):not([size]) option:hover,
+    select:not([multiple]):not([size]) option:focus-visible {
+      background: var(--popover-hover);
+      outline: none;
+    }
+
+    select:not([multiple]):not([size]) option:checked {
+      background: var(--accent);
+      color: var(--accent-foreground);
+    }
+
+    select:not([multiple]):not([size]) option:disabled {
+      color: var(--muted-foreground);
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    select:not([multiple]):not([size]) option::checkmark {
+      content: "";
+      order: 1;
+      width: 14px;
+      height: 14px;
+      margin-left: auto;
+      background-color: currentColor;
+      mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E")
+        center / contain no-repeat;
+    }
+
+    select:not([multiple]):not([size]) optgroup {
+      padding: 6px 10px 2px;
+      font: 500 11px var(--font-mono);
+      color: var(--muted-foreground);
+    }
+  }
 }
 
 /* Smooth theme transitions — only active during the class swap, not on hovers.
@@ -250,24 +361,6 @@
   }
 }
 
-@keyframes slide-in-left {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(0);
-  }
-}
-
-@keyframes slide-up {
-  from {
-    transform: translateY(100%);
-  }
-  to {
-    transform: translateY(0);
-  }
-}
-
 @keyframes fade-in {
   from {
     opacity: 0;
@@ -277,100 +370,22 @@
   }
 }
 
-/* Cards settle in with a small fade + rise instead of appearing abruptly. Runs
-   once per mounted card (stable React keys), so it plays for a new folder /
-   search result / next page — not on every keystroke re-render. */
-@keyframes card-in {
+/* Content changes share the same small, opaque depth settle. Edge movement is
+   reserved for actual drawers; loading handoffs retain their opacity feedback. */
+@keyframes content-settle {
   from {
-    opacity: 0;
-    transform: translateY(4px);
+    transform: scale(var(--scale-content-enter));
   }
   to {
-    opacity: 1;
     transform: none;
   }
 }
 
-/* Content panels (tab bodies, section swaps) settle in with a 4px rise. */
-@keyframes panel-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* Folder drill-in / back: the new folder's content arrives from the side the
-   user moved toward (deeper = from the right, up = from the left), so the
-   hierarchy reads spatially. Small offset: this is a hint, not a slide. */
-@keyframes folder-in-forward {
-  from {
-    opacity: 0;
-    transform: translateX(24px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes folder-in-back {
-  from {
-    opacity: 0;
-    transform: translateX(-24px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* A card that turned up in the open view eases in where it belongs: opacity and
-   the house 97% scale, from the card's own top-left so its neighbours' tops do
-   not move. */
-@keyframes card-arrive {
-  from {
-    opacity: 0;
-    transform: scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* A tree count that changed settles toward its new value: up when it grew,
-   down when it shrank. 4px, press-fast: a tick, not a slide. */
-@keyframes count-up {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes count-down {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* Floating panels (suggestion lists, pickers) settle from 97% scale. */
+/* Floating panels use the same depth range, with a brief opacity handoff. */
 @keyframes pop-in {
   from {
     opacity: 0;
-    transform: scale(0.97);
+    transform: scale(var(--scale-content-enter));
   }
   to {
     opacity: 1;
@@ -416,124 +431,43 @@
     animation: theme-icon-in var(--duration-fast) var(--ease-out);
   }
 
-  .slide-in-left {
-    animation: slide-in-left var(--duration-fast) var(--ease-out);
+  .slide-in-left,
+  .slide-up,
+  .animate-card-in,
+  .animate-panel-in,
+  .animate-card-arrive,
+  .results-settle,
+  .pane-in,
+  .folder-in-forward,
+  .folder-in-back {
+    animation: content-settle var(--duration-slow) var(--ease-content-settle) backwards;
+    transform-origin: center top;
   }
-
-  .slide-up {
-    animation: slide-up var(--duration-fast) var(--ease-out);
-  }
-
   .fade-in {
-    animation: fade-in var(--duration-fast) var(--ease-out);
+    animation: fade-in var(--duration-press) var(--ease-out);
   }
-
-  .animate-card-in {
-    animation: card-in var(--duration-fast) var(--ease-out) both;
-  }
-
   .pop-in {
     animation: pop-in var(--duration-press) var(--ease-out);
   }
-
-  .animate-panel-in {
-    animation: panel-in var(--duration-fast) var(--ease-out) both;
-  }
-
-  .animate-card-arrive {
-    animation: card-arrive var(--duration-fast) var(--ease-out) backwards;
-    transform-origin: top left;
-  }
-
-  .animate-count-up {
-    animation: count-up var(--duration-press) var(--ease-out) both;
-  }
-
+  .animate-count-up,
   .animate-count-down {
-    animation: count-down var(--duration-press) var(--ease-out) both;
+    animation: none;
   }
 
-  .folder-in-forward {
-    animation: folder-in-forward var(--duration-slow) var(--ease-out) both;
+  /* Fast reads never flash a loading grid. Its geometry is reserved immediately. */
+  .library-loading-placeholder {
+    animation: fade-in var(--duration-fast) var(--ease-library-enter) var(--duration-fast) both;
   }
 
-  .folder-in-back {
-    animation: folder-in-back var(--duration-slow) var(--ease-out) both;
+  /* A result set arrives together: no lateral travel or decorative cascade. */
+  :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump)
+    > .library-virtual-row
+    > [data-library-key] {
+    animation: content-settle var(--duration-slow) var(--ease-content-settle) backwards;
+    transform-origin: center top;
   }
-
-  /* Library grid cards after a folder change: each card settles in on its own,
-     30ms apart and capped at 10 like .stagger-children. "backwards" releases the
-     final transform so press feedback (active:scale) still works afterwards. */
-  .folder-cards-forward > * {
-    animation: folder-in-forward var(--duration-slow) var(--ease-out) backwards;
-  }
-  .folder-cards-back > * {
-    animation: folder-in-back var(--duration-slow) var(--ease-out) backwards;
-  }
-  .folder-cards-jump > * {
-    animation: fade-in var(--duration-slow) var(--ease-out) backwards;
-  }
-  :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump) > *:nth-child(2) {
-    animation-delay: 30ms;
-  }
-  :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump) > *:nth-child(3) {
-    animation-delay: 60ms;
-  }
-  :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump) > *:nth-child(4) {
-    animation-delay: 90ms;
-  }
-  :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump) > *:nth-child(5) {
-    animation-delay: 120ms;
-  }
-  :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump) > *:nth-child(6) {
-    animation-delay: 150ms;
-  }
-  :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump) > *:nth-child(7) {
-    animation-delay: 180ms;
-  }
-  :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump) > *:nth-child(8) {
-    animation-delay: 210ms;
-  }
-  :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump) > *:nth-child(9) {
-    animation-delay: 240ms;
-  }
-  :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump) > *:nth-child(n + 10) {
-    animation-delay: 270ms;
-  }
-
-  /* Entrance stagger for card grids. Children settle 30ms apart so a page reads
-     as a sequence instead of one flat block. Capped at ~10: a 60-card page must
-     land well inside the 300ms UI budget, so everything past the 10th shares the
-     last slot. Purely decorative — the cards are already interactive underneath. */
-  .stagger-children > *:nth-child(1) {
+  .stagger-children > * {
     animation-delay: 0ms;
-  }
-  .stagger-children > *:nth-child(2) {
-    animation-delay: 30ms;
-  }
-  .stagger-children > *:nth-child(3) {
-    animation-delay: 60ms;
-  }
-  .stagger-children > *:nth-child(4) {
-    animation-delay: 90ms;
-  }
-  .stagger-children > *:nth-child(5) {
-    animation-delay: 120ms;
-  }
-  .stagger-children > *:nth-child(6) {
-    animation-delay: 150ms;
-  }
-  .stagger-children > *:nth-child(7) {
-    animation-delay: 180ms;
-  }
-  .stagger-children > *:nth-child(8) {
-    animation-delay: 210ms;
-  }
-  .stagger-children > *:nth-child(9) {
-    animation-delay: 240ms;
-  }
-  .stagger-children > *:nth-child(n + 10) {
-    animation-delay: 270ms;
   }
 
   .pb-safe {
@@ -552,22 +486,34 @@
   .animate-count-up,
   .animate-count-down,
   .animate-card-arrive,
-  .animate-panel-in {
-    animation: fade-in var(--duration-fast) ease both;
+  .animate-panel-in,
+  .pane-in,
+  .results-settle {
+    animation: none;
   }
   .animate-theme-icon {
     animation: none;
   }
-  /* Stagger is decorative sequencing — under reduced motion the whole grid
-     fades in at once rather than marching in. :nth-child(n) matches the (0,2,0)
-     specificity of the stagger rules above so this override actually wins. */
+  /* Legacy stagger classes must not reintroduce a delay. */
   .stagger-children > *:nth-child(n) {
     animation-delay: 0ms;
   }
-  /* Folder cards fade without moving or marching in. Same (0,2,0) specificity
-     as the delay rules above, declared later, so it wins. */
-  :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump) > *:nth-child(n) {
-    animation-name: fade-in;
-    animation-delay: 0ms;
+  /* Match the card entrance selector so reduced motion always wins. */
+  :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump)
+    > .library-virtual-row
+    > [data-library-key][data-entry-slot] {
+    animation: none;
+  }
+}
+
+/* The library toolbar's printer filter draws its own chevron and is reset by a
+   component rule outside the base layer; give it the shared menu too. */
+@supports (appearance: base-select) {
+  .library-model-toolbar label > select:not([multiple]):not([size]) {
+    appearance: base-select;
+  }
+
+  .library-model-toolbar label:has(> select) > svg:last-child {
+    display: none;
   }
 }
