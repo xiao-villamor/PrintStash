@@ -269,12 +269,12 @@ export function LibraryItems<T>({
       if (before) {
         const dx = before.left - after.left;
         const dy = before.top - after.top;
-        const dw = before.width - after.width;
-        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(dw) < 0.5) continue;
+        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
+        // Transform only: it runs on the compositor. Animating width would
+        // relayout every card on every frame of the pane motion.
         keyframes = progress.map((value, index) => ({
           offset: index / last,
           transform: `translate(${dx * (1 - value)}px, ${dy * (1 - value)}px)`,
-          width: `${after.width + dw * (1 - value)}px`,
         }));
       } else {
         // Newly rendered (e.g. a row the reflow brings into view) fades in.
@@ -362,6 +362,13 @@ export function LibraryItems<T>({
     };
   }, [readingRenderers, readingId, keys, columns, virtual, virtualizer, geometry]);
 
+  // A card's content depends on its item, not on the grid: a column change
+  // (e.g. the pane starting to move) reuses the same elements, so React skips
+  // re-rendering every card and the motion's first frame is not delayed.
+  const contents = useMemo(
+    () => items.map((item, index) => renderItem(item, index)),
+    [items, renderItem],
+  );
   const child = (item: T, index: number) => (
     <div
       key={itemKey(item)}
@@ -369,7 +376,7 @@ export function LibraryItems<T>({
       data-entry-slot={Math.min(index, 4)}
       className="min-w-0"
     >
-      {renderItem(item, index)}
+      {contents[index]}
     </div>
   );
   // Native rendering is one grid: a card keeps its element (and decoded
