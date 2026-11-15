@@ -1019,14 +1019,15 @@ describe("ModelBrowser", () => {
     ];
 
     /**
-     * A folder card in the grid (the sidebar tree lists the same names). The
-     * cards arrive with the open folder's children, after the page has drawn.
+     * The open control of a folder card in the grid (the sidebar tree lists the
+     * same names). The cards arrive with the open folder's children, after the
+     * page has drawn; the card's button, not its frame, opens the folder.
      */
     async function folderCard(path: string) {
       return waitFor(() => {
         const card = screen
           .getByRole("main")
-          .querySelector<HTMLElement>(`[data-collection-path="${path}"]`);
+          .querySelector<HTMLElement>(`[data-collection-path="${path}"] button:not([role])`);
         if (!card) throw new Error(`no folder card for ${path}`);
         return card;
       });
@@ -1058,6 +1059,34 @@ describe("ModelBrowser", () => {
       await waitFor(() => expect(app.client.isFetching()).toBe(0));
 
       expect(folder).toBeInTheDocument();
+    });
+
+    it("keeps the card of a Model shown in both folders when moving between them", async () => {
+      const user = userEvent.setup();
+      const shared = aModelListItem({ id: 7, name: "Shared bracket" });
+      const page = (models: ReturnType<typeof aModelListItem>[]) =>
+        json({
+          items: models.map((model) => ({ kind: "model", model })),
+          total: models.length,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        });
+      renderVault({
+        at: "/?c=parts",
+        collections: PARTS_TREE,
+        routes: {
+          "GET /api/v1/models/browse": (url) =>
+            url.includes("parts%2Fbrackets")
+              ? page([shared])
+              : page([aModelListItem({ id: 8, name: "Shelf rig" }), shared]),
+        },
+      });
+      const before = (await screen.findByText("Shared bracket")).closest("[data-library-key]");
+      await user.click(await folderCard("parts/brackets"));
+      expect(await screen.findByRole("heading", { name: "Brackets" })).toBeVisible();
+      await waitFor(() => expect(screen.queryByText("Shelf rig")).not.toBeInTheDocument());
+      expect(screen.getByText("Shared bracket").closest("[data-library-key]")).toBe(before);
     });
 
     it("keeps one coherent folder result while the destination loads", async () => {

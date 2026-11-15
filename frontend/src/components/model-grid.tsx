@@ -4314,7 +4314,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 />
               ) : viewMode === "grid" ? (
                 <div
-                  key={`grid:${folderEntrance.path ?? ""}`}
+                  // One grid across folders: a Model shown in both (subfolders
+                  // included) keeps its card, thumbnail and state instead of
+                  // every card being rebuilt on each navigation. The entrance
+                  // class on this container still settles the new result set.
+                  key="grid"
                   ref={modelGrid}
                   data-fill-hold={fillPhase === "holding" ? "" : undefined}
                   className={compact ? "p-3" : favoritesOnly ? "px-4 pb-6 sm:px-6" : "p-4 sm:p-6"}
