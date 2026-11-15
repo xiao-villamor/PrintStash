@@ -158,44 +158,60 @@ test.describe("vault route", () => {
     expect(browseRequests.every((url) => !new URL(url).searchParams.has("cursor"))).toBe(true);
   });
 
-  test("a Model added to the open view eases in while the others stay put", async ({ page }) => {
-    let changed = false;
-    const existing = aModelListItem({ id: 1, name: "Existing bracket", thumbnail_url: null });
-    const added = aModelListItem({ id: 2, name: "Added bracket", thumbnail_url: null });
-    await page.route("**/api/v1/models/browse/revision", (route) =>
-      route.fulfill({
-        json: { browse_revision: changed ? "r2" : "r1", authorization_revision: "a1" },
-      }),
-    );
-    await page.route("**/api/v1/models/browse?**", (route) =>
-      route.fulfill({
-        json: {
-          items: (changed ? [added, existing] : [existing]).map((model) => ({
-            kind: "model",
-            model,
-          })),
-          total: changed ? 2 : 1,
-          next_cursor: null,
-          browse_revision: changed ? "r2" : "r1",
-          authorization_revision: "a1",
-        },
-      }),
-    );
-    await page.goto("/");
-    await expect(page.getByText("Existing bracket", { exact: true })).toBeVisible();
-    changed = true;
-    await page.evaluate(() =>
-      document.dispatchEvent(new Event("visibilitychange", { bubbles: true })),
-    );
+  for (const reducedMotion of ["no-preference", "reduce"] as const) {
+    test(`a Model added to the open view fades at its final size with ${reducedMotion}`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ reducedMotion });
+      let changed = false;
+      const existing = aModelListItem({ id: 1, name: "Existing bracket", thumbnail_url: null });
+      const added = aModelListItem({ id: 2, name: "Added bracket", thumbnail_url: null });
+      await page.route("**/api/v1/models/browse/revision", (route) =>
+        route.fulfill({
+          json: { browse_revision: changed ? "r2" : "r1", authorization_revision: "a1" },
+        }),
+      );
+      await page.route("**/api/v1/models/browse?**", (route) =>
+        route.fulfill({
+          json: {
+            items: (changed ? [added, existing] : [existing]).map((model) => ({
+              kind: "model",
+              model,
+            })),
+            total: changed ? 2 : 1,
+            next_cursor: null,
+            browse_revision: changed ? "r2" : "r1",
+            authorization_revision: "a1",
+          },
+        }),
+      );
+      await page.goto("/");
+      await expect(page.getByText("Existing bracket", { exact: true })).toBeVisible();
+      await page.evaluate(() => {
+        document.addEventListener("animationstart", (event) => {
+          if (!(event.target instanceof HTMLElement) || !event.target.matches("article")) return;
+          for (const animation of event.target.getAnimations()) {
+            animation.pause();
+            animation.currentTime = 75;
+          }
+        });
+      });
+      changed = true;
+      await page.evaluate(() =>
+        document.dispatchEvent(new Event("visibilitychange", { bubbles: true })),
+      );
 
-    const arrival = page.locator("article", { hasText: "Added bracket" });
-    await expect(arrival).toBeVisible();
-    expect(await arrival.evaluate((node) => getComputedStyle(node).animationName)).toBe(
-      "card-arrive",
-    );
-    const settled = page.locator("article", { hasText: "Existing bracket" });
-    expect(await settled.evaluate((node) => getComputedStyle(node).animationName)).toBe("none");
-  });
+      const arrival = page.locator("article", { hasText: "Added bracket" });
+      await expect(arrival).toBeVisible();
+      await expect(arrival).toHaveCSS("animation-duration", "0.15s");
+      await expect(arrival).toHaveCSS("transform", "none");
+      const opacity = await arrival.evaluate((node) => Number(getComputedStyle(node).opacity));
+      expect(opacity).toBeGreaterThan(0);
+      expect(opacity).toBeLessThan(1);
+      const settled = page.locator("article", { hasText: "Existing bracket" });
+      expect(await settled.evaluate((node) => getComputedStyle(node).animationName)).toBe("none");
+    });
+  }
 
   test("reports a conflicting batch undo", async ({ page }) => {
     await page.route("**/api/v1/models/browse?**", (route) =>

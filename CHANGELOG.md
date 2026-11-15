@@ -11,6 +11,8 @@
 
 ### Fixed
 
+- Cards appear at their final size and position with a brief fade, without growing or rising as they load.
+
 - API key and OrcaSlicer command copy buttons work on HTTP installations without the secure Clipboard API, with a visible error if the browser refuses copying.
 - Confirmed Trash purges reclaim owned files, thumbnails and multipart covers on guarded local/FUSE storage using hash-checked quarantine. Previously blocked guarded cleanup intents are retried; changed objects and external originals remain protected.
 

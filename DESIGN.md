@@ -284,7 +284,7 @@ Both are covered by e2e tests in `frontend/tests/e2e/app-routes.spec.ts`.
 
 | Class | Use |
 | --- | --- |
-| `animate-card-in` | Grid/list items — fade + 4px rise |
+| `animate-card-in`, `animate-card-arrive` | Newly mounted cards and cards added to the open view — opacity only over `press`, already at their final size and position |
 | `animate-panel-in` | Tab bodies, section swaps, empty states |
 | `pop-in` | Floating panels — from `scale(0.97)` |
 | `slide-up`, `slide-in-left` | Drawers and sheets |

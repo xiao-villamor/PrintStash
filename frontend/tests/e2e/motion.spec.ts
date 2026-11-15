@@ -58,6 +58,33 @@ async function folderWithDescription(page: Page) {
 }
 
 test.describe("motion and layering", () => {
+  for (const reducedMotion of ["no-preference", "reduce"] as const) {
+    test(`initial printer cards fade at their final position with ${reducedMotion}`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ reducedMotion });
+      await page.addInitScript(() => {
+        document.addEventListener("animationstart", (event) => {
+          if (!(event.target instanceof HTMLElement) || !event.target.matches("article")) return;
+          for (const animation of event.target.getAnimations()) {
+            animation.pause();
+            animation.currentTime = 75;
+          }
+        });
+      });
+
+      await page.goto("/printers");
+
+      const card = page.getByRole("main").getByRole("article").first();
+      await expect(card).toBeVisible();
+      await expect(card).toHaveCSS("animation-duration", "0.15s");
+      await expect(card).toHaveCSS("transform", "none");
+      const opacity = await card.evaluate((node) => Number(getComputedStyle(node).opacity));
+      expect(opacity).toBeGreaterThan(0);
+      expect(opacity).toBeLessThan(1);
+    });
+  }
+
   for (const scenario of [
     { width: 1920, reducedMotion: "no-preference" },
     { width: 390, reducedMotion: "no-preference" },

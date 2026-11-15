@@ -277,20 +277,6 @@
   }
 }
 
-/* Cards settle in with a small fade + rise instead of appearing abruptly. Runs
-   once per mounted card (stable React keys), so it plays for a new folder /
-   search result / next page — not on every keystroke re-render. */
-@keyframes card-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
 /* Content panels (tab bodies, section swaps) settle in with a 4px rise. */
 @keyframes panel-in {
   from {
@@ -321,20 +307,6 @@
   from {
     opacity: 0;
     transform: translateX(-24px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* A card that turned up in the open view eases in where it belongs: opacity and
-   the house 97% scale, from the card's own top-left so its neighbours' tops do
-   not move. */
-@keyframes card-arrive {
-  from {
-    opacity: 0;
-    transform: scale(0.97);
   }
   to {
     opacity: 1;
@@ -428,8 +400,9 @@
     animation: fade-in var(--duration-fast) var(--ease-out);
   }
 
+  /* Cards appear at their final size and position; only opacity changes. */
   .animate-card-in {
-    animation: card-in var(--duration-fast) var(--ease-out) both;
+    animation: fade-in var(--duration-press) var(--ease-out) backwards;
   }
 
   .pop-in {
@@ -441,8 +414,7 @@
   }
 
   .animate-card-arrive {
-    animation: card-arrive var(--duration-fast) var(--ease-out) backwards;
-    transform-origin: top left;
+    animation: fade-in var(--duration-press) var(--ease-out) backwards;
   }
 
   .animate-count-up {
@@ -543,7 +515,6 @@
 
 /* Reduced motion: keep opacity feedback, drop all movement. */
 @media (prefers-reduced-motion: reduce) {
-  .animate-card-in,
   .slide-in-left,
   .slide-up,
   .pop-in,
@@ -551,7 +522,6 @@
   .folder-in-back,
   .animate-count-up,
   .animate-count-down,
-  .animate-card-arrive,
   .animate-panel-in {
     animation: fade-in var(--duration-fast) ease both;
   }
