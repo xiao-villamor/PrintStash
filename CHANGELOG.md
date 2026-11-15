@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Library loading reuses eligible folder preview data, starts previews without waiting for card fades, and loads descriptions and dialogs on demand. Automatic folder scope resolves empty direct listings in one response while preserving bounded pagination.
 - The Collections sidebar opens with a gentler ease and changes tools without zooming its contents.
 - Switching to Search, Favorites or Settings animates only the main content with one shared transition; the sidebar and top bar stay still. Search in the navigation rail opens the main Search page, and cached returns use the same motion.
 - Workbench sections share one sidebar width and preserve its position when navigating to Settings. Settings navigation uses the same sidebar, and section, tab and card transitions follow a shared motion pattern with reduced-motion support.

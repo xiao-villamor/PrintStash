@@ -14,6 +14,7 @@ export function listLibraryPage(
   const search = modelListSearch(params);
   search.set("view", params.view);
   search.set("sort", params.sort);
+  if (params.auto_scope) search.set("auto_scope", "true");
   if (params.cursor) search.set("cursor", params.cursor);
   return getJson<LibraryBrowsePage>(`/api/v1/models/browse?${search}`, options);
 }

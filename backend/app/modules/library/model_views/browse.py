@@ -65,6 +65,8 @@ class Cursor(BaseModel):
     revision: str
     offset: int = Field(gt=0, le=2**63 - 1)
     total: int = Field(ge=0)
+    # Older cursors carry only the explicitly requested scope.
+    direct: bool | None = None
 
 
 def revision(session: Session) -> BrowseRevisionRead:
@@ -90,6 +92,8 @@ def _revision(session: Session) -> str:
 
 def _key(user: User, query: BrowseQuery) -> str:
     inputs = query.model_dump(mode="json", exclude={"cursor"})
+    if not query.auto_scope:
+        inputs.pop("auto_scope")
     for field, value in inputs.items():
         if isinstance(value, list):
             inputs[field] = sorted(set(value))
@@ -293,12 +297,23 @@ def page_items(session: Session, user: User, query: BrowseQuery) -> BrowsePage:
     cursor = _decode(query.cursor, key) if query.cursor is not None else None
     if cursor is not None and cursor.revision != browse_revision:
         raise OperationError("browse_refresh_required", kind=ErrorKind.CONFLICT)
-    source = _source(session, user, query)
+    effective_direct = (
+        cursor.direct
+        if cursor is not None and cursor.direct is not None
+        else query.direct
+    )
+    source = _source(
+        session, user, query.model_copy(update={"direct": effective_direct})
+    )
     total = (
         cursor.total
         if cursor is not None
         else session.execute(select(func.count()).select_from(source)).scalar_one()
     )
+    if cursor is None and query.auto_scope and effective_direct and total == 0:
+        effective_direct = False
+        source = _source(session, user, query.model_copy(update={"direct": False}))
+        total = session.execute(select(func.count()).select_from(source)).scalar_one()
     descending = query.sort in {
         ModelSort.DATE_DESC,
         ModelSort.NAME_DESC,
@@ -345,6 +360,7 @@ def page_items(session: Session, user: User, query: BrowseQuery) -> BrowsePage:
                 revision=browse_revision,
                 offset=offset + len(rows),
                 total=total,
+                direct=effective_direct,
             )
         )
         if has_more
@@ -356,6 +372,7 @@ def page_items(session: Session, user: User, query: BrowseQuery) -> BrowsePage:
         total=total,
         browse_revision=browse_revision,
         authorization_revision=authority.authorization_revision,
+        effective_direct=effective_direct,
     )
 
 

@@ -20,6 +20,10 @@ class BrowseKind(str, Enum):
 
 
 class BrowseQuery(ModelFilters):
+    auto_scope: bool = Field(
+        default=False,
+        description="Expand an empty direct listing to its subtree in the same read.",
+    )
     view: LibraryView = LibraryView.ALL
     sort: ModelSort = ModelSort.DATE_DESC
     limit: int = Field(default=60, ge=1, le=100)
@@ -52,6 +56,7 @@ class BrowsePage(BaseModel):
     )
     browse_revision: str
     authorization_revision: str
+    effective_direct: bool
 
 
 class BrowseRevisionRead(BaseModel):

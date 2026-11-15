@@ -3,7 +3,10 @@ import { LibraryCardSelection } from "@/components/library-card-selection";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { LibraryPreviewPlaceholder } from "@/components/library-card-placeholder";
 import { Button } from "@/components/ui/button";
-import { useCollectionOverview } from "@/features/library/collection-overview";
+import {
+  useCollectionOverview,
+  type CollectionPreviewSource,
+} from "@/features/library/collection-overview";
 import { useUiLocale } from "@/lib/i18n";
 import { uiText } from "@/lib/locale";
 import type { ModelDrag } from "@/lib/model-dnd";
@@ -23,6 +26,7 @@ export function CollectionOverviewCard({
   selected,
   onToggleSelect,
   previewsReady = true,
+  previewSource,
 }: {
   collection: CollectionRead;
   compact?: boolean;
@@ -37,6 +41,7 @@ export function CollectionOverviewCard({
   onToggleSelect?: (id: number) => void;
   /** False until the page's own Model list has arrived; mosaics read after it. */
   previewsReady?: boolean;
+  previewSource?: CollectionPreviewSource;
 }) {
   useUiLocale();
   const { ref, pending, models, error, retry } = useCollectionOverview(
@@ -44,6 +49,7 @@ export function CollectionOverviewCard({
     authorizationRevision,
     onAuthorityRetired,
     previewsReady,
+    previewSource,
   );
   const { dragOver, handlers } = useModelDropTarget(collection.path, onDropModel);
   const count = models?.length ?? (pending ? 4 : 0);

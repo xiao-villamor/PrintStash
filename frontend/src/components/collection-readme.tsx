@@ -16,8 +16,8 @@ import { useCollectionReadme } from "@/lib/queries";
 import { queryKeys } from "@/lib/query-client";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
-import { MarkdownView } from "@/components/markdown-view";
 import { toast } from "@/lib/toast";
+import { useCollectionReadmeRenderer } from "@/components/use-collection-readme-renderer";
 
 export function CollectionReadme({
   collectionId,
@@ -41,6 +41,8 @@ export function CollectionReadme({
   // readme that cannot be read is treated as absent: the folder is still usable.
   const readmeQuery = useCollectionReadme(collectionId, { enabled: hasReadme });
   const readme = readmeQuery.data ?? null;
+  const renderer = useCollectionReadmeRenderer(hasReadme || !!readme);
+  const MarkdownView = renderer.data?.MarkdownView;
   const loading = readmeQuery.isLoading;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -69,7 +71,7 @@ export function CollectionReadme({
     observer.observe(el);
     if (el.firstElementChild) observer.observe(el.firstElementChild);
     return () => observer.disconnect();
-  }, [collectionId, readme, editing]);
+  }, [collectionId, readme, editing, MarkdownView]);
 
   // Switching collections drops an open edit in the render that first sees the
   // new id — React's "adjust state when a prop changes". The readme itself is
@@ -137,6 +139,7 @@ export function CollectionReadme({
 
   // Nothing to show and can't edit → render nothing (no empty box).
   if (loading) return null;
+  if (renderer.error && readme) throw renderer.error;
   if (!readme && !editing && !canEdit) return null;
 
   const editor = (
@@ -214,7 +217,7 @@ export function CollectionReadme({
             ref={contentRef}
             className={!expanded ? "relative max-h-48 overflow-hidden" : "relative"}
           >
-            <MarkdownView source={readme} />
+            {MarkdownView && <MarkdownView source={readme} />}
             {overflows && !expanded && (
               <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background to-transparent" />
             )}

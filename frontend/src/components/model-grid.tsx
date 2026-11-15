@@ -23,7 +23,6 @@ import {
 } from "@/features/library/collection-navigation";
 import { useTaxonomyCommands } from "@/features/library/taxonomy";
 
-import { LibraryCardSelection } from "@/components/library-card-selection";
 import { LibraryBatchRecovery } from "@/components/library-batch-recovery";
 
 import {
@@ -52,6 +51,7 @@ import {
 import { useLibraryThumbnails } from "@/features/library/thumbnails";
 import { useLibraryAuthority } from "@/features/library/authority";
 import { listLibraryPage } from "@/lib/api/library-browse";
+import type { LibraryBrowseParams } from "@/types/library-browse";
 
 import { historyFilters, historyKeys } from "@/lib/search-filters";
 import {
@@ -124,6 +124,7 @@ import { MODEL_DND_MIME, captureModelDrag, type ModelDrag } from "@/lib/model-dn
 import { BatchToolbar } from "@/components/batch-toolbar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CollectionReadme } from "@/components/collection-readme";
+import { useCollectionReadmeRenderer } from "@/components/use-collection-readme-renderer";
 import { MultipartModelTagsDialog } from "@/components/multipart-model-tags-dialog";
 import { MultipartModelCard } from "@/components/multipart-model-card";
 import { DocumentBrowser } from "@/components/document-browser";
@@ -225,22 +226,6 @@ const loadNewMultipartModelModal = () =>
 const UploadModal = lazyImport(loadUploadModal);
 const ModelTagsDialog = lazyImport(loadModelTagsDialog);
 const NewMultipartModelModal = lazyImport(loadNewMultipartModelModal);
-
-/** Fetch the dialog chunks once the library is usable, so the first click opens
- *  a dialog instead of an empty frame while its code downloads. */
-function useDialogPreload(ready: boolean) {
-  useEffect(() => {
-    if (!ready) return;
-    const load = () => {
-      // A failed warm-up changes nothing: opening the dialog retries the import.
-      for (const loader of [loadModelTagsDialog, loadUploadModal, loadNewMultipartModelModal])
-        void loader().catch(() => undefined);
-    };
-    // Late enough not to compete with the first thumbnails, early enough to be warm.
-    const handle = setTimeout(load, 1500);
-    return () => clearTimeout(handle);
-  }, [ready]);
-}
 
 type SortKey = ModelSort;
 type ViewMode = "grid" | "list";
@@ -1105,7 +1090,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const scopeParam = searchParams.get("scope");
   const folderScopeKey = selectedCollection ?? "";
   const [autoSubtreeFor, setAutoSubtreeFor] = useState<string | null>(null);
-  const includeSubfolders =
+  const requestedIncludeSubfolders =
     scopeParam === "all" || (scopeParam !== "here" && autoSubtreeFor === folderScopeKey);
   const queryClient = useQueryClient();
 
@@ -1139,13 +1124,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // the memoization of everything derived from it below.
   const folderModelFilters = (
     collection: string | null = selectedCollection,
-  ): ModelListFilters => ({
+  ): ModelListFilters & Pick<LibraryBrowseParams, "auto_scope"> => ({
     ...baseFilters,
     collection: collection ?? undefined,
     // A search or a filter spans the whole subtree; an unfiltered folder view
     // lists only its direct children so subfolders' models don't leak into
     // the parent (#30).
-    direct: !includeSubfolders && !searchQuery && !narrowsLibrary(baseFilters),
+    direct: !requestedIncludeSubfolders && !searchQuery && !narrowsLibrary(baseFilters),
+    auto_scope: scopeParam === null && !searchQuery && !narrowsLibrary(baseFilters),
     q: searchQuery,
   });
   // Options and counts describe the whole subtree, so a folder that holds only
@@ -1253,6 +1239,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     browseParams,
     selectedCollectionId === null || destinationCollection?.path === selectedCollection,
   );
+  const includeSubfolders =
+    requestedIncludeSubfolders || modelQuery.data?.pages[0]?.effective_direct === false;
   const recent = useRecentFolders(
     destinationSettled ? selectedLookup.data : undefined,
     recentFoldersOpen,
@@ -1267,6 +1255,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const collectionReadme = useCollectionReadme(selectedCollectionRow?.id ?? null, {
     enabled: selectedCollectionRow?.has_readme ?? false,
   });
+  const readmeRenderer = useCollectionReadmeRenderer(selectedCollectionRow?.has_readme ?? false);
   const folderSearch = useCollectionSearch(searchQuery ?? "", "view", {
     enabled: searchQuery !== undefined,
   });
@@ -1282,6 +1271,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     (selectedCollection === null ||
       (selectedCollectionRow !== null && selectedCollectionId === selectedCollectionRow.id)) &&
     (!selectedCollectionRow?.has_readme || !collectionReadme.isPending) &&
+    (!selectedCollectionRow?.has_readme || !readmeRenderer.isPending) &&
     folderPages.data !== undefined &&
     !folderPages.isPlaceholderData &&
     modelQuery.data !== undefined &&
@@ -1347,7 +1337,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     selectedCollectionRow,
     selectedLookup.data,
     modelQuery.hasNextPage,
-    modelQuery.data?.pages.length,
+    modelQuery.data?.pages,
   ]);
   const [settledSnapshot, setSettledSnapshot] = useState(nextSnapshot);
   const lookupStatus = selectedLookup.error ? parseApiError(selectedLookup.error).status : null;
@@ -2499,7 +2489,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     startup.complete && browseReady && !refreshing,
   );
   const warmModel = useModelOpenIntent(startup.complete && browseReady && !refreshing);
-  useDialogPreload(startup.complete && browseReady);
   const canAdminSelectedCollection =
     user?.is_superuser || selectedCollectionRow?.effective_role === "admin";
   // Even administrators must wait for the selected parent's identity before creating.
@@ -4121,7 +4110,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                             arriving={arriving.has(`c:${collection.id}`)}
                             authorizationRevision={snapshot?.authorizationRevision}
                             onAuthorityRetired={onAuthorityRetired}
-                            previewsReady={browseReady && fillPhase !== "holding"}
+                            previewsReady={browseReady}
+                            previewSource={
+                              browseReady && modelQuery.data?.pages[0]
+                                ? { page: modelQuery.data.pages[0], params: browseParams }
+                                : undefined
+                            }
                             onSelect={handleCollectionChange}
                             onIntent={prefetchFolder}
                             onDropModel={canUploadToVault ? handleMoveModel : undefined}

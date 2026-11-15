@@ -63,6 +63,14 @@ export default defineConfig(({ mode }) => ({
               test: /node_modules[\\/].*lucide-react/,
               includeDependenciesRecursively: false,
             },
+            {
+              // The app re-exports these primitives from its UI package. Keep
+              // the wrappers with their implementation instead of fetching a
+              // separate, often empty module for each button/input/dialog.
+              name: "ui",
+              test: /(?:src[\\/]components[\\/]ui[\\/]|packages[\\/]ui[\\/]src[\\/])/,
+              includeDependenciesRecursively: false,
+            },
           ],
         },
       },

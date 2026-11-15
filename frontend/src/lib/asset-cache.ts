@@ -1,9 +1,9 @@
 import { getAuthenticatedBlob } from "@/lib/api";
 import { onAuthChange } from "@/lib/auth-store";
 
-// Four: with mosaics and next pages deferred behind the first screen, the
-// server keeps up and the cards' pictures arrive in half the rounds of two.
-const MAX_DOWNLOADS = 4;
+// Match HTTP/1.1's per-origin connection pool. Viewport admission bounds the
+// work; primary cards still take every queued slot before background mosaics.
+const MAX_DOWNLOADS = 6;
 const MAX_INACTIVE_ENTRIES = 400;
 const MAX_INACTIVE_BYTES = 32 * 1024 * 1024;
 
