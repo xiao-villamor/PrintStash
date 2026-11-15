@@ -462,6 +462,8 @@ def _derive_mesh(
             prepared = stack.enter_context(
                 reserve_sources((resolve(file_row),), output_bytes=output_bytes)
             )
+            phases.ns["reserve_prepared"] = time.monotonic_ns() - reserve_started
+            reserve_started = time.monotonic_ns()
             claim = CapacityManager(get_session_factory()).reserve(
                 f"derive:mesh:{file_id}:{time.monotonic_ns()}",
                 [
@@ -478,7 +480,7 @@ def _derive_mesh(
                 ],
                 transient=True,
             )
-            phases.ns["reserve"] = time.monotonic_ns() - reserve_started
+            phases.ns["reserve_capacity"] = time.monotonic_ns() - reserve_started
             stack.callback(claim.release)
             with phases.phase("materialize"):
                 (source,) = stack.enter_context(
