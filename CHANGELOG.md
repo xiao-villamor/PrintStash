@@ -22,10 +22,13 @@
 
 - Thumbnails for an imported archive finish sooner: search indexing of the new Models now waits until their thumbnails and measurements are done instead of competing with them for the database. New Models become searchable shortly after their thumbnails appear.
 - Mesh processing no longer stalls behind a job that has already started: admission could read a just-admitted job as still waiting, and every later job then waited for it to finish.
+- Background discovery creates each batch of Jobs in one database write instead of one per Job, so it waits less behind thumbnail publication during an import.
+- Search indexing of an import's new Models no longer starts early in the gap between two batches of thumbnail work, where it slowed the remaining thumbnails by about 5 s.
 - The default number of simultaneous mesh jobs is now one per usable CPU (it was one more). With admission no longer stalling, the extra job only competed for the CPU: on a 3-CPU, 8 GB install a 60-file archive's thumbnails finish in 38.7 s instead of 44.9 s, at the same CPU cost. `VAULT_MAX_RENDER_JOBS` and *Models processed at once* still override it.
 
 ### Fixed
 
+- Mesh processing logs which 3MF reader read each file and, when the XML reader stood in for lib3mf, why (`mesh_phases`, `printstash_mesh_3mf_reads_total`).
 - 7z archives with more than one folder (non-solid, appended or split into blocks) import instead of failing as invalid.
 - Uploads interrupted by a crash or restart before they were recorded no longer stay in staging forever: on startup the API removes unrecorded uploads older than a day.
 - API key and OrcaSlicer command copy buttons work on HTTP installations without the secure Clipboard API, with a visible error if the browser refuses copying.
