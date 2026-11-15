@@ -393,6 +393,11 @@ class LocalResourcePool:
                             ):
                                 raise AdmissionCorrupted("recovery ticket was replaced")
                             path.unlink()
+                if abandoned:
+                    # Retiring a finished claim's record frees its share: look
+                    # again at once. Waiting here for a release that already
+                    # happened cost each reservation a full wait interval.
+                    continue
                 _releases.wait(seen, _WAIT_SECONDS)
             checkpoint()
             yield NativePermit(
