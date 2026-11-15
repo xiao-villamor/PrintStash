@@ -10,11 +10,14 @@ import type { CollectionRead } from "@/types";
 
 const PREVIEW_LIMIT = 4;
 
-/** A bounded descendant read, admitted only when the collection card approaches view. */
+/** A bounded descendant read, admitted only when the collection card approaches
+ * view and, when `afterPrimary` is false, the page's own list has arrived: four
+ * mosaic reads must not compete with the list the reader came for. */
 export function useCollectionOverview(
   collection: CollectionRead,
   authorizationRevision: string | undefined,
   onAuthorityRetired: () => void,
+  afterPrimary = true,
 ) {
   const { ref, admitted } = useViewportAdmission();
   const [session] = useState(getSessionVersion);
@@ -32,7 +35,8 @@ export function useCollectionOverview(
         limit: PREVIEW_LIMIT,
       },
     ],
-    enabled: active && admitted && !!authorizationRevision && collection.model_count > 0,
+    enabled:
+      active && admitted && afterPrimary && !!authorizationRevision && collection.model_count > 0,
     queryFn: async ({ signal }) => {
       requireSessionVersion(session);
       const page = await listLibraryPage(

@@ -51,6 +51,22 @@ export default defineConfig(({ mode }) => ({
   },
   build: {
     outDir: "dist",
+    rolldownOptions: {
+      output: {
+        // Route splitting left ~95 sub-2 KB chunks on the Library's first load
+        // (one per icon or helper); over HTTP/1.1's six connections they queued
+        // for ~300 ms. The icons (most of them, ~200 bytes each) share one chunk.
+        codeSplitting: {
+          groups: [
+            {
+              name: "icons",
+              test: /node_modules[\\/].*lucide-react/,
+              includeDependenciesRecursively: false,
+            },
+          ],
+        },
+      },
+    },
   },
   test: {
     // Unit tests run in jsdom (localStorage, window) and exclude the Playwright

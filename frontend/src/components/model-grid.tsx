@@ -1383,11 +1383,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const fillingCardsWindow = folderEntrance.fromPlaceholder && folderEntering !== null;
   const fillingCards = fillingCardsWindow;
   const loadingCardRects = useRef<readonly DOMRect[]>([]);
-  // Whether the last retired placeholder was seen: only then do cards fill it.
-  const [placeholderSeen, setPlaceholderSeen] = useState(false);
+  // Positions of the last placeholder the reader saw; empty when it never showed
+  // (a fast read), so cards never travel from a stale one.
   const rememberLoadingCards = useCallback((rects: readonly DOMRect[]) => {
     loadingCardRects.current = rects;
-    setPlaceholderSeen(rects.length > 0);
   }, []);
   const folderCardsClass =
     folderEntering && !fillingCards ? FOLDER_CARDS_CLASS[folderEntering] : undefined;
@@ -1554,7 +1553,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const fillEntrance =
     folderEntrance.fromPlaceholder && fillingCardsWindow
       ? folderEntrance
-      : modelsFilling && placeholderSeen
+      : modelsFilling
         ? modelsArrival.entrance
         : null;
   const modelGrid = useRef<HTMLDivElement>(null);
@@ -4122,6 +4121,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                             arriving={arriving.has(`c:${collection.id}`)}
                             authorizationRevision={snapshot?.authorizationRevision}
                             onAuthorityRetired={onAuthorityRetired}
+                            previewsReady={browseReady && fillPhase !== "holding"}
                             onSelect={handleCollectionChange}
                             onIntent={prefetchFolder}
                             onDropModel={canUploadToVault ? handleMoveModel : undefined}
@@ -4333,10 +4333,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     renderItem={(item, index) => (
                       <LibraryCardFill
                         filling={
-                          (fillingCards ||
-                            (modelsFilling && placeholderSeen) ||
-                            fillPhase !== "idle") &&
-                          !favoritesOnly
+                          (fillingCards || modelsFilling || fillPhase !== "idle") && !favoritesOnly
                         }
                         origins={loadingCardRects}
                         index={index}
@@ -4402,7 +4399,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     folders
                   />
                   <LoadMore
-                    paused={reading.status === "restoring" || !browseReady}
+                    paused={
+                      reading.status === "restoring" ||
+                      !browseReady ||
+                      // The next page waits for the first screen's pictures.
+                      fillPhase === "holding"
+                    }
                     layoutKey={`${viewMode}:${pane?.open ?? true}`}
                     hasMore={hasMore && !refreshRequired}
                     loading={loadingMore}

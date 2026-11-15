@@ -1,7 +1,9 @@
 import { getAuthenticatedBlob } from "@/lib/api";
 import { onAuthChange } from "@/lib/auth-store";
 
-const MAX_DOWNLOADS = 2;
+// Four: with mosaics and next pages deferred behind the first screen, the
+// server keeps up and the cards' pictures arrive in half the rounds of two.
+const MAX_DOWNLOADS = 4;
 const MAX_INACTIVE_ENTRIES = 400;
 const MAX_INACTIVE_BYTES = 32 * 1024 * 1024;
 

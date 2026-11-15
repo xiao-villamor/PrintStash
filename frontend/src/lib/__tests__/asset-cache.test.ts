@@ -249,54 +249,58 @@ describe("assetCache", () => {
 });
 
 describe("asset leases and admission", () => {
-  it("limits simultaneous protected image downloads to two", async () => {
-    const responses = Array.from({ length: 6 }, () => Promise.withResolvers<Response>());
+  // Four concurrent protected downloads (see MAX_DOWNLOADS).
+  const SLOTS = 4;
+
+  it("limits simultaneous protected image downloads to four", async () => {
+    const responses = Array.from({ length: SLOTS + 2 }, () => Promise.withResolvers<Response>());
     let index = 0;
     vi.mocked(fetch).mockImplementation(() => responses[index++].promise);
     const leases = responses.map((_, i) => acquireAssetUrl(`/lease/limit-${i}`));
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(SLOTS);
     responses[0].resolve(new Response("png"));
     await leases[0].url;
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(SLOTS + 1));
     responses.slice(1).forEach((response) => response.resolve(new Response("png")));
     await Promise.all(leases.map((lease) => lease.url));
     leases.forEach((lease) => lease.release());
   });
 
   it("downloads a card's image before queued collection mosaic images", async () => {
-    const responses = Array.from({ length: 4 }, () => Promise.withResolvers<Response>());
+    const responses = Array.from({ length: SLOTS + 2 }, () => Promise.withResolvers<Response>());
     let index = 0;
     vi.mocked(fetch).mockImplementation(() => responses[index++].promise);
     const requested = () => vi.mocked(fetch).mock.calls.map(([input]) => String(input));
-    const mosaics = [0, 1, 2].map((i) =>
+    const mosaics = Array.from({ length: SLOTS + 1 }, (_, i) =>
       acquireAssetUrl(`/lease/mosaic-${i}`, undefined, "background"),
     );
     const card = acquireAssetUrl("/lease/card");
-    // Two slots: the first mosaics already started; the card goes next.
-    expect(requested()).toHaveLength(2);
+    // Every slot went to a mosaic already; the card overtakes the queued one.
+    expect(requested()).toHaveLength(SLOTS);
     responses[0].resolve(new Response("png"));
     await mosaics[0].url;
-    await vi.waitFor(() => expect(requested()).toHaveLength(3));
-    expect(requested()[2]).toContain("/lease/card");
+    await vi.waitFor(() => expect(requested()).toHaveLength(SLOTS + 1));
+    expect(requested()[SLOTS]).toContain("/lease/card");
     responses.slice(1).forEach((response) => response.resolve(new Response("png")));
     await Promise.all([...mosaics, card].map((lease) => lease.url));
     [...mosaics, card].forEach((lease) => lease.release());
   });
 
   it("promotes a queued mosaic image that a card also shows", async () => {
-    const responses = Array.from({ length: 4 }, () => Promise.withResolvers<Response>());
+    const responses = Array.from({ length: SLOTS + 2 }, () => Promise.withResolvers<Response>());
     let index = 0;
     vi.mocked(fetch).mockImplementation(() => responses[index++].promise);
     const requested = () => vi.mocked(fetch).mock.calls.map(([input]) => String(input));
-    const mosaics = [0, 1, 2].map((i) =>
+    const mosaics = Array.from({ length: SLOTS + 1 }, (_, i) =>
       acquireAssetUrl(`/lease/shared-${i}`, undefined, "background"),
     );
     const extra = acquireAssetUrl("/lease/shared-extra", undefined, "background");
-    const card = acquireAssetUrl("/lease/shared-2");
+    // The last mosaic is still queued; a card showing the same picture promotes it.
+    const card = acquireAssetUrl(`/lease/shared-${SLOTS}`);
     responses[0].resolve(new Response("png"));
     await mosaics[0].url;
-    await vi.waitFor(() => expect(requested()).toHaveLength(3));
-    expect(requested()[2]).toContain("/lease/shared-2");
+    await vi.waitFor(() => expect(requested()).toHaveLength(SLOTS + 1));
+    expect(requested()[SLOTS]).toContain(`/lease/shared-${SLOTS}`);
     responses.slice(1).forEach((response) => response.resolve(new Response("png")));
     await Promise.all([...mosaics, extra, card].map((lease) => lease.url));
     [...mosaics, extra, card].forEach((lease) => lease.release());
@@ -385,7 +389,8 @@ describe("asset leases and admission", () => {
     response.resolve(new Response("obsolete"));
     for (const outcome of await Promise.all(outcomes))
       expect(outcome).toMatchObject({ name: "AbortError" });
-    expect(fetch).toHaveBeenCalledTimes(2);
+    // Only the downloads already started reached the network; queued ones never do.
+    expect(fetch).toHaveBeenCalledTimes(SLOTS);
     expect(created).toHaveLength(0);
     leases.forEach((lease) => lease.release());
   });

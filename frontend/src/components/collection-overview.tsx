@@ -22,6 +22,7 @@ export function CollectionOverviewCard({
   selectable,
   selected,
   onToggleSelect,
+  previewsReady = true,
 }: {
   collection: CollectionRead;
   compact?: boolean;
@@ -34,12 +35,15 @@ export function CollectionOverviewCard({
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number) => void;
+  /** False until the page's own Model list has arrived; mosaics read after it. */
+  previewsReady?: boolean;
 }) {
   useUiLocale();
   const { ref, pending, models, error, retry } = useCollectionOverview(
     collection,
     authorizationRevision,
     onAuthorityRetired,
+    previewsReady,
   );
   const { dragOver, handlers } = useModelDropTarget(collection.path, onDropModel);
   const count = models?.length ?? (pending ? 4 : 0);
