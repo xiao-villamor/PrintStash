@@ -6,7 +6,8 @@ import type { LibraryEntry } from "@/features/library/navigation-state";
 import { modelPrinterFilesOptions, useModelPrintJobs } from "@/features/library/model-detail";
 import { useAuth } from "@/lib/auth-context";
 import { downloadAuthenticatedFile } from "@/lib/api";
-import { uiText, currentLocale } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { formatCalendarDate } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
 import type { FileRead, ModelListItem, ModelPrintJobRead, ModelRead } from "@/types";
@@ -89,11 +90,7 @@ export function ModelCardRevision({
   const meta = (
     <p className="library-card-meta">
       <span>{dimensions ?? ""}</span>
-      <time dateTime={model.updated_at}>
-        {new Intl.DateTimeFormat(currentLocale(), { month: "short", day: "numeric" }).format(
-          new Date(model.updated_at),
-        )}
-      </time>
+      <time dateTime={model.updated_at}>{formatCalendarDate(model.updated_at)}</time>
     </p>
   );
 

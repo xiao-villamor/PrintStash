@@ -1,5 +1,6 @@
 import type { Message, MessageCatalog, MessageKey } from "@/locales/catalogs";
 import { loadLocaleCatalog, localeMetadata, type Locale } from "@/locales/registry";
+import { pluralRules } from "@printstash/domain/format";
 
 /** Display metadata of every locale; messages are loaded per locale on demand. */
 export const localeDefinitions = localeMetadata;
@@ -66,12 +67,26 @@ export function parseLocale(value: string | null): Locale | null {
   return SUPPORTED_LOCALES.find((locale) => locale === value) ?? null;
 }
 
-export function getLocale(): Locale {
+function readStoredLocale(): Locale {
   try {
     return parseLocale(globalThis.localStorage?.getItem(LOCALE_STORAGE_KEY) ?? null) ?? "en";
   } catch {
     return "en";
   }
+}
+
+// Every uiText() and formatter asks for the locale, thousands of times in one
+// render. Storage is read once per synchronous pass: the value is dropped at the
+// next microtask, so a write between renders (another tab, a test) is seen.
+let storedLocale: Locale | null = null;
+export function getLocale(): Locale {
+  if (storedLocale === null) {
+    storedLocale = readStoredLocale();
+    queueMicrotask(() => {
+      storedLocale = null;
+    });
+  }
+  return storedLocale;
 }
 
 let transientLocale: Locale | null = null;
@@ -120,6 +135,7 @@ export async function activateLocale(): Promise<Locale> {
 }
 
 export function setLocale(locale: Locale): void {
+  storedLocale = null;
   try {
     localStorage.setItem(LOCALE_STORAGE_KEY, locale);
     transientLocale = null;
@@ -155,7 +171,7 @@ export function formatMessage(
 ): string {
   const text =
     message instanceof Object
-      ? (message[new Intl.PluralRules(locale).select(Number(values.count ?? 0))] ?? message.other)
+      ? (message[pluralRules(locale).select(Number(values.count ?? 0))] ?? message.other)
       : message;
   return text.replace(/\{(\w+)\}/g, (placeholder, name: string) =>
     Object.hasOwn(values, name) ? String(values[name]) : placeholder,

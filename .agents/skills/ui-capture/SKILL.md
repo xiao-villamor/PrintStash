@@ -38,6 +38,28 @@ found. `.motion-audit/` is gitignored.
 | `load` | cold reload with `/models/browse` delayed by `--latency` (skeleton → cards) |
 | `folder` | click the first collection card, browse delayed (navigation + skeleton) |
 
+Navigation cost per folder change (requests by endpoint, exact duplicates,
+full reloads, time until cards show, long frames), cold cache:
+
+```bash
+PRINTSTASH_USER=… PRINTSTASH_PASSWORD=… node scripts/motion-audit/nav-trace.mjs \
+  --base http://localhost:3474 --path "/?c=<folder>&cid=<id>" --child <child-slug> --parent <Parent name>
+```
+
+Virtualization (TanStack Virtual) only engages above 120 loaded items; check it
+on a library that large, not on a small real one.
+
+## The Playwright MCP window is not a reliable input source
+
+Its injected hit-target interceptor can stop delivering real pointer and
+keyboard input (no `pointerdown` reaches `document`, nothing navigates, no
+error). Before calling anything "a click that does nothing" a bug: record
+`pointerdown` on `document`; if it never fires, it is the harness. Call the
+element's React `onClick` to confirm the app path, then run the gesture in the
+headless scripts above. Detach every CDP session a script opens
+(`await cdp.detach()`), and close/reopen the MCP browser when input stops.
+Use the MCP window to look; use the scripts to measure and to click.
+
 ## Findings and what they mean
 
 | Finding | Defect |

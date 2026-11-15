@@ -19,5 +19,7 @@ export const timeAgo = (value: string) => display.timeAgo(value, currentLocale()
 export const timeAgoShort = (value: string) => display.timeAgoShort(value, currentLocale());
 
 export function formatNumber(value: number, options?: Intl.NumberFormatOptions): string {
-  return new Intl.NumberFormat(currentLocale(), options).format(value);
+  return display.numberFormat(currentLocale(), options).format(value);
 }
+export const formatCalendarDate = (value: string) =>
+  display.formatCalendarDate(value, currentLocale());
