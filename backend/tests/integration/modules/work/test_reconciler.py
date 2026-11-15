@@ -475,6 +475,57 @@ class TestDiscover:
         assert PROBE.calls == 1
         assert result.outcomes.get("already_active") == 2
 
+    def test_creates_a_batch_in_one_writer_transaction(
+        self, engine: InlineJobEngine, db_session: Session, monkeypatch
+    ) -> None:
+        # Each BEGIN IMMEDIATE waited ~60 ms behind mesh publication under load.
+        writes = []
+        begin = reconciler_module.begin_write
+
+        def counted(session, *, immediate=False):
+            writes.append(immediate)
+            begin(session, immediate=immediate)
+
+        monkeypatch.setattr(reconciler_module, "begin_write", counted)
+        PROBE.items = _items("a", "b", "c")
+
+        result = run_pass(SOURCED)
+
+        assert sorted(job.subject_key for job in _jobs(db_session)) == ["a", "b", "c"]
+        assert writes == [True]
+        assert result.submitted == 3
+
+    def test_one_active_subject_does_not_undo_the_rest_of_its_batch(
+        self, engine: InlineJobEngine, db_session: Session, make_job
+    ) -> None:
+        make_job(kind=SOURCED, subject="b")
+        PROBE.items = _items("a", "b", "c")
+
+        result = run_pass(SOURCED)
+
+        assert sorted(job.subject_key for job in _jobs(db_session)) == ["a", "b", "c"]
+        assert result.outcomes.get("already_active") == 1
+        assert result.submitted == 2
+
+    def test_records_the_latest_occurrence_of_a_batch(
+        self, engine: InlineJobEngine, db_session: Session
+    ) -> None:
+        later = utcnow().replace(microsecond=0)
+        earlier = later - timedelta(minutes=5)
+        PROBE.items = [
+            WorkItem(subject_key="sched@2", occurrence_at=later),
+            WorkItem(subject_key="sched@1", occurrence_at=earlier),
+        ]
+
+        run_pass(SOURCED)
+
+        db_session.expire_all()
+        cursor = db_session.get(ReconcileCursor, SOURCED)
+        assert cursor is not None and cursor.last_occurrence_at is not None
+        assert cursor.last_occurrence_at.replace(tzinfo=None) == later.replace(
+            tzinfo=None
+        )
+
     def test_records_a_declined_occurrence_as_a_cancelled_job(
         self, engine: InlineJobEngine, db_session: Session
     ) -> None:
@@ -1193,6 +1244,29 @@ class TestPriorityDiscovery:
         engine.catalog.definitions[SOURCED] = replace(definition, source=source)
         return source
 
+    def test_a_batch_spends_the_lane_budget_it_read_once(
+        self, engine, db_session, monkeypatch
+    ):
+        from app.modules.work import reconciler
+
+        self.source(engine)
+        PROBE.items = _items("a/i", "b/i", priority=WorkPriority.INTERACTIVE)
+        # Discovery saw room for two; by the write transaction one was taken.
+        budgets = iter(
+            [
+                reconciler.DiscoveryBudget(total=2, interactive=2, backfill=0),
+                reconciler.DiscoveryBudget(total=1, interactive=1, backfill=0),
+            ]
+        )
+        monkeypatch.setattr(
+            reconciler, "_discovery_budget", lambda _session, _definition: next(budgets)
+        )
+
+        result = run_pass(SOURCED)
+
+        assert [job.subject_key for job in _jobs(db_session)] == ["a/i"]
+        assert result.outcomes[reconciler.PassNote.LANE_FULL] == 1
+
     def test_backfill_headroom_cannot_hide_interactive_intent(
         self, engine, db_session, make_job
     ):
@@ -1405,7 +1479,7 @@ class TestPriorityAdmission:
         from app.modules.work.reconciler import (
             PassNote,
             PassResult,
-            _create_and_submit,
+            _create_and_submit_all,
             _DiscoveryLease,
         )
 
@@ -1426,9 +1500,9 @@ class TestPriorityAdmission:
         submissions = []
         monkeypatch.setattr("app.modules.work.reconciler.submit", submissions.append)
         result = PassResult()
-        created = _create_and_submit(
+        created = _create_and_submit_all(
             engine.catalog.definitions[SOURCED],
-            WorkItem("lost/i", priority=WorkPriority.INTERACTIVE),
+            [WorkItem("lost/i", priority=WorkPriority.INTERACTIVE)],
             now=now,
             result=result,
             lease=_DiscoveryLease(name, "old"),
@@ -1451,9 +1525,9 @@ class TestPriorityAdmission:
 
         TestPriorityDiscovery.source(engine)
         PROBE.items = _items("retained/i", priority=WorkPriority.INTERACTIVE)
-        original = reconciler._create_and_submit
+        original = reconciler._create_and_submit_all
 
-        def replace_holder(definition, item, *, now, result, lease):
+        def replace_holder(definition, items, *, now, result, lease):
             assert lease is not None
             row = db_session.get(WorkFence, lease.name)
             assert row is not None and row.holder == lease.holder
@@ -1461,9 +1535,9 @@ class TestPriorityAdmission:
             row.expires_at = utcnow() + timedelta(seconds=60)
             db_session.add(row)
             db_session.commit()
-            return original(definition, item, now=now, result=result, lease=lease)
+            return original(definition, items, now=now, result=result, lease=lease)
 
-        monkeypatch.setattr(reconciler, "_create_and_submit", replace_holder)
+        monkeypatch.setattr(reconciler, "_create_and_submit_all", replace_holder)
         result = reconciler.PassResult()
         reconciler._discover(
             engine.catalog.definitions[SOURCED], now=utcnow(), result=result
