@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from app.core.time import utcnow
 from app.db.models import CollectionRole
+from app.modules.library.model_views.thumbnails import thumbnail_version
 from app.modules.storage.storage_backend.runtime import get_backend
 
 
@@ -206,3 +207,49 @@ class TestFileThumbnail:
 
         assert response.status_code == 404, response.text
         assert response.json()["detail"] == "thumbnail_not_found"
+
+
+class TestVersionedThumbnailCaching:
+    """The current versioned URL is kept by the browser without asking again;
+    anything else keeps revalidating, so a stale URL never pins old bytes."""
+
+    def _published(self, db_session, make_model, make_file):
+        row = make_file(make_model("cached-thumb"))
+        backend = get_backend()
+        key = f"{row.id}-0123456789ab-cdef.webp"
+        backend.write_bytes(b"versioned-thumbnail", key)
+        row.thumbnail_path = key
+        db_session.add(row)
+        db_session.commit()
+        return row, thumbnail_version(row.id, key)
+
+    def test_marks_the_current_version_immutable(
+        self, client, auth_headers, db_session, make_model, make_file
+    ):
+        row, version = self._published(db_session, make_model, make_file)
+
+        response = client.get(
+            f"/api/v1/files/{row.id}/thumbnail?v={version}", headers=auth_headers
+        )
+
+        assert response.status_code == 200, response.text
+        assert (
+            response.headers["cache-control"] == "private, max-age=31536000, immutable"
+        )
+
+    @pytest.mark.parametrize(
+        "query", ["", "?v=000000000000"], ids=["unversioned", "stale"]
+    )
+    def test_revalidates_any_other_url(
+        self, client, auth_headers, db_session, make_model, make_file, query
+    ):
+        row, _ = self._published(db_session, make_model, make_file)
+
+        response = client.get(
+            f"/api/v1/files/{row.id}/thumbnail{query}", headers=auth_headers
+        )
+
+        assert response.status_code == 200, response.text
+        assert (
+            response.headers["cache-control"] == "private, max-age=0, must-revalidate"
+        )

@@ -28,6 +28,9 @@ from app.modules.storage.storage_backend.contracts import (
 
 PRIVATE_REVALIDATION = "private, max-age=0, must-revalidate"
 PRIVATE_NO_STORE = "private, no-store"
+# A content-versioned URL never changes its bytes: the browser keeps them
+# without asking again. Logout clears the browser cache (Clear-Site-Data).
+PRIVATE_IMMUTABLE = "private, max-age=31536000, immutable"
 MAX_REDIRECT_SECONDS = 60
 
 
@@ -53,6 +56,8 @@ class DeliveryRequest:
     if_range: str | None = None
     proxy_only: bool = False
     inline: bool = False
+    # The URL names this exact content (e.g. a thumbnail's ?v= version).
+    immutable: bool = False
 
 
 @dataclass
@@ -80,7 +85,7 @@ def parse_http_date(value: str | None) -> datetime | None:
     try:
         result = parsedate_to_datetime(value)
         return result.astimezone(timezone.utc) if result.tzinfo else None
-    except (ValueError, TypeError, OverflowError):
+    except ValueError, TypeError, OverflowError:
         return None
 
 
@@ -96,7 +101,9 @@ def representation_headers(
     request: DeliveryRequest, *, etag: str, modified_at: datetime | None
 ) -> dict[str, str]:
     headers = {
-        "Cache-Control": cache_policy(request.purpose),
+        "Cache-Control": PRIVATE_IMMUTABLE
+        if request.immutable
+        else cache_policy(request.purpose),
         "ETag": etag,
         "Content-Disposition": content_disposition(
             request.filename, inline=request.inline
@@ -196,7 +203,7 @@ def safe_browser_download(
             # proxied below the application's own host.
             and target_origin != app_origin
         )
-    except (ValueError, TypeError, OverflowError):
+    except ValueError, TypeError, OverflowError:
         return False
 
 

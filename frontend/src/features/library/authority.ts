@@ -1,5 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { getLibraryRevision } from "@/lib/api/library-browse";
 import { onAuthChange, retirePrivateSessionScope } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
@@ -37,7 +42,25 @@ class BrowseReceipts {
   private listeners = new Set<() => void>();
   private stop: (() => void) | null = null;
   latestProbe: ProbeReceipt | null = null;
+  /** What the newest completed probe observed, for the session it ran in. */
+  latestAuthority: { authority: LibraryAuthority; sessionVersion: number } | null = null;
   constructor(private client: QueryClient) {}
+  /** A page carries the server's revisions at the moment it was served. When
+   * every loaded page of a query names exactly the authority the latest probe
+   * observed, the receipt cannot reveal a change: no new probe is needed. */
+  private confirmedByLatestProbe(key: readonly unknown[]): boolean {
+    const latest = this.latestAuthority;
+    if (!latest || latest.sessionVersion !== getSessionVersion()) return false;
+    const pages = this.client.getQueryData<InfiniteData<LibraryBrowsePage>>(key)?.pages ?? [];
+    return (
+      pages.length > 0 &&
+      pages.every(
+        (page) =>
+          page.browse_revision === latest.authority.browse_revision &&
+          page.authorization_revision === latest.authority.authorization_revision,
+      )
+    );
+  }
   snapshot = () => this.receipt;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -51,8 +74,9 @@ class BrowseReceipts {
           key[1] !== libraryBrowseKeys.all[1]
         )
           return;
+        if (this.confirmedByLatestProbe(key)) return;
         // Includes structurally shared responses, prefetch and confirmed mutation
-        // publication. Such receipts conservatively require one coalesced probe.
+        // publication. Any other receipt conservatively requires one coalesced probe.
         this.receipt = nextSequence();
         for (const notify of this.listeners) notify();
       });
@@ -119,6 +143,7 @@ export function useLibraryAuthority(
       };
       owner.latestProbe = provenance;
       const authority = decodeLibraryAuthority(await getLibraryRevision({ signal }));
+      owner.latestAuthority = { authority, sessionVersion: provenance.sessionVersion };
       return { authority, ...provenance };
     },
     enabled: active,

@@ -574,3 +574,32 @@ class TestRateLimits:
         assert refreshed.status_code == 200, (
             "one exhausted limiter must not lock out the other"
         )
+
+
+class TestBrowserCacheBoundary:
+    """Immutable thumbnails stay in the browser cache; an account boundary on a
+    shared browser clears it so nobody sees the previous account's pictures."""
+
+    def test_sign_in_clears_the_browser_cache(
+        self, client: TestClient, account
+    ) -> None:
+        account("cache-boundary-in")
+
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "cache-boundary-in", "password": PASSWORD},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.headers["clear-site-data"] == '"cache"'
+
+    def test_sign_out_clears_the_browser_cache(
+        self, client: TestClient, account, sign_in
+    ) -> None:
+        account("cache-boundary-out")
+        token = sign_in("cache-boundary-out")["access_token"]
+
+        response = client.post("/api/v1/auth/logout", headers=_bearer(token))
+
+        assert response.status_code == 200, response.text
+        assert response.headers["clear-site-data"] == '"cache"'
