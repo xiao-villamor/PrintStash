@@ -189,8 +189,9 @@ services:
       VAULT_MEDIA_WORKER_TIMEOUT_SECONDS: ${VAULT_MEDIA_WORKER_TIMEOUT_SECONDS:-180}
 
       # --- Background work ---
-      # Requires a build with PRINTSTASH_DBOS_NOTIFICATIONS=true; restart to change.
-      VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS: ${VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS:-false}
+      # SQLite queue wake-ups; published images carry the required DBOS patch.
+      # A build with PRINTSTASH_DBOS_NOTIFICATIONS=false needs false. Restart to change.
+      VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS: ${VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS:-true}
       # `all` (default): this API runs HTTP and every background Job itself.
       # With --profile workers set `api`, PostgreSQL and VAULT_SHARED_STORAGE=true;
       # VAULT_API_RUNS_JOBS=false then leaves every Job to the workers.

@@ -101,7 +101,7 @@ RUN uv sync --frozen --no-dev --no-editable --extra full --extra gpu \
 
 FROM dependencies-${PRINTSTASH_VARIANT} AS runtime
 ARG PRINTSTASH_VARIANT
-ARG PRINTSTASH_DBOS_NOTIFICATIONS=false
+ARG PRINTSTASH_DBOS_NOTIFICATIONS=true
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin printstash \
  && mkdir -p /data/files /data/thumbs /data/staging /data/backups /data/db \
@@ -121,6 +121,9 @@ RUN case "$PRINTSTASH_DBOS_NOTIFICATIONS" in \
       false) ;; \
       *) echo "PRINTSTASH_DBOS_NOTIFICATIONS must be true or false" >&2; exit 1 ;; \
     esac
+# The image turns notifications on exactly when it carries the verified patch;
+# source installs keep the unpatched SDK and the setting's default of false.
+ENV VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS=${PRINTSTASH_DBOS_NOTIFICATIONS}
 # Fresh guarded parsers share code bytes, never interpreter or parser state.
 # Runtime bytecode writes are disabled, so compile application sources at build.
 RUN .venv/bin/python -m compileall -q app
