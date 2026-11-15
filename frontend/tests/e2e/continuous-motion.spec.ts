@@ -71,7 +71,7 @@ async function expectStationaryReveal(page: Page, surface: string) {
   const content = page.locator(`.${surface}`);
   await expect(content).toHaveCSS("transform", "none");
   const opacity = await content.evaluate((element) => Number(getComputedStyle(element).opacity));
-  expect(opacity).toBeGreaterThan(0.86);
+  expect(opacity).toBeGreaterThan(0.55);
   expect(opacity).toBeLessThan(1);
 }
 
@@ -97,6 +97,25 @@ test("Settings tabs remain stationary and interrupted selections inherit opacity
   await expect(page.locator(".settings-main")).toHaveCSS("opacity", "1");
   await nav.getByRole("button", { name: "Previews", exact: true }).click();
   expect(await page.evaluate(() => window.sectionReveals)).toHaveLength(2);
+});
+
+test("a visually finished reveal does not suppress the next destination", async ({ page }) => {
+  await page.goto("/settings?section=design");
+  const nav = page.getByRole("navigation", { name: "Settings sections" });
+  await nav.getByRole("button", { name: "Previews", exact: true }).click();
+  await expectStationaryReveal(page, "settings-main");
+  await page.locator(".settings-main").evaluate((element) => {
+    for (const animation of element.getAnimations())
+      animation.currentTime = Number(animation.effect?.getComputedTiming().duration) * 0.95;
+  });
+  const nearOpaque = await page
+    .locator(".settings-main")
+    .evaluate((element) => Number(getComputedStyle(element).opacity));
+  expect(nearOpaque).toBeGreaterThan(0.99);
+  expect(nearOpaque).toBeLessThan(1);
+  await nav.getByRole("button", { name: "Appearance", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.sectionReveals.length)).toBe(2);
+  expect(await page.evaluate(() => window.sectionReveals[1].opacity[0])).toBe(0.55);
 });
 
 test("Model detail tabs reveal without zooming", async ({ page }) => {

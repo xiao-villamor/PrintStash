@@ -68,7 +68,7 @@
     --duration-slow: 300ms;
     --ease-library-enter: cubic-bezier(0.2, 0.6, 0.35, 1);
     --duration-library-enter: 240ms;
-    --opacity-content-enter: 0.86;
+    --opacity-content-enter: 0.55;
     --scale-detail-enter: var(--scale-content-enter);
     --workbench-sidebar-width: 320px;
 

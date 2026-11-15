@@ -236,14 +236,16 @@ position. Settings navigation occupies this frame rather than adding another col
 The border and background belong to the stationary shell, outside animated content.
 
 Model detail tabs, Settings sections and Upload modes share
-`useContentReveal`: content commits at its natural size with one quiet opacity
-0.86→1 handoff over the library timing (240ms). No zoom, slide or spring changes
+`useContentReveal`: content commits at its natural size with one visible, stationary opacity
+0.55→1 handoff over the library timing (240ms). No zoom, slide or spring changes
 text or card size. Rapid selections inherit the current opacity. Initial mount
 and data refreshes do not replay section motion. The frame remains mounted;
 reduced motion makes selection immediate and static. Tab press feedback begins
 on pointer-down and underline feedback stays local.
 
-Search, Favorites and Settings main destinations use this same stationary reveal.
+Library, Search, Pending, Favorites and Settings main destinations use this
+same stationary reveal. Sidebar mode changes reveal even when the URL changes;
+only their inner content participates, leaving the boundary and width stationary.
 The route outlet keeps one mounted content surface; its readiness signal lives
 inside Suspense so a cold destination starts its reveal when its content commits.
 Sidebar navigation and the top bar remain stationary. Entering Favorites does not
@@ -254,16 +256,24 @@ not replay the main transition. First load is static.
 
 Library motion is quiet and continuous: stable geometry, no spring or scale,
 no cascading entrances, and no blank flash when revisiting cached content.
-`useContentReveal` gives the committed browsing surface one opacity 0.86→1
+`useContentReveal` gives the committed browsing surface one opacity 0.55→1
 transition over `--duration-library-enter` (240ms). Its identity is the displayed
-history entry plus layout, so down, up, Back/Forward, and filters share one
-repeatable transition. Interruptions continue from the current opacity. Pane
-reflow, background refreshes, and virtual-row mounts do not replay navigation.
+canonical destination plus layout, so down, up, Back/Forward, and filters share one
+repeatable transition. URL normalization does not replay an unchanged destination.
+The browsing snapshot owns the Library/Favorites scope, so a cross-section
+return receives one outer reveal instead of a second nested fade. Interruptions
+continue from the current opacity. A reveal at 99% opacity is visually settled;
+the next destination starts a fresh entrance rather than inheriting an invisible
+tail. Pane reflow, background refreshes, and virtual-row mounts do not replay
+navigation.
 First load stays still; newly decoded previews and their loading covers crossfade
 in their fixed frames over the same library timing. Cached previews remain
 visible. Reduced motion makes navigation immediate and shortens image/cover
-feedback to `press` (150ms). Readiness starts the reveal immediately, with no
-extra network delay or wait for slower sibling images.
+feedback to `press` (150ms). Readiness presents content at the starting opacity,
+then starts the fade after
+a painted frame. Cached results cannot consume the entrance inside their render
+commit. There is no network delay or wait for slower sibling images; controls
+remain interactive throughout.
 Loading cards and populated cards share geometry. Reserve a subcollection strip
 only for known children on initial load. During navigation, the displayed
 snapshot retains its layout until the destination commits; a pending lookup
@@ -300,7 +310,7 @@ Retain the outliner DOM, filter, expansion and scroll state while closed; make i
 inert immediately and hide its contents only at rest. Drag resizing remains 1:1,
 initial page layout does not replay entry, and reduced motion settles immediately.
 Local sidebar tool changes use `useContentReveal`: stationary geometry with opacity
-0.86→1 over the library timing. Cross-route navigation keeps the sidebar static.
+0.55→1 over the library timing. Cross-route navigation keeps the sidebar static.
 Reduced motion makes these reveals immediate.
 
 Source, History and Similar loading states use quiet row placeholders aligned to
@@ -367,7 +377,7 @@ the user is watching. **Nothing in the app may exceed 300ms.**
    primitive exists to prevent. Always pass a `DURATION` constant from
    `lib/overlay.ts` and match it to the class the panel actually uses:
    `DURATION.press` ↔ `duration-press`, `DURATION.fast` ↔ `duration-fast`.
-7. **High-frequency actions do not replay page motion.** Search, Favorites and
+7. **High-frequency actions do not replay page motion.** Library, Search, Pending, Favorites and
    Settings destination changes are the scoped workbench exception described
    above. Other route navigation stays immediate. Typing, query changes and data
    updates never animate the whole page.

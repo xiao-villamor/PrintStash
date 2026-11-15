@@ -72,16 +72,20 @@ test.describe("Library motion", () => {
       .getByRole("button", { name: /maraio/ })
       .click();
     await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.libraryReveals.length)).toBe(1);
     await page.goBack();
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.libraryReveals.length)).toBe(2);
     await page.goForward();
     await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.libraryReveals.length)).toBe(3);
     await page.goBack();
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
 
+    await expect.poll(() => page.evaluate(() => window.libraryReveals.length)).toBe(4);
     const reveals = await page.evaluate(() => window.libraryReveals);
     expect(reveals).toHaveLength(4);
-    expect(reveals.every((reveal) => reveal.opacity[0] >= 0.86 && reveal.opacity[0] <= 1)).toBe(
+    expect(reveals.every((reveal) => reveal.opacity[0] >= 0.55 && reveal.opacity[0] <= 1)).toBe(
       true,
     );
     expect(reveals.every((reveal) => reveal.opacity.at(-1) === 1)).toBe(true);
@@ -112,7 +116,7 @@ test.describe("Library motion", () => {
     const interruptedOpacity = await page
       .locator(".library-content-reveal")
       .evaluate((element) => Number(getComputedStyle(element).opacity));
-    expect(interruptedOpacity).toBeGreaterThan(0.86);
+    expect(interruptedOpacity).toBeGreaterThan(0.55);
     expect(interruptedOpacity).toBeLessThan(1);
 
     await page.goBack();

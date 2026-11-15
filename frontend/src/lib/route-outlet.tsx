@@ -3,7 +3,7 @@ import { Outlet, useRouterState } from "@tanstack/react-router";
 import { usePathname, useSearchParams } from "./navigation";
 import { useContentReveal } from "./use-content-reveal";
 
-type MainSection = "search" | "favorites" | "settings" | "other";
+type MainSection = "library" | "search" | "favorites" | "pending" | "settings" | "other";
 
 function normalizePath(path: string): string {
   return path.replace(/\/+$/, "") || "/";
@@ -29,11 +29,15 @@ export function RouteOutlet() {
   const section: MainSection =
     pathname === "/search"
       ? "search"
-      : pathname === "/" && params.get("favorites") === "true"
-        ? "favorites"
-        : pathname === "/settings"
-          ? "settings"
-          : "other";
+      : pathname === "/"
+        ? params.get("favorites") === "true"
+          ? "favorites"
+          : "library"
+        : pathname === "/inbox"
+          ? "pending"
+          : pathname === "/settings"
+            ? "settings"
+            : "other";
   const [committedSection, setCommittedSection] = useState(section);
   const changingPath = useRouterState({
     select: (state) => {

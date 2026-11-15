@@ -1,6 +1,9 @@
 import { useLayoutEffect, useRef } from "react";
 import { cssTimeSeconds } from "@/lib/css-time";
 
+// Treat the last imperceptible tail as settled, even if onfinish is still queued.
+const SETTLED_OPACITY = 0.99;
+
 /** Quiet section handoff: no scale, slide, spring or outgoing snapshot. */
 export function useContentReveal<T extends HTMLElement = HTMLDivElement>(
   identity: string,
@@ -47,19 +50,31 @@ export function useContentReveal<T extends HTMLElement = HTMLDivElement>(
     }
     const tokens = getComputedStyle(element);
     const from = continuation.current ?? Number(tokens.getPropertyValue("--opacity-content-enter"));
-    const animation = element.animate([{ opacity: from }, { opacity: 1 }], {
-      duration: cssTimeSeconds(tokens.getPropertyValue("--duration-library-enter")) * 1000,
-      easing: tokens.getPropertyValue("--ease-library-enter").trim(),
-      fill: "both",
-    });
+    // Keep the starting contrast visible for a paint. Cached destinations can
+    // otherwise spend the whole entrance inside the same busy render commit.
+    element.style.opacity = String(from);
+    let animation: Animation | null = null;
+    let frame: number;
     let finished = false;
     const finish = () => {
       finished = true;
+      cancelAnimationFrame(frame);
       continuation.current = null;
       element.style.removeProperty("opacity");
-      animation.cancel();
+      if (animation) animation.onfinish = null;
+      animation?.cancel();
     };
-    animation.onfinish = finish;
+    frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        if (finished) return;
+        animation = element.animate([{ opacity: from }, { opacity: 1 }], {
+          duration: cssTimeSeconds(tokens.getPropertyValue("--duration-library-enter")) * 1000,
+          easing: tokens.getPropertyValue("--ease-library-enter").trim(),
+          fill: "both",
+        });
+        animation.onfinish = finish;
+      });
+    });
     const onPreference = () => {
       if (reduced.matches) finish();
     };
@@ -67,10 +82,13 @@ export function useContentReveal<T extends HTMLElement = HTMLDivElement>(
     return () => {
       reduced.removeEventListener("change", onPreference);
       if (!finished) {
-        continuation.current = Number(getComputedStyle(element).opacity);
-        element.style.opacity = String(continuation.current);
+        const opacity = Number(getComputedStyle(element).opacity);
+        continuation.current = opacity < SETTLED_OPACITY ? opacity : null;
+        element.style.opacity = String(opacity);
       }
-      animation.cancel();
+      cancelAnimationFrame(frame);
+      if (animation) animation.onfinish = null;
+      animation?.cancel();
     };
   }, [identity, enabled, scope, scroll, animateOnEnable]);
 

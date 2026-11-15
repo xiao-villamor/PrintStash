@@ -1344,6 +1344,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (!browseReady) return null;
     return {
       entry,
+      favorites: favoritesOnly,
       items: orderedItems,
       authorizationRevision: modelQuery.data?.pages[0]?.authorization_revision,
       modelPages: modelQuery.data?.pages.length ?? 0,
@@ -1362,6 +1363,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }, [
     browseReady,
     entry,
+    favoritesOnly,
     orderedItems,
     foldersHidden,
     folderPages.data,
@@ -1639,13 +1641,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // into view, or a reflowed row) keeps its place.
   const arriving = useEntranceWindow(arrival, arrival.arriving, DURATION.fast) ?? NO_ARRIVALS;
 
-  // One reveal belongs to the committed visit, including cached Back/Forward.
+  // One reveal belongs to the committed destination, including cached Back/Forward.
+  // Canonical URL replacements do not create a second visual visit.
   // Reused cards and delayed virtual rows share the same presentation instead
   // of independently restarting CSS keyframes as their children mount.
   const modelsContent = useRef<HTMLDivElement>(null);
-  const libraryReveal = useContentReveal(`${snapshot?.entry.key ?? ""}:${viewMode}`, {
+  const libraryReveal = useContentReveal(`${snapshot?.entry.href ?? ""}:${viewMode}`, {
     enabled: snapshot !== null && docView === "models",
-    scope: favoritesOnly ? "favorites" : "library",
+    scope: (snapshot?.favorites ?? favoritesOnly) ? "favorites" : "library",
   });
 
   // A change to the library applies by itself while the view is a single page:

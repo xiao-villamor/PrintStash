@@ -228,10 +228,8 @@ export function CollectionsPaneHost() {
   if (!pane) throw new Error("Collections pane host requires its shell provider");
   const { attach, open, mode } = pane;
   const motion = useCollectionsPaneMotion(open);
-  const params = useSearchParams();
   const sectionMotion = useContentReveal(`${mode}:${pathname === "/" ? "library" : "navigation"}`, {
     enabled: open,
-    scope: `${pathname}:${params.get("favorites") === "true"}`,
   });
   return (
     <div

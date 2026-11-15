@@ -36,6 +36,8 @@
 
 ### Fixed
 
+- Cached Library navigation and switches to Search, Pending and Favorites now show a visible, stationary content reveal after the first painted frame. Returning to Library and opening Pending on mobile use the same transition; sidebar changes no longer lose their reveal when the URL changes, and URL normalization does not replay the same destination.
+
 - Collection navigation no longer inserts a temporary subcollection gap above existing Model cards. Settings stays reachable from the rail and restores its section sidebar; Collections correctly exits Favorites.
 
 - Library navigation uses one calm, interruptible reveal for cached folder visits, Back/Forward, and filters. New previews and loading covers fade into place instead of popping; cached images remain visible.
