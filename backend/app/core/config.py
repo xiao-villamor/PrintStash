@@ -344,10 +344,10 @@ class Settings(BaseSettings):
 
     # Maximum simultaneous native mesh jobs across processes sharing this local
     # data root. This also defaults the derive.native lane. The default is one
-    # job per usable CPU plus one (cgroup quota rounded up to whole CPUs), and
-    # no more than fit the native pool at the 640 MiB thumbnail floor, between
-    # 1 and 8: the extra job keeps cores busy while another waits on I/O, and
-    # memory admission still decides which claims run together. An explicit
+    # job per usable CPU (cgroup quota rounded up to whole CPUs), and no more
+    # than fit the native pool at the 640 MiB thumbnail floor, between 1 and 8:
+    # more jobs than CPUs only oversubscribe the quota, and memory admission
+    # still decides which claims run together. An explicit
     # value also bounds local inference. Zero remains serial.
     max_render_jobs: int = Field(
         default_factory=lambda data: default_native_jobs(

@@ -17,6 +17,8 @@
 ### Performance
 
 - Thumbnails for an imported archive finish sooner: search indexing of the new Models now waits until their thumbnails and measurements are done instead of competing with them for the database. New Models become searchable shortly after their thumbnails appear.
+- Mesh processing no longer stalls behind a job that has already started: admission could read a just-admitted job as still waiting, and every later job then waited for it to finish.
+- The default number of simultaneous mesh jobs is now one per usable CPU (it was one more). With admission no longer stalling, the extra job only competed for the CPU: on a 3-CPU, 8 GB install a 60-file archive's thumbnails finish in 38.7 s instead of 44.9 s, at the same CPU cost. `VAULT_MAX_RENDER_JOBS` and *Models processed at once* still override it.
 
 ### Fixed
 

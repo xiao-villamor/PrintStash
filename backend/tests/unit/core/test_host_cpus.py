@@ -274,15 +274,13 @@ class TestNativeJobsFor:
     @pytest.mark.parametrize(
         ("cpus", "pool_gib", "jobs"),
         [
-            pytest.param(1, 2, 2, id="one-cpu"),
-            pytest.param(2, 2, 3, id="two-cpus-four-gib-host"),
-            pytest.param(3, 3, 4, id="three-cpus-six-gib-host"),
-            pytest.param(4, 4, 5, id="four-cpus-eight-gib-host"),
+            pytest.param(1, 2, 1, id="one-cpu"),
+            pytest.param(2, 2, 2, id="two-cpus-four-gib-host"),
+            pytest.param(3, 3, 3, id="three-cpus-six-gib-host"),
+            pytest.param(4, 4, 4, id="four-cpus-eight-gib-host"),
         ],
     )
-    def test_runs_one_job_per_cpu_plus_one(
-        self, cpus: int, pool_gib: int, jobs: int
-    ) -> None:
+    def test_runs_one_job_per_cpu(self, cpus: int, pool_gib: int, jobs: int) -> None:
         assert native_jobs_for(cpus, pool_gib * 1024**3) == jobs
 
     @pytest.mark.parametrize(
