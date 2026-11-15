@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Collection rows expand and collapse continuously as folders change, keeping the Model grid attached to their movement. Settings sections, Model detail tabs, Upload modes and main destinations use a stationary reveal instead of a zoom; interrupted selections continue from their current appearance.
+
 - Nested folders read their Model page alongside child-folder listings. The measured first row starts downloading its authorized previews as soon as the page arrives, sharing those bytes with the cards. These thumbnails take priority over folder mosaics and revision details, while the first batch still fills the viewport. Shared application-shell code loads together with fewer startup requests, and the matched route's scripts load alongside its language catalog.
 - Decoded Library previews and their card details appear immediately, without a second loading interval for placeholder and image fades. Shared framework code loads together to reduce startup requests while optional features stay deferred.
 - Library cards reveal as soon as their own previews are ready. Release notes, Documents, bulk-selection tools and inspector editing controls load when opened, keeping the initial gallery smaller; the inspector header and close action remain available while its content loads.

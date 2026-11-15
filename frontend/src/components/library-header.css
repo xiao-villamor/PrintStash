@@ -96,6 +96,19 @@
   font-size: 12px;
   font-weight: 500;
 }
+.library-collections-region {
+  position: relative;
+  flex-shrink: 0;
+}
+.library-collections-region[data-open="false"] {
+  height: 0;
+}
+.library-collections-region[data-open="false"] > .library-collections-row {
+  position: absolute;
+  inset: 0 0 auto;
+  opacity: 0;
+  clip-path: inset(0 0 100% 0);
+}
 .library-subcollections {
   margin-top: 14px;
   margin-bottom: 0;

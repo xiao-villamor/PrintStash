@@ -223,8 +223,9 @@ ordinary action cursors from drifting between components.
 /* --ease-content-settle is the sampled curve in packages/ui/src/motion.css. */
 ```
 
-Use three related behaviors: edge movement for drawers, a small opaque depth settle
-for section changes, and opacity-only handoffs for loading surfaces. Do not invent
+Use related behaviors: edge movement for drawers, stationary opacity handoffs
+for section changes and loading surfaces, and a clipped row reveal when
+child-collection space changes. Do not invent
 new directions, bounce, cascades, or text crossfades for individual features.
 
 Collections, Search, Favorites, Pending, Saved views and Settings use one shell
@@ -235,22 +236,21 @@ position. Settings navigation occupies this frame rather than adding another col
 The border and background belong to the stationary shell, outside animated content.
 
 Model detail tabs, Settings sections and Upload modes share
-`useContentMotion`: content commits immediately at full opacity, then settles from
-`--scale-content-enter` to its natural size, anchored at the top center. The
-critically damped spring uses the fast token as a 200ms response and settles in
-about 300ms, without overshoot. Rapid selections inherit the current presentation
-and velocity. Initial mount and data refreshes do not replay section motion.
-The frame remains mounted; reduced motion makes selection immediate and static.
-Tab press feedback begins on pointer-down and underline feedback stays local.
+`useContentReveal`: content commits at its natural size with one quiet opacity
+0.86→1 handoff over the library timing (240ms). No zoom, slide or spring changes
+text or card size. Rapid selections inherit the current opacity. Initial mount
+and data refreshes do not replay section motion. The frame remains mounted;
+reduced motion makes selection immediate and static. Tab press feedback begins
+on pointer-down and underline feedback stays local.
 
-Search, Favorites and Settings main destinations use this same depth spring. The
-route outlet keeps one mounted content surface; its readiness signal lives inside
-Suspense so even a cold destination starts motion when its content commits. Sidebar
-navigation and the top bar sit outside that surface and remain stationary during
-these switches. Search in the rail opens the main Search destination without
-changing the sidebar's open preference. Back/Forward uses the same treatment.
-Typing, filters, Settings sub-sections and data refreshes do not replay the main
-transition; internal controls retain their own local feedback. First load is static.
+Search, Favorites and Settings main destinations use this same stationary reveal.
+The route outlet keeps one mounted content surface; its readiness signal lives
+inside Suspense so a cold destination starts its reveal when its content commits.
+Sidebar navigation and the top bar remain stationary. Entering Favorites does not
+also fade its nested library surface. Search in the rail opens the main Search
+destination without changing the sidebar's open preference. Back/Forward uses
+the same treatment. Typing, filters, Settings sub-sections and data refreshes do
+not replay the main transition. First load is static.
 
 Library motion is quiet and continuous: stable geometry, no spring or scale,
 no cascading entrances, and no blank flash when revisiting cached content.
@@ -268,6 +268,15 @@ Loading cards and populated cards share geometry. Reserve a subcollection strip
 only for known children on initial load. During navigation, the displayed
 snapshot retains its layout until the destination commits; a pending lookup
 never borrows the root collection count or inserts space above existing cards.
+When a committed collection changes whether child collections exist,
+`LibraryCollectionsRegion` commits the new layout once, translates the following
+Model content from its previous position, and clips the child row over the library
+timing. Child-grid column measurements settle before the motion starts on the
+next frame. No per-frame height or grid-track layout runs while new cards render.
+The Model grid follows that row rather than jumping to its final position. The outgoing row stays clipped and inert until the transition ends;
+reversals retarget from its visible height. Initial loading and reduced motion
+remain immediate. The disclosure never scales the cards or duplicates the
+outgoing Model grid.
 If collection
 metadata moves the destination grid, cards continue from visible placeholder
 positions; reduced motion omits that translation. Missing-preview icons appear
@@ -315,7 +324,7 @@ Choosing:
 | Situation | Curve | Duration |
 | --- | --- | --- |
 | Entering or exiting (modal, menu, panel, toast) | `ease-out` | `fast` |
-| Content/section settle | critical spring / `ease-settle` | 200ms response / `slow` |
+| Content/section handoff | `ease-library-enter` | `duration-library-enter` (240ms) |
 | Press feedback | `ease-out` | `press` |
 | Hover, color change | default | `press` |
 | Constant motion (progress fill) | `linear` | n/a |
@@ -330,18 +339,21 @@ the user is watching. **Nothing in the app may exceed 300ms.**
    `top`, or `margin` triggers layout on every frame. Progress bars use
    `transform: scaleX()`, not `width`. The docked sidebar is an explicit exception:
    one width animation keeps its boundary and the workspace on the same timeline.
+   Child-collection disclosure uses a bounded clip-path for the row and a
+   compositor translation for the Model content, with one layout commit.
 2. **`transition-all` is banned.** It animates properties you did not intend,
    off the GPU. List them: `transition-[background-color,border-color,transform]`.
    The count in `frontend/src/` must stay at zero.
 3. **Never scale from 0.** Nothing in the real world appears from nothing.
    Floating entrances start at `scale-content-enter` + `opacity: 0`; section
-   content stays opaque.
+   content retains its natural size and reveals from `opacity-content-enter`.
 4. **Floating panels scale from their trigger**, not their center — a menu opened
    from the top-right corner grows out of that corner
    (`transform-origin: top right`). Modals are the exception: they are centered,
    so `transform-origin: center` is correct there.
-5. **Retarget from the current presentation.** Interactive drawer and section
-   springs preserve both position and velocity. Never restart a spring from its
+5. **Retarget from the current presentation.** Interactive drawer
+   springs preserve both position and velocity. Section reveals preserve opacity.
+   Never restart a spring from its
    initial state or lock input while it runs. Non-gesture CSS transitions retarget
    from the current computed value.
 6. **Enter and exit are symmetric.** An overlay that keyframes in and then

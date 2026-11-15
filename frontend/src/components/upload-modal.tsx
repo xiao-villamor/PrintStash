@@ -1,6 +1,6 @@
 "use client";
 
-import { useContentMotion } from "@/lib/use-content-motion";
+import { useContentReveal } from "@/lib/use-content-reveal";
 import { useTaxonomyCommands } from "@/features/library/taxonomy";
 
 import { uiMessage } from "@/lib/locale";
@@ -130,7 +130,7 @@ export function UploadModal({
   const [meshFile, setMeshFile] = useState<File | null>(null);
   const [gcodeFile, setGcodeFile] = useState<File | null>(null);
   const [mode, setMode] = useState<UploadMode>("files");
-  const modeMotion = useContentMotion(mode, { enabled: open, scroll: "self" });
+  const modeMotion = useContentReveal(mode, { enabled: open, scroll: "self" });
   // Bulk mode: each mesh becomes its own model, queued as an independent
   // ingest task. No mesh+G-code linking (that stays on the "Files" tab).
   // Picking/dropping a folder mirrors its subfolders into nested collections.

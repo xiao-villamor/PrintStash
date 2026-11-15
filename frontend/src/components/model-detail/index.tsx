@@ -79,7 +79,7 @@ import { SendToButtons } from "./send-to-buttons";
 import { ShareDialog } from "./share-dialog";
 import { SettingsTab } from "./settings-tab";
 import { SourceTab } from "./source-tab";
-import { useContentMotion } from "@/lib/use-content-motion";
+import { useContentReveal } from "@/lib/use-content-reveal";
 import { DetailTabLoading } from "./tab-loading";
 import { useDerivativeRefresh } from "./use-derivative-refresh";
 import { ViewerToolbar } from "./viewer-toolbar";
@@ -353,7 +353,7 @@ function ModelDetailPresentation({
     (!canEditModel && requestedTab === "similar")
       ? "overview"
       : requestedTab;
-  const detailTabBody = useContentMotion(activeTab, { scroll: "parent" });
+  const detailTabBody = useContentReveal(activeTab, { scroll: "parent" });
   const visibleTabs = useMemo(
     () =>
       TABS.filter(

@@ -1,7 +1,7 @@
 import { Suspense, useLayoutEffect, useState } from "react";
 import { Outlet, useRouterState } from "@tanstack/react-router";
 import { usePathname, useSearchParams } from "./navigation";
-import { useContentMotion } from "./use-content-motion";
+import { useContentReveal } from "./use-content-reveal";
 
 type MainSection = "search" | "favorites" | "settings" | "other";
 
@@ -44,7 +44,7 @@ export function RouteOutlet() {
       );
     },
   });
-  const motion = useContentMotion(committedSection, {
+  const motion = useContentReveal(committedSection, {
     enabled: section !== "other",
     animateOnEnable: true,
   });

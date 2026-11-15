@@ -2,11 +2,21 @@ import { useLayoutEffect, useRef } from "react";
 import { cssTimeSeconds } from "@/lib/css-time";
 
 /** Quiet section handoff: no scale, slide, spring or outgoing snapshot. */
-export function useContentReveal(
+export function useContentReveal<T extends HTMLElement = HTMLDivElement>(
   identity: string,
-  { enabled, scope }: { enabled: boolean; scope: string },
+  {
+    enabled = true,
+    scope,
+    scroll = "preserve",
+    animateOnEnable = false,
+  }: {
+    enabled?: boolean;
+    scope?: string;
+    scroll?: "self" | "parent" | "preserve";
+    animateOnEnable?: boolean;
+  } = {},
 ) {
-  const content = useRef<HTMLDivElement>(null);
+  const content = useRef<T>(null);
   const previous = useRef({ identity, scope, enabled });
   const continuation = useRef<number | null>(null);
 
@@ -17,8 +27,20 @@ export function useContentReveal(
     previous.current = { identity, scope, enabled };
     const element = content.current;
     if (!element) return;
+    if (changed && scroll !== "preserve") {
+      (scroll === "self" ? element : element.parentElement)?.scrollTo({
+        top: 0,
+        behavior: "instant",
+      });
+    }
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
-    if (!changed || !enabled || !wasEnabled || !sameScope || reduced.matches) {
+    if (
+      !changed ||
+      !enabled ||
+      (!wasEnabled && !animateOnEnable) ||
+      !sameScope ||
+      reduced.matches
+    ) {
       continuation.current = null;
       element.style.removeProperty("opacity");
       return;
@@ -50,7 +72,7 @@ export function useContentReveal(
       }
       animation.cancel();
     };
-  }, [identity, enabled, scope]);
+  }, [identity, enabled, scope, scroll, animateOnEnable]);
 
   return content;
 }

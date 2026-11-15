@@ -2,7 +2,7 @@
 import { WorkbenchSidebarContent } from "@/components/collections-pane";
 import { useCollectionsPane } from "@/lib/collections-pane-context";
 
-import { useContentMotion } from "@/lib/use-content-motion";
+import { useContentReveal } from "@/lib/use-content-reveal";
 import { StorageConnectionReview } from "@/components/storage-connection-review";
 
 import { captureEditingBase } from "@/lib/api/editing";
@@ -488,7 +488,7 @@ export function SettingsPanel() {
   // during render; mirroring it into state needed an effect to re-sync on every
   // deep link, back button, and replace.
   const activeSection = settingsSection(searchParams.get("section"));
-  const sectionMotion = useContentMotion<HTMLElement>(activeSection);
+  const sectionMotion = useContentReveal<HTMLElement>(activeSection);
   const settingsTrash = activeSection === "trash" && searchParams.get("view") === "settings";
   const trashPage = activeSection === "trash" && !settingsTrash;
   const mobileTabsRef = useRef<HTMLDivElement>(null);
