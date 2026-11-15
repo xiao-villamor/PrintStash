@@ -116,6 +116,7 @@ class PassNote(StrEnum):
     ALREADY_ACTIVE = "already_active"
     CLAIMED_ELSEWHERE = "claimed_elsewhere"
     WAITING_FOR_ADDITIONS = "waiting_for_additions"
+    YIELDING_TO_INTERACTIVE = "yielding_to_interactive"
 
 
 @dataclass(frozen=True)
@@ -669,6 +670,12 @@ def _discover(definition: JobDefinition, *, now: datetime, result: PassResult) -
                 result.count(PassNote.WAITING_FOR_ADDITIONS)
                 return
             result.paced = True
+        if definition.yields_to and jobs.any_active(
+            session, definition.yields_to, priority=WorkPriority.INTERACTIVE
+        ):
+            # The last of those Jobs to settle nudges this definition.
+            result.count(PassNote.YIELDING_TO_INTERACTIVE)
+            return
         if isinstance(source, PrioritizedWorkSource):
             budget = _discovery_budget(session, definition)
             limit = budget.total

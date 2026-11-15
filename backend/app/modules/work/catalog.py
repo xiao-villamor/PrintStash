@@ -161,6 +161,14 @@ class WorkCatalog:
             if item.during_additions is not DuringAdditions.RUNS
         )
 
+    def yielding_to(self, name: JobKind) -> tuple[JobKind, ...]:
+        """Definitions whose discovery waits behind interactive Jobs of ``name``."""
+        return tuple(
+            other
+            for other, item in self.definitions.items()
+            if name in item.yields_to
+        )
+
     @property
     def paced_during_additions(self) -> tuple[JobKind, ...]:
         """Definitions that look for work at a pace while additions are active."""

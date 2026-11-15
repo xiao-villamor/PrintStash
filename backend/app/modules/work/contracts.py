@@ -352,6 +352,10 @@ class JobDefinition:
     # What discovery does while the library is still being added to. The last
     # addition to settle nudges every definition that held back.
     during_additions: DuringAdditions = DuringAdditions.RUNS
+    # Definitions whose interactive Jobs this one's discovery waits behind:
+    # background writes that would otherwise hold the database writer while a
+    # person waits on that work. The last such Job to settle nudges it.
+    yields_to: tuple[JobKind, ...] = ()
     # Whether each step is admitted as a write-capable operation (drained by a
     # restore, deferred while one holds the fence). Only work that itself takes
     # the restore fence (a vault migration's cutover) opts out and gates itself.

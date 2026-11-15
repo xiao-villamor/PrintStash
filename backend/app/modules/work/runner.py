@@ -193,6 +193,20 @@ class ExecutionContext:
             if adding:
                 # Paced work looks again on its own while additions go on.
                 sources.difference_update(catalog.paced_during_additions)
+            yielding = catalog.yielding_to(definition.name)
+            if (
+                yielding
+                and self.priority is WorkPriority.INTERACTIVE
+                and not jobs.any_active(
+                    session,
+                    (definition.name,),
+                    besides=self.job_id,
+                    priority=WorkPriority.INTERACTIVE,
+                )
+            ):
+                # The last interactive Job to end releases the work that
+                # yielded to it.
+                sources.update(yielding)
             for source in sorted(sources):
                 if stamp(session, source, now=now):
                     passes.append(source)
