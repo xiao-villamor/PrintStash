@@ -78,6 +78,9 @@ export function CollectionOverviewCard({
         className={`${compact ? "flex items-center gap-3 p-2" : "block"} w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`}
       >
         <div
+          data-library-preview={
+            error ? "failed" : collection.model_count > 0 && !models ? "pending" : "ready"
+          }
           className={`collection-card-collage library-preview grid gap-px overflow-hidden ${columns} ${count > 2 ? "grid-rows-2" : "grid-rows-1"} ${compact ? "shrink-0" : ""}`}
           aria-hidden="true"
         >

@@ -18,7 +18,7 @@ export function useStartupThumbnails(
       frame = requestAnimationFrame(() => {
         const thumbnails = [...element.querySelectorAll("[data-library-thumbnail]")];
         if (hasMedia && thumbnails.length === 0) return;
-        const visible = thumbnails.filter((thumbnail) => {
+        const inViewport = (thumbnail: Element) => {
           const bounds = thumbnail.getBoundingClientRect();
           return (
             bounds.width > 0 &&
@@ -28,7 +28,17 @@ export function useStartupThumbnails(
             bounds.left < innerWidth &&
             bounds.right > 0
           );
-        });
+        };
+        // Collection images do not exist until their bounded preview read resolves.
+        // Keep secondary requests behind that read as well as the image bytes.
+        const previews = [...element.querySelectorAll("[data-library-preview]")].filter(inViewport);
+        if (previews.some((preview) => preview.getAttribute("data-library-preview") === "failed")) {
+          settle("media", "failed");
+          return;
+        }
+        if (previews.some((preview) => preview.getAttribute("data-library-preview") === "pending"))
+          return;
+        const visible = thumbnails.filter(inViewport);
         if (
           visible.some((thumbnail) => thumbnail.getAttribute("data-library-thumbnail") === "failed")
         ) {
@@ -62,7 +72,7 @@ export function useStartupThumbnails(
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ["data-library-thumbnail", "src"],
+      attributeFilter: ["data-library-thumbnail", "data-library-preview", "src"],
     });
     element.addEventListener("load", check, true);
     element.addEventListener("error", check, true);

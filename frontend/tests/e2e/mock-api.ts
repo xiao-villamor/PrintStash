@@ -1414,6 +1414,21 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     sendJson(res, { browse_revision: "r1", authorization_revision: "a1" });
     return;
   }
+  if (url.pathname === "/api/v1/models/browse/collection-preview") {
+    const collection = url.searchParams.get("collection");
+    sendJson(res, {
+      items: modelList
+        .filter(
+          (model) =>
+            model.collection === collection || model.collection?.startsWith(`${collection}/`),
+        )
+        .toSorted((a, b) => b.updated_at.localeCompare(a.updated_at) || a.id - b.id)
+        .slice(0, 4)
+        .map((model) => ({ kind: "model", id: model.id, thumbnail_url: model.thumbnail_url })),
+      authorization_revision: "a1",
+    });
+    return;
+  }
   if (url.pathname === "/api/v1/models/browse") {
     const items =
       url.searchParams.get("view") === "multipart"

@@ -5,6 +5,7 @@ import type {
   LibraryBrowsePage,
   LibraryBrowseParams,
   LibraryThumbnailProjection,
+  LibraryCollectionPreview,
 } from "@/types/library-browse";
 
 export function listLibraryPage(
@@ -21,6 +22,17 @@ export function listLibraryPage(
 
 export function getLibraryRevision(options?: GetJsonOptions): Promise<LibraryAuthority> {
   return getJson<LibraryAuthority>("/api/v1/models/browse/revision", options);
+}
+
+export function getCollectionPreview(
+  collection: string,
+  options?: GetJsonOptions,
+): Promise<LibraryCollectionPreview> {
+  const search = new URLSearchParams({ collection });
+  return getJson<LibraryCollectionPreview>(
+    `/api/v1/models/browse/collection-preview?${search}`,
+    options,
+  );
 }
 
 export function getLibraryThumbnails(

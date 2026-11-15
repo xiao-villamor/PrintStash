@@ -81,9 +81,9 @@ def _hooks(derivative_group: DerivativeGroup):
         file_row = session.get(File, file_id_of(subject_key))
         if file_row is None:
             return
-        records.fail_in_flight(
+        records.fail_unfinished(
             session,
-            file_id_of(subject_key),
+            file_row,
             reason,
             now=utcnow(),
             kinds=derivative_group.recipes_for(file_row.file_type),

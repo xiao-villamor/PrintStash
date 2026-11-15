@@ -76,3 +76,18 @@ class BrowseThumbnail(BaseModel):
 class BrowseThumbnailsRead(BaseModel):
     items: list[BrowseThumbnail]
     authorization_revision: str
+
+
+class CollectionPreviewQuery(BaseModel):
+    collection: str = Field(min_length=1, max_length=2048)
+
+
+class LibraryPreviewItem(BaseModel):
+    kind: BrowseKind
+    id: int
+    thumbnail_url: str | None
+
+
+class CollectionPreviewRead(BaseModel):
+    items: list[LibraryPreviewItem] = Field(max_length=4)
+    authorization_revision: str

@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Collection mosaics read four authorized thumbnail references without loading full Model cards or counting the subtree. Secondary Library reads wait for visible collection previews to resolve.
 - Library loading reuses eligible folder preview data, starts previews without waiting for card fades, and loads descriptions and dialogs on demand. Automatic folder scope resolves empty direct listings in one response while preserving bounded pagination.
 - The Collections sidebar opens with a gentler ease and changes tools without zooming its contents.
 - Switching to Search, Favorites or Settings animates only the main content with one shared transition; the sidebar and top bar stay still. Search in the navigation rail opens the main Search page, and cached returns use the same motion.
@@ -28,6 +29,8 @@
 
 ### Fixed
 
+- The API prepares route and validation metadata before accepting traffic, avoiding a synchronous pause across concurrent first requests after startup.
+- Derivative Jobs that fail before claiming an output now record the failure with the normal backoff and attempt limit, preventing immediate rediscovery loops while retaining completed outputs.
 - Library preview updates no longer flash a refresh banner or hide the details-panel toggle. The displayed list and open inspector stay in place during background refreshes; explicit refreshes and failures keep their feedback.
 - ZIP and model selection searches keep the search icon inside the field. Selected entries use neutral highlighting, and the ZIP destination picker and import actions stay visible in the dialog footer on narrow screens.
 - G-code preview views stay where you put them: choosing Front or Top, fitting, or changing layers no longer snaps the camera back, and orbiting still works after the top view. Layers are browsed like a slicer: a vertical layer rail with step buttons, the layer number and its height, plus a This layer toggle that shows only the current layer. A compact bar holds the view menu, fit, travel and bed; scrolling zooms.

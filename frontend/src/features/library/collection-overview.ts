@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { listLibraryPage } from "@/lib/api/library-browse";
+import { getCollectionPreview } from "@/lib/api/library-browse";
 import { onAuthChange, retirePrivateSessionScope } from "@/lib/auth-store";
 import { ApiError } from "@/lib/errors";
 import { queryKeys } from "@/lib/query-client";
@@ -11,6 +11,7 @@ import type {
   LibraryBrowseEntry,
   LibraryBrowsePage,
   LibraryBrowseParams,
+  LibraryPreviewItem,
 } from "@/types/library-browse";
 import { narrowsLibrary } from "./filters";
 
@@ -51,6 +52,12 @@ export function collectionPreviewItems(
     : null;
 }
 
+function previewItem(item: LibraryBrowseEntry): LibraryPreviewItem {
+  return item.kind === "model"
+    ? { kind: item.kind, id: item.model.id, thumbnail_url: item.model.thumbnail_url }
+    : { kind: item.kind, id: item.multipart.id, thumbnail_url: item.multipart.cover_thumbnail_url };
+}
+
 /** A bounded descendant read, admitted only when the collection card approaches
  * view and, when `afterPrimary` is false, the page's own list has arrived: four
  * mosaic reads must not compete with the list the reader came for. */
@@ -89,16 +96,7 @@ export function useCollectionOverview(
       collection.model_count > 0,
     queryFn: async ({ signal }) => {
       requireSessionVersion(session);
-      const page = await listLibraryPage(
-        {
-          collection: collection.path,
-          direct: false,
-          limit: PREVIEW_LIMIT,
-          sort: "date-desc",
-          view: "all",
-        },
-        { signal },
-      );
+      const page = await getCollectionPreview(collection.path, { signal });
       requireSessionVersion(session);
       return page;
     },
@@ -136,14 +134,10 @@ export function useCollectionOverview(
     models: visible
       ? collection.model_count === 0
         ? []
-        : (reused ?? query.data?.items)?.map((item) =>
-            item.kind === "model"
-              ? { key: `model:${item.model.id}`, thumbnail: item.model.thumbnail_url }
-              : {
-                  key: `multipart:${item.multipart.id}`,
-                  thumbnail: item.multipart.cover_thumbnail_url,
-                },
-          )
+        : (reused?.map(previewItem) ?? query.data?.items)?.map((item) => ({
+            key: `${item.kind}:${item.id}`,
+            thumbnail: item.thumbnail_url,
+          }))
       : undefined,
     error: active && reused === null && query.isError,
     retry: () => {

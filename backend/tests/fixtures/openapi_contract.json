@@ -1807,6 +1807,14 @@
         "title": "Body_upload_document_image_api_v1_documents__document_id__images_post",
         "type": "object"
       },
+      "BrowseKind": {
+        "enum": [
+          "model",
+          "multipart"
+        ],
+        "title": "BrowseKind",
+        "type": "string"
+      },
       "BrowseModel": {
         "properties": {
           "kind": {
@@ -3928,6 +3936,28 @@
           "role"
         ],
         "title": "CollectionPermissionUpdate",
+        "type": "object"
+      },
+      "CollectionPreviewRead": {
+        "properties": {
+          "authorization_revision": {
+            "title": "Authorization Revision",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryPreviewItem"
+            },
+            "maxItems": 4,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "authorization_revision"
+        ],
+        "title": "CollectionPreviewRead",
         "type": "object"
       },
       "CollectionRead": {
@@ -8324,6 +8354,35 @@
           }
         },
         "title": "LibraryPathScan",
+        "type": "object"
+      },
+      "LibraryPreviewItem": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/BrowseKind"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "thumbnail_url"
+        ],
+        "title": "LibraryPreviewItem",
         "type": "object"
       },
       "LibraryRead": {
@@ -33966,6 +34025,55 @@
           }
         ],
         "summary": "Revision-checked mixed library cards",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/browse/collection-preview": {
+      "get": {
+        "operationId": "collection_preview_api_v1_models_browse_collection_preview_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "maxLength": 2048,
+              "minLength": 1,
+              "title": "Collection",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionPreviewRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read four authorized collection cover references without card metadata",
         "tags": [
           "models"
         ]

@@ -30,3 +30,14 @@ export interface LibraryThumbnailProjection {
   items: { model_id: number; thumbnail_url: string | null }[];
   authorization_revision: string;
 }
+
+export interface LibraryPreviewItem {
+  kind: "model" | "multipart";
+  id: number;
+  thumbnail_url: string | null;
+}
+
+export interface LibraryCollectionPreview {
+  items: LibraryPreviewItem[];
+  authorization_revision: string;
+}

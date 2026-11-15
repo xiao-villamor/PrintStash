@@ -293,7 +293,7 @@ def prepare_process(*, owner: bool) -> PreparedProcess:
                     ),
                 )
             )
-    except (OSError, RuntimeError, ValueError, sqlite3.Error):
+    except OSError, RuntimeError, ValueError, sqlite3.Error:
         logger.exception("artifact cache unavailable; source reads remain enabled")
         bind_materializer(None, configured_root=Path(settings.artifact_cache_root))
 
@@ -430,6 +430,10 @@ async def lifespan(app: FastAPI):
     # Validate environment-time paths before even creating the process-lock
     # rendezvous beside the database.
     validate_runtime_storage_paths()
+    # FastAPI resolves included route/dependency graphs lazily. Preparing the
+    # public schema also resolves those graphs before traffic is admitted,
+    # instead of blocking concurrent first requests on the HTTP event loop.
+    await asyncio.to_thread(app.openapi)
     process_lock = acquire_process_lock()
     app.state.process_lock = process_lock
     logger.info("starting %s v%s", settings.app_name, settings.app_version)
