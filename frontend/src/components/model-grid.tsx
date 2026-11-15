@@ -858,6 +858,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // Measure the loading cards before the first browse request. Keep this size
   // with the mounted view so resizing cannot replace its accepted cursors.
   const [pageSize, setPageSize] = useState<number | null>(null);
+  const [firstRowSize, setFirstRowSize] = useState(0);
   const [initialLibraryPreferences] = useState(() => ({
     view: readVaultPreference(LIBRARY_VIEW_KEY),
     sort: readVaultPreference("ps-vault-sort"),
@@ -1250,6 +1251,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     browseParams,
     pageSize !== null &&
       (selectedCollectionId === null || destinationCollection?.path === selectedCollection),
+    firstRowSize,
   );
   const includeSubfolders =
     requestedIncludeSubfolders || modelQuery.data?.pages[0]?.effective_direct === false;
@@ -1286,9 +1288,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       destinationCollection !== undefined &&
       !destinationCollection.has_readme);
   const receivePageSize = useCallback(
-    (capacity: number) => {
+    (capacity: number, columns: number) => {
       // Include the reserved collection strip before measuring the Model area.
-      if (capacityReady) setPageSize((current) => current ?? capacity);
+      if (capacityReady) {
+        setPageSize((current) => current ?? capacity);
+        setFirstRowSize(columns);
+      }
     },
     [capacityReady],
   );
@@ -5100,7 +5105,7 @@ export function ModelGridSkeleton({
 }: {
   compact?: boolean;
   onRetire?: (rects: readonly DOMRect[]) => void;
-  onCapacityChange?: (capacity: number) => void;
+  onCapacityChange?: (capacity: number, columns: number) => void;
 }) {
   useUiLocale();
   const [scrollNode, setScrollNode] = useState<HTMLDivElement | null>(null);
@@ -5117,7 +5122,7 @@ export function ModelGridSkeleton({
       // the viewport, rather than sizing against temporary stacked folders.
       capacityFrame.current = requestAnimationFrame(() => {
         if (scrollNode?.isConnected)
-          onCapacityChange?.(viewportPageSize(scrollNode, count, "[data-library-key]"));
+          onCapacityChange?.(viewportPageSize(scrollNode, count, "[data-library-key]"), count);
       });
     },
     [onCapacityChange, scrollNode],
@@ -5130,7 +5135,7 @@ export function ModelGridSkeleton({
   );
   useLayoutEffect(() => {
     // Non-layout hosts and hidden surfaces cannot provide a viewport yet.
-    if (scrollNode?.clientWidth === 0) onCapacityChange?.(UNMEASURED_PAGE_SIZE);
+    if (scrollNode?.clientWidth === 0) onCapacityChange?.(UNMEASURED_PAGE_SIZE, 0);
   }, [onCapacityChange, scrollNode]);
   const cards = useMemo(
     () => Array.from({ length: columns * SKELETON_ROWS }, (_, index) => index),
@@ -5207,12 +5212,12 @@ export function ModelGridSkeleton({
 function ModelListSkeleton({
   onCapacityChange,
 }: {
-  onCapacityChange?: (capacity: number) => void;
+  onCapacityChange?: (capacity: number, columns: number) => void;
 }) {
   useUiLocale();
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (root.current) onCapacityChange?.(viewportPageSize(root.current, 1, ":scope > div"));
+    if (root.current) onCapacityChange?.(viewportPageSize(root.current, 1, ":scope > div"), 1);
   }, [onCapacityChange]);
   return (
     <div ref={root} className="flex flex-col">

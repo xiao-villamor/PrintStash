@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Nested folders read their Model page alongside child-folder listings. First-row thumbnails take priority over folder mosaics and revision details, while the first batch still fills the viewport. Shared application-shell code loads together with fewer startup requests.
+- Nested folders read their Model page alongside child-folder listings. The measured first row starts downloading its authorized previews as soon as the page arrives, sharing those bytes with the cards. These thumbnails take priority over folder mosaics and revision details, while the first batch still fills the viewport. Shared application-shell code loads together with fewer startup requests.
 - Decoded Library previews and their card details appear immediately, without a second loading interval for placeholder and image fades. Shared framework code loads together to reduce startup requests while optional features stay deferred.
 - Library cards reveal as soon as their own previews are ready. Release notes, Documents, bulk-selection tools and inspector editing controls load when opened, keeping the initial gallery smaller; the inspector header and close action remain available while its content loads.
 - Library grids and tables size the first batch to fill the visible page and load subsequent pages as the reader scrolls, including scrollbar and assistive scrolling. Pagination shows a retry action only when a page fails.
