@@ -817,6 +817,19 @@ class TestRegistration:
         } <= names
 
 
+class TestProjectionYieldsToMeshWork:
+    def test_projection_discovery_yields_to_mesh_jobs(self) -> None:
+        # Projected beside an import's mesh Jobs, each page held the writer for
+        # hundreds of statements and stalled thumbnail publication.
+        project = next(
+            definition
+            for definition in jobs.definitions()
+            if definition.name is JobKind.SEARCH_PROJECT
+        )
+
+        assert project.yields_to == (JobKind.DERIVATIVES_MESH,)
+
+
 class TestRestoreAdmission:
     """Search definitions admit each unit, so a restore drains between units."""
 

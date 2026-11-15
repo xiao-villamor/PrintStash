@@ -1967,6 +1967,64 @@ class TestDiscoveryWaitsForAdditions:
         assert len(self._created(db_session, EAGER)) == 1
 
 
+class TestDiscoveryYieldsToInteractiveWork:
+    """``yields_to``: discovery holds back while a person waits on other work."""
+
+    def test_holds_back_while_an_interactive_job_is_active(
+        self, yielding_engine, make_job, db_session: Session
+    ) -> None:
+        from app.modules.work.reconciler import PassNote
+
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        make_job(kind=INTERACTIVE_WORK, state=JobState.RUNNING, attempts=1)
+
+        result = run_pass(YIELDING)
+
+        assert (
+            TestDiscoveryWaitsForAdditions._created(db_session, YIELDING),
+            result.outcomes,
+        ) == ([], {PassNote.YIELDING_TO_INTERACTIVE.value: 1})
+
+    def test_holds_back_while_an_interactive_job_is_queued(
+        self, yielding_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        make_job(kind=INTERACTIVE_WORK, state=JobState.QUEUED)
+
+        run_pass(YIELDING)
+
+        assert TestDiscoveryWaitsForAdditions._created(db_session, YIELDING) == []
+
+    def test_runs_beside_backfill_jobs(
+        self, yielding_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        make_job(
+            kind=INTERACTIVE_WORK,
+            state=JobState.RUNNING,
+            attempts=1,
+            priority=WorkPriority.BACKFILL,
+        )
+
+        run_pass(YIELDING)
+
+        assert len(TestDiscoveryWaitsForAdditions._created(db_session, YIELDING)) == 1
+
+    def test_finds_work_once_no_interactive_job_is_active(
+        self, yielding_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        make_job(kind=INTERACTIVE_WORK, state=JobState.COMPLETED)
+
+        run_pass(YIELDING)
+
+        assert len(TestDiscoveryWaitsForAdditions._created(db_session, YIELDING)) == 1
+
+
 class TestPacedDiscovery:
     """``DuringAdditions.PACED``: discovery looks at a pace while the library grows."""
 

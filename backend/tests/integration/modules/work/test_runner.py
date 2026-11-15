@@ -1594,6 +1594,66 @@ class TestAdditionsRelease:
         assert PACED in _nudged(additions_engine)
 
 
+class TestInteractiveRelease:
+    """The last interactive Job to settle releases the work that yielded to it."""
+
+    def test_the_last_interactive_job_to_end_nudges_the_yielding_work(
+        self, yielding_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        job = make_job(kind=INTERACTIVE_WORK, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        cursor = db_session.get(ReconcileCursor, YIELDING)
+        assert cursor is not None and cursor.nudged_at is not None
+        assert YIELDING in _nudged(yielding_engine)
+
+    def test_one_that_ends_before_others_leaves_it_waiting(
+        self, yielding_engine, make_job
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        make_job(
+            kind=INTERACTIVE_WORK,
+            state=JobState.QUEUED,
+            subject="artifact/2",
+        )
+        job = make_job(kind=INTERACTIVE_WORK, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert YIELDING not in _nudged(yielding_engine)
+
+    def test_a_failed_interactive_job_releases_it_too(
+        self, yielding_engine, make_job
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        job = make_job(kind=INTERACTIVE_WORK, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.FAILED, error="broken_mesh")
+
+        assert YIELDING in _nudged(yielding_engine)
+
+    def test_a_backfill_job_ending_releases_nothing(
+        self, yielding_engine, make_job
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        job = make_job(
+            kind=INTERACTIVE_WORK,
+            state=JobState.RUNNING,
+            attempts=1,
+            priority=WorkPriority.BACKFILL,
+        )
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert YIELDING not in _nudged(yielding_engine)
+
+
 def _paced_delays(engine: InlineJobEngine, source: JobKind) -> list[float | None]:
     return [
         execution.submission.delay_seconds

@@ -13,6 +13,10 @@
 
 - A TAR upload or URL import can no longer exhaust the server's memory or CPU with a few hundred bytes. TAR headers are read with fixed caps: oversized long-name or pax headers and unknown member types are refused, folders and links count toward the entry limit, the whole unpacked stream is held to the archive size limit, and cancelling an import stops its archive check.
 
+### Performance
+
+- Thumbnails for an imported archive finish sooner: search indexing of the new Models now waits until their thumbnails and measurements are done instead of competing with them for the database. New Models become searchable shortly after their thumbnails appear.
+
 ### Fixed
 
 - 7z archives with more than one folder (non-solid, appended or split into blocks) import instead of failing as invalid.
