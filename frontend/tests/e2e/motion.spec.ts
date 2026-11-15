@@ -27,6 +27,7 @@ declare global {
       transform: string;
     }[];
     descriptionHeights: number[];
+    cardEntranceScales: number[];
   }
 }
 
@@ -252,32 +253,38 @@ test.describe("motion and layering", () => {
     });
   }
 
-  test("the card entrance is large enough to be noticed on cached content", async ({ page }) => {
+  test("folder cards appear at their final size", async ({ page }) => {
     await folderWithDescription(page);
+    await page.addInitScript(() => {
+      window.cardEntranceScales = [];
+      document.addEventListener("animationstart", (event) => {
+        if (!(event.target instanceof HTMLElement) || !event.target.matches("[data-library-key]"))
+          return;
+        const card = event.target;
+        for (const animation of card.getAnimations()) {
+          animation.pause();
+          animation.currentTime = 75;
+        }
+        window.cardEntranceScales.push(new DOMMatrixReadOnly(getComputedStyle(card).transform).a);
+      });
+    });
     await page.goto("/");
+
     await page
       .getByRole("main")
       .getByRole("button", { name: /maraio/ })
       .click();
-    await expect
-      .poll(() => entrancesUnder(page, "folder-cards-forward"))
-      .toContain("folder-in-forward");
+    await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
 
-    const [start] = (await animationStarts(page)).filter(
-      (entry) => entry.name === "folder-in-forward",
+    await expect
+      .poll(() => page.evaluate(() => window.cardEntranceScales.length))
+      .toBeGreaterThan(0);
+    expect(await page.evaluate(() => window.cardEntranceScales)).toEqual(
+      expect.arrayContaining([1]),
     );
-    const keyframes = await page.evaluate(() =>
-      Array.from(document.styleSheets)
-        .flatMap((sheet) => Array.from(sheet.cssRules))
-        .filter(
-          (rule): rule is CSSKeyframesRule =>
-            rule instanceof CSSKeyframesRule && rule.name === "folder-in-forward",
-        )
-        .map((rule) => rule.cssText)
-        .join(" "),
+    expect(await page.evaluate(() => window.cardEntranceScales.every((scale) => scale === 1))).toBe(
+      true,
     );
-    expect(start.duration).toBe("0.3s");
-    expect(keyframes).toContain("translateX(24px)");
   });
 
   test("a folder whose cards are already cached still animates them in on a revisit", async ({

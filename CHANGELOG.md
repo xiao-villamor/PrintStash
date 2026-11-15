@@ -34,6 +34,8 @@
 
 ### Fixed
 
+- Library cards and results appear at their final size with a brief fade instead of shrinking and growing when a folder opens.
+
 - The API prepares route and validation metadata and collects initialization objects before accepting traffic, avoiding synchronous initialization and early full-collection pauses across concurrent first requests.
 - Derivative Jobs that fail before claiming an output now record the failure with the normal backoff and attempt limit, preventing immediate rediscovery loops while retaining completed outputs.
 - Library preview updates no longer flash a refresh banner or hide the details-panel toggle. The displayed list and open inspector stay in place during background refreshes; explicit refreshes and failures keep their feedback.

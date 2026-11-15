@@ -433,15 +433,18 @@
 
   .slide-in-left,
   .slide-up,
-  .animate-card-in,
   .animate-panel-in,
-  .animate-card-arrive,
-  .results-settle,
-  .pane-in,
-  .folder-in-forward,
-  .folder-in-back {
+  .pane-in {
     animation: content-settle var(--duration-slow) var(--ease-content-settle) backwards;
     transform-origin: center top;
+  }
+  /* Cards stay at their final size when results first appear. */
+  .animate-card-in,
+  .animate-card-arrive,
+  .results-settle,
+  .folder-in-forward,
+  .folder-in-back {
+    animation: fade-in var(--duration-press) var(--ease-out) backwards;
   }
   .fade-in {
     animation: fade-in var(--duration-press) var(--ease-out);
@@ -463,8 +466,7 @@
   :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump)
     > .library-virtual-row
     > [data-library-key] {
-    animation: content-settle var(--duration-slow) var(--ease-content-settle) backwards;
-    transform-origin: center top;
+    animation: fade-in var(--duration-press) var(--ease-out) backwards;
   }
   .stagger-children > * {
     animation-delay: 0ms;

@@ -249,8 +249,8 @@ changing the sidebar's open preference. Back/Forward uses the same treatment.
 Typing, filters, Settings sub-sections and data refreshes do not replay the main
 transition; internal controls retain their own local feedback. First load is static.
 
-Library card entrances use the same depth range and sampled spring curve, together,
-without directional travel or staggering. Resolving a loading grid instead keeps
+Library cards and result sets appear at their final size and position with an
+opacity-only fade over `press`, together without scaling or staggering. Resolving a loading grid instead keeps
 frames opaque until their own preview settles, then removes each card's cover
 without an opacity delay. Decoded Model and Collection previews appear immediately
 in the fixed preview; readiness does not add a decorative loading interval.
@@ -363,9 +363,10 @@ Match the full animation selector's specificity, and gate hover-only motion behi
 
 | Class | Use |
 | --- | --- |
-| `animate-card-in`, `animate-panel-in`, `animate-card-arrive`, `results-settle` | Shared opaque depth settle for newly inserted content; use the hook for persistent, interruptible section bodies |
+| `animate-card-in`, `animate-card-arrive`, `results-settle`, `folder-in-forward`, `folder-in-back` | Stationary opacity-only card/result entrance over `press` |
+| `animate-panel-in` | Shared opaque depth settle for newly inserted section content; use the hook for persistent, interruptible section bodies |
 | `pop-in` | Floating panels, from the shared 0.98 scale with brief opacity feedback |
-| `folder-in-forward`, `folder-in-back`, `slide-up`, `slide-in-left`, `pane-in` | Compatibility names for the same content settle; no directional movement |
+| `slide-up`, `slide-in-left`, `pane-in` | Compatibility names for the same content settle; no directional movement |
 | `animate-count-up`, `animate-count-down` | Compatibility names; counts update without animation |
 | `stagger-children` | Compatibility name; children now arrive together without delay |
 
