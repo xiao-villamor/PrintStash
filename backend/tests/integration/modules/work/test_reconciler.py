@@ -2087,6 +2087,39 @@ class TestDiscoveryYieldsToInteractiveWork:
 
         assert len(TestDiscoveryWaitsForAdditions._created(db_session, YIELDING)) == 1
 
+    @pytest.mark.parametrize("owes", [True, False], ids=["owed", "caught-up"])
+    def test_holds_back_for_interactive_work_not_yet_made_into_jobs(
+        self, yielding_engine, db_session: Session, owes: bool
+    ) -> None:
+        # Between two discovery batches an import's mesh work has no active
+        # Job; projected in that gap, search ran beside the rest of it.
+        from dataclasses import replace
+
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        class Owing:
+            def pending(self, session, *, now, limit):
+                return []
+
+            def next_due(self, session, *, now):
+                return None
+
+            def owes_interactive(self, session, *, now):
+                return owes
+
+        definitions = yielding_engine.catalog.definitions
+        definitions[INTERACTIVE_WORK] = replace(
+            definitions[INTERACTIVE_WORK], source=Owing()
+        )
+
+        result = run_pass(YIELDING)
+
+        created = TestDiscoveryWaitsForAdditions._created(db_session, YIELDING)
+        assert len(created) == (0 if owes else 1)
+        assert result.outcomes.get(
+            reconciler_module.PassNote.YIELDING_TO_INTERACTIVE.value
+        ) == (1 if owes else None)
+
     def test_finds_work_once_no_interactive_job_is_active(
         self, yielding_engine, make_job, db_session: Session
     ) -> None:
