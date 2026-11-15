@@ -9,8 +9,14 @@
 - CTB (v2–5) and GOO (V3.0) resin slices can be uploaded as source files with embedded previews and available layer height/count, exposure, estimated print time, resin volume, printer and slicer metadata. Original printer bytes remain downloadable. Resin printing and layer/toolpath simulation are not included.
 - Collection Documents accepts spreadsheets, Word files and arbitrary binary attachments, including other resin formats, with original-byte downloads.
 
+### Security
+
+- A TAR upload or URL import can no longer exhaust the server's memory or CPU with a few hundred bytes. TAR headers are read with fixed caps: oversized long-name or pax headers and unknown member types are refused, folders and links count toward the entry limit, the whole unpacked stream is held to the archive size limit, and cancelling an import stops its archive check.
+
 ### Fixed
 
+- 7z archives with more than one folder (non-solid, appended or split into blocks) import instead of failing as invalid.
+- Uploads interrupted by a crash or restart before they were recorded no longer stay in staging forever: on startup the API removes unrecorded uploads older than a day.
 - API key and OrcaSlicer command copy buttons work on HTTP installations without the secure Clipboard API, with a visible error if the browser refuses copying.
 - Confirmed Trash purges reclaim owned files, thumbnails and multipart covers on guarded local/FUSE storage using hash-checked quarantine. Previously blocked guarded cleanup intents are retried; changed objects and external originals remain protected.
 

@@ -184,12 +184,24 @@ def _prepare_storage_for_startup(
                 "reconciled %d interrupted pending import(s)", interrupted_imports
             )
     if recover_publications:
-        from app.modules.ingestion.staging_cleanup import prune_expired, reconcile_jobs
+        from app.core.time import utcnow
+        from app.modules.ingestion.staging_cleanup import (
+            prune_expired,
+            reconcile_jobs,
+            sweep_unreceipted_incoming,
+        )
 
         with get_session_factory().scoped_session() as session:
             reconcile_jobs(session)
             prune_expired(session, backend=backend)
             session.commit()
+            orphaned = sweep_unreceipted_incoming(
+                session, incoming=settings.incoming_dir, now=utcnow()
+            )
+            if orphaned:
+                logger.warning(
+                    "removed %d unreceipted upload(s) from staging", orphaned
+                )
     return backend
 
 
@@ -293,7 +305,7 @@ def prepare_process(*, owner: bool) -> PreparedProcess:
                     ),
                 )
             )
-    except (OSError, RuntimeError, ValueError, sqlite3.Error):
+    except OSError, RuntimeError, ValueError, sqlite3.Error:
         logger.exception("artifact cache unavailable; source reads remain enabled")
         bind_materializer(None, configured_root=Path(settings.artifact_cache_root))
 

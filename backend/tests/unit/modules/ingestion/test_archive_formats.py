@@ -131,7 +131,7 @@ class TestTranscoding:
         source = tmp_path / "source"
         source.write_bytes(_build(archive, ENTRIES))
         planned = archive_formats.planned_zip_bytes(
-            source, archive, limits=LIMITS, keep=_keep
+            source, archive, limits=LIMITS, keep=_keep, on_chunk=lambda: None
         )
 
         target = _transcode(tmp_path, archive, source.read_bytes())
@@ -199,6 +199,176 @@ class TestTarMembers:
             _transcode(tmp_path, ArchiveFormat.TAR, data)
 
 
+def _hostile_tar(member_type: bytes, declared: int) -> bytes:
+    """A bz2 TAR whose first member declares *declared* zero bytes of *member_type*.
+
+    The shape of the audit's probes: a few hundred bytes on disk that
+    ``tarfile`` would inflate in full while parsing it.
+    """
+    import bz2
+    import tarfile
+
+    info = tarfile.TarInfo("x")
+    info.size = declared
+    info.type = member_type
+    compressor = bz2.BZ2Compressor(9)
+    parts = [compressor.compress(info.tobuf(format=tarfile.GNU_FORMAT))]
+    block = bytes(1 << 20)
+    remaining = declared + (-declared % 512)
+    while remaining:
+        parts.append(compressor.compress(block[: min(remaining, len(block))]))
+        remaining -= min(remaining, len(block))
+    body = b"solid a"
+    tail = tarfile.TarInfo("a.stl")
+    tail.size = len(body)
+    parts.append(compressor.compress(tail.tobuf(format=tarfile.GNU_FORMAT)))
+    parts.append(compressor.compress(body + bytes(-len(body) % 512) + bytes(1024)))
+    parts.append(compressor.flush())
+    return b"".join(parts)
+
+
+def _plan(tmp_path: Path, data: bytes, limits: ArchiveLimits = LIMITS, on_chunk=None):
+    source = tmp_path / "source.tar"
+    source.write_bytes(data)
+    return archive_formats.planned_zip_bytes(
+        source,
+        ArchiveFormat.TAR,
+        limits=limits,
+        keep=_keep,
+        on_chunk=on_chunk or (lambda: None),
+    )
+
+
+WIDE = ArchiveLimits(
+    max_entries=10,
+    max_entry_bytes=1000,
+    max_total_bytes=1500,
+    max_central_directory_bytes=1 << 20,
+    max_path_bytes=1024,
+    max_depth=32,
+)
+
+
+class TestHostileTarHeaders:
+    """A tiny TAR must not drive memory or CPU before any limit applies (F1)."""
+
+    def test_refuses_a_long_name_payload_over_the_path_limit(self, tmp_path) -> None:
+        import tarfile
+        import time
+
+        data = _hostile_tar(tarfile.GNUTYPE_LONGNAME, 16 << 20)
+        started = time.process_time()
+
+        with pytest.raises(ArchivePolicyError, match="archive_path_too_deep"):
+            _plan(tmp_path, data)
+
+        assert time.process_time() - started < 0.5
+
+    def test_refuses_an_unknown_member_type_without_inflating_it(
+        self, tmp_path
+    ) -> None:
+        import time
+
+        data = _hostile_tar(b"Z", 16 << 20)
+        started = time.process_time()
+
+        with pytest.raises(ArchivePolicyError, match="archive_invalid"):
+            _plan(tmp_path, data)
+
+        assert time.process_time() - started < 0.5
+
+    def test_sniffs_a_hostile_archive_from_its_first_block(self, tmp_path) -> None:
+        import tarfile
+        import time
+
+        source = tmp_path / "download"
+        source.write_bytes(_hostile_tar(tarfile.GNUTYPE_LONGNAME, 16 << 20))
+        started = time.process_time()
+
+        assert archive_formats.sniff_format(source) is ArchiveFormat.TAR
+        assert time.process_time() - started < 0.1
+
+    def test_counts_links_and_directories_toward_the_entry_limit(
+        self, tmp_path
+    ) -> None:
+        links = {f"link{i}.stl": "a.stl" for i in range(LIMITS.max_entries)}
+        data = tar_bytes({"a.stl": b"x"}, links=links)
+
+        with pytest.raises(ArchivePolicyError, match="archive_too_many_entries"):
+            _plan(tmp_path, data)
+
+    def test_refuses_a_stream_that_inflates_past_the_archive_limit(
+        self, tmp_path
+    ) -> None:
+        limits = ArchiveLimits(
+            max_entries=3,
+            max_entry_bytes=100_000,
+            max_total_bytes=100_000,
+            max_central_directory_bytes=1 << 20,
+            max_path_bytes=64,
+            max_depth=3,
+        )
+        # Neither file is kept, so only the stream budget can refuse them.
+        data = tar_bytes({"a.bin": bytes(100_000), "b.bin": bytes(100_000)})
+
+        with pytest.raises(ArchivePolicyError, match="archive_too_large"):
+            _plan(tmp_path, data, limits)
+
+    def test_planning_stops_when_the_job_is_cancelled(self, tmp_path) -> None:
+        class Cancelled(Exception):
+            pass
+
+        def cancelled() -> None:
+            raise Cancelled
+
+        with pytest.raises(Cancelled):
+            _plan(tmp_path, tar_bytes(ENTRIES), on_chunk=cancelled)
+
+    def test_refuses_a_header_with_a_wrong_checksum(self, tmp_path) -> None:
+        data = bytearray(tar_bytes({"a.stl": b"x"}, compression=""))
+        data[0] ^= 0x01
+
+        with pytest.raises(ArchivePolicyError, match="archive_invalid"):
+            _transcode(tmp_path, ArchiveFormat.TAR, bytes(data))
+
+    @pytest.mark.parametrize("tar_format", ["gnu", "pax", "ustar"])
+    def test_keeps_long_paths_in_every_tar_format(self, tmp_path, tar_format) -> None:
+        import io
+        import tarfile
+
+        name = "/".join(["folder"] * 15) + "/model.stl"  # 116 bytes
+        formats = {
+            "gnu": tarfile.GNU_FORMAT,
+            "pax": tarfile.PAX_FORMAT,
+            "ustar": tarfile.USTAR_FORMAT,
+        }
+        buffer = io.BytesIO()
+        with tarfile.open(
+            fileobj=buffer, mode="w:xz", format=formats[tar_format]
+        ) as archive:
+            info = tarfile.TarInfo(name)
+            info.size = 5
+            archive.addfile(info, io.BytesIO(b"solid"))
+            folder = tarfile.TarInfo("folder")
+            folder.type = tarfile.DIRTYPE
+            archive.addfile(folder)
+        source = tmp_path / "source.tar.xz"
+        source.write_bytes(buffer.getvalue())
+        target = tmp_path / "out.zip"
+
+        archive_formats.transcode_to_zip(
+            source,
+            ArchiveFormat.TAR,
+            target,
+            limits=WIDE,
+            keep=_keep,
+            on_chunk=lambda: None,
+        )
+
+        with zipfile.ZipFile(target) as output:
+            assert {n: output.read(n) for n in output.namelist()} == {name: b"solid"}
+
+
 class TestSevenZipMembers:
     def test_refuses_an_encrypted_archive(self, tmp_path) -> None:
         data = seven_zip_bytes({"a.stl": b"x"}, password="secret")
@@ -209,6 +379,27 @@ class TestSevenZipMembers:
     def test_refuses_bytes_that_are_not_a_7z(self, tmp_path) -> None:
         with pytest.raises(ArchivePolicyError, match="archive_invalid"):
             _transcode(tmp_path, ArchiveFormat.SEVEN_ZIP, b"7z\xbc\xaf\x27\x1cbroken")
+
+    def test_transcodes_an_archive_with_several_folders(self, tmp_path) -> None:
+        # Non-solid 7z holds one folder per file; py7zr extracts folders on
+        # threads when given a path, which opened two ZIP write handles at once.
+        import py7zr
+
+        entries = {f"part{i}.stl": bytes([i]) * 200 for i in range(4)}
+        target = tmp_path / "split.7z"
+        # Each append session writes its own folder.
+        for index, (name, body) in enumerate(entries.items()):
+            with py7zr.SevenZipFile(target, mode="a" if index else "w") as archive:
+                archive.writestr(body, name)
+        with py7zr.SevenZipFile(target, mode="r") as archive:
+            streams = archive.header.main_streams
+            assert streams is not None and streams.unpackinfo is not None
+            assert streams.unpackinfo.numfolders > 1
+
+        out = _transcode(tmp_path, ArchiveFormat.SEVEN_ZIP, target.read_bytes())
+
+        with zipfile.ZipFile(out) as result:
+            assert {name: result.read(name) for name in result.namelist()} == entries
 
 
 class TestRarMembers:

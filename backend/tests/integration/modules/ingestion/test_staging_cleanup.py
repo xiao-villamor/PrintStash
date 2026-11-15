@@ -372,3 +372,88 @@ class TestCancellationCustody:
             assert path.read_bytes() == b"original retry input"
             db_session.expire_all()
             assert db_session.get(StagingLease, lease.id) is not None
+
+
+class TestUnreceiptedIncomingSweep:
+    """Bytes staged before their receipt are reclaimed after a crash (F3)."""
+
+    @staticmethod
+    def _aged(path, hours: float):
+        import os
+
+        stamp = (utcnow() - timedelta(hours=hours)).timestamp()
+        os.utime(path, (stamp, stamp), follow_symlinks=False)
+        return path
+
+    def test_removes_an_old_upload_no_lease_names(self, db_session, tmp_path):
+        incoming = tmp_path / "_incoming"
+        incoming.mkdir()
+        orphan = incoming / "a1b2.zip"
+        orphan.write_bytes(b"x")
+        self._aged(orphan, 25)
+        temp = incoming / ".printstash-stage-abc"
+        temp.write_bytes(b"y")
+        self._aged(temp, 25)
+
+        removed = staging_cleanup.sweep_unreceipted_incoming(
+            db_session, incoming=incoming, now=utcnow()
+        )
+
+        assert removed == 2
+        assert list(incoming.iterdir()) == []
+
+    def test_keeps_leased_young_and_owned_entries(
+        self, db_session, make_ingest_request, make_user, tmp_path
+    ):
+        incoming = tmp_path / "_incoming"
+        incoming.mkdir()
+        leased = incoming / "leased.stl"
+        leased.write_bytes(b"leased")
+        request = make_ingest_request(
+            make_user(), kind=IngestRequestKind.UPLOAD, state=JobState.QUEUED
+        )
+        staging_leases.create_job_lease(
+            db_session,
+            job_id=request.job_id,
+            owner_user_id=request.owner_user_id,
+            path=leased,
+            size_bytes=6,
+            sha256=hashlib.sha256(b"leased").hexdigest(),
+        )
+        db_session.commit()
+        self._aged(leased, 48)
+        young = incoming / "streaming.zip"
+        young.write_bytes(b"still uploading")
+        self._aged(young, 23)
+        owned = incoming / "scratch-windows"
+        owned.mkdir()
+        (owned / "window").write_bytes(b"recovered by its own receipt")
+        self._aged(owned, 48)
+        outside = tmp_path / "library.stl"
+        outside.write_bytes(b"not staging")
+        link = incoming / "link.stl"
+        link.symlink_to(outside)
+        self._aged(link, 48)
+
+        removed = staging_cleanup.sweep_unreceipted_incoming(
+            db_session, incoming=incoming, now=utcnow()
+        )
+
+        assert removed == 0
+        assert sorted(p.name for p in incoming.iterdir()) == [
+            "leased.stl",
+            "link.stl",
+            "scratch-windows",
+            "streaming.zip",
+        ]
+        assert outside.read_bytes() == b"not staging"
+
+    def test_a_missing_incoming_directory_has_nothing_to_sweep(
+        self, db_session, tmp_path
+    ):
+        assert (
+            staging_cleanup.sweep_unreceipted_incoming(
+                db_session, incoming=tmp_path / "absent", now=utcnow()
+            )
+            == 0
+        )
