@@ -5,14 +5,9 @@ import { CollectionHeaderTags } from "@/components/collection-header-tags";
 import "./library-header.css";
 
 import { arrivingKeys, entryKeys } from "@/lib/library-arrivals";
-import {
-  FOLDER_CARDS_CLASS,
-  FOLDER_ENTRANCE_MS,
-  FOLDER_MOVE_CLASS,
-  folderMove,
-  type FolderMove,
-} from "@/lib/folder-transition";
+import { FOLDER_ENTRANCE_MS, folderMove, type FolderMove } from "@/lib/folder-transition";
 import { useEntranceWindow } from "@/lib/entrance-window";
+import { useContentReveal } from "@/lib/use-content-reveal";
 import { DURATION } from "@/lib/overlay";
 import { deleteLibraryMultipart } from "@/features/library/multipart";
 import { useLibraryNavigationReads } from "@/features/library/navigation-reads";
@@ -1411,8 +1406,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const rememberLoadingCards = useCallback((rects: readonly DOMRect[]) => {
     loadingCardRects.current = rects;
   }, []);
-  const folderCardsClass =
-    folderEntering && !fillingCards ? FOLDER_CARDS_CLASS[folderEntering] : undefined;
   const onAuthorityRetired = useCallback(() => {
     const session = getSessionVersion();
     void refreshAuth().catch((error) => {
@@ -1642,33 +1635,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // into view, or a reflowed row) keeps its place.
   const arriving = useEntranceWindow(arrival, arrival.arriving, DURATION.fast) ?? NO_ARRIVALS;
 
-  // Filter, sort and view changes settle their results. Opening or closing the
-  // Collections pane does not: it moves the boundary continuously and inserts
-  // nothing, so replaying the settle would scale content already on screen on
-  // top of that motion (DESIGN.md: entrance classes live only for entrances).
-  const resultsLayout = viewMode;
-  const [resultsView, setResultsView] = useState<{
-    href: string | null;
-    path: string | null;
-    layout: string;
-    settles: boolean;
-  }>({ href: displayedHref, path: displayedPath, layout: resultsLayout, settles: false });
-  if (
-    displayedHref !== null &&
-    (resultsView.href !== displayedHref || resultsView.layout !== resultsLayout)
-  ) {
-    setResultsView({
-      href: displayedHref,
-      path: displayedPath,
-      layout: resultsLayout,
-      settles: resultsView.href !== null && resultsView.path === displayedPath,
-    });
-  }
-  const resultsSettling = useEntranceWindow(
-    resultsView,
-    resultsView.settles ? "results-settle" : null,
-    DURATION.fast,
-  );
+  // One reveal belongs to the committed visit, including cached Back/Forward.
+  // Reused cards and delayed virtual rows share the same presentation instead
+  // of independently restarting CSS keyframes as their children mount.
+  const libraryReveal = useContentReveal(`${snapshot?.entry.key ?? ""}:${viewMode}`, {
+    enabled: snapshot !== null && docView === "models",
+    scope: "library",
+  });
 
   // A change to the library applies by itself while the view is a single page:
   // new Models ease in where they belong and a change elsewhere only moves the
@@ -4022,7 +3995,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               />
             </Suspense>
           ) : (
-            <div className="flex-1 flex flex-col bg-background">
+            <div
+              ref={libraryReveal}
+              className="library-content-reveal flex-1 flex flex-col bg-background"
+            >
               {reading.status === "reset" && (
                 <p
                   role="status"
@@ -4177,7 +4153,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         readingRenderers={readingRenderers}
                         readingId="collections"
                         layout="grid"
-                        className={folderCardsClass}
                         compact={!collectionOverview && compact}
                         estimateSize={collectionOverview ? 266 : 82}
                         minCardWidth={collectionOverview ? undefined : 300}
@@ -4365,8 +4340,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 <div
                   // One grid across folders: a Model shown in both (subfolders
                   // included) keeps its card, thumbnail and state instead of
-                  // every card being rebuilt on each navigation. The entrance
-                  // class on this container still settles the new result set.
+                  // every card being rebuilt on each navigation. The surrounding
+                  // content reveal settles the committed visit as one surface.
                   key="grid"
                   ref={modelGrid}
                   data-fill-hold={fillPhase === "holding" ? "" : undefined}
@@ -4430,11 +4405,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     readingId="models"
                     layout="grid"
                     compact={compact}
-                    className={
-                      [folderCardsClass, !fillingCards && resultsSettling]
-                        .filter(Boolean)
-                        .join(" ") || undefined
-                    }
                   />
                   <LoadMore
                     paused={reading.status === "restoring" || !browseReady}
@@ -4466,7 +4436,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   key={`list:${folderEntrance.path ?? ""}`}
                   ref={listContent}
                   data-library-list
-                  className={`${folderEntering ? FOLDER_MOVE_CLASS[folderEntering] : (resultsSettling ?? "")} flex-1 overflow-y-auto`}
+                  className="flex-1 overflow-y-auto"
                 >
                   <div className="flex flex-col">
                     <div className="flex items-center gap-3 px-4 py-2 border-b border-border text-xs font-mono text-muted-foreground uppercase tracking-wider bg-muted/50">

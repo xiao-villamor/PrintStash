@@ -441,7 +441,6 @@
   /* Cards stay at their final size when results first appear. */
   .animate-card-in,
   .animate-card-arrive,
-  .results-settle,
   .folder-in-forward,
   .folder-in-back {
     animation: fade-in var(--duration-press) var(--ease-out) backwards;
@@ -462,12 +461,6 @@
     animation: fade-in var(--duration-fast) var(--ease-library-enter) var(--duration-fast) both;
   }
 
-  /* A result set arrives together: no lateral travel or decorative cascade. */
-  :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump)
-    > .library-virtual-row
-    > [data-library-key] {
-    animation: fade-in var(--duration-press) var(--ease-out) backwards;
-  }
   .stagger-children > * {
     animation-delay: 0ms;
   }
@@ -489,8 +482,7 @@
   .animate-count-down,
   .animate-card-arrive,
   .animate-panel-in,
-  .pane-in,
-  .results-settle {
+  .pane-in {
     animation: none;
   }
   .animate-theme-icon {
@@ -499,12 +491,6 @@
   /* Legacy stagger classes must not reintroduce a delay. */
   .stagger-children > *:nth-child(n) {
     animation-delay: 0ms;
-  }
-  /* Match the card entrance selector so reduced motion always wins. */
-  :is(.folder-cards-forward, .folder-cards-back, .folder-cards-jump)
-    > .library-virtual-row
-    > [data-library-key][data-entry-slot] {
-    animation: none;
   }
 }
 

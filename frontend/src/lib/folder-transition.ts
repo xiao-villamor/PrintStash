@@ -22,12 +22,5 @@ export const FOLDER_MOVE_CLASS = {
   jump: "fade-in",
 } satisfies Record<FolderMove, string>;
 
-/** Card wrappers share the existing depth entrance on folder navigation. */
-export const FOLDER_CARDS_CLASS = {
-  forward: "folder-cards-forward",
-  back: "folder-cards-back",
-  jump: "folder-cards-jump",
-} satisfies Record<FolderMove, string>;
-
 /** Keep the entrance window aligned with the shared slow motion timing. */
 export const FOLDER_ENTRANCE_MS = DURATION.slow;

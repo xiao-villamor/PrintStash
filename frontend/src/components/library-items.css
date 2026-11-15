@@ -26,7 +26,8 @@
   background-color: var(--plate);
 }
 .library-card-fill {
-  animation: library-card-fill var(--duration-library-enter) var(--ease-library-enter) both;
+  opacity: 0;
+  transition: opacity var(--duration-library-enter) var(--ease-library-enter);
 }
 .library-card-fill-position {
   animation: library-card-fill-position var(--duration-library-enter) var(--ease-library-enter) both;
@@ -44,18 +45,19 @@
     animation: none;
   }
 }
-@keyframes library-card-fill {
-  from {
+@starting-style {
+  .library-card-fill {
     opacity: 1;
-  }
-  to {
-    opacity: 0;
   }
 }
 .library-thumbnail-fill {
-  /* Readiness is useful content: show decoded previews in the next paint,
-     without adding a second loading interval for their opacity transition. */
-  transition: none;
+  transition: opacity var(--duration-library-enter) var(--ease-library-enter);
+}
+@media (prefers-reduced-motion: reduce) {
+  .library-card-fill,
+  .library-thumbnail-fill {
+    transition-duration: var(--duration-press);
+  }
 }
 
 .library-card-facts > span + span::before {
@@ -300,18 +302,8 @@
   background: var(--card);
 }
 
-/* Reveal a complete card as soon as its own preview settles. A slower sibling
-   must not keep a decoded image and its title behind the shared fill hold. */
-.library-card-fill-frame:has(
-    [data-library-thumbnail="ready"],
-    [data-library-thumbnail="missing"],
-    [data-library-thumbnail="failed"]
-  )
-  .library-card-fill {
-  animation: none;
-  opacity: 0;
-}
-
+/* Each ready card clears its cover gently. A slower sibling cannot hold it;
+   the bounded hold still releases stalled images into their loading state. */
 [data-fill-hold]
   .library-card-fill-frame:not(
     :has(
@@ -321,5 +313,5 @@
     )
   )
   .library-card-fill {
-  animation: none;
+  opacity: 1;
 }

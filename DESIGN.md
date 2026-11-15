@@ -249,11 +249,18 @@ changing the sidebar's open preference. Back/Forward uses the same treatment.
 Typing, filters, Settings sub-sections and data refreshes do not replay the main
 transition; internal controls retain their own local feedback. First load is static.
 
-Library cards and result sets appear at their final size and position with an
-opacity-only fade over `press`, together without scaling or staggering. Resolving a loading grid instead keeps
-frames opaque until their own preview settles, then removes each card's cover
-without an opacity delay. Decoded Model and Collection previews appear immediately
-in the fixed preview; readiness does not add a decorative loading interval.
+Library motion is quiet and continuous: stable geometry, no spring or scale,
+no cascading entrances, and no blank flash when revisiting cached content.
+`useContentReveal` gives the committed browsing surface one opacity 0.86→1
+transition over `--duration-library-enter` (240ms). Its identity is the displayed
+history entry plus layout, so down, up, Back/Forward, and filters share one
+repeatable transition. Interruptions continue from the current opacity. Pane
+reflow, background refreshes, and virtual-row mounts do not replay navigation.
+First load stays still; newly decoded previews and their loading covers crossfade
+in their fixed frames over the same library timing. Cached previews remain
+visible. Reduced motion makes navigation immediate and shortens image/cover
+feedback to `press` (150ms). Readiness starts the reveal immediately, with no
+extra network delay or wait for slower sibling images.
 Loading cards and populated cards share geometry. If collection
 metadata moves the destination grid, cards continue from visible placeholder
 positions; reduced motion omits that translation. Missing-preview icons appear
@@ -363,7 +370,7 @@ Match the full animation selector's specificity, and gate hover-only motion behi
 
 | Class | Use |
 | --- | --- |
-| `animate-card-in`, `animate-card-arrive`, `results-settle`, `folder-in-forward`, `folder-in-back` | Stationary opacity-only card/result entrance over `press` |
+| `animate-card-in`, `animate-card-arrive`, `folder-in-forward`, `folder-in-back` | Stationary opacity-only card/result entrance over `press` |
 | `animate-panel-in` | Shared opaque depth settle for newly inserted section content; use the hook for persistent, interruptible section bodies |
 | `pop-in` | Floating panels, from the shared 0.98 scale with brief opacity feedback |
 | `slide-up`, `slide-in-left`, `pane-in` | Compatibility names for the same content settle; no directional movement |
@@ -375,11 +382,10 @@ Actual drawers use the shared edge motion, not an entrance utility.
 
 **Entrance classes live only for their entrance.** The Library grid is
 virtualized: rows and cards mount again whenever the grid reflows (the pane or
-a column count changes) or scrolls back into view. A `folder-cards-*`,
-`results-settle` or `animate-card-arrive` class left in place replays on each
-of those mounts, so content the reader has already seen slides in again. Apply
-them through `useEntranceWindow` (`lib/entrance-window.ts`), which releases the
-class once its entrance has played.
+a column count changes) or scrolls back into view. An `animate-card-arrive`
+class left in place replays on each mount. Apply it through `useEntranceWindow`
+(`lib/entrance-window.ts`), which releases the class once its entrance has played.
+Navigation uses the persistent surface reveal instead of child entrance classes.
 
 The Library details panel (`.library-model-inspector`) is one panel for every
 Model it shows: it eases in 12px from its edge on open (`fast`), leaves the

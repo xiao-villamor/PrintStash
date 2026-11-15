@@ -1,12 +1,11 @@
 /*
- * Where a folder's cards arrive from. Drilling in comes from the right, climbing
- * out from the left, and anything unrelated fades. The classification must not
+ * Folder ancestry chooses the selector browser's entrance. The classification must not
  * mistake a shared name prefix ("house" / "house2") for ancestry, and the
  * entrances stay horizontal or opacity-only so reading-position anchors hold.
  */
 import { describe, expect, it } from "vitest";
 
-import { FOLDER_CARDS_CLASS, FOLDER_MOVE_CLASS, folderMove } from "../folder-transition";
+import { FOLDER_MOVE_CLASS, folderMove } from "../folder-transition";
 
 describe("folderMove", () => {
   it("is forward when drilling from the vault or a folder into a descendant", () => {
@@ -34,14 +33,6 @@ describe("folderMove", () => {
       forward: "folder-in-forward",
       back: "folder-in-back",
       jump: "fade-in",
-    });
-  });
-
-  it("names a card entrance for every move", () => {
-    expect(FOLDER_CARDS_CLASS).toEqual({
-      forward: "folder-cards-forward",
-      back: "folder-cards-back",
-      jump: "folder-cards-jump",
     });
   });
 });

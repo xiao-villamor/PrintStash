@@ -34,6 +34,8 @@
 
 ### Fixed
 
+- Library navigation uses one calm, interruptible reveal for cached folder visits, Back/Forward, and filters. New previews and loading covers fade into place instead of popping; cached images remain visible.
+
 - Library cards and results appear at their final size with a brief fade instead of shrinking and growing when a folder opens.
 
 - The API prepares route and validation metadata and collects initialization objects before accepting traffic, avoiding synchronous initialization and early full-collection pauses across concurrent first requests.
