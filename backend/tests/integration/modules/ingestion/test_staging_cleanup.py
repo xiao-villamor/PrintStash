@@ -402,7 +402,7 @@ class TestUnreceiptedIncomingSweep:
         assert removed == 2
         assert list(incoming.iterdir()) == []
 
-    def test_keeps_leased_young_and_owned_entries(
+    def test_keeps_entries_not_proven_orphaned(
         self, db_session, make_ingest_request, make_user, tmp_path
     ):
         incoming = tmp_path / "_incoming"

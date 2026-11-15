@@ -288,7 +288,7 @@ class TestHostileTarHeaders:
         assert archive_formats.sniff_format(source) is ArchiveFormat.TAR
         assert time.process_time() - started < 0.1
 
-    def test_counts_links_and_directories_toward_the_entry_limit(
+    def test_counts_every_member_that_is_not_a_file_toward_the_entry_limit(
         self, tmp_path
     ) -> None:
         links = {f"link{i}.stl": "a.stl" for i in range(LIMITS.max_entries)}
