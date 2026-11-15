@@ -10,10 +10,11 @@ referenced by the derivative row.
 
 from __future__ import annotations
 
+import json
 import tempfile
 import time
-from collections.abc import Callable
-from contextlib import ExitStack
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -309,7 +310,12 @@ def _thumbnail_failure(
     return DerivativeState.FAILED
 
 
-def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outcome:
+def _derive_mesh(
+    file_id: int,
+    *,
+    execution: JobExecution | None = None,
+    phases: _ProducePhases,
+) -> Outcome:
     """Publish each fenced basic output before optional fingerprint completion."""
     from app.modules.ingestion.extensions import extraction_options
     from app.modules.media.fingerprints import ALGORITHM_VERSION
@@ -323,7 +329,8 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
     from . import mesh_continuations
     from .mesh_continuation_values import FingerprintPlan
 
-    options = extraction_options(get_session_factory())
+    with phases.phase("options"):
+        options = extraction_options(get_session_factory())
     plan = (
         FingerprintPlan(
             ALGORITHM_VERSION, options.get("triangle_cap", MAX_ANALYSIS_FACES)
@@ -341,9 +348,10 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
             session, claimed_file, plan, execution=execution
         )
 
-    begun = _begin(
-        file_id, JobKind.DERIVATIVES_MESH, execution=execution, claimed=resume
-    )
+    with phases.phase("claim"):
+        begun = _begin(
+            file_id, JobKind.DERIVATIVES_MESH, execution=execution, claimed=resume
+        )
     if begun is None:
         return Outcome({})
     file_row, attempts = begun
@@ -355,7 +363,8 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
         outcome[kind] = state
         # Output ownership is already durable. Realtime delivery remains best effort.
         try:
-            _announce(file_row, Outcome({kind: state}))
+            with phases.phase("announce"):
+                _announce(file_row, Outcome({kind: state}))
         except Exception:  # noqa: BLE001 - a delivery failure cannot undo READY
             logger.warning(
                 "mesh output notice failed", extra={"file_id": file_id, "kind": kind}
@@ -368,7 +377,10 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
             if kind not in attempts or kind in outcome:
                 raise ValueError("unexpected_mesh_geometry_output")
             authority = attempts[kind]
-            with get_session_factory().scoped_session() as session:
+            with (
+                phases.phase("publish_metadata"),
+                get_session_factory().scoped_session() as session,
+            ):
                 if plan is not None:
                     pending = mesh_continuations.create(session, authority, plan)
                 if isinstance(frame.outcome, GeometryReady):
@@ -408,27 +420,28 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
             kind = DerivativeKind.THUMBNAIL
             if kind not in attempts or kind in outcome:
                 raise ValueError("unexpected_mesh_thumbnail_output")
-            state = (
-                _thumbnail_failure(
-                    attempts[kind],
-                    frame.failure_reason.value if frame.failure_reason else None,
+            with phases.phase("publish_thumbnail"):
+                state = (
+                    _thumbnail_failure(
+                        attempts[kind],
+                        frame.failure_reason.value if frame.failure_reason else None,
+                    )
+                    if frame.image is None
+                    else _publish_thumbnail(
+                        file_row,
+                        frame.image,
+                        attempt=attempts[kind],
+                        normalize=True,
+                        preserve_frame=frame.strategy is ThumbnailStrategy.FULL,
+                        strategy=frame.strategy.value,
+                        renderer_encoded=frame.strategy is ThumbnailStrategy.FULL,
+                        complete=frame.coverage.preview
+                        in (PreviewCoverage.COMPLETE, PreviewCoverage.DOCUMENT_SUPPLIED),
+                        duration_ms=frame.duration_ms,
+                        peak_rss_bytes=frame.peak_rss_bytes,
+                        abort_on_failure=True,
+                    )
                 )
-                if frame.image is None
-                else _publish_thumbnail(
-                    file_row,
-                    frame.image,
-                    attempt=attempts[kind],
-                    normalize=True,
-                    preserve_frame=frame.strategy is ThumbnailStrategy.FULL,
-                    strategy=frame.strategy.value,
-                    renderer_encoded=frame.strategy is ThumbnailStrategy.FULL,
-                    complete=frame.coverage.preview
-                    in (PreviewCoverage.COMPLETE, PreviewCoverage.DOCUMENT_SUPPLIED),
-                    duration_ms=frame.duration_ms,
-                    peak_rss_bytes=frame.peak_rss_bytes,
-                    abort_on_failure=True,
-                )
-            )
             published(kind, state)
         else:
             raise TypeError("unknown_mesh_basic_output")
@@ -445,6 +458,7 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
                 else None
             )
             output_bytes = MAX_PACKET_BYTES if handoff_plan is not None else 0
+            reserve_started = time.monotonic_ns()
             prepared = stack.enter_context(
                 reserve_sources((resolve(file_row),), output_bytes=output_bytes)
             )
@@ -464,8 +478,12 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
                 ],
                 transient=True,
             )
+            phases.ns["reserve"] = time.monotonic_ns() - reserve_started
             stack.callback(claim.release)
-            (source,) = stack.enter_context(prepared.materialize(capacity_claimed=True))
+            with phases.phase("materialize"):
+                (source,) = stack.enter_context(
+                    prepared.materialize(capacity_claimed=True)
+                )
             request = ThumbnailRequest(
                 path=source,
                 file_type=file_row.file_type.value,
@@ -484,15 +502,16 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
                 # Decode once under one native admission. Independent output
                 # consumers share source arrays; the GPU handoff starts after
                 # clean worker exit releases its native memory reservation.
-                if handoff_plan is not None:
-                    handoff = stack.enter_context(
-                        thumbnail_handoff.reserve(handoff_plan, prepared.directory)
-                    )
-                    result = mesh_isolation.generate(
-                        request, on_output=publish, handoff=handoff
-                    )
-                else:
-                    result = mesh_isolation.generate(request, on_output=publish)
+                with phases.phase("generate"):
+                    if handoff_plan is not None:
+                        handoff = stack.enter_context(
+                            thumbnail_handoff.reserve(handoff_plan, prepared.directory)
+                        )
+                        result = mesh_isolation.generate(
+                            request, on_output=publish, handoff=handoff
+                        )
+                    else:
+                        result = mesh_isolation.generate(request, on_output=publish)
                 if result is not None and result.fingerprint_result is not None:
                     if pending is None:
                         raise RuntimeError(
@@ -808,11 +827,56 @@ def _announced(produce):
     return run
 
 
+class _ProducePhases:
+    """Main-process time of one mesh produce step, by phase (audit B2).
+
+    The worker's own time and the memory-admission wait are logged by native
+    supervision under the same Job; what remains of the step is this process's
+    preparation, publication and cleanup, which these phases name.
+    """
+
+    def __init__(self) -> None:
+        self._started = time.monotonic_ns()
+        self.ns: dict[str, int] = {}
+
+    @contextmanager
+    def phase(self, name: str) -> Iterator[None]:
+        started = time.monotonic_ns()
+        try:
+            yield
+        finally:
+            self.ns[name] = self.ns.get(name, 0) + time.monotonic_ns() - started
+
+    def log(self, file_id: int) -> None:
+        from app.core.execution_scope import current_execution
+
+        execution = current_execution()
+        logger.info(
+            "mesh_produce %s",
+            json.dumps(
+                {
+                    "version": 1,
+                    "job_id": execution.job_id if execution is not None else None,
+                    "job_execution_id": execution.execution_id
+                    if execution is not None
+                    else None,
+                    "file_id": file_id,
+                    "total_ns": time.monotonic_ns() - self._started,
+                    "phases_ns": self.ns,
+                },
+                separators=(",", ":"),
+            ),
+        )
+
+
 def derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outcome:
+    phases = _ProducePhases()
     try:
-        return _derive_mesh(file_id, execution=execution)
+        return _derive_mesh(file_id, execution=execution, phases=phases)
     except records.AttemptSuperseded:
         return Outcome({})
+    finally:
+        phases.log(file_id)
 
 
 def _derive_plates(file_id: int, *, execution: JobExecution | None = None) -> Outcome:
