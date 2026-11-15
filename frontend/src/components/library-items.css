@@ -204,6 +204,10 @@
 }
 .library-card-menu-item {
   display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  border-radius: var(--radius);
   width: 100%;
   padding: 8px 12px;
   text-align: left;

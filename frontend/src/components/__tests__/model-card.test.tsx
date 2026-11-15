@@ -339,6 +339,7 @@ describe("ModelCard", () => {
       await openCardMenu();
       await user.click(screen.getByRole("menuitem", { name: "Add Cam Holder v4 to favorites" }));
 
+      await openCardMenu();
       expect(
         screen.getByRole("menuitem", { name: "Remove Cam Holder v4 from favorites" }),
       ).toBeDisabled();
@@ -354,6 +355,7 @@ describe("ModelCard", () => {
       await openCardMenu();
       await user.click(screen.getByRole("menuitem", { name: "Add Cam Holder v4 to favorites" }));
 
+      await openCardMenu();
       await waitFor(() =>
         expect(
           screen.getByRole("menuitem", { name: "Add Cam Holder v4 to favorites" }),

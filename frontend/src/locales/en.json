@@ -5189,5 +5189,11 @@
   "Auto-scan on": "Auto-scan on",
   "Auto-scan off": "Auto-scan off",
   "Remove…": "Remove…",
-  "Last scan {date}": "Last scan {date}"
+  "Last scan {date}": "Last scan {date}",
+  "library.filters.search": "Search filters or values…",
+  "library.filters.noMatches": "No matching filters or values.",
+  "library.filters.noValues": "No values in this collection.",
+  "library.filters.instant": "Changes apply immediately",
+  "library.menu.addFavorite": "Add to favorites",
+  "library.menu.removeFavorite": "Remove from favorites"
 }

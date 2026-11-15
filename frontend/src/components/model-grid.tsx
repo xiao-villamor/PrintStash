@@ -58,7 +58,6 @@ import {
   sameLibraryFilters,
   structuredLibraryFilterKeys as STRUCTURED_FILTER_KEYS,
   structuredLibraryFilterLabel,
-  type StructuredLibraryFilterKey as StructuredFilterKey,
 } from "@/features/library/filters";
 
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
@@ -126,7 +125,7 @@ import { FilterSidebar } from "@/components/filter-sidebar";
 import { readLibraryLocation, type LibraryViewMode } from "@/features/library/url";
 import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
 import { StructuredFilters } from "@/components/structured-filters";
-import { LibraryBaseFilters } from "@/components/library-base-filters";
+import { LibraryFilterPicker, type LibraryFilterField } from "@/components/library-filter-picker";
 import type { UploadMode } from "@/components/upload-modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -859,6 +858,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [printerMenuOpen, setPrinterMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const toolbarMenuOpener = useRef<HTMLElement | null>(null);
+  const filtersOpener = useRef<HTMLButtonElement>(null);
   const [filtersExpanded, setFiltersExpanded] = useState<boolean | null>(null);
   // Documents still need the collection snapshot, but have no
   // Model placeholder to measure. Keep their existing bounded browse read.
@@ -1060,9 +1060,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     router.replace(qs ? `/?${qs}` : "/");
   }
 
-  function setStructuredFilter(key: StructuredFilterKey, values: string[]) {
+  function setStructuredFilter(key: LibraryFilterField, values: string[]) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete(key);
+    if (key === "printer_id") params.delete("printer_presence");
+    if (key === "printer_presence") params.delete("printer_id");
     values.forEach((value) => params.append(key, value));
     const qs = params.toString();
     router.replace(qs ? `/?${qs}` : "/");
@@ -1725,7 +1727,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // selections safe. We clear it when navigating folders (see below) so a hidden
   // off-screen selection doesn't linger.
 
-  function toggleStructuredFilters() {
+  function toggleStructuredFilters(event: React.MouseEvent<HTMLButtonElement>) {
+    filtersOpener.current = event.currentTarget;
     startup.request("filters");
     setFiltersExpanded((current) => !current);
   }
@@ -2566,13 +2569,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     router.replace(qs ? `/?${qs}` : "/");
   }
 
-  function clearAllFilters() {
+  function clearAllFilters(preserveLocation = false) {
     setSelectedIds(new Set());
     setSelectedMultipartRows(new Map());
     const params = new URLSearchParams(searchParams.toString());
-    params.delete("q");
-    params.delete("c");
-    params.delete("cid");
+    if (!preserveLocation) {
+      params.delete("q");
+      params.delete("c");
+      params.delete("cid");
+    }
     params.delete("tag");
     params.delete("printer_id");
     params.delete("printer_presence");
@@ -2865,6 +2870,63 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     </>
   );
 
+  function filterControl(className: string) {
+    return (
+      <DropdownMenu
+        open={!!filtersExpanded}
+        onOpenChange={(open) => setFiltersExpanded(open)}
+        portal
+        align="start"
+        role="dialog"
+        aria-label={uiText("Filter Models")}
+        className={className}
+        contentClassName="w-[352px] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg"
+        trigger={
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            data-menu-trigger
+            onClick={toggleStructuredFilters}
+            aria-label={uiText("Filters")}
+            aria-haspopup="dialog"
+            aria-expanded={!!filtersExpanded}
+            aria-controls="library-filter-panel"
+            className="h-10 w-full gap-2 aria-expanded:bg-accent aria-expanded:text-accent-foreground @3xl/library:h-8"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            {uiText("Filters")}
+            {activeFilterItems.length > Number(!!query.trim()) && (
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {activeFilterItems.length - Number(!!query.trim())}
+              </span>
+            )}
+          </Button>
+        }
+      >
+        <LibraryFilterPicker
+          filters={currentFilters}
+          facets={facetQuery.data}
+          tags={tags}
+          printers={printers}
+          canViewPrinters={canViewPrinters}
+          loading={facetQuery.isLoading || tagsQuery.isLoading}
+          error={facetQuery.isError || tagsQuery.isError}
+          onRetry={() => {
+            void facetQuery.refetch();
+            void tagsQuery.refetch();
+          }}
+          onChange={setStructuredFilter}
+          onReset={() => clearAllFilters(true)}
+          onClose={() => {
+            setFiltersExpanded(false);
+            filtersOpener.current?.focus();
+          }}
+        />
+      </DropdownMenu>
+    );
+  }
+
   const libraryToolbar = collectionOverview ? (
     <div className="collection-overview-toolbar flex flex-wrap items-center justify-between gap-4">
       <div className="min-w-0">
@@ -2874,16 +2936,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         </p>
       </div>
       <div className="collection-overview-actions flex flex-wrap items-center gap-2">
-        <Button
-          variant="ghost"
-          size="xs"
-          className="h-9 aria-expanded:bg-accent aria-expanded:text-accent-foreground"
-          onClick={toggleStructuredFilters}
-          aria-expanded={!!filtersExpanded}
-          aria-controls="library-filter-panel"
-        >
-          {uiText("Filters")}
-        </Button>
+        {filterControl("shrink-0")}
         {libraryActions}
         <DropdownMenu
           open={moreOpen}
@@ -3001,31 +3054,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               })}
             </div>
           )}
-          <Button
-            type="button"
-            variant="outline"
-            onClick={toggleStructuredFilters}
-            className="order-2 h-10 min-w-0 flex-1 px-2 md:hidden"
-          >
-            <span className="min-w-0 truncate">{uiText("Filters")}</span>
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            onClick={toggleStructuredFilters}
-            aria-expanded={!!filtersExpanded}
-            aria-controls="library-filter-panel"
-            className="order-1 aria-expanded:bg-accent aria-expanded:text-accent-foreground hidden h-10 min-w-0 flex-1 px-2 md:inline-flex @3xl/library:h-8 @3xl/library:flex-none @3xl/library:px-3"
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            <span className="library-toolbar-label min-w-0 truncate">{uiText("Filters")}</span>
-            {activeFilterItems.length > Number(!!query.trim()) && (
-              <span className="font-mono tabular-nums">
-                {activeFilterItems.length - Number(!!query.trim())}
-              </span>
-            )}
-          </Button>
+          {filterControl("order-2 min-w-0 flex-1 md:order-1 @3xl/library:flex-none")}
           <div className="library-secondary-tools order-2 ml-auto grid min-w-0 flex-2 grid-cols-2 items-center gap-2 @3xl/library:hidden">
             <div className="min-w-0 @3xl/library:hidden">
               <SortMenu
@@ -3572,110 +3601,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           </div>
 
-          <Modal
-            open={!!filtersExpanded}
-            onClose={() => setFiltersExpanded(false)}
-            title={uiText("Filter Models")}
-            description={uiText(
-              "Filter the current collection. Printing on keeps its current printer scope.",
-            )}
-            className="max-w-[480px]"
-            footer={
-              <>
-                <Button type="button" variant="outline" size="sm" onClick={clearAllFilters}>
-                  {uiText("Reset filters")}
-                </Button>
-                <Button type="button" size="sm" onClick={() => setFiltersExpanded(false)}>
-                  {uiText("Apply filters")}
-                </Button>
-              </>
-            }
-          >
-            <div
-              id="library-filter-panel"
-              role="region"
-              aria-label={uiText("Filters")}
-              className="max-h-[60vh] overflow-y-auto"
-              onFocusCapture={() => startup.request("filters")}
-              onPointerDownCapture={() => startup.request("filters")}
-            >
-              <label className="mb-5 block space-y-2 text-sm">
-                <span>{uiText("Material")}</span>
-                <select
-                  aria-label={uiText("Material")}
-                  className="h-10 w-full border border-input bg-card px-3 text-sm"
-                  value={
-                    structured.material_type?.length === 1
-                      ? structured.material_type[0]
-                      : structured.material_type?.length
-                        ? "__multiple"
-                        : ""
-                  }
-                  onChange={(event) => {
-                    if (event.target.value !== "__multiple")
-                      setStructuredFilter(
-                        "material_type",
-                        event.target.value ? [event.target.value] : [],
-                      );
-                  }}
-                >
-                  <option value="">{ui("Any material")}</option>
-                  {(structured.material_type?.length ?? 0) > 1 && (
-                    <option value="__multiple">{structured.material_type.join(" · ")}</option>
-                  )}
-                  {Array.from(
-                    new Set([
-                      ...(facetQuery.data?.material_type.map((item) => item.value) ?? []),
-                      ...(structured.material_type ?? []),
-                    ]),
-                  ).map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <details>
-                <summary className="text-xs text-muted-foreground">
-                  {t("similarity.moreFilters")}
-                </summary>
-                <div className="mt-3">
-                  <StructuredFilters
-                    layout="inline"
-                    extraControls={
-                      <LibraryBaseFilters
-                        tags={tags}
-                        printers={printers}
-                        selectedTags={selectedTags}
-                        selectedPrinterId={selectedPrinterId}
-                        selectedPrinterPresence={selectedPrinterPresence}
-                        onTagsChange={setSelectedTags}
-                        onPrinterChange={setSelectedPrinterId}
-                        onPrinterPresenceChange={setSelectedPrinterPresence}
-                        canViewPrinters={canViewPrinters}
-                      />
-                    }
-                    facets={facetQuery.data}
-                    loading={facetQuery.isLoading}
-                    error={facetQuery.isError}
-                    active={structured}
-                    onChange={setStructuredFilter}
-                    uploadedAfter={searchParams.get("uploaded_after") ?? undefined}
-                    uploadedBefore={searchParams.get("uploaded_before") ?? undefined}
-                    history={historyFilters(searchParams)}
-                    onDateChange={(key, value) => {
-                      const params = new URLSearchParams(searchParams.toString());
-                      if (value) params.set(key, value);
-                      else params.delete(key);
-                      router.replace(params.size ? `/?${params}` : "/");
-                    }}
-                    onClearAll={clearAllFilters}
-                  />
-                </div>
-              </details>
-            </div>
-          </Modal>
-
           {activeFilterItems.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3 sm:px-6">
               <span className="text-3xs font-mono uppercase tracking-wider text-muted-foreground">
@@ -3695,7 +3620,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   <X className="h-3 w-3" aria-hidden />
                 </Button>
               ))}
-              <Button type="button" variant="ghost" size="xs" onClick={clearAllFilters}>
+              <Button type="button" variant="ghost" size="xs" onClick={() => clearAllFilters()}>
                 {uiText("Clear all")}
               </Button>
             </div>
@@ -4046,7 +3971,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           {uiText("aiSearch.backToLibrary")}
                         </Button>
                       ) : hasActiveFilters ? (
-                        <Button type="button" variant="outline" size="xs" onClick={clearAllFilters}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="xs"
+                          onClick={() => clearAllFilters()}
+                        >
                           {uiText("Clear all filters")}
                         </Button>
                       ) : selectedCollection && !canUploadHere ? (

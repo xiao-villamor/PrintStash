@@ -7,9 +7,9 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { LibraryItemLink } from "@/features/library/navigation";
 import { displayModelName } from "@/lib/display-name";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { ModelListItem, FileRevisionStatus } from "@/types";
-import { Box, ScanSearch } from "lucide-react";
+import { Box, ScanSearch, ArrowUpRight, PanelRight, Star, Tags } from "lucide-react";
 import { useCardDetail, cardDimensions, cardRevisions } from "@/features/library/card-detail";
 import { ModelCardRevision } from "@/components/model-card-revision";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
@@ -196,6 +196,7 @@ function ModelCardInner({
       ? starMutation.variables.starred
       : model.starred;
   const starBusy = starMutation.isPending;
+  const menuOpener = useRef<HTMLAnchorElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null);
   // Only a Model with G-code needs its detail (revisions and print history);
@@ -236,14 +237,17 @@ function ModelCardInner({
         portal
         align="start"
         anchorPoint={menuPoint}
+        returnFocusRef={menuOpener}
         className="h-full min-w-0"
         aria-label={uiText("Model actions")}
-        contentClassName="w-64 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+        contentClassName="w-60 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
         trigger={
           <article
             ref={cardRef}
             onContextMenu={(event) => {
               event.preventDefault();
+              menuOpener.current =
+                event.currentTarget.querySelector<HTMLAnchorElement>("[data-menu-trigger]");
               // A pointer opens the menu where it pointed; the keyboard key has no point.
               setMenuPoint(
                 event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : null,
@@ -253,6 +257,8 @@ function ModelCardInner({
             onKeyDown={(event) => {
               if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
                 event.preventDefault();
+                menuOpener.current =
+                  event.currentTarget.querySelector<HTMLAnchorElement>("[data-menu-trigger]");
                 setMenuPoint(null);
                 setMenuOpen(true);
               }
@@ -442,30 +448,77 @@ function ModelCardInner({
           </article>
         }
       >
+        <p
+          title={model.name}
+          className="truncate px-3 py-2 text-xs font-medium text-muted-foreground"
+        >
+          {model.name}
+        </p>
+        <LibraryItemLink
+          origin={origin}
+          href={`/models/${model.id}`}
+          role="menuitem"
+          className="library-card-menu-item"
+          onClick={() => setMenuOpen(false)}
+        >
+          <ArrowUpRight className="h-4 w-4 text-muted-foreground" aria-hidden />
+          {uiText("Open page")}
+        </LibraryItemLink>
+        {onInspect && !selectable && (
+          <button
+            type="button"
+            role="menuitem"
+            className="library-card-menu-item"
+            onClick={() => {
+              setMenuOpen(false);
+              if (menuOpener.current) onInspect(model.id, menuOpener.current);
+            }}
+          >
+            <PanelRight className="h-4 w-4 text-muted-foreground" aria-hidden />
+            {uiText("Model details")}
+          </button>
+        )}
+        <div role="separator" className="my-1 border-t border-border" />
         <button
           type="button"
           role="menuitem"
           disabled={starBusy}
-          onClick={() => void toggleStar()}
+          aria-label={
+            starred
+              ? uiText("Remove {value1} from favorites", { value1: model.name })
+              : uiText("Add {value1} to favorites", { value1: model.name })
+          }
+          onClick={() => {
+            setMenuOpen(false);
+            menuOpener.current?.focus();
+            void toggleStar();
+          }}
           className="library-card-menu-item"
         >
-          {starred
-            ? uiText("Remove {value1} from favorites", { value1: model.name })
-            : uiText("Add {value1} to favorites", { value1: model.name })}
+          <Star
+            className={`h-4 w-4 text-muted-foreground ${starred ? "fill-current" : ""}`}
+            aria-hidden
+          />
+          {uiText(starred ? "library.menu.removeFavorite" : "library.menu.addFavorite")}
         </button>
         {!selectable && canEditTags && onEditTags && (
           <button
             type="button"
             role="menuitem"
+            aria-label={
+              model.tags.length > 0
+                ? uiText("Edit tags for {value1}", { value1: model.name })
+                : uiText("Add tags to {value1}", { value1: model.name })
+            }
             onClick={() => {
               setMenuOpen(false);
+              menuOpener.current?.focus();
               onEditTags(model);
             }}
             className="library-card-menu-item"
           >
-            {model.tags.length > 0
-              ? uiText("Edit tags for {value1}", { value1: model.name })
-              : uiText("Add tags to {value1}", { value1: model.name })}
+            <Tags className="h-4 w-4 text-muted-foreground" aria-hidden />
+            {uiText(model.tags.length ? "Edit tags" : "Add tags")}
           </button>
         )}
       </DropdownMenu>

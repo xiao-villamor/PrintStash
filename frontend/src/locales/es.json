@@ -5189,5 +5189,11 @@
   "Auto-scan on": "Escaneo automático activado",
   "Auto-scan off": "Escaneo automático desactivado",
   "Remove…": "Quitar…",
-  "Last scan {date}": "Último escaneo {date}"
+  "Last scan {date}": "Último escaneo {date}",
+  "library.filters.search": "Buscar filtros o valores…",
+  "library.filters.noMatches": "No hay filtros ni valores que coincidan.",
+  "library.filters.noValues": "No hay valores en esta colección.",
+  "library.filters.instant": "Los cambios se aplican al instante",
+  "library.menu.addFavorite": "Añadir a favoritos",
+  "library.menu.removeFavorite": "Quitar de favoritos"
 }

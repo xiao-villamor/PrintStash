@@ -251,6 +251,18 @@ phones its field appears above the same results. Favorites is a reversible Libra
 filter that preserves the query, sidebar, toolbar and card layout, not another
 sidebar mode or main destination. AI and image search retain their explicit tools.
 
+Library Filters uses an anchored, nonmodal picker beside the toolbar. Search
+matches category names and values; categories lead to selectable values in the
+same panel. Selections update the URL and results immediately, remain visible as
+removable chips, and survive reloads. Reset in the picker preserves the folder,
+keyword query and view. Keep loading, retry and empty states inside the picker;
+Escape and the close button return focus to Filters.
+
+Model context menus show the Model name once above concise, icon-led actions:
+Open page, Model details, Favorites and tags. Details uses the existing inspector;
+tags respects edit permissions. Pointer menus anchor at the click and keyboard
+menus anchor to the card; Escape returns focus to its link.
+
 Library cards use a stationary opacity 0.2→1 reveal over
 `--duration-library-enter` (240ms). The actual card owns this entrance after it
 mounts, including first load and cached navigation; an animated placeholder or

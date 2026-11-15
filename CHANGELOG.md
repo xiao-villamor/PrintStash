@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Library filters open beside the toolbar in a searchable picker. Search by category or value, combine selections, and see results immediately; resetting the picker preserves the current folder and search. Card context menus show the Model name once with concise actions for opening its page, showing details, Favorites and tags.
+
 - Collection rows expand and collapse continuously as folders change, keeping the Model grid attached to their movement. Settings sections, Model detail tabs, Upload modes and main destinations use a stationary reveal instead of a zoom; interrupted selections continue from their current appearance.
 
 - Nested folders read their Model page alongside child-folder listings. The measured first row starts downloading its authorized previews as soon as the page arrives, sharing those bytes with the cards. These thumbnails take priority over folder mosaics and revision details, while the first batch still fills the viewport. Shared application-shell code loads together with fewer startup requests, and the matched route's scripts load alongside its language catalog.

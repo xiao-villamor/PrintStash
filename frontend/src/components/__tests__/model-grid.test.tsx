@@ -335,10 +335,7 @@ async function openFilters() {
   if (!screen.queryByRole("dialog", { name: "Filter Models" })) {
     await userEvent.click(screen.getAllByRole("button", { name: /^Filters(?: \d+)?$/ }).at(-1)!);
   }
-  const more = await within(screen.getByRole("dialog", { name: "Filter Models" })).findByText(
-    "More filters",
-  );
-  if (!more.closest("details")?.open) await userEvent.click(more);
+  expect(await screen.findByRole("searchbox", { name: "Search filters or values…" })).toBeVisible();
 }
 
 async function waitForLibraryActions() {
@@ -1746,7 +1743,7 @@ describe("ModelBrowser", () => {
       );
       expect(screen.getAllByRole("button", { name: "Upload" })).not.toHaveLength(0);
       await waitForLibraryActions();
-      await userEvent.click(screen.getByRole("button", { name: "More" }));
+      await userEvent.click(screen.getAllByRole("button", { name: "More" })[0]);
       expect(screen.getByRole("menuitem", { name: "New multipart set" })).toBeEnabled();
       await userEvent.keyboard("{Escape}");
       await openFilters();

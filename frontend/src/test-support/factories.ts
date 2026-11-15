@@ -51,6 +51,7 @@ import type {
   FilePlate,
   JobStatus,
   ModelListItem,
+  ModelFacetsRead,
   OutlinerModelRead,
   PrinterAccess,
   PrinterCapabilities,
@@ -1139,6 +1140,21 @@ export function aTrashedMultipartModel(
     part_count: 2,
     deleted_at: "2026-01-01T00:00:00Z",
     expires_at: "2026-01-31T00:00:00Z",
+    ...override,
+  };
+}
+
+/** Available filter values for one Library scope. */
+export function aModelFacets(override: Partial<ModelFacetsRead> = {}): ModelFacetsRead {
+  return {
+    file_type: [],
+    material_type: [],
+    slicer_name: [],
+    printer_model: [],
+    revision_status: [],
+    print_outcome: [],
+    storage: [],
+    printed: [],
     ...override,
   };
 }
