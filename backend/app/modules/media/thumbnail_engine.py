@@ -83,6 +83,7 @@ from app.modules.media.mesh_telemetry import (
     MeshPhase,
     PhaseOutcome,
     PhaseRecorder,
+    ReaderChoice,
 )
 from app.modules.media.stl_reader import (
     InvalidSTL,
@@ -232,6 +233,7 @@ class _Generation:
         self.source_scene: PreparedScene | None = None
         # Set once the scene is read; lib3mf scenes use their lighter face weight.
         self.lib3mf_scene = False
+        self.reader_choice: ReaderChoice | None = None
         self.scene_cleanup_pending = False
         self.fingerprint_result: FingerprintResult | None = None
         self.sample_buffers_pending = False
@@ -456,11 +458,11 @@ class _Generation:
             # Render, topology and FP apply their own budgets
             # before a consumer materializes placed geometry.
             try:
-                scene, reader = read_scene_with_reader(
+                scene, self.reader_choice = read_scene_with_reader(
                     self.request.path, max_faces=MAX_ANALYSIS_FACES
                 )
                 self.source_scene = PreparedScene(scene)
-                self.lib3mf_scene = reader is ThreeMFReader.LIB3MF
+                self.lib3mf_scene = self.reader_choice.reader is ThreeMFReader.LIB3MF
             except GeometryError as exc:
                 if exc.code in {
                     "archive_resource_limit",
@@ -557,6 +559,7 @@ class _Generation:
                     )
 
         self.phases.finish(
+            reader=self.reader_choice,
             outcome=PhaseOutcome.COMPLETED
             if self.mesh is not None
             or self.source_scene is not None

@@ -76,6 +76,42 @@ class TestRecordPhases:
         assert payload["stages"][0]["output_bytes"] is None
         assert payload["stages"][0]["triangle_count"] == 4
 
+    def test_logs_and_counts_the_3mf_reader(
+        self, supervision: SupervisionStats, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from app.modules.media.mesh_telemetry import (
+            NativeFallback,
+            ReaderChoice,
+            ThreeMFReader,
+        )
+
+        phase = PhaseStats(
+            MeshPhase.LOAD,
+            100,
+            12,
+            None,
+            4,
+            PhaseOutcome.COMPLETED,
+            ReaderChoice(ThreeMFReader.XML, NativeFallback.MIXED_UNITS),
+        )
+        counter = mesh_observability._three_mf_reads.labels("xml", "mixed_units")
+        before = counter._value.get()
+        caplog.set_level(logging.INFO, logger=mesh_observability.logger.name)
+
+        mesh_observability.record_phases((phase,), supervision)
+
+        record = next(
+            record
+            for record in caplog.records
+            if record.getMessage().startswith("mesh_phases ")
+        )
+        payload = json.loads(record.getMessage().removeprefix("mesh_phases "))
+        assert payload["stages"][0]["reader"] == {
+            "reader": "xml",
+            "fallback": "mixed units",
+        }
+        assert counter._value.get() == before + 1
+
     def test_contains_metrics_sink_failure(
         self,
         supervision: SupervisionStats,

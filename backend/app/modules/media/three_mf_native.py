@@ -32,6 +32,7 @@ from printstash_core.mesh.similarity.components import (
 
 from app.core.native_settings import settings
 from app.modules.media import three_mf_package as package
+from app.modules.media.mesh_telemetry import NativeFallback
 
 if TYPE_CHECKING:
     import numpy as np
@@ -48,7 +49,13 @@ _TAG = re.compile(rb"<(?:([A-Za-z_][\w.-]*):)?(model|item)(?=[\s/>])([^>]*)>")
 
 
 class NativeUnavailable(Exception):
-    """The package must be read by the XML reader."""
+    """The package must be read by the XML reader, for ``reason``."""
+
+    def __init__(self, reason: NativeFallback) -> None:
+        if not isinstance(reason, NativeFallback):
+            raise TypeError("reason must be a NativeFallback")
+        super().__init__(reason.value)
+        self.reason = reason
 
 
 def _load_binding() -> tuple[Any, Any] | None:
@@ -92,18 +99,18 @@ def _scan_part(
     printable: list[bool] = []
     for window in package.windows(archive, info):
         if package.declares_dtd(window):
-            raise NativeUnavailable("document type declaration")
+            raise NativeUnavailable(NativeFallback.DOCUMENT_TYPE)
         for match in _TAG.finditer(window):
             prefix, tag, raw = match.group(1), match.group(2), match.group(3)
             attrs = package.attributes(raw)
             if tag == b"model":
                 if model is not None:
-                    raise NativeUnavailable("second model element")
+                    raise NativeUnavailable(NativeFallback.SECOND_MODEL)
                 model = package.model_element(prefix, attrs)
                 if not model.plain:
-                    raise NativeUnavailable("model semantics")
+                    raise NativeUnavailable(NativeFallback.MODEL_SEMANTICS)
             elif model is None:
-                raise NativeUnavailable("structure before the model element")
+                raise NativeUnavailable(NativeFallback.STRUCTURE_BEFORE_MODEL)
             else:
                 printable.append(
                     attrs.get((None, b"printable"), b"1") in (b"1", b"true")
@@ -111,7 +118,7 @@ def _scan_part(
         if not whole:
             break
     if model is None:
-        raise NativeUnavailable("model element beyond the first window")
+        raise NativeUnavailable(NativeFallback.MODEL_BEYOND_WINDOW)
     return _Part(model.unit, tuple(printable))
 
 
@@ -123,7 +130,7 @@ def _preflight(path: Path) -> tuple[float, tuple[bool, ...]]:
                 archive, max_model_bytes=settings.mesh_3mf_max_xml_mb * 1024 * 1024
             )
             if not package.is_opc(names):
-                raise NativeUnavailable("not an OPC package")
+                raise NativeUnavailable(NativeFallback.NOT_OPC)
             root = package.root_part(archive, names, models)
             parts = {
                 name: _scan_part(archive, names[name], whole=name == root)
@@ -138,10 +145,10 @@ def _preflight(path: Path) -> tuple[float, tuple[bool, ...]]:
         NotImplementedError,
         zipfile.BadZipFile,
     ) as exc:
-        raise NativeUnavailable("unreadable package") from exc
+        raise NativeUnavailable(NativeFallback.UNREADABLE_PACKAGE) from exc
     # The XML reader scales each part by its own unit; lib3mf by the root's.
     if len({part.unit for part in parts.values()}) != 1:
-        raise NativeUnavailable("mixed units")
+        raise NativeUnavailable(NativeFallback.MIXED_UNITS)
     return package.UNITS[parts[root].unit], parts[root].printable
 
 
@@ -158,14 +165,14 @@ def _transform(fields: Any, unit: float) -> NDArray[np.float64]:
         not np.isfinite(transform).all()
         or float(np.abs(transform[:3, 3]).max()) > SINGLE_PRECISION_REACH_MM
     ):
-        raise NativeUnavailable("placement beyond single precision")
+        raise NativeUnavailable(NativeFallback.PLACEMENT_PRECISION)
     return transform
 
 
 def read_scene(path: Path, *, max_faces: int) -> ExpandedScene:
     """The package's scene, or ``NativeUnavailable`` for the XML reader."""
     if _BINDING is None:
-        raise NativeUnavailable("lib3mf unavailable")
+        raise NativeUnavailable(NativeFallback.BINDING_UNAVAILABLE)
     # The generated binding declares every handle optional; a failed call
     # raises instead of returning None, so its objects are used untyped.
     lib3mf, wrapper = _BINDING
@@ -181,7 +188,7 @@ def read_scene(path: Path, *, max_faces: int) -> ExpandedScene:
     except lib3mf.ELib3MFException as exc:
         if "bad_alloc" in str(exc):
             raise GeometryError("resource_limit") from exc
-        raise NativeUnavailable("lib3mf refused the package") from exc
+        raise NativeUnavailable(NativeFallback.LIB3MF_REFUSED) from exc
 
 
 def _scene(
@@ -204,7 +211,7 @@ def _scene(
         obj = iterator.GetCurrentObject()
         objects[key(obj)] = obj
     if len(objects) > MAX_RESOURCES:
-        raise NativeUnavailable("scene resource limit")
+        raise NativeUnavailable(NativeFallback.SCENE_RESOURCE_LIMIT)
 
     items = model.GetBuildItems()
     build_items = []
@@ -212,12 +219,12 @@ def _scene(
         build_items.append(items.GetCurrent())
     # lib3mf keeps the root build in document order; the scan saw the same items.
     if len(build_items) != len(printable):
-        raise NativeUnavailable("build items differ from the root build")
+        raise NativeUnavailable(NativeFallback.BUILD_ITEMS_DIFFER)
     build_items = [
         item for item, keep in zip(build_items, printable, strict=True) if keep
     ]
     if len(build_items) > MAX_BUILD_ITEMS:
-        raise NativeUnavailable("scene resource limit")
+        raise NativeUnavailable(NativeFallback.SCENE_RESOURCE_LIMIT)
     build = tuple(
         Instance(
             key(item.GetObjectResource()),
@@ -239,7 +246,7 @@ def _scene(
             continue
         obj = objects.get(resource_id)
         if obj is None:
-            raise NativeUnavailable("missing resource")
+            raise NativeUnavailable(NativeFallback.MISSING_RESOURCE)
         unique = obj.GetUniqueResourceID()
         if obj.IsMeshObject():
             mesh = model.GetMeshObjectByID(unique)
@@ -263,7 +270,7 @@ def _scene(
                 ),
             )
             if needed.value != vertex_count:
-                raise NativeUnavailable("vertex count changed")
+                raise NativeUnavailable(NativeFallback.VERTEX_COUNT_CHANGED)
             wrapper.checkError(
                 mesh,
                 wrapper.lib.lib3mf_meshobject_gettriangleindices(
@@ -271,13 +278,13 @@ def _scene(
                 ),
             )
             if needed.value != face_count:
-                raise NativeUnavailable("face count changed")
+                raise NativeUnavailable(NativeFallback.FACE_COUNT_CHANGED)
             scaled = vertices.astype(np.float64) * unit
             if scaled.size and not (
                 np.isfinite(scaled).all()
                 and float(np.abs(scaled).max()) <= SINGLE_PRECISION_REACH_MM
             ):
-                raise NativeUnavailable("geometry beyond single precision")
+                raise NativeUnavailable(NativeFallback.GEOMETRY_PRECISION)
             admitted[resource_id] = MeshResource(
                 resource_id, scaled, faces.astype(np.int64)
             )
@@ -285,7 +292,7 @@ def _scene(
             components = model.GetComponentsObjectByID(unique)
             count = components.GetComponentCount()
             if count + len(pending) > MAX_RESOURCES:
-                raise NativeUnavailable("scene resource limit")
+                raise NativeUnavailable(NativeFallback.SCENE_RESOURCE_LIMIT)
             children = []
             for index in range(count):
                 component = components.GetComponent(index)
@@ -302,5 +309,5 @@ def _scene(
             pending.extend(child.resource_id for child in reversed(assembly.children))
         else:
             # Level sets and other non-mesh objects have no XML-reader meaning.
-            raise NativeUnavailable("unsupported object kind")
+            raise NativeUnavailable(NativeFallback.UNSUPPORTED_OBJECT)
     return expand_scene(tuple(admitted.values()), build, max_faces=max_faces)

@@ -58,6 +58,12 @@ _phase_bytes = Counter(
     ("phase", "direction"),
     registry=registry,
 )
+_three_mf_reads = Counter(
+    "printstash_mesh_3mf_reads_total",
+    "3MF packages read, by reader and why lib3mf declined (none when it read).",
+    ("reader", "fallback"),
+    registry=registry,
+)
 _phase_triangles = Histogram(
     "printstash_mesh_phase_triangles",
     "Known triangle counts at the stage boundary.",
@@ -234,5 +240,11 @@ def record_phases(stats: tuple[PhaseStats, ...], supervision: SupervisionStats) 
                 _phase_bytes.labels(phase, "output").inc(stage.output_bytes)
             if stage.triangle_count is not None:
                 _phase_triangles.labels(phase).observe(stage.triangle_count)
+            if stage.reader is not None:
+                fallback = stage.reader.fallback
+                _three_mf_reads.labels(
+                    stage.reader.reader.value,
+                    "none" if fallback is None else fallback.name.lower(),
+                ).inc()
     except Exception:
         logger.exception("failed to publish mesh phase metrics")

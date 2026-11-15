@@ -18,6 +18,7 @@ import trimesh
 from printstash_core.mesh.similarity import GeometryError
 
 from app.modules.media import three_mf_native
+from app.modules.media.mesh_telemetry import NativeFallback
 from app.modules.media.three_mf_native import NativeUnavailable, read_scene
 from tests.factories.content import zip_bytes
 from tests.factories.geometry import tetrahedron, three_mf
@@ -265,12 +266,17 @@ class TestReadScene:
                 max_faces=FACE_BUDGET,
             )
 
+    def test_a_fallback_names_one_of_the_known_reasons(self):
+        with pytest.raises(TypeError, match="NativeFallback"):
+            NativeUnavailable("free text")  # type: ignore[arg-type]
+
     def test_leaves_a_second_model_element_to_the_xml_reader(self, tmp_path):
         model = _root(three_mf())
         payload = opc_package(zip_bytes({"3D/3dmodel.model": model + model}))
 
-        with pytest.raises(NativeUnavailable, match="second model element"):
+        with pytest.raises(NativeUnavailable, match="second model element") as caught:
             read_scene(_write(tmp_path, payload), max_faces=FACE_BUDGET)
+        assert caught.value.reason is NativeFallback.SECOND_MODEL
 
     def test_leaves_a_build_item_before_the_model_to_the_xml_reader(self, tmp_path):
         payload = opc_package(
