@@ -711,7 +711,7 @@ wheels = [
 
 [[package]]
 name = "dbos"
-version = "3.3.0"
+version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -720,10 +720,11 @@ dependencies = [
     { name = "python-dateutil" },
     { name = "pyyaml" },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7a/54/1bcf792851d184e82c27f3de1ce1e7e2008482083d3098ea4ffc97c873f8/dbos-3.3.0.tar.gz", hash = "sha256:5b5fe81272e7f0b16b8e98befe1d4475b1ad72ba57e0a421900e3f7df21eb898", size = 516801, upload-time = "2026-10-15T17:20:59.905Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/f5/62915a118f1f873d6767372da78351721b6b4b7c6abb3b60ba03b70b038a/dbos-3.5.0.tar.gz", hash = "sha256:8005419054f2442d4a4041fc248e3940bae81af5e5b166e258256de562d1819f", size = 598043, upload-time = "2026-11-10T16:19:08.175Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/94/db/407d2748b9aaccd28930815a0f3de6013bc53b7ddb87c3b7949abc8741f7/dbos-3.3.0-py3-none-any.whl", hash = "sha256:398e5c3182d0aa9fa4115c9f06028202365d0c356c172f2ec21c1fd8be6e441b", size = 246771, upload-time = "2026-10-15T17:20:58.114Z" },
+    { url = "https://files.pythonhosted.org/packages/24/3e/a3d19004f520444aa410bd4302196e50a044c401fbd3d8b49dd89f7b1e8a/dbos-3.5.0-py3-none-any.whl", hash = "sha256:d92cde12b0ffa00b85af682ee5eb40d51d466873095f3efac64b660f743b72f2", size = 283906, upload-time = "2026-11-10T16:19:06.219Z" },
 ]
 
 [[package]]
@@ -1926,7 +1927,7 @@ requires-dist = [
     { name = "cheroot", marker = "extra == 'dev'", specifier = ">=11,<12" },
     { name = "croniter", specifier = ">=6.2,<7" },
     { name = "cryptography", specifier = ">=50,<51" },
-    { name = "dbos", specifier = ">=3.3,<4" },
+    { name = "dbos", specifier = ">=3.5,<4" },
     { name = "deptry", marker = "extra == 'dev'", specifier = ">=0.23,<1" },
     { name = "fast-simplification", marker = "extra == 'dev'", specifier = ">=0.2.0,<0.3" },
     { name = "fastapi", specifier = ">=0.141,<1" },

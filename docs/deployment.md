@@ -411,7 +411,7 @@ path outside a persistent mount loses state on container replacement.
 The optional SQLite notification adapter is disabled by default. To evaluate it,
 build the backend with `--build-arg PRINTSTASH_DBOS_NOTIFICATIONS=true`, then set
 `VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS=true` and restart. The build applies an
-exact-source-checked patch to the locked DBOS 3.3.0 SDK; startup verifies its
+exact-source-checked patch to the locked DBOS 3.5.0 SDK; startup verifies its
 manifest and adapter hash. An incompatible or missing patch refuses opt-in.
 This is a maintained local dependency patch, not an upstream DBOS API. A DBOS
 upgrade requires reviewing and regenerating the patch before opting in again.

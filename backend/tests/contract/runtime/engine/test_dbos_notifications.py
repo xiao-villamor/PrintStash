@@ -1,8 +1,11 @@
 """Durable DBOS work progresses under long fallback intervals.
 
-Run with the disposable patched SDK on PYTHONPATH. The real database, queue
-dispatcher and workflow executor are used. A five-second outcome deadline is
-well below the 30-second recovery scan, so missing wakeups fail visibly.
+The cases need the patched SDK, which the shared environment never carries:
+without it, one test patches a disposable copy of the installed SDK and runs
+this module again in a subprocess with that copy first on PYTHONPATH. The real
+database, queue dispatcher and workflow executor are used. A five-second
+outcome deadline is well below the 30-second recovery scan, so missing wakeups
+fail visibly.
 """
 
 from __future__ import annotations
@@ -15,6 +18,56 @@ from collections import defaultdict
 
 import pytest
 from dbos import DBOS, SetEnqueueOptions, SetWorkflowID
+
+from tests.paths import BACKEND_DIR
+
+
+def _sdk_patched() -> bool:
+    from app.runtime.engine.dbos_notifications import verify_patch
+
+    try:
+        verify_patch()
+    except RuntimeError:
+        return False
+    return True
+
+
+PATCHED = _sdk_patched()
+
+
+@pytest.mark.skipif(PATCHED, reason="already running under the patched SDK")
+def test_dispatch_contract_under_a_disposable_patched_sdk(tmp_path):
+    import importlib.util
+    import os
+    import shutil
+    from pathlib import Path
+
+    spec = importlib.util.find_spec("dbos")
+    assert spec is not None and spec.submodule_search_locations
+    copy = tmp_path / "sdk" / "dbos"
+    shutil.copytree(Path(next(iter(spec.submodule_search_locations))), copy)
+    subprocess.run(
+        [sys.executable, "scripts/experimental_dbos_notifications.py", str(copy)],
+        cwd=BACKEND_DIR,
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join([str(copy.parent), str(BACKEND_DIR)]),
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", __file__, "-q", "-p", "no:cacheprovider"],
+        cwd=BACKEND_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+    assert result.returncode == 0, result.stdout[-6000:] + result.stderr[-2000:]
+    assert " passed" in result.stdout and " failed" not in result.stdout
 
 
 class Runtime:
@@ -93,6 +146,7 @@ def runtime(tmp_path):
         runtime.close()
 
 
+@pytest.mark.skipif(not PATCHED, reason="runs in the patched-SDK subprocess")
 class TestNotificationDispatch:
     def test_committed_enqueue_wakes_the_dispatcher(self, runtime):
         handle = runtime.enqueue("ready")

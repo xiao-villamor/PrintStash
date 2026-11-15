@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- The background engine uses DBOS 3.5.0 (was 3.3.0). Its first start adds indexes, a column and a table to the disposable engine database; queued Jobs resume. Stop every API and worker process and restart them together on the same image. DBOS 3.3.0 is not guaranteed to read the migrated engine database: to roll back, stop every process and discard the engine state (the `-dbos` SQLite sibling with its `-wal` and `-shm` files, or the PostgreSQL `dbos` schema) before starting the previous image; Jobs are recorded in the application database and are submitted again.
+
 ### Added
 
 - **Multi-plate G-code previews.** Browse the sliced plates inside Bambu Studio and OrcaSlicer `.3mf` and `.gcode.3mf` files, including exports without source meshes. Choose a file and a plate in the G-code viewer; ordinary G-code revisions keep their existing preview.

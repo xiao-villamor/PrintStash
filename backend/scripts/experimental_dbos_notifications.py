@@ -13,9 +13,9 @@ import json
 from pathlib import Path
 
 EXPECTED = {
-    "_queue.py": "33c287b8f31ee498216ebb4751c914eaccc02077b09ad5be42207c86dc8ff03f",
-    "_core.py": "71932bf0b5c7dc45f082bc38157e3ee13bc5c98cf0398fcb28b92a1ee68e2da2",
-    "_sys_db.py": "966d2cbd1fb3ed7f7199c902b10ead239baa296dc910dbb07b953af50cfbad6a",
+    "_queue.py": "03010fe4bca57616793f2570e12cc05b269c0a23da41becc27b4a5df0be29ba1",
+    "_core.py": "a103f6dcf8f7339f4626db0e67a7a160344f8226d3311d3f9468f943438cba91",
+    "_sys_db.py": "aa6507ab23f00ab6f6f180d62b9b09af7ff2720fef97b578db43bb770b5de96d",
 }
 
 
@@ -32,7 +32,7 @@ def patch(root: Path) -> None:
             raise ValueError(f"unsupported DBOS source: {name}")
     imports = (
         "from app.runtime.engine.dbos_notifications import ClaimRetry, RECOVERY_SECONDS, signals\n"
-        "PRINTSTASH_NOTIFICATION_PATCH = 2\n"
+        "PRINTSTASH_NOTIFICATION_PATCH = 3\n"
     )
     for name in sources:
         s = sources[name]
@@ -76,20 +76,42 @@ def patch(root: Path) -> None:
         "                latest = queue\n",
         "                if notified_sqlite:\n                    retry.failed()\n                    signals.failed(queue.name)\n                    continue\n                latest = queue\n",
     )
+    # 3.5 claims inside a nested dequeue() per shard scope: any failed claim or
+    # scope lookup marks the poll failed; the outcome is settled once per poll.
     q = replace_once(
         q,
-        "        except OperationalError as e:\n            if isinstance(e.orig, errors.LockNotAvailable):",
-        "        except OperationalError as e:\n            if notified_sqlite:\n                retry.failed()\n                signals.failed(queue.name)\n            if isinstance(e.orig, errors.LockNotAvailable):",
+        "    # Whether any scope hit a serialization conflict during the current poll.\n    contended = False\n",
+        "    # Whether any scope hit a serialization conflict during the current poll.\n    contended = False\n    failed = False\n",
     )
     q = replace_once(
         q,
-        "        except Exception as e:\n            if not stop_event.is_set():",
-        "        except Exception as e:\n            if notified_sqlite:\n                retry.failed()\n                signals.failed(queue.name)\n            if not stop_event.is_set():",
+        "            nonlocal contended, polled\n",
+        "            nonlocal contended, polled, failed\n",
+    )
+    q = replace_once(
+        q,
+        "            except DBAPIError as e:\n                if dbos._sys_db.is_lock_conflict(e):",
+        "            except DBAPIError as e:\n                failed = True\n                if dbos._sys_db.is_lock_conflict(e):",
+    )
+    q = replace_once(
+        q,
+        "            except Exception as e:\n                if not stop_event.is_set():\n                    # Only print",
+        "            except Exception as e:\n                failed = True\n                if not stop_event.is_set():\n                    # Only print",
+    )
+    q = replace_once(
+        q,
+        "        is_latest_version: Optional[bool] = None\n",
+        "        is_latest_version: Optional[bool] = None\n        failed = False\n",
+    )
+    q = replace_once(
+        q,
+        '        except Exception as e:\n            if not stop_event.is_set():\n                dbos.logger.warning(\n                    f"Exception finding work',
+        '        except Exception as e:\n            failed = True\n            if not stop_event.is_set():\n                dbos.logger.warning(\n                    f"Exception finding work',
     )
     q = replace_once(
         q,
         "        # Attempt to scale back the polling interval on each iteration",
-        "        else:\n            retry.succeeded()\n\n        # Attempt to scale back the polling interval on each iteration",
+        "        if notified_sqlite and failed:\n            retry.failed()\n            signals.failed(queue.name)\n        elif notified_sqlite:\n            retry.succeeded()\n\n        # Attempt to scale back the polling interval on each iteration",
     )
     sources["_queue.py"] = q
     c = sources["_core.py"]
@@ -108,10 +130,17 @@ def patch(root: Path) -> None:
             '        DebugTriggers.debug_trigger_point(DebugTriggers.DEBUG_TRIGGER_INITWF_COMMIT)\n        signals.notify(status["queue_name"])\n        return '
             + returned,
         )
+    # _insert_workflow_batch runs inside its caller's transaction: hint only
+    # after each caller commits, or a scan can run before the rows are visible.
     s = replace_once(
         s,
-        "        return inserted\n\n    def _apply_caller_schema",
-        '        for status in statuses:\n            signals.notify(status["queue_name"])\n        return inserted\n\n    def _apply_caller_schema',
+        "        with self.engine.begin() as conn:\n            return self._insert_workflow_batch(conn, rows, input_rows)\n",
+        '        with self.engine.begin() as conn:\n            inserted = self._insert_workflow_batch(conn, rows, input_rows)\n        for status in statuses:\n            signals.notify(status["queue_name"])\n        return inserted\n',
+    )
+    s = replace_once(
+        s,
+        "            self._stamp_last_fired_at(conn, statuses, fired_at, inserted)\n        return inserted\n",
+        '            self._stamp_last_fired_at(conn, statuses, fired_at, inserted)\n        for status in statuses:\n            signals.notify(status["queue_name"])\n        return inserted\n',
     )
     start = s.index("    def transition_delayed_workflows(self)")
     end = s.index("    def cancel_timed_out_workflows", start)
@@ -122,7 +151,7 @@ def patch(root: Path) -> None:
     new = replace_once(
         new,
         "                )\n            )\n",
-        "                )\n                .returning(SystemSchema.workflow_status.c.queue_name)\n            ).scalars().all()\n        for queue_name in set(changed):\n            signals.notify(queue_name)\n",
+        "                )\n                .returning(self.tables.workflow_status.c.queue_name)\n            ).scalars().all()\n        for queue_name in set(changed):\n            signals.notify(queue_name)\n",
     )
     original_body = old[old.index("        now_ms =") :]
     new_body = new[new.index("        now_ms =") :]
@@ -168,8 +197,8 @@ def patch(root: Path) -> None:
         Path(__file__).resolve().parents[1] / "app/runtime/engine/dbos_notifications.py"
     )
     manifest = {
-        "patch_version": 2,
-        "dbos_version": "3.3.0",
+        "patch_version": 3,
+        "dbos_version": "3.5.0",
         "original_files": EXPECTED,
         "files": {
             name: hashlib.sha256(content.encode()).hexdigest()
