@@ -18,9 +18,12 @@
 .library-preview-placeholder {
   background: color-mix(in srgb, var(--muted) 40%, transparent);
 }
+/* Opaque like the skeleton's preview: a thumbnail decoding underneath stays
+   hidden until the whole card is revealed, never ahead of its title. */
 .library-card-fill-preview {
   aspect-ratio: 8 / 5;
-  border-bottom: 1px solid transparent;
+  border-bottom: 1px solid var(--border);
+  background-color: var(--plate);
 }
 .library-card-fill {
   animation: library-card-fill var(--duration-library-enter) var(--ease-library-enter) both;
@@ -295,4 +298,10 @@
   height: 82px;
   border: 1px solid var(--border);
   background: var(--card);
+}
+
+/* While a fill is held (thumbnails on screen still decoding), placeholders
+   stay opaque; releasing the hold starts every fade at the same moment. */
+[data-fill-hold] .library-card-fill {
+  animation: none;
 }

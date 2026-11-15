@@ -55,11 +55,10 @@ export function ModelCardRevision({
   const revisions = cardRevisions(detail);
   const file = revisions.find((revision) => revision.is_recommended) ?? revisions[0];
   const administrator = !!user?.is_superuser;
-  // Before the card detail loads, the list row already says whether a
-  // recommended revision exists, so the card takes its final height at once
-  // instead of shrinking (and moving its whole row) when the detail arrives.
-  const expectsRevision =
-    model.recommended_revision_status != null || model.recommended_revision_label != null;
+  // The list row says whether any G-code exists, so the card takes its final
+  // height at once instead of resizing (and moving its row) when the detail
+  // arrives; a Model without G-code never reads its detail at all.
+  const expectsRevision = model.gcode_file_count > 0;
   const history = useModelPrintJobs(model.id, admitted && !!file && administrator);
   const [sendOpen, setSendOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);

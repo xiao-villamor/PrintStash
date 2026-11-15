@@ -255,6 +255,8 @@ const modelList = [
     tags: model.tags,
     thumbnail_url: model.thumbnail_url,
     file_count: model.files.length,
+    gcode_file_count: model.files.filter((file) => file.file_type === "gcode").length,
+    bounding_box: null,
     printer_presence: [{ printer_id: printer.id, printer_name: printer.name, file_count: 1 }],
     updated_at: model.updated_at,
     mesh_file_id: 1,

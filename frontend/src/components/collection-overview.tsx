@@ -78,6 +78,7 @@ export function CollectionOverviewCard({
                 path={model.thumbnail}
                 alt=""
                 fade
+                priority="background"
                 loadingPlaceholder={<LibraryPreviewPlaceholder />}
                 className={`flex min-h-0 min-w-0 items-center justify-center overflow-hidden ${count === 3 && index === 0 ? "row-span-2" : ""}`}
                 imageClassName="h-full w-full object-contain"

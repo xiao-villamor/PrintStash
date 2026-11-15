@@ -91,6 +91,7 @@ import {
   useState,
   useRef,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -367,6 +368,55 @@ function FolderSearch({
       </kbd>
     </label>
   );
+}
+
+/** Longest the placeholders wait for on-screen thumbnails before revealing. */
+const FILL_HOLD_MS = 800;
+
+/**
+ * Holds a card fill until the thumbnails of the cards on screen are decoded
+ * (or FILL_HOLD_MS passes), then releases it so every placeholder fades at
+ * once: the reader sees placeholders, then finished cards, never cards whose
+ * pictures arrive one by one.
+ */
+function useFillHold<Entrance>(
+  entrance: Entrance | null,
+  grid: RefObject<HTMLElement | null>,
+): "idle" | "holding" | "revealing" {
+  // One hold per fill entrance; a finished one stays "done" for its entrance,
+  // so the fill window that outlives it cannot start a second hold.
+  const [hold, setHold] = useState<{
+    entrance: Entrance;
+    phase: "holding" | "revealing" | "done";
+  } | null>(null);
+  if (entrance !== null && hold?.entrance !== entrance) setHold({ entrance, phase: "holding" });
+  useEffect(() => {
+    if (!hold || hold.phase === "done") return;
+    if (hold.phase === "revealing") {
+      const done = window.setTimeout(
+        () => setHold({ entrance: hold.entrance, phase: "done" }),
+        FOLDER_ENTRANCE_MS,
+      );
+      return () => window.clearTimeout(done);
+    }
+    const started = performance.now();
+    let frame = requestAnimationFrame(function check() {
+      const node = grid.current;
+      const waiting = node
+        ? Array.from(node.querySelectorAll('[data-library-thumbnail="pending"]')).some(
+            (thumbnail) => {
+              const rect = thumbnail.getBoundingClientRect();
+              return rect.bottom > 0 && rect.top < window.innerHeight;
+            },
+          )
+        : true;
+      if ((node && !waiting) || performance.now() - started > FILL_HOLD_MS)
+        setHold({ entrance: hold.entrance, phase: "revealing" });
+      else frame = requestAnimationFrame(check);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [hold, grid]);
+  return !hold || hold.phase === "done" ? "idle" : hold.phase;
 }
 
 /**
@@ -1330,7 +1380,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     });
   }
   const folderEntering = useEntranceWindow(folderEntrance, folderEntrance.move, FOLDER_ENTRANCE_MS);
-  const fillingCards = folderEntrance.fromPlaceholder && folderEntering !== null;
+  const fillingCardsWindow = folderEntrance.fromPlaceholder && folderEntering !== null;
+  const fillingCards = fillingCardsWindow;
   const loadingCardRects = useRef<readonly DOMRect[]>([]);
   // Whether the last retired placeholder was seen: only then do cards fill it.
   const [placeholderSeen, setPlaceholderSeen] = useState(false);
@@ -1497,6 +1548,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       modelsArrival.entrance && true,
       FOLDER_ENTRANCE_MS,
     ) !== null;
+  // Cards fill their placeholders as one step: each card mounts under its
+  // placeholder (so its thumbnail downloads), and the placeholders stay until
+  // the thumbnails on screen are ready, then all fade together.
+  const fillEntrance =
+    folderEntrance.fromPlaceholder && fillingCardsWindow
+      ? folderEntrance
+      : modelsFilling && placeholderSeen
+        ? modelsArrival.entrance
+        : null;
+  const modelGrid = useRef<HTMLDivElement>(null);
+  const fillPhase = useFillHold(fillEntrance, modelGrid);
 
   const selectionEntry = useRef<LibraryEntry | null>(entry);
   useLayoutEffect(() => {
@@ -4253,6 +4315,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               ) : viewMode === "grid" ? (
                 <div
                   key={`grid:${folderEntrance.path ?? ""}`}
+                  ref={modelGrid}
+                  data-fill-hold={fillPhase === "holding" ? "" : undefined}
                   className={compact ? "p-3" : favoritesOnly ? "px-4 pb-6 sm:px-6" : "p-4 sm:p-6"}
                 >
                   <LibraryItems
@@ -4265,7 +4329,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     renderItem={(item, index) => (
                       <LibraryCardFill
                         filling={
-                          (fillingCards || (modelsFilling && placeholderSeen)) && !favoritesOnly
+                          (fillingCards ||
+                            (modelsFilling && placeholderSeen) ||
+                            fillPhase !== "idle") &&
+                          !favoritesOnly
                         }
                         origins={loadingCardRects}
                         index={index}

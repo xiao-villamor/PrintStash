@@ -263,6 +263,45 @@ describe("asset leases and admission", () => {
     leases.forEach((lease) => lease.release());
   });
 
+  it("downloads a card's image before queued collection mosaic images", async () => {
+    const responses = Array.from({ length: 4 }, () => Promise.withResolvers<Response>());
+    let index = 0;
+    vi.mocked(fetch).mockImplementation(() => responses[index++].promise);
+    const requested = () => vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+    const mosaics = [0, 1, 2].map((i) =>
+      acquireAssetUrl(`/lease/mosaic-${i}`, undefined, "background"),
+    );
+    const card = acquireAssetUrl("/lease/card");
+    // Two slots: the first mosaics already started; the card goes next.
+    expect(requested()).toHaveLength(2);
+    responses[0].resolve(new Response("png"));
+    await mosaics[0].url;
+    await vi.waitFor(() => expect(requested()).toHaveLength(3));
+    expect(requested()[2]).toContain("/lease/card");
+    responses.slice(1).forEach((response) => response.resolve(new Response("png")));
+    await Promise.all([...mosaics, card].map((lease) => lease.url));
+    [...mosaics, card].forEach((lease) => lease.release());
+  });
+
+  it("promotes a queued mosaic image that a card also shows", async () => {
+    const responses = Array.from({ length: 4 }, () => Promise.withResolvers<Response>());
+    let index = 0;
+    vi.mocked(fetch).mockImplementation(() => responses[index++].promise);
+    const requested = () => vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+    const mosaics = [0, 1, 2].map((i) =>
+      acquireAssetUrl(`/lease/shared-${i}`, undefined, "background"),
+    );
+    const extra = acquireAssetUrl("/lease/shared-extra", undefined, "background");
+    const card = acquireAssetUrl("/lease/shared-2");
+    responses[0].resolve(new Response("png"));
+    await mosaics[0].url;
+    await vi.waitFor(() => expect(requested()).toHaveLength(3));
+    expect(requested()[2]).toContain("/lease/shared-2");
+    responses.slice(1).forEach((response) => response.resolve(new Response("png")));
+    await Promise.all([...mosaics, extra, card].map((lease) => lease.url));
+    [...mosaics, extra, card].forEach((lease) => lease.release());
+  });
+
   it("removes abandoned queued image work", async () => {
     const responses = Array.from({ length: 4 }, () => Promise.withResolvers<Response>());
     let index = 0;

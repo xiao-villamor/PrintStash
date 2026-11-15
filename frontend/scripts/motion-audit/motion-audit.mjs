@@ -4,6 +4,7 @@
  *
  *   node scripts/motion-audit/motion-audit.mjs --base http://localhost:3470 \
  *     --out ../.motion-audit [--scenario sidebar-close,sidebar-open,load,folder] [--path "/?c=..."]
+ *     [--cache cold|warm] (cold by default: load/folder run with the HTTP cache off)
  *
  * Every scenario performs one real user gesture at 1920x1080 and records, on
  * every animation frame, the geometry and *effective* opacity (own × ancestors)
@@ -20,7 +21,7 @@
  *
  * Sign-in uses PRINTSTASH_USER / PRINTSTASH_PASSWORD when the app redirects.
  */
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { chromium } from "@playwright/test";
@@ -35,6 +36,9 @@ const { values: args } = parseArgs({
     },
     scenario: { type: "string", default: "sidebar-close,sidebar-open,load,folder" },
     latency: { type: "string", default: "700" },
+    // "cold" disables the HTTP cache for data scenarios, so a load shows a real
+    // first visit (thumbnails downloaded, not replayed from disk cache).
+    cache: { type: "string", default: "cold" },
     scheme: { type: "string", default: "dark" },
     headed: { type: "boolean", default: false },
     viewport: { type: "string", default: "1920x1080" },
@@ -155,11 +159,33 @@ function installSampler(tracked) {
           area: Math.round(visibleArea),
           vx: Math.round(visibleX * 1000) / 1000,
           skeleton: !!element.closest(".library-loading-placeholder"),
+          // A card under its opaque fill placeholder is not visible yet.
+          covered: (() => {
+            const fill = element.querySelector(".library-card-fill");
+            return !!fill && effectiveOpacity(fill) > 0.5;
+          })(),
+          // The thumbnail shows through a fill whose preview area is see-through.
+          imageThrough: (() => {
+            const fill = element.querySelector(".library-card-fill");
+            const image = element.querySelector("[data-library-thumbnail] img");
+            if (!fill || !image || effectiveOpacity(fill) <= 0.5) return false;
+            if (!(image.complete && image.naturalWidth > 0) || effectiveOpacity(image) <= 0.5)
+              return false;
+            const preview = fill.querySelector(".library-card-fill-preview");
+            const alpha = (color) => {
+              const match = color.match(/rgba?\(([^)]+)\)/);
+              if (!match) return 1;
+              const parts = match[1].split(/[ ,/]+/).filter(Boolean);
+              return parts.length > 3 ? Number(parts[3]) : 1;
+            };
+            return !preview || alpha(getComputedStyle(preview).backgroundColor) < 0.5;
+          })(),
           // Thumbnail readiness: a ready preview that turns pending is a media flash.
           media: (() => {
             const frame = element.querySelector("[data-library-thumbnail]");
             if (!frame) return null;
-            if (frame.getAttribute("data-library-thumbnail") === "missing") return "missing";
+            const state = frame.getAttribute("data-library-thumbnail");
+            if (state === "missing" || state === "failed") return state;
             const image = frame.querySelector("img");
             return image &&
               image.complete &&
@@ -262,6 +288,25 @@ function analyse({ frames, longFrames, shifts }, label) {
         frames.slice(0, i).some((f) => Object.values(f.elements).some((e) => e.media === "ready"))
       )
         add("media-blank", t, `${key} mounts without its thumbnail (${cur.media})`);
+      // A preview that reads as missing/failed and later shows is a false
+      // failure message flashed during an ordinary load.
+      if (
+        cur &&
+        cur.media === "ready" &&
+        trace.slice(0, i).some((e) => e && (e.media === "missing" || e.media === "failed"))
+      )
+        if (!trace.slice(0, i).some((e) => e && e.media === "ready"))
+          add(
+            "false-failure",
+            t,
+            `${key} showed a missing/failed preview before its thumbnail arrived`,
+          );
+      if (cur && cur.imageThrough && !(prev && prev.imageThrough))
+        add(
+          "image-before-title",
+          t,
+          `${key} shows its picture while its title is still a placeholder`,
+        );
       if (prev && cur && Math.abs(cur.o - prev.o) > 0.45)
         add("opacity-snap", t, `${key} opacity ${prev.o} → ${cur.o} in one frame`);
       if (prev && cur) {
@@ -384,8 +429,38 @@ function analyse({ frames, longFrames, shifts }, label) {
     medianFrameMs: Math.round((dts[Math.floor(dts.length / 2)] ?? 0) * 10) / 10,
     p95FrameMs: Math.round((dts[Math.floor(dts.length * 0.95)] ?? 0) * 10) / 10,
     motionSettledMs: Math.round(bursts.at(-1)?.end ?? 0),
+    phases: phases(frames),
     bursts,
     findings: dedupe(findings),
+  };
+}
+
+/** When each stage of the Model grid became visible: placeholder, cards with
+ * data, and the thumbnails of the cards on screen (first, median, last). */
+function phases(frames) {
+  const onScreen = (e) => e.area > 0 && e.o > 0.5 && !e.covered;
+  const first = (test) =>
+    frames.find((f) => Object.entries(f.elements).some(([k, e]) => test(k, e)))?.t;
+  const skeleton = first((k, e) => e.skeleton && k.startsWith("skeleton") && onScreen(e));
+  const cards = first((k, e) => k.startsWith("/models") && !e.skeleton && onScreen(e));
+  const ready = new Map();
+  for (const f of frames)
+    for (const [k, e] of Object.entries(f.elements))
+      if (k.startsWith("/models") && onScreen(e) && e.media === "ready" && !ready.has(k))
+        ready.set(k, f.t);
+  const visible = new Set();
+  const last = frames.at(-1);
+  for (const [k, e] of Object.entries(last?.elements ?? {}))
+    if (k.startsWith("/models") && e.area > 0 && e.y < 1080) visible.add(k);
+  const times = [...visible].map((k) => ready.get(k) ?? Infinity).sort((a, b) => a - b);
+  const r = (v) => (v === undefined ? null : v === Infinity ? "never" : Math.round(v));
+  return {
+    skeletonShown: r(skeleton),
+    cardsShown: r(cards),
+    firstImage: r(times[0]),
+    medianImage: r(times[Math.floor(times.length / 2)]),
+    lastImage: r(times.at(-1)),
+    visibleCards: visible.size,
   };
 }
 
@@ -455,6 +530,10 @@ async function record(page, cdp, name, gesture, settleMs = 1500) {
     await cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => {});
   };
   cdp.on("Page.screencastFrame", onFrame);
+  if (args.cache === "cold" && (name === "load" || name === "folder")) {
+    await cdp.send("Network.enable");
+    await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+  }
   await cdp.send("Page.startScreencast", { format: "jpeg", quality: 70, everyNthFrame: 1 });
   await page.waitForTimeout(150);
   const plan = gesture instanceof Function ? { gesture } : gesture;
@@ -549,6 +628,8 @@ for (const name of args.scenario.split(",")) {
   const { trace, shots } = await record(page, cdp, name, gesture, settle);
   const result = analyse(trace, name);
   const dir = path.join(outRoot, name);
+  // A previous run's frames in the same folder would mix two recordings.
+  await rm(dir, { recursive: true, force: true });
   await mkdir(path.join(dir, "frames"), { recursive: true });
   await writeFile(path.join(dir, "report.json"), JSON.stringify({ ...result, trace }, null, 1));
   await Promise.all(
@@ -576,6 +657,11 @@ for (const r of summary) {
     `## ${r.label}`,
     `frames ${r.frames} · median ${r.medianFrameMs} ms · p95 ${r.p95FrameMs} ms · motion settled ${r.motionSettledMs} ms · bursts ${r.bursts.length}`,
   );
+  const ph = r.phases;
+  if (ph.cardsShown !== null)
+    lines.push(
+      `phases: skeleton ${ph.skeletonShown ?? "—"} ms → cards ${ph.cardsShown} ms → images first ${ph.firstImage} / median ${ph.medianImage} / last ${ph.lastImage} ms (${ph.visibleCards} on screen)`,
+    );
   if (!r.findings.length) lines.push("- no findings");
   for (const f of r.findings)
     lines.push(`- **${f.kind}** @${f.t} ms ×${f.count}: ${f.examples.join(" | ")}`);

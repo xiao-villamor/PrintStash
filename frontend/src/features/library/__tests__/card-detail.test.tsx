@@ -2,7 +2,7 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useCardDetail, cardDimensions } from "../card-detail";
-import { aModel, aMetadata, aRevision } from "@/test-support/factories";
+import { aModel } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
 import { queryKeys } from "@/lib/query-client";
 import { retirePrivateSessionScope } from "@/lib/auth-store";
@@ -86,43 +86,13 @@ describe("useCardDetail", () => {
 });
 
 describe("cardDimensions", () => {
-  it("shows all three recorded source dimensions", () => {
-    expect(
-      cardDimensions(
-        aModel({
-          files: [
-            aRevision({
-              file_type: "stl",
-              metadata: aMetadata({ bbox_x_mm: 210, bbox_y_mm: 110, bbox_z_mm: 40 }),
-            }),
-          ],
-        }),
-      ),
-    ).toBe("210 × 110 × 40 mm");
+  it("shows the list row's three measured dimensions", () => {
+    expect(cardDimensions({ x_mm: 210, y_mm: 110, z_mm: 40 })).toBe("210 × 110 × 40 mm");
   });
-  it("omits incomplete source geometry", () => {
-    expect(
-      cardDimensions(
-        aModel({
-          files: [
-            aRevision({
-              file_type: "stl",
-              metadata: aMetadata({ bbox_x_mm: 210, bbox_y_mm: 110, bbox_z_mm: null }),
-            }),
-          ],
-        }),
-      ),
-    ).toBeNull();
+  it("rounds to one decimal", () => {
+    expect(cardDimensions({ x_mm: 12.34, y_mm: 5, z_mm: 0.06 })).toBe("12.3 × 5 × 0.1 mm");
   });
-  it("does not substitute toolpath bounds for source geometry", () => {
-    expect(
-      cardDimensions(
-        aModel({
-          files: [
-            aRevision({ metadata: aMetadata({ bbox_x_mm: 210, bbox_y_mm: 110, bbox_z_mm: 40 }) }),
-          ],
-        }),
-      ),
-    ).toBeNull();
+  it("shows no size before a mesh is measured", () => {
+    expect(cardDimensions(null)).toBeNull();
   });
 });

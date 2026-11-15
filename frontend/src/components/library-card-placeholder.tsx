@@ -69,7 +69,9 @@ export function LibraryCardFill({
           aria-hidden
           className="library-card-fill pointer-events-none absolute inset-px flex flex-col overflow-hidden"
         >
-          <div className="library-card-fill-preview shrink-0" />
+          <div className="library-card-fill-preview shrink-0">
+            <LibraryPreviewPlaceholder />
+          </div>
           <div className="flex-1 bg-card">
             <LibraryCardDetailsPlaceholder />
           </div>

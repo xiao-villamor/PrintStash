@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
 import { useViewportAdmission } from "@/lib/use-viewport-admission";
-import type { ModelRead } from "@/types";
+import type { ModelBoundingBoxRead, ModelRead } from "@/types";
 import { formatNumber } from "@/lib/format";
 import { normalizeRecommendedGcodeFiles } from "@/components/model-detail/presentation";
 import { modelDetailOptions } from "./model-detail";
@@ -28,17 +28,11 @@ export function cardRevisions(model: ModelRead | undefined) {
     .sort((a, b) => b.version - a.version);
 }
 
-export function cardDimensions(model: ModelRead | undefined): string | null {
-  const geometry = model?.files.find(
-    (file) =>
-      file.file_type !== "gcode" &&
-      file.metadata?.bbox_x_mm != null &&
-      file.metadata.bbox_y_mm != null &&
-      file.metadata.bbox_z_mm != null,
-  )?.metadata;
-  if (!geometry) return null;
+/** The card's size line, from the list row: no Model detail read is needed. */
+export function cardDimensions(box: ModelBoundingBoxRead | null): string | null {
+  if (!box) return null;
   return (
-    [geometry.bbox_x_mm!, geometry.bbox_y_mm!, geometry.bbox_z_mm!]
+    [box.x_mm, box.y_mm, box.z_mm]
       .map((value) => formatNumber(value, { maximumFractionDigits: 1 }))
       .join(" × ") + " mm"
   );

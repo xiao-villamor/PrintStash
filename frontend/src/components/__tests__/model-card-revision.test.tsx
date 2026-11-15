@@ -142,7 +142,7 @@ describe("ModelCardRevision", () => {
     expect(screen.queryByText("Recommended")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download Rev 3" })).toBeEnabled();
   });
-  it("takes its final height before the detail loads when the list row has no revision", () => {
+  it("takes its final height at once when the list row has no G-code", () => {
     renderApp(
       <ModelCardRevision model={aModelListItem()} admitted dimensions={null}>
         <span>30m</span>
@@ -152,10 +152,10 @@ describe("ModelCardRevision", () => {
     expect(screen.queryByText("Print results not available")).not.toBeInTheDocument();
     expect(document.querySelector(".library-card-meta")).toBeInTheDocument();
   });
-  it("reserves the revision lines before the detail loads when the list row has one", () => {
+  it("reserves the revision lines before the detail loads when the list row has G-code", () => {
     renderApp(
       <ModelCardRevision
-        model={aModelListItem({ recommended_revision_status: "needs_test" })}
+        model={aModelListItem({ gcode_file_count: 1 })}
         admitted={false}
         dimensions={null}
       >

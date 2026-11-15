@@ -198,8 +198,14 @@ function ModelCardInner({
   const starBusy = starMutation.isPending;
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null);
-  const { ref: cardRef, admitted, data: detail } = useCardDetail(model.id, !favorites);
-  const dimensions = cardDimensions(detail);
+  // Only a Model with G-code needs its detail (revisions and print history);
+  // its size and everything else on the card come with the list row.
+  const {
+    ref: cardRef,
+    admitted,
+    data: detail,
+  } = useCardDetail(model.id, !favorites && model.gcode_file_count > 0);
+  const dimensions = cardDimensions(model.bounding_box);
   const revisions = cardRevisions(detail);
   const revision = revisions.find((file) => file.is_recommended) ?? revisions[0];
   const cornerStatus =

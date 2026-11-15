@@ -35,7 +35,9 @@ const model: ModelListItem = {
   tags: [],
   thumbnail_url: null,
   file_count: 2,
+  gcode_file_count: 1,
   mesh_file_id: null,
+  bounding_box: null,
   printer_presence: [],
   updated_at: "2026-07-13T12:00:00Z",
   print_summary: null,
@@ -133,6 +135,25 @@ describe("ModelCard", () => {
     await user.click(link);
 
     expect(screen.getByLabelText("Current card location")).toHaveTextContent("/models/1");
+  });
+
+  it("shows a Model without G-code completely from its list row, without a detail read", async () => {
+    const { requests } = renderCard({
+      gcode_file_count: 0,
+      bounding_box: { x_mm: 73, y_mm: 113, z_mm: 122 },
+    });
+
+    expect(screen.getByText("73 × 113 × 122 mm")).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(requests().filter((request) => request.url.endsWith("/api/v1/models/1"))).toEqual([]);
+  });
+
+  it("reads the detail of a Model that has G-code, for its revisions", async () => {
+    const { requests } = renderCard({ gcode_file_count: 1 });
+
+    await waitFor(() =>
+      expect(requests().some((request) => request.url.endsWith("/api/v1/models/1"))).toBe(true),
+    );
   });
 
   it("does not convert on hover", async () => {

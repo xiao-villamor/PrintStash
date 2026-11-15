@@ -1,5 +1,5 @@
 import { useCallback, useState, type ReactNode } from "react";
-import { peekCachedAssetUrl } from "@/lib/asset-cache";
+import { peekCachedAssetUrl, type AssetPriority } from "@/lib/asset-cache";
 import { useAuthenticatedAsset } from "@/lib/use-authenticated-asset-url";
 import { useViewportAdmission } from "@/lib/use-viewport-admission";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ export function ProtectedThumbnail({
   className,
   imageClassName,
   fade = false,
+  priority = "primary",
   children,
 }: {
   path: string | null | undefined;
@@ -23,6 +24,8 @@ export function ProtectedThumbnail({
   className?: string;
   imageClassName?: string;
   fade?: boolean;
+  /** Collection mosaics are "background": they never delay the cards' own images. */
+  priority?: AssetPriority;
   children?: ReactNode;
 }) {
   const { ref, admitted: inView } = useViewportAdmission();
@@ -40,7 +43,7 @@ export function ProtectedThumbnail({
   // remounted by a reflow paints its thumbnail in its first frame, not after
   // an intersection round trip that leaves a blank frame.
   const admitted = inView || cachedSource.url !== null;
-  const asset = useAuthenticatedAsset(external ? null : path, admitted);
+  const asset = useAuthenticatedAsset(external ? null : path, admitted, priority);
   const url = admitted ? (external ?? asset.url) : null;
   const [decoded, setDecoded] = useState<string | null>(null);
   const ready = url !== null && decoded === url;

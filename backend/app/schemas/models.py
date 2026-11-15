@@ -263,6 +263,14 @@ class PrintSummaryRead(BaseModel):
     total_cost: Optional[float] = None
 
 
+class ModelBoundingBoxRead(BaseModel):
+    """Measured extent of a Model's mesh, in millimetres; all three or none."""
+
+    x_mm: float
+    y_mm: float
+    z_mm: float
+
+
 class ModelListItem(EditingBase):
     similarity: ModelSimilarityRead = Field(default_factory=ModelSimilarityRead)
     id: int
@@ -279,6 +287,11 @@ class ModelListItem(EditingBase):
     file_count: int
     # Newest mesh file (STL/3MF/OBJ) — lets the UI preload the 3D preview.
     mesh_file_id: Optional[int] = None
+    # Extent of the newest measured mesh, so a card shows its size without
+    # reading the Model detail. None until a mesh has been measured.
+    bounding_box: Optional[ModelBoundingBoxRead] = None
+    # Live G-code revisions; a card reads the Model detail only when it has one.
+    gcode_file_count: int = 0
     printer_presence: List[ModelPrinterPresenceRead] = []
     updated_at: datetime
     print_summary: Optional[PrintSummaryRead] = None

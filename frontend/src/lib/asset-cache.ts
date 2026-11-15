@@ -6,6 +6,9 @@ const MAX_INACTIVE_ENTRIES = 400;
 const MAX_INACTIVE_BYTES = 32 * 1024 * 1024;
 
 type AssetStatus = "queued" | "loading" | "ready" | "retired";
+/** "background" assets (collection mosaics) yield every free slot to
+ * "primary" ones (the cards the reader came for). */
+export type AssetPriority = "primary" | "background";
 interface AssetData {
   url: string;
   bytes: number;
@@ -17,6 +20,7 @@ class AssetEntry {
   readonly resolve: (url: string) => void;
   readonly reject: (reason: Error) => void;
   status: AssetStatus = "queued";
+  priority: AssetPriority = "background";
   data: AssetData | null = null;
   references = 0;
   counted = false;
@@ -107,15 +111,34 @@ function pump(): void {
   }
 }
 
-function getEntry(path: string): AssetEntry {
+function enqueue(entry: AssetEntry): void {
+  // Primary assets wait only behind other primary ones, in request order.
+  const firstBackground =
+    entry.priority === "primary"
+      ? queue.findIndex((queued) => queued.priority === "background")
+      : -1;
+  if (firstBackground === -1) queue.push(entry);
+  else queue.splice(firstBackground, 0, entry);
+}
+
+function getEntry(path: string, priority: AssetPriority): AssetEntry {
   const cached = entries.get(path);
   if (cached) {
     touch(cached);
+    if (priority === "primary" && cached.priority === "background") {
+      cached.priority = "primary";
+      const queued = queue.indexOf(cached);
+      if (queued !== -1) {
+        queue.splice(queued, 1);
+        enqueue(cached);
+      }
+    }
     return cached;
   }
   const entry = new AssetEntry(path);
+  entry.priority = priority;
   entries.set(path, entry);
-  queue.push(entry);
+  enqueue(entry);
   return entry;
 }
 
@@ -138,9 +161,13 @@ export interface AssetLease {
 }
 
 /** Own a share of protected bytes; other consumers survive this caller's cancellation. */
-export function acquireAssetUrl(path: string, signal?: AbortSignal): AssetLease {
+export function acquireAssetUrl(
+  path: string,
+  signal?: AbortSignal,
+  priority: AssetPriority = "primary",
+): AssetLease {
   if (signal?.aborted) return { url: Promise.reject(signal.reason), release() {} };
-  const entry = getEntry(path);
+  const entry = getEntry(path, priority);
   entry.references += 1;
   let active = true;
   let reject!: (reason: Error) => void;

@@ -43,6 +43,7 @@ from app.modules.printing.costing import (
 from app.schemas.models import (
     FileRead,
     MetadataRead,
+    ModelBoundingBoxRead,
     ModelListItem,
     ModelPrinterPresenceRead,
     PrintSummaryRead,
@@ -214,10 +215,21 @@ def _list_related_queries():
             ModelStar.user_id == bindparam("user_id"),
             ModelStar.model_id.in_(bindparam("model_ids", expanding=True)),  # type: ignore[union-attr]
         ),
-        select(File.model_id, func.count(File.id))
+        select(
+            File.model_id,
+            func.count(File.id),
+            func.sum(case((File.file_type == FileType.GCODE, 1), else_=0)),
+        )
         .where(File.model_id.in_(bindparam("model_ids", expanding=True)), live(File))  # type: ignore[union-attr]
         .group_by(File.model_id),
-        select(File.model_id, File.id)
+        select(
+            File.model_id,
+            File.id,
+            Metadata.bbox_x_mm,
+            Metadata.bbox_y_mm,
+            Metadata.bbox_z_mm,
+        )
+        .outerjoin(Metadata, Metadata.file_id == File.id)  # type: ignore[arg-type]
         .where(
             File.model_id.in_(bindparam("model_ids", expanding=True)),  # type: ignore[union-attr]
             File.file_type.in_(  # type: ignore[attr-defined]
@@ -316,11 +328,24 @@ def _hydrate_list_rows(
     similarity = similarity_summaries(session, user, model_ids)
     starred_ids = set(session.exec(stars_query, params=parameters).all())
 
-    file_counts = dict(session.exec(counts_query, params=parameters).all())
+    file_counts: dict[int, int] = {}
+    gcode_counts: dict[int, int] = {}
+    for model_id, count, gcode in session.exec(counts_query, params=parameters).all():
+        file_counts[int(model_id)] = int(count)
+        gcode_counts[int(model_id)] = int(gcode or 0)
 
     mesh_file_ids: dict[int, int] = {}
-    for model_id, file_id in session.exec(mesh_query, params=parameters).all():
+    bounding_boxes: dict[int, ModelBoundingBoxRead] = {}
+    for model_id, file_id, x_mm, y_mm, z_mm in session.exec(
+        mesh_query, params=parameters
+    ).all():
         mesh_file_ids.setdefault(int(model_id), int(file_id))
+        # Newest mesh first: the first one measured on all three axes wins.
+        if x_mm is not None and y_mm is not None and z_mm is not None:
+            bounding_boxes.setdefault(
+                int(model_id),
+                ModelBoundingBoxRead(x_mm=x_mm, y_mm=y_mm, z_mm=z_mm),
+            )
 
     recommended: dict[int, tuple[FileRevisionStatus | None, str | None]] = {}
     for model_id, rev_status, rev_label in session.exec(
@@ -394,7 +419,9 @@ def _hydrate_list_rows(
                 tags=sorted(tags_by_model.get(model.id, [])),
                 thumbnail_url=thumb_url(model),
                 file_count=int(file_counts.get(model.id, 0)),
+                gcode_file_count=gcode_counts.get(model.id, 0),
                 mesh_file_id=mesh_file_ids.get(model.id),
+                bounding_box=bounding_boxes.get(model.id),
                 printer_presence=presence_by_model.get(model.id, []),
                 updated_at=model.updated_at,
                 print_summary=summaries.get(model.id),

@@ -10655,6 +10655,30 @@
         "title": "ModelBatchTags",
         "type": "object"
       },
+      "ModelBoundingBoxRead": {
+        "description": "Measured extent of a Model's mesh, in millimetres; all three or none.",
+        "properties": {
+          "x_mm": {
+            "title": "X Mm",
+            "type": "number"
+          },
+          "y_mm": {
+            "title": "Y Mm",
+            "type": "number"
+          },
+          "z_mm": {
+            "title": "Z Mm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x_mm",
+          "y_mm",
+          "z_mm"
+        ],
+        "title": "ModelBoundingBoxRead",
+        "type": "object"
+      },
       "ModelEditBatchResult": {
         "properties": {
           "failed": {
@@ -11002,6 +11026,16 @@
       },
       "ModelListItem": {
         "properties": {
+          "bounding_box": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelBoundingBoxRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "collection": {
             "anyOf": [
               {
@@ -11057,6 +11091,11 @@
           },
           "file_count": {
             "title": "File Count",
+            "type": "integer"
+          },
+          "gcode_file_count": {
+            "default": 0,
+            "title": "Gcode File Count",
             "type": "integer"
           },
           "id": {
