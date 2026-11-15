@@ -24,9 +24,10 @@ const ReactQueryDevtools = import.meta.env.DEV
 const stopTaskScope = startTaskCenterSessionScope();
 import.meta.hot?.dispose(stopTaskScope);
 
-// Every screen reads its text synchronously, so the one catalog the app starts
-// in must be present before the first render.
-void activateLocale().then(() => {
+// Match and load this destination's code alongside its language catalog.
+// Screens still mount only after translations are ready; AuthProvider keeps
+// their private reads behind session validation.
+void Promise.all([activateLocale(), router.load()]).then(() => {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <I18nProvider>
