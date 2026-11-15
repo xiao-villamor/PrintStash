@@ -1,5 +1,6 @@
 "use client";
 
+import { useCollectionsPane } from "@/lib/collections-pane-context";
 import { useState } from "react";
 import {
   FolderClosed,
@@ -25,6 +26,7 @@ export function BottomNavBar() {
   const pathname = usePathname();
   const params = useSearchParams();
   const router = useRouter();
+  const pane = useCollectionsPane();
   const { user, logout } = useAuth();
   const startup = useLibraryStartup();
   const inbox = useInboxCount(startup.canLoad("inbox"));
@@ -59,8 +61,10 @@ export function BottomNavBar() {
       {tabs.map((item) => {
         const active =
           item.href === "/"
-            ? pathname === "/" && params.get("favorites") !== "true"
-            : pathname.startsWith(item.href);
+            ? pathname === "/" && pane?.mode !== "search"
+            : item.href === "/search" && pane?.open
+              ? pane.mode === "search"
+              : pathname.startsWith(item.href);
         return (
           <a
             key={item.href}
@@ -78,7 +82,11 @@ export function BottomNavBar() {
               )
                 return;
               event.preventDefault();
-              router.push(item.href);
+              if (item.href === "/search" && pane) pane.showSearch();
+              else {
+                if (item.href === "/") pane?.showCollections();
+                router.push(item.href);
+              }
             }}
           >
             <item.icon className="h-5 w-5" strokeWidth={1.6} aria-hidden />

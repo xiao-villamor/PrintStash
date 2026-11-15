@@ -136,21 +136,22 @@ test("Upload mode switches reveal without zooming", async ({ page }) => {
   await expectStationaryReveal(page, "upload-mode-content");
 });
 
-test("main destinations use one stationary reveal without a nested Favorites fade", async ({
+test("Favorites filters Library without replaying the entire main destination", async ({
   page,
 }) => {
   await page.goto("/settings");
   const rail = page.getByRole("navigation", { name: "Navigation", exact: true });
   await rail.getByRole("link", { name: "Search", exact: true }).click();
-  await expect(page).toHaveURL(/\/search/);
+  await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
   await expectStationaryReveal(page, "workbench-main-content");
-  await rail.getByRole("link", { name: "Favorites", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Favorites & saved views" })).toBeVisible();
-  await expectStationaryReveal(page, "workbench-main-content");
-  expect(await page.evaluate(() => window.sectionReveals.map((item) => item.surface))).toEqual([
-    "workbench-main-content",
-    "workbench-main-content",
-  ]);
+  await rail.getByRole("button", { name: "Favorites", exact: true }).click();
+  await expect(page).toHaveURL(/favorites=true/);
+  await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      window.sectionReveals.filter((item) => item.surface === "workbench-main-content"),
+    ),
+  ).toHaveLength(1);
 });
 
 async function finishLayout(page: Page) {

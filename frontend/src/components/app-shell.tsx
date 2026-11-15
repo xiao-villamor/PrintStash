@@ -5,7 +5,11 @@ import { useEffect, useState } from "react";
 import { useRouter } from "@/lib/navigation";
 
 import { BottomNavBar } from "@/components/bottom-nav-bar";
-import { CollectionsPaneProvider, CollectionsPaneHost } from "@/components/collections-pane";
+import {
+  CollectionsPaneProvider,
+  CollectionsPaneHost,
+  MobileLibrarySearch,
+} from "@/components/collections-pane";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { Toaster } from "@/components/toaster";
 import { TopBar } from "@/components/top-bar";
@@ -147,6 +151,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     <CollectionsPaneHost />
                     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
                       <TopBar />
+                      <MobileLibrarySearch />
                       <PreviewActivityTracker enabled={!!user?.is_superuser} />
                       <div className="shell-route-viewport flex min-h-0 flex-1 overflow-hidden">
                         <div

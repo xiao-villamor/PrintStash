@@ -1,9 +1,9 @@
 import { Suspense, useLayoutEffect, useState } from "react";
 import { Outlet, useRouterState } from "@tanstack/react-router";
-import { usePathname, useSearchParams } from "./navigation";
+import { usePathname } from "./navigation";
 import { useContentReveal } from "./use-content-reveal";
 
-type MainSection = "library" | "search" | "favorites" | "pending" | "settings" | "other";
+type MainSection = "library" | "search" | "pending" | "settings" | "other";
 
 function normalizePath(path: string): string {
   return path.replace(/\/+$/, "") || "/";
@@ -25,14 +25,11 @@ function ContentReady({
 /** Retire outgoing page effects while its lazy destination is being matched. */
 export function RouteOutlet() {
   const pathname = normalizePath(usePathname());
-  const params = useSearchParams();
   const section: MainSection =
     pathname === "/search"
       ? "search"
       : pathname === "/"
-        ? params.get("favorites") === "true"
-          ? "favorites"
-          : "library"
+        ? "library"
         : pathname === "/inbox"
           ? "pending"
           : pathname === "/settings"

@@ -33,7 +33,7 @@ export function LibrarySearch({
   recent = [],
   onSearchCommit,
 }: {
-  placement?: "header" | "sidebar";
+  placement?: "header" | "sidebar" | "mobile";
   recent?: readonly string[];
   onSearchCommit?: (query: string) => void;
 }) {
@@ -91,7 +91,7 @@ export function LibrarySearch({
     publishTimer.current = window.setTimeout(() => {
       publishTimer.current = undefined;
       setPublished(next);
-      if (sidebar || pathname === "/search" || aiActive) {
+      if (pathname === "/search" || aiActive) {
         const href = searchHref(next, effectiveMode, pathname === "/search" ? params : "");
         if (pathname === "/search") router.replace(href);
         else router.push(href);
@@ -116,7 +116,11 @@ export function LibrarySearch({
     if (!query.trim()) return;
     cancelPublication();
     setPublished(query.trim());
-    router.push(searchHref(query, nextMode, pathname === "/search" ? params : "", true));
+    if (pathname === "/" && nextMode === "lexical") {
+      const updated = new URLSearchParams(params);
+      updated.set("q", query.trim());
+      router.replace(`/?${updated}`);
+    } else router.push(searchHref(query, nextMode, pathname === "/search" ? params : "", true));
   }
   function toggleAi() {
     const nextMode = aiActive ? "lexical" : "hybrid";
@@ -128,7 +132,7 @@ export function LibrarySearch({
   function submit() {
     if (composing) return;
     onSearchCommit?.(value.trim());
-    if (sidebar || pathname !== "/" || aiActive) {
+    if (pathname !== "/" || aiActive) {
       searchFor(value, effectiveMode);
       return;
     }
@@ -192,7 +196,9 @@ export function LibrarySearch({
         />
         <Input
           ref={input}
-          autoFocus={sidebar ? desktop : pathname === "/search" && !desktop}
+          autoFocus={
+            placement === "mobile" || (sidebar ? desktop : pathname === "/search" && !desktop)
+          }
           onFocus={() => {
             setEngaged(true);
             startup.request("search");

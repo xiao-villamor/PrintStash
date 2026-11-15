@@ -6,7 +6,7 @@ import "./library-header.css";
 import { LibraryCollectionsRegion } from "@/components/library-collections-region";
 
 import { arrivingKeys, entryKeys } from "@/lib/library-arrivals";
-import { FOLDER_ENTRANCE_MS, folderMove, type FolderMove } from "@/lib/folder-transition";
+import { FOLDER_ENTRANCE_MS } from "@/lib/folder-transition";
 import { useEntranceWindow } from "@/lib/entrance-window";
 import { useContentReveal } from "@/lib/use-content-reveal";
 import { DURATION } from "@/lib/overlay";
@@ -88,7 +88,6 @@ import {
   useState,
   useRef,
   type ReactNode,
-  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -105,8 +104,6 @@ import {
   SavedViewRead,
   TagRead,
 } from "@/types";
-import { TabBar } from "@/components/ui/tabs";
-import { FavoriteSavedViewRow } from "@/components/favorite-saved-view-row";
 import { ModelCard } from "@/components/model-card";
 import { LibraryModelInspector } from "@/components/library-model-inspector";
 import { CollectionTitleEditor } from "@/components/collection-title-editor";
@@ -124,11 +121,7 @@ import { useCollectionReadmeRenderer } from "@/components/use-collection-readme-
 import { MultipartModelTagsDialog } from "@/components/multipart-model-tags-dialog";
 import { MultipartModelCard } from "@/components/multipart-model-card";
 import { useCollectionsPane } from "@/lib/collections-pane-context";
-import {
-  LibraryCollectionsPane,
-  LibraryBreadcrumbs,
-  FavoritesSidebar,
-} from "@/components/collections-pane";
+import { LibraryCollectionsPane, LibraryBreadcrumbs } from "@/components/collections-pane";
 import { FilterSidebar } from "@/components/filter-sidebar";
 import { readLibraryLocation, type LibraryViewMode } from "@/features/library/url";
 import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
@@ -354,54 +347,6 @@ function FolderSearch({
       </kbd>
     </label>
   );
-}
-
-/** Longest the placeholders wait for on-screen thumbnails before revealing. */
-const FILL_HOLD_MS = 800;
-
-/**
- * Retains fill frames until visible previews settle (or FILL_HOLD_MS passes).
- * CSS releases each complete card independently; this bound retires the frames
- * and resumes pagination without waiting indefinitely for a stalled preview.
- */
-function useFillHold<Entrance>(
-  entrance: Entrance | null,
-  grid: RefObject<HTMLElement | null>,
-): "idle" | "holding" | "revealing" {
-  // One hold per fill entrance; a finished one stays "done" for its entrance,
-  // so the fill window that outlives it cannot start a second hold.
-  const [hold, setHold] = useState<{
-    entrance: Entrance;
-    phase: "holding" | "revealing" | "done";
-  } | null>(null);
-  if (entrance !== null && hold?.entrance !== entrance) setHold({ entrance, phase: "holding" });
-  useEffect(() => {
-    if (!hold || hold.phase === "done") return;
-    if (hold.phase === "revealing") {
-      const done = window.setTimeout(
-        () => setHold({ entrance: hold.entrance, phase: "done" }),
-        FOLDER_ENTRANCE_MS,
-      );
-      return () => window.clearTimeout(done);
-    }
-    const started = performance.now();
-    let frame = requestAnimationFrame(function check() {
-      const node = grid.current;
-      const waiting = node
-        ? Array.from(node.querySelectorAll('[data-library-thumbnail="pending"]')).some(
-            (thumbnail) => {
-              const rect = thumbnail.getBoundingClientRect();
-              return rect.bottom > 0 && rect.top < window.innerHeight;
-            },
-          )
-        : true;
-      if ((node && !waiting) || performance.now() - started > FILL_HOLD_MS)
-        setHold({ entrance: hold.entrance, phase: "revealing" });
-      else frame = requestAnimationFrame(check);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [hold, grid]);
-  return !hold || hold.phase === "done" ? "idle" : hold.phase;
 }
 
 /**
@@ -915,11 +860,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const toolbarMenuOpener = useRef<HTMLElement | null>(null);
   const [filtersExpanded, setFiltersExpanded] = useState<boolean | null>(null);
-  const [favoritesPanel, setFavoritesPanel] = useState<"favorites" | "views">("favorites");
-  // Documents and saved views still need the collection snapshot, but have no
+  // Documents still need the collection snapshot, but have no
   // Model placeholder to measure. Keep their existing bounded browse read.
-  if (pageSize === null && (docView === "docs" || favoritesPanel === "views"))
-    setPageSize(UNMEASURED_PAGE_SIZE);
+  if (pageSize === null && docView === "docs") setPageSize(UNMEASURED_PAGE_SIZE);
   const [compact, setCompact] = useState(
     () => readVaultPreference("ps-vault-density") === "compact",
   );
@@ -1389,29 +1332,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       ? null
       : (nextSnapshot ?? settledSnapshot);
   const displayedCollection = snapshot?.collection ?? null;
-  // Loading fills the existing frame; navigation between populated folders moves cards.
+  // Each displayed destination owns the real cards' entrance, including cached visits.
   const displayedPath = snapshot === null ? null : (displayedCollection?.path ?? "");
-  const [folderEntrance, setFolderEntrance] = useState<{
-    path: string | null;
-    move: FolderMove | null;
-    fromPlaceholder: boolean;
-  }>({ path: displayedPath, move: displayedPath === null ? null : "jump", fromPlaceholder: false });
-  if (displayedPath !== null && folderEntrance.path !== displayedPath) {
-    setFolderEntrance({
-      path: displayedPath,
-      move: folderEntrance.path === null ? "jump" : folderMove(folderEntrance.path, displayedPath),
-      fromPlaceholder: folderEntrance.path === null,
-    });
-  }
-  const folderEntering = useEntranceWindow(folderEntrance, folderEntrance.move, FOLDER_ENTRANCE_MS);
-  const fillingCardsWindow = folderEntrance.fromPlaceholder && folderEntering !== null;
-  const fillingCards = fillingCardsWindow;
-  const loadingCardRects = useRef<readonly DOMRect[]>([]);
-  // Positions of the last placeholder the reader saw; empty when it never showed
-  // (a fast read), so cards never travel from a stale one.
-  const rememberLoadingCards = useCallback((rects: readonly DOMRect[]) => {
-    loadingCardRects.current = rects;
-  }, []);
+  const cardIdentity = `${snapshot?.entry.href ?? ""}:${viewMode}:${snapshot?.items.length ? "populated" : "empty"}`;
+  const cardEntrance = useEntranceWindow(cardIdentity, snapshot ? true : null, FOLDER_ENTRANCE_MS);
   const onAuthorityRetired = useCallback(() => {
     const session = getSessionVersion();
     void refreshAuth().catch((error) => {
@@ -1552,33 +1476,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     !browseReady &&
     !favoritesOnly &&
     (snapshot?.items.length ?? 0) === 0;
-  // When Models replace their placeholder after the folder's collections were
-  // already shown, the cards fill the placeholder's frames like a first load.
-  const [modelsArrival, setModelsArrival] = useState<{
-    pending: boolean;
-    entrance: { pending: false } | null;
-  }>({ pending: modelsPending, entrance: null });
-  if (modelsArrival.pending !== modelsPending)
-    setModelsArrival({
-      pending: modelsPending,
-      entrance: modelsPending ? null : { pending: false },
-    });
-  const modelsFilling =
-    useEntranceWindow(
-      modelsArrival.entrance,
-      modelsArrival.entrance && true,
-      FOLDER_ENTRANCE_MS,
-    ) !== null;
-  // Cards download beneath their frames and reveal independently as their own
-  // preview decodes. Keep the bounded hold for cleanup and pagination admission.
-  const fillEntrance =
-    folderEntrance.fromPlaceholder && fillingCardsWindow
-      ? folderEntrance
-      : modelsFilling
-        ? modelsArrival.entrance
-        : null;
-  const modelGrid = useRef<HTMLDivElement>(null);
-  const fillPhase = useFillHold(fillEntrance, modelGrid);
 
   const selectionEntry = useRef<LibraryEntry | null>(entry);
   useLayoutEffect(() => {
@@ -1641,14 +1538,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // into view, or a reflowed row) keeps its place.
   const arriving = useEntranceWindow(arrival, arrival.arriving, DURATION.fast) ?? NO_ARRIVALS;
 
-  // One reveal belongs to the committed destination, including cached Back/Forward.
-  // Canonical URL replacements do not create a second visual visit.
-  // Reused cards and delayed virtual rows share the same presentation instead
-  // of independently restarting CSS keyframes as their children mount.
+  // Lists reveal together; grid cards reveal on their actual mount or destination
+  // change, so virtual rows cannot consume the entrance before showing content.
   const modelsContent = useRef<HTMLDivElement>(null);
   const libraryReveal = useContentReveal(`${snapshot?.entry.href ?? ""}:${viewMode}`, {
-    enabled: snapshot !== null && docView === "models",
-    scope: (snapshot?.favorites ?? favoritesOnly) ? "favorites" : "library",
+    enabled: snapshot !== null && docView === "models" && viewMode === "list",
+    animateOnEnable: true,
   });
 
   // A change to the library applies by itself while the view is a single page:
@@ -1690,11 +1585,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (browseReady) settleStartup("cards", "ready");
     else if (error !== null) settleStartup("cards", "failed");
   }, [browseReady, error, settleStartup]);
-  useEffect(() => {
-    if (!favoritesOnly || pane?.mode === "collections") return;
-    settleStartup("tree", browseReady ? "ready" : "pending");
-    return () => settleStartup("tree", "idle");
-  }, [favoritesOnly, pane?.mode, browseReady, settleStartup]);
   const startupContent = useRef<HTMLElement>(null);
   const listContent = useRef<HTMLDivElement>(null);
   const readingRenderers = useRef(new Map<string, LibraryReadingRenderer>());
@@ -2359,7 +2249,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const inspectorAvailable =
     snapshot?.entry === entry &&
     docView === "models" &&
-    !favoritesOnly &&
     !authority.authorizationChanged &&
     visibleModels.length > 0;
   const inspectorOpen = inspectorAvailable && !!inspectorIntent?.open;
@@ -3391,62 +3280,51 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
         {/* Stitch layout: filter sidebar + main content */}
         <LibraryCollectionsPane>
-          {favoritesOnly && pane?.mode !== "collections" ? (
-            <FavoritesSidebar
-              models={visibleModels}
-              multipartModels={visibleMultipartModels}
-              origin={snapshot?.entry}
-            />
-          ) : (
-            <FilterSidebar
-              collectionsOnly={pane !== null}
-              filtersOpen={false}
-              outlinerFilters={baseFilters}
-              tags={tags}
-              printers={printers}
-              selectedCollection={selectedCollection}
-              selectedCollectionId={selectedCollectionId}
-              selectedTags={selectedTags}
-              selectedPrinterId={selectedPrinterId}
-              selectedPrinterPresence={selectedPrinterPresence}
-              onCollectionChange={handleCollectionChange}
-              onCollectionIntent={prefetchFolder}
-              onTagsChange={setSelectedTags}
-              onPrinterChange={setSelectedPrinterId}
-              onPrinterPresenceChange={setSelectedPrinterPresence}
-              onCreateCollection={handleOpenCreateCollection}
-              onMoveModel={handleMoveModel}
-              onMoveCollection={handleMoveCollection}
-              onDeleteCollection={handleDeleteCollection}
-              canViewPrinters={canViewPrinters}
-              canManageLibrary={!!user?.is_superuser}
-              quickAccess={
-                auth.isAuthenticated ? (
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      aria-pressed={favoritesOnly}
-                      onClick={toggleFavorites}
-                      className={cn(
-                        "h-8 w-full justify-start px-3 text-sm",
-                        favoritesOnly && "bg-accent text-accent-foreground",
-                      )}
-                    >
-                      <Star
-                        className={cn("h-4 w-4", favoritesOnly && "fill-current")}
-                        aria-hidden
-                      />
-                      {uiText("Favorites")}
-                    </Button>
-                    {!savedViewsHost && savedViewControl()}
-                  </>
-                ) : null
-              }
-              libraryView={libraryView}
-              onLibraryViewChange={handleLibraryViewChange}
-            />
-          )}
+          <FilterSidebar
+            collectionsOnly={pane !== null}
+            filtersOpen={false}
+            outlinerFilters={baseFilters}
+            tags={tags}
+            printers={printers}
+            selectedCollection={selectedCollection}
+            selectedCollectionId={selectedCollectionId}
+            selectedTags={selectedTags}
+            selectedPrinterId={selectedPrinterId}
+            selectedPrinterPresence={selectedPrinterPresence}
+            onCollectionChange={handleCollectionChange}
+            onCollectionIntent={prefetchFolder}
+            onTagsChange={setSelectedTags}
+            onPrinterChange={setSelectedPrinterId}
+            onPrinterPresenceChange={setSelectedPrinterPresence}
+            onCreateCollection={handleOpenCreateCollection}
+            onMoveModel={handleMoveModel}
+            onMoveCollection={handleMoveCollection}
+            onDeleteCollection={handleDeleteCollection}
+            canViewPrinters={canViewPrinters}
+            canManageLibrary={!!user?.is_superuser}
+            quickAccess={
+              auth.isAuthenticated ? (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    aria-pressed={favoritesOnly}
+                    onClick={toggleFavorites}
+                    className={cn(
+                      "h-8 w-full justify-start px-3 text-sm",
+                      favoritesOnly && "bg-accent text-accent-foreground",
+                    )}
+                  >
+                    <Star className={cn("h-4 w-4", favoritesOnly && "fill-current")} aria-hidden />
+                    {uiText("Favorites")}
+                  </Button>
+                  {!savedViewsHost && savedViewControl()}
+                </>
+              ) : null
+            }
+            libraryView={libraryView}
+            onLibraryViewChange={handleLibraryViewChange}
+          />
         </LibraryCollectionsPane>
         {savedViewsHost && auth.isAuthenticated && createPortal(savedViewControl(), savedViewsHost)}
 
@@ -3516,81 +3394,68 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           )}
           {/* Breadcrumb */}
           <LibraryBreadcrumbs>
-            {favoritesOnly ? (
-              <nav
-                aria-label={uiText("Favorites")}
-                className="flex min-w-0 items-center gap-2 text-sm"
-              >
-                <Link href="/" className="text-muted-foreground">
-                  PrintStash
-                </Link>
-                <span className="text-muted-foreground">/</span>
-                <span>{uiText("Favorites")}</span>
-              </nav>
-            ) : (
-              <CollectionBreadcrumbs items={breadcrumbs} onNavigate={handleCollectionChange}>
-                {availableRecentFolders.length > 0 && (
-                  <DropdownMenu
-                    className="ml-2 shrink-0 border-l border-border pl-2"
-                    open={recentFoldersOpen}
-                    onOpenChange={setRecentFoldersOpen}
-                    align="start"
-                    trigger={
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        data-menu-trigger
-                        aria-haspopup="menu"
-                        aria-expanded={recentFoldersOpen}
-                        aria-label={uiText("Recent")}
-                        onClick={() => setRecentFoldersOpen(!recentFoldersOpen)}
-                        className="h-7 gap-1.5 px-2 text-xs font-normal text-muted-foreground"
-                      >
-                        <History className="h-3.5 w-3.5" aria-hidden />
-                        <span className="hidden @xl/trail:inline">{ui("Recent")}</span>
-                      </Button>
-                    }
-                    contentClassName="w-64 max-w-[calc(100vw-2rem)] rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-                  >
-                    <p className="px-2.5 py-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                      {uiText("Recent folders")}
-                    </p>
-                    {availableRecentFolders.map((folder) => (
-                      <button
-                        key={folder.id ?? folder.path}
-                        title={folder.label}
-                        disabled={folder.unavailable}
-                        role="menuitem"
-                        type="button"
-                        onClick={() => {
-                          handleCollectionChange(folder.path, folder.id);
-                          setRecentFoldersOpen(false);
-                        }}
-                        className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 truncate">
-                          {folder.label}
-                          {folder.unavailable ? ` — ${uiText("Unavailable")}` : ""}
-                        </span>
-                      </button>
-                    ))}
-                    <button
+            <CollectionBreadcrumbs items={breadcrumbs} onNavigate={handleCollectionChange}>
+              {availableRecentFolders.length > 0 && (
+                <DropdownMenu
+                  className="ml-2 shrink-0 border-l border-border pl-2"
+                  open={recentFoldersOpen}
+                  onOpenChange={setRecentFoldersOpen}
+                  align="start"
+                  trigger={
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="sm"
+                      data-menu-trigger
+                      aria-haspopup="menu"
+                      aria-expanded={recentFoldersOpen}
+                      aria-label={uiText("Recent")}
+                      onClick={() => setRecentFoldersOpen(!recentFoldersOpen)}
+                      className="h-7 gap-1.5 px-2 text-xs font-normal text-muted-foreground"
+                    >
+                      <History className="h-3.5 w-3.5" aria-hidden />
+                      <span className="hidden @xl/trail:inline">{ui("Recent")}</span>
+                    </Button>
+                  }
+                  contentClassName="w-64 max-w-[calc(100vw-2rem)] rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+                >
+                  <p className="px-2.5 py-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                    {uiText("Recent folders")}
+                  </p>
+                  {availableRecentFolders.map((folder) => (
+                    <button
+                      key={folder.id ?? folder.path}
+                      title={folder.label}
+                      disabled={folder.unavailable}
                       role="menuitem"
+                      type="button"
                       onClick={() => {
-                        recent.clear();
+                        handleCollectionChange(folder.path, folder.id);
                         setRecentFoldersOpen(false);
                       }}
-                      className="mt-1 w-full border-t border-border px-2.5 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-popover-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      {uiText("Clear recent folders")}
+                      <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 truncate">
+                        {folder.label}
+                        {folder.unavailable ? ` — ${uiText("Unavailable")}` : ""}
+                      </span>
                     </button>
-                  </DropdownMenu>
-                )}
-              </CollectionBreadcrumbs>
-            )}
+                  ))}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      recent.clear();
+                      setRecentFoldersOpen(false);
+                    }}
+                    className="mt-1 w-full border-t border-border px-2.5 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-popover-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {uiText("Clear recent folders")}
+                  </button>
+                </DropdownMenu>
+              )}
+            </CollectionBreadcrumbs>
           </LibraryBreadcrumbs>
 
           {/* The pane owns breakpoints: an open outliner also consumes horizontal room. */}
@@ -3601,8 +3466,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   title={
                     unavailableCollection
                       ? uiText("library.collectionUnavailable")
-                      : (selectedName ??
-                        uiText(favoritesOnly ? "Favorites & saved views" : "All Models"))
+                      : (selectedName ?? uiText("All Models"))
                   }
                   canEdit={canRenameCollection}
                   open={collectionRename !== null}
@@ -3646,23 +3510,19 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     <p className="library-meta-part text-sm text-muted-foreground">
                       {unavailableCollection
                         ? uiText("library.collectionUnavailableHelp")
-                        : favoritesOnly
-                          ? uiText(
-                              "Your frequently used Models and Multipart Models, kept together.",
-                            )
-                          : loading
-                            ? uiText("Loading...")
-                            : uiText(
-                                // Subtree results are not "here": count what is shown.
-                                selectedName && !includeSubfolders
-                                  ? visibleMultipartModels.length
-                                    ? "library.header.itemsHere"
-                                    : "library.header.modelsHere"
-                                  : "counts.items",
-                                {
-                                  count: displayCount,
-                                },
-                              )}
+                        : loading
+                          ? uiText("Loading...")
+                          : uiText(
+                              // Subtree results are not "here": count what is shown.
+                              selectedName && !includeSubfolders
+                                ? visibleMultipartModels.length
+                                  ? "library.header.itemsHere"
+                                  : "library.header.modelsHere"
+                                : "counts.items",
+                              {
+                                count: displayCount,
+                              },
+                            )}
                       {refreshing && (
                         <span className="ml-2 font-mono text-xs text-muted-foreground">
                           {uiText("Updating...")}
@@ -3690,31 +3550,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   )}
                 </div>
               </div>
-              {favoritesOnly && (
-                <div className="flex shrink-0 flex-wrap items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="xs"
-                    aria-pressed={viewMode === "grid"}
-                    onClick={() => selectViewMode("grid")}
-                  >
-                    {uiText("Grid")}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="xs"
-                    aria-pressed={viewMode === "list"}
-                    onClick={() => selectViewMode("list")}
-                  >
-                    {uiText("Table")}
-                  </Button>
-                  <Button variant="outline" size="xs" onClick={toggleStructuredFilters}>
-                    {uiText("Filters")}
-                  </Button>
-                </div>
-              )}
-              {!favoritesOnly && newCollectionButton}
-              {!pane && !favoritesOnly && (
+              {newCollectionButton}
+              {!pane && (
                 <Button
                   onClick={() => {
                     setDropPreload(null);
@@ -3839,7 +3676,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           </Modal>
 
-          {activeFilterItems.length > Number(favoritesOnly) && (
+          {activeFilterItems.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3 sm:px-6">
               <span className="text-3xs font-mono uppercase tracking-wider text-muted-foreground">
                 {uiText("Filters")}
@@ -3937,37 +3774,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </form>
           </ModalShell>
 
-          {favoritesOnly && (
-            <div className="mx-4 mt-6 sm:mx-6">
-              <TabBar
-                tabs={[
-                  { key: "favorites", label: uiText("Favorites") },
-                  { key: "views", label: uiText("Saved views") },
-                ]}
-                active={favoritesPanel}
-                onChange={(panel) => {
-                  setFavoritesPanel(panel);
-                  if (panel === "views") startup.request("saved-views");
-                }}
-                className="gap-6 border-b border-border"
-                tabClassName="border-b-2 border-transparent pb-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                activeTabClassName="border-foreground font-medium"
-                showIndicator={false}
-              />
-              <div className="flex min-h-16 items-center justify-between gap-3 text-xs text-muted-foreground">
-                <span>
-                  {favoritesPanel === "favorites"
-                    ? uiText("counts.items", { count: displayCount })
-                    : uiText("Saved views")}
-                </span>
-                {favoritesPanel === "views" && (
-                  <Button variant="outline" size="xs" onClick={openSaveView}>
-                    {uiText("Save current view")}
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
           {docView === "docs" && !favoritesOnly && (
             <div className="flex items-center gap-4 px-4 pt-4 text-sm sm:px-6">
               <button
@@ -4089,9 +3895,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   viewMode === "grid" &&
                   (reservedCollections > 0 || (!loading && visibleCollections.length > 0))
                 }
-                enabled={
-                  snapshot !== null && !favoritesOnly && viewMode === "grid" && !collectionOverview
-                }
+                enabled={snapshot !== null && viewMode === "grid" && !collectionOverview}
               >
                 {viewMode === "grid" && reservedCollections > 0 && (
                   <section
@@ -4135,37 +3939,43 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     <CollectionStrip
                       total={visibleCollections.length}
                       overview={collectionOverview}
-                      resetKey={folderEntrance.path ?? ""}
+                      resetKey={displayedPath ?? ""}
                     >
                       {(limit, onColumns, extraColumns) => (
                         <LibraryItems
-                          key={`collections:${folderEntrance.path ?? ""}`}
+                          key={`collections:${displayedPath ?? ""}`}
                           items={
                             limit === null ? visibleCollections : visibleCollections.slice(0, limit)
                           }
                           itemKey={(collection) => `collection:${collection.id}`}
                           renderItem={(collection) => (
-                            <CollectionOverviewCard
-                              collection={collection}
-                              compact={!collectionOverview}
-                              arriving={arriving.has(`c:${collection.id}`)}
-                              authorizationRevision={snapshot?.authorizationRevision}
-                              onAuthorityRetired={onAuthorityRetired}
-                              previewsReady={browseReady}
-                              previewSource={
-                                browseReady && modelQuery.data?.pages[0]
-                                  ? { page: modelQuery.data.pages[0], params: browseParams }
-                                  : undefined
-                              }
-                              onSelect={handleCollectionChange}
-                              onIntent={prefetchFolder}
-                              onDropModel={canUploadToVault ? handleMoveModel : undefined}
-                              selectable={selectMode}
-                              selected={selectedCollectionRows.has(collection.id)}
-                              onToggleSelect={
-                                auth.isAuthenticated ? toggleCollectionSelect : undefined
-                              }
-                            />
+                            <LibraryCardFill
+                              identity={cardIdentity}
+                              animateOnMount={cardEntrance !== null}
+                              className="library-collection-reveal"
+                            >
+                              <CollectionOverviewCard
+                                collection={collection}
+                                compact={!collectionOverview}
+                                arriving={arriving.has(`c:${collection.id}`)}
+                                authorizationRevision={snapshot?.authorizationRevision}
+                                onAuthorityRetired={onAuthorityRetired}
+                                previewsReady={browseReady}
+                                previewSource={
+                                  browseReady && modelQuery.data?.pages[0]
+                                    ? { page: modelQuery.data.pages[0], params: browseParams }
+                                    : undefined
+                                }
+                                onSelect={handleCollectionChange}
+                                onIntent={prefetchFolder}
+                                onDropModel={canUploadToVault ? handleMoveModel : undefined}
+                                selectable={selectMode}
+                                selected={selectedCollectionRows.has(collection.id)}
+                                onToggleSelect={
+                                  auth.isAuthenticated ? toggleCollectionSelect : undefined
+                                }
+                              />
+                            </LibraryCardFill>
                           )}
                           scrollRef={startupContent}
                           readingRenderers={readingRenderers}
@@ -4184,81 +3994,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               </LibraryCollectionsRegion>
 
               <div ref={modelsContent} className="library-model-content flex flex-1 flex-col">
-                {!favoritesOnly && !collectionOverview && (
+                {!collectionOverview && (
                   <div className="library-model-toolbar-wrap px-4 sm:px-6">{libraryToolbar}</div>
                 )}
 
-                {favoritesOnly && favoritesPanel === "views" ? (
-                  <section
-                    className="mx-4 mb-6 border border-border bg-card sm:mx-6"
-                    aria-label={uiText("Saved views")}
-                  >
-                    {savedViewReadState.status === "loading" ? (
-                      <p role="status" className="p-5 text-sm text-muted-foreground">
-                        {uiText("savedView.loading")}
-                      </p>
-                    ) : savedViewReadState.status === "error" ? (
-                      <div role="alert" className="p-5">
-                        <p className="mb-3 text-sm">{uiText("savedView.loadError")}</p>
-                        <Button variant="outline" size="xs" onClick={savedViewReadState.retry}>
-                          {uiText("savedView.retry")}
-                        </Button>
-                      </div>
-                    ) : savedViews.length ? (
-                      savedViews.map((view) => (
-                        <FavoriteSavedViewRow
-                          key={`${savedViewsOwner.session}:${view.id}`}
-                          view={view}
-                          onOpen={() => applySavedView(view)}
-                          onRename={(name) =>
-                            manageSavedView(
-                              { kind: "update", id: view.id, payload: { name } },
-                              "savedView.renameSuccess",
-                            )
-                          }
-                          onUpdate={() =>
-                            manageSavedView(
-                              { kind: "update", id: view.id, payload: { filters: currentFilters } },
-                              "savedView.updateSuccess",
-                            )
-                          }
-                          onDuplicate={() =>
-                            manageSavedView(
-                              {
-                                kind: "create",
-                                name: duplicateViewName(view.name),
-                                filters: effectiveLibraryView(view.filters, canViewPrinters),
-                              },
-                              "savedView.duplicateSuccess",
-                            )
-                          }
-                          onDelete={() =>
-                            manageSavedView(
-                              { kind: "delete", id: view.id },
-                              "savedView.deleteSuccess",
-                            )
-                          }
-                        />
-                      ))
-                    ) : (
-                      <EmptyState
-                        title={uiText("No saved views yet")}
-                        description={uiText("Save a Library or Search view to keep it here.")}
-                        action={
-                          <Button variant="outline" size="xs" onClick={openSaveView}>
-                            {uiText("Save current view")}
-                          </Button>
-                        }
-                      />
-                    )}
-                  </section>
-                ) : loading ? (
+                {loading ? (
                   viewMode === "grid" ? (
-                    <ModelGridSkeleton
-                      compact={compact}
-                      onRetire={rememberLoadingCards}
-                      onCapacityChange={receivePageSize}
-                    />
+                    <ModelGridSkeleton compact={compact} onCapacityChange={receivePageSize} />
                   ) : (
                     <ModelListSkeleton onCapacityChange={receivePageSize} />
                   )
@@ -4266,11 +4008,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   // The folder's collections can arrive before its Models: the
                   // placeholder holds the Models' place until they replace it.
                   viewMode === "grid" ? (
-                    <ModelGridSkeleton
-                      compact={compact}
-                      onRetire={rememberLoadingCards}
-                      onCapacityChange={receivePageSize}
-                    />
+                    <ModelGridSkeleton compact={compact} onCapacityChange={receivePageSize} />
                   ) : (
                     <ModelListSkeleton onCapacityChange={receivePageSize} />
                   )
@@ -4363,9 +4101,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     // every card being rebuilt on each navigation. The surrounding
                     // content reveal settles the committed visit as one surface.
                     key="grid"
-                    ref={modelGrid}
-                    data-fill-hold={fillPhase === "holding" ? "" : undefined}
-                    className={compact ? "p-3" : favoritesOnly ? "px-4 pb-6 sm:px-6" : "p-4 sm:p-6"}
+                    className={compact ? "p-3" : "p-4 sm:p-6"}
                   >
                     <LibraryItems
                       items={libraryItems}
@@ -4374,20 +4110,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           ? `/models/${item.value.id}`
                           : `/multipart-models/${item.value.id}`
                       }
-                      renderItem={(item, index) => (
+                      renderItem={(item) => (
                         <LibraryCardFill
-                          filling={
-                            (fillingCards || modelsFilling || fillPhase !== "idle") &&
-                            !favoritesOnly
-                          }
-                          origins={loadingCardRects}
-                          index={index}
+                          identity={cardIdentity}
+                          animateOnMount={cardEntrance !== null}
                         >
                           {item.kind === "multipart" ? (
                             <MultipartModelCard
                               key={`multipart-${item.value.id}`}
                               item={item.value}
-                              favorites={favoritesOnly}
                               arriving={arriving.has(`p:${item.value.id}`)}
                               collectionLabel={item.value.collection_label}
                               returnTo={currentLibraryHref}
@@ -4405,7 +4136,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                             <ModelCard
                               key={item.value.id}
                               model={item.value}
-                              favorites={favoritesOnly}
                               origin={snapshot?.entry}
                               arriving={arriving.has(`m:${item.value.id}`)}
                               collectionLabel={item.value.collection_label}
@@ -4415,7 +4145,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                               draggable={canUploadToVault && !selectMode}
                               onEditTags={openTagEditor}
                               onIntent={warmModel}
-                              onInspect={!favoritesOnly ? inspectModel : undefined}
+                              onInspect={inspectModel}
                               inspected={inspectorOpen && inspectorIntent?.id === item.value.id}
                             />
                           )}
@@ -4439,12 +4169,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       folders
                     />
                     <LoadMore
-                      paused={
-                        reading.status === "restoring" ||
-                        !browseReady ||
-                        // The next page waits for the first screen's pictures.
-                        fillPhase === "holding"
-                      }
+                      paused={reading.status === "restoring" || !browseReady}
                       layoutKey={`${viewMode}:${pane?.open ?? true}`}
                       hasMore={hasMore && !refreshRequired}
                       loading={loadingMore}
@@ -4454,7 +4179,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   </div>
                 ) : (
                   <div
-                    key={`list:${folderEntrance.path ?? ""}`}
+                    key={`list:${displayedPath ?? ""}`}
                     ref={listContent}
                     data-library-list
                     className="flex-1 overflow-y-auto"
@@ -4536,7 +4261,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                               selected={selectedIds.has(item.value.id)}
                               onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
                               draggable={canUploadToVault && !selectMode}
-                              onInspect={!favoritesOnly ? inspectModel : undefined}
+                              onInspect={inspectModel}
                               inspected={inspectorOpen && inspectorIntent?.id === item.value.id}
                             />
                           )

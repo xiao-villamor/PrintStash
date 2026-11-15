@@ -228,7 +228,7 @@ for section changes and loading surfaces, and a clipped row reveal when
 child-collection space changes. Do not invent
 new directions, bounce, cascades, or text crossfades for individual features.
 
-Collections, Search, Favorites, Pending, Saved views and Settings use one shell
+Collections, Search, Pending, Saved views and Settings use one shell
 sidebar and one persisted width (`--workbench-sidebar-width`, 320px by default,
 resizable from 280px to 520px). The model inspector uses the same width on desktop.
 Section navigation preserves the sidebar's open state, boundary and workspace
@@ -243,37 +243,28 @@ and data refreshes do not replay section motion. The frame remains mounted;
 reduced motion makes selection immediate and static. Tab press feedback begins
 on pointer-down and underline feedback stays local.
 
-Library, Search, Pending, Favorites and Settings main destinations use this
-same stationary reveal. Sidebar mode changes reveal even when the URL changes;
-only their inner content participates, leaving the boundary and width stationary.
-The route outlet keeps one mounted content surface; its readiness signal lives
-inside Suspense so a cold destination starts its reveal when its content commits.
-Sidebar navigation and the top bar remain stationary. Entering Favorites does not
-also fade its nested library surface. Search in the rail opens the main Search
-destination without changing the sidebar's open preference. Back/Forward uses
-the same treatment. Typing, filters, Settings sub-sections and data refreshes do
-not replay the main transition. First load is static.
+Library, advanced Search, Pending and Settings main destinations use this
+same stationary reveal. Sidebar mode changes reveal their inner content, leaving
+the boundary and width stationary. The route outlet waits for its lazy content.
+Ordinary Search opens the sidebar and filters the global Library in place; on
+phones its field appears above the same results. Favorites is a reversible Library
+filter that preserves the query, sidebar, toolbar and card layout, not another
+sidebar mode or main destination. AI and image search retain their explicit tools.
 
-Library motion is quiet and continuous: stable geometry, no spring or scale,
-no cascading entrances, and no blank flash when revisiting cached content.
-`useContentReveal` gives the committed browsing surface one opacity 0.55→1
-transition over `--duration-library-enter` (240ms). Its identity is the displayed
-canonical destination plus layout, so down, up, Back/Forward, and filters share one
-repeatable transition. URL normalization does not replay an unchanged destination.
-The browsing snapshot owns the Library/Favorites scope, so a cross-section
-return receives one outer reveal instead of a second nested fade. Interruptions
-continue from the current opacity. A reveal at 99% opacity is visually settled;
-the next destination starts a fresh entrance rather than inheriting an invisible
-tail. Pane reflow, background refreshes, and virtual-row mounts do not replay
-navigation.
-First load stays still; newly decoded previews and their loading covers crossfade
-in their fixed frames over the same library timing. Cached previews remain
-visible. Reduced motion makes navigation immediate and shortens image/cover
-feedback to `press` (150ms). Readiness presents content at the starting opacity,
-then starts the fade after
-a painted frame. Cached results cannot consume the entrance inside their render
-commit. There is no network delay or wait for slower sibling images; controls
-remain interactive throughout.
+Library cards use a stationary opacity 0.2→1 reveal over
+`--duration-library-enter` (240ms). The actual card owns this entrance after it
+mounts, including first load and cached navigation; an animated placeholder or
+ancestor is not proof that the card entered. Reused cards reveal when their
+displayed canonical destination changes. Lists reveal together. Back/Forward and
+filters follow the same behavior. There is no scale, spring or cascade.
+Interruptions continue from the visible opacity, including development effect
+replays; at 99% opacity the next destination starts a fresh entrance. Pane reflow,
+background refreshes and virtual rows mounted after the entrance window do not
+replay navigation. Newly decoded images crossfade inside fixed preview frames;
+cached images stay decoded. Reduced motion keeps cards opaque and immediate.
+Readiness holds the starting opacity for a painted frame before fading, so a
+cached render cannot consume the entrance before displaying its cards. There is
+no cover waiting for all sibling images and controls remain interactive.
 Loading cards and populated cards share geometry. Reserve a subcollection strip
 only for known children on initial load. During navigation, the displayed
 snapshot retains its layout until the destination commits; a pending lookup

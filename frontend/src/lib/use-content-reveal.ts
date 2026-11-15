@@ -12,15 +12,17 @@ export function useContentReveal<T extends HTMLElement = HTMLDivElement>(
     scope,
     scroll = "preserve",
     animateOnEnable = false,
+    animateOnMount = false,
   }: {
     enabled?: boolean;
     scope?: string;
     scroll?: "self" | "parent" | "preserve";
     animateOnEnable?: boolean;
+    animateOnMount?: boolean;
   } = {},
 ) {
   const content = useRef<T>(null);
-  const previous = useRef({ identity, scope, enabled });
+  const previous = useRef({ identity: animateOnMount ? null : identity, scope, enabled });
   const continuation = useRef<number | null>(null);
 
   useLayoutEffect(() => {
@@ -37,8 +39,10 @@ export function useContentReveal<T extends HTMLElement = HTMLDivElement>(
       });
     }
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+    // StrictMode replays mount effects: resume the unfinished entrance even
+    // when its identity is unchanged, rather than exposing an opaque first frame.
     if (
-      !changed ||
+      (!changed && continuation.current === null) ||
       !enabled ||
       (!wasEnabled && !animateOnEnable) ||
       !sameScope ||

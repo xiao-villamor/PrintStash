@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RouteOutlet } from "@/lib/route-outlet";
 import { useRouter } from "@/lib/navigation";
 
@@ -21,6 +21,16 @@ function Frame() {
     </>
   );
 }
+
+beforeEach(() => {
+  vi.stubGlobal("matchMedia", (media: string) => ({
+    matches: false,
+    media,
+    addEventListener() {},
+    removeEventListener() {},
+  }));
+});
+afterEach(() => vi.unstubAllGlobals());
 
 describe("RouteOutlet", () => {
   it("retires the outgoing screen before a delayed destination is ready", async () => {

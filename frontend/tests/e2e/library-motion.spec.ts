@@ -50,7 +50,7 @@ test.describe("Library motion", () => {
       Element.prototype.animate = function (...args) {
         const result = animate.apply(this, args);
         if (
-          this.classList.contains("library-content-reveal") &&
+          this.matches(".library-card-fill-frame,.library-content-reveal") &&
           result.effect instanceof KeyframeEffect
         ) {
           const frames = result.effect.getKeyframes();
@@ -67,6 +67,10 @@ test.describe("Library motion", () => {
   test("cached history visits replay a stationary reveal", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
+    await expect(page.locator(".library-card-fill-frame")).toHaveCSS("opacity", "1");
+    await page.evaluate(() => {
+      window.libraryReveals = [];
+    });
     await page
       .getByRole("main")
       .getByRole("button", { name: /maraio/ })
@@ -85,7 +89,7 @@ test.describe("Library motion", () => {
     await expect.poll(() => page.evaluate(() => window.libraryReveals.length)).toBe(4);
     const reveals = await page.evaluate(() => window.libraryReveals);
     expect(reveals).toHaveLength(4);
-    expect(reveals.every((reveal) => reveal.opacity[0] >= 0.55 && reveal.opacity[0] <= 1)).toBe(
+    expect(reveals.every((reveal) => reveal.opacity[0] >= 0.2 && reveal.opacity[0] <= 1)).toBe(
       true,
     );
     expect(reveals.every((reveal) => reveal.opacity.at(-1) === 1)).toBe(true);
@@ -97,11 +101,15 @@ test.describe("Library motion", () => {
   test("interrupted navigation continues from the visible opacity", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
+    await expect(page.locator(".library-card-fill-frame")).toHaveCSS("opacity", "1");
+    await page.evaluate(() => {
+      window.libraryReveals = [];
+    });
     await page.evaluate(() => {
       const animate = Element.prototype.animate;
       Element.prototype.animate = function (...args) {
         const animation = animate.apply(this, args);
-        if (this.classList.contains("library-content-reveal")) {
+        if (this.matches(".library-card-fill-frame,.library-content-reveal")) {
           animation.pause();
           animation.currentTime = Number(animation.effect?.getComputedTiming().duration) / 2;
         }
@@ -114,9 +122,9 @@ test.describe("Library motion", () => {
       .click();
     await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
     const interruptedOpacity = await page
-      .locator(".library-content-reveal")
+      .locator(".library-card-fill-frame")
       .evaluate((element) => Number(getComputedStyle(element).opacity));
-    expect(interruptedOpacity).toBeGreaterThan(0.55);
+    expect(interruptedOpacity).toBeGreaterThan(0.2);
     expect(interruptedOpacity).toBeLessThan(1);
 
     await page.goBack();
@@ -131,35 +139,45 @@ test.describe("Library motion", () => {
   test("cached breadcrumb visits reveal on each return", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
+    await expect(page.locator(".library-card-fill-frame")).toHaveCSS("opacity", "1");
+    await page.evaluate(() => {
+      window.libraryReveals = [];
+    });
     await page
       .getByRole("main")
       .getByRole("button", { name: /maraio/ })
       .click();
     await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.libraryReveals.length)).toBe(1);
     await page
       .locator("header")
       .getByRole("button", { name: "All Models", exact: true })
       .first()
       .press("Enter");
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.libraryReveals.length)).toBe(2);
     await page
       .getByRole("main")
       .getByRole("button", { name: /maraio/ })
       .click();
     await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
 
-    expect(await page.evaluate(() => window.libraryReveals)).toHaveLength(3);
+    await expect.poll(() => page.evaluate(() => window.libraryReveals.length)).toBe(3);
   });
 
   test("pane reflow does not replay the library reveal", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
+    await expect(page.locator(".library-card-fill-frame")).toHaveCSS("opacity", "1");
+    await page.evaluate(() => {
+      window.libraryReveals = [];
+    });
     await page
       .getByRole("main")
       .getByRole("button", { name: /maraio/ })
       .click();
     await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
-    await expect(page.locator(".library-content-reveal")).toHaveCSS("opacity", "1");
+    await expect(page.locator(".library-card-fill-frame")).toHaveCSS("opacity", "1");
     await page.evaluate(() => {
       window.libraryReveals = [];
     });
@@ -176,6 +194,10 @@ test.describe("Library motion", () => {
   test("filter results reveal when their snapshot commits", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
+    await expect(page.locator(".library-card-fill-frame")).toHaveCSS("opacity", "1");
+    await page.evaluate(() => {
+      window.libraryReveals = [];
+    });
 
     await page
       .getByRole("radiogroup", { name: "Filter models by status" })
@@ -189,6 +211,10 @@ test.describe("Library motion", () => {
   test("list layout reveals without scaling", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
+    await expect(page.locator(".library-card-fill-frame")).toHaveCSS("opacity", "1");
+    await page.evaluate(() => {
+      window.libraryReveals = [];
+    });
 
     await page.getByRole("button", { name: "List View", exact: true }).click();
 
@@ -203,6 +229,10 @@ test.describe("Library motion", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
+    await expect(page.locator(".library-card-fill-frame")).toHaveCSS("opacity", "1");
+    await page.evaluate(() => {
+      window.libraryReveals = [];
+    });
     await page
       .getByRole("main")
       .getByRole("button", { name: /maraio/ })
@@ -212,6 +242,6 @@ test.describe("Library motion", () => {
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
 
     expect(await page.evaluate(() => window.libraryReveals)).toEqual([]);
-    await expect(page.locator(".library-content-reveal")).toHaveCSS("opacity", "1");
+    await expect(page.locator(".library-card-fill-frame")).toHaveCSS("opacity", "1");
   });
 });

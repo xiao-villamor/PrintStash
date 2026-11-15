@@ -9,7 +9,7 @@ test.use({ viewport: { width: 1440, height: 900 } });
 test.describe("Library shell navigation", () => {
   test("Collections leaves Favorites", async ({ page }) => {
     await page.goto("/?favorites=true");
-    await expect(page.getByRole("heading", { name: "Favorites & saved views" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
     const rail = page.getByRole("navigation", { name: "Navigation", exact: true });
 
     await rail.getByRole("link", { name: "Collections", exact: true }).click();
@@ -20,7 +20,7 @@ test.describe("Library shell navigation", () => {
       page.getByRole("complementary", { name: "Collections", exact: true }),
     ).toBeVisible();
     await page.goBack();
-    await expect(page.getByRole("heading", { name: "Favorites & saved views" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
   });
 
   test("Settings stays directly reachable after Search", async ({ page }) => {
@@ -28,7 +28,8 @@ test.describe("Library shell navigation", () => {
     await expect(page.getByRole("navigation", { name: "Settings sections" })).toBeVisible();
     const rail = page.getByRole("navigation", { name: "Navigation", exact: true });
     await rail.getByRole("link", { name: "Search", exact: true }).click();
-    await expect(page).toHaveURL(/\/search/);
+    await expect(page.locator("[data-shell-panel-search]")).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/");
 
     await rail.getByRole("link", { name: "Settings", exact: true }).press("Enter");
 

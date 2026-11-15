@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
+import { type ReactNode } from "react";
+import { useContentReveal } from "@/lib/use-content-reveal";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /** The same quiet surface before browse data arrives and while an image decodes. */
@@ -29,54 +30,23 @@ export function LibraryCardDetailsPlaceholder() {
   );
 }
 
-/** Keep the frame opaque; only reposition it when the destination layout changes. */
+/** The actual card enters after it mounts, including cached destinations.
+ * Thumbnail decoding has its own crossfade inside this stationary surface. */
 export function LibraryCardFill({
-  filling,
-  origins,
-  index,
+  identity,
+  animateOnMount,
   children,
+  className = "library-card-fill-frame",
 }: {
-  filling: boolean;
-  origins: RefObject<readonly DOMRect[]>;
-  index: number;
+  className?: string;
+  identity: string;
+  animateOnMount: boolean;
   children: ReactNode;
 }) {
-  const frame = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const node = frame.current;
-    const origin = origins.current[index];
-    if (!filling || !node || !origin) return;
-    // Sibling collection grids finish their layout effects before this frame.
-    // Measuring earlier would animate toward their temporary one-column layout.
-    const tick = requestAnimationFrame(() => {
-      const destination = node.getBoundingClientRect();
-      node.style.setProperty("--card-fill-x", `${origin.left - destination.left}px`);
-      node.style.setProperty("--card-fill-y", `${origin.top - destination.top}px`);
-      node.classList.add("library-card-fill-position");
-    });
-    return () => {
-      cancelAnimationFrame(tick);
-      node.classList.remove("library-card-fill-position");
-      node.style.removeProperty("--card-fill-x");
-      node.style.removeProperty("--card-fill-y");
-    };
-  }, [filling, origins, index]);
+  const frame = useContentReveal(identity, { animateOnMount });
   return (
-    <div ref={frame} className="library-card-fill-frame relative h-full">
+    <div ref={frame} className={`${className} relative h-full`}>
       {children}
-      {filling && (
-        <div
-          aria-hidden
-          className="library-card-fill pointer-events-none absolute inset-px flex flex-col overflow-hidden"
-        >
-          <div className="library-card-fill-preview shrink-0">
-            <LibraryPreviewPlaceholder />
-          </div>
-          <div className="flex-1 bg-card">
-            <LibraryCardDetailsPlaceholder />
-          </div>
-        </div>
-      )}
     </div>
   );
 }

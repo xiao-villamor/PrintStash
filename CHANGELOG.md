@@ -14,7 +14,7 @@
 - Collection mosaics read four authorized thumbnail references without loading full Model cards or counting the subtree. Secondary Library reads wait for visible collection previews to resolve.
 - Library loading reuses eligible folder preview data, starts previews without waiting for card fades, and loads descriptions and dialogs on demand. Automatic folder scope resolves empty direct listings in one response while preserving bounded pagination.
 - The Collections sidebar opens with a gentler ease and changes tools without zooming its contents.
-- Switching to Search, Favorites or Settings animates only the main content with one shared transition; the sidebar and top bar stay still. Search in the navigation rail opens the main Search page, and cached returns use the same motion.
+- Search opens the sidebar and updates the global Library results; on phones the field appears above those same results. Favorites is a reversible filter that preserves the query, sidebar, toolbar and card layout. Explicit AI and image-search tools remain available.
 - Workbench sections share one sidebar width and preserve its position when navigating to Settings. Settings navigation uses the same sidebar, and section, tab and card transitions follow a shared motion pattern with reduced-motion support.
 - The frontend adopts the OpenDesign workbench: a compact navigation rail, neutral surfaces, square controls, technical library cards, and a wider model inspector. Model facts remain beside the preview while tabs change; inspecting another G-code revision changes the displayed settings and send selection without changing the stored recommendation. Source hashes are available in Files.
 - Settings follows one compact layout in every section: each setting shows its label and help on the left with the control on the right, statuses are plain text, and buttons carry no decorative icons. Single sign-on, About, Imports, Backups, Maintenance and Background work use the same grouped sections. Automatic backups and SSO options are switches, model card metrics are three dropdowns, and paired browsers are renamed through an explicit Rename action.
@@ -36,7 +36,7 @@
 
 ### Fixed
 
-- Cached Library navigation and switches to Search, Pending and Favorites now show a visible, stationary content reveal after the first painted frame. Returning to Library and opening Pending on mobile use the same transition; sidebar changes no longer lose their reveal when the URL changes, and URL normalization does not replay the same destination.
+- Real Library cards now reveal after they mount on both first load and cached returns, including development effect replays. Loading placeholders can no longer consume the entrance before the real cards appear. Search and Pending sidebar changes keep their stationary handoff; Favorites filters the cards without fading the whole page.
 
 - Collection navigation no longer inserts a temporary subcollection gap above existing Model cards. Settings stays reachable from the rail and restores its section sidebar; Collections correctly exits Favorites.
 

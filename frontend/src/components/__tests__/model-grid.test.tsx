@@ -412,12 +412,10 @@ describe("ModelBrowser", () => {
       expect(within(actions).getByRole("button", { name: "New collection" })).toBeDisabled();
       expect(screen.queryByRole("checkbox", { name: "Select Benchy" })).not.toBeInTheDocument();
     });
-    it("names the favorites view when the filter is active", async () => {
+    it("keeps the Library title when Favorites filters the results", async () => {
       renderVault({ at: "/?favorites=true" });
 
-      expect(
-        await screen.findByRole("heading", { name: "Favorites & saved views", level: 1 }),
-      ).toBeVisible();
+      expect(await screen.findByRole("heading", { name: "All Models", level: 1 })).toBeVisible();
     });
     it("offers a way back from an empty favorites view", async () => {
       const user = userEvent.setup();

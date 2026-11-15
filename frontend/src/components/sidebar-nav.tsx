@@ -134,7 +134,6 @@ export function SidebarNav() {
         if (pane?.open && pane.mode === "pending") return true;
         return pathname.startsWith("/inbox");
       case "favorites":
-        if (pane?.open && pane.mode !== "favorites") return false;
         return favorites && !savedViewsOpen;
       case "printers":
         return pathname.startsWith("/printers");
@@ -165,6 +164,25 @@ export function SidebarNav() {
     if (item.adminOnly && !user?.is_superuser) return null;
     const label = t(item.labelKey);
     const active = isActive(item.id);
+    if (item.id === "favorites")
+      return (
+        <button
+          key={item.id}
+          type="button"
+          title={label}
+          aria-pressed={favorites}
+          className={railClass(favorites)}
+          onClick={() => {
+            const next = new URLSearchParams(pathname === "/" ? params : "");
+            if (favorites) next.delete("favorites");
+            else next.set("favorites", "true");
+            router.push(next.size ? `/?${next}` : "/");
+          }}
+        >
+          <Star className="h-5 w-5" strokeWidth={1.6} aria-hidden />
+          <span className="sr-only">{label}</span>
+        </button>
+      );
     return (
       <a
         key={item.id}
@@ -180,10 +198,14 @@ export function SidebarNav() {
               : undefined
         }
         aria-expanded={
-          item.id === "library" || item.id === "inbox" ? active && pane?.open : undefined
+          item.id === "library" || item.id === "inbox" || item.id === "search"
+            ? active && pane?.open
+            : undefined
         }
         aria-controls={
-          item.id === "library" || item.id === "inbox" ? "collections-pane" : undefined
+          item.id === "library" || item.id === "inbox" || item.id === "search"
+            ? "collections-pane"
+            : undefined
         }
         className={railClass(active)}
         onClick={(event) => {
@@ -205,14 +227,16 @@ export function SidebarNav() {
             return;
           }
           if (item.id === "search") {
-            if (pathname !== "/search") router.push(item.href);
-            else if (pane?.open) pane.showSearch();
+            if (pane) pane.showSearch();
+            else router.push("/");
             return;
           }
           if (pane && (item.id === "library" || item.id === "inbox")) {
             if (item.id === "library" && favorites) {
               pane.showCollections();
-              router.push(item.href);
+              const next = new URLSearchParams(params);
+              next.delete("favorites");
+              router.push(next.size ? `/?${next}` : "/");
               return;
             }
             const mode = item.id === "library" ? "collections" : "pending";
@@ -264,7 +288,11 @@ export function SidebarNav() {
                     else pane.showSavedViews();
                   } else {
                     requestSavedViews();
-                    if (pathname !== "/") router.push("/");
+                    const next = new URLSearchParams(pathname === "/" ? params : "");
+                    next.delete("c");
+                    next.delete("cid");
+                    next.delete("scope");
+                    router.push(next.size ? `/?${next}` : "/");
                   }
                 }}
               >

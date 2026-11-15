@@ -85,16 +85,16 @@ describe("SidebarNav", () => {
     it("opens Favorites using the existing library filter", () => {
       renderNav();
 
-      expect(screen.getByRole("link", { name: "Favorites" })).toHaveAttribute(
-        "href",
-        "/?favorites=true",
+      expect(screen.getByRole("button", { name: "Favorites" })).toHaveAttribute(
+        "aria-pressed",
+        "false",
       );
     });
 
     it("navigates to Favorites through the client router", async () => {
       const user = userEvent.setup();
       renderNav({ at: "/inbox" });
-      await user.click(screen.getByRole("link", { name: "Favorites" }));
+      await user.click(screen.getByRole("button", { name: "Favorites" }));
       await waitFor(() =>
         expect(screen.getByTestId("rail-location")).toHaveTextContent("/?favorites=true"),
       );
@@ -102,7 +102,7 @@ describe("SidebarNav", () => {
 
     it("leaves modified link clicks to the browser", () => {
       renderNav({ at: "/inbox" });
-      const link = screen.getByRole("link", { name: "Favorites" });
+      const link = screen.getByRole("link", { name: "Collections" });
       let intercepted: boolean | undefined;
       document.addEventListener(
         "click",
@@ -193,9 +193,9 @@ describe("SidebarNav", () => {
     it("marks Favorites when the filter is active", () => {
       renderNav({ at: "/?favorites=true" });
 
-      expect(screen.getByRole("link", { name: "Favorites" })).toHaveAttribute(
-        "aria-current",
-        "page",
+      expect(screen.getByRole("button", { name: "Favorites" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
       );
       expect(screen.getByRole("link", { name: "Collections" })).not.toHaveAttribute("aria-current");
     });

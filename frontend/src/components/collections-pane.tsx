@@ -12,12 +12,10 @@ import { readLibraryLocation } from "@/features/library/url";
 import { readLibraryFilters } from "@/features/library/filters";
 import { collectionIdentity } from "@/features/library/collection-navigation";
 import { FilterSidebar } from "@/components/filter-sidebar";
-import { Box, Boxes } from "lucide-react";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { LibrarySearch } from "@/components/library-search";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { LibraryItemLink } from "@/features/library/navigation";
-import type { LibraryEntry } from "@/features/library/navigation-state";
 import { useContentReveal } from "@/lib/use-content-reveal";
 import { useCollectionsPaneMotion } from "./use-collections-pane-motion";
 import { PendingSidebar, SavedViewsSidebar } from "@/components/context-panels";
@@ -51,6 +49,7 @@ function storedPreference(key: string): boolean | null {
 export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const pathname = usePathname();
+  const router = useRouter();
   const searchParams = useSearchParams();
   if (!user) throw new Error("Collections pane requires a private session");
   const storageKey = `printstash.collections-pane.${user.id}`;
@@ -72,23 +71,27 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
   const settings =
     pathname === "/settings" &&
     (searchParams.get("section") !== "trash" || searchParams.get("view") === "settings");
-  const routeScope = `${pathname}:${searchParams.get("favorites") === "true"}:${settings}`;
+  const routeScope = `${pathname}:${settings}`;
   const [requestedMode, setRequestedMode] = useState<{
     scope: string;
     mode: "collections" | "search" | "pending" | "views";
   } | null>(null);
   // A temporary tool selection belongs to this visit, not a future return.
-  if (requestedMode && requestedMode.scope !== routeScope) setRequestedMode(null);
+  if (requestedMode && requestedMode.scope !== routeScope) {
+    setRequestedMode(
+      requestedMode.mode === "search" && pathname === "/"
+        ? { scope: routeScope, mode: "search" }
+        : null,
+    );
+  }
   const mode =
     requestedMode?.scope === routeScope
       ? requestedMode.mode
       : pathname === "/search"
         ? "search"
-        : pathname === "/" && searchParams.get("favorites") === "true"
-          ? "favorites"
-          : settings
-            ? "settings"
-            : "collections";
+        : settings
+          ? "settings"
+          : "collections";
   // Section navigation never changes the user's sidebar geometry.
   const open = preference ?? true;
   useEffect(() => {
@@ -117,6 +120,12 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
       showSearch: () => {
         setPreference(true);
         setRequestedMode({ scope: routeScope, mode: "search" });
+        const next = new URLSearchParams(pathname === "/" ? searchParams : "");
+        next.delete("c");
+        next.delete("cid");
+        next.delete("scope");
+        next.set("v", "models");
+        router.push(`/?${next}`);
       },
       showPending: () => {
         setPreference(true);
@@ -131,7 +140,7 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
         setRequestedMode(null);
       },
     }),
-    [host, breadcrumbHost, open, mode, routeScope, width, setWidth],
+    [host, breadcrumbHost, open, mode, routeScope, width, setWidth, pathname, searchParams, router],
   );
   return (
     <CollectionsPaneContext.Provider value={value}>
@@ -245,7 +254,7 @@ export function CollectionsPaneHost() {
         <div ref={sectionMotion} className="workbench-section-content flex h-full w-full min-h-0">
           <div
             ref={attach}
-            className={`flex h-full w-full min-h-0 ${mode !== "collections" && mode !== "favorites" && mode !== "settings" ? "hidden" : ""}`}
+            className={`flex h-full w-full min-h-0 ${mode !== "collections" && mode !== "settings" ? "hidden" : ""}`}
           >
             {pathname !== "/" && mode === "collections" ? <NavigationCollections /> : null}
           </div>
@@ -258,54 +267,16 @@ export function CollectionsPaneHost() {
   );
 }
 
-export function FavoritesSidebar({
-  models,
-  multipartModels,
-  origin,
-}: {
-  models: readonly { id: number; name: string }[];
-  multipartModels: readonly { id: number; name: string }[];
-  origin?: LibraryEntry;
-}) {
-  useUiLocale();
+/** On phones the same search control sits above the global results. */
+export function MobileLibrarySearch() {
+  const pane = useCollectionsPane();
+  const pathname = usePathname();
+  const desktop = useMediaQuery("(min-width: 768px)");
+  if (desktop || pathname !== "/" || !pane?.open || pane.mode !== "search") return null;
   return (
-    <aside aria-label={uiText("Favorites")} className="flex h-full w-full shrink-0 flex-col">
-      <h2 className="flex h-12 shrink-0 items-center px-4 font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
-        {uiText("Favorites")}
-      </h2>
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
-        {models.map((model) => (
-          <LibraryItemLink
-            origin={origin}
-            key={model.id}
-            href={`/models/${model.id}`}
-            className="flex h-[30px] items-center gap-2 px-2.5 text-[13px] text-foreground hover:bg-muted"
-          >
-            <Box
-              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-              strokeWidth={1.6}
-              aria-hidden
-            />
-            <span className="truncate">{model.name}</span>
-          </LibraryItemLink>
-        ))}
-        {multipartModels.map((model) => (
-          <LibraryItemLink
-            origin={origin}
-            key={model.id}
-            href={`/multipart-models/${model.id}`}
-            className="flex h-[30px] items-center gap-2 px-2.5 text-[13px] text-foreground hover:bg-muted"
-          >
-            <Boxes
-              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-              strokeWidth={1.6}
-              aria-hidden
-            />
-            <span className="truncate">{model.name}</span>
-          </LibraryItemLink>
-        ))}
-      </div>
-    </aside>
+    <div className="shrink-0 border-b border-border bg-card px-3 py-2">
+      <LibrarySearch placement="mobile" />
+    </div>
   );
 }
 

@@ -227,9 +227,7 @@ export function TopBar() {
           : recordRoute && record
             ? record.name
             : pathname === "/"
-              ? searchParams.get("favorites") === "true"
-                ? uiText("Favorites")
-                : (collectionName ?? uiText("Library"))
+              ? (collectionName ?? uiText("Library"))
               : titleKey
                 ? t(titleKey)
                 : t("Page not found")}
@@ -317,7 +315,7 @@ export function TopBar() {
             size="icon"
             className="h-8 w-8 text-muted-foreground"
             aria-label={t("Search")}
-            onClick={() => router.push("/search")}
+            onClick={() => (pane ? pane.showSearch() : router.push("/"))}
           >
             <Search className="h-4 w-4" aria-hidden />
           </Button>

@@ -9,7 +9,7 @@ export interface CollectionsPaneState {
   width: number;
   setWidth: (width: number) => void;
   toggle: () => void;
-  mode: "collections" | "search" | "favorites" | "pending" | "views" | "settings";
+  mode: "collections" | "search" | "pending" | "views" | "settings";
   showCollections: () => void;
   showSearch: () => void;
   showPending: () => void;

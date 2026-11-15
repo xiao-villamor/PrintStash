@@ -17,7 +17,7 @@ test.beforeEach(async ({ page }) => {
     window.revealFrames = [];
     const sample = () => {
       for (const element of document.querySelectorAll(
-        ".library-content-reveal,.workbench-main-content,.workbench-section-content",
+        ".library-card-fill-frame,.workbench-main-content,.workbench-section-content",
       )) {
         const style = getComputedStyle(element);
         window.revealFrames.push({
@@ -92,44 +92,38 @@ test("cached collection visits have a visible stationary handoff every time", as
   });
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
-  await visibleHandoff(page, "library-content-reveal", () =>
+  await visibleHandoff(page, "library-card-fill-frame", () =>
     page
       .getByRole("main")
       .getByRole("button", { name: /maraio/ })
       .click(),
   );
   for (let visit = 0; visit < 2; visit++) {
-    await visibleHandoff(page, "library-content-reveal", async () => {
+    await visibleHandoff(page, "library-card-fill-frame", async () => {
       await page.goBack();
     });
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
-    await visibleHandoff(page, "library-content-reveal", async () => {
+    await visibleHandoff(page, "library-card-fill-frame", async () => {
       await page.goForward();
     });
     await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
   }
 });
 
-test("Search, Pending and Favorites retain visible transitions on repeated rail visits", async ({
+test("Search and Pending panes reveal on repeated visits without replacing Library", async ({
   page,
 }) => {
-  await page.goto("/settings");
-  await expect(page.getByRole("navigation", { name: "Settings sections" })).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
   const rail = page.getByRole("navigation", { name: "Navigation", exact: true });
   for (let visit = 0; visit < 2; visit++) {
-    await visibleHandoff(page, "workbench-main-content", () =>
+    await visibleHandoff(page, "workbench-section-content", () =>
       rail.getByRole("link", { name: "Search", exact: true }).click(),
     );
-    await expect(page).toHaveURL(/\/search/);
+    expect(new URL(page.url()).pathname).toBe("/");
+    await expect(page.locator("[data-shell-panel-search]")).toBeVisible();
     await visibleHandoff(page, "workbench-section-content", () =>
       rail.getByRole("link", { name: "Pending", exact: true }).click(),
-    );
-    await visibleHandoff(page, "workbench-main-content", () =>
-      rail.getByRole("link", { name: "Favorites", exact: true }).click(),
-    );
-    await expect(page.getByRole("heading", { name: "Favorites & saved views" })).toBeVisible();
-    await visibleHandoff(page, "workbench-main-content", () =>
-      rail.getByRole("link", { name: "Collections", exact: true }).click(),
     );
     await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
   }
