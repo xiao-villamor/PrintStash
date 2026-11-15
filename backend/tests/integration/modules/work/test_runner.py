@@ -1543,6 +1543,70 @@ class TestStepPriority:
         assert _status(job.id).state is JobState.FAILED
 
 
+class TestStepTelemetry:
+    """A step runs inside its Job's identity and its first start is timed (F5)."""
+
+    def test_binds_the_execution_identity_for_the_step(self, engine, make_job):
+        from app.core.execution_scope import current_execution
+
+        observed = []
+        TRACE.behaviour["one"] = lambda _context: observed.append(current_execution())
+        job = make_job(kind=MUTATING)
+
+        _run(engine, job)
+
+        assert observed[0] is not None
+        assert (observed[0].job_id, observed[0].definition) == (
+            job.id,
+            MUTATING.value,
+        )
+        assert current_execution() is None
+
+    def test_records_the_queue_wait_of_a_first_start(self, engine, make_job):
+        from app.core.metrics import registry
+
+        def count() -> float:
+            return (
+                registry.get_sample_value(
+                    "printstash_job_queue_wait_seconds_count",
+                    {"kind": MUTATING.value},
+                )
+                or 0.0
+            )
+
+        before = count()
+        job = make_job(kind=MUTATING)
+
+        _run(engine, job)
+
+        assert count() == before + 1
+
+    def test_a_later_attempt_records_no_queue_wait(self, engine, make_job):
+        from app.core.metrics import registry
+        from app.core.time import utcnow
+
+        def count() -> float:
+            return (
+                registry.get_sample_value(
+                    "printstash_job_queue_wait_seconds_count",
+                    {"kind": MUTATING.value},
+                )
+                or 0.0
+            )
+
+        job = make_job(
+            kind=MUTATING,
+            state=JobState.INTERRUPTED,
+            attempts=1,
+            started_at=utcnow(),
+        )
+        before = count()
+
+        _run(engine, job, attempt=2)
+
+        assert count() == before
+
+
 class TestAdditionsRelease:
     """The last addition to settle releases the work that waited for it."""
 

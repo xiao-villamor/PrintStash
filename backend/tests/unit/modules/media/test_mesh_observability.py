@@ -110,6 +110,64 @@ class TestRecordAdmission:
         assert "failed to publish native admission metrics" in caplog.text
 
 
+class TestRecordsTheJobExecution:
+    """Admission waits and worker runs join to the Job they served (audit F5)."""
+
+    @staticmethod
+    def _payload(caplog, prefix: str) -> dict:
+        record = next(
+            record
+            for record in caplog.records
+            if record.getMessage().startswith(prefix)
+        )
+        return json.loads(record.getMessage().removeprefix(prefix))
+
+    def test_an_admission_names_its_job_execution(self, caplog) -> None:
+        from app.core.execution_scope import ExecutionIdentity, execution_scope
+        from app.modules.media.mesh_telemetry import AdmissionOutcome, AdmissionStats
+
+        caplog.set_level(logging.INFO, logger=mesh_observability.logger.name)
+        identity = ExecutionIdentity("job-7", "job-7:e:2", "derivatives.mesh")
+
+        with execution_scope(identity):
+            mesh_observability.record_admission(
+                AdmissionStats(100, 1, 40, 2, 100, AdmissionOutcome.ADMITTED)
+            )
+
+        payload = self._payload(caplog, "mesh_admission ")
+        assert (payload["job_id"], payload["job_execution_id"]) == (
+            "job-7",
+            "job-7:e:2",
+        )
+
+    def test_an_admission_outside_a_job_names_none(self, caplog) -> None:
+        from app.modules.media.mesh_telemetry import AdmissionOutcome, AdmissionStats
+
+        caplog.set_level(logging.INFO, logger=mesh_observability.logger.name)
+
+        mesh_observability.record_admission(
+            AdmissionStats(100, 1, 40, 2, 100, AdmissionOutcome.ADMITTED)
+        )
+
+        payload = self._payload(caplog, "mesh_admission ")
+        assert (payload["job_id"], payload["job_execution_id"]) == (None, None)
+
+    def test_a_worker_run_names_its_job_execution(
+        self, supervision: SupervisionStats, caplog
+    ) -> None:
+        from app.core.execution_scope import ExecutionIdentity, execution_scope
+
+        caplog.set_level(logging.INFO, logger=mesh_observability.logger.name)
+        identity = ExecutionIdentity("job-8", "job-8:e:1", "derivatives.mesh")
+
+        with execution_scope(identity):
+            mesh_observability.record_supervision(supervision)
+
+        payload = self._payload(caplog, "mesh_supervision ")
+        assert payload["job_id"] == "job-8"
+        assert payload["execution_id"] == supervision.execution_id
+
+
 class TestRecordEscalation:
     def test_logs_the_escalated_claim(self, caplog: pytest.LogCaptureFixture) -> None:
         from app.modules.media.mesh_contracts import ThumbnailFailureReason

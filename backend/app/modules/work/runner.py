@@ -25,8 +25,9 @@ from sqlmodel import col, select
 
 from app.core.cancellation import OperationCancelled, cancellation_scope
 from app.core.config import settings
+from app.core.execution_scope import ExecutionIdentity, execution_scope
 from app.core.logging import get_logger
-from app.core.time import utcnow
+from app.core.time import ensure_utc, utcnow
 from app.core.work_priority import priority_scope
 from app.db.models import ACTIVE_JOB_STATES, Job, JobKind, JobState, WorkPriority
 from app.db.session import get_session_factory
@@ -440,6 +441,13 @@ def _begin(job_id: str, attempt: int, execution_epoch: str) -> dict[str, str] | 
         if row.attempts > attempt:
             return None
         now = utcnow()
+        if row.started_at is None:
+            from app.core.metrics import record_queue_wait
+
+            # Enqueue to first start: polling, lane slots and admission.
+            record_queue_wait(
+                row.kind.value, (now - ensure_utc(row.created_at)).total_seconds()
+            )
         row.attempts = max(row.attempts, attempt)
         row.submitted_epoch = execution_epoch
         row.state = JobState.RUNNING
@@ -519,6 +527,13 @@ def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
             with (
                 cancellation_scope(withdrawn, idle=waiting),
                 priority_scope(context.priority),
+                execution_scope(
+                    ExecutionIdentity(
+                        job_id=context.job_id,
+                        execution_id=context.execution_id,
+                        definition=context.definition.value,
+                    )
+                ),
             ):
                 step.fn(context)
         finally:

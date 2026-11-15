@@ -144,6 +144,17 @@ def record_estimate(stats: EstimateStats) -> None:
         logger.exception("failed to publish mesh estimate metrics")
 
 
+def _execution_fields() -> dict[str, str | None]:
+    """The Job execution a native wait or worker belongs to; null outside Jobs."""
+    from app.core.execution_scope import current_execution
+
+    execution = current_execution()
+    return {
+        "job_id": execution.job_id if execution is not None else None,
+        "job_execution_id": execution.execution_id if execution is not None else None,
+    }
+
+
 def record_admission(stats: AdmissionStats) -> None:
     try:
         logger.info(
@@ -153,6 +164,7 @@ def record_admission(stats: AdmissionStats) -> None:
                     "version": 1,
                     "process_id": os.getpid(),
                     "process_role": settings.process_role.value,
+                    **_execution_fields(),
                     **asdict(stats),
                 },
                 allow_nan=False,
@@ -177,6 +189,7 @@ def record_supervision(stats: SupervisionStats) -> None:
                     "version": 1,
                     "process_id": os.getpid(),
                     "process_role": settings.process_role.value,
+                    **_execution_fields(),
                     **asdict(stats),
                 },
                 allow_nan=False,
