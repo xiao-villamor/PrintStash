@@ -19,13 +19,25 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.admission import require as require_database_connection_admission
 from app.db.url import normalize_async_database_url, normalize_database_url
+from app.db.writer_gate import WriterGate, gated_connection_class
+from app.db.writer_gate import install as install_writer_gate
 
 logger = get_logger(__name__)
 
 # `check_same_thread=False` is required for SQLite + FastAPI (multiple threads).
 _normalized_db_url = normalize_database_url(settings.db_url)
+_is_sqlite = _normalized_db_url.startswith("sqlite")
+# Every SQLite writer lives in this process, so writers queue in memory and
+# take over the moment the last one commits (``app.db.writer_gate``).
+_writer_gate = (
+    WriterGate(timeout_seconds=settings.sqlite_busy_timeout_ms / 1000)
+    if _is_sqlite
+    else None
+)
 _connect_args = (
-    {"check_same_thread": False} if _normalized_db_url.startswith("sqlite") else {}
+    {"check_same_thread": False, "factory": gated_connection_class(_writer_gate)}
+    if _writer_gate is not None
+    else {}
 )
 
 
@@ -74,8 +86,9 @@ _engine: Engine = create_engine(
     **_pool_options(_normalized_db_url),
 )
 
-if _normalized_db_url.startswith("sqlite"):
+if _writer_gate is not None:
     event.listen(_engine, "connect", _set_sqlite_pragmas)
+    install_writer_gate(_engine, _writer_gate)
 
 
 class AsyncDatabaseCapabilityError(RuntimeError):
