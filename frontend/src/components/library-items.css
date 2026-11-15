@@ -53,9 +53,9 @@
   }
 }
 .library-thumbnail-fill {
-  transition-property: opacity;
-  transition-duration: var(--duration-library-enter);
-  transition-timing-function: var(--ease-library-enter);
+  /* Readiness is useful content: show decoded previews in the next paint,
+     without adding a second loading interval for their opacity transition. */
+  transition: none;
 }
 
 .library-card-facts > span + span::before {
@@ -302,6 +302,16 @@
 
 /* Reveal a complete card as soon as its own preview settles. A slower sibling
    must not keep a decoded image and its title behind the shared fill hold. */
+.library-card-fill-frame:has(
+    [data-library-thumbnail="ready"],
+    [data-library-thumbnail="missing"],
+    [data-library-thumbnail="failed"]
+  )
+  .library-card-fill {
+  animation: none;
+  opacity: 0;
+}
+
 [data-fill-hold]
   .library-card-fill-frame:not(
     :has(

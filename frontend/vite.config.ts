@@ -71,6 +71,14 @@ export default defineConfig(({ mode }) => ({
               test: /(?:src[\\/]components[\\/]ui[\\/]|packages[\\/]ui[\\/]src[\\/])/,
               includeDependenciesRecursively: false,
             },
+            {
+              // The gallery needs React, routing and queries together. Keep
+              // their runtime dependencies in the same chunk so small shared
+              // framework modules do not queue behind one another at startup.
+              name: "runtime",
+              test: /[\\/]node_modules[\\/](?:react|react-dom|scheduler|use-sync-external-store|@tanstack[\\/](?:react-router|router-core|history|react-query|query-core))[\\/]/,
+              includeDependenciesRecursively: true,
+            },
           ],
         },
       },

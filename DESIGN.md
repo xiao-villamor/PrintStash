@@ -251,8 +251,10 @@ transition; internal controls retain their own local feedback. First load is sta
 
 Library card entrances use the same depth range and sampled spring curve, together,
 without directional travel or staggering. Resolving a loading grid instead keeps
-frames opaque: text placeholders dissolve over content and decoded images fill
-the fixed preview. Loading cards and populated cards share geometry. If collection
+frames opaque until their own preview settles, then removes each card's cover
+without an opacity delay. Decoded Model and Collection previews appear immediately
+in the fixed preview; readiness does not add a decorative loading interval.
+Loading cards and populated cards share geometry. If collection
 metadata moves the destination grid, cards continue from visible placeholder
 positions; reduced motion omits that translation. Missing-preview icons appear
 only for missing or failed assets. Counts update in place without motion.

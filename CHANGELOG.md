@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Decoded Library previews and their card details appear immediately, without a second loading interval for placeholder and image fades. Shared framework code loads together to reduce startup requests while optional features stay deferred.
 - Library cards reveal as soon as their own previews are ready. Release notes, Documents, bulk-selection tools and inspector editing controls load when opened, keeping the initial gallery smaller; the inspector header and close action remain available while its content loads.
 - Library grids and tables size the first batch to fill the visible page and load subsequent pages as the reader scrolls, including scrollbar and assistive scrolling. Pagination shows a retry action only when a page fails.
 - Search-index worker leases and progress no longer invalidate Library pagination. Catalog edits and search-generation activation still retire stale cursors.
