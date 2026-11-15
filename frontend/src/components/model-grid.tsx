@@ -84,6 +84,7 @@ import { useLibraryStartup } from "@/lib/library-startup-context";
 import { useNavigationShell } from "@/lib/navigation-shell";
 
 import {
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -121,13 +122,11 @@ import { lazyImport } from "@/lib/lazy-component";
 import { useModelMoves } from "@/features/library/moves";
 import { ModelMoveReview } from "@/components/model-move-review";
 import { MODEL_DND_MIME, captureModelDrag, type ModelDrag } from "@/lib/model-dnd";
-import { BatchToolbar } from "@/components/batch-toolbar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CollectionReadme } from "@/components/collection-readme";
 import { useCollectionReadmeRenderer } from "@/components/use-collection-readme-renderer";
 import { MultipartModelTagsDialog } from "@/components/multipart-model-tags-dialog";
 import { MultipartModelCard } from "@/components/multipart-model-card";
-import { DocumentBrowser } from "@/components/document-browser";
 import { useCollectionsPane } from "@/lib/collections-pane-context";
 import {
   LibraryCollectionsPane,
@@ -226,6 +225,12 @@ const loadNewMultipartModelModal = () =>
 const UploadModal = lazyImport(loadUploadModal);
 const ModelTagsDialog = lazyImport(loadModelTagsDialog);
 const NewMultipartModelModal = lazyImport(loadNewMultipartModelModal);
+const DocumentBrowser = lazyImport(() =>
+  import("@/components/document-browser").then((module) => ({ default: module.DocumentBrowser })),
+);
+const BatchToolbar = lazyImport(() =>
+  import("@/components/batch-toolbar").then((module) => ({ default: module.BatchToolbar })),
+);
 
 type SortKey = ModelSort;
 type ViewMode = "grid" | "list";
@@ -359,10 +364,9 @@ function FolderSearch({
 const FILL_HOLD_MS = 800;
 
 /**
- * Holds a card fill until the thumbnails of the cards on screen are decoded
- * (or FILL_HOLD_MS passes), then releases it so every placeholder fades at
- * once: the reader sees placeholders, then finished cards, never cards whose
- * pictures arrive one by one.
+ * Retains fill frames until visible previews settle (or FILL_HOLD_MS passes).
+ * CSS releases each complete card independently; this bound retires the frames
+ * and resumes pagination without waiting indefinitely for a stalled preview.
  */
 function useFillHold<Entrance>(
   entrance: Entrance | null,
@@ -1553,9 +1557,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       modelsArrival.entrance && true,
       FOLDER_ENTRANCE_MS,
     ) !== null;
-  // Cards fill their placeholders as one step: each card mounts under its
-  // placeholder (so its thumbnail downloads), and the placeholders stay until
-  // the thumbnails on screen are ready, then all fade together.
+  // Cards download beneath their frames and reveal independently as their own
+  // preview decodes. Keep the bounded hold for cleanup and pagination admission.
   const fillEntrance =
     folderEntrance.fromPlaceholder && fillingCardsWindow
       ? folderEntrance
@@ -2011,6 +2014,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   );
   const selectionCount =
     selectedIds.size + selectedCollectionRows.size + selectedMultipartRows.size;
+  // First selection loads the tools; retain their owner afterward so clearing
+  // selection can finish the existing exit and dialog lifecycle.
+  const [batchToolsActivated, setBatchToolsActivated] = useState(false);
+  if (selectionCount > 0 && !batchToolsActivated) setBatchToolsActivated(true);
 
   async function runCollectionBatch(
     success: MessageKey,
@@ -3988,11 +3995,19 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           {docView === "docs" &&
           !favoritesOnly &&
           (selectedCollection === null || selectedCollectionRow !== null) ? (
-            <DocumentBrowser
-              collectionId={selectedCollectionRow?.id ?? null}
-              collectionPath={selectedCollection}
-              canCreate={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
-            />
+            <Suspense
+              fallback={
+                <p role="status" className="p-6 text-sm">
+                  {uiText("Loading...")}
+                </p>
+              }
+            >
+              <DocumentBrowser
+                collectionId={selectedCollectionRow?.id ?? null}
+                collectionPath={selectedCollection}
+                canCreate={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
+              />
+            </Suspense>
           ) : (
             <div className="flex-1 flex flex-col bg-background">
               {reading.status === "reset" && (
@@ -4564,24 +4579,26 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             }}
           />
         )}
-        {docView === "models" && (
-          <BatchToolbar
-            modelCount={selectedIds.size}
-            multipartCount={selectedMultipartRows.size}
-            selectedCollections={selectedCollections}
-            tags={tags}
-            busy={batchBusy || currentBatchRecovery !== null}
-            canMoveToRoot={!!user?.is_superuser}
-            onMoveSelection={moveSelection}
-            onRenameCollections={(names) =>
-              runCollectionBatch("collection.renameSuccess", (collection) =>
-                renameCollection(collection.id, names[collection.id]),
-              )
-            }
-            onApplyTags={tagSelection}
-            onDeleteSelection={deleteSelection}
-            onClear={clearSelection}
-          />
+        {docView === "models" && batchToolsActivated && (
+          <Suspense fallback={null}>
+            <BatchToolbar
+              modelCount={selectedIds.size}
+              multipartCount={selectedMultipartRows.size}
+              selectedCollections={selectedCollections}
+              tags={tags}
+              busy={batchBusy || currentBatchRecovery !== null}
+              canMoveToRoot={!!user?.is_superuser}
+              onMoveSelection={moveSelection}
+              onRenameCollections={(names) =>
+                runCollectionBatch("collection.renameSuccess", (collection) =>
+                  renameCollection(collection.id, names[collection.id]),
+                )
+              }
+              onApplyTags={tagSelection}
+              onDeleteSelection={deleteSelection}
+              onClear={clearSelection}
+            />
+          </Suspense>
         )}
         {multipartTagTarget && (
           <MultipartModelTagsDialog

@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Library cards reveal as soon as their own previews are ready. Release notes, Documents, bulk-selection tools and inspector editing controls load when opened, keeping the initial gallery smaller; the inspector header and close action remain available while its content loads.
 - Library grids and tables size the first batch to fill the visible page and load subsequent pages as the reader scrolls, including scrollbar and assistive scrolling. Pagination shows a retry action only when a page fails.
 - Search-index worker leases and progress no longer invalidate Library pagination. Catalog edits and search-generation activation still retire stale cursors.
 - Collection mosaics read four authorized thumbnail references without loading full Model cards or counting the subtree. Secondary Library reads wait for visible collection previews to resolve.

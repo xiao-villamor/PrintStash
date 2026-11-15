@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { criticalSpring } from "@/lib/critical-spring";
 import { cssTimeSeconds } from "@/lib/css-time";
@@ -8,8 +8,11 @@ const VELOCITY_SETTLED = 0.03;
 
 /** A compositor spring keeps moving while the 3D preview initializes. Presence
  * follows completion, and reversals inherit the presentation and its velocity. */
-export function useInspectorMotion(open: boolean) {
+export function useInspectorMotion(open: boolean, contentKey: number) {
   const panel = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (panel.current) panel.current.scrollTop = 0;
+  }, [contentKey]);
   const position = useRef(1);
   const velocity = useRef(0);
   const [present, setPresent] = useState(open);
@@ -64,8 +67,8 @@ export function useInspectorMotion(open: boolean) {
       if (animation && !settled) {
         // Read presentation before canceling; the analytical velocity comes from
         // the same spring timeline, not a new zero-velocity entrance.
-        const currentTime = animation.currentTime;
-        const elapsed = typeof currentTime === "number" ? currentTime / 1000 : 0;
+        // element.animate above uses the document timeline, whose time is ms.
+        const elapsed = Number(animation.currentTime ?? 0) / 1000;
         velocity.current = spring.sample(elapsed).velocity;
         const style = getComputedStyle(element);
         const distance =

@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useI18n, useUiLocale } from "@/lib/i18n";
 import { useRouter, useSearchParams } from "@/lib/navigation";
-import { APP_VERSION } from "@/lib/changelog";
+import { APP_VERSION } from "@/lib/app-version";
 import { localeDefinitions, SUPPORTED_LOCALES, uiText } from "@/lib/locale";
 import { useThemeMode, setThemeMode, type ThemeMode } from "@/lib/theme";
 import { openKeyboardShortcuts } from "@/lib/keyboard-commands";

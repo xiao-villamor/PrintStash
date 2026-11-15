@@ -300,8 +300,16 @@
   background: var(--card);
 }
 
-/* While a fill is held (thumbnails on screen still decoding), placeholders
-   stay opaque; releasing the hold starts every fade at the same moment. */
-[data-fill-hold] .library-card-fill {
+/* Reveal a complete card as soon as its own preview settles. A slower sibling
+   must not keep a decoded image and its title behind the shared fill hold. */
+[data-fill-hold]
+  .library-card-fill-frame:not(
+    :has(
+      [data-library-thumbnail="ready"],
+      [data-library-thumbnail="missing"],
+      [data-library-thumbnail="failed"]
+    )
+  )
+  .library-card-fill {
   animation: none;
 }

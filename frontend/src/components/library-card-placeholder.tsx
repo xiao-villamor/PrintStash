@@ -62,7 +62,7 @@ export function LibraryCardFill({
     };
   }, [filling, origins, index]);
   return (
-    <div ref={frame} className="relative h-full">
+    <div ref={frame} className="library-card-fill-frame relative h-full">
       {children}
       {filling && (
         <div

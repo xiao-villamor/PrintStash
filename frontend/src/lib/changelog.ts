@@ -491,5 +491,5 @@ export const CHANGELOG: ChangelogEntry[] = [
   },
 ];
 
-/** Current app version = newest changelog entry. */
-export const APP_VERSION = CHANGELOG[0].version;
+/** Current release version, shared with the application shell. */
+export { APP_VERSION } from "./app-version";
