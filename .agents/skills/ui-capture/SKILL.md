@@ -74,7 +74,10 @@ found. `.motion-audit/` is gitignored.
    authoritative.
 6. **Timing on a production build.** Dev React inflates long frames 3–5×.
    Judge visuals on the dev server; judge `long-frame`/`dropped-frames` on
-   `vite build` + `vite preview` with the same backend.
+   `vite build` + `vite preview` with the same backend. Publish it on the
+   URL the user already uses (the session lives in per-origin storage, so a
+   new port shows them the sign-in page), confirm that URL serves the new
+   `assets/index-*.js`, and check it signed in before reporting.
 7. **Report with numbers.** Before/after table per scenario: findings by kind,
    motion settled ms, p95 frame ms. List what remains, by finding.
 
