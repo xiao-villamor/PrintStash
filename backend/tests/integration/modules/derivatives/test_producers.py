@@ -733,6 +733,56 @@ class TestDeriveMesh:
         with zipfile.ZipFile(io.BytesIO(original)) as archive:
             assert archive.read("Metadata/thumbnail.png") == image.getvalue()
 
+    def test_a_3mf_cover_is_the_render_rather_than_its_slicer_picture(
+        self, db_session, stored
+    ):
+        import io
+
+        from PIL import Image
+
+        image = io.BytesIO()
+        Image.new("RGB", (32, 32), "red").save(image, format="PNG")
+        artifact = stored(
+            "pictured.3mf",
+            three_mf(extras={"Metadata/thumbnail.png": image.getvalue()}),
+        )
+
+        result = producers.derive_mesh(artifact.id)
+
+        assert result.kinds[DerivativeKind.THUMBNAIL] == DerivativeState.READY
+        row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
+        assert json.loads(row.output_json)["strategy"] == "full"
+
+    def test_a_failed_mesh_worker_still_publishes_the_slicer_picture(
+        self, db_session, stored, monkeypatch
+    ):
+        import io
+
+        from PIL import Image
+
+        image = io.BytesIO()
+        Image.new("RGB", (32, 32), "red").save(image, format="PNG")
+        artifact = stored(
+            "crashing.3mf",
+            three_mf(extras={"Metadata/thumbnail.png": image.getvalue()}),
+        )
+
+        def crash(*_args, **_kwargs):
+            raise mesh_isolation.MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
+
+        monkeypatch.setattr(producers.mesh_isolation, "generate", crash)
+
+        result = producers.derive_mesh(artifact.id)
+
+        assert result.kinds[DerivativeKind.THUMBNAIL] == DerivativeState.READY
+        assert result.kinds[DerivativeKind.METADATA] == DerivativeState.FAILED
+        rows = _rows(db_session, artifact.id)
+        assert json.loads(rows[DerivativeKind.THUMBNAIL].output_json)["strategy"] == (
+            "embedded"
+        )
+        assert get_backend().exists(rows[DerivativeKind.THUMBNAIL].storage_key)
+        assert rows[DerivativeKind.METADATA].failure_reason == "resource_limit"
+
     def test_embedded_preview_survives_refused_geometry(
         self, db_session, stored, monkeypatch
     ):

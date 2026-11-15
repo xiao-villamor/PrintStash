@@ -23,7 +23,9 @@ from app.modules.media.mesh_contracts import (
     GeometryReady,
     PreviewCoverage,
     SourceScanState,
+    ThumbnailStrategy,
 )
+from tests.factories.geometry import three_mf
 from tests.fixtures.mesh_analysis import analyze, is_partial_render
 
 from .._meshes import (
@@ -68,10 +70,25 @@ class TestAnalyzeMesh:
         assert geometry["triangle_count"] is not None
         assert thumb is not None
 
-    def test_valid_embedded_3mf_preview_precedes_mesh_render(
+    def test_rendered_cover_is_preferred_over_the_slicer_picture(
+        self, tmp_path: Path
+    ) -> None:
+        """Every card shares one rendered look; the slicer picture is a fallback."""
+        png = _valid_preview_png((220, 40, 120))
+        p = tmp_path / "render-first.3mf"
+        p.write_bytes(three_mf(extras={"Metadata/thumbnail.png": png}))
+
+        result = analyze(p)
+
+        assert result.image is not None
+        assert result.image != png
+        assert result.strategy is ThumbnailStrategy.FULL
+
+    def test_slicer_picture_leads_when_rendered_covers_are_off(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """A valid slicer preview is preferred even when mesh loading is safe."""
+        """Off restores the earlier order: the slicer preview is the cover."""
+        monkeypatch.setitem(_overlay, "prefer_rendered_3mf_preview", False)
         png = _valid_preview_png((220, 40, 120))
         p = tmp_path / "preview-first.3mf"
         with zipfile.ZipFile(p, "w") as zf:

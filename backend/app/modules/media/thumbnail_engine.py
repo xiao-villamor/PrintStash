@@ -321,6 +321,7 @@ class _Generation:
                 # meshes once because it also needs exact geometry metadata.
                 if (
                     self.embedded is not None
+                    and self._embedded_is_final()
                     and not self.request.include_geometry
                     and not self.request.include_fingerprint
                 ):
@@ -438,14 +439,22 @@ class _Generation:
             self.phases.finish(
                 output_bytes=len(self.embedded) if self.embedded is not None else None
             )
-            if self.embedded is not None:
-                # The slicer's own picture is ready now. Publish it
-                # before the mesh is read, so the Model has a thumbnail
-                # while its geometry is still being measured.
+            if self.embedded is not None and self._embedded_is_final():
+                # The slicer's own picture is the cover. Publish it before
+                # the mesh is read, so the Model has a thumbnail while its
+                # geometry is still being measured.
                 self.image = self.embedded
                 self.strategy = ThumbnailStrategy.EMBEDDED
                 self.preview_coverage = PreviewCoverage.DOCUMENT_SUPPLIED
                 self.emit_thumbnail()
+
+    def _embedded_is_final(self) -> bool:
+        """Whether the 3MF's own picture is the cover rather than a fallback.
+
+        A render is preferred unless the source is over the cap, where the
+        mesh is never read and the slicer picture is all there is.
+        """
+        return not settings.prefer_rendered_3mf_preview or self.over_cap
 
     def _parse(self) -> None:
         """Read the source into the representation its format calls for."""
@@ -706,15 +715,18 @@ class _Generation:
         if self.request.include_thumbnail:
             self.phases.start(MeshPhase.RENDER)
             self.report("rendering_thumbnail")
-            if self.embedded is not None:
-                self.image = self.embedded
-                self.strategy = ThumbnailStrategy.EMBEDDED
-                self.preview_coverage = PreviewCoverage.DOCUMENT_SUPPLIED
-            elif (
+            renderable = (
                 self.mesh is not None
                 or self.visual_mesh is not None
                 or self.source_scene is not None
+            )
+            if self.embedded is not None and (
+                self._embedded_is_final() or not renderable
             ):
+                self.image = self.embedded
+                self.strategy = ThumbnailStrategy.EMBEDDED
+                self.preview_coverage = PreviewCoverage.DOCUMENT_SUPPLIED
+            elif renderable:
                 if self.source_scene is not None:
                     # Keep only already-admitted placed arrays for later
                     # analysis; native mesh objects and topology caches
@@ -825,6 +837,17 @@ class _Generation:
                     if self.image is not None:
                         self.strategy = ThumbnailStrategy.FULL
                         self.preview_coverage = PreviewCoverage.COMPLETE
+                if (
+                    self.image is None
+                    and self.packet is None
+                    and self.embedded is not None
+                ):
+                    # The render was refused or failed: the slicer's picture
+                    # is still a faithful cover.
+                    self.image = self.embedded
+                    self.strategy = ThumbnailStrategy.EMBEDDED
+                    self.preview_coverage = PreviewCoverage.DOCUMENT_SUPPLIED
+                    self.failure = None
 
             self.phases.finish(
                 output_bytes=len(self.image)
