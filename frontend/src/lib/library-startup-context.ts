@@ -1,8 +1,15 @@
 import { createContext, useContext } from "react";
 
-export type StartupPart = "cards" | "tree" | "media";
+export type StartupPart = "cards" | "tree" | "primary-media" | "media";
 export type StartupOutcome = "idle" | "pending" | "ready" | "failed";
-export type SecondaryRead = "filters" | "saved-views" | "search" | "inbox" | "activity";
+export type SecondaryRead =
+  | "filters"
+  | "saved-views"
+  | "search"
+  | "inbox"
+  | "activity"
+  | "collection-previews"
+  | "card-details";
 
 export interface LibraryStartup {
   complete: boolean;

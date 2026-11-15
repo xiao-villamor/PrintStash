@@ -59,6 +59,17 @@ export default defineConfig(({ mode }) => ({
         codeSplitting: {
           groups: [
             {
+              // Every private route mounts this shell. Keep its existing static
+              // dependency graph together instead of requesting dozens of tiny
+              // shared chunks. Owning the whole graph before the vendor groups
+              // also prevents initialization cycles between shell and UI code.
+              // Dynamic feature imports remain separate.
+              name: "shell",
+              test: /src[\\/]root-layout\.tsx$/,
+              priority: 10,
+              includeDependenciesRecursively: true,
+            },
+            {
               name: "icons",
               test: /node_modules[\\/].*lucide-react/,
               includeDependenciesRecursively: false,

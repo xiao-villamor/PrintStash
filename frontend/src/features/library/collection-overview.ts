@@ -6,6 +6,7 @@ import { ApiError } from "@/lib/errors";
 import { queryKeys } from "@/lib/query-client";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { useViewportAdmission } from "@/lib/use-viewport-admission";
+import { useLibraryStartup } from "@/lib/library-startup-context";
 import type { CollectionRead } from "@/types";
 import type {
   LibraryBrowseEntry,
@@ -58,9 +59,9 @@ function previewItem(item: LibraryBrowseEntry): LibraryPreviewItem {
     : { kind: item.kind, id: item.multipart.id, thumbnail_url: item.multipart.cover_thumbnail_url };
 }
 
-/** A bounded descendant read, admitted only when the collection card approaches
- * view and, when `afterPrimary` is false, the page's own list has arrived: four
- * mosaic reads must not compete with the list the reader came for. */
+/** A bounded descendant read, admitted near the viewport after the page's list
+ * arrives and its first Model row settles. Reusing an authorized prefix already
+ * in memory needs no competing metadata request. */
 export function useCollectionOverview(
   collection: CollectionRead,
   authorizationRevision: string | undefined,
@@ -69,6 +70,7 @@ export function useCollectionOverview(
   source?: CollectionPreviewSource,
 ) {
   const { ref, admitted } = useViewportAdmission();
+  const startup = useLibraryStartup();
   const [session] = useState(getSessionVersion);
   const currentSession = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
   const active = session === currentSession;
@@ -91,6 +93,7 @@ export function useCollectionOverview(
       active &&
       admitted &&
       afterPrimary &&
+      startup.canLoad("collection-previews") &&
       reused === null &&
       !!authorizationRevision &&
       collection.model_count > 0,

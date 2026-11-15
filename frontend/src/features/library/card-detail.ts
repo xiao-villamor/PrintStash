@@ -3,21 +3,23 @@ import { useQuery } from "@tanstack/react-query";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
 import { useViewportAdmission } from "@/lib/use-viewport-admission";
+import { useLibraryStartup } from "@/lib/library-startup-context";
 import type { ModelBoundingBoxRead, ModelRead } from "@/types";
 import { formatNumber } from "@/lib/format";
 import { normalizeRecommendedGcodeFiles } from "@/components/model-detail/presentation";
 import { modelDetailOptions } from "./model-detail";
 
-/** The list projection omits revision IDs and geometry. Read the existing detail
- * only for admitted cards, sharing the inspector's cache and cancellation. */
+/** Read revision details for admitted cards after the first Model row's previews
+ * settle, sharing the inspector's cache and cancellation. */
 export function useCardDetail(id: number, enabled: boolean) {
   const { ref, admitted } = useViewportAdmission();
+  const startup = useLibraryStartup();
   const [session] = useState(getSessionVersion);
   const currentSession = useSyncExternalStore(onAuthChange, getSessionVersion);
   const active = session === currentSession;
   const query = useQuery({
     ...modelDetailOptions(id),
-    enabled: enabled && admitted && active,
+    enabled: enabled && admitted && active && startup.canLoad("card-details"),
   });
   return { ref, admitted: admitted && active, data: active ? query.data : undefined };
 }

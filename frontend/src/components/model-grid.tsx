@@ -1277,12 +1277,20 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   });
   const folderPages = searchQuery !== undefined ? folderSearch : folderLevel;
   const foldersReady = folderPages.data !== undefined && !folderPages.isPlaceholderData;
+  // The authorized lookup already reserves the child-folder strip. Its items
+  // can load alongside the Model page instead of delaying viewport sizing.
+  // Search and readme layouts still need their actual content before measuring.
+  const capacityReady =
+    foldersReady ||
+    (searchQuery === undefined &&
+      destinationCollection !== undefined &&
+      !destinationCollection.has_readme);
   const receivePageSize = useCallback(
     (capacity: number) => {
       // Include the reserved collection strip before measuring the Model area.
-      if (foldersReady) setPageSize((current) => current ?? capacity);
+      if (capacityReady) setPageSize((current) => current ?? capacity);
     },
-    [foldersReady],
+    [capacityReady],
   );
   // Canonical replacement creates a Router key. Publish the visit only once
   // that identity is settled, before the reader can establish its position.
@@ -5099,12 +5107,26 @@ export function ModelGridSkeleton({
   const scroll = useMemo(() => ({ current: scrollNode }), [scrollNode]);
   const renderers = useRef(new Map<string, LibraryReadingRenderer>());
   const [columns, setColumns] = useState(4);
+  const capacityFrame = useRef<number | null>(null);
   const receiveColumns = useCallback(
     (count: number) => {
       setColumns(count);
-      if (scrollNode) onCapacityChange?.(viewportPageSize(scrollNode, count, "[data-library-key]"));
+      if (capacityFrame.current !== null) cancelAnimationFrame(capacityFrame.current);
+      // The reserved collection strip measures its columns in the same commit.
+      // Read after that reflow so an early nested-folder request still fills
+      // the viewport, rather than sizing against temporary stacked folders.
+      capacityFrame.current = requestAnimationFrame(() => {
+        if (scrollNode?.isConnected)
+          onCapacityChange?.(viewportPageSize(scrollNode, count, "[data-library-key]"));
+      });
     },
     [onCapacityChange, scrollNode],
+  );
+  useLayoutEffect(
+    () => () => {
+      if (capacityFrame.current !== null) cancelAnimationFrame(capacityFrame.current);
+    },
+    [],
   );
   useLayoutEffect(() => {
     // Non-layout hosts and hidden surfaces cannot provide a viewport yet.
