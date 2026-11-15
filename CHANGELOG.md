@@ -29,7 +29,7 @@
 
 ### Fixed
 
-- The API prepares route and validation metadata before accepting traffic, avoiding a synchronous pause across concurrent first requests after startup.
+- The API prepares route and validation metadata and collects initialization objects before accepting traffic, avoiding synchronous initialization and early full-collection pauses across concurrent first requests.
 - Derivative Jobs that fail before claiming an output now record the failure with the normal backoff and attempt limit, preventing immediate rediscovery loops while retaining completed outputs.
 - Library preview updates no longer flash a refresh banner or hide the details-panel toggle. The displayed list and open inspector stay in place during background refreshes; explicit refreshes and failures keep their feedback.
 - ZIP and model selection searches keep the search icon inside the field. Selected entries use neutral highlighting, and the ZIP destination picker and import actions stay visible in the dialog footer on narrow screens.

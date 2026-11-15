@@ -10,6 +10,7 @@ and is the same in every process; nothing here starts a loop.
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 import sqlite3
 from contextlib import asynccontextmanager
@@ -468,6 +469,10 @@ async def lifespan(app: FastAPI):
         await watcher.start_all()
     except Exception:
         logger.exception("library watcher failed to start; scheduled scans still run")
+    # Establish the long-lived heap after route and runtime initialization.
+    # Otherwise an early request can trigger the first full collection of that
+    # large graph. Automatic collection and its thresholds stay unchanged.
+    await asyncio.to_thread(gc.collect)
     yield
     from app.bootstrap.work import stop as stop_work
     from app.modules.storage.materializer_runtime import bind_materializer
