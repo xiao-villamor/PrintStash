@@ -233,9 +233,9 @@ type LibraryItem =
   | { kind: "model"; value: ModelListItem }
   | { kind: "multipart"; value: MultipartModelListItem };
 
-// Fill the initial viewport without projecting/mounting sixty cards at once.
-// Later pages keep the same bound and use the server cursor.
-const PAGE_SIZE = 24;
+// Layout-free hosts use a bounded fallback; browsers measure their first batch.
+// Later pages keep the measured size and use the server cursor.
+const UNMEASURED_PAGE_SIZE = 24;
 const NO_ARRIVALS: ReadonlySet<string> = new Set();
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   {
@@ -851,6 +851,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
     readVaultPreference("ps-vault-view") === "list" ? "list" : "grid",
   );
+  // Measure the loading cards before the first browse request. Keep this size
+  // with the mounted view so resizing cannot replace its accepted cursors.
+  const [pageSize, setPageSize] = useState<number | null>(null);
   const [initialLibraryPreferences] = useState(() => ({
     view: readVaultPreference(LIBRARY_VIEW_KEY),
     sort: readVaultPreference("ps-vault-sort"),
@@ -912,6 +915,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const toolbarMenuOpener = useRef<HTMLElement | null>(null);
   const [filtersExpanded, setFiltersExpanded] = useState<boolean | null>(null);
   const [favoritesPanel, setFavoritesPanel] = useState<"favorites" | "views">("favorites");
+  // Documents and saved views still need the collection snapshot, but have no
+  // Model placeholder to measure. Keep their existing bounded browse read.
+  if (pageSize === null && (docView === "docs" || favoritesPanel === "views"))
+    setPageSize(UNMEASURED_PAGE_SIZE);
   const [compact, setCompact] = useState(
     () => readVaultPreference("ps-vault-density") === "compact",
   );
@@ -1054,7 +1061,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       {
         ...folderModelFilters(path),
         view: libraryView,
-        limit: PAGE_SIZE,
+        limit: pageSize ?? UNMEASURED_PAGE_SIZE,
         sort: sortKey,
       },
       id,
@@ -1232,12 +1239,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const browseParams = {
     ...folderModelFilters(),
     view: libraryView,
-    limit: PAGE_SIZE,
+    limit: pageSize ?? UNMEASURED_PAGE_SIZE,
     sort: sortKey,
   };
   const modelQuery = useLibraryBrowse(
     browseParams,
-    selectedCollectionId === null || destinationCollection?.path === selectedCollection,
+    pageSize !== null &&
+      (selectedCollectionId === null || destinationCollection?.path === selectedCollection),
   );
   const includeSubfolders =
     requestedIncludeSubfolders || modelQuery.data?.pages[0]?.effective_direct === false;
@@ -1264,6 +1272,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       searchQuery === undefined && (selectedCollection === null || selectedCollectionRow !== null),
   });
   const folderPages = searchQuery !== undefined ? folderSearch : folderLevel;
+  const foldersReady = folderPages.data !== undefined && !folderPages.isPlaceholderData;
+  const receivePageSize = useCallback(
+    (capacity: number) => {
+      // Include the reserved collection strip before measuring the Model area.
+      if (foldersReady) setPageSize((current) => current ?? capacity);
+    },
+    [foldersReady],
+  );
   // Canonical replacement creates a Router key. Publish the visit only once
   // that identity is settled, before the reader can establish its position.
   const projectionReady =
@@ -2318,8 +2334,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // The lookup knows the folder has collections before the browse read lists
   // them: their row is reserved so the Models placeholder does not drop later.
   const reservedCollections =
-    !collectionOverview && visibleCollections.length === 0 && (loading || !browseReady)
-      ? (destinationCollection?.child_count ?? 0)
+    !foldersHidden &&
+    !collectionOverview &&
+    visibleCollections.length === 0 &&
+    (loading || !browseReady)
+      ? (folderPages.data?.pages[0]?.items.length ?? destinationCollection?.child_count ?? 0)
       : 0;
   const showScopeToggle =
     !favoritesOnly && docView === "models" && !searchQuery && visibleCollections.length > 0;
@@ -2473,7 +2492,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       const options = libraryBrowseOptions({
         ...folderModelFilters(path),
         view: libraryView,
-        limit: PAGE_SIZE,
+        limit: pageSize ?? UNMEASURED_PAGE_SIZE,
         sort: sortKey,
       });
       const cancel = () => {
@@ -4212,17 +4231,25 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </section>
               ) : loading ? (
                 viewMode === "grid" ? (
-                  <ModelGridSkeleton compact={compact} onRetire={rememberLoadingCards} />
+                  <ModelGridSkeleton
+                    compact={compact}
+                    onRetire={rememberLoadingCards}
+                    onCapacityChange={receivePageSize}
+                  />
                 ) : (
-                  <ModelListSkeleton />
+                  <ModelListSkeleton onCapacityChange={receivePageSize} />
                 )
               ) : modelsPending ? (
                 // The folder's collections can arrive before its Models: the
                 // placeholder holds the Models' place until they replace it.
                 viewMode === "grid" ? (
-                  <ModelGridSkeleton compact={compact} onRetire={rememberLoadingCards} />
+                  <ModelGridSkeleton
+                    compact={compact}
+                    onRetire={rememberLoadingCards}
+                    onCapacityChange={receivePageSize}
+                  />
                 ) : (
-                  <ModelListSkeleton />
+                  <ModelListSkeleton onCapacityChange={receivePageSize} />
                 )
               ) : error && snapshot === null ? null : collectionOverview &&
                 viewMode === "grid" ? null : sortedModels.length === 0 &&
@@ -4877,8 +4904,8 @@ function ModelListRow({
 /**
  * The next page of a view loads as the list is scrolled toward its end, so
  * a sentinel reaching up 600px above the end starts the read before the reader
- * gets there. The explicit button is always available. A failed read retires
- * the observer so a sentinel still in view cannot retry without end.
+ * gets there. A failed read retires the observer and offers an explicit retry,
+ * so a sentinel still in view cannot retry without end.
  */
 function LoadMore({
   hasMore,
@@ -4903,7 +4930,9 @@ function LoadMore({
   useLayoutEffect(() => {
     load.current = onClick;
   });
-  const [awaitScroll, setAwaitScroll] = useState(paused);
+  // The measured first batch fills the viewport. Anticipate later pages only
+  // after the reader scrolls, even when this view has no initial media pause.
+  const [awaitScroll, setAwaitScroll] = useState(true);
   const [readingLayout, setReadingLayout] = useState(layoutKey);
   if (readingLayout !== layoutKey) {
     setReadingLayout(layoutKey);
@@ -4923,10 +4952,14 @@ function LoadMore({
     };
     main.addEventListener("wheel", resume, { passive: true });
     main.addEventListener("touchmove", resume, { passive: true });
+    // Scroll does not bubble: capture also covers the table's inner scroller.
+    // Scrollbar dragging and assistive scrolling need no wheel or key event.
+    main.addEventListener("scroll", resume, { capture: true, passive: true });
     main.addEventListener("keydown", resume);
     return () => {
       main.removeEventListener("wheel", resume);
       main.removeEventListener("touchmove", resume);
+      main.removeEventListener("scroll", resume, true);
       main.removeEventListener("keydown", resume);
     };
   }, [awaitScroll, paused]);
@@ -4936,12 +4969,40 @@ function LoadMore({
     mayLoad.current = automatic && hasMore && !loading;
   });
   useEffect(() => {
+    const main = sentinel.current?.closest("main");
+    if (!main || !hasMore || loading || failed || paused || !awaitScroll) return;
+    // A short first page has no scrollbar to move. Fill only that viewport;
+    // the larger anticipation area belongs to subsequent reader scrolling.
+    let filling = false;
+    const fill = () => {
+      const table = main.querySelector<HTMLElement>("[data-library-list]");
+      const tableScrollable = table !== null && table.scrollHeight > table.clientHeight + 1;
+      if (
+        !filling &&
+        !tableScrollable &&
+        main.clientHeight > 0 &&
+        main.scrollHeight <= main.clientHeight + 1
+      ) {
+        filling = true;
+        load.current();
+      }
+    };
+    fill();
+    if (!("ResizeObserver" in globalThis)) return;
+    const observer = new ResizeObserver(fill);
+    observer.observe(main);
+    return () => observer.disconnect();
+  }, [awaitScroll, failed, hasMore, loading, paused, layoutKey]);
+  useEffect(() => {
     const element = sentinel.current;
     if (!automatic || !hasMore || loading || element === null) return;
     // Observing reports the current state at once, so a list shorter than the
     // reach keeps loading until it fills it.
     const observer = new IntersectionObserver((entries) => {
-      if (mayLoad.current && entries.some((entry) => entry.isIntersecting)) load.current();
+      if (mayLoad.current && entries.some((entry) => entry.isIntersecting)) {
+        mayLoad.current = false;
+        load.current();
+      }
     });
     observer.observe(element);
     return () => observer.disconnect();
@@ -4949,7 +5010,10 @@ function LoadMore({
   if (!hasMore) return null;
   return (
     <Localized>
-      <div className="relative flex justify-center mt-6 pb-6">
+      <div
+        data-library-pagination={folders ? "folders" : "models"}
+        className="relative flex justify-center mt-6 pb-6"
+      >
         {"IntersectionObserver" in globalThis && (
           <div
             ref={sentinel}
@@ -4958,17 +5022,15 @@ function LoadMore({
             className="pointer-events-none absolute bottom-0 h-[600px] w-full"
           />
         )}
-        <button
-          onClick={onClick}
-          disabled={loading}
-          className="px-4 py-2 rounded border border-border bg-background text-foreground hover:bg-muted disabled:opacity-50 font-mono text-[13px] uppercase tracking-wider transition-colors"
-        >
-          {loading
-            ? uiText("Loading...")
-            : folders
-              ? uiText("Show more folders")
-              : uiText("Load more")}
-        </button>
+        {loading ? (
+          <span role="status" className="text-xs text-muted-foreground">
+            {uiText("Loading...")}
+          </span>
+        ) : failed ? (
+          <Button variant="outline" onClick={onClick}>
+            {uiText("Retry")}
+          </Button>
+        ) : null}
       </div>
     </Localized>
   );
@@ -4992,18 +5054,45 @@ export function CollectionHeaderSkeleton() {
 /** Two full rows: a partial last row reads as content, not as loading. */
 const SKELETON_ROWS = 2;
 
+function viewportPageSize(node: HTMLElement, columns: number, selector: string): number {
+  const main = node.closest("main");
+  const first = node.querySelector<HTMLElement>(selector);
+  if (!main || !first || main.clientHeight === 0 || first.clientHeight === 0)
+    return UNMEASURED_PAGE_SIZE;
+  const firstRect = first.getBoundingClientRect();
+  const rowGap = Number.parseFloat(getComputedStyle(first.parentElement!).rowGap);
+  const gap = Number.isFinite(rowGap) ? rowGap : 0;
+  const available = Math.max(0, main.getBoundingClientRect().bottom - firstRect.top);
+  const rows = Math.max(1, Math.ceil((available + gap) / (firstRect.height + gap)));
+  // Browse's maximum page size is 100; a taller surface continues automatically.
+  return Math.min(100, columns * rows);
+}
+
 export function ModelGridSkeleton({
   compact = false,
   onRetire,
+  onCapacityChange,
 }: {
   compact?: boolean;
   onRetire?: (rects: readonly DOMRect[]) => void;
+  onCapacityChange?: (capacity: number) => void;
 }) {
   useUiLocale();
   const [scrollNode, setScrollNode] = useState<HTMLDivElement | null>(null);
   const scroll = useMemo(() => ({ current: scrollNode }), [scrollNode]);
   const renderers = useRef(new Map<string, LibraryReadingRenderer>());
   const [columns, setColumns] = useState(4);
+  const receiveColumns = useCallback(
+    (count: number) => {
+      setColumns(count);
+      if (scrollNode) onCapacityChange?.(viewportPageSize(scrollNode, count, "[data-library-key]"));
+    },
+    [onCapacityChange, scrollNode],
+  );
+  useLayoutEffect(() => {
+    // Non-layout hosts and hidden surfaces cannot provide a viewport yet.
+    if (scrollNode?.clientWidth === 0) onCapacityChange?.(UNMEASURED_PAGE_SIZE);
+  }, [onCapacityChange, scrollNode]);
   const cards = useMemo(
     () => Array.from({ length: columns * SKELETON_ROWS }, (_, index) => index),
     [columns],
@@ -5050,7 +5139,7 @@ export function ModelGridSkeleton({
       {scrollNode && (
         <LibraryItems
           items={cards}
-          onColumnsChange={setColumns}
+          onColumnsChange={receiveColumns}
           itemKey={(index) => `skeleton:${index}`}
           scrollRef={scroll}
           readingRenderers={renderers}
@@ -5076,10 +5165,18 @@ export function ModelGridSkeleton({
   );
 }
 
-function ModelListSkeleton() {
+function ModelListSkeleton({
+  onCapacityChange,
+}: {
+  onCapacityChange?: (capacity: number) => void;
+}) {
   useUiLocale();
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (root.current) onCapacityChange?.(viewportPageSize(root.current, 1, ":scope > div"));
+  }, [onCapacityChange]);
   return (
-    <div className="flex flex-col">
+    <div ref={root} className="flex flex-col">
       {Array.from({ length: 6 }).map((_, i) => (
         <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-border">
           <Skeleton className="w-10 h-10 rounded flex-shrink-0" />

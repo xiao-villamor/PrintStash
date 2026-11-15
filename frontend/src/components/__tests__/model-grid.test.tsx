@@ -148,6 +148,52 @@ const EMPTY_FACETS = {
   storage: [],
 };
 
+function observePagination() {
+  const observers: {
+    callback: IntersectionObserverCallback;
+    target: Element | null;
+    disconnected: boolean;
+  }[] = [];
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      entry: (typeof observers)[number];
+      constructor(callback: IntersectionObserverCallback) {
+        this.entry = { callback, target: null, disconnected: false };
+        observers.push(this.entry);
+      }
+      observe(target: Element) {
+        this.entry.target = target;
+      }
+      unobserve() {}
+      takeRecords() {
+        return [];
+      }
+      disconnect() {
+        this.entry.disconnected = true;
+      }
+    },
+  );
+  return async (kind: "models" | "folders" = "models") => {
+    const live = await waitFor(() => {
+      fireEvent.scroll(screen.getByRole("main"));
+      const observer = observers.findLast(
+        (entry) =>
+          !entry.disconnected && entry.target?.closest(`[data-library-pagination="${kind}"]`),
+      );
+      if (!observer) throw new Error("pagination is not observing the scrolled list");
+      return observer;
+    });
+    // SAFETY: the component reads only isIntersecting and ignores the observer argument.
+    act(() =>
+      live.callback(
+        [{ isIntersecting: true }] as IntersectionObserverEntry[],
+        {} as IntersectionObserver,
+      ),
+    );
+  };
+}
+
 function renderVault(
   options: RenderAppOptions & {
     models?: ModelListItem[];
@@ -3473,6 +3519,7 @@ describe("ModelBrowser", () => {
 
   describe("pagination", () => {
     it("retries a failed continuation without discarding read pages", async () => {
+      const nextPage = observePagination();
       const user = userEvent.setup();
       const first = aModelListItem({ id: 1, name: "Already read" });
       const later = aModelListItem({ id: 2, name: "Next page" });
@@ -3494,19 +3541,19 @@ describe("ModelBrowser", () => {
         },
       });
       expect(await screen.findByText("Already read")).toBeVisible();
-      await user.click(screen.getByRole("button", { name: /Load more/ }));
+      await nextPage();
       expect(await screen.findByText("[429] rate_limited")).toBeVisible();
       expect(screen.getByText("Already read")).toBeVisible();
       expect(screen.queryByText("Next page")).not.toBeInTheDocument();
       rateLimited = false;
-      await user.click(screen.getByRole("button", { name: /Load more/ }));
+      await user.click(screen.getByRole("button", { name: "Retry" }));
       expect(await screen.findByText("Next page")).toBeVisible();
       expect(screen.getByText("Already read")).toBeVisible();
       expect(screen.queryByText("[429] rate_limited")).not.toBeInTheDocument();
     });
 
     it("keeps a wide folder level to one page until more is requested", async () => {
-      const user = userEvent.setup();
+      const nextPage = observePagination();
       const first = aCollectionNode();
       const second = aCollectionNode({
         id: 2,
@@ -3531,7 +3578,7 @@ describe("ModelBrowser", () => {
         requests().filter((call) => call.url.startsWith("/api/v1/collections/children")),
       ).toHaveLength(1);
 
-      await user.click(main.getByRole("button", { name: "Show more folders" }));
+      await nextPage("folders");
       expect(await main.findByText("Tools")).toBeInTheDocument();
       expect(
         requests().filter((call) => call.url.startsWith("/api/v1/collections/children")),
@@ -3539,7 +3586,7 @@ describe("ModelBrowser", () => {
     });
 
     it("preserves server order when another mixed page arrives", async () => {
-      const user = userEvent.setup();
+      const nextPage = observePagination();
       renderVault({
         at: "/?type=all&sort=name-asc",
         routes: {
@@ -3557,14 +3604,14 @@ describe("ModelBrowser", () => {
       });
       const first = await screen.findByRole("link", { name: /Zeta/ });
 
-      await user.click(screen.getByRole("button", { name: /Load more/ }));
+      await nextPage();
 
       const second = await screen.findByText("Älpha");
       expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     });
 
     it("reaches matching results after an empty browse page", async () => {
-      const user = userEvent.setup();
+      const nextPage = observePagination();
       renderVault({
         at: "/?file_type=stl",
         routes: {
@@ -3581,7 +3628,7 @@ describe("ModelBrowser", () => {
         },
       });
 
-      await user.click(await screen.findByRole("button", { name: /Load more/ }));
+      await nextPage();
 
       expect(await screen.findByText("Match")).toBeVisible();
     });
@@ -3627,7 +3674,7 @@ describe("ModelBrowser", () => {
 
       await within(screen.getByRole("main")).findByText("Benchy");
       await waitFor(() =>
-        expect(screen.queryByRole("button", { name: /Load more/ })).toBeInTheDocument(),
+        expect(document.querySelector('[data-library-pagination="models"]')).toBeInTheDocument(),
       );
     });
   });
@@ -3902,6 +3949,7 @@ describe("ModelBrowser", () => {
     });
 
     it("restarts refreshed folder pagination", async () => {
+      const nextPage = observePagination();
       const user = userEvent.setup();
       const app = renderVault({
         models: [aModelListItem({ name: "Original model" })],
@@ -3920,7 +3968,7 @@ describe("ModelBrowser", () => {
             }),
         },
       });
-      await user.click(await screen.findByRole("button", { name: "Show more folders" }));
+      await nextPage("folders");
       await within(screen.getByRole("main")).findByText("Second folder");
       app.route({
         "GET /api/v1/models/browse": modelPage("Current model"),
@@ -4086,38 +4134,6 @@ describe("ModelBrowser", () => {
   });
 
   describe("loading the next page by scrolling", () => {
-    const observers: { callback: IntersectionObserverCallback; disconnected: boolean }[] = [];
-    beforeEach(() => {
-      observers.length = 0;
-      vi.stubGlobal(
-        "IntersectionObserver",
-        class {
-          entry: { callback: IntersectionObserverCallback; disconnected: boolean };
-          constructor(callback: IntersectionObserverCallback) {
-            this.entry = { callback, disconnected: false };
-            observers.push(this.entry);
-          }
-          observe() {}
-          unobserve() {}
-          takeRecords() {
-            return [];
-          }
-          disconnect() {
-            this.entry.disconnected = true;
-          }
-        },
-      );
-    });
-    afterEach(() => vi.unstubAllGlobals());
-
-    function reachTheEnd() {
-      const live = observers.filter((observer) => !observer.disconnected).at(-1);
-      if (!live) throw new Error("no observer is watching the end of the list");
-      // SAFETY: the component reads only `isIntersecting` from an entry, nothing from the observer.
-      const entries = [{ isIntersecting: true }] as IntersectionObserverEntry[];
-      // SAFETY: the callback ignores its second argument, which only a real observer supplies.
-      act(() => live.callback(entries, {} as IntersectionObserver));
-    }
     function pagedRoutes(rateLimited: () => boolean) {
       return {
         "GET /api/v1/models/browse": (url: string) => {
@@ -4142,32 +4158,34 @@ describe("ModelBrowser", () => {
       };
     }
 
-    it("loads the next page automatically while retaining its explicit button", async () => {
+    it("loads the next page automatically without a pagination button", async () => {
+      const nextPage = observePagination();
       renderVault({ routes: pagedRoutes(() => false) });
       expect(await screen.findByText("First page")).toBeVisible();
-      expect(screen.getByRole("button", { name: /Load more/ })).toBeVisible();
+      expect(screen.queryByRole("button", { name: /Load more/ })).not.toBeInTheDocument();
       expect(screen.queryByText("Next page")).not.toBeInTheDocument();
 
-      reachTheEnd();
+      await nextPage();
 
       expect(await screen.findByText("Next page")).toBeVisible();
     });
 
-    it("loads a page through the explicit button when an observer is available", async () => {
-      const user = userEvent.setup();
+    it("loads a page after scrollbar-driven scrolling", async () => {
+      const nextPage = observePagination();
       renderVault({ routes: pagedRoutes(() => false) });
       expect(await screen.findByText("First page")).toBeVisible();
-      await user.click(screen.getByRole("button", { name: /Load more/ }));
+      await nextPage();
       expect(await screen.findByText("Next page")).toBeVisible();
     });
 
     it("keeps explicit retry after a continuation fails", async () => {
+      const nextPage = observePagination();
       renderVault({ routes: pagedRoutes(() => true) });
       expect(await screen.findByText("First page")).toBeVisible();
 
-      reachTheEnd();
+      await nextPage();
 
-      expect(await screen.findByRole("button", { name: /Load more/ })).toBeVisible();
+      expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();
     });
   });
 
@@ -4211,6 +4229,7 @@ describe("ModelBrowser", () => {
     });
 
     it("restarts a rejected continuation from the first page", async () => {
+      const nextPage = observePagination();
       const user = userEvent.setup();
       const app = renderVault({
         routes: {
@@ -4226,7 +4245,7 @@ describe("ModelBrowser", () => {
                 }),
         },
       });
-      await user.click(await screen.findByRole("button", { name: /Load more/ }));
+      await nextPage();
       await screen.findByText("The library has changed. Refresh before loading more results.");
       expect(screen.getByText("Original bracket")).toBeVisible();
       app.route({

@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Library grids and tables size the first batch to fill the visible page and load subsequent pages as the reader scrolls, including scrollbar and assistive scrolling. Pagination shows a retry action only when a page fails.
+- Search-index worker leases and progress no longer invalidate Library pagination. Catalog edits and search-generation activation still retire stale cursors.
 - Collection mosaics read four authorized thumbnail references without loading full Model cards or counting the subtree. Secondary Library reads wait for visible collection previews to resolve.
 - Library loading reuses eligible folder preview data, starts previews without waiting for card fades, and loads descriptions and dialogs on demand. Automatic folder scope resolves empty direct listings in one response while preserving bounded pagination.
 - The Collections sidebar opens with a gentler ease and changes tools without zooming its contents.
