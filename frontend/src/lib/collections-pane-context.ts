@@ -14,6 +14,7 @@ export interface CollectionsPaneState {
   showSearch: () => void;
   showPending: () => void;
   showSavedViews: () => void;
+  showSettings: () => void;
 }
 
 export const CollectionsPaneContext = createContext<CollectionsPaneState | null>(null);

@@ -8,6 +8,7 @@ import {
   LogIn,
   Printer,
   Search,
+  Settings,
   SlidersHorizontal,
   Star,
   Trash2,
@@ -36,6 +37,7 @@ type RailDestination =
   | "favorites"
   | "printers"
   | "profiles"
+  | "settings"
   | "trash";
 type NavItem = {
   id: RailDestination;
@@ -55,6 +57,7 @@ const mainItems: NavItem[] = [
 const utilityItems: NavItem[] = [
   { id: "printers", href: "/printers", labelKey: "nav.printers", icon: Printer, adminOnly: true },
   { id: "profiles", href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
+  { id: "settings", href: "/settings", labelKey: "nav.settings", icon: Settings },
   {
     id: "trash",
     href: "/settings?section=trash",
@@ -137,6 +140,11 @@ export function SidebarNav() {
         return pathname.startsWith("/printers");
       case "profiles":
         return pathname.startsWith("/profiles");
+      case "settings":
+        return (
+          pathname === "/settings" &&
+          (params.get("section") !== "trash" || params.get("view") === "settings")
+        );
       case "trash":
         return (
           pathname === "/settings" &&
@@ -192,12 +200,21 @@ export function SidebarNav() {
           )
             return;
           event.preventDefault();
+          if (item.id === "settings" && isActive("settings")) {
+            pane?.showSettings();
+            return;
+          }
           if (item.id === "search") {
             if (pathname !== "/search") router.push(item.href);
             else if (pane?.open) pane.showSearch();
             return;
           }
           if (pane && (item.id === "library" || item.id === "inbox")) {
+            if (item.id === "library" && favorites) {
+              pane.showCollections();
+              router.push(item.href);
+              return;
+            }
             const mode = item.id === "library" ? "collections" : "pending";
             if (pane.open && pane.mode === mode) pane.toggle();
             else if (mode === "collections") pane.showCollections();

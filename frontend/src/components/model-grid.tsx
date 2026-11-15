@@ -1273,7 +1273,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       searchQuery === undefined && (selectedCollection === null || selectedCollectionRow !== null),
   });
   const folderPages = searchQuery !== undefined ? folderSearch : folderLevel;
-  const foldersReady = folderPages.data !== undefined && !folderPages.isPlaceholderData;
+  const foldersReady =
+    (searchQuery !== undefined || selectedCollection === null || selectedCollectionRow !== null) &&
+    folderPages.data !== undefined &&
+    !folderPages.isPlaceholderData;
   // The authorized lookup already reserves the child-folder strip. Its items
   // can load alongside the Model page instead of delaying viewport sizing.
   // Search and readme layouts still need their actual content before measuring.
@@ -2324,14 +2327,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
   // The large folder overview remains only for folders whose subtree holds no models yet.
   const collectionOverview = folderHoldsOnlyFolders && !subtreeHasModels;
-  // The lookup knows the folder has collections before the browse read lists
-  // them: their row is reserved so the Models placeholder does not drop later.
+  // Reserve only the initial destination's known children. During navigation
+  // the displayed snapshot owns its geometry until the next one commits. A
+  // disabled root query can still return cached data while a leaf lookup runs.
   const reservedCollections =
-    !foldersHidden &&
-    !collectionOverview &&
-    visibleCollections.length === 0 &&
-    (loading || !browseReady)
-      ? (folderPages.data?.pages[0]?.items.length ?? destinationCollection?.child_count ?? 0)
+    !foldersHidden && !collectionOverview && loading
+      ? ((foldersReady ? folderPages.data?.pages[0]?.items.length : undefined) ??
+        destinationCollection?.child_count ??
+        0)
       : 0;
   const showScopeToggle =
     !favoritesOnly && docView === "models" && !searchQuery && visibleCollections.length > 0;

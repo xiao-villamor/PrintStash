@@ -90,7 +90,10 @@ On desktop, a 53px rail keeps primary destinations visible beside the work
 area. A compact header carries search and global actions; the library retains
 its resizable collection panel. On narrow screens a bottom navigation and its
 More drawer replace the rail. Labels remain available to assistive technology
-for icon-only destinations, and keyboard focus is always visible.
+for icon-only destinations, and keyboard focus is always visible. Settings has a
+permanent rail shortcut. On an open Settings page it restores the Settings sidebar
+without changing the selected subsection; on another page it opens Settings.
+Collections leaves the Favorites filter before displaying the Library.
 
 A page is either a **document** or a **surface**, and the choice is not a matter
 of taste.
@@ -261,7 +264,11 @@ in their fixed frames over the same library timing. Cached previews remain
 visible. Reduced motion makes navigation immediate and shortens image/cover
 feedback to `press` (150ms). Readiness starts the reveal immediately, with no
 extra network delay or wait for slower sibling images.
-Loading cards and populated cards share geometry. If collection
+Loading cards and populated cards share geometry. Reserve a subcollection strip
+only for known children on initial load. During navigation, the displayed
+snapshot retains its layout until the destination commits; a pending lookup
+never borrows the root collection count or inserts space above existing cards.
+If collection
 metadata moves the destination grid, cards continue from visible placeholder
 positions; reduced motion omits that translation. Missing-preview icons appear
 only for missing or failed assets. Counts update in place without motion.

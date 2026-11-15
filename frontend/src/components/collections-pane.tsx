@@ -126,6 +126,10 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
         setPreference(true);
         setRequestedMode({ scope: routeScope, mode: "views" });
       },
+      showSettings: () => {
+        setPreference(true);
+        setRequestedMode(null);
+      },
     }),
     [host, breadcrumbHost, open, mode, routeScope, width, setWidth],
   );

@@ -143,6 +143,24 @@ describe("SidebarNav", () => {
       );
     });
 
+    it.each([
+      { account: "admin", auth: adminSession() },
+      { account: "member", auth: memberSession() },
+    ])("keeps Settings directly reachable for a $account", async ({ auth }) => {
+      const user = userEvent.setup();
+      renderNav({ at: "/search", auth });
+
+      await user.click(screen.getByRole("link", { name: "Settings" }));
+
+      await waitFor(() =>
+        expect(screen.getByTestId("rail-location")).toHaveTextContent("/settings"),
+      );
+      expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+    });
+
     it("sends the wiki link out to the docs site", async () => {
       const user = userEvent.setup();
       renderNav();

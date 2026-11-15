@@ -2655,6 +2655,7 @@ export function SettingsPanel() {
             <WorkbenchSidebarContent>
               <nav
                 aria-label={uiText("Settings sections")}
+                hidden={sidebar !== null && sidebar.mode !== "settings"}
                 className={cn(
                   "settings-nav",
                   sidebar
