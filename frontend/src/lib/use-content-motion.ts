@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
 import { criticalSpring } from "./critical-spring";
+import { cssTimeSeconds } from "@/lib/css-time";
 
 /** Section changes share one opaque depth settle. The frame never participates,
  * and interrupted changes inherit the current presentation and velocity. */
@@ -53,7 +54,7 @@ export function useContentMotion<T extends HTMLElement = HTMLDivElement>(
     }
     const tokens = getComputedStyle(element);
     const initialScale = Number(tokens.getPropertyValue("--scale-content-enter"));
-    const response = parseFloat(tokens.getPropertyValue("--duration-fast")) / 1000;
+    const response = cssTimeSeconds(tokens.getPropertyValue("--duration-fast"));
     if (!interrupted.current) {
       progress.current = 0;
       velocity.current = 0;

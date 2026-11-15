@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
 import { criticalSpring } from "@/lib/critical-spring";
+import { cssTimeSeconds } from "@/lib/css-time";
 
 const POSITION_SETTLED = 0.001;
 const VELOCITY_SETTLED = 0.03;
@@ -45,7 +46,7 @@ export function useInspectorMotion(open: boolean) {
     }
 
     const tokens = getComputedStyle(element);
-    const response = parseFloat(tokens.getPropertyValue("--duration-fast")) / 1000;
+    const response = cssTimeSeconds(tokens.getPropertyValue("--duration-fast"));
     const spring = criticalSpring(position.current, velocity.current, target, response);
     paint();
     element.style.willChange = "transform";

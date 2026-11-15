@@ -6,6 +6,7 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { LibraryItemLink } from "@/features/library/navigation";
+import { displayModelName } from "@/lib/display-name";
 import { memo, useEffect, useState } from "react";
 import { ModelListItem, FileRevisionStatus } from "@/types";
 import { Box, ScanSearch } from "lucide-react";
@@ -196,6 +197,7 @@ function ModelCardInner({
       : model.starred;
   const starBusy = starMutation.isPending;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null);
   const { ref: cardRef, admitted, data: detail } = useCardDetail(model.id, !favorites);
   const dimensions = cardDimensions(detail);
   const revisions = cardRevisions(detail);
@@ -227,6 +229,7 @@ function ModelCardInner({
         onOpenChange={setMenuOpen}
         portal
         align="start"
+        anchorPoint={menuPoint}
         className="h-full min-w-0"
         aria-label={uiText("Model actions")}
         contentClassName="w-64 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
@@ -235,11 +238,16 @@ function ModelCardInner({
             ref={cardRef}
             onContextMenu={(event) => {
               event.preventDefault();
+              // A pointer opens the menu where it pointed; the keyboard key has no point.
+              setMenuPoint(
+                event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : null,
+              );
               setMenuOpen(true);
             }}
             onKeyDown={(event) => {
               if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
                 event.preventDefault();
+                setMenuPoint(null);
                 setMenuOpen(true);
               }
             }}
@@ -256,12 +264,12 @@ function ModelCardInner({
                 : undefined
             }
             onDragEnd={() => setDragging(false)}
-            className={`${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} library-model-card group group/selection-card relative flex h-full flex-col min-w-0 bg-card border rounded transition-[color,background-color,border-color,opacity] duration-press overflow-hidden ${
+            className={`${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} library-model-card group group/selection-card relative flex h-full flex-col min-w-0 bg-card border rounded transition-[color,background-color,border-color,opacity,scale] duration-press ease-out active:scale-[0.99] motion-reduce:active:scale-100 overflow-hidden ${
               draggable ? "cursor-grab active:cursor-grabbing" : ""
             } ${dragging ? "opacity-40" : ""} ${
               selected
                 ? "border-border bg-accent text-accent-foreground"
-                : "border-border hover:border-primary"
+                : "border-border hover:border-border-strong"
             }`}
           >
             {onToggleSelect && (
@@ -313,7 +321,7 @@ function ModelCardInner({
                 placeholder={
                   <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center">
                     <Box className="h-6 w-6 text-muted-foreground" />
-                    <span className="text-2xs text-muted-foreground">
+                    <span className="text-xs text-muted-foreground">
                       {uiText("library.previewMissing")}
                     </span>
                   </div>
@@ -328,21 +336,18 @@ function ModelCardInner({
                     />
                   </div>
                 )}
-                {!favorites && dimensions && (
-                  <span className="library-card-dimensions">{dimensions}</span>
-                )}
               </ProtectedThumbnail>
 
               {favorites ? (
                 <div className="library-card-content flex flex-1 flex-col">
                   {/* Title + revision */}
                   <div className="px-3 pt-4 pb-2 flex min-w-0 items-start justify-between gap-2">
-                    <h2
+                    <h3
                       title={model.name}
                       className="min-w-0 break-words text-sm font-semibold text-foreground tracking-tight line-clamp-2 leading-snug"
                     >
-                      {model.name}
-                    </h2>
+                      {displayModelName(model.name)}
+                    </h3>
                   </div>
 
                   {Boolean(model.similarity?.open_candidates) && (
@@ -369,7 +374,7 @@ function ModelCardInner({
                       </span>
                     )}
                   </div>
-                  <div className="library-card-facts flex flex-wrap gap-x-1.5 gap-y-1 px-3 pt-2 font-mono text-2xs text-foreground">
+                  <div className="library-card-facts flex flex-wrap gap-x-1.5 gap-y-1 px-3 pt-2 font-mono text-xs text-foreground">
                     {metrics.map((id) => (
                       <MetricCell key={id} id={id} model={model} />
                     ))}
@@ -377,9 +382,9 @@ function ModelCardInner({
                 </div>
               ) : (
                 <div className="library-card-content library-card-standard">
-                  <h2 title={model.name}>
-                    <span>{model.name}</span>
-                  </h2>
+                  <h3 title={model.name}>
+                    <span>{displayModelName(model.name)}</span>
+                  </h3>
                   {Boolean(model.similarity?.open_candidates) && (
                     <p className="flex items-center gap-1 text-xs text-primary">
                       <ScanSearch className="h-3.5 w-3.5" aria-hidden="true" />
@@ -392,7 +397,13 @@ function ModelCardInner({
               )}
             </LibraryItemLink>
             {!favorites && (
-              <ModelCardRevision model={model} detail={detail} admitted={admitted} origin={origin}>
+              <ModelCardRevision
+                model={model}
+                detail={detail}
+                admitted={admitted}
+                origin={origin}
+                dimensions={dimensions}
+              >
                 <div className="library-card-facts">
                   {factMetrics.map((id) => (
                     <MetricCell key={id} id={id} model={model} />

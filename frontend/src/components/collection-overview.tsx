@@ -51,8 +51,8 @@ export function CollectionOverviewCard({
       data-compact={compact || undefined}
       data-library-anchor={`collection:${collection.id}`}
       {...handlers}
-      className={`${arriving ? "animate-card-arrive" : ""} group group/selection-card relative min-w-0 overflow-hidden border bg-card ${
-        selected || dragOver ? "border-primary" : "border-border hover:border-primary"
+      className={`${arriving ? "animate-card-arrive" : ""} group group/selection-card relative min-w-0 overflow-hidden border bg-card transition-[border-color,scale] duration-press ease-out active:scale-[0.99] motion-reduce:active:scale-100 ${
+        selected || dragOver ? "border-primary" : "border-border hover:border-border-strong"
       }`}
     >
       <button

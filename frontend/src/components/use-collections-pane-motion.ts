@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
+import { durationToken } from "@/lib/css-time";
 const KEYFRAME_COUNT = 60;
 
 /** A continuous ease into rest, with no spring response or oscillation.
@@ -24,6 +25,39 @@ function dockMotion(from: number, velocity: number, target: number, duration: nu
     return { time, position: sample(time).position };
   });
   return { samples, duration, sample };
+}
+
+/** While the pane moves, `html[data-pane-moving]` is set; when it rests, the
+ * `PANE_SETTLED_EVENT` fires. Layouts that would reflow with the boundary (the
+ * Library grid's column count) wait for it, so they change once, at rest,
+ * instead of popping cards in and out mid-motion. */
+export const PANE_SETTLED_EVENT = "printstash:pane-settled";
+/** Fires when the pane starts moving. `detail` is a {@link PaneMotion}: layouts
+ * beside the pane move to their resting arrangement in lockstep with it. */
+export const PANE_MOVING_EVENT = "printstash:pane-moving";
+
+export interface PaneMotion {
+  opening: boolean;
+  /** How much wider (positive) or narrower the content beside the pane ends up. */
+  contentDelta: number;
+  durationMs: number;
+  /** Normalised progress 0→1 at evenly spaced times across `durationMs`. */
+  progress: readonly number[];
+}
+
+export class PaneMovingEvent extends Event {
+  constructor(readonly motion: PaneMotion) {
+    super(PANE_MOVING_EVENT);
+  }
+}
+
+function setMoving(moving: boolean) {
+  const root = document.documentElement;
+  if (moving) root.dataset.paneMoving = "";
+  else if ("paneMoving" in root.dataset) {
+    delete root.dataset.paneMoving;
+    window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
+  }
 }
 
 /** Only the shell column changes width; its contents retain their intrinsic
@@ -54,6 +88,7 @@ export function useCollectionsPaneMotion(open: boolean) {
     const finish = () => {
       settled = true;
       velocity.current = 0;
+      setMoving(false);
       shell.style.width = `${open ? fullWidth : 0}px`;
       body.style.visibility = open ? "visible" : "hidden";
       widthAnimation?.cancel();
@@ -62,8 +97,7 @@ export function useCollectionsPaneMotion(open: boolean) {
       initialized.current = true;
       finish();
     } else {
-      const duration =
-        parseFloat(getComputedStyle(shell).getPropertyValue("--duration-slow")) / 1000;
+      const duration = durationToken(shell, "--duration-slow");
       const motion = dockMotion(
         fromWidth / fullWidth,
         velocity.current / fullWidth,
@@ -75,6 +109,18 @@ export function useCollectionsPaneMotion(open: boolean) {
         finish();
       else {
         body.style.visibility = "visible";
+        setMoving(true);
+        const fromPosition = fromWidth / fullWidth;
+        const span = (open ? 1 : 0) - fromPosition;
+        const detail: PaneMotion = {
+          opening: open,
+          contentDelta: fromWidth - (open ? fullWidth : 0),
+          durationMs: motion.duration * 1000,
+          progress: motion.samples.map((sample) =>
+            Math.abs(span) < 1e-6 ? 1 : (sample.position - fromPosition) / span,
+          ),
+        };
+        window.dispatchEvent(new PaneMovingEvent(detail));
         const timing = {
           duration: motion.duration * 1000,
           easing: "linear",
@@ -116,6 +162,8 @@ export function useCollectionsPaneMotion(open: boolean) {
       widthAnimation?.cancel();
     };
   }, [open]);
+  // A pane removed mid-motion must not leave the Library waiting for rest.
+  useEffect(() => () => setMoving(false), []);
 
   return { viewport, content };
 }

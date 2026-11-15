@@ -17,7 +17,7 @@ import type { StartupOutcome } from "@/lib/library-startup-context";
 import { useLibraryStartup } from "@/lib/library-startup-context";
 import { useViewportAdmission } from "@/lib/use-viewport-admission";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "@/lib/navigation";
 import { Link } from "@/lib/link";
 import { useMediaQuery } from "@/lib/use-media-query";
@@ -46,6 +46,8 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  FolderTree,
+  ListTree,
   ChevronsUp,
   Printer,
   Search,
@@ -215,7 +217,40 @@ function OutlinerLeaves({
   );
 }
 
+const TREE_MODELS_KEY = "printstash:tree-models";
+const treeModelsListeners = new Set<() => void>();
+function readTreeModels(): boolean {
+  try {
+    return localStorage.getItem(TREE_MODELS_KEY) !== "hidden";
+  } catch {
+    return true;
+  }
+}
+/** Whether the outliner lists models under their folders; a per-viewer preference. */
+function useTreeModelsVisible(): [boolean, (visible: boolean) => void] {
+  const visible = useSyncExternalStore(
+    (listener) => {
+      treeModelsListeners.add(listener);
+      return () => treeModelsListeners.delete(listener);
+    },
+    readTreeModels,
+    () => true,
+  );
+  const setVisible = useCallback((next: boolean) => {
+    try {
+      if (next) localStorage.removeItem(TREE_MODELS_KEY);
+      else localStorage.setItem(TREE_MODELS_KEY, "hidden");
+    } catch {
+      // Storage can be unavailable; the preference then lasts for this view only.
+    }
+    treeModelsListeners.forEach((listener) => listener());
+  }, []);
+  return [visible, setVisible];
+}
+
 interface TreeContext {
+  /** False keeps the outliner to folders only. */
+  showModels: boolean;
   dragEnabled: boolean;
   selected: string | null;
   /** `id` is the folder's identity when the caller holds it: a destination
@@ -664,7 +699,9 @@ function CollectionTreeRow({
         {isOpen && hasNestedItems && !confirming && (
           <div className="collection-tree-children ml-1 border-l border-border pl-1 min-w-0">
             {node.visible_child_count > 0 && <CollectionLevel parentId={node.id} ctx={ctx} />}
-            {node.direct_entry_count > 0 && <EntryLevel collectionId={node.id} ctx={ctx} />}
+            {ctx.showModels && node.direct_entry_count > 0 && (
+              <EntryLevel collectionId={node.id} ctx={ctx} />
+            )}
           </div>
         )}
       </div>
@@ -719,7 +756,7 @@ function DroppableAllModels({
       </div>
       {isExpanded && count > 0 && (
         <div className="ml-5 border-l border-border pl-4 min-w-0">
-          <EntryLevel collectionId={null} ctx={ctx} />
+          {ctx.showModels && <EntryLevel collectionId={null} ctx={ctx} />}
         </div>
       )}
     </>
@@ -758,6 +795,7 @@ export function FilterSidebarContent({
   collapseVersion = 0,
 }: FilterSidebarProps) {
   "use memo";
+  const [treeModelsVisible] = useTreeModelsVisible();
   const { t, locale } = useI18n();
   const startup = useLibraryStartup();
   const settleStartup = startup.settle;
@@ -1038,6 +1076,7 @@ export function FilterSidebarContent({
   }
 
   const treeContext: TreeContext = {
+    showModels: treeModelsVisible,
     dragEnabled: !navigationOnly,
     selected: selectedCollection,
     onSelect: onCollectionChange,
@@ -1264,6 +1303,7 @@ export function FilterSidebarContent({
                       <div className="collection-tree-root ml-1 border-l border-border pl-1 min-w-0">
                         <CollectionLevel parentId={null} ctx={treeContext} />
                         {collectionsOnly &&
+                          treeModelsVisible &&
                           (roots.data?.pages[0]?.parent_direct_entry_count ?? 0) > 0 && (
                             <EntryLevel collectionId={null} ctx={treeContext} />
                           )}
@@ -1527,6 +1567,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
   const desktop = useMediaQuery("(min-width: 768px)");
   const [outlinerFilter, setOutlinerFilter] = useState("");
   const [collapseVersion, setCollapseVersion] = useState(0);
+  const [treeModelsVisible, setTreeModelsVisible] = useTreeModelsVisible();
   const shellPane = useCollectionsPane();
   const pane = props.collectionsOnly ? shellPane : null;
   const [localWidth, setLocalWidth] = useState(() => {
@@ -1588,6 +1629,21 @@ export function FilterSidebar(props: FilterSidebarProps) {
                 onClick={props.onCreateCollection}
               >
                 <FolderPlus className="h-4 w-4" strokeWidth={1.6} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                aria-label={uiText(treeModelsVisible ? "Hide models in tree" : "Show models in tree")}
+                title={uiText(treeModelsVisible ? "Hide models in tree" : "Show models in tree")}
+                aria-pressed={!treeModelsVisible}
+                onClick={() => setTreeModelsVisible(!treeModelsVisible)}
+              >
+                {treeModelsVisible ? (
+                  <FolderTree className="h-4 w-4" strokeWidth={1.6} />
+                ) : (
+                  <ListTree className="h-4 w-4" strokeWidth={1.6} />
+                )}
               </Button>
               <Button
                 variant="ghost"

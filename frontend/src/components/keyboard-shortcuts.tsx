@@ -93,6 +93,14 @@ export function KeyboardShortcuts() {
   }, [focusRequest, pane?.open, pane?.mode]);
   useEffect(() => {
     function focusSearch() {
+      const folderSearch = Array.from(
+        document.querySelectorAll<HTMLInputElement>("[data-library-search]"),
+      ).find((element) => element.getClientRects().length > 0);
+      if (folderSearch) {
+        folderSearch.focus();
+        folderSearch.select();
+        return;
+      }
       if (desktop && pane) {
         pane.showSearch();
         requestFocus((value) => ({ token: value.token + 1, kind: "search" }));

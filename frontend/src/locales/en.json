@@ -840,6 +840,12 @@
   "Sign out": "Sign out",
   "Navigation": "Navigation",
   "Search models": "Search models",
+  "Search in {value1}": "Search in {value1}",
+  "This folder": "This folder",
+  "Include subfolders": "Include subfolders",
+  "Model scope": "Model scope",
+  "Hide models in tree": "Hide models in tree",
+  "Show models in tree": "Show models in tree",
   "Toggle theme": "Toggle theme",
   "Dismiss": "Dismiss",
   "Artifact": "Artifact",
@@ -2899,6 +2905,10 @@
   "counts.models": {
     "one": "{count} model",
     "other": "{count} models"
+  },
+  "library.collectionsHidden": {
+    "one": "{count} more",
+    "other": "{count} more"
   },
   "counts.usedByFiles": {
     "one": "Used by {count} file",

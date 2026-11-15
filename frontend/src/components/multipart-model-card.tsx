@@ -67,7 +67,7 @@ export function MultipartModelCard({
     <article
       data-favorites={favorites || undefined}
       className={cn(
-        `${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} library-model-card group group/selection-card relative flex h-full min-w-0 max-w-full flex-col overflow-hidden rounded border border-border bg-card text-card-foreground transition-[border-color,box-shadow,transform] duration-fast hover:border-primary active:scale-[0.99] `,
+        `${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} library-model-card group group/selection-card relative flex h-full min-w-0 max-w-full flex-col overflow-hidden rounded border border-border bg-card text-card-foreground transition-[border-color,box-shadow,scale] duration-press ease-out hover:border-border-strong active:scale-[0.99] motion-reduce:active:scale-100 `,
         selected && "bg-accent text-accent-foreground",
       )}
     >
@@ -135,7 +135,7 @@ export function MultipartModelCard({
       >
         <div className="library-preview relative h-36 shrink-0 overflow-hidden">
           <Cover src={item.cover_thumbnail_url} alt="" />
-          <span className="absolute left-3.5 bottom-2.5 max-w-[calc(100%-6rem)] truncate font-mono text-3xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <span className="absolute left-3.5 bottom-2.5 max-w-[calc(100%-6rem)] truncate font-mono text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             {t("multipart.badge")}
           </span>
         </div>
@@ -162,32 +162,34 @@ export function MultipartModelCard({
               </>
             )}
           </p>
-          <div className="mt-auto flex min-w-0 items-center gap-1 overflow-hidden border-t border-border pt-2">
-            <div className="flex min-w-0 flex-1 gap-1 overflow-hidden">
-              {item.tags.slice(0, 2).map((tag) => (
+          {(item.tags.length > 0 || collectionLabel) && (
+            <div className="mt-auto flex min-w-0 items-center gap-1 overflow-hidden border-t border-border pt-2">
+              <div className="flex min-w-0 flex-1 gap-1 overflow-hidden">
+                {item.tags.slice(0, 2).map((tag) => (
+                  <span
+                    key={tag}
+                    title={tag}
+                    className="max-w-24 truncate rounded border border-primary-soft bg-accent px-1.5 py-0.5 font-mono text-xs font-semibold tracking-wider text-accent-foreground"
+                  >
+                    {tag}
+                  </span>
+                ))}
+                {item.tags.length > 2 && (
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    +{item.tags.length - 2}
+                  </span>
+                )}
+              </div>
+              {collectionLabel && (
                 <span
-                  key={tag}
-                  title={tag}
-                  className="max-w-24 truncate rounded border border-primary-soft bg-accent px-1.5 py-0.5 font-mono text-3xs font-semibold tracking-wider text-accent-foreground"
+                  title={collectionLabel}
+                  className="max-w-[45%] shrink truncate text-xs text-muted-foreground"
                 >
-                  {tag}
-                </span>
-              ))}
-              {item.tags.length > 2 && (
-                <span className="shrink-0 text-3xs text-muted-foreground">
-                  +{item.tags.length - 2}
+                  {collectionLabel}
                 </span>
               )}
             </div>
-            {collectionLabel && (
-              <span
-                title={collectionLabel}
-                className="max-w-[45%] shrink truncate text-xs text-muted-foreground"
-              >
-                {collectionLabel}
-              </span>
-            )}
-          </div>
+          )}
         </div>
       </LibraryItemLink>
       {favorites && (

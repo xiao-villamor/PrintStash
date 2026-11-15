@@ -39,12 +39,15 @@ export function ModelCardRevision({
   detail,
   admitted,
   origin,
+  dimensions,
   children,
 }: {
   model: ModelListItem;
   detail?: ModelRead;
   admitted: boolean;
   origin?: LibraryEntry;
+  /** Bounding box, e.g. `166 × 166 × 1 mm`; unknown until the card detail loads. */
+  dimensions: string | null;
   children: ReactNode;
 }) {
   useUiLocale();
@@ -52,6 +55,11 @@ export function ModelCardRevision({
   const revisions = cardRevisions(detail);
   const file = revisions.find((revision) => revision.is_recommended) ?? revisions[0];
   const administrator = !!user?.is_superuser;
+  // Before the card detail loads, the list row already says whether a
+  // recommended revision exists, so the card takes its final height at once
+  // instead of shrinking (and moving its whole row) when the detail arrives.
+  const expectsRevision =
+    model.recommended_revision_status != null || model.recommended_revision_label != null;
   const history = useModelPrintJobs(model.id, admitted && !!file && administrator);
   const [sendOpen, setSendOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -78,18 +86,25 @@ export function ModelCardRevision({
     }
   }
 
+  // Every card ends on the same quiet line, so footers align across a row.
+  const meta = (
+    <p className="library-card-meta">
+      <span>{dimensions ?? ""}</span>
+      <time dateTime={model.updated_at}>
+        {new Intl.DateTimeFormat(currentLocale(), { month: "short", day: "numeric" }).format(
+          new Date(model.updated_at),
+        )}
+      </time>
+    </p>
+  );
+
   return (
     <div className="library-card-summary-container">
       <div className="library-card-revision-summary">
-        {detail && !file ? (
-          <div className="library-card-no-gcode">
-            <span>{uiText("No G-code yet")}</span>
-            <time dateTime={model.updated_at}>
-              {new Intl.DateTimeFormat(currentLocale(), { month: "short", day: "numeric" }).format(
-                new Date(model.updated_at),
-              )}
-            </time>
-          </div>
+        {(detail ? !file : !expectsRevision) ? (
+          // No G-code is the common case: it reads as the absence of a revision
+          // line, and the status filter states it explicitly.
+          <span className="sr-only">{uiText("No G-code yet")}</span>
         ) : (
           <>
             <div className="library-card-revision-line">
@@ -105,7 +120,7 @@ export function ModelCardRevision({
               <div className="library-card-revision-actions">
                 {file?.is_recommended && (
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon-sm"
                     disabled={!canPrint}
                     onClick={() => setSendOpen(true)}
@@ -117,7 +132,7 @@ export function ModelCardRevision({
                 )}
                 {file && (
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon-sm"
                     disabled={downloading}
                     onClick={() => void download()}
@@ -172,6 +187,7 @@ export function ModelCardRevision({
             {children}
           </>
         )}
+        {meta}
       </div>
       {sendOpen && canPrint && file && (
         <div className="hidden">

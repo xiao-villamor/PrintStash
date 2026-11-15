@@ -31,6 +31,7 @@ import {
   type LibraryReadingRenderer,
 } from "@/features/library/reading-position";
 import { LibraryItems } from "@/components/library-items";
+import { PANE_MOVING_EVENT, PANE_SETTLED_EVENT } from "@/components/use-collections-pane-motion";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { useModelOpenIntent } from "@/features/library/model-detail";
 import { useLibraryEntry, type LibraryEntry } from "@/features/library/navigation-state";
@@ -82,7 +83,15 @@ import { useIntentPrefetch } from "@/lib/use-intent-prefetch";
 import { useLibraryStartup } from "@/lib/library-startup-context";
 import { useNavigationShell } from "@/lib/navigation-shell";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useRef,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/navigation";
@@ -160,6 +169,8 @@ import {
   ListChecks,
   SlidersHorizontal,
   ScanSearch,
+  Search,
+  FolderTree,
   Boxes,
 } from "lucide-react";
 import {
@@ -306,6 +317,135 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 type MenuTriggerSize = "xs" | "sm";
 type MenuTriggerVariant = "outline" | "ghost";
 
+/** Narrows the current folder (and everything below it) by name, without leaving it. */
+function FolderSearch({
+  value,
+  onCommit,
+  placeholder,
+}: {
+  value: string;
+  onCommit: (value: string) => void;
+  placeholder: string;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [committed, setCommitted] = useState(value);
+  // Navigation (back, a cleared filter chip) replaces the URL value; follow it.
+  if (value !== committed) {
+    setCommitted(value);
+    setDraft(value);
+  }
+  useEffect(() => {
+    if (draft.trim() === value.trim()) return;
+    const timer = window.setTimeout(() => onCommit(draft), 150);
+    return () => window.clearTimeout(timer);
+  }, [draft, value, onCommit]);
+  return (
+    <label className="library-folder-search relative order-1 hidden w-56 items-center @3xl/library:flex">
+      <Search
+        aria-hidden
+        className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-muted-foreground"
+      />
+      <input
+        type="search"
+        data-library-search
+        value={draft}
+        aria-label={placeholder}
+        placeholder={placeholder}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") onCommit(draft);
+          if (event.key === "Escape" && draft) {
+            event.preventDefault();
+            setDraft("");
+            onCommit("");
+          }
+        }}
+        className="h-8 w-full min-w-0 border border-input bg-card pl-8 pr-7 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+      <kbd className="pointer-events-none absolute right-2 font-mono text-xs text-muted-foreground">
+        /
+      </kbd>
+    </label>
+  );
+}
+
+/**
+ * One row of collections above the models, expandable per folder. It owns its
+ * column count, so a pane animation that changes the row size re-renders this
+ * strip only, never the whole library mid-motion.
+ */
+function CollectionStrip({
+  total,
+  overview,
+  resetKey,
+  children,
+}: {
+  total: number;
+  overview: boolean;
+  resetKey: string;
+  children: (
+    limit: number | null,
+    onColumns: (columns: number) => void,
+    extraColumns: number,
+  ) => ReactNode;
+}) {
+  useUiLocale();
+  const [expandedFor, setExpandedFor] = useState<string | null>(null);
+  const [rowSize, setRowSize] = useState(4);
+  const expanded = expandedFor === resetKey;
+  // While the pane moves, the row already holds its resting column count (the
+  // grid switches at the start of the motion). One more collection stays
+  // rendered beyond the row's clipped edge: closing, the moving edge uncovers
+  // it; opening, the narrowing row slides the leaving one out under the edge.
+  const [extra, setExtra] = useState(0);
+  useEffect(() => {
+    const moving = () => setExtra(1);
+    const settled = () => setExtra(0);
+    window.addEventListener(PANE_MOVING_EVENT, moving);
+    window.addEventListener(PANE_SETTLED_EVENT, settled);
+    return () => {
+      window.removeEventListener(PANE_MOVING_EVENT, moving);
+      window.removeEventListener(PANE_SETTLED_EVENT, settled);
+    };
+  }, []);
+  // How many collections the resting row leaves out, so "N more" fades in or
+  // out together with the pane motion rather than after it.
+  const hidden = Math.max(0, total - rowSize);
+  return (
+    <>
+      {!overview && (
+        <div className="mb-2 flex min-h-7 items-center justify-between gap-3">
+          <h2 className="text-xs font-medium text-foreground">
+            {uiText("Collections")} <span className="font-mono font-normal">{total}</span>
+          </h2>
+          {/* Always mounted: when every collection fits (e.g. the pane closed)
+              it fades out in place instead of popping in and out at rest. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            aria-expanded={expanded}
+            aria-hidden={!expanded && hidden === 0 ? true : undefined}
+            tabIndex={!expanded && hidden === 0 ? -1 : undefined}
+            onClick={() => setExpandedFor(expanded ? null : resetKey)}
+            className={`transition-opacity duration-press ease-out ${!expanded && hidden === 0 ? "pointer-events-none opacity-0" : "opacity-100"}`}
+          >
+            {expanded
+              ? uiText("Show fewer")
+              : uiText("library.collectionsHidden", { count: Math.max(hidden, 1) })}
+            <ChevronDown aria-hidden className={`h-3.5 w-3.5 ${expanded ? "rotate-180" : ""}`} />
+          </Button>
+        </div>
+      )}
+      {children(
+        overview || expanded ? null : rowSize + extra,
+        setRowSize,
+        overview || expanded ? 0 : extra,
+      )}
+    </>
+  );
+}
+
 interface SortMenuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -364,7 +504,8 @@ function SortMenu({
         <button
           key={option.value}
           type="button"
-          role="menuitem"
+          role="menuitemradio"
+          aria-checked={sortKey === option.value}
           onClick={() => {
             onSelect(option.value);
             onOpenChange(false);
@@ -422,7 +563,8 @@ function PrinterMenu({ open, onOpenChange, value, options, onSelect, onIntent }:
         <button
           key={option.value}
           type="button"
-          role="menuitem"
+          role="menuitemradio"
+          aria-checked={value === option.value}
           onClick={() => {
             onSelect(option.value);
             onOpenChange(false);
@@ -907,7 +1049,30 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   const query = searchParams.get("q") ?? "";
   const searchQuery = currentFilters.q ?? undefined;
+  // Model scope: "here" lists only this folder's own models, "all" its whole
+  // subtree. Unset follows the folder: one with no models of its own shows its
+  // subtree, so models are never hidden behind folder cards.
+  const scopeParam = searchParams.get("scope");
+  const folderScopeKey = selectedCollection ?? "";
+  const [autoSubtreeFor, setAutoSubtreeFor] = useState<string | null>(null);
+  const includeSubfolders =
+    scopeParam === "all" || (scopeParam !== "here" && autoSubtreeFor === folderScopeKey);
   const queryClient = useQueryClient();
+
+  function setModelScope(next: "here" | "all") {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("scope", next);
+    router.replace(`/?${params}`);
+  }
+
+  function setFolderQuery(next: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    const value = next.trim();
+    if (value) params.set("q", value);
+    else params.delete("q");
+    const qs = params.toString();
+    router.replace(qs ? `/?${qs}` : "/");
+  }
 
   function setStructuredFilter(key: StructuredFilterKey, values: string[]) {
     const params = new URLSearchParams(searchParams.toString());
@@ -930,7 +1095,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     // A search or a filter spans the whole subtree; an unfiltered folder view
     // lists only its direct children so subfolders' models don't leak into
     // the parent (#30).
-    direct: !searchQuery && !narrowsLibrary(baseFilters),
+    direct: !includeSubfolders && !searchQuery && !narrowsLibrary(baseFilters),
     q: searchQuery,
   });
   // Options and counts describe the whole subtree, so a folder that holds only
@@ -1167,8 +1332,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const folderEntering = useEntranceWindow(folderEntrance, folderEntrance.move, FOLDER_ENTRANCE_MS);
   const fillingCards = folderEntrance.fromPlaceholder && folderEntering !== null;
   const loadingCardRects = useRef<readonly DOMRect[]>([]);
+  // Whether the last retired placeholder was seen: only then do cards fill it.
+  const [placeholderSeen, setPlaceholderSeen] = useState(false);
   const rememberLoadingCards = useCallback((rects: readonly DOMRect[]) => {
     loadingCardRects.current = rects;
+    setPlaceholderSeen(rects.length > 0);
   }, []);
   const folderCardsClass =
     folderEntering && !fillingCards ? FOLDER_CARDS_CLASS[folderEntering] : undefined;
@@ -1306,6 +1474,29 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       (!browseReady || (modelQuery.isFetching && !modelQuery.isFetchingNextPage)));
   const loadingMore = modelQuery.isFetchingNextPage || !browseReady;
   const hasMore = snapshot?.hasMore ?? false;
+  const modelsPending =
+    !loading &&
+    error === null &&
+    !browseReady &&
+    !favoritesOnly &&
+    (snapshot?.items.length ?? 0) === 0;
+  // When Models replace their placeholder after the folder's collections were
+  // already shown, the cards fill the placeholder's frames like a first load.
+  const [modelsArrival, setModelsArrival] = useState<{
+    pending: boolean;
+    entrance: { pending: false } | null;
+  }>({ pending: modelsPending, entrance: null });
+  if (modelsArrival.pending !== modelsPending)
+    setModelsArrival({
+      pending: modelsPending,
+      entrance: modelsPending ? null : { pending: false },
+    });
+  const modelsFilling =
+    useEntranceWindow(
+      modelsArrival.entrance,
+      modelsArrival.entrance && true,
+      FOLDER_ENTRANCE_MS,
+    ) !== null;
 
   const selectionEntry = useRef<LibraryEntry | null>(entry);
   useLayoutEffect(() => {
@@ -1368,8 +1559,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // into view, or a reflowed row) keeps its place.
   const arriving = useEntranceWindow(arrival, arrival.arriving, DURATION.fast) ?? NO_ARRIVALS;
 
-  // Filter, sort, view and pane-width changes retain their existing results settle.
-  const resultsLayout = `${viewMode}:${pane?.open ?? true}`;
+  // Filter, sort and view changes settle their results. Opening or closing the
+  // Collections pane does not: it moves the boundary continuously and inserts
+  // nothing, so replaying the settle would scale content already on screen on
+  // top of that motion (DESIGN.md: entrance classes live only for entrances).
+  const resultsLayout = viewMode;
   const [resultsView, setResultsView] = useState<{
     href: string | null;
     path: string | null;
@@ -2049,13 +2243,35 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     searchParams.has("uploaded_before") ||
     historyKeys.some((key) => searchParams.has(key));
   const displayCount = libraryItems.length;
-  const collectionOverview =
+  const folderHoldsOnlyFolders =
     !favoritesOnly &&
     docView === "models" &&
+    browseReady &&
+    !loading &&
+    !includeSubfolders &&
     visibleCollections.length > 0 &&
     displayCount === 0 &&
     !hasMore &&
     !hasActiveFilters;
+  const subtreeHasModels = (displayedCollection?.model_count ?? 1) > 0;
+  if (
+    folderHoldsOnlyFolders &&
+    scopeParam !== "here" &&
+    subtreeHasModels &&
+    autoSubtreeFor !== folderScopeKey
+  ) {
+    setAutoSubtreeFor(folderScopeKey);
+  }
+  // The large folder overview remains only for folders whose subtree holds no models yet.
+  const collectionOverview = folderHoldsOnlyFolders && !subtreeHasModels;
+  // The lookup knows the folder has collections before the browse read lists
+  // them: their row is reserved so the Models placeholder does not drop later.
+  const reservedCollections =
+    !collectionOverview && visibleCollections.length === 0 && (loading || !browseReady)
+      ? (destinationCollection?.child_count ?? 0)
+      : 0;
+  const showScopeToggle =
+    !favoritesOnly && docView === "models" && !searchQuery && visibleCollections.length > 0;
   // Links belong to the displayed result even while another destination loads.
   const currentLibraryHref = snapshot?.entry.href ?? canonicalLibraryHref;
   const inspectorScope = `${entry.session}:${entry.key}:${currentLibraryHref}`;
@@ -2533,50 +2749,52 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       </div>
     );
 
-  const libraryActions = (
+  const libraryActions = auth.isAuthenticated ? (
     <div
       role="group"
       aria-label={t("vault.libraryTools")}
-      className="order-3 flex basis-full flex-wrap items-center gap-2 @3xl/library:order-2 @3xl/library:basis-auto @3xl/library:border-l @3xl/library:border-border @3xl/library:pl-3"
+      className="order-3 flex basis-full flex-wrap items-center gap-2 @3xl/library:order-4 @3xl/library:ml-auto @3xl/library:basis-auto"
     >
-      <Button variant="ghost" size="xs" className="h-10 @3xl/library:h-8" asChild>
-        <Link href="/library/similar">
-          <ScanSearch className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          {t("similarity.title")}
-        </Link>
-      </Button>
       <Button
-        variant="outline"
+        variant="ghost"
         size="xs"
-        className="h-10 @3xl/library:h-8"
-        disabled={!canCreateCollection}
-        title={
-          canAdminSelectedCollection
-            ? uiText("Create a collection")
-            : uiText("Admin access required for this collection")
-        }
-        onClick={handleOpenCreateCollection}
+        className="h-10 aria-pressed:bg-accent aria-pressed:text-accent-foreground @3xl/library:h-8"
+        aria-pressed={selectMode}
+        onClick={() => (selectMode ? clearSelection() : setKeyboardSelection(true))}
       >
-        <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        {uiText("New collection")}
+        <ListChecks className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        <span className="library-toolbar-label">{uiText("Select")}</span>
       </Button>
-      {auth.isAuthenticated && (
-        <Button
-          variant="ghost"
-          size="xs"
-          className="h-10 aria-pressed:bg-accent aria-pressed:text-accent-foreground @3xl/library:h-8"
-          aria-pressed={selectMode}
-          onClick={() => (selectMode ? clearSelection() : setKeyboardSelection(true))}
-        >
-          <ListChecks className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          {uiText("Select")}
-        </Button>
-      )}
     </div>
+  ) : null;
+
+  // Creating a collection acts on the folder, not on the models being filtered.
+  const newCollectionButton = (
+    <Button
+      variant="outline"
+      size="xs"
+      className="shrink-0 @3xl/library:h-8"
+      disabled={!canCreateCollection}
+      title={
+        canAdminSelectedCollection
+          ? uiText("Create a collection")
+          : uiText("Admin access required for this collection")
+      }
+      onClick={handleOpenCreateCollection}
+    >
+      <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      {uiText("New collection")}
+    </Button>
   );
 
   const libraryMoreActions = (
     <>
+      <Button variant="ghost" role="menuitem" className="w-full justify-start" asChild>
+        <Link href="/library/similar" onClick={() => setMoreOpen(false)}>
+          <ScanSearch className="h-4 w-4" aria-hidden />
+          {t("similarity.title")}
+        </Link>
+      </Button>
       <Button
         variant="ghost"
         role="menuitem"
@@ -2763,6 +2981,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             {t("vault.models")}
           </h2>
           {docView === "models" && (
+            <FolderSearch
+              value={query}
+              onCommit={setFolderQuery}
+              placeholder={
+                selectedName
+                  ? uiText("Search in {value1}", { value1: selectedName })
+                  : uiText("Search models")
+              }
+            />
+          )}
+          {docView === "models" && (
             <LibraryStatusFilters
               value={structured.revision_status}
               counts={facetQuery.data?.revision_status}
@@ -2770,6 +2999,48 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               onChange={(value) => setStructuredFilter("revision_status", value)}
               onIntent={() => startup.request("filters")}
             />
+          )}
+          {showScopeToggle && (
+            <div
+              role="radiogroup"
+              aria-label={uiText("Model scope")}
+              className="library-status-filters library-scope-toggle order-1 hidden items-center @3xl/library:flex"
+              onKeyDown={(event) => {
+                if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+                event.preventDefault();
+                const group = event.currentTarget;
+                setModelScope(includeSubfolders ? "here" : "all");
+                requestAnimationFrame(() =>
+                  group.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus(),
+                );
+              }}
+            >
+              {(["here", "all"] as const).map((scope) => {
+                const checked = (scope === "all") === includeSubfolders;
+                return (
+                  <Button
+                    key={scope}
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    role="radio"
+                    aria-checked={checked}
+                    tabIndex={checked ? 0 : -1}
+                    onClick={() => setModelScope(scope)}
+                    title={uiText(scope === "here" ? "This folder" : "Include subfolders")}
+                  >
+                    {scope === "here" ? (
+                      <Folder className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    ) : (
+                      <FolderTree className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    )}
+                    <span className="library-toolbar-label">
+                      {uiText(scope === "here" ? "This folder" : "Include subfolders")}
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
           )}
           <Button
             type="button"
@@ -2789,7 +3060,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             className="order-1 aria-expanded:bg-accent aria-expanded:text-accent-foreground hidden h-10 min-w-0 flex-1 px-2 md:inline-flex @3xl/library:h-8 @3xl/library:flex-none @3xl/library:px-3"
           >
             <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            <span className="min-w-0 truncate">{uiText("Filters")}</span>
+            <span className="library-toolbar-label min-w-0 truncate">{uiText("Filters")}</span>
             {activeFilterItems.length > Number(!!query.trim()) && (
               <span className="font-mono tabular-nums">
                 {activeFilterItems.length - Number(!!query.trim())}
@@ -2827,9 +3098,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             </Button>
           </div>
-          {libraryActions}
-          <div className="library-display-controls order-4 ml-auto hidden shrink-0 items-center gap-2 @3xl/library:flex">
-            {canViewPrinters && (
+          {canViewPrinters && (
+            <div className="order-1 hidden @3xl/library:flex">
               <PrinterMenu
                 open={printerMenuOpen}
                 onOpenChange={setPrinterMenuOpen}
@@ -2853,7 +3123,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   else setSelectedPrinterId(value ? Number(value) : null);
                 }}
               />
-            )}
+            </div>
+          )}
+          {libraryActions}
+          <div className="library-display-controls order-5 hidden shrink-0 items-center gap-2 @3xl/library:flex">
             <SortMenu
               open={desktopSortOpen}
               onOpenChange={setDesktopSortOpen}
@@ -2887,6 +3160,21 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </Button>
               ))}
             </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              data-menu-trigger
+              aria-haspopup="menu"
+              aria-expanded={moreOpen}
+              aria-label={t("nav.more")}
+              onClick={(event) => {
+                toolbarMenuOpener.current = event.currentTarget;
+                setMoreOpen(!moreOpen);
+              }}
+            >
+              <MoreHorizontal className="h-4 w-4" aria-hidden />
+            </Button>
           </div>
         </div>
       }
@@ -3096,12 +3384,59 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           ref={startupContent}
           tabIndex={-1}
           aria-busy={reading.status === "restoring"}
+          data-inspector-open={inspectorOpen || undefined}
           className="@container/library relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-background pb-24 md:pb-0"
           onDragEnter={onMainDragEnter}
           onDragOver={onMainDragOver}
           onDragLeave={onMainDragLeave}
           onDrop={onMainDrop}
         >
+          {/* Selection controls float over the top of the content: entering
+              selection mode never moves the item that was just pressed. */}
+          {selectMode && (
+            <div className="sticky top-0 z-20 h-0">
+              <div className="absolute inset-x-0 top-0 flex min-h-14 flex-wrap items-center gap-3 border-b border-border bg-muted px-4 py-2 text-xs sm:px-6">
+                <span className="font-mono text-muted-foreground">
+                  {uiText("{value1} selected", { value1: String(selectionCount ?? "") })}
+                </span>
+                {docView === "models" && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={selectAllVisible}
+                      className="font-medium text-primary hover:underline"
+                    >
+                      {uiText("Select all on screen (")}
+                      {sortedModels.length +
+                        visibleMultipartModels.length +
+                        visibleCollections.length}
+                      )
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void selectAllMatching()}
+                      disabled={selectingAll}
+                      className="font-medium text-primary hover:underline disabled:opacity-50"
+                    >
+                      {selectingAll ? uiText("Selecting…") : uiText("library.selectAllMatching")}
+                    </button>
+                  </>
+                )}
+                <Button size="xs" variant="outline" onClick={clearSelection}>
+                  {uiText("Done")}
+                </Button>
+                {selectionCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearSelection}
+                    className="font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    {uiText("Clear")}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           {isDragging && canUploadToVault && (
             <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center border-2 border-dashed border-primary bg-primary/5">
               <span className="bg-background border border-border rounded px-4 py-2 font-mono text-xs uppercase tracking-widest shadow">
@@ -3248,7 +3583,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           : loading
                             ? uiText("Loading...")
                             : uiText(
-                                selectedName
+                                // Subtree results are not "here": count what is shown.
+                                selectedName && !includeSubfolders
                                   ? visibleMultipartModels.length
                                     ? "library.header.itemsHere"
                                     : "library.header.modelsHere"
@@ -3307,6 +3643,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   </Button>
                 </div>
               )}
+              {!favoritesOnly && newCollectionButton}
               {!pane && !favoritesOnly && (
                 <Button
                   onClick={() => {
@@ -3530,49 +3867,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </form>
           </ModalShell>
 
-          {selectMode && (
-            <div className="px-4 sm:px-6 py-2 bg-muted border-b border-border flex flex-wrap items-center gap-3 text-xs">
-              <span className="font-mono text-muted-foreground">
-                {uiText("{value1} selected", { value1: String(selectionCount ?? "") })}
-              </span>
-              {docView === "models" && (
-                <>
-                  <button
-                    type="button"
-                    onClick={selectAllVisible}
-                    className="font-medium text-primary hover:underline"
-                  >
-                    {uiText("Select all on screen (")}
-                    {sortedModels.length +
-                      visibleMultipartModels.length +
-                      visibleCollections.length}
-                    )
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void selectAllMatching()}
-                    disabled={selectingAll}
-                    className="font-medium text-primary hover:underline disabled:opacity-50"
-                  >
-                    {selectingAll ? uiText("Selecting…") : uiText("library.selectAllMatching")}
-                  </button>
-                </>
-              )}
-              <Button size="xs" variant="outline" onClick={clearSelection}>
-                {uiText("Done")}
-              </Button>
-              {selectionCount > 0 && (
-                <button
-                  type="button"
-                  onClick={clearSelection}
-                  className="font-medium text-muted-foreground hover:text-foreground"
-                >
-                  {uiText("Clear")}
-                </button>
-              )}
-            </div>
-          )}
-
           {favoritesOnly && (
             <div className="mx-4 mt-6 sm:mx-6">
               <TabBar
@@ -3708,44 +4002,87 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </div>
               )}
 
+              {viewMode === "grid" && reservedCollections > 0 && (
+                <section
+                  className="library-subcollections library-loading-placeholder mx-4 sm:mx-6"
+                  aria-hidden
+                >
+                  <CollectionStrip
+                    total={reservedCollections}
+                    overview={false}
+                    resetKey={selectedCollection ?? ""}
+                  >
+                    {(limit, onColumns, extraColumns) => (
+                      <LibraryItems
+                        items={Array.from(
+                          { length: Math.min(reservedCollections, limit ?? reservedCollections) },
+                          (_, index) => index,
+                        )}
+                        itemKey={(index) => `collection-placeholder:${index}`}
+                        renderItem={() => <div className="library-collection-placeholder" />}
+                        scrollRef={startupContent}
+                        readingRenderers={readingRenderers}
+                        readingId="collections-placeholder"
+                        layout="grid"
+                        compact={compact}
+                        estimateSize={82}
+                        minCardWidth={300}
+                        virtualize={false}
+                        onColumnsChange={onColumns}
+                        extraColumns={extraColumns}
+                      />
+                    )}
+                  </CollectionStrip>
+                </section>
+              )}
+
               {viewMode === "grid" && !loading && visibleCollections.length > 0 && (
                 <section
                   className={`library-subcollections mx-4 sm:mx-6 ${collectionOverview ? "library-subcollections-overview" : ""}`}
                   aria-label={uiText("Collections")}
                 >
-                  {!collectionOverview && (
-                    <h2 className="mb-2 text-xs font-medium text-foreground">
-                      {uiText("Collections")}{" "}
-                      <span className="font-mono font-normal">{visibleCollections.length}</span>
-                    </h2>
-                  )}
-                  <LibraryItems
-                    key={`collections:${folderEntrance.path ?? ""}`}
-                    items={visibleCollections}
-                    itemKey={(collection) => `collection:${collection.id}`}
-                    renderItem={(collection) => (
-                      <CollectionOverviewCard
-                        collection={collection}
-                        compact={!collectionOverview}
-                        arriving={arriving.has(`c:${collection.id}`)}
-                        authorizationRevision={snapshot?.authorizationRevision}
-                        onAuthorityRetired={onAuthorityRetired}
-                        onSelect={handleCollectionChange}
-                        onIntent={prefetchFolder}
-                        onDropModel={canUploadToVault ? handleMoveModel : undefined}
-                        selectable={selectMode}
-                        selected={selectedCollectionRows.has(collection.id)}
-                        onToggleSelect={auth.isAuthenticated ? toggleCollectionSelect : undefined}
+                  <CollectionStrip
+                    total={visibleCollections.length}
+                    overview={collectionOverview}
+                    resetKey={folderEntrance.path ?? ""}
+                  >
+                    {(limit, onColumns, extraColumns) => (
+                      <LibraryItems
+                        key={`collections:${folderEntrance.path ?? ""}`}
+                        items={
+                          limit === null ? visibleCollections : visibleCollections.slice(0, limit)
+                        }
+                        itemKey={(collection) => `collection:${collection.id}`}
+                        renderItem={(collection) => (
+                          <CollectionOverviewCard
+                            collection={collection}
+                            compact={!collectionOverview}
+                            arriving={arriving.has(`c:${collection.id}`)}
+                            authorizationRevision={snapshot?.authorizationRevision}
+                            onAuthorityRetired={onAuthorityRetired}
+                            onSelect={handleCollectionChange}
+                            onIntent={prefetchFolder}
+                            onDropModel={canUploadToVault ? handleMoveModel : undefined}
+                            selectable={selectMode}
+                            selected={selectedCollectionRows.has(collection.id)}
+                            onToggleSelect={
+                              auth.isAuthenticated ? toggleCollectionSelect : undefined
+                            }
+                          />
+                        )}
+                        scrollRef={startupContent}
+                        readingRenderers={readingRenderers}
+                        readingId="collections"
+                        layout="grid"
+                        className={folderCardsClass}
+                        compact={!collectionOverview && compact}
+                        estimateSize={collectionOverview ? 266 : 82}
+                        minCardWidth={collectionOverview ? undefined : 300}
+                        onColumnsChange={onColumns}
+                        extraColumns={extraColumns}
                       />
                     )}
-                    scrollRef={startupContent}
-                    readingRenderers={readingRenderers}
-                    readingId="collections"
-                    layout="grid"
-                    className={folderCardsClass}
-                    compact={!collectionOverview && compact}
-                    estimateSize={collectionOverview ? 266 : 82}
-                  />
+                  </CollectionStrip>
                 </section>
               )}
 
@@ -3818,6 +4155,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   )}
                 </section>
               ) : loading ? (
+                viewMode === "grid" ? (
+                  <ModelGridSkeleton compact={compact} onRetire={rememberLoadingCards} />
+                ) : (
+                  <ModelListSkeleton />
+                )
+              ) : modelsPending ? (
+                // The folder's collections can arrive before its Models: the
+                // placeholder holds the Models' place until they replace it.
                 viewMode === "grid" ? (
                   <ModelGridSkeleton compact={compact} onRetire={rememberLoadingCards} />
                 ) : (
@@ -3919,7 +4264,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     }
                     renderItem={(item, index) => (
                       <LibraryCardFill
-                        filling={fillingCards && !favoritesOnly}
+                        filling={
+                          (fillingCards || (modelsFilling && placeholderSeen)) && !favoritesOnly
+                        }
                         origins={loadingCardRects}
                         index={index}
                       >
@@ -4560,22 +4907,23 @@ function LoadMore({
   );
 }
 
-/** The tags row and description of a Collection, before its row and readme arrive. */
+/** The description line of a Collection, before its row and readme arrive. It
+ * has the height of the "Add a description" line that usually replaces it. */
 export function CollectionHeaderSkeleton() {
   useUiLocale();
   return (
     <div
       role="status"
       aria-label={uiText("Loading…")}
-      className="library-loading-placeholder flex flex-wrap items-center gap-4 border-b border-border px-4 py-2 sm:px-6"
+      className="library-loading-placeholder collection-header-readme-placeholder"
     >
-      <Skeleton className="h-8 w-28" />
-      <Skeleton className="h-8 w-60 max-w-full" />
+      <Skeleton className="h-3 w-60 max-w-full" />
     </div>
   );
 }
 
-const SKELETON_CARDS = Array.from({ length: 8 }, (_, index) => index);
+/** Two full rows: a partial last row reads as content, not as loading. */
+const SKELETON_ROWS = 2;
 
 export function ModelGridSkeleton({
   compact = false,
@@ -4588,6 +4936,11 @@ export function ModelGridSkeleton({
   const [scrollNode, setScrollNode] = useState<HTMLDivElement | null>(null);
   const scroll = useMemo(() => ({ current: scrollNode }), [scrollNode]);
   const renderers = useRef(new Map<string, LibraryReadingRenderer>());
+  const [columns, setColumns] = useState(4);
+  const cards = useMemo(
+    () => Array.from({ length: columns * SKELETON_ROWS }, (_, index) => index),
+    [columns],
+  );
   useLayoutEffect(() => {
     if (!scrollNode || !onRetire) return;
     let rects: readonly DOMRect[] = [];
@@ -4601,16 +4954,20 @@ export function ModelGridSkeleton({
       cancelAnimationFrame(tick);
       tick = requestAnimationFrame(measure);
     };
-    const observer = new ResizeObserver(schedule);
-    observer.observe(scrollNode);
+    const observer = "ResizeObserver" in globalThis ? new ResizeObserver(schedule) : null;
+    observer?.observe(scrollNode);
     window.addEventListener("scroll", schedule, true);
     return () => {
       cancelAnimationFrame(tick);
-      observer.disconnect();
+      observer?.disconnect();
       window.removeEventListener("scroll", schedule, true);
       const grid = scrollNode.querySelector(".library-loading-placeholder");
-      // A suppressed fast-load placeholder never established a visual position.
-      if (!grid || Number(getComputedStyle(grid).opacity) === 0) return;
+      // A suppressed fast-load placeholder never established a visual position;
+      // forget older ones too, so cards never travel from a stale placeholder.
+      if (!grid || Number(getComputedStyle(grid).opacity) === 0) {
+        onRetire([]);
+        return;
+      }
       // Keep the last painted positions: earlier siblings may already have
       // changed layout during the commit that retires this placeholder.
       onRetire(rects);
@@ -4625,7 +4982,8 @@ export function ModelGridSkeleton({
     >
       {scrollNode && (
         <LibraryItems
-          items={SKELETON_CARDS}
+          items={cards}
+          onColumnsChange={setColumns}
           itemKey={(index) => `skeleton:${index}`}
           scrollRef={scroll}
           readingRenderers={renderers}

@@ -1,6 +1,6 @@
 /** Status controls follow the prototype without advertising an unsupported server filter. */
 import { fireEvent, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { useState } from "react";
 import { LibraryStatusFilters } from "../library-status-filters";
 import { renderApp } from "@/test-support/render";
@@ -44,23 +44,34 @@ describe("LibraryStatusFilters", () => {
         onIntent={() => {}}
       />,
     );
-    expect(screen.queryByRole("radio", { name: /Ready/ })).toBeNull();
+    expect(screen.getByRole("radio", { name: "Ready 0" })).not.toBeChecked();
     expect(screen.getByRole("radio", { name: "Failed 0" })).toBeChecked();
   });
-  it("does not invent a No G-code filter or count", () => {
-    const change = vi.fn<(value: string[]) => void>();
+  it("counts Ready and Needs test even when nothing matches", () => {
+    renderApp(
+      <LibraryStatusFilters
+        value={[]}
+        total={3}
+        counts={[{ value: "needs_test", count: 2 }]}
+        onChange={() => {}}
+        onIntent={() => {}}
+      />,
+    );
+    expect(screen.getByRole("radio", { name: "Ready 0" })).toBeVisible();
+    expect(screen.getByRole("radio", { name: "Needs test 2" })).toBeVisible();
+    expect(screen.queryByRole("radio", { name: /Failed/ })).toBeNull();
+  });
+  it("offers no placeholder filter that cannot be used", () => {
     renderApp(
       <LibraryStatusFilters
         value={[]}
         counts={undefined}
         total={6}
-        onChange={change}
+        onChange={() => {}}
         onIntent={() => {}}
       />,
     );
-    const unavailable = screen.getByRole("radio", { name: "No G-code" });
-    expect(unavailable).toBeDisabled();
-    fireEvent.click(unavailable);
-    expect(change).not.toHaveBeenCalled();
+    expect(screen.queryByRole("radio", { name: /No G-code/ })).toBeNull();
+    for (const radio of screen.getAllByRole("radio")) expect(radio).toBeEnabled();
   });
 });

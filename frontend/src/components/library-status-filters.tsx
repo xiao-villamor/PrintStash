@@ -24,19 +24,19 @@ export function LibraryStatusFilters({
       {
         key: "known_good",
         label: uiText("Ready"),
-        count: counts?.find((item) => item.value === "known_good")?.count,
+        count: counts && (counts.find((item) => item.value === "known_good")?.count ?? 0),
         dot: "bg-muted-foreground",
       },
       {
         key: "needs_test",
         label: uiText("Needs test"),
-        count: counts?.find((item) => item.value === "needs_test")?.count,
+        count: counts && (counts.find((item) => item.value === "needs_test")?.count ?? 0),
         dot: "library-status-test",
       },
       {
         key: "failed",
         label: uiText("Failed"),
-        count: counts?.find((item) => item.value === "failed")?.count,
+        count: counts && (counts.find((item) => item.value === "failed")?.count ?? 0),
         dot: "bg-destructive",
       },
     ];
@@ -44,7 +44,10 @@ export function LibraryStatusFilters({
     (item) =>
       item.key === "all" ||
       value.includes(item.key) ||
-      (item.key === "failed" ? (item.count ?? 0) > 0 : item.count !== 0),
+      // Ready and Needs test always show their count, zero included; Failed
+      // appears only when something failed.
+      item.key !== "failed" ||
+      (item.count ?? 0) > 0,
   );
   const active = value.length === 0 ? "all" : value.length === 1 ? value[0] : null;
   return (

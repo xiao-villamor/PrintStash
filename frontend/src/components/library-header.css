@@ -158,7 +158,7 @@
   height: 7px;
 }
 .library-status-filters > button > span.font-mono {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
 }
 .library-status-test {
@@ -331,10 +331,49 @@
   margin-right: 8px;
 }
 
-@container library (min-width: 768px) and (max-width: 1279px) {
+@container library (min-width: 768px) and (max-width: 1099px) {
   .library-model-toolbar > .library-display-controls {
     flex-basis: 100%;
     margin-left: 0;
     justify-content: flex-start;
   }
+}
+
+/* The empty tag affordance waits for intent on pointer devices. It sits at the
+   end of the meta line, so hiding it leaves no gap; the description prompt
+   stays visible because hiding it would leave an empty line under the title. */
+@media (hover: hover) {
+  .library-collection-header .collection-add-tag {
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-out);
+  }
+  .library-collection-header:hover .collection-add-tag,
+  .library-collection-header .collection-add-tag:focus-visible {
+    opacity: 1;
+  }
+}
+
+/* With the inspector docked the library narrows to ~1180px. The toolbar keeps
+   one row, so opening the panel never pushes the grid down: the search field
+   shortens and Filters/Select keep their icons, with their names still
+   announced to assistive technology. */
+@container library (max-width: 1440px) {
+  .library-folder-search {
+    width: 10rem;
+  }
+  .library-model-toolbar .library-toolbar-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* Same box as the compact readme's one-line "Add a description" button. */
+.collection-header-readme-placeholder {
+  display: flex;
+  align-items: center;
+  height: 18px;
 }

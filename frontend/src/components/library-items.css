@@ -1,6 +1,10 @@
 .library-virtual-row {
   display: grid;
   align-items: stretch;
+  /* For the one frame before the column count catches up with a narrowing
+     pane, the last card is clipped instead of scrolling the page sideways. */
+  overflow-x: clip;
+  overflow-clip-margin: 2px;
 }
 .library-items-grid > [data-library-key],
 .library-virtual-row > [data-library-key] {
@@ -89,7 +93,7 @@
   gap: 8px;
   padding: 12px 14px 8px;
 }
-.library-card-standard h2 {
+.library-card-standard h3 {
   display: flex;
   align-items: center;
   min-height: 36px;
@@ -99,7 +103,7 @@
   font-weight: 600;
   overflow-wrap: anywhere;
 }
-.library-card-standard h2 > span {
+.library-card-standard h3 > span {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -110,8 +114,6 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
 }
 .library-card-revision-line {
   display: flex;
@@ -143,8 +145,39 @@
 }
 
 .library-card-summary-container {
-  padding: 0 14px 14px;
+  /* Pinned to the card's foot: rows of cards share one footer line. */
+  margin-top: auto;
+  padding: 0 14px 12px;
   min-width: 0;
+}
+.library-card-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 17px;
+  margin: 6px 0 0;
+  color: var(--muted-foreground);
+  font: 400 12px/1.4 var(--font-mono);
+}
+.library-card-meta > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.library-card-meta > time {
+  flex-shrink: 0;
+}
+/* Pointer devices reveal per-card actions on intent; touch keeps them visible. */
+@media (hover: hover) {
+  .library-card-revision-actions {
+    opacity: 0;
+    transition: opacity var(--duration-press) var(--ease-out);
+  }
+  .library-model-card:hover .library-card-revision-actions,
+  .library-model-card:focus-within .library-card-revision-actions {
+    opacity: 1;
+  }
 }
 .library-card-status {
   position: absolute;
@@ -158,13 +191,6 @@
   gap: 5px;
   font-weight: 500;
   background: transparent;
-}
-.library-card-dimensions {
-  position: absolute;
-  left: 14px;
-  bottom: 10px;
-  color: var(--muted-foreground);
-  font: 400 11px/1.4 var(--font-mono);
 }
 .library-card-revision-actions {
   display: flex;
@@ -198,16 +224,6 @@
 }
 .library-card-outcome-failed {
   color: var(--destructive);
-}
-.library-card-no-gcode {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-.library-card-no-gcode time {
-  font: 400 11px/1.4 var(--font-mono);
 }
 .library-card-menu-item {
   display: flex;
@@ -254,9 +270,8 @@
   justify-content: center;
 }
 .library-card-thumbnail {
-  width: 45%;
-  height: auto;
-  max-height: 80%;
+  width: 80%;
+  height: 80%;
   object-fit: contain;
 }
 
@@ -270,6 +285,14 @@
   aspect-ratio: auto;
 }
 .collection-card-name,
-.library-card-standard h2 {
+.library-card-standard h3 {
   font-size: 1rem;
+}
+
+/* A compact collection card's frame (collage 64px + 8px padding + border),
+   so the reserved row has the height of the row that replaces it. */
+.library-collection-placeholder {
+  height: 82px;
+  border: 1px solid var(--border);
+  background: var(--card);
 }

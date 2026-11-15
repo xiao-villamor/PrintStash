@@ -20,7 +20,12 @@ const model = aModel({
 });
 function renderRevision(detail: ModelRead | undefined = model, options: RenderAppOptions = {}) {
   return renderApp(
-    <ModelCardRevision model={aModelListItem()} detail={detail} admitted>
+    <ModelCardRevision
+      model={aModelListItem()}
+      detail={detail}
+      admitted
+      dimensions="166 × 166 × 1 mm"
+    >
       <span>30m</span>
     </ModelCardRevision>,
     {
@@ -120,15 +125,44 @@ describe("ModelCardRevision", () => {
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Download Rev 2" })).toBeEnabled();
   });
-  it("shows the absence of G-code from the full model record", () => {
+  it("states the absence of G-code to assistive technology without a visible revision line", () => {
     renderRevision(aModel({ files: [aRevision({ file_type: "stl" })] }));
-    expect(screen.getByText("No G-code yet")).toBeVisible();
+    expect(screen.getByText("No G-code yet")).toHaveClass("sr-only");
+    expect(screen.queryByText(/^Rev /)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Print|Download/ })).not.toBeInTheDocument();
+  });
+  it("ends every card on the same size and date line", () => {
+    renderRevision(aModel({ files: [aRevision({ file_type: "stl" })] }));
+    expect(screen.getByText("166 × 166 × 1 mm")).toBeVisible();
+    expect(document.querySelector(".library-card-meta time")).toHaveAttribute("dateTime");
   });
   it("does not invent a recommended revision when none is designated", () => {
     renderRevision(aModel({ files: [aRevision({ id: 9, version: 4, gcode_revision_number: 3 })] }));
     expect(screen.getByText("Rev 3")).toBeVisible();
     expect(screen.queryByText("Recommended")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download Rev 3" })).toBeEnabled();
+  });
+  it("takes its final height before the detail loads when the list row has no revision", () => {
+    renderApp(
+      <ModelCardRevision model={aModelListItem()} admitted dimensions={null}>
+        <span>30m</span>
+      </ModelCardRevision>,
+    );
+    expect(screen.queryByText("Revision")).not.toBeInTheDocument();
+    expect(screen.queryByText("Print results not available")).not.toBeInTheDocument();
+    expect(document.querySelector(".library-card-meta")).toBeInTheDocument();
+  });
+  it("reserves the revision lines before the detail loads when the list row has one", () => {
+    renderApp(
+      <ModelCardRevision
+        model={aModelListItem({ recommended_revision_status: "needs_test" })}
+        admitted={false}
+        dimensions={null}
+      >
+        <span>30m</span>
+      </ModelCardRevision>,
+    );
+    expect(screen.getByText("Revision")).toBeVisible();
+    expect(screen.getByText("30m")).toBeVisible();
   });
 });

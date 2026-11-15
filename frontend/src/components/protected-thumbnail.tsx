@@ -25,9 +25,8 @@ export function ProtectedThumbnail({
   fade?: boolean;
   children?: ReactNode;
 }) {
-  const { ref, admitted } = useViewportAdmission();
+  const { ref, admitted: inView } = useViewportAdmission();
   const external = path?.startsWith("https://") || path?.startsWith("http://") ? path : null;
-  const asset = useAuthenticatedAsset(external ? null : path, admitted);
   // Capture reuse before admission starts a download. A remounted cached image
   // stays visible; a replacement blob still gets its own reveal.
   const [cachedSource, setCachedSource] = useState(() => ({
@@ -37,6 +36,11 @@ export function ProtectedThumbnail({
   if (cachedSource.path !== path) {
     setCachedSource({ path, url: path && !external ? peekCachedAssetUrl(path) : null });
   }
+  // Admission gates downloads. Bytes already in memory need no gate: a card
+  // remounted by a reflow paints its thumbnail in its first frame, not after
+  // an intersection round trip that leaves a blank frame.
+  const admitted = inView || cachedSource.url !== null;
+  const asset = useAuthenticatedAsset(external ? null : path, admitted);
   const url = admitted ? (external ?? asset.url) : null;
   const [decoded, setDecoded] = useState<string | null>(null);
   const ready = url !== null && decoded === url;

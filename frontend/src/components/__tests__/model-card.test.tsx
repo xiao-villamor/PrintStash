@@ -402,9 +402,17 @@ describe("similarity badge", () => {
 });
 
 describe("OpenDesign Model card facts", () => {
-  it("labels an absent revision status without claiming G-code is absent", () => {
+  it("keeps the preview corner quiet when no revision status is known", () => {
     renderCard({ recommended_revision_status: null, recommended_revision_label: null });
-    expect(screen.getByText("No revision status")).toBeVisible();
+    expect(screen.queryByText("No revision status")).not.toBeInTheDocument();
+    expect(screen.queryByText("No G-code")).not.toBeInTheDocument();
+  });
+  it("shows file-stem names with spaces and keeps the exact name as its tooltip", () => {
+    renderCard({ name: "Shoe+Rack+-+Shelf" });
+    expect(screen.getByRole("heading", { level: 3, name: "Shoe Rack - Shelf" })).toHaveAttribute(
+      "title",
+      "Shoe+Rack+-+Shelf",
+    );
   });
   it("keeps the full tag set in the card's edit action", async () => {
     const tag = "An intentionally long library tag that exceeds a narrow card";

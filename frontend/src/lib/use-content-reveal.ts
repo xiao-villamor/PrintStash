@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
+import { cssTimeSeconds } from "@/lib/css-time";
 
 /** Quiet section handoff: no scale, slide, spring or outgoing snapshot. */
 export function useContentReveal(
@@ -25,7 +26,7 @@ export function useContentReveal(
     const tokens = getComputedStyle(element);
     const from = continuation.current ?? Number(tokens.getPropertyValue("--opacity-content-enter"));
     const animation = element.animate([{ opacity: from }, { opacity: 1 }], {
-      duration: parseFloat(tokens.getPropertyValue("--duration-library-enter")),
+      duration: cssTimeSeconds(tokens.getPropertyValue("--duration-library-enter")) * 1000,
       easing: tokens.getPropertyValue("--ease-library-enter").trim(),
       fill: "both",
     });
