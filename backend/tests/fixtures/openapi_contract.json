@@ -1853,6 +1853,10 @@
             "title": "Browse Revision",
             "type": "string"
           },
+          "effective_direct": {
+            "title": "Effective Direct",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "discriminator": {
@@ -1897,7 +1901,8 @@
           "next_cursor",
           "total",
           "browse_revision",
-          "authorization_revision"
+          "authorization_revision",
+          "effective_direct"
         ],
         "title": "BrowsePage",
         "type": "object"
@@ -33871,6 +33876,18 @@
                 }
               ],
               "title": "Has Similar Candidates"
+            }
+          },
+          {
+            "description": "Expand an empty direct listing to its subtree in the same read.",
+            "in": "query",
+            "name": "auto_scope",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Expand an empty direct listing to its subtree in the same read.",
+              "title": "Auto Scope",
+              "type": "boolean"
             }
           },
           {

@@ -249,10 +249,10 @@ describe("assetCache", () => {
 });
 
 describe("asset leases and admission", () => {
-  // Four concurrent protected downloads (see MAX_DOWNLOADS).
-  const SLOTS = 4;
+  // Six concurrent protected downloads (see MAX_DOWNLOADS).
+  const SLOTS = 6;
 
-  it("limits simultaneous protected image downloads to four", async () => {
+  it("limits simultaneous protected image downloads to six", async () => {
     const responses = Array.from({ length: SLOTS + 2 }, () => Promise.withResolvers<Response>());
     let index = 0;
     vi.mocked(fetch).mockImplementation(() => responses[index++].promise);
@@ -307,7 +307,7 @@ describe("asset leases and admission", () => {
   });
 
   it("removes abandoned queued image work", async () => {
-    const responses = Array.from({ length: 4 }, () => Promise.withResolvers<Response>());
+    const responses = Array.from({ length: SLOTS }, () => Promise.withResolvers<Response>());
     let index = 0;
     vi.mocked(fetch).mockImplementation(() => responses[index++].promise);
     const active = responses.map((_, i) => acquireAssetUrl(`/lease/queue-${i}`));
@@ -317,7 +317,7 @@ describe("asset leases and admission", () => {
     responses.forEach((response) => response.resolve(new Response("png")));
     await Promise.all(active.map((lease) => lease.url));
     expect(await abandoned).toMatchObject({ name: "AbortError" });
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(SLOTS);
     active.forEach((lease) => lease.release());
   });
 
