@@ -40,7 +40,8 @@ class TestPreviewRecovery:
                 assert held["published_count"] == 0
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait(timeout=15)
-                os.killpg(native_pid, signal.SIGKILL)
+                # The parent-death signal may have already killed the native group.
+                _stop(process, native_pid)
                 # Re-open the same vault using the real DBOS/reconciler composition.
                 restarted = subprocess.run(
                     [
