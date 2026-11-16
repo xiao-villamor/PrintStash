@@ -239,7 +239,10 @@ describe("TopBar", () => {
           <CollectionsPaneHost />
           <CurrentLocation />
         </CollectionsPaneProvider>,
-        { at: "/settings", matchesMedia: () => false },
+        {
+          at: "/settings",
+          matchesMedia: (query) => query === "(prefers-reduced-motion: reduce)",
+        },
       );
 
       expect(app.requests().some((request) => request.url.includes("/search/status"))).toBe(false);
