@@ -2074,3 +2074,125 @@ class TestIncrementalCaptureCover:
             ).first()
             is None
         )
+
+
+@pytest.fixture
+def incremental_capture(db_session, make_user):
+    from app.schemas.inbox import CaptureSessionCreate
+
+    owner = make_user(superuser=True)
+    declaration = _slot_payload().files[0]
+    payload = CaptureSessionCreate.model_validate(
+        {
+            "request_key": "declaration-recovery",
+            "source_url": _slot_payload().source_url,
+            "capture_source": _capture_source(),
+            "files": [
+                {
+                    "id": declaration.id,
+                    "name": declaration.filename,
+                    "file_type": "other",
+                    "size": None,
+                }
+            ],
+        }
+    )
+    row = inbox.start_capture_session(db_session, owner, payload)
+    return owner, row, declaration
+
+
+class TestDeclareCaptureFile:
+    def test_reuses_an_unchanged_file_declaration(
+        self, db_session, incremental_capture
+    ):
+        owner, row, declaration = incremental_capture
+        original = inbox.declare_capture_file(db_session, owner, row.id, declaration)
+
+        replay = inbox.declare_capture_file(db_session, owner, row.id, declaration)
+
+        assert replay.id == original.id
+        assert [
+            slot.id
+            for slot in inbox.capture_recovery(db_session, owner, row.id).slots
+        ] == [original.id]
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            pytest.param({"sha256": "f" * 64}, id="digest"),
+            pytest.param({"size_bytes": 1}, id="size"),
+            pytest.param({"media_type": "application/zip"}, id="media-type"),
+        ],
+    )
+    def test_refuses_a_changed_file_declaration(
+        self, db_session, incremental_capture, change
+    ):
+        owner, row, declaration = incremental_capture
+        original = inbox.declare_capture_file(db_session, owner, row.id, declaration)
+
+        with pytest.raises(OperationError, match="capture_request_conflict"):
+            inbox.declare_capture_file(
+                db_session, owner, row.id, declaration.model_copy(update=change)
+            )
+
+        assert (
+            db_session.get(CaptureUploadSlot, original.id).sha256 == declaration.sha256
+        )
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            pytest.param({"id": "unselected"}, id="identity"),
+            pytest.param({"filename": "other.stl"}, id="filename"),
+        ],
+    )
+    def test_refuses_a_file_outside_the_original_selection(
+        self, db_session, incremental_capture, change
+    ):
+        owner, row, declaration = incremental_capture
+
+        with pytest.raises(OperationError, match="capture_request_conflict"):
+            inbox.declare_capture_file(
+                db_session, owner, row.id, declaration.model_copy(update=change)
+            )
+
+        assert db_session.exec(select(CaptureUploadSlot)).all() == []
+
+    def test_refuses_declaration_after_capture_review(
+        self, db_session, incremental_capture
+    ):
+        owner, row, declaration = incremental_capture
+        row.state = InboxItemState.REVIEW
+        db_session.add(row)
+        db_session.commit()
+
+        with pytest.raises(OperationError, match="capture_upload_not_finalizable"):
+            inbox.declare_capture_file(db_session, owner, row.id, declaration)
+
+        assert db_session.exec(select(CaptureUploadSlot)).all() == []
+
+    def test_refuses_a_declaration_after_staging_expiry(
+        self, db_session, incremental_capture
+    ):
+        from datetime import UTC, datetime
+
+        owner, row, declaration = incremental_capture
+        row.created_at = datetime(2020, 1, 1, tzinfo=UTC)
+        db_session.add(row)
+        db_session.commit()
+
+        with pytest.raises(OperationError, match="staging_expired"):
+            inbox.declare_capture_file(db_session, owner, row.id, declaration)
+
+        assert db_session.exec(select(CaptureUploadSlot)).all() == []
+
+    def test_refuses_declaration_by_another_administrator(
+        self, db_session, incremental_capture, make_user
+    ):
+        _, row, declaration = incremental_capture
+        outsider = make_user(superuser=True)
+
+        with pytest.raises(OperationError, match="pending_import_not_found"):
+            inbox.declare_capture_file(db_session, outsider, row.id, declaration)
+
+        assert db_session.exec(select(CaptureUploadSlot)).all() == []

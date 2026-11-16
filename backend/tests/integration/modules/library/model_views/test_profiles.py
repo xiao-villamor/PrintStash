@@ -45,7 +45,7 @@ def profile_context(
         make_artifact_link(
             file, source, capture_id=capture.id, source_file_id="package"
         )
-        records.append((model, file))
+        records.append((model, file, source, capture))
     return user, records
 
 
@@ -100,3 +100,32 @@ class TestRelatedProfiles:
         assert result.items[0].profile.origin == "provider"
         assert result.items[0].profile.estimated_seconds == 100
         assert "not-public" not in result.model_dump_json()
+
+    def test_omits_legacy_captures_without_profile_facts(
+        self, db_session, profile_context
+    ):
+        user, records = profile_context
+        capture = records[0][3]
+        capture.snapshot_json = "{}"
+        db_session.add(capture)
+        db_session.commit()
+
+        result = related_profiles(db_session, user, records[0][0].id)
+
+        assert [item.file_id for item in result.items] == [records[1][1].id]
+
+    def test_deduplicates_the_same_artifact_profile_across_captures(
+        self, db_session, profile_context, make_capture, make_artifact_link
+    ):
+        import json
+
+        user, records = profile_context
+        model, file, source, original = records[0]
+        repeated = make_capture(source, snapshot=json.loads(original.snapshot_json))
+        make_artifact_link(
+            file, source, capture_id=repeated.id, source_file_id="package"
+        )
+
+        result = related_profiles(db_session, user, model.id)
+
+        assert [item.file_id for item in result.items] == [file.id, records[1][1].id]
