@@ -3,10 +3,10 @@
 import pytest
 
 from app.db.models import SystemConfig
-from app.modules.derivatives.policy import SETTINGS
+from app.modules.derivatives.policy import SettingName
 
 
-@pytest.mark.parametrize("name", list(SETTINGS.values()))
+@pytest.mark.parametrize("name", list(SettingName))
 class TestDerivativeControls:
     def test_boolean_sets_an_override(self, client, auth_headers, db_session, name):
         response = client.put(
@@ -22,14 +22,16 @@ class TestDerivativeControls:
         make_system_config(**{name: False})
         response = client.put("/api/v1/config", headers=auth_headers, json={name: None})
         assert response.status_code == 200, response.text
-        assert response.json()[name] is True
+        assert response.json()[name] is (
+            name not in (SettingName.PREVIEWS, SettingName.PREVIEW_POLES)
+        )
         db_session.expire_all()
         assert getattr(db_session.get(SystemConfig, 1), name) is None
 
     def test_omission_preserves_other_overrides(
         self, client, auth_headers, db_session, make_system_config, name
     ):
-        other = next(candidate for candidate in SETTINGS.values() if candidate != name)
+        other = next(candidate for candidate in SettingName if candidate != name)
         make_system_config(**{other: False})
         response = client.put("/api/v1/config", headers=auth_headers, json={name: True})
         assert response.status_code == 200, response.text

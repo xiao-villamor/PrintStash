@@ -104,65 +104,67 @@ test.describe("Collection header preview", () => {
     await expect(text).toHaveCSS("font-size", "13px");
     await expect(text).toHaveCSS("margin-top", "0px");
   });
-});
 
-test("retains collection previews when a returning tab refreshes the library", async ({
-  page,
-  context,
-}) => {
-  const firstRead = page.waitForResponse(
-    (response) => new URL(response.url()).pathname === "/api/v1/models/browse",
-  );
-  await page.goto("/");
-  const originalPage = await (await firstRead).json();
-  const card = page.locator('main [data-collection-path="maraio"]');
-  const image = card.locator("img").first();
-  await expect(image).toBeVisible();
-  const original = await image.getAttribute("src");
-  const count = await card.locator("p").last().textContent();
-  let release!: () => void;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let reading = false;
-  await page.route("**/api/v1/models/browse/revision", async (route) => {
-    await route.fulfill({
-      json: {
-        browse_revision: "r-returning-tab",
-        authorization_revision: originalPage.authorization_revision,
-      },
-    });
-  });
-  await page.route("**/api/v1/models/browse?**", async (route) => {
-    reading = true;
-    await held;
-    await route.fulfill({
-      json: { ...originalPage, browse_revision: "r-returning-tab" },
-    });
-  });
-  const otherTab = await context.newPage();
-  await otherTab.goto("about:blank");
-  await otherTab.bringToFront();
-  await page.bringToFront();
-  // Headless Chromium may keep both pages visible. Exercise the same visibility
-  // events that Query's focus manager receives from a real browser tab switch.
-  await page.evaluate(() => {
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
-    document.dispatchEvent(new Event("visibilitychange"));
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
-    document.dispatchEvent(new Event("visibilitychange"));
-  });
-  try {
-    await expect.poll(() => reading).toBe(true);
-    await expect(image).toHaveAttribute("src", original!);
+  test("retains collection previews when a returning tab refreshes the library", async ({
+    page,
+    context,
+  }) => {
+    const firstRead = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/v1/models/browse",
+    );
+    await page.goto("/");
+    const originalPage = await (await firstRead).json();
+    const card = page.locator('main [data-collection-path="maraio"]');
+    const image = card.locator("img").first();
     await expect(image).toBeVisible();
-    await expect(card.locator("p").last()).toHaveText(count!);
-    await expect(page.getByText("Updating...", { exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Refresh library", exact: true })).toHaveCount(0);
-  } finally {
-    release();
-    await otherTab.close();
-  }
-  await expect(page.locator("main")).not.toHaveAttribute("aria-busy", "true");
-  await expect(image).toHaveAttribute("src", original!);
+    const original = await image.getAttribute("src");
+    const count = await card.locator("p").last().textContent();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reading = false;
+    await page.route("**/api/v1/models/browse/revision", async (route) => {
+      await route.fulfill({
+        json: {
+          browse_revision: "r-returning-tab",
+          authorization_revision: originalPage.authorization_revision,
+        },
+      });
+    });
+    await page.route("**/api/v1/models/browse?**", async (route) => {
+      reading = true;
+      await held;
+      await route.fulfill({
+        json: { ...originalPage, browse_revision: "r-returning-tab" },
+      });
+    });
+    const otherTab = await context.newPage();
+    await otherTab.goto("about:blank");
+    await otherTab.bringToFront();
+    await page.bringToFront();
+    // Headless Chromium may keep both pages visible. Exercise the same visibility
+    // events that Query's focus manager receives from a real browser tab switch.
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    try {
+      await expect.poll(() => reading).toBe(true);
+      await expect(image).toHaveAttribute("src", original!);
+      await expect(image).toBeVisible();
+      await expect(card.locator("p").last()).toHaveText(count!);
+      await expect(page.getByText("Updating...", { exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Refresh library", exact: true })).toHaveCount(
+        0,
+      );
+    } finally {
+      release();
+      await otherTab.close();
+    }
+    await expect(page.locator("main")).not.toHaveAttribute("aria-busy", "true");
+    await expect(image).toHaveAttribute("src", original!);
+  });
 });

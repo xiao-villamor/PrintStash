@@ -8,6 +8,7 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.core.errors import ErrorKind, OperationError
 from app.core.time import utcnow
+from app.db.library_revision import invalidate_library_browse
 from app.db.models import (
     DerivativeGroupRegeneration,
     DerivativeKind,
@@ -154,13 +155,20 @@ def update(
         return
     config = lock(session)
     previous_poles = preview_poles(session)
+    previous_enabled = resolve(session)[JobKind.DERIVATIVES_PREVIEWS].enabled
     for name, value in changes.items():
         setattr(config, name, value)
     _forget(session)
     config.updated_at = utcnow()
     session.add(config)
     session.flush()
-    if previous_poles != preview_poles(session):
+    poles_changed = previous_poles != preview_poles(session)
+    if (
+        poles_changed
+        or previous_enabled != resolve(session)[JobKind.DERIVATIVES_PREVIEWS].enabled
+    ):
+        invalidate_library_browse(session)
+    if poles_changed:
         # Fence in-flight publication and rediscover existing outputs atomically
         # with the setting, using the same durable authority as regenerate-all.
         definition, kind = JobKind.DERIVATIVES_PREVIEWS, DerivativeKind.PREVIEWS

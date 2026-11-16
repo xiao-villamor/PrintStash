@@ -41,6 +41,7 @@ def _produce_within_claim(path, directory):
             "3mf",
             hashlib.sha256(path.read_bytes()).hexdigest(),
             directory,
+            include_poles=True,
         )
 
 

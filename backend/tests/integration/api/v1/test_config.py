@@ -1101,3 +1101,24 @@ class TestPreviewControl:
             row.derivatives_previews_enabled,
             row.derivatives_previews_include_poles,
         ) == (enabled, poles)
+
+    def test_preview_choice_retires_cached_gallery(self, client, auth_headers):
+        def revision():
+            return client.get(
+                "/api/v1/models/browse/revision", headers=auth_headers
+            ).json()["browse_revision"]
+
+        before = revision()
+        for enabled, poles in [(True, False), (True, True), (False, False)]:
+            saved = client.put(
+                "/api/v1/config",
+                headers=auth_headers,
+                json={
+                    "derivatives_previews_enabled": enabled,
+                    "derivatives_previews_include_poles": poles,
+                },
+            )
+            assert saved.status_code == 200, saved.text
+            after = revision()
+            assert after != before
+            before = after

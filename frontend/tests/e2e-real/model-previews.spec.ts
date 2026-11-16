@@ -209,6 +209,25 @@ test.describe("Generated Model views", () => {
       );
       expect(transferred.some((path) => path.endsWith("/stl"))).toBe(false);
       expect(transferred.some((path) => path.includes("/previews/"))).toBe(true);
+      await gallery.getByRole("button", { name: "Close", exact: true }).click();
+      const settingsTab = await page.context().newPage();
+      try {
+        await settingsTab.goto("/settings?section=previews");
+        const choice = settingsTab.getByRole("combobox", {
+          name: "Multi-angle previews",
+          exact: true,
+        });
+        await expect(choice).toBeEnabled();
+        await choice.selectOption("single");
+        await expect(choice).toBeEnabled();
+        await page.bringToFront();
+        await expect(card.getByRole("button", { name: "Next preview", exact: true })).toHaveCount(
+          0,
+        );
+        await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
+      } finally {
+        await settingsTab.close();
+      }
     } finally {
       expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
       await page.request.put("/api/v1/config", {

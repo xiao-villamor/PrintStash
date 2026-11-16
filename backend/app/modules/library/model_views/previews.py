@@ -85,7 +85,7 @@ def summaries(
         return {}
     files = selected_files(session, model_ids)
     enabled = not files or policy.resolve(session)[JobKind.DERIVATIVES_PREVIEWS].enabled
-    include_poles = policy.preview_poles(session)
+    include_poles = policy.preview_poles(session) if files else False
     by_file: dict[int, list[ArtifactDerivative]] = defaultdict(list)
     if files:
         for row in session.exec(

@@ -68,9 +68,9 @@ class TestGetPreviewActivity:
 
         assert response.status_code == 200, response.text
         assert response.json() == {
-            "total": 2,
+            "total": 1,
             "completed": 0,
-            "remaining": 2,
+            "remaining": 1,
             "skipped": 0,
             "failed": 0,
         }
