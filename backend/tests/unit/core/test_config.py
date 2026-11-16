@@ -77,8 +77,8 @@ class TestSettings:
     @pytest.mark.parametrize(
         ("cpus", "memory_gib", "jobs"),
         [
-            pytest.param(2, 4, 3, id="two-cpus-four-gib"),
-            pytest.param(4, 8, 5, id="four-cpus-eight-gib"),
+            pytest.param(2, 4, 2, id="two-cpus-four-gib"),
+            pytest.param(4, 8, 4, id="four-cpus-eight-gib"),
             pytest.param(12, 8, 6, id="twelve-cpus-eight-gib"),
         ],
     )
@@ -118,7 +118,7 @@ class TestSettings:
         monkeypatch.setattr(host_cpus, "usable_cpus", lambda: 2)
         monkeypatch.setattr(host_memory, "memory_limit_bytes", lambda: 4 * 1024**3)
 
-        assert FrozenSettings(_env_file=None).max_render_jobs == 3
+        assert FrozenSettings(_env_file=None).max_render_jobs == 2
 
     def test_an_explicit_render_jobs_value_wins(
         self, monkeypatch: pytest.MonkeyPatch
