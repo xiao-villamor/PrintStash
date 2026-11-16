@@ -69,8 +69,8 @@ describe("CollectionsPaneProvider", () => {
   it.each([
     { at: "/", expected: "open" },
     { at: "/search", expected: "open" },
-    { at: "/models/1", expected: "closed" },
-    { at: "/printers", expected: "closed" },
+    { at: "/models/1", expected: "open" },
+    { at: "/printers", expected: "open" },
   ])("uses the reference default at $at", ({ at, expected }) => {
     renderPane({ at });
 
@@ -89,10 +89,10 @@ describe("CollectionsPaneProvider", () => {
   });
 
   it("keeps another user's pane preference separate", () => {
-    localStorage.setItem("printstash.collections-pane.1", "open");
+    localStorage.setItem("printstash.collections-pane.1", "closed");
     renderPane({ at: "/models/1", auth: memberSession() });
 
-    expect(screen.getByLabelText("Pane state")).toHaveTextContent("closed");
+    expect(screen.getByLabelText("Pane state")).toHaveTextContent("open");
   });
 
   it("uses a saved collapsed preference on direct Library entry", () => {
@@ -132,20 +132,23 @@ describe("LibraryBreadcrumbs", () => {
 describe("CollectionsPaneHost", () => {
   it("remembers a submitted search in its actual panel", async () => {
     renderPane({ at: "/search?q=bracket" });
-    expect(screen.getByRole("searchbox", { name: "Search library" })).toHaveValue("bracket");
+    const search = screen.getByRole("searchbox", { name: "Search library" });
+    expect(search).toHaveValue("bracket");
+    await userEvent.type(search, "{Enter}");
     expect(await screen.findByRole("button", { name: "bracket" })).toBeVisible();
     expect(JSON.parse(localStorage.getItem("printstash.recent-searches.1") ?? "[]")).toEqual([
       "bracket",
     ]);
   });
-  it("bounds recent searches to eight distinct queries", () => {
+  it("bounds recent searches to eight distinct queries", async () => {
     localStorage.setItem(
       "printstash.recent-searches.1",
       JSON.stringify(Array.from({ length: 8 }, (_, i) => `query${i}`)),
     );
     renderPane({ at: "/search?q=newest" });
+    await userEvent.type(screen.getByRole("searchbox"), "{Enter}");
     const panel = screen.getByRole("complementary", { name: "Search panel" });
-    expect(within(panel).getAllByRole("button")).toHaveLength(8);
+    expect(within(panel).getAllByRole("button", { name: /^query|^newest$/ })).toHaveLength(8);
     expect(within(panel).queryByRole("button", { name: "query7" })).not.toBeInTheDocument();
   });
   it("keeps another account's recent queries private", () => {
@@ -160,7 +163,9 @@ describe("CollectionsPaneHost", () => {
     );
     renderPane({ at: "/search" });
     const panel = screen.getByRole("complementary", { name: "Search panel" });
-    expect(within(panel).getAllByRole("button")).toHaveLength(1);
+    expect(JSON.parse(localStorage.getItem("printstash.recent-searches.1") ?? "[]")).toEqual([
+      "valid",
+    ]);
     expect(within(panel).getByRole("button", { name: "valid" })).toBeVisible();
   });
   it("navigates from a secondary screen using the production outliner", async () => {

@@ -236,13 +236,13 @@ export function CollectionsPaneHost() {
   const pathname = usePathname();
   if (!pane) throw new Error("Collections pane host requires its shell provider");
   const { attach, open, mode } = pane;
-  const motion = useCollectionsPaneMotion(open);
+  const { viewport, content } = useCollectionsPaneMotion(open);
   const sectionMotion = useContentReveal(`${mode}:${pathname === "/" ? "library" : "navigation"}`, {
     enabled: open,
   });
   return (
     <div
-      ref={motion.viewport}
+      ref={viewport}
       id="collections-pane"
       data-collections-pane
       data-open={open}
@@ -250,7 +250,7 @@ export function CollectionsPaneHost() {
       aria-hidden={!open}
       className="collections-pane-shell hidden h-full min-h-0 shrink-0 md:flex"
     >
-      <div ref={motion.content} className="collections-pane-content flex h-full min-h-0 shrink-0">
+      <div ref={content} className="collections-pane-content flex h-full min-h-0 shrink-0">
         <div ref={sectionMotion} className="workbench-section-content flex h-full w-full min-h-0">
           <div
             ref={attach}

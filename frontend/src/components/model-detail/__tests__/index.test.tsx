@@ -229,7 +229,7 @@ describe("ModelDetail", () => {
       );
       expect(screen.getByRole("heading", { level: 1, name: "Benchy" })).toBeVisible();
       expect(screen.getByRole("button", { name: "Add tags to Benchy" })).toBeVisible();
-      expect(screen.getByRole("button", { name: "Favorite" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Add Benchy to favorites" })).toBeVisible();
       expect(screen.getByRole("button", { name: "Share" })).toBeVisible();
       expect(screen.queryByPlaceholderText("Add a description…")).not.toBeInTheDocument();
     });
@@ -1629,7 +1629,7 @@ describe("ModelDetail", () => {
       await screen.findByText("Benchy");
       await user.click(screen.getByRole("tab", { name: /Revisions/ }));
 
-      await user.click(await screen.findByRole("button", { name: /Add/ }));
+      await user.click(await screen.findByRole("button", { name: "Add revision" }));
 
       expect(screen.queryByText("Add G-code revision")).toBeNull();
     });

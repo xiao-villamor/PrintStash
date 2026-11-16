@@ -47,7 +47,7 @@ const accessibleGpu = {
 };
 
 test.describe("settings route", () => {
-  test("dropdowns open the shared square menu and still choose a value", async ({ page }) => {
+  test("selects Settings values from the shared menu", async ({ page }) => {
     await page.goto("/settings?section=design");
     const theme = page.getByRole("combobox", { name: "Theme", exact: true });
     await expect(theme).toBeVisible();

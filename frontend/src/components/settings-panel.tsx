@@ -186,7 +186,7 @@ import {
   usePrinterCardImagePreference,
   writePrinterCardImagePreference,
 } from "@/lib/printer-card-display";
-import { CHANGELOG, GITHUB_REPO } from "@/lib/changelog";
+import { CHANGELOG, GITHUB_REPO, GITHUB_REPO_LABEL } from "@/lib/changelog";
 import {
   readPreviewPreferences,
   writePreviewPreferences,
@@ -5153,7 +5153,7 @@ export function SettingsPanel() {
                       {METADATA_FIELDS.map((field) => (
                         <label
                           key={field.id}
-                          className="flex h-8 cursor-pointer items-center gap-2 text-[13px] text-foreground"
+                          className="flex h-8 items-center gap-2 text-[13px] text-foreground"
                         >
                           <Checkbox
                             checked={metadataPrefs[field.id]}
@@ -5492,7 +5492,7 @@ export function SettingsPanel() {
                     <div className="settings-readonly-row">
                       <p className="text-[13px] font-medium text-foreground">{uiText("Source")}</p>
                       <span className="font-mono text-[13px] text-foreground">
-                        {`github.com/${GITHUB_REPO}`}
+                        {GITHUB_REPO_LABEL}
                       </span>
                     </div>
                   </div>

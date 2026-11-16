@@ -80,8 +80,8 @@ function runCli(fixture, extra = [], runtimeDirectory = runtime) {
 }
 
 async function collinearCase(fixture) {
-  // Positive vertex bounds but zero triangle area: both loaders genuinely render no foreground.
-  const vertices = [0, 0, 0, 1, 0, 0, 2, 0, 0];
+  // Coincident vertices stay coincident after projection and still leave nonzero bounds.
+  const vertices = [0, 0, 0, 0, 0, 0, 2, 0, 0];
   const normal = [0, 0, 1, 0, 0, 1, 0, 0, 1];
   const stl = Buffer.alloc(134);
   stl.writeUInt32LE(1, 80);

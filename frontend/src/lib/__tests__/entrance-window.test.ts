@@ -26,18 +26,24 @@ describe("useEntranceWindow", () => {
 
   it("applies the entrance value while the entrance plays", () => {
     const hook = mount({ entrance: {}, value: "folder-cards-forward" });
+    act(() => vi.advanceTimersToNextFrame());
+    act(() => vi.advanceTimersToNextFrame());
     act(() => vi.advanceTimersByTime(199));
     expect(hook.result.current).toBe("folder-cards-forward");
   });
 
   it("releases the entrance value once the entrance has played", () => {
     const hook = mount({ entrance: {}, value: "folder-cards-forward" });
+    act(() => vi.advanceTimersToNextFrame());
+    act(() => vi.advanceTimersToNextFrame());
     act(() => vi.advanceTimersByTime(200));
     expect(hook.result.current).toBeNull();
   });
 
   it("applies the value again for the next entrance", () => {
     const hook = mount({ entrance: {}, value: "results-settle" });
+    act(() => vi.advanceTimersToNextFrame());
+    act(() => vi.advanceTimersToNextFrame());
     act(() => vi.advanceTimersByTime(200));
     hook.rerender({ entrance: {}, value: "results-settle" });
     expect(hook.result.current).toBe("results-settle");
@@ -60,6 +66,8 @@ describe("useEntranceWindow", () => {
   it("keeps a released value released across re-renders of the same entrance", () => {
     const entrance = {};
     const hook = mount({ entrance, value: "folder-cards-back" });
+    act(() => vi.advanceTimersToNextFrame());
+    act(() => vi.advanceTimersToNextFrame());
     act(() => vi.advanceTimersByTime(200));
     hook.rerender({ entrance, value: "folder-cards-back" });
     expect(hook.result.current).toBeNull();

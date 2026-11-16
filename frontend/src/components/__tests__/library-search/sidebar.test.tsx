@@ -28,7 +28,7 @@ function setup(at = "/?favorites=true&tag=useful") {
 }
 
 describe("Library sidebar search", () => {
-  it("updates global results while typing, and preserves filters on submission and clearing", async () => {
+  it("preserves Library filters throughout the query lifecycle", async () => {
     setup();
     const user = userEvent.setup();
     await user.type(screen.getByRole("searchbox"), "bracket");

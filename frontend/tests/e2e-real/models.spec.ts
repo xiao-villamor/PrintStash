@@ -8,6 +8,7 @@
  */
 import { test, expect } from "./helpers";
 import { clickModelAction, modelCard, openModelPage, uploadModel } from "./util";
+import { settleLibraryRead } from "../e2e/_library";
 
 // Full lifecycle on the REAL backend: upload G-code → real ingestion creates the
 // model → edit it → soft-delete to trash → restore → purge forever.
@@ -44,7 +45,9 @@ test.describe("model library", () => {
       await expect(
         page.getByRole("button", { name: `Edit tags for ${name}`, exact: true }),
       ).toBeVisible();
-      await expect(page.getByRole("button", { name: "Favorite", exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: `Add ${name} to favorites`, exact: true }),
+      ).toBeVisible();
       await titleEditor.getByRole("textbox", { name: "Model name", exact: true }).fill(quickName);
       await titleEditor.getByRole("button", { name: "Save", exact: true }).click();
       await expect(titleEditor).toHaveCount(0);
@@ -74,10 +77,8 @@ test.describe("model library", () => {
       await expect(page.getByText(renamed)).toHaveCount(0); // gone from trash
 
       // Back in the library.
-      await expect(async () => {
-        await page.goto("/");
-        await expect(modelCard(page, renamed)).toBeVisible({ timeout: 2_000 });
-      }).toPass({ timeout: 15_000 });
+      await page.goto("/");
+      await settleLibraryRead(page, modelCard(page, renamed));
 
       // ── Delete + purge forever (cleanup) ────────────────────────────────────────
       await openModelPage(page, renamed);

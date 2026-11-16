@@ -79,7 +79,7 @@ function renderUpload(
 
 /** Choose one of the four ways in. */
 function mode(name: "Files" | "Bulk" | "From URL" | "From archive") {
-  return screen.getByRole("button", { name: new RegExp(`\\s*${name}\\s*`) });
+  return screen.getByRole("tab", { name: new RegExp(`\\s*${name}\\s*`) });
 }
 
 /** The mesh and G-code slots, in the order the dialog renders them. */

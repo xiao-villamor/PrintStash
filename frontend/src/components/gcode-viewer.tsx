@@ -267,9 +267,9 @@ const CAMERA_PRESETS = [
   "top",
 ] as const satisfies readonly ViewerCameraPreset[];
 const TOGGLE =
-  "h-7 px-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40";
+  "h-7 px-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-40";
 const ICON_BUTTON =
-  "inline-flex h-7 w-7 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40";
+  "inline-flex h-7 w-7 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-40";
 
 export interface GcodeViewerProps {
   url: string;
@@ -524,7 +524,7 @@ export function GcodeViewer({
           max={data.totalLayers - 1}
           value={currentLayer}
           onChange={(event) => setCurrentLayer(Number(event.target.value))}
-          className="min-h-0 w-4 flex-1 cursor-pointer accent-primary [direction:rtl] [writing-mode:vertical-lr]"
+          className="min-h-0 w-4 flex-1 accent-primary [direction:rtl] [writing-mode:vertical-lr]"
         />
         <button
           type="button"

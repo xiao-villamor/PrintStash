@@ -641,7 +641,7 @@ function CollectionTreeRow({
               onClick={() => onSelect(node.path, node.id)}
               className="flex min-h-7 flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               title={node.display_path}
-              aria-label={`${node.display_path} · ${uiText("counts.items", { count: node.subtree_entry_count })}`}
+              aria-description={`${node.display_path} · ${uiText("counts.items", { count: node.subtree_entry_count })}`}
               data-outliner-collection={node.path}
               {...attributes}
               role="treeitem"
@@ -1013,20 +1013,18 @@ export function FilterSidebarContent({
 
   // Opening the current collection reveals one useful level, without walking
   // the whole tree or undoing a subsequent explicit collapse by the reader.
-  const autoRevealedSelection = useRef<string | null>(null);
-  useEffect(() => {
-    if (!selectedCollection) {
-      autoRevealedSelection.current = null;
-      return;
+  const [autoRevealedSelection, setAutoRevealedSelection] = useState<string | null>(null);
+  const collection = lookup.data?.collection;
+  if (autoRevealedSelection !== selectedCollection) {
+    if (selectedCollection === null) {
+      setAutoRevealedSelection(null);
+    } else if (collectionsOnly && collection?.path === selectedCollection) {
+      setAutoRevealedSelection(selectedCollection);
+      if (collection.child_count > 0) {
+        setExpanded((previous) => new Set([...previous, selectedCollection]));
+      }
     }
-    const collection = lookup.data?.collection;
-    if (!collectionsOnly || collection?.path !== selectedCollection) return;
-    if (autoRevealedSelection.current === selectedCollection) return;
-    autoRevealedSelection.current = selectedCollection;
-    if (collection.child_count > 0) {
-      setExpanded((previous) => new Set([...previous, selectedCollection]));
-    }
-  }, [collectionsOnly, lookup.data, selectedCollection]);
+  }
 
   function toggleTag(slug: string) {
     if (selectedTags.includes(slug)) onTagsChange(selectedTags.filter((t) => t !== slug));
@@ -1634,7 +1632,9 @@ export function FilterSidebar(props: FilterSidebarProps) {
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7"
-                aria-label={uiText(treeModelsVisible ? "Hide models in tree" : "Show models in tree")}
+                aria-label={uiText(
+                  treeModelsVisible ? "Hide models in tree" : "Show models in tree",
+                )}
                 title={uiText(treeModelsVisible ? "Hide models in tree" : "Show models in tree")}
                 aria-pressed={!treeModelsVisible}
                 onClick={() => setTreeModelsVisible(!treeModelsVisible)}

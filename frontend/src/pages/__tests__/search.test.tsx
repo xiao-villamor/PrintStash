@@ -44,15 +44,17 @@ describe("Search results", () => {
     expect(app.requests().some((request) => request.url.startsWith("/api/v1/search?"))).toBe(false);
     expect(app.requestsWithMethod("POST")).toHaveLength(0);
   });
-  it("submits search text from the results page", async () => {
+  it("submits a revised query from mobile results", async () => {
     const user = userEvent.setup();
-    const app = results({ at: "/search?q=bracket&mode=lexical&type=model" });
+    const app = results({
+      at: "/search?q=bracket&mode=lexical&type=model",
+      matchesMedia: () => false,
+    });
     await screen.findByRole("link", { name: "Desk bracket" });
-    const query = screen.getByRole("textbox", { name: "Search text" });
+    const query = screen.getByRole("searchbox", { name: "Search library" });
 
     await user.clear(query);
-    await user.type(query, "mount");
-    await user.click(screen.getByRole("button", { name: /^Search$/ }));
+    await user.type(query, "mount{Enter}");
 
     await waitFor(() =>
       expect(

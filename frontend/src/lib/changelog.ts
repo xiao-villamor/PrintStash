@@ -13,6 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 export const GITHUB_REPO = "xiao-villamor/PrintStash";
+export const GITHUB_REPO_LABEL = `github.com/${GITHUB_REPO}`;
 
 export interface ChangelogEntry {
   version: string;

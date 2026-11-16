@@ -18,14 +18,17 @@ export function DetailTabLoading({
   children: ReactNode;
 }) {
   const [showPlaceholder, setShowPlaceholder] = useState(false);
+  const loading = enabled && pending;
+  const [previousLoading, setPreviousLoading] = useState(loading);
+  if (loading !== previousLoading) {
+    setPreviousLoading(loading);
+    setShowPlaceholder(false);
+  }
   useEffect(() => {
-    if (!enabled || !pending) {
-      setShowPlaceholder(false);
-      return;
-    }
+    if (!loading) return;
     const timer = window.setTimeout(() => setShowPlaceholder(true), PLACEHOLDER_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [pending, enabled]);
+  }, [loading]);
 
   if (!enabled) return children;
 

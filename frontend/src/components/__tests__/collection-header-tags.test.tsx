@@ -14,7 +14,7 @@ function mount(tags = ["functional"], canEdit = true) {
   return save;
 }
 async function draft(value: string) {
-  const opener = screen.queryByRole("button", { name: "+ Add tag" });
+  const opener = screen.queryByRole("button", { name: "Add tag" });
   if (opener) await userEvent.click(opener);
   await userEvent.type(screen.getByRole("textbox", { name: "New tag" }), value);
 }
@@ -43,7 +43,7 @@ describe("CollectionHeaderTags", () => {
     await userEvent.keyboard("{Escape}");
     expect(save).not.toHaveBeenCalled();
     expect(screen.queryByRole("textbox")).toBeNull();
-    await waitFor(() => expect(screen.getByRole("button", { name: "+ Add tag" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add tag" })).toHaveFocus());
   });
   it("removes only the chosen tag", async () => {
     const save = mount(["functional", "outdoor"]);
@@ -105,7 +105,7 @@ describe("CollectionHeaderTags", () => {
   });
   it("keeps an empty submission available for correction", async () => {
     const save = mount();
-    await userEvent.click(screen.getByRole("button", { name: "+ Add tag" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add tag" }));
     await userEvent.keyboard("{Enter}");
     expect(screen.getByRole("alert")).toHaveTextContent("Type a tag name first.");
     expect(save).not.toHaveBeenCalled();
@@ -120,7 +120,7 @@ describe("CollectionHeaderTags", () => {
   });
   it("closes an empty field without stealing the next control's focus", async () => {
     mount();
-    await userEvent.click(screen.getByRole("button", { name: "+ Add tag" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add tag" }));
     const next = document.createElement("button");
     document.body.append(next);
     try {
@@ -134,7 +134,7 @@ describe("CollectionHeaderTags", () => {
   });
   it("removes the last tag with Backspace on an empty field", async () => {
     const save = mount(["functional", "outdoor"]);
-    await userEvent.click(screen.getByRole("button", { name: "+ Add tag" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add tag" }));
     await userEvent.keyboard("{Backspace}");
     expect(save).toHaveBeenCalledWith(["functional"]);
     await waitFor(() =>
@@ -161,7 +161,7 @@ describe("CollectionHeaderTags", () => {
   });
   it("closes an empty validation error on blur", async () => {
     const save = mount();
-    await userEvent.click(screen.getByRole("button", { name: "+ Add tag" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add tag" }));
     await userEvent.keyboard("{Enter}");
     expect(screen.getByRole("alert")).toBeVisible();
     await userEvent.tab();

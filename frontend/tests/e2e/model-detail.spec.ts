@@ -163,7 +163,7 @@ test.describe("model detail route", () => {
     );
   });
 
-  test("isolates one toolpath layer and fits the view back to isometric", async ({ page }) => {
+  test("restores the isometric fit after isolating a toolpath layer", async ({ page }) => {
     const preview = await openToolpath(page);
     const canvas = preview.locator("canvas");
     const all = await canvas.screenshot();

@@ -241,20 +241,19 @@ describe("Library model inspector", () => {
       return element;
     };
 
-    it("settles into its open state after mounting", async () => {
+    it("opens immediately when reduced motion is preferred", () => {
       setup();
-      expect(panel()).toHaveAttribute("data-state", "closed");
-      await waitFor(() => expect(panel()).toHaveAttribute("data-state", "open"));
+      expect(panel()).toHaveAttribute("data-state", "open");
     });
 
-    it("stays on screen while it leaves", async () => {
+    it("releases keyboard ownership when closed", async () => {
       const app = setup();
       await ready();
       app.rerender(
         <LibraryModelInspector id={1} open={false} canWrite onClose={vi.fn<() => void>()} />,
       );
       expect(panel()).toHaveAttribute("data-state", "closed");
-      expect(panel()).not.toHaveAttribute("hidden");
+      expect(panel()).toHaveAttribute("inert");
     });
 
     it("hides once it has left", async () => {

@@ -925,7 +925,7 @@ describe("SettingsPanel", () => {
         },
       });
 
-      await user.click(await screen.findByTitle("Revoke API key"));
+      await user.click(await screen.findByRole("button", { name: "Revoke API key" }));
 
       await waitFor(() =>
         expect(
@@ -2741,7 +2741,7 @@ describe("SettingsPanel", () => {
       expect(await screen.findByText("v0.12.1")).toBeInTheDocument();
     });
 
-    it("names the installed version and its source repository", async () => {
+    it("shows installed build provenance", async () => {
       renderSettings({ at: "/settings?section=about" });
 
       const version = await screen.findByRole("group", { name: "Version" });
@@ -3369,9 +3369,11 @@ describe("SettingsPanel", () => {
       renderSettings({ at: "/settings?section=design" });
       await screen.findByText("Model metadata");
 
-      await user.click(screen.getByRole("button", { name: "Infill", pressed: true }));
+      await user.click(screen.getByRole("checkbox", { name: "Infill", checked: true }));
 
-      expect(window.localStorage.getItem("printstash.metadata.visible")).toContain("infill");
+      expect(
+        JSON.parse(window.localStorage.getItem("printstash.metadata.visible") ?? "{}"),
+      ).toMatchObject({ infill: false });
     });
 
     it("counts how many are showing", async () => {
@@ -3387,10 +3389,7 @@ describe("SettingsPanel", () => {
 
       await user.click(screen.getByRole("button", { name: "Show all" }));
 
-      expect(screen.getByRole("button", { name: "Infill" })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
+      expect(screen.getByRole("checkbox", { name: "Infill" })).toBeChecked();
     });
 
     it("turns every field off at once", async () => {
@@ -3400,10 +3399,7 @@ describe("SettingsPanel", () => {
 
       await user.click(screen.getByRole("button", { name: "Hide all" }));
 
-      expect(screen.getByRole("button", { name: "Infill" })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
+      expect(screen.getByRole("checkbox", { name: "Infill" })).not.toBeChecked();
     });
 
     it("puts the fields back to the defaults", async () => {
@@ -3629,7 +3625,7 @@ describe("Settings account draft lifetime", () => {
     });
     expect(await screen.findByRole("alert")).toHaveTextContent("Users could not be loaded.");
     expect(screen.getByText("Slicer")).toBeVisible();
-    expect(screen.getByTitle("Revoke API key")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Revoke API key" })).toBeEnabled();
   });
   it("disables a selected collection grant after the User list is denied", async () => {
     const app = renderSettings({

@@ -180,7 +180,7 @@ export function DropdownMenu({
       window.visualViewport?.removeEventListener("resize", onResize);
       window.visualViewport?.removeEventListener("scroll", position);
     };
-  }, [mounted, align, anchorPoint?.x, anchorPoint?.y, portal, portalHost, onOpenChange]);
+  }, [mounted, align, anchorPoint, portal, portalHost, onOpenChange]);
 
   function contains(target: Node) {
     return (

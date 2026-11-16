@@ -1,3 +1,4 @@
+/** CSS time values from design tokens convert to seconds consistently. */
 import { describe, expect, it } from "vitest";
 import { cssTimeSeconds } from "@/lib/css-time";
 

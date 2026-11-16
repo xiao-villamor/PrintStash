@@ -131,7 +131,7 @@ describe("ModelCardRevision", () => {
     expect(screen.queryByText(/^Rev /)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Print|Download/ })).not.toBeInTheDocument();
   });
-  it("ends every card on the same size and date line", () => {
+  it("aligns each card's metadata footer", () => {
     renderRevision(aModel({ files: [aRevision({ file_type: "stl" })] }));
     expect(screen.getByText("166 × 166 × 1 mm")).toBeVisible();
     expect(document.querySelector(".library-card-meta time")).toHaveAttribute("dateTime");

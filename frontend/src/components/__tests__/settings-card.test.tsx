@@ -1,3 +1,4 @@
+/** Settings cards expose their title, description and actions through the questionnaire layout. */
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -5,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { SettingsCard, SettingsSwitch } from "@/components/settings-card";
 
 describe("SettingsSwitch", () => {
-  it("states its value as text and reports the next value", async () => {
+  it("exposes a readable switch value through a toggle", async () => {
     const onChange = vi.fn<(checked: boolean) => void>();
     render(<SettingsSwitch checked={false} onChange={onChange} label="Enable SSO login" />);
 
@@ -30,7 +31,7 @@ describe("SettingsSwitch", () => {
 });
 
 describe("SettingsCard", () => {
-  it("names its group by its title and keeps the action beside the heading", () => {
+  it("lays out the named settings group with a header action", () => {
     render(
       <SettingsCard
         title="Version"
@@ -49,7 +50,7 @@ describe("SettingsCard", () => {
 });
 
 describe("Badge", () => {
-  it("exposes its slot and variant so a surface can restyle it as status text", () => {
+  it("exposes the description styling hooks", () => {
     render(<Badge variant="warning">Auto-disabled</Badge>);
 
     const badge = screen.getByText("Auto-disabled");

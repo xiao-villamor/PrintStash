@@ -17,10 +17,10 @@ function Location() {
     </output>
   );
 }
-function searchBox(options: RenderAppOptions = {}) {
+function searchBox(options: RenderAppOptions = {}, placement: "header" | "sidebar" = "header") {
   return renderApp(
     <>
-      <LibrarySearch />
+      <LibrarySearch placement={placement} />
       <Location />
     </>,
     {
@@ -40,11 +40,13 @@ describe("LibrarySearch", () => {
     searchBox();
     expect(screen.getByRole("searchbox")).toHaveAttribute("spellcheck", "false");
   });
-  it("returns to the library when clearing a submitted search", async () => {
+  it("clears the submitted search in the results view", async () => {
     const user = userEvent.setup();
     searchBox({ at: "/search?q=bracket&parse=1" });
     await user.click(screen.getByRole("button", { name: "Clear search" }));
-    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(/^\/\?$/));
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent("/search?mode=lexical"),
+    );
     expect(screen.getByRole("searchbox")).toHaveValue("");
     expect(screen.getByRole("searchbox")).toHaveFocus();
   });
@@ -54,11 +56,13 @@ describe("LibrarySearch", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("/?c=Tools&tag=useful&sort=name_asc");
     expect(screen.getByRole("searchbox")).toHaveValue("");
   });
-  it("leaves submitted results when the query is erased with the keyboard", async () => {
+  it("clears the result query through keyboard editing", async () => {
     const user = userEvent.setup();
     searchBox({ at: "/search?q=bracket" });
     await user.clear(screen.getByRole("searchbox"));
-    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(/^\/\?$/));
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent("/search?mode=lexical"),
+    );
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -89,20 +93,20 @@ describe("LibrarySearch", () => {
       expect(app.requests().some((request) => request.url.includes("/search?"))).toBe(true),
     );
     await user.click(screen.getByRole("button", { name: "Clear search" }));
-    expect(await screen.findByRole("heading", { name: "Library" })).toBeVisible();
+    expect(screen.getByRole("searchbox")).toHaveValue("");
     await act(async () => pending.resolve(json(searchResponse({ items: [aSearchResult()] }))));
     expect(screen.queryByRole("link", { name: "Desk bracket" })).toBeNull();
     expect(screen.queryByText("Searching…")).toBeNull();
   });
-  it("debounces lexical suggestions without inference", async () => {
+  it("debounces keyword filtering in the Library", async () => {
     const user = userEvent.setup();
     const app = searchBox();
     await user.type(screen.getByRole("searchbox"), "bracket");
-    expect(await screen.findByRole("link", { name: /Desk bracket/ })).toBeVisible();
-    const requests = app.requests().filter((request) => request.url.startsWith("/api/v1/search?"));
-    expect(requests).toHaveLength(1);
-    expect(new URL(requests[0].url, "http://test").searchParams.get("mode")).toBe("lexical");
-    expect(requests[0].url).toContain("instant=true");
+
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/?q=bracket"));
+    expect(
+      app.requests().filter((request) => request.url.startsWith("/api/v1/search?")),
+    ).toHaveLength(0);
   });
   it("keeps Enter in the library with existing filters", async () => {
     const user = userEvent.setup();
@@ -125,12 +129,14 @@ describe("LibrarySearch", () => {
       },
     });
     await user.type(screen.getByRole("searchbox"), "small boat");
-    const ai = await screen.findByRole("button", { name: "Search with AI" });
+    const ai = await screen.findByRole("button", { name: "AI Search" });
     expect(ai).toHaveAttribute("aria-pressed", "false");
     expect(ai.textContent).toBe("");
     await user.click(ai);
-    expect(screen.getByTestId("location")).toHaveTextContent("/search?q=small+boat&parse=1");
-    expect(screen.getByRole("button", { name: "Turn off AI search" })).toHaveAttribute(
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/search?q=small+boat&mode=hybrid&parse=1",
+    );
+    expect(screen.getByRole("button", { name: "AI Search" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -141,7 +147,7 @@ describe("LibrarySearch", () => {
         "GET /api/v1/search/status": json(searchStatus({ enabled: true, semantic_ready: true })),
       },
     });
-    expect(await screen.findByRole("button", { name: "Enter a search to use AI" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "AI Search" })).toBeEnabled();
     expect(screen.getByRole("searchbox")).toHaveValue("");
   });
   it("shows unavailable AI without allowing an AI search", async () => {
@@ -151,10 +157,7 @@ describe("LibrarySearch", () => {
       },
     });
     await userEvent.setup().type(screen.getByRole("searchbox"), "bracket");
-    expect(
-      await screen.findByRole("button", { name: "AI search is getting ready" }),
-    ).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "Search with AI" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "AI Search" })).toBeDisabled();
   });
   it("disables cached capabilities after a failed refresh", async () => {
     const app = searchBox({
@@ -165,14 +168,12 @@ describe("LibrarySearch", () => {
       },
     });
     await userEvent.type(screen.getByRole("searchbox"), "bracket");
-    expect(await screen.findByRole("button", { name: "Search with AI" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "AI Search" })).toBeEnabled();
     app.route({ "GET /api/v1/search/status": json({}, 503) });
     await act(async () => {
       await app.client.refetchQueries({ queryKey: ["ai-search", "status"] });
     });
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Search with AI" })).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByRole("button", { name: "AI Search" })).toBeNull());
     expect(screen.queryByRole("button", { name: "Search by image" })).toBeNull();
     expect(screen.getByRole("searchbox")).toHaveValue("bracket");
     await userEvent.keyboard("{Enter}");
@@ -191,11 +192,11 @@ describe("LibrarySearch", () => {
         "GET /api/v1/search/status": json(searchStatus({ enabled: true, semantic_ready: true })),
       },
     });
-    const ai = await screen.findByRole("button", { name: "Turn off AI search" });
+    const ai = await screen.findByRole("button", { name: "AI Search" });
     expect(ai).toHaveAttribute("aria-pressed", "true");
     await user.click(ai);
     expect(screen.getByTestId("location")).toHaveTextContent("/search?q=bracket&mode=lexical");
-    expect(screen.getByRole("button", { name: "Search with AI" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "AI Search" })).toHaveAttribute(
       "aria-pressed",
       "false",
     );
@@ -208,9 +209,11 @@ describe("LibrarySearch", () => {
         "GET /api/v1/search/status": json(searchStatus({ enabled: true, semantic_ready: true })),
       },
     });
-    await user.click(await screen.findByRole("button", { name: "Search with AI" }));
-    expect(screen.getByTestId("location")).toHaveTextContent("/search?q=bracket&parse=1");
-    expect(screen.getByRole("button", { name: "Turn off AI search" })).toHaveAttribute(
+    await user.click(await screen.findByRole("button", { name: "AI Search" }));
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/search?q=bracket&mode=hybrid&parse=1",
+    );
+    expect(screen.getByRole("button", { name: "AI Search" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -227,71 +230,45 @@ describe("LibrarySearch", () => {
     await user.type(input, " boat{Enter}");
     expect(screen.getByTestId("location")).toHaveTextContent("/search?q=bracket+boat&mode=lexical");
   });
-  it("keeps keyboard focus through suggestions", async () => {
-    const user = userEvent.setup();
+  it("keeps focus in the search field as the Library query updates", async () => {
     searchBox();
-    await user.keyboard("/");
     const input = screen.getByRole("searchbox");
+    await userEvent.type(input, "a/b");
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/?q=a%2Fb"));
     expect(input).toHaveFocus();
-    await user.type(input, "bracket");
-    const result = await screen.findByRole("link", { name: /Desk bracket/ });
-    expect(input).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
-    expect(result).toHaveFocus();
-    await user.keyboard("{Escape}");
-    expect(input).toHaveFocus();
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
-  it("ignores late suggestions for a replaced query", async () => {
-    const user = userEvent.setup();
-    searchBox();
-    let finish: (response: Response) => void = () => {};
-    const old = new Promise<Response>((resolve) => {
-      finish = resolve;
-    });
-    const fetcher = vi.fn<typeof fetch>(async (url) =>
-      String(url).includes("/status")
-        ? json(searchStatus())
-        : new URL(String(url), "http://localhost").searchParams.get("q") === "old"
-          ? old
-          : json(searchResponse({ items: [aSearchResult({ name: "Current bracket" })] })),
-    );
-    vi.stubGlobal("fetch", fetcher);
-    const input = screen.getByRole("searchbox");
-    await user.type(input, "old");
-    await waitFor(() =>
-      expect(fetcher.mock.calls.some(([url]) => String(url).includes("q=old"))).toBe(true),
-    );
-    await user.clear(input);
-    await user.type(input, "new");
-    expect(input).toHaveValue("new");
-    expect(await screen.findByRole("link", { name: /Current bracket/ })).toBeVisible();
-    await act(async () => {
-      finish(json(searchResponse({ items: [aSearchResult({ name: "Stale bracket" })] })));
-    });
-    expect(screen.queryByText("Stale bracket")).toBeNull();
-  });
-  it("supports Spanish search controls", async () => {
-    const user = userEvent.setup();
-    searchBox({
-      locale: "es",
-      routes: {
-        "GET /api/v1/search/status": json(searchStatus({ enabled: true, semantic_ready: true })),
+
+  it("supports Spanish sidebar search controls", async () => {
+    searchBox(
+      {
+        locale: "es",
+        routes: {
+          "GET /api/v1/search/status": json(searchStatus({ enabled: true, semantic_ready: true })),
+        },
       },
-    });
-    await user.type(screen.getByRole("searchbox", { name: "Buscar en la biblioteca" }), "soporte");
-    expect(await screen.findByText("Coincidencias por palabras")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Buscar con IA" })).toHaveAttribute(
+      "sidebar",
+    );
+
+    await userEvent.type(
+      screen.getByRole("searchbox", { name: "Buscar en la biblioteca" }),
+      "soporte",
+    );
+    expect(screen.getByRole("button", { name: "Búsqueda con IA" })).toHaveAttribute(
       "aria-pressed",
       "false",
     );
-    expect(screen.getByRole("button", { name: "Ver todos los resultados" })).toBeVisible();
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/?q=soporte"));
   });
-  it("reports unavailable suggestions with a recovery action", async () => {
-    const user = userEvent.setup();
-    searchBox({ routes: { "GET /api/v1/search?": json({}, 503) } });
-    await user.type(screen.getByRole("searchbox"), "bracket");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Suggestions could not load");
-    expect(screen.getByRole("button", { name: "Show all results" })).toBeVisible();
+
+  it("recovers sidebar AI capability after a failed request", async () => {
+    const app = searchBox({ routes: { "GET /api/v1/search/status": json({}, 503) } }, "sidebar");
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(screen.getByRole("button", { name: "AI Search" })).toBeDisabled();
+
+    app.route({
+      "GET /api/v1/search/status": json(searchStatus({ enabled: true, semantic_ready: true })),
+    });
+    await userEvent.click(retry);
+    await waitFor(() => expect(screen.getByRole("button", { name: "AI Search" })).toBeEnabled());
   });
 });

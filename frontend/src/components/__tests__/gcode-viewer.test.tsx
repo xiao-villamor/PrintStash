@@ -145,7 +145,7 @@ describe("GcodeViewer", () => {
     );
   });
 
-  it("offers the camera views as one compact choice and keeps it while the layer changes", async () => {
+  it("preserves a compact camera choice across layer changes", async () => {
     const user = userEvent.setup();
     fetchMock.mockResolvedValue(textResponse(TOOLPATH));
 
@@ -175,7 +175,7 @@ describe("GcodeViewer", () => {
     expect(screen.getByRole("combobox", { name: "Camera view" })).toHaveValue("isometric");
   });
 
-  it("steps through layers from the layer rail and isolates the current layer", async () => {
+  it("isolates the layer selected with the rail", async () => {
     const user = userEvent.setup();
     fetchMock.mockResolvedValue(
       textResponse("G1 Z0.2 F600\nG1 X1 Y1 E1\nG1 Z0.4\nG1 X2 Y2 E2\nG1 Z0.6\nG1 X3 Y3 E3\n"),

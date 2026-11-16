@@ -637,7 +637,7 @@ describe("ExternalLibrariesPanel", () => {
           .mockResolvedValue([aVolume({ enabled: false })]),
       });
 
-      expect(await screen.findByText("Paused")).toBeInTheDocument();
+      expect(await screen.findByText(/paused/i)).toBeInTheDocument();
     });
 
     it("explains that a legacy root needs proof before recovery", async () => {
@@ -778,7 +778,7 @@ describe("ExternalLibrariesPanel", () => {
     it("says a local folder is watched in real time", async () => {
       renderPanel();
 
-      expect(await screen.findByText("Watching (real-time)")).toBeInTheDocument();
+      expect(await screen.findByText(/Watching \(real-time\)/)).toBeInTheDocument();
     });
 
     it("says a network folder falls back to the schedule", async () => {
@@ -790,7 +790,7 @@ describe("ExternalLibrariesPanel", () => {
           .mockResolvedValue([aVolume({ fs_kind: "network", watch_active: false })]),
       });
 
-      expect(await screen.findByText("Network folder — scheduled scans only")).toBeInTheDocument();
+      expect(await screen.findByText(/Network folder — scheduled scans only/)).toBeInTheDocument();
     });
 
     it("says so when watching was turned off deliberately", async () => {
@@ -800,7 +800,7 @@ describe("ExternalLibrariesPanel", () => {
           .mockResolvedValue([aVolume({ watch_mode: "off", watch_active: false })]),
       });
 
-      expect(await screen.findByText("Watching off — scheduled scans only")).toBeInTheDocument();
+      expect(await screen.findByText(/Watching off — scheduled scans only/)).toBeInTheDocument();
     });
 
     it("describes a preset schedule in words", async () => {
@@ -896,7 +896,7 @@ describe("ExternalLibrariesPanel", () => {
           .mockResolvedValue([aVolume({ last_scanned_at: null })]),
       });
 
-      expect(await screen.findByText(/last scan Never/)).toBeInTheDocument();
+      expect(await screen.findByText(/Last scan Never/i)).toBeInTheDocument();
     });
   });
 

@@ -430,7 +430,7 @@ describe("OpenDesign Model card facts", () => {
     expect(screen.queryByText("No revision status")).not.toBeInTheDocument();
     expect(screen.queryByText("No G-code")).not.toBeInTheDocument();
   });
-  it("shows file-stem names with spaces and keeps the exact name as its tooltip", () => {
+  it("displays readable stems with the original name as a tooltip", () => {
     renderCard({ name: "Shoe+Rack+-+Shelf" });
     expect(screen.getByRole("heading", { level: 3, name: "Shoe Rack - Shelf" })).toHaveAttribute(
       "title",

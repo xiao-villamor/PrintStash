@@ -364,19 +364,19 @@ describe("ModelBrowser", () => {
         }),
       ).not.toBeInTheDocument();
 
-      expect(within(actions).getByRole("link", { name: "Similar models" })).toBeVisible();
-      expect(within(actions).getByRole("button", { name: "New collection" })).toBeVisible();
+      expect(within(main).getByRole("button", { name: "New collection" })).toBeVisible();
       expect(within(actions).getByRole("button", { name: "Select" })).toBeVisible();
       expect(screen.getByRole("checkbox", { name: "Select Benchy" })).toBeVisible();
       expect(screen.queryByRole("button", { name: "Library tools" })).not.toBeInTheDocument();
       expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     });
-    it("links to library-wide similar models", async () => {
+    it("links to library-wide similar models from More", async () => {
+      const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
       await within(screen.getByRole("main")).findByText("Benchy");
-      const actions = screen.getByRole("group", { name: "Library tools" });
 
-      expect(within(actions).getByRole("link", { name: "Similar models" })).toHaveAttribute(
+      await user.click(screen.getAllByRole("button", { name: "More" }).at(-1)!);
+      expect(await screen.findByRole("menuitem", { name: "Similar models" })).toHaveAttribute(
         "href",
         "/library/similar",
       );
@@ -385,7 +385,7 @@ describe("ModelBrowser", () => {
       const user = userEvent.setup();
       renderVault();
       await within(screen.getByRole("main")).findByRole("button", { name: "All Models" });
-      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(screen.getAllByRole("button", { name: "More" }).at(-1)!);
       await user.click(screen.getByRole("menuitem", { name: "New multipart set" }));
       expect(screen.getByRole("dialog", { name: "New multipart set" })).toBeVisible();
     });
@@ -403,10 +403,10 @@ describe("ModelBrowser", () => {
     it("hides selection for signed-out readers", async () => {
       renderVault({ auth: signedOutSession(), models: [aModelListItem({ name: "Benchy" })] });
       await within(screen.getByRole("main")).findByText("Benchy");
-      const actions = screen.getByRole("group", { name: "Library tools" });
+      const main = screen.getByRole("main");
 
-      expect(within(actions).queryByRole("button", { name: "Select" })).not.toBeInTheDocument();
-      expect(within(actions).getByRole("button", { name: "New collection" })).toBeDisabled();
+      expect(within(main).queryByRole("button", { name: "Select" })).not.toBeInTheDocument();
+      expect(within(main).getByRole("button", { name: "New collection" })).toBeDisabled();
       expect(screen.queryByRole("checkbox", { name: "Select Benchy" })).not.toBeInTheDocument();
     });
     it("keeps the Library title when Favorites filters the results", async () => {
@@ -918,7 +918,9 @@ describe("ModelBrowser", () => {
 
       const main = await screen.findByRole("main");
       for (const path of ["christine", "pegboard", "models"]) {
-        expect(main.querySelector(`[data-collection-path="${path}"]`)).toBeVisible();
+        await waitFor(() =>
+          expect(main.querySelector(`[data-collection-path="${path}"]`)).toBeVisible(),
+        );
       }
     });
 
@@ -931,8 +933,7 @@ describe("ModelBrowser", () => {
         ],
       });
 
-      const main = await screen.findByRole("main");
-      expect(within(main).getByRole("button", { name: /Christine/ })).toBeVisible();
+      expect(await screen.findByRole("treeitem", { name: "Christine" })).toBeVisible();
     });
 
     it("opens a collection from its grid card", async () => {
@@ -940,7 +941,7 @@ describe("ModelBrowser", () => {
       renderVault({ collections: [aCollection()] });
 
       const main = await screen.findByRole("main");
-      await user.click(within(main).getByRole("button", { name: /Parts/ }));
+      await user.click(await within(main).findByRole("button", { name: /Parts/ }));
 
       expect(await screen.findByRole("heading", { name: "Parts" })).toBeVisible();
     });
@@ -949,11 +950,11 @@ describe("ModelBrowser", () => {
       renderVault({ collections: [aCollection()], historyProbe: true });
 
       const main = await screen.findByRole("main");
-      fireEvent.click(within(main).getByRole("button", { name: /Parts/ }));
+      fireEvent.click(await within(main).findByRole("button", { name: /Parts/ }));
       expect(await screen.findByRole("heading", { name: "Parts" })).toBeVisible();
 
       const breadcrumb = within(main).getByRole("navigation");
-      fireEvent.click(within(breadcrumb).getByRole("button", { name: "Parts" }));
+      fireEvent.click(within(breadcrumb).getByText("Parts"));
       fireEvent.click(screen.getByRole("button", { name: "History back" }));
 
       await waitFor(() =>
@@ -1008,9 +1009,9 @@ describe("ModelBrowser", () => {
       // Every level of the path has to be reachable, or the user is stranded in
       // a folder with no way back up.
       await waitFor(() => {
-        const labels = screen.getAllByRole("button").map((button) => button.textContent);
-        expect(labels).toEqual(expect.arrayContaining([expect.stringContaining("Parts")]));
-        expect(labels).toEqual(expect.arrayContaining([expect.stringContaining("Brackets")]));
+        const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumbs" });
+        expect(within(breadcrumb).getByText("Parts")).toBeVisible();
+        expect(within(breadcrumb).getByText("Brackets")).toHaveAttribute("aria-current", "page");
       });
     });
   });
@@ -1068,7 +1069,9 @@ describe("ModelBrowser", () => {
       return waitFor(() => {
         const card = screen
           .getByRole("main")
-          .querySelector<HTMLElement>(`[data-collection-path="${path}"] button:not([role])`);
+          .querySelector<HTMLElement>(
+            `[data-collection-path="${path}"][role="button"], [data-collection-path="${path}"] button:not([role])`,
+          );
         if (!card) throw new Error(`no folder card for ${path}`);
         return card;
       });
@@ -1082,7 +1085,7 @@ describe("ModelBrowser", () => {
       return requests().filter(
         (call) =>
           call.method === "GET" &&
-          call.url.startsWith(prefix) &&
+          new URL(call.url, "http://test").pathname === prefix &&
           new URLSearchParams(call.url.split("?")[1] ?? "").get("collection") === collection,
       );
     }
@@ -1211,7 +1214,7 @@ describe("ModelBrowser", () => {
           ),
         ).toBe(true),
       );
-      expect(within(breadcrumb).getByRole("button", { name: "Parts" })).toBeVisible();
+      expect(within(breadcrumb).getByText("Parts")).toBeVisible();
       fireEvent.click(await folderCard("parts/brackets"));
       await waitFor(() =>
         expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
@@ -1226,7 +1229,7 @@ describe("ModelBrowser", () => {
         }),
       );
       expect(screen.getByRole("heading", { name: "Parts" })).toBeVisible();
-      expect(within(breadcrumb).getByRole("button", { name: "Parts" })).toBeVisible();
+      expect(within(breadcrumb).getByText("Parts")).toBeVisible();
       const href = new URL(
         screen.getByRole("link", { name: /Displayed shelf/ }).getAttribute("href")!,
         "http://test",
@@ -1244,7 +1247,7 @@ describe("ModelBrowser", () => {
       );
       await screen.findByText("Current bracket");
       expect(screen.getByRole("heading", { name: "Brackets" })).toBeVisible();
-      expect(within(breadcrumb).getByRole("button", { name: "Brackets" })).toBeVisible();
+      expect(within(breadcrumb).getByText("Brackets")).toBeVisible();
       expect(screen.queryByText("Displayed shelf")).not.toBeInTheDocument();
       expect(screen.queryByText("Late root")).not.toBeInTheDocument();
     });
@@ -1526,7 +1529,7 @@ describe("ModelBrowser", () => {
       await within(screen.getByRole("main")).findByText("Benchy");
 
       await user.click(sortButton());
-      await user.click(screen.getAllByRole("menuitem", { name: "Name A–Z" }).at(-1)!);
+      await user.click(screen.getAllByRole("menuitemradio", { name: "Name A–Z" }).at(-1)!);
 
       expect(screen.getByTestId("vault-location")).toHaveTextContent("sort=name-asc");
     });
@@ -1558,7 +1561,7 @@ describe("ModelBrowser", () => {
       const sort = sortButton();
       await user.click(sort);
       // Each bar owns its own menu, so scope the choice to the one just opened.
-      await user.click(screen.getAllByRole("menuitem", { name: "Name A–Z" }).at(-1)!);
+      await user.click(screen.getAllByRole("menuitemradio", { name: "Name A–Z" }).at(-1)!);
 
       expect(window.localStorage.getItem("ps-vault-sort")).toBe("name-asc");
     });
@@ -1568,7 +1571,7 @@ describe("ModelBrowser", () => {
       const app = renderVault({ at: "/?q=benchy", models: [aModelListItem({ name: "Benchy" })] });
       await within(screen.getByRole("main")).findByText("Benchy");
       await user.click(sortButton());
-      await user.click(screen.getAllByRole("menuitem", { name: "Relevance" }).at(-1)!);
+      await user.click(screen.getAllByRole("menuitemradio", { name: "Relevance" }).at(-1)!);
       expect(window.localStorage.getItem("ps-vault-sort")).toBe("relevance");
       await waitFor(() =>
         expect(
@@ -3231,11 +3234,8 @@ describe("ModelBrowser", () => {
         routes: { "POST /api/v1/saved-views": json(aSavedView()) },
       });
       await within(screen.getByRole("main")).findByText("Benchy");
-      await user.click(screen.getByRole("tab", { name: "Saved views" }));
-      const savedViews = await screen.findByRole("region", { name: "Saved views" });
-      await user.click(
-        await within(savedViews).findByRole("button", { name: "Save current view" }),
-      );
+      await user.click(screen.getByRole("button", { name: /Saved views/ }));
+      await user.click(await screen.findByRole("button", { name: /Save current view/ }));
       const dialog = await screen.findByRole("dialog");
       await user.type(within(dialog).getByRole("textbox"), "PETG");
 
@@ -3321,11 +3321,8 @@ describe("ModelBrowser", () => {
         },
       });
       await within(screen.getByRole("main")).findByText("Benchy");
-      await user.click(screen.getByRole("tab", { name: "Saved views" }));
-
-      await screen.findByRole("heading", { name: "PETG only" });
-      await user.click(screen.getByRole("button", { name: "More" }));
-      await user.click(screen.getByRole("menuitem", { name: "Update with current filters" }));
+      await user.click(screen.getByRole("button", { name: /Saved views/ }));
+      await user.click(await screen.findByTitle("Update with current filters"));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
@@ -3438,7 +3435,6 @@ describe("ModelBrowser", () => {
       });
 
       await within(screen.getByRole("main")).findByText("Benchy");
-      await waitForLibraryActions();
       expect(screen.queryByRole("button", { name: /Saved views/ })).toBeNull();
     });
   });
@@ -3505,7 +3501,7 @@ describe("ModelBrowser", () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
       await within(screen.getByRole("main")).findByText("Benchy");
 
-      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(screen.getAllByRole("button", { name: "More" }).at(-1)!);
       await user.click(screen.getByRole("menuitem", { name: "Documents" }));
 
       expect(window.localStorage.getItem("printstash.last.view")).toBe("docs");
@@ -3640,8 +3636,9 @@ describe("ModelBrowser", () => {
       });
       await within(screen.getByRole("main")).findByText("Favorite bracket");
 
+      fireEvent.contextMenu(screen.getByRole("link", { name: /Favorite bracket/ }));
       await user.click(
-        screen.getByRole("button", { name: "Remove Favorite bracket from favorites" }),
+        await screen.findByRole("menuitem", { name: "Remove Favorite bracket from favorites" }),
       );
       expect(within(screen.getByRole("main")).getByText("Favorite bracket")).toBeVisible();
       pending.resolve(json({ model_id: 1, starred: false }));

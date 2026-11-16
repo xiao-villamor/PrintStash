@@ -154,9 +154,9 @@ export function useCollectionsPaneMotion(open: boolean) {
       reduced.removeEventListener("change", onPreference);
       desktop.removeEventListener("change", onPreference);
       if (widthAnimation && trajectory && !settled) {
-        const time = widthAnimation.currentTime;
+        const time = Number(widthAnimation.currentTime);
         velocity.current =
-          trajectory.sample(typeof time === "number" ? time / 1000 : 0).velocity * fullWidth;
+          trajectory.sample(Number.isFinite(time) ? time / 1000 : 0).velocity * fullWidth;
         shell.style.width = `${shell.getBoundingClientRect().width}px`;
       }
       widthAnimation?.cancel();

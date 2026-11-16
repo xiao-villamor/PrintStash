@@ -47,7 +47,7 @@ describe("LibraryStatusFilters", () => {
     expect(screen.getByRole("radio", { name: "Ready 0" })).not.toBeChecked();
     expect(screen.getByRole("radio", { name: "Failed 0" })).toBeChecked();
   });
-  it("counts Ready and Needs test even when nothing matches", () => {
+  it("shows status counts for empty results", () => {
     renderApp(
       <LibraryStatusFilters
         value={[]}

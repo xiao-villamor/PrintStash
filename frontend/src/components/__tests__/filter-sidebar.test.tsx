@@ -172,7 +172,7 @@ async function folderRow(name: string): Promise<HTMLElement> {
 
 /** Open a folder the way a user does, by its chevron. */
 async function openFolder(user: ReturnType<typeof userEvent.setup>, name: string) {
-  await user.click(within(await folderRow(name)).getByRole("button", { name: "Expand" }));
+  await user.click(within(await folderRow(name)).getByRole("button", { name: /^Expand(?: |$)/ }));
 }
 
 describe("FilterSidebar", () => {
@@ -287,11 +287,11 @@ describe("FilterSidebar", () => {
       await screen.findByText("Parts");
       if (models.length > 0) await screen.findByText("Root model");
       const root = within(await folderRow("All Models"));
-      await user.click(root.getByRole("button", { name: "Collapse" }));
+      await user.click(root.getByRole("button", { name: /^Collapse(?: |$)/ }));
       expect(screen.queryByRole("treeitem", { name: "Parts" })).toBeNull();
       expect(screen.queryByRole("treeitem", { name: "Toys" })).toBeNull();
       expect(screen.queryByText("Root model")).toBeNull();
-      expect(root.getByRole("button", { name: "Expand" })).toHaveAttribute(
+      expect(root.getByRole("button", { name: /^Expand(?: |$)/ })).toHaveAttribute(
         "aria-expanded",
         "false",
       );
@@ -303,8 +303,8 @@ describe("FilterSidebar", () => {
       renderSidebar({ selectedCollection: "parts/brackets" });
       await screen.findByText("Brackets");
       const root = within(await folderRow("All Models"));
-      await user.click(root.getByRole("button", { name: "Collapse" }));
-      await user.click(root.getByRole("button", { name: "Expand" }));
+      await user.click(root.getByRole("button", { name: /^Collapse(?: |$)/ }));
+      await user.click(root.getByRole("button", { name: /^Expand(?: |$)/ }));
       expect(await screen.findByText("Brackets")).toBeVisible();
       expect(screen.getByRole("status", { name: "Selected collection" })).toHaveTextContent(
         "parts/brackets",
@@ -316,7 +316,7 @@ describe("FilterSidebar", () => {
       sessionStorage.setItem("ps-filter-expanded", JSON.stringify(["parts"]));
       const view = renderSidebar();
       const root = within(await folderRow("All Models"));
-      expect(await root.findByRole("button", { name: "Expand" })).toBeVisible();
+      expect(await root.findByRole("button", { name: /^Expand(?: |$)/ })).toBeVisible();
       expect(screen.queryByRole("treeitem", { name: "Parts" })).toBeNull();
       expect(view.requestsWithMethod("POST")).toHaveLength(0);
     });
@@ -351,7 +351,7 @@ describe("FilterSidebar", () => {
       sessionStorage.setItem("ps-filter-all-expanded", "false");
       renderSidebar({ startup: true });
       const root = within(await folderRow("All Models"));
-      await root.findByRole("button", { name: "Expand" });
+      await root.findByRole("button", { name: /^Expand(?: |$)/ });
       await user.click(screen.getByRole("button", { name: "Cards ready" }));
       await user.click(screen.getByRole("button", { name: "Media ready" }));
       await waitFor(() =>
@@ -364,7 +364,7 @@ describe("FilterSidebar", () => {
       sessionStorage.setItem("ps-filter-all-expanded", "false");
       renderSidebar();
       const root = within(await folderRow("All Models"));
-      await root.findByRole("button", { name: "Expand" });
+      await root.findByRole("button", { name: /^Expand(?: |$)/ });
       const search = screen.getByPlaceholderText("Filter outliner...");
       await user.type(search, "Brackets");
       expect(await screen.findByText("Brackets")).toBeVisible();
@@ -638,7 +638,9 @@ describe("FilterSidebar", () => {
       await openFolder(user, "Parts");
       await screen.findByText("Brackets");
 
-      await user.click(within(await folderRow("Parts")).getByRole("button", { name: "Collapse" }));
+      await user.click(
+        within(await folderRow("Parts")).getByRole("button", { name: /^Collapse(?: |$)/ }),
+      );
 
       expect(screen.queryByText("Brackets")).toBeNull();
     });
@@ -926,7 +928,9 @@ describe("FilterSidebar", () => {
       await openFolder(user, "Parts");
       await screen.findByText("Brackets");
 
-      await user.click(within(await folderRow("Parts")).getByRole("button", { name: "Collapse" }));
+      await user.click(
+        within(await folderRow("Parts")).getByRole("button", { name: /^Collapse(?: |$)/ }),
+      );
 
       await waitFor(() => expect(screen.queryByText("Brackets")).toBeNull());
     });
@@ -936,7 +940,9 @@ describe("FilterSidebar", () => {
       const user = userEvent.setup();
       renderSidebar();
       await openFolder(user, "Parts");
-      await user.click(within(await folderRow("Parts")).getByRole("button", { name: "Collapse" }));
+      await user.click(
+        within(await folderRow("Parts")).getByRole("button", { name: /^Collapse(?: |$)/ }),
+      );
 
       await openFolder(user, "Parts");
 
@@ -966,7 +972,7 @@ describe("FilterSidebar", () => {
       const user = userEvent.setup();
       renderSidebar({ models: [aOutlinerModel({ id: 5, collection: null, collection_id: null })] });
 
-      await user.click((await screen.findAllByRole("button", { name: "Collapse" }))[0]);
+      await user.click((await screen.findAllByRole("button", { name: /^Collapse(?: |$)/ }))[0]);
 
       await waitFor(() =>
         expect(window.sessionStorage.getItem("ps-filter-all-expanded")).toBe("false"),
@@ -1128,7 +1134,9 @@ describe("outliner pages", () => {
         (r) => new URL(r.url, "http://test").searchParams.get("collection_id") === "1",
       ),
     ).toBe(true);
-    await user.click(within(await folderRow("Parts")).getByRole("button", { name: "Collapse" }));
+    await user.click(
+      within(await folderRow("Parts")).getByRole("button", { name: /^Collapse(?: |$)/ }),
+    );
     await openFolder(user, "Parts");
     await screen.findByText("Part 050");
     expect(app.requests().filter((r) => r.url.includes("/outliner/entries"))).toHaveLength(2);

@@ -408,7 +408,7 @@ describe("AiSearchSetup", () => {
     });
     expect(
       await screen.findByRole("progressbar", { name: "Library preparation progress" }),
-    ).toHaveAttribute("value", "4");
+    ).toHaveAttribute("aria-valuenow", "4");
     expect(screen.getByText("4 of 10 searchable entries prepared")).toBeVisible();
     expect(screen.getByText("Indexing passages")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Prepare my library" })).not.toBeInTheDocument();
@@ -532,6 +532,7 @@ describe("AiSearchSetup", () => {
         ]),
       },
     });
+    await userEvent.click(await screen.findByText("Preparation details"));
     expect(await screen.findByRole("list", { name: "Preparation steps" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "Index check" })).not.toBeInTheDocument();
   });

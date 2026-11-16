@@ -1,24 +1,10 @@
-/*
- * The desktop header: the logo, the model search, and the account menu.
- *
- * Two things here are stateful in ways a render test is the only way to catch.
- *
- * The search box is owned by the URL, not by the input. A `?q=` in the address
- * bar — from a back navigation, a bookmark, or a shared link — has to land in the
- * box, and typing has to end up back in the URL after a debounce. Break either
- * direction and the results stop matching what the user sees they searched for.
- * Search on other pages must open the existing results route with the entered term.
- *
- * The account menu is the desktop half of the navigation, and it carries the same
- * prefix-matched active state and admin-only filtering as the mobile bar. A route
- * added to one shell and not the other is invisible on the platform nobody tested
- * on.
- */
+/** The topbar exposes route context and launches workbench actions. */
 
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { CollectionsPaneHost, CollectionsPaneProvider } from "@/components/collections-pane";
 import { TopBar } from "@/components/top-bar";
 import { type AuthState } from "@/lib/auth-context";
 import { useCollectionSearch } from "@/lib/queries";
@@ -245,84 +231,27 @@ describe("TopBar", () => {
   });
 
   describe("search", () => {
-    it("shows the search box on the vault", () => {
-      renderTopBar();
-
-      expect(screen.getByRole("searchbox", { name: "Search library" })).toBeInTheDocument();
-    });
-
-    it("starts a search from another page", async () => {
+    it("opens Library search from a secondary screen on mobile", async () => {
       const user = userEvent.setup();
-      renderTopBar({ at: "/settings" });
-      const box = screen.getByRole("searchbox", { name: "Search library" });
-
-      await user.type(box, "benchy{Enter}");
-
-      await waitFor(() =>
-        expect(screen.getByTestId("location")).toHaveTextContent("/search?q=benchy"),
+      const app = renderApp(
+        <CollectionsPaneProvider>
+          <TopBar />
+          <CollectionsPaneHost />
+          <CurrentLocation />
+        </CollectionsPaneProvider>,
+        { at: "/settings", matchesMedia: () => false },
       );
-    });
 
-    it("does not read search capability on another page before the field is used", async () => {
-      const app = renderTopBar({ at: "/settings" });
-
-      await waitFor(() =>
-        expect(screen.getByRole("searchbox", { name: "Search library" })).toBeVisible(),
-      );
       expect(app.requests().some((request) => request.url.includes("/search/status"))).toBe(false);
-    });
+      await user.click(screen.getByRole("button", { name: "Search" }));
 
-    it("starts from the term already in the URL", () => {
-      renderTopBar({ at: "/?q=benchy" });
-
-      expect(screen.getByRole("searchbox", { name: "Search library" })).toHaveValue("benchy");
-    });
-
-    it("writes what the user typed back to the URL", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-
-      await user.type(screen.getByRole("searchbox", { name: "Search library" }), "benchy");
-
-      await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/?q=benchy"));
-    });
-
-    it("offers a clear affordance once there is a term", () => {
-      renderTopBar({ at: "/?q=benchy" });
-
-      expect(screen.getByRole("button", { name: "Clear search" })).toBeInTheDocument();
-    });
-
-    it("drops the term from the URL when the search is cleared", async () => {
-      const user = userEvent.setup();
-      renderTopBar({ at: "/?q=benchy" });
-
-      await user.click(screen.getByRole("button", { name: "Clear search" }));
-
-      await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/"));
-      expect(screen.getByRole("searchbox", { name: "Search library" })).toHaveValue("");
-    });
-
-    it("focuses the box when the user presses slash", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-
-      await user.keyboard("/");
-
-      expect(screen.getByRole("searchbox", { name: "Search library" })).toHaveFocus();
-    });
-
-    it("leaves slash alone while the user is typing in the box", async () => {
-      // Otherwise the shortcut swallows the character in the one field it is
-      // meant to serve.
-      const user = userEvent.setup();
-      renderTopBar();
-      const box = screen.getByRole("searchbox", { name: "Search library" });
-      await user.click(box);
-
-      await user.keyboard("a/b");
-
-      expect(box).toHaveValue("a/b");
+      await user.type(
+        await screen.findByRole("searchbox", { name: "Search library" }),
+        "benchy{Enter}",
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId("location")).toHaveTextContent("/?v=models&q=benchy"),
+      );
     });
   });
 
