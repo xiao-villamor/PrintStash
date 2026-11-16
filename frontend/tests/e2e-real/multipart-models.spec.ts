@@ -1,6 +1,6 @@
 /** Multipart groupings link existing Models without taking ownership of their files. */
 import type { ModelPageRead, MultipartModelRead } from "../../src/types";
-import { openFilters, openLibraryTools } from "./util";
+import { openModelPage, openFilters, openLibraryTools } from "./util";
 import { test, expect } from "./helpers";
 import { createCollectionViaVault, modelCard, uploadModel } from "./util";
 
@@ -190,7 +190,7 @@ test.describe("multipart models", () => {
     await expect(modelCard(page, base)).toHaveCount(1);
     await expect(page.getByRole("link", { name: group, exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: secondGroup, exact: true })).toBeVisible();
-    await modelCard(page, base).click();
+    await openModelPage(page, base);
     await expect(page.getByRole("heading", { name: base, exact: true })).toBeVisible();
     await page.getByRole("tab", { name: "Revisions" }).click();
     await expect(page.getByText("Rev 1", { exact: true }).first()).toBeVisible();

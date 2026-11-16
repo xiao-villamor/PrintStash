@@ -48,19 +48,13 @@ test.describe("Shared keyboard commands", () => {
     await page.goto("/?c=maraio");
     await expect(page.getByRole("heading", { name: "maraio", exact: true })).toBeVisible();
     await page.keyboard.press("/");
-    await expect(
-      page.locator("header").getByRole("searchbox", { name: "Search library" }),
-    ).toBeFocused();
+    await expect(page.getByRole("searchbox", { name: "Search in maraio" })).toBeFocused();
     await page.keyboard.press("Control+Shift+F");
-    await expect(
-      page
-        .getByRole("complementary", { name: "Search panel" })
-        .getByRole("searchbox", { name: "Search library" }),
-    ).toBeFocused();
+    await expect(page.getByRole("searchbox", { name: "Search in maraio" })).toBeFocused();
     await page.keyboard.press("Control+b");
     const toggle = page.locator("header").getByRole("button", { name: "Toggle sidebar" });
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await expect(toggle).toBeFocused();
+    await expect(page.getByRole("searchbox", { name: "Search in maraio" })).toBeFocused();
     await page.keyboard.press("Control+b");
     await page.keyboard.press("Control+Shift+E");
     const collection = page
@@ -79,18 +73,14 @@ test.describe("Shared keyboard commands", () => {
     await page.keyboard.press("ArrowLeft");
     await expect(collection).toBeFocused();
     await page.keyboard.press("F2");
-    await expect(
-      page
-        .getByRole("dialog", { name: "Rename maraio", exact: true })
-        .getByRole("textbox", { name: "Collection name" }),
-    ).toBeFocused();
+    await expect(page.getByRole("textbox", { name: "Collection name" })).toBeFocused();
   });
 
   test("preserves reserved keyboard ownership", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
     await page.keyboard.press("/");
-    const input = page.locator("header").getByRole("searchbox", { name: "Search library" });
+    const input = page.getByRole("searchbox", { name: "Search models" });
     await input.evaluate((node) =>
       node.dispatchEvent(
         new KeyboardEvent("keydown", {
@@ -114,11 +104,7 @@ test.describe("Shared keyboard commands", () => {
     await expect(page.getByRole("complementary", { name: "Search panel" })).toHaveCount(0);
     await page.keyboard.press("Escape");
     await page.keyboard.press("Control+Shift+F");
-    await expect(
-      page
-        .getByRole("complementary", { name: "Search panel" })
-        .getByRole("searchbox", { name: "Search library" }),
-    ).toBeFocused();
+    await expect(page.getByRole("searchbox", { name: "Search models" })).toBeFocused();
   });
 
   test("consumes the captured Undo once outside text editing", async ({ page }) => {
@@ -148,7 +134,7 @@ test.describe("Shared keyboard commands", () => {
     await page.keyboard.press("/");
     await page.keyboard.press("Control+z");
     expect(restores).toBe(0);
-    await page.locator("header").getByRole("searchbox", { name: "Search library" }).blur();
+    await page.getByRole("searchbox", { name: "Search in maraio" }).blur();
     await page.keyboard.press("Control+z");
     await expect.poll(() => restores).toBe(1);
     await page.keyboard.press("Control+z");

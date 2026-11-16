@@ -33,6 +33,7 @@ class TestViewerWorkerRecovery:
             VAULT_DATA_ROOT=str(tmp_path),
             VAULT_PROCESS_ROLE="all",
             VAULT_API_RUNS_JOBS="true",
+            VAULT_DERIVATIVES_PREVIEWS_ENABLED="true",
         )
         native_pid = None
         with tempfile.TemporaryFile(mode="w+") as log:

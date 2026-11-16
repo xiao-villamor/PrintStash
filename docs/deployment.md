@@ -581,18 +581,21 @@ after a restore. Tuning settings are listed in
 
 Settings → Background work provides independent administrator controls for mesh
 metadata/previews, G-code metadata/embedded thumbnails, and binary G-code
-toolpaths. All groups default to enabled. Deployment defaults are:
+toolpaths. Optional multi-angle previews default to disabled; ordinary thumbnails remain enabled. Deployment defaults are:
 
 | Environment variable | Default |
 | --- | --- |
 | `VAULT_DERIVATIVES_MESH_ENABLED` | `true` |
 | `VAULT_DERIVATIVES_GCODE_ENABLED` | `true` |
 | `VAULT_DERIVATIVES_TOOLPATH_ENABLED` | `true` |
-| `VAULT_DERIVATIVES_PREVIEWS_ENABLED` | `true` |
+| `VAULT_DERIVATIVES_PREVIEWS_ENABLED` | `false` |
+| `VAULT_DERIVATIVES_PREVIEWS_INCLUDE_POLES` | `false` |
 
-Multi-angle previews are generated only after a Model's cover, so they also
-need mesh processing enabled. Turn them off to keep covers without the extra
-CPU and storage of generated views.
+Settings → Previews offers one thumbnail (the default), four consistent oblique
+views, or oblique views plus top and bottom. Multi-angle generation runs after
+the cover and needs mesh processing enabled. Changing the angle selection
+regenerates existing view sets in the background. Single-thumbnail mode hides
+existing extra views without deleting them.
 
 A saved Boolean overrides the environment; **Use deployment default** clears it.
 The controls persist in the application database and take effect in running API

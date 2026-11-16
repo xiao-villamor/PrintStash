@@ -79,7 +79,7 @@ test.describe("Library navigation", () => {
     ).toHaveCount(0);
   });
 
-  test("recovers an unaccepted Library read through explicit refresh", async ({ page }) => {
+  test("recovers an unaccepted Library read automatically", async ({ page }) => {
     const model = aModelListItem({ id: 1, name: "Recovered initial read" });
     let reads = 0;
     let recoverable = false;
@@ -99,7 +99,8 @@ test.describe("Library navigation", () => {
     });
     await page.goto("/?type=all&sort=date-desc");
     const refresh = page.getByRole("main").getByRole("button", { name: "Refresh library" });
-    await expect(refresh).toBeVisible();
+    await expect.poll(() => reads).toBeGreaterThanOrEqual(2);
+    await expect(refresh).toBeHidden();
     const beforeRefresh = reads;
     expect(beforeRefresh).toBeGreaterThan(0);
     const link = page
@@ -144,6 +145,11 @@ test.describe("Library navigation", () => {
       const origin = page.url();
       const key = await page.evaluate(() => window.history.state.__TSR_key);
       await link.click();
+      if (kind === "Model")
+        await page
+          .locator("#model-drawer")
+          .getByRole("link", { name: "Open page", exact: true })
+          .click();
       await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
       await page.getByRole("link", { name: "Back", exact: true }).click();
 
@@ -251,12 +257,15 @@ test.describe("Library navigation", () => {
       );
       second[10] = aModelListItem({ id: 1, name: "skadis_kitchen-roll_screw" });
       let returning = false;
+      let rejectedCursor = false;
       const restored: (string | null)[] = [];
       await page.route("**/api/v1/models/browse?**", (route) => {
         const cursor = new URL(route.request().url()).searchParams.get("cursor");
         if (returning) restored.push(cursor);
-        if (returning && cursor && recovery === "stale")
+        if (returning && cursor === "second" && recovery === "stale") {
+          rejectedCursor = true;
           return route.fulfill({ status: 409, json: { detail: "browse_refresh_required" } });
+        }
         const models = cursor ? second : first;
         return route.fulfill({
           json: {
@@ -264,7 +273,7 @@ test.describe("Library navigation", () => {
               .filter((model) => !(returning && recovery === "removed" && model.id === 1))
               .map((model) => ({ kind: "model", model })),
             total: 60,
-            next_cursor: cursor ? "unvisited-third-page" : "second",
+            next_cursor: cursor ? "unvisited-third-page" : rejectedCursor ? "second-new" : "second",
             browse_revision: "r1",
             authorization_revision: "a1",
           },
@@ -300,7 +309,7 @@ test.describe("Library navigation", () => {
       await page.clock.fastForward(301_000);
       returning = true;
       await page.getByRole("link", { name: "Back", exact: true }).click();
-      if (recovery === "available") {
+      if (recovery !== "removed") {
         await expect(link).toBeVisible();
         await expect
           .poll(async () => link.evaluate((node) => node.getBoundingClientRect().top))
@@ -313,7 +322,9 @@ test.describe("Library navigation", () => {
         ).toBeVisible();
         expect(await page.getByRole("main").evaluate((node) => node.scrollTop)).toBe(0);
       }
-      expect(restored.filter((cursor) => cursor !== null)).toEqual(["second"]);
+      expect(restored.filter((cursor) => cursor !== null)).toEqual(
+        recovery === "stale" ? ["second", "second-new"] : ["second"],
+      );
       expect(restored).not.toContain("unvisited-third-page");
     });
   }
@@ -348,53 +359,74 @@ test.describe("Library navigation", () => {
           },
         }),
       );
-      await page.route("**/api/v1/models/120", (route) =>
-        route.fulfill({ json: aModel({ id: 120, name: "Favorite 20", starred: true }) }),
+      await page.route("**/api/v1/models/124", (route) =>
+        route.fulfill({ json: aModel({ id: 124, name: "Favorite 24", starred: true }) }),
       );
       const acknowledgement = Promise.withResolvers<void>();
       await page.route(
-        `**/api/v1/${kind === "model" ? "models" : "multipart-models"}/120/star`,
+        `**/api/v1/${kind === "model" ? "models" : "multipart-models"}/124/star`,
         async (route) => {
           await acknowledgement.promise;
           await route.fulfill({
             json:
               kind === "model"
-                ? { model_id: 120, starred: false }
-                : { multipart_model_id: 120, starred: false },
+                ? { model_id: 124, starred: false }
+                : { multipart_model_id: 124, starred: false },
           });
         },
       );
       await page.goto("/?c=maraio&type=all&sort=name-asc&favorites=true");
       const target = page
         .getByRole("main")
-        .getByRole("link", { name: /Favorite 20/ })
+        .getByRole("link", { name: /Favorite 24/ })
         .first();
       const remove =
         layout === "grid"
-          ? page.getByRole("button", { name: "Remove Favorite 20 from favorites", exact: true })
+          ? page.getByRole(kind === "model" ? "menuitem" : "button", {
+              name: "Remove Favorite 24 from favorites",
+              exact: true,
+            })
           : target;
-      await scrollToLibraryEntry(page, remove);
+      await scrollToLibraryEntry(page, target);
+      await target.evaluate((node) => {
+        const main = node.closest("main")!;
+        const list = main.querySelector<HTMLElement>("[data-library-list]");
+        const scroll = list && list.scrollHeight > list.clientHeight ? list : main;
+        scroll.scrollTop += node.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+      });
+      await target.hover();
+      if (layout === "grid" && kind === "model") await target.click({ button: "right" });
       const survivor = page
         .getByRole("main")
-        .getByRole("link", { name: /Favorite 21/ })
+        .getByRole("link", { name: /Favorite 25/ })
         .first();
       await expect(survivor).toBeVisible();
-      const before = await survivor.evaluate((node) => node.getBoundingClientRect().top);
+      let before = await survivor.evaluate((node) => node.getBoundingClientRect().top);
       const box = await remove.boundingBox();
       if (!box) throw new Error("Favorite action has no visible box");
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
       if (layout === "list") {
-        await page.getByRole("button", { name: "Favorited", exact: true }).click();
-        await expect(page.getByRole("heading", { name: "Favorite 20", exact: true })).toBeVisible();
+        await expect(page.locator("#model-drawer")).toBeVisible();
+        before = await survivor.evaluate((node) => node.getBoundingClientRect().top);
+        await page
+          .locator("#model-drawer")
+          .getByRole("link", { name: "Open page", exact: true })
+          .click();
+        await page
+          .getByRole("button", { name: "Remove Favorite 24 from favorites", exact: true })
+          .click();
+        await expect(page.getByRole("heading", { name: "Favorite 24", exact: true })).toBeVisible();
       } else await expect(target).toBeVisible();
       // Compare the same unhovered geometry; the next card can move under the pointer.
       await page.mouse.move(1, 1);
       acknowledgement.resolve();
       if (layout === "list") {
-        await expect(page.getByRole("button", { name: "Favorite", exact: true })).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: "Add Favorite 24 to favorites", exact: true }),
+        ).toBeVisible();
         await page.getByRole("link", { name: "Back", exact: true }).click();
       }
-      await expect(page.getByRole("main").getByRole("link", { name: /Favorite 20/ })).toHaveCount(
+      await expect(page.getByRole("main").getByRole("link", { name: /Favorite 24/ })).toHaveCount(
         0,
       );
       await expect
@@ -404,7 +436,7 @@ test.describe("Library navigation", () => {
   }
 
   for (const recovery of ["available", "removed", "stale"] as const) {
-    test(`bounds explicit refresh when its anchor is ${recovery}`, async ({ page }) => {
+    test(`bounds automatic refresh when its anchor is ${recovery}`, async ({ page }) => {
       await page.clock.install();
       const first = Array.from({ length: 20 }, (_, index) =>
         aModelListItem({ id: 100 + index, name: `First ${index}` }),
@@ -413,6 +445,7 @@ test.describe("Library navigation", () => {
         aModelListItem({ id: 200 + index, name: `Second ${index}` }),
       );
       let changed = false;
+      let conflicts = 0;
       let removed: number | null = null;
       const refreshed: (string | null)[] = [];
       await page.route("**/api/v1/models/browse/revision", (route) =>
@@ -423,7 +456,7 @@ test.describe("Library navigation", () => {
       await page.route("**/api/v1/models/browse?**", (route) => {
         const cursor = new URL(route.request().url()).searchParams.get("cursor");
         if (changed) refreshed.push(cursor);
-        if (changed && cursor && recovery === "stale")
+        if (changed && cursor && recovery === "stale" && conflicts++ === 0)
           return route.fulfill({ status: 409, json: { detail: "browse_refresh_required" } });
         const models = cursor
           ? second
@@ -464,13 +497,18 @@ test.describe("Library navigation", () => {
       changed = true;
       await page.clock.fastForward(31_000);
       const refresh = page.getByRole("button", { name: "Refresh library", exact: true });
-      await expect(refresh).toBeVisible();
-      // Activate the actual control without locator auto-scroll changing the reading bookmark.
-      await refresh.evaluate((button: HTMLButtonElement) => button.click());
-      if (recovery === "available") {
+      await expect(refresh).toBeHidden();
+      await page.clock.runFor(1000);
+      const expectedReads =
+        recovery === "stale" ? [null, "second-new", null, "second-new"] : [null, "second-new"];
+      if (recovery === "stale") {
+        await expect.poll(() => refreshed).toEqual([null, "second-new"]);
+        await page.clock.runFor(4000);
+      }
+      if (recovery !== "removed") {
         // The coherent old snapshot keeps this anchor in place while refresh is
         // pending. Prove fresh pages published before checking its new position.
-        await expect.poll(() => refreshed).toEqual([null, "second-new"]);
+        await expect.poll(() => refreshed).toEqual(expectedReads);
         await expect(
           page
             .getByRole("main")
@@ -493,7 +531,7 @@ test.describe("Library navigation", () => {
             "Your previous reading position could not be restored. Showing the start of this view.",
           ),
         ).toBeVisible();
-      expect(refreshed).toEqual([null, "second-new"]);
+      expect(refreshed).toEqual(expectedReads);
     });
   }
 });

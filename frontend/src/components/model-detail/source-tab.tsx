@@ -65,6 +65,7 @@ function SourceField({
   blocked,
   snapshot,
   submit,
+  feedback,
   last = false,
 }: {
   modelName?: string;
@@ -74,6 +75,7 @@ function SourceField({
   blocked: boolean;
   snapshot: ModelProvenanceRead;
   submit: SubmitSource;
+  feedback: ReactNode;
   last?: boolean;
 }) {
   useUiLocale();
@@ -130,6 +132,7 @@ function SourceField({
     <div
       className={`grid gap-x-4 gap-y-2 py-4 @md/source:grid-cols-[minmax(6.25rem,.65fr)_minmax(0,2fr)] @md/source:items-start ${last ? "" : "border-b border-border"}`}
     >
+      {!editing && feedback}
       <div className="flex flex-col items-start gap-1">
         <h3 className="text-sm font-medium text-foreground">{label}</h3>
         <span className="text-xs text-muted-foreground">
@@ -226,6 +229,7 @@ function SourceField({
         }
       >
         <div className="space-y-5">
+          {feedback}
           <dl className="grid grid-cols-[1fr_2fr] gap-x-4 gap-y-2 bg-plate p-4 text-[13px]">
             {modelName && (
               <>
@@ -522,6 +526,46 @@ function SourceTabContent({
   const blocked = state.phase !== "idle";
   const editable = canEdit && !editor.editDenied && !blocked;
   const reviewed = state.phase === "blocked" ? state.reviewed : null;
+  const pending = state.phase === "blocked" ? state.pending.command : null;
+  const fieldFeedback =
+    pending?.kind === "override" && Object.keys(pending.payload.overrides).length > 0;
+  const feedback = state.phase === "blocked" && (
+    <div role="alert" className="space-y-3 rounded border border-border bg-muted p-3 text-sm">
+      <p>
+        {uiText(state.problem === "conflict" ? "library.editConflict" : "library.saveUnconfirmed")}
+      </p>
+      <Button variant="outline" loading={editor.reviewing} onClick={() => void editor.review()}>
+        {uiText("library.reviewLatest")}
+      </Button>
+      {reviewed && (
+        <section aria-label={uiText("library.latestVersion")} className="space-y-3">
+          <h3 className="font-semibold">{uiText("library.latestVersion")}</h3>
+          <SourceReview
+            modelId={modelId}
+            api={api}
+            command={state.pending.command}
+            model={reviewed.model}
+            data={reviewed.provenance}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              disabled={editor.reviewing}
+              onClick={() => void editor.adopt()}
+            >
+              {uiText("library.useLatest")}
+            </Button>
+            <Button
+              disabled={!canEdit || editor.editDenied || editor.reviewing}
+              onClick={editor.retry}
+            >
+              {uiText("library.retryDraft")}
+            </Button>
+          </div>
+        </section>
+      )}
+    </div>
+  );
   return (
     <DetailTabLoading pending={!data} variant="source">
       {data && (
@@ -532,52 +576,7 @@ function SourceTabContent({
               <Button onClick={editor.retryRead}>{uiText("Retry")}</Button>
             </div>
           )}
-          {state.phase === "blocked" && (
-            <div
-              role="alert"
-              className="space-y-3 rounded border border-border bg-muted p-3 text-sm"
-            >
-              <p>
-                {uiText(
-                  state.problem === "conflict" ? "library.editConflict" : "library.saveUnconfirmed",
-                )}
-              </p>
-              <Button
-                variant="outline"
-                loading={editor.reviewing}
-                onClick={() => void editor.review()}
-              >
-                {uiText("library.reviewLatest")}
-              </Button>
-              {reviewed && (
-                <section aria-label={uiText("library.latestVersion")} className="space-y-3">
-                  <h3 className="font-semibold">{uiText("library.latestVersion")}</h3>
-                  <SourceReview
-                    modelId={modelId}
-                    api={api}
-                    command={state.pending.command}
-                    model={reviewed.model}
-                    data={reviewed.provenance}
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      disabled={editor.reviewing}
-                      onClick={() => void editor.adopt()}
-                    >
-                      {uiText("library.useLatest")}
-                    </Button>
-                    <Button
-                      disabled={!canEdit || editor.editDenied || editor.reviewing}
-                      onClick={editor.retry}
-                    >
-                      {uiText("library.retryDraft")}
-                    </Button>
-                  </div>
-                </section>
-              )}
-            </div>
-          )}
+          {!fieldFeedback && feedback}
           {!data.sources.length && (
             <EmptyState title={t("source.emptyTitle")} description={t("source.emptyDescription")} />
           )}
@@ -668,6 +667,14 @@ function SourceTabContent({
                           blocked={blocked}
                           snapshot={data}
                           submit={editor.submit}
+                          feedback={
+                            fieldFeedback &&
+                            pending?.kind === "override" &&
+                            pending.sourceId === source.id &&
+                            field.field_name in pending.payload.overrides
+                              ? feedback
+                              : null
+                          }
                           last={index === source.fields.length - 1}
                         />
                       ))}

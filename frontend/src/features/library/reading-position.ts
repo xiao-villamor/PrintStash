@@ -327,7 +327,12 @@ export function useLibraryReadingPosition(
   }, [current, entry, layout, recovery.status, pagination, mainRef, listRef, capturePosition]);
 
   async function refresh(replace: () => Promise<void>) {
-    const saved = capturePosition(true);
+    // A cursor can expire while reconstructing a paged view. Retry from the
+    // original bookmark, not the shortened list that is currently mounted.
+    const saved =
+      recovery.entry === entry && recovery.layout === layout && recovery.status === "restoring"
+        ? recovery.saved
+        : capturePosition(true);
     if (!saved || !entry || !current) return;
     const token = ++operation.current;
     renderAttempts.current = { entry, count: 0 };

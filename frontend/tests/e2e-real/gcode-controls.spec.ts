@@ -1,11 +1,11 @@
 /**
- * The G-code layer slider owns the preview's bottom controls. Mesh camera
+ * The G-code layer slider owns the preview's side controls. Mesh camera
  * overlays must never intercept a layer click on phones or desktop.
  * The real PrusaSlicer fixture exercises parsing and actual input events.
  */
 import { readFile } from "node:fs/promises";
 import { test, expect } from "./helpers";
-import { modelCard, uploadModel } from "./util";
+import { openModelPage, uploadModel } from "./util";
 
 test.describe("G-code layer controls", () => {
   for (const width of [320, 390, 1440]) {
@@ -23,7 +23,7 @@ test.describe("G-code layer controls", () => {
         },
       });
       await page.setViewportSize({ width, height: width === 1440 ? 1000 : 844 });
-      await modelCard(page, name).click();
+      await openModelPage(page, name);
       const modelId = new URL(page.url()).pathname.split("/").at(-1);
       try {
         await expect(page.getByRole("button", { name: "Fit to view" })).toBeEnabled({
@@ -33,7 +33,7 @@ test.describe("G-code layer controls", () => {
         const slider = page.getByRole("slider", { name: "Current layer" });
         await expect(slider).toBeVisible({ timeout: 30_000 });
         await expect(slider).toHaveAttribute("max", "30");
-        await expect(page.getByRole("button", { name: "Fit to view" })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Fit to view" })).toBeEnabled();
         await slider.scrollIntoViewIfNeeded();
         await slider.focus();
         await slider.press("Home");
@@ -43,8 +43,9 @@ test.describe("G-code layer controls", () => {
           const bounds = await slider.boundingBox();
           expect(bounds).not.toBeNull();
           const point = {
-            x: bounds!.x + bounds!.width * fraction,
-            y: bounds!.y + bounds!.height / 2,
+            x: bounds!.x + bounds!.width / 2,
+            // Native range thumbs stop half their width before either endpoint.
+            y: bounds!.y + bounds!.width / 2 + (bounds!.height - bounds!.width) * (1 - fraction),
           };
           expect(
             await slider.evaluate(
@@ -53,9 +54,12 @@ test.describe("G-code layer controls", () => {
             ),
           ).toBe(true);
           await page.mouse.click(point.x, point.y);
-          const layer = Number(await slider.inputValue());
-          expect(layer).toBeGreaterThanOrEqual(Math.round(30 * fraction) - 2);
-          expect(layer).toBeLessThanOrEqual(Math.round(30 * fraction) + 2);
+          await expect
+            .poll(async () => Number(await slider.inputValue()))
+            .toBeGreaterThanOrEqual(Math.round(30 * fraction) - 2);
+          await expect
+            .poll(async () => Number(await slider.inputValue()))
+            .toBeLessThanOrEqual(Math.round(30 * fraction) + 2);
         }
         await page.screenshot({ path: testInfo.outputPath(`layers-${width}.png`) });
         await page.getByRole("button", { name: "3D model", exact: true }).click();

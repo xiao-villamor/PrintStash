@@ -74,9 +74,8 @@ export function useCollectionOverview(
   const [session] = useState(getSessionVersion);
   const currentSession = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
   const active = session === currentSession;
-  const reused = afterPrimary
-    ? collectionPreviewItems(collection, authorizationRevision, source)
-    : null;
+  // Admission gates network work, not the authorized snapshot already on screen.
+  const reused = collectionPreviewItems(collection, authorizationRevision, source);
   const query = useQuery({
     queryKey: [
       ...queryKeys.models,

@@ -470,12 +470,13 @@ describe("SourceTab conditional editing", () => {
     await user.clear(screen.getByRole("textbox", { name: "Title override" }));
     await user.type(screen.getByRole("textbox", { name: "Title override" }), "My draft");
     await user.click(screen.getByRole("button", { name: "Save override" }));
-    await screen.findByRole("button", { name: "Review latest version" });
-    expect(screen.getByRole("button", { name: "Save override" })).toBeDisabled();
+    const dialog = within(screen.getByRole("dialog", { name: "Edit Title" }));
+    await dialog.findByRole("button", { name: "Review latest version" });
+    expect(dialog.getByRole("button", { name: "Save override" })).toBeDisabled();
     expect(writes).toHaveLength(1);
     view.route({ "GET /api/v1/models/1/provenance": json(latest) });
-    await user.click(screen.getByRole("button", { name: "Review latest version" }));
-    expect(await screen.findByText("Other editor")).toBeInTheDocument();
+    await user.click(dialog.getByRole("button", { name: "Review latest version" }));
+    expect(await dialog.findByText("Other editor")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Title override" })).toHaveValue("My draft");
     await user.click(screen.getByRole("button", { name: "Save my draft against this version" }));
     expect(await screen.findByText("My draft")).toBeInTheDocument();

@@ -83,6 +83,7 @@ export function LibraryItems<T>({
   const [geometry, setGeometry] = useState({ columns: 1, margin: 0, width: 0, height: 0 });
   const [pinned, setPinned] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<string | null>(null);
+  const focusedEntry = useRef<{ key: string; index: number } | null>(null);
   const focusRestore = useRef<{ key: string; index: number } | null>(null);
   const restore = useRef<{ key: string; offset: number } | null>(null);
   const readyGeometry = useRef<typeof geometry | null>(null);
@@ -227,6 +228,17 @@ export function LibraryItems<T>({
       if (frame !== null) cancelAnimationFrame(frame);
     };
   }, [scrollRef, layout, compact, gap, minCardWidth]);
+
+  // Crossing the native/virtual threshold remounts row wrappers. Retain the
+  // focused control's identity before that commit, then restore it without scrolling.
+  useLayoutEffect(() => {
+    const focused = focusedEntry.current;
+    if (!focused) return;
+    root.current
+      ?.querySelector<HTMLElement>(`[data-library-key="${CSS.escape(focused.key)}"]`)
+      ?.querySelectorAll<HTMLElement>("button,a,input,[tabindex]")
+      [focused.index]?.focus({ preventScroll: true });
+  }, [virtual, columns]);
 
   useLayoutEffect(() => {
     virtualizer.measure();
@@ -396,13 +408,25 @@ export function LibraryItems<T>({
         className,
       )}
       data-library-renderer={virtual ? "virtual" : "native"}
-      onFocusCapture={(event) =>
-        setPinned(
-          event.target.closest<HTMLElement>("[data-library-key]")?.dataset.libraryKey ?? null,
-        )
-      }
+      onFocusCapture={(event) => {
+        const card = event.target.closest<HTMLElement>("[data-library-key]");
+        const key = card?.dataset.libraryKey;
+        focusedEntry.current =
+          key && card
+            ? {
+                key,
+                index: Array.from(card.querySelectorAll("button,a,input,[tabindex]")).indexOf(
+                  event.target,
+                ),
+              }
+            : null;
+        setPinned(key ?? null);
+      }}
       onBlurCapture={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setPinned(null);
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          focusedEntry.current = null;
+          setPinned(null);
+        }
       }}
       onDragStartCapture={(event) =>
         setPinned(

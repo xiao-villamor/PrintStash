@@ -67,3 +67,15 @@ class TestSummaries:
         db_session.flush()
         after = summaries(db_session, [model.id])[model.id].source_images[0].url
         assert before != after
+
+    def test_fresh_install_has_only_the_ordinary_thumbnail(
+        self, db_session, make_model, make_file
+    ):
+        from app.modules.derivatives.activity import preview_activity
+
+        model = make_model()
+        make_file(model, filename="part.stl")
+        result = summaries(db_session, [model.id])[model.id]
+        assert result.state == "disabled"
+        assert result.published is None
+        assert preview_activity(db_session).total == 1

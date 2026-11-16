@@ -16,7 +16,7 @@ test.describe("AI Search settings freshness", () => {
         ).ok(),
       ).toBe(true);
       await page.goto("/settings?section=ai-search");
-      await page.getByRole("tab", { name: "Technical" }).click();
+      await page.getByRole("button", { name: "Technical settings", exact: true }).click();
       const weight = page.getByRole("spinbutton", { name: "Keyword ranking weight" });
       await weight.fill("2");
       expect(
@@ -75,9 +75,9 @@ test.describe("AI Search settings freshness", () => {
         ).ok(),
       ).toBe(true);
       await page.goto("/settings?section=ai-search");
-      await page.getByRole("tab", { name: "Technical" }).click();
+      await page.getByRole("button", { name: "Technical settings", exact: true }).click();
       await second.goto("/settings?section=ai-search");
-      await second.getByRole("tab", { name: "Technical" }).click();
+      await second.getByRole("button", { name: "Technical settings", exact: true }).click();
       await page.getByRole("spinbutton", { name: "Keyword ranking weight" }).fill("2");
       await second.getByRole("spinbutton", { name: "Semantic ranking weight" }).fill("3");
       await page.getByRole("button", { name: "Save search settings" }).click();

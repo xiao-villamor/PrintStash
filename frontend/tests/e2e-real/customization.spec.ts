@@ -10,7 +10,7 @@ import { test, expect } from "./helpers";
 test.describe("appearance customization", () => {
   test("model metadata visibility toggle persists across reload", async ({ page }) => {
     await page.goto("/settings");
-    await page.getByRole("button", { name: "Design" }).click();
+    await page.getByRole("button", { name: "Appearance" }).click();
 
     const chip = page.getByRole("button", { name: "Supports", exact: true });
     await expect(chip).toBeVisible();
@@ -20,7 +20,7 @@ test.describe("appearance customization", () => {
     expect(after).not.toBe(before);
 
     await page.reload();
-    await page.getByRole("button", { name: "Design" }).click();
+    await page.getByRole("button", { name: "Appearance" }).click();
     await expect(page.getByRole("button", { name: "Supports", exact: true })).toHaveAttribute(
       "aria-pressed",
       after!,

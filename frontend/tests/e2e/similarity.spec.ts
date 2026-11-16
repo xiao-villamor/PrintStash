@@ -309,18 +309,14 @@ test.describe("Model detail Similar controls", () => {
       await expect(settingsHeading).toBeVisible();
       const settingsStyle = await settingsHeading.evaluate((heading) => {
         const title = getComputedStyle(heading);
-        const frame = getComputedStyle(heading.closest("section")!);
         return {
           fontSize: title.fontSize,
           fontWeight: title.fontWeight,
           color: title.color,
-          backgroundColor: frame.backgroundColor,
-          borderColor: frame.borderColor,
-          borderRadius: frame.borderRadius,
         };
       });
       await page.getByRole("tab", { name: "Similar", exact: true }).click();
-      const heading = pane.getByRole("heading", { name: "Model matches", exact: true });
+      const heading = pane.getByRole("heading", { name: "Similar models", exact: true });
       const frame = pane.getByRole("region", { name: "Model matches", exact: true });
       await expect(heading).toBeVisible();
       const empty = frame.getByText("No candidates to review", { exact: true });
@@ -335,26 +331,12 @@ test.describe("Model detail Similar controls", () => {
         fontWeight: settingsStyle.fontWeight,
         color: settingsStyle.color,
       });
-      expect(
-        await frame.evaluate((element) => {
-          const style = getComputedStyle(element);
-          return {
-            backgroundColor: style.backgroundColor,
-            borderColor: style.borderColor,
-            borderRadius: style.borderRadius,
-          };
-        }),
-      ).toEqual({
-        backgroundColor: settingsStyle.backgroundColor,
-        borderColor: settingsStyle.borderColor,
-        borderRadius: settingsStyle.borderRadius,
-      });
       const titleBounds = await heading.boundingBox();
       const frameBounds = await frame.boundingBox();
       expect(titleBounds!.y + titleBounds!.height).toBeLessThanOrEqual(frameBounds!.y);
       const emptyBounds = await empty.locator("..").boundingBox();
       expect(emptyBounds!.height).toBeLessThan(180);
-      await expect(frame.getByRole("button", { name: "Find similar", exact: true })).toBeEnabled();
+      await expect(pane.getByRole("button", { name: "Find similar", exact: true })).toBeEnabled();
       expect(
         await frame.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
       ).toBe(true);
@@ -364,13 +346,13 @@ test.describe("Model detail Similar controls", () => {
 
   for (const scenario of [
     {
-      label: "default840desktop",
+      label: "wide840desktop",
       width: 1920,
       height: 1080,
       pane: 840,
       locale: "en",
       tab: "Similar",
-      states: ["To review", "Confirmed", "Later", "Rejected"],
+      states: ["Open", "Confirmed", "Later", "Rejected", "All"],
       filters: "Filters",
       find: "Find similar",
       resize: "Resize details panel",
@@ -382,7 +364,7 @@ test.describe("Model detail Similar controls", () => {
       pane: 400,
       locale: "es",
       tab: "Similares",
-      states: ["Por revisar", "Confirmados", "Más tarde", "Rechazados"],
+      states: ["Abrir", "Confirmados", "Más tarde", "Rechazados", "Todos"],
       filters: "Filtros",
       find: "Buscar similares",
       resize: "Cambiar el tamaño del panel de detalles",
@@ -394,7 +376,7 @@ test.describe("Model detail Similar controls", () => {
       pane: 390,
       locale: "es",
       tab: "Similares",
-      states: ["Por revisar", "Confirmados", "Más tarde", "Rechazados"],
+      states: ["Abrir", "Confirmados", "Más tarde", "Rechazados", "Todos"],
       filters: "Filtros",
       find: "Buscar similares",
       resize: "Cambiar el tamaño del panel de detalles",
@@ -406,7 +388,7 @@ test.describe("Model detail Similar controls", () => {
       pane: 320,
       locale: "en",
       tab: "Similar",
-      states: ["To review", "Confirmed", "Later", "Rejected"],
+      states: ["Open", "Confirmed", "Later", "Rejected", "All"],
       filters: "Filters",
       find: "Find similar",
       resize: "Resize details panel",
@@ -417,7 +399,7 @@ test.describe("Model detail Similar controls", () => {
       await page.addInitScript(
         ({ locale, pane }) => {
           localStorage.setItem("printstash.locale", locale);
-          if (pane === 400) localStorage.setItem("ps-model-detail-sidebar-width", String(pane));
+          localStorage.setItem("ps-model-detail-inspector-preferred-width", String(pane));
         },
         { locale: scenario.locale, pane: scenario.pane },
       );
@@ -491,7 +473,7 @@ test.describe("Model detail Similar controls", () => {
       await page.screenshot({ path: testInfo.outputPath(`model-similar-${scenario.label}.png`) });
       await filters.click();
       await expect(filters).toHaveAttribute("aria-expanded", "true");
-      await expect(pane.getByRole("combobox").first()).toBeVisible();
+      await expect(page.getByRole("dialog").getByRole("combobox").first()).toBeVisible();
     });
   }
 });

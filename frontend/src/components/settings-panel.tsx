@@ -7,7 +7,7 @@ import { StorageConnectionReview } from "@/components/storage-connection-review"
 
 import { captureEditingBase } from "@/lib/api/editing";
 import type { EditingBase } from "@/types/editing";
-import type { PreferenceIntent } from "@/lib/queries/settings-preferences";
+import type { PreferenceIntent, PreviewMode } from "@/lib/queries/settings-preferences";
 
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
@@ -40,7 +40,11 @@ import {
   useAdminUserCommand,
   type ApiKeyReceipt,
 } from "@/lib/queries/settings-account";
-import { savedPreference, useSettingsPreferenceCommand } from "@/lib/queries/settings-preferences";
+import {
+  previewMode,
+  savedPreference,
+  useSettingsPreferenceCommand,
+} from "@/lib/queries/settings-preferences";
 import { GpuServerStatus } from "@/components/gpu-server-status";
 import {
   settingsComputeOptions,
@@ -389,6 +393,15 @@ function parseTrashRetentionDays(value: string): number | null {
   const days = Number(value);
   return Number.isSafeInteger(days) ? days : null;
 }
+function previewModeLabel(mode: PreviewMode): string {
+  return uiText(
+    mode === "single"
+      ? "One thumbnail"
+      : mode === "oblique"
+        ? "Oblique views"
+        : "Oblique views + top and bottom",
+  );
+}
 function preferenceLabel(intent: PreferenceIntent): string {
   switch (intent.kind) {
     case "multi-angle":
@@ -671,10 +684,10 @@ export function SettingsPanel() {
   const preferenceCommand = useSettingsPreferenceCommand();
   const preferenceIntent = preferenceCommand.intent;
   const preferenceReview = preferenceCommand.state;
-  const multiAngleEnabled =
+  const selectedPreviewMode =
     preferenceIntent?.kind === "multi-angle"
       ? preferenceIntent.value
-      : (remoteConfigData?.derivatives_previews_enabled ?? false);
+      : previewMode(remoteConfigData);
   const autoMarkKnownGood =
     preferenceIntent?.kind === "auto-mark"
       ? preferenceIntent.value
@@ -1031,7 +1044,7 @@ export function SettingsPanel() {
       if (accountCurrent(session)) toast.error(error);
     }
   }
-  async function saveMultiAnglePreviews(next: boolean) {
+  async function saveMultiAnglePreviews(next: PreviewMode) {
     if (
       !user?.is_superuser ||
       !remoteConfigData ||
@@ -2769,9 +2782,7 @@ export function SettingsPanel() {
                       <h3 className="font-semibold">{uiText("library.latestVersion")}</h3>
                       <p>
                         {preferenceReview.intent.kind === "multi-angle"
-                          ? uiText(
-                              preferenceReview.snapshot.derivatives_previews_enabled ? "On" : "Off",
-                            )
+                          ? previewModeLabel(previewMode(preferenceReview.snapshot))
                           : String(
                               savedPreference(preferenceReview.snapshot, preferenceReview.intent),
                             )}
@@ -5389,14 +5400,19 @@ export function SettingsPanel() {
                         {uiText("Multi-angle previews")}
                         <span className="settings-row-hint">
                           {uiText(
-                            "Generate extra views for each Model. Turn off to save preparation time; cover images and existing views stay available.",
+                            "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.",
                           )}
                         </span>
                       </span>
-                      <SettingsSwitch
-                        label={uiText("Multi-angle previews")}
-                        checked={multiAngleEnabled}
-                        onChange={saveMultiAnglePreviews}
+                      <select
+                        className={INPUT}
+                        aria-label={uiText("Multi-angle previews")}
+                        value={selectedPreviewMode}
+                        onChange={(event) => {
+                          const mode = event.target.value;
+                          if (mode === "single" || mode === "oblique" || mode === "oblique-poles")
+                            void saveMultiAnglePreviews(mode);
+                        }}
                         disabled={
                           !user?.is_superuser ||
                           !remoteConfigData ||
@@ -5405,7 +5421,11 @@ export function SettingsPanel() {
                           preferenceCommand.blocked ||
                           backupPolicy.isPending
                         }
-                      />
+                      >
+                        <option value="single">{previewModeLabel("single")}</option>
+                        <option value="oblique">{previewModeLabel("oblique")}</option>
+                        <option value="oblique-poles">{previewModeLabel("oblique-poles")}</option>
+                      </select>
                     </div>
                     <p className="settings-footnote">
                       {uiText(

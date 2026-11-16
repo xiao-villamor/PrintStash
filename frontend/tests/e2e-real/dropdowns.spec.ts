@@ -4,7 +4,7 @@
  * left edge; every option must remain reachable without horizontal scrolling.
  */
 import { test as authenticatedTest, expect, authBundleFor, authedContext } from "./helpers";
-import { modelCard, uploadModel } from "./util";
+import { openModelPage, uploadModel } from "./util";
 
 const test = authenticatedTest.extend({
   page: async ({ page }, use) => {
@@ -128,7 +128,7 @@ test.describe("dropdown viewport placement", () => {
     let modelId: string | undefined;
     try {
       await uploadModel(page, name, { collection: collection.name });
-      await modelCard(page, name).click();
+      await openModelPage(page, name);
       await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
       modelId = new URL(page.url()).pathname.split("/").at(-1);
       const grant = await page.request.put(

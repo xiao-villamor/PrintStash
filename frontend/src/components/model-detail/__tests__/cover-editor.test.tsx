@@ -269,6 +269,39 @@ describe("Model cover editor", () => {
     expect(screen.getByText("Saved custom cover")).toBeVisible();
   });
 
+  it("retries a failed review without replaying the uncertain write", async () => {
+    let reads = 0;
+    const app = renderApp(<Editor initial={aModel({ has_custom_cover: true })} />, {
+      routes: routes({
+        "DELETE /api/v1/models/1/cover": json({ detail: "edit_conflict" }, 412),
+        "GET /api/v1/models/1": () =>
+          ++reads === 1
+            ? json({ detail: "unavailable" }, 503)
+            : json(aModel({ edit_version: 2, effective_role: "edit" })),
+      }),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Reset to automatic" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+    expect(await screen.findByText("The latest Model could not be loaded.")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Review latest version" }));
+    expect(
+      await screen.findByRole("button", { name: "Apply my cover to this version" }),
+    ).toBeEnabled();
+    expect(reads).toBe(2);
+    expect(app.requests().filter((r) => r.method === "DELETE")).toHaveLength(1);
+  });
+
+  it("does not publish a cover after its editor is closed", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const app = renderApp(<Editor initial={aModel({ has_custom_cover: true })} />, {
+      routes: routes({ "DELETE /api/v1/models/1/cover": () => pending.promise }),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Reset to automatic" }));
+    app.unmount();
+    await act(async () => pending.resolve(json(aModel({ edit_version: 2 }))));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("retries unavailable source images", async () => {
     const app = renderApp(<Editor />, {
       routes: routes({

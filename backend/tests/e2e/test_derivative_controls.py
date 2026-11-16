@@ -18,7 +18,12 @@ class TestDerivativeControls:
     ):
         headers = superuser_headers
         disabled = await api.put(
-            "/api/v1/config", headers=headers, json={"derivatives_mesh_enabled": False}
+            "/api/v1/config",
+            headers=headers,
+            json={
+                "derivatives_mesh_enabled": False,
+                "derivatives_previews_enabled": True,
+            },
         )
         assert disabled.status_code == 200, disabled.text
         upload = await api.post(

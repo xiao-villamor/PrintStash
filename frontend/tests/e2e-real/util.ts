@@ -2,8 +2,7 @@ import { expect, type APIResponse, type Page, type Response } from "@playwright/
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
-import { scrollToEnd } from "../e2e/_scroll";
-import { refreshLibrary, settleLibraryRead } from "../e2e/_library";
+import { settleLibraryRead } from "../e2e/_library";
 
 /** The new backup, as the finished `backups.create` Job reports it. */
 export interface CreatedBackup {
@@ -93,9 +92,7 @@ export async function openLibraryTools(page: Page): Promise<void> {
 
 /** Toolbar actions use native button semantics on every viewport. */
 export function libraryTool(page: Page, name: "New collection") {
-  return page
-    .getByRole("group", { name: "Library tools", exact: true })
-    .getByRole("button", { name, exact: true });
+  return page.getByRole("main").getByRole("button", { name, exact: true });
 }
 
 // The backend dedupes files by content hash, so the bytes must be unique per
@@ -199,14 +196,16 @@ export async function createCollectionViaVault(
   }
   await openLibraryTools(page);
   await libraryTool(page, "New collection").click();
-  const input = page.getByPlaceholder(parent ? /New subcollection in/ : "Collection name...");
+  const input = page
+    .getByRole("dialog", { name: "New collection", exact: true })
+    .getByRole("textbox", { name: "Name", exact: true });
   await input.fill(name);
   await input.press("Enter");
   await expect(input).toBeHidden();
   if (parent) {
     await expect(page.locator(`[data-collection-path="${parent}/${name}"]`)).toBeVisible();
   } else {
-    await expect(page.locator("aside").getByRole("button", { name, exact: true })).toBeVisible();
+    await expect(page.locator("aside").getByRole("treeitem", { name, exact: true })).toBeVisible();
   }
 }
 
@@ -255,12 +254,12 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
     await dialog.getByRole("button", { name: "None" }).click();
     // Destination results are paginated. Search by the leaf name before selecting
     // the full displayed path, including when earlier flows created other folders.
-    await dialog
+    await page
       .getByRole("textbox", { name: "Find destination", exact: true })
       .fill(collection.slice(collection.lastIndexOf("/") + 1));
     // Anchor the path before its count so a parent's nested folders cannot
     // match while the debounced search still shows the previous results.
-    await dialog.getByRole("option", { name: new RegExp(collection + " \\(\\d+\\)$") }).click();
+    await page.getByRole("option", { name: new RegExp(collection + " \\(\\d+\\)$") }).click();
   }
   if (tag) {
     const tagInput = page.getByPlaceholder("Search or create — press Enter");
@@ -309,15 +308,3 @@ export async function openFilters(page: Page) {
 }
 
 /** Follow one explicit stale-page recovery before establishing a reading anchor. */
-export async function loadNextLibraryPage(page: Page, beyond: number): Promise<void> {
-  const main = page.getByRole("main");
-  const entries = main.locator("[data-library-entry]");
-  const refresh = main.getByRole("button", { name: "Refresh library", exact: true });
-  await scrollToEnd(page);
-  await expect(entries.nth(beyond).or(refresh).first()).toBeAttached();
-  if (await refresh.isVisible()) {
-    await refreshLibrary(page);
-    await scrollToEnd(page);
-  }
-  await expect.poll(() => entries.count()).toBeGreaterThan(beyond);
-}

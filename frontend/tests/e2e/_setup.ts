@@ -47,6 +47,17 @@ export function useMockApi(): void {
   test.beforeEach(async ({ page }) => {
     resetMockApiState();
     await page.addInitScript(() => {
+      // Vite's debug launcher is absent from production and covers the mobile
+      // More button. Keep developer chrome out of user-facing browser flows.
+      document.addEventListener(
+        "DOMContentLoaded",
+        () => {
+          const style = document.createElement("style");
+          style.textContent = ".tsqd-parent-container{display:none!important}";
+          document.head.append(style);
+        },
+        { once: true },
+      );
       localStorage.setItem("printstash.token", "test-token");
       localStorage.setItem(
         "printstash.user",

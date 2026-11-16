@@ -11,6 +11,7 @@
 import { readFile } from "node:fs/promises";
 import { test, expect } from "./helpers";
 import {
+  openModelPage,
   createCollectionViaVault,
   gcodeFor,
   modelCard,
@@ -25,7 +26,7 @@ test.describe("collections", () => {
     const name = `e2e-col-${Date.now()}`;
     await createCollectionViaVault(page, name);
     const sidebar = page.locator("aside");
-    const collection = sidebar.getByRole("button", { name, exact: true });
+    const collection = sidebar.getByRole("treeitem", { name, exact: true });
 
     // Survives a full reload — proves real persistence, not optimistic UI.
     await page.reload();
@@ -63,25 +64,24 @@ test.describe("collections", () => {
     await page.evaluate(() => document.fonts.ready);
     const headingBox = await heading.boundingBox();
     await heading.dblclick();
-    const dialog = page.getByRole("dialog", { name: `Rename ${name}`, exact: true });
-    const input = dialog.getByRole("textbox", { name: "Collection name", exact: true });
+    const input = page.getByRole("textbox", { name: "Collection name", exact: true });
     await expect(input).toBeFocused();
     await expect(input).toHaveValue(name);
-    await expect(dialog).not.toHaveAttribute("aria-modal", "true");
-    await expect(page.locator("aside").getByRole("button", { name, exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.locator("aside").getByRole("treeitem", { name, exact: true })).toBeVisible();
     await expect(modelCard(page, model)).toBeVisible();
-    expect(await heading.boundingBox()).toEqual(headingBox);
-    const editorBox = await dialog.boundingBox();
+    const editorBox = await input.boundingBox();
     expect(headingBox).not.toBeNull();
     expect(editorBox).not.toBeNull();
-    expect(editorBox!.y).toBeGreaterThanOrEqual(headingBox!.y + headingBox!.height);
-    expect(editorBox!.y - headingBox!.y - headingBox!.height).toBeLessThanOrEqual(32);
-    expect(Math.abs(editorBox!.x - headingBox!.x)).toBeLessThanOrEqual(1);
-    expect(editorBox!.width).toBeLessThan(480);
+    expect(Math.abs(editorBox!.y - headingBox!.y)).toBeLessThanOrEqual(8);
+    expect(editorBox!.x).toBeLessThanOrEqual(headingBox!.x);
+    expect(editorBox!.x + editorBox!.width).toBeGreaterThan(headingBox!.x + headingBox!.width);
+    const surface = (await page.getByRole("main").boundingBox())!;
+    expect(editorBox!.x + editorBox!.width).toBeLessThanOrEqual(surface.x + surface.width);
     expect(editorBox!.height).toBeLessThan(200);
     await input.fill(renamed);
     await input.press("Enter");
-    await expect(dialog).toHaveCount(0);
+    await expect(input).toHaveCount(0);
     await expect(page.getByRole("heading", { name: renamed, exact: true })).toBeVisible();
     await expect(page).toHaveURL((url) => url.searchParams.get("c") === `${parent}/${renamed}`);
     await expect(modelCard(page, model)).toHaveAttribute("href", sameModel);
@@ -90,13 +90,13 @@ test.describe("collections", () => {
 
     // ── The same Model and its Artifact survive the collection's new path ──
     await expect(modelCard(page, model)).toHaveAttribute("href", sameModel);
-    await modelCard(page, model).click();
+    await openModelPage(page, model);
     await expect(page).toHaveURL((url) => url.pathname === modelPath);
     await expect(page.getByRole("heading", { name: model, exact: true })).toBeVisible();
     await page.getByRole("tab", { name: /^Revisions/ }).click();
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      page.getByTitle("Download").first().click(),
+      page.getByRole("button", { name: "Download", exact: true }).first().click(),
     ]);
     expect(download.suggestedFilename()).toBe(`${model}.gcode`);
     const downloadedPath = await download.path();
@@ -112,25 +112,21 @@ test.describe("collections", () => {
       .getByRole("button", { name: `Rename ${renamed}`, exact: true });
     await renameButton.focus();
     await renameButton.press("Enter");
-    const cancelledDialog = page.getByRole("dialog", {
-      name: `Rename ${renamed}`,
-      exact: true,
-    });
-    const cancelledInput = cancelledDialog.getByRole("textbox", {
+    const cancelledInput = page.getByRole("textbox", {
       name: "Collection name",
       exact: true,
     });
     await expect(cancelledInput).toBeFocused();
     await cancelledInput.fill(`${renamed}-discarded`);
     await cancelledInput.press("Escape");
-    await expect(cancelledDialog).toHaveCount(0);
+    await expect(cancelledInput).toHaveCount(0);
     await expect(renameButton).toBeFocused();
     await page.reload();
     await expect(page.getByRole("heading", { name: renamed, exact: true })).toBeVisible();
 
     // ── Remove this flow's collection branch ──
     const sidebar = page.locator("aside");
-    const parentRow = sidebar.getByRole("button", { name: parent, exact: true });
+    const parentRow = sidebar.getByRole("treeitem", { name: parent, exact: true });
     await parentRow.focus();
     await parentRow
       .locator("..")
@@ -165,9 +161,8 @@ test.describe("collections", () => {
 
     // ── History retains the descendant identity across a parent heading rename ──
     await page
-      .getByRole("main")
-      .getByRole("navigation")
-      .getByRole("button", { name: parent, exact: true })
+      .getByRole("complementary", { name: "Collections", exact: true })
+      .getByRole("treeitem", { name: parent, exact: true })
       .click();
     await page.getByRole("button", { name: `Rename ${parent}`, exact: true }).click();
     await page.getByRole("textbox", { name: "Collection name", exact: true }).fill(headingName);
@@ -191,7 +186,7 @@ test.describe("collections", () => {
       name: `Select folder ${headingName}`,
       exact: true,
     });
-    await page.getByRole("main").getByRole("button").filter({ has: folderChoice }).hover();
+    await folderChoice.locator("..").hover();
     await folderChoice.check();
     await page.getByRole("button", { name: "Rename", exact: true }).click();
     const rename = page.getByRole("dialog");
@@ -206,17 +201,17 @@ test.describe("collections", () => {
       "href",
       new RegExp(`^${modelPath}(?:\\?|$)`),
     );
-    await modelCard(page, model).click();
+    await openModelPage(page, model);
     await page.getByRole("tab", { name: /^Revisions/ }).click();
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      page.getByTitle("Download").first().click(),
+      page.getByRole("button", { name: "Download", exact: true }).first().click(),
     ]);
     expect(await readFile((await download.path())!, "utf8")).toBe(gcodeFor(model));
 
     // ── Clean only this flow's Models and collection branch ──
     await page.goto("/");
-    const parentRow = page.locator("aside").getByRole("button", { name: bulkName, exact: true });
+    const parentRow = page.locator("aside").getByRole("treeitem", { name: bulkName, exact: true });
     await parentRow.focus();
     await parentRow
       .locator("..")
@@ -242,9 +237,10 @@ test.describe("collections", () => {
     await createCollectionViaVault(page, child, parent);
     await page.goto("/");
     const sidebar = page.locator("aside");
-    const parentRow = sidebar.getByRole("button", { name: parent, exact: true });
-    await parentRow.locator("xpath=preceding-sibling::button[@aria-label='Expand']").click();
-    const childRow = sidebar.getByRole("button", { name: child, exact: true });
+    const parentRow = sidebar.getByRole("treeitem", { name: parent, exact: true });
+    await parentRow.focus();
+    await parentRow.press("ArrowRight");
+    const childRow = sidebar.getByRole("treeitem", { name: child, exact: true });
     await childRow.focus();
     await childRow
       .locator("..")
@@ -280,8 +276,8 @@ test.describe("collections", () => {
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.goto("/");
     const sidebar = page.locator("aside");
-    const parentRow = sidebar.getByRole("button", { name: parent, exact: true });
-    const childRow = sidebar.getByRole("button", { name: child, exact: true });
+    const parentRow = sidebar.getByRole("treeitem", { name: parent, exact: true });
+    const childRow = sidebar.getByRole("treeitem", { name: child, exact: true });
     for (const row of [parentRow, childRow]) {
       const badge = row.locator("xpath=following-sibling::span[last()]");
       await expect(badge).toHaveText("1");
@@ -325,7 +321,7 @@ test.describe("collections", () => {
     // Keep the action exposed even when the pointer leaves its moving row.
     await page.goto("/");
     const sidebar = page.locator("aside");
-    const label = sidebar.getByRole("button", { name: col, exact: true });
+    const label = sidebar.getByRole("treeitem", { name: col, exact: true });
     await expect(label).toBeVisible();
     await label.focus();
     const deleteAction = label
@@ -335,7 +331,7 @@ test.describe("collections", () => {
     await expect(deleteAction).toBeVisible();
     await deleteAction.click();
     await sidebar.getByRole("button", { name: "Delete", exact: true }).click();
-    await expect(sidebar.getByRole("button", { name: col, exact: true })).toHaveCount(0);
+    await expect(sidebar.getByRole("treeitem", { name: col, exact: true })).toHaveCount(0);
 
     // The contained model landed in the trash (recycle bin), not hard-deleted.
     await page.goto("/settings");

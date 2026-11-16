@@ -254,11 +254,15 @@ class TestConfigResolver:
 
 
 class TestDerivativeDefaults:
-    def test_all_producer_groups_default_to_enabled(self, monkeypatch):
+    def test_only_optional_multiangle_generation_defaults_to_disabled(
+        self, monkeypatch
+    ):
         for name in SETTINGS.values():
             monkeypatch.delenv(f"VAULT_{name.upper()}", raising=False)
         configured = FrozenSettings(_env_file=None)
-        assert all(getattr(configured, name) is True for name in SETTINGS.values())
+        for name in SETTINGS.values():
+            assert getattr(configured, name) is (name != "derivatives_previews_enabled")
+        assert configured.derivatives_previews_include_poles is False
 
     @pytest.mark.parametrize("name", list(SETTINGS.values()))
     def test_reads_a_disabled_environment_default(self, monkeypatch, name):

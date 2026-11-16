@@ -1005,6 +1005,44 @@ describe("DropdownMenu viewport placement", () => {
     vi.stubGlobal("innerWidth", 500);
   }
 
+  it("anchors a contextual menu at the pointer position", () => {
+    panelGeometry(100, 400);
+    openMenu(
+      <DropdownMenu
+        portal
+        open
+        onOpenChange={() => {}}
+        anchorPoint={{ x: 120, y: 150 }}
+        trigger={TRIGGER}
+      >
+        <MenuItems />
+      </DropdownMenu>,
+    );
+    expect(screen.getByRole("menu")).toHaveStyle({
+      left: "120px",
+      top: "150px",
+      transformOrigin: "left top",
+    });
+  });
+
+  it("positions menus when ResizeObserver is unavailable", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "ResizeObserver");
+    Reflect.deleteProperty(globalThis, "ResizeObserver");
+    try {
+      panelGeometry(180, 400);
+      openMenu(
+        <DropdownMenu portal open onOpenChange={() => {}} trigger={TRIGGER}>
+          <MenuItems />
+        </DropdownMenu>,
+      );
+      expect(screen.getByRole("menu")).toHaveStyle({ top: "212px" });
+      fireEvent(window, new Event("resize"));
+      expect(screen.getByRole("menu")).toHaveStyle({ top: "212px" });
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, "ResizeObserver", descriptor);
+    }
+  });
+
   it("opens above a trigger when its contents do not fit below", () => {
     panelGeometry(180, 400);
     openMenu(

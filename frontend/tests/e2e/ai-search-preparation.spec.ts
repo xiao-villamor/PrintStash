@@ -50,6 +50,7 @@ test.describe("AI Search preparation", () => {
     ] as const) {
       await page.setViewportSize({ width, height });
       await page.goto("/settings?section=ai-search");
+      await page.getByText("Preparation details", { exact: true }).click();
       const steps = page.getByRole("list", { name: "Preparation steps" });
       await expect(steps.getByRole("listitem")).toHaveText([
         /Check library content\(done\)/,

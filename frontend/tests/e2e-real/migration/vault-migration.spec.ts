@@ -21,6 +21,7 @@ test.describe("Vault migration", () => {
     await uploadGcodeModel(page, baselineName);
     const backup = await createBackupViaApi(page);
     await page.goto("/settings?section=storage");
+    await page.getByRole("button", { name: "Plan migration", exact: true }).click();
     await expect(page.getByRole("region", { name: "Move Vault storage" })).toBeVisible();
     const panel = page.getByRole("region", { name: "Move Vault storage" });
     await panel.getByLabel("Your files", { exact: true }).fill(data);
@@ -74,6 +75,7 @@ test.describe("Vault migration", () => {
     await expect.poll(healthy, { timeout: 30_000, intervals: [50, 100, 250] }).toBe(false);
     await expect.poll(healthy, { timeout: 60_000, intervals: [100, 250, 500] }).toBe(true);
     await page.goto("/settings?section=storage");
+    await page.getByRole("button", { name: "Plan migration", exact: true }).click();
     await expect(page.getByRole("region", { name: "Move Vault storage" })).toBeVisible();
     await panel.getByRole("button", { name: "Recover migration" }).click();
     await panel.getByRole("button", { name: "Resume copy" }).click();
@@ -83,7 +85,7 @@ test.describe("Vault migration", () => {
     await expect(confirmation).toContainText("writes are paused");
     await confirmation.getByRole("button", { name: "Switch Vault storage" }).click();
     await expect(panel.getByText("Destination is active", { exact: true })).toBeVisible();
-    const currentStorage = page.getByRole("region", { name: "Storage connection details" });
+    const currentStorage = page.locator(".settings-storage-summary");
     await expect(currentStorage.getByText(data, { exact: true })).toBeVisible();
     await expect(currentStorage.getByText(thumbs, { exact: true })).toBeVisible();
     await expect(panel.getByText(/will not be deleted automatically/)).toBeVisible();

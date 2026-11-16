@@ -9,6 +9,8 @@
 - Browser captures can suggest an editable collection and tags, include a selected cover for every resulting Model, and show download and upload byte progress. Recovering an interrupted capture retains its original suggestions and verified files; a pending local cover must be selected again.
 
 - Archive review identifies omitted images, documents and unsupported entries before importing Models, and explains how selected files and subfolders become Models and collections.
+
+- New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.
 - Flat-model previews now support arrow navigation through all five views and back to the cover. Single-cover and multi-angle cards share a larger image area, and the expanded gallery uses more room on large screens while fitting narrow displays.
 
 - Preview settings now include the vault-wide multi-angle generation switch. Preview activity reports total, completed, remaining, skipped and failed image tasks across the library, including work waiting to enter the queue. Multi-angle orbits use the shared cover camera elevation; enabled generators refresh older view sets in the background.
@@ -73,6 +75,18 @@
 
 - Partial imports show every file result and its failure reason. Expired browser staging prompts a fresh capture, and collection selection is distinguished from physical storage.
 - Slicer handoff remembers the current user's browser preference, retains a download fallback for the selected Artifact and distinguishes a requested launch from a confirmed opening.
+
+- Saved multipart descriptions stay visible in the overview. Multipart member names wrap without clipping, and the mobile composition editor keeps Add variant and Save changes at the shared touch-target size.
+
+- Captured-source conflict recovery stays inside the edit dialog, keeping review and retry controls reachable. Keyboard focus remains on its card when a growing Library switches to virtual rows.
+
+- Profile conflict reviews remain accessible inside the edit dialog, and cancelling a new profile returns keyboard focus to its creation button. Native dropdowns follow the app’s shared cursor preference.
+
+- Collection previews remain visible during background Library refreshes, routine count updates no longer flash an Updating label, and Add tag is visible without hovering.
+
+- The Library now refreshes automatically after catalog changes or expired browse cursors, including paged galleries. Updates preserve the reading position, wait until selection ends, and no longer require a Refresh library banner.
+
+- Completing a ZIP import no longer leaves the Library empty with a request error when it interrupts an in-progress refresh. Interrupted reads recover automatically while preserving the displayed Models and reading position.
 - Library refreshes recover automatically when an ongoing ZIP import changes the catalog during a read, keeping the displayed Models and reading position instead of showing a stuck request error.
 
 - Model card arrows return to the cover in both directions and skip the repeated default camera angle. The expanded gallery keeps every generated view available.

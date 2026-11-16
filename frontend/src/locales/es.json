@@ -5158,10 +5158,10 @@
   "modelCover.reviewFailed": "No se pudo cargar la versión más reciente del modelo.",
   "modelCover.applyReviewed": "Aplicar mi portada a esta versión",
   "modelPreview.cover": "Portada",
-  "modelPreview.orbit0": "Órbita 1 · −35°",
-  "modelPreview.orbit1": "Órbita 2 · 55°",
-  "modelPreview.orbit2": "Órbita 3 · 145°",
-  "modelPreview.orbit3": "Órbita 4 · 235°",
+  "modelPreview.orbit0": "Oblicua 1",
+  "modelPreview.orbit1": "Oblicua 2",
+  "modelPreview.orbit2": "Oblicua 3",
+  "modelPreview.orbit3": "Oblicua 4",
   "modelPreview.top": "Superior",
   "modelPreview.bottom": "Inferior",
   "modelPreview.face": "Cara amplia",
@@ -5341,5 +5341,9 @@
   "A Multipart with this name already exists. Rename it or review a new import with another name.": "Ya existe un Multipart con este nombre. Cámbialo o revisa una nueva importación con otro nombre.",
   "The selected cover is not a valid JPEG, PNG or WebP image within the size limits.": "La portada seleccionada no es una imagen JPEG, PNG o WebP válida dentro de los límites de tamaño.",
   "A selected guide is missing from the archive. Prepare and review the archive again.": "Falta una guía seleccionada en el archivo. Prepara y revisa el archivo de nuevo.",
-  "The selected cover is missing from the archive. Prepare and review the archive again.": "Falta la portada seleccionada en el archivo. Prepara y revisa el archivo de nuevo."
+  "The selected cover is missing from the archive. Prepare and review the archive again.": "Falta la portada seleccionada en el archivo. Prepara y revisa el archivo de nuevo.",
+  "One thumbnail": "Una miniatura",
+  "Oblique views": "Vistas oblicuas",
+  "Oblique views + top and bottom": "Vistas oblicuas + superior e inferior",
+  "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Empieza con una miniatura para importar más rápido. Activa cuatro vistas oblicuas y, opcionalmente, las vistas superior e inferior. Los modelos existentes se actualizan en segundo plano."
 }

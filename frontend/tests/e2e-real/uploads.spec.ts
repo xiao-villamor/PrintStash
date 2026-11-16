@@ -8,7 +8,14 @@
  * a queue that reports success while a render is still missing.
  */
 import { test, expect } from "./helpers";
-import { bgcodeFor, createCollectionViaVault, modelCard, stlFor, uploadModel } from "./util";
+import {
+  openModelPage,
+  bgcodeFor,
+  createCollectionViaVault,
+  modelCard,
+  stlFor,
+  uploadModel,
+} from "./util";
 
 test.describe("uploads", () => {
   test("recovers remote Job state after missed events", async ({ page }) => {
@@ -161,7 +168,7 @@ test.describe("uploads", () => {
     });
     await page.goto("/");
     await expect(modelCard(page, name)).toBeVisible({ timeout: 60_000 });
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
   });
 
@@ -220,7 +227,7 @@ test.describe("uploads", () => {
         timeout: 60_000,
       })
       .toBeGreaterThan(0);
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     const screenshot = page.getByRole("button", { name: "Screenshot" });
     await expect(screenshot).toBeEnabled({ timeout: 60_000 });
 
@@ -249,7 +256,7 @@ test.describe("uploads", () => {
         await thumbnail.evaluate((image: HTMLImageElement) => image.naturalWidth),
       ).toBeGreaterThan(0);
     }).toPass({ timeout: 60_000 });
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await page.getByRole("tab", { name: /Files/ }).click();
     await expect(page.getByText(`${name}.stl`).first()).toBeVisible();
@@ -265,7 +272,7 @@ test.describe("uploads", () => {
       },
     });
 
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await expect(page.getByText("PETG", { exact: true }).first()).toBeVisible();
     await expect(page.getByText(/PrusaSlicer/).first()).toBeVisible();
@@ -287,7 +294,7 @@ test.describe("uploads", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Upload model" });
-    await dialog.getByRole("button", { name: "Bulk", exact: true }).click();
+    await dialog.getByRole("tab", { name: "Bulk", exact: true }).click();
     await dialog
       .locator(
         'input[type="file"][accept=".stl,.3mf,.obj,.glb,.gltf,.ply,.3dm,.fbx,.step,.stp,.dxf,.ctb,.goo"]',
@@ -340,7 +347,7 @@ test.describe("uploads", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Upload model" });
-    await dialog.getByRole("button", { name: "Bulk", exact: true }).click();
+    await dialog.getByRole("tab", { name: "Bulk", exact: true }).click();
     await dialog.locator('input[type="file"][accept*=".dxf"]').setInputFiles({
       name: `${name}.dxf`,
       mimeType: "image/vnd.dxf",
@@ -353,7 +360,7 @@ test.describe("uploads", () => {
     await expect(task.getByText("completed", { exact: true })).toBeVisible({ timeout: 120_000 });
 
     await page.goto("/");
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(
       page.getByText("DXF preview is not supported yet.", { exact: false }),
     ).toBeVisible();

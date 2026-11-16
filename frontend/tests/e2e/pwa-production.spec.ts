@@ -226,7 +226,9 @@ test.describe("production PWA cache contracts", () => {
     const response = await page.goto("/settings");
 
     expect(response?.status()).toBe(200);
-    await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Settings", exact: true, level: 1 }),
+    ).toBeVisible();
   });
 
   test("delivers the production bootstrap offline", async ({ page, context }) => {
@@ -292,7 +294,9 @@ test.describe("production route recovery", () => {
     await expect(page.getByRole("button", { name: "Reload page" })).toBeVisible();
     await context.unroute(/\/assets\/settings-[^/]+\.js$/);
     await page.getByRole("button", { name: "Reload page" }).click();
-    await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Settings", exact: true, level: 1 }),
+    ).toBeVisible();
     expect(documents).toBe(3);
   });
 });

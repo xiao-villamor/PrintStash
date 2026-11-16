@@ -23061,6 +23061,10 @@
             "title": "Derivatives Previews Enabled",
             "type": "boolean"
           },
+          "derivatives_previews_include_poles": {
+            "title": "Derivatives Previews Include Poles",
+            "type": "boolean"
+          },
           "derivatives_toolpath_enabled": {
             "title": "Derivatives Toolpath Enabled",
             "type": "boolean"
@@ -23264,7 +23268,8 @@
           "derivatives_mesh_enabled",
           "derivatives_gcode_enabled",
           "derivatives_toolpath_enabled",
-          "derivatives_previews_enabled"
+          "derivatives_previews_enabled",
+          "derivatives_previews_include_poles"
         ],
         "title": "VaultConfigRead",
         "type": "object"
@@ -23440,6 +23445,17 @@
               }
             ],
             "title": "Derivatives Previews Enabled"
+          },
+          "derivatives_previews_include_poles": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivatives Previews Include Poles"
           },
           "derivatives_toolpath_enabled": {
             "anyOf": [

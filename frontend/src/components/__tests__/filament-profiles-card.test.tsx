@@ -944,7 +944,8 @@ describe("FilamentProfilesCard", () => {
         await user.clear(name);
         await user.type(name, "My draft");
         await user.click(screen.getByRole("heading", { name: `${label} presets` }));
-        await screen.findByRole("button", { name: "Review current values" });
+        const editor = screen.getByRole("dialog", { name: `Edit ${kind} preset` });
+        await within(editor).findByRole("button", { name: "Review current values" });
         expect(name).toHaveValue("My draft");
         await user.click(name);
         await user.click(screen.getByRole("heading", { name: `${label} presets` }));
@@ -955,7 +956,7 @@ describe("FilamentProfilesCard", () => {
           notes: "Other editor notes",
         };
         app.route({ [`GET /api/v1/${kind}-profiles`]: json([current]) });
-        await user.click(screen.getByRole("button", { name: "Review current values" }));
+        await user.click(within(editor).getByRole("button", { name: "Review current values" }));
         expect(
           await within(screen.getByRole("status", { name: "Current preset values" })).findByText(
             "Other editor notes",
@@ -970,7 +971,7 @@ describe("FilamentProfilesCard", () => {
           },
           [`GET /api/v1/${kind}-profiles`]: json([saved]),
         });
-        await user.click(screen.getByRole("button", { name: "Save revised changes" }));
+        await user.click(within(editor).getByRole("button", { name: "Save revised changes" }));
         await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(2));
         const revised = app.requestsWithMethod("PATCH")[1];
         expect(revisedHeaders.get("If-Match")).toBe(

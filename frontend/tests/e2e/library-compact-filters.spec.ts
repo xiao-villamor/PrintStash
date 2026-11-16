@@ -1,52 +1,54 @@
 /**
- * Desktop filters share the browsing surface with the expanded tree and results.
- * Date dropdowns must not move the toolbar or results when opened.
+ * The shared filter picker keeps URL selections, keyboard return, and the
+ * browsing surface stable while choices load or the viewport changes.
  */
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { aPrinter } from "../../src/test-support/factories";
 import { collectPageProblems, useMockApi } from "./_setup";
 
 useMockApi();
 
+async function openFilters(page: Page) {
+  await page
+    .getByRole("button", { name: "Filters", exact: true })
+    .filter({ visible: true })
+    .click();
+  const picker = page.getByRole("dialog", { name: "Filter Models", exact: true });
+  await expect(picker).toBeVisible();
+  return picker;
+}
+
 test.describe("compact Library filters", () => {
   test.use({ viewport: { width: 1920, height: 1080 } });
 
-  test("uses shared checkbox choices for Printer", async ({ page }, testInfo) => {
+  test("uses mutually exclusive checkbox choices for Printer", async ({ page }, testInfo) => {
     await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
     await page.route("**/api/v1/printers", (route) =>
       route.fulfill({ json: [aPrinter({ id: 7, name: "Workshop printer" })] }),
     );
     await page.goto("/");
-    await page.getByRole("main").getByRole("button", { name: "Filters", exact: true }).click();
-    const filters = page.getByRole("main").getByRole("region", { name: "Filters", exact: true });
-    await filters.getByRole("button", { name: "Printer", exact: true }).click();
-    const menu = page.getByRole("dialog", { name: "Printer", exact: true });
-    await menu.getByRole("checkbox", { name: "Vault only", exact: true }).click();
+    const menu = await openFilters(page);
+    await menu.getByRole("button", { name: "Printer", exact: true }).click();
+    await menu.getByRole("checkbox", { name: "Vault only", exact: true }).check();
     await expect(page).toHaveURL(/printer_presence=none/);
     await expect(menu.getByRole("checkbox", { name: "Vault only", exact: true })).toBeChecked();
-    await menu.getByRole("checkbox", { name: "Workshop printer", exact: true }).click();
+    await menu.getByRole("checkbox", { name: "Workshop printer", exact: true }).check();
     await expect(page).toHaveURL(/printer_id=7/);
     await expect(page).not.toHaveURL(/printer_presence=/);
-    await expect(
-      menu.getByRole("checkbox", { name: "Workshop printer", exact: true }),
-    ).toBeChecked();
     await expect(menu.getByRole("checkbox", { checked: true })).toHaveCount(1);
-    await expect(menu).toHaveCSS("opacity", "1");
     await menu.screenshot({
       path: testInfo.outputPath("printer-shared-choices.png"),
       animations: "disabled",
     });
-    await menu.getByRole("checkbox", { name: "On a printer", exact: true }).click();
+    await menu.getByRole("checkbox", { name: "On a printer", exact: true }).check();
     await expect(page).toHaveURL(/printer_presence=any/);
     await expect(page).not.toHaveURL(/printer_id=/);
-    await expect(menu.getByRole("checkbox", { name: "On a printer", exact: true })).toBeChecked();
-    await menu.getByRole("checkbox", { name: "On a printer", exact: true }).click();
+    await menu.getByRole("checkbox", { name: "On a printer", exact: true }).uncheck();
     await expect(page).not.toHaveURL(/printer_presence=/);
-    await expect(menu.getByRole("checkbox", { name: "Any location", exact: true })).toBeChecked();
+    await expect(menu.getByRole("checkbox", { checked: true })).toHaveCount(0);
   });
 
-  test("uses the same checkbox choices for printed status", async ({ page }, testInfo) => {
-    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+  test("uses mutually exclusive checkbox choices for printed status", async ({ page }) => {
     await page.route("**/api/v1/models/facets**", (route) =>
       route.fulfill({
         json: {
@@ -65,29 +67,20 @@ test.describe("compact Library filters", () => {
       }),
     );
     await page.goto("/?printed=no");
-    await expect(page.getByRole("main")).toHaveAttribute("aria-busy", "false");
-    const filters = page.getByRole("main").getByRole("region", { name: "Filters", exact: true });
-    await filters.getByRole("button", { name: "Printed", exact: true }).click();
-    const menu = page.getByRole("dialog", { name: "Printed", exact: true });
+    const menu = await openFilters(page);
+    await menu.getByRole("button", { name: /^Printed/ }).click();
     await expect(menu.getByRole("checkbox", { name: "Not printed", exact: true })).toBeChecked();
     await expect(menu.getByText("0", { exact: true })).toBeVisible();
-    await expect(menu).toHaveCSS("opacity", "1");
-    await page.screenshot({
-      path: testInfo.outputPath("printed-checkbox.png"),
-      animations: "disabled",
-      clip: { x: 220, y: 140, width: 1150, height: 450 },
-    });
-    await menu.getByRole("checkbox", { name: "Printed", exact: true }).click();
+    await menu.getByRole("checkbox", { name: "Printed", exact: true }).check();
     await expect(page).toHaveURL(/printed=yes/);
     await expect(
       menu.getByRole("checkbox", { name: "Not printed", exact: true }),
     ).not.toBeChecked();
-    await expect(menu.getByRole("checkbox", { name: "Printed", exact: true })).toBeChecked();
-    await menu.getByRole("checkbox", { name: "All", exact: true }).click();
+    await menu.getByRole("checkbox", { name: "Printed", exact: true }).uncheck();
     await expect(page).not.toHaveURL(/printed=/);
   });
 
-  test("keeps loading feedback in the existing filter row", async ({ page }) => {
+  test("preserves selected filters while their values load", async ({ page }) => {
     const pending = Promise.withResolvers<void>();
     await page.route("**/api/v1/models/facets**", async (route) => {
       await pending.promise;
@@ -106,165 +99,82 @@ test.describe("compact Library filters", () => {
     });
     try {
       await page.goto("/?file_type=3mf");
-      const filters = page.getByRole("main").getByRole("region", { name: "Filters", exact: true });
-      const loading = filters.getByRole("status", { name: "Loading filter values…" });
-      const uploaded = filters.getByRole("button", { name: "Uploaded", exact: true });
-      await expect(loading).toBeVisible();
-      await expect(filters.getByRole("button", { name: "File type", exact: true })).toContainText(
-        "(1)",
-      );
-      await expect(uploaded).toBeEnabled();
-      await expect(page.getByTitle("Remove File type: 3MF", { exact: true })).toBeVisible();
-      await page.evaluate(() => document.fonts.ready);
-      const before = await uploaded.boundingBox();
-      const spinner = await loading.boundingBox();
-      const panel = await filters.boundingBox();
-      expect(before).not.toBeNull();
-      expect(spinner).not.toBeNull();
-      expect(panel).not.toBeNull();
-      expect(
-        Math.abs(spinner!.y + spinner!.height / 2 - before!.y - before!.height / 2),
-      ).toBeLessThan(2);
-      const similar = filters.getByRole("checkbox", { name: "Has similar candidates" });
-      const checkboxBox = await similar.boundingBox();
-      expect(checkboxBox).not.toBeNull();
-      await page.mouse.move(
-        checkboxBox!.x + checkboxBox!.width / 2,
-        checkboxBox!.y + checkboxBox!.height / 2,
-      );
-      await page.mouse.down();
+      const menu = await openFilters(page);
+      await expect(menu.getByRole("status")).toHaveText("Loading filter values…");
+      await menu.getByRole("button", { name: /^File type/ }).click();
+      const choice = menu.getByRole("checkbox", { name: "3MF", exact: true });
+      await expect(choice).toBeChecked();
+      await expect(choice).toBeEnabled();
       pending.resolve();
-      await expect(loading).toHaveCount(0);
-      await page.mouse.up();
-      await expect(similar).toBeChecked();
-      await expect(page).toHaveURL(/has_similar_candidates=yes/);
-      await expect(filters.getByRole("button", { name: "File type", exact: true })).toContainText(
-        "(1)",
-      );
-      expect((await uploaded.boundingBox())!.y).toBe(before!.y);
-      expect((await filters.boundingBox())!.height).toBe(panel!.height);
+      await expect(menu.getByText("Loading filter values…")).toHaveCount(0);
+      await expect(choice).toBeChecked();
+      await expect(menu.getByText("7", { exact: true })).toBeVisible();
+      await choice.uncheck();
+      await expect(page).not.toHaveURL(/file_type=/);
     } finally {
       pending.resolve();
     }
   });
 
-  test("keeps date dropdowns above a stable browsing surface on 1080p", async ({ page }) => {
+  test("keeps date controls above a stable browsing surface on 1080p", async ({ page }) => {
     const problems = await collectPageProblems(page);
     await page.goto(
       "/?file_type=3mf&printed=no&storage=vault&uploaded_after=2026-01-01&uploaded_before=2026-12-31",
     );
-    const main = page.getByRole("main");
-    const filters = main.getByRole("region", { name: "Filters", exact: true });
-    await expect(main).toHaveAttribute("aria-busy", "false");
-    await expect(filters.getByRole("button", { name: "File type", exact: true })).toContainText(
-      "(1)",
-    );
-    await expect(filters.getByRole("button", { name: "Printed", exact: true })).toContainText(
-      "(1)",
-    );
-    await expect(page.getByRole("dialog")).toHaveCount(0);
-    const closedHeight = (await filters.boundingBox())!.height;
-    const uploaded = filters.getByRole("button", { name: "Uploaded", exact: true });
-    await uploaded.click();
-    const dates = page.getByRole("dialog", { name: "Uploaded", exact: true });
-    await expect(dates.getByLabel("After", { exact: true })).toHaveValue("2026-01-01");
-    await expect(dates.getByLabel("Before", { exact: true })).toHaveValue("2026-12-31");
-    expect((await filters.boundingBox())!.height).toBe(closedHeight);
-    await page.keyboard.press("Escape");
-    await expect(uploaded).toBeFocused();
-    await expect(
-      page.locator("aside").getByRole("button", { name: "All Models", exact: true }),
-    ).toBeVisible();
-    await page
-      .locator("aside")
-      .getByRole("button", { name: "Expand", exact: true })
-      .first()
-      .click();
-    await expect(
-      page.locator("aside").getByRole("button", { name: "Collapse", exact: true }).first(),
-    ).toBeVisible();
-    await expect(page.getByTitle("Remove File type: 3MF", { exact: true })).toBeVisible();
-    const model = main.locator("[data-library-entry]").first();
+    const model = page.getByRole("main").locator("[data-library-entry]").first();
     await expect(model).toBeVisible();
-    const panelBox = await filters.boundingBox();
-    const modelBox = await model.boundingBox();
-    expect(panelBox).not.toBeNull();
-    expect(modelBox).not.toBeNull();
-    expect(panelBox!.height).toBeLessThan(200);
-    expect(modelBox!.y).toBeGreaterThan(panelBox!.y + panelBox!.height);
-    expect(modelBox!.y + modelBox!.height).toBeLessThan(1080);
-    await expect(page.getByRole("dialog")).toHaveCount(0);
+    const before = await model.boundingBox();
+    const menu = await openFilters(page);
+    await menu.getByRole("button", { name: /^Uploaded/ }).click();
+    await expect(menu.getByLabel("After", { exact: true })).toHaveValue("2026-01-01");
+    await expect(menu.getByLabel("Before", { exact: true })).toHaveValue("2026-12-31");
+    expect(await model.boundingBox()).toEqual(before);
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Filters", exact: true }).filter({ visible: true }),
+    ).toBeFocused();
+    await expect(page.getByTitle("Remove File type: 3MF", { exact: true })).toBeVisible();
+    expect(await model.boundingBox()).toEqual(before);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
-    await page.evaluate(async () => {
-      await document.fonts.ready;
-      await Promise.all(
-        [...document.images]
-          .filter(
-            (image) => image.loading !== "lazy" || image.getBoundingClientRect().top < innerHeight,
-          )
-          .map((image) => image.decode().catch(() => {})),
-      );
-    });
-    await page.screenshot({ path: "../reports/desktop-compact-filters-1080p.png" });
-    await uploaded.click();
-    await expect(dates).toHaveCSS("opacity", "1");
-    await page.screenshot({
-      path: "../reports/library-date-dropdown.png",
-      animations: "disabled",
-      clip: { x: 220, y: 180, width: 1150, height: 240 },
-    });
-    await page.keyboard.press("Escape");
     expect(problems).toEqual([]);
   });
 
-  test("keeps active chips when the inline controls are collapsed", async ({ page }) => {
+  test("keeps active chips after closing the picker", async ({ page }) => {
     await page.goto("/?file_type=3mf&uploaded_after=2026-01-01");
-    const filters = page.getByRole("main").getByRole("region", { name: "Filters", exact: true });
-    await expect(filters).toBeVisible();
-    await page
-      .getByRole("button", { name: /^Filters(?: \d+)?$/ })
-      .filter({ visible: true })
-      .click();
-    await expect(filters).toHaveCount(0);
+    const menu = await openFilters(page);
+    await menu.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(menu).toHaveCount(0);
     await expect(page.getByTitle("Remove File type: 3MF", { exact: true })).toBeVisible();
     await expect(page).toHaveURL(/file_type=3mf/);
   });
 
-  test("fits date dropdowns within a narrow desktop surface", async ({ page }) => {
+  test("fits date controls within a narrow desktop surface", async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto("/?file_type=3mf&uploaded_after=2026-01-01&printed_after=2026-01-01");
-    const filters = page.getByRole("main").getByRole("region", { name: "Filters", exact: true });
-    await filters.getByRole("button", { name: "Uploaded", exact: true }).click();
-    await expect(
-      page.getByRole("dialog", { name: "Uploaded" }).getByLabel("After", { exact: true }),
-    ).toBeVisible();
-    await filters.getByRole("button", { name: "Print history", exact: true }).click();
-    const history = page.getByRole("dialog", { name: "Print history" });
-    await expect(history.getByLabel(/Finished on or after/)).toBeVisible();
-    await expect(page.getByRole("dialog", { name: "Uploaded" })).toHaveCount(0);
-    const box = (await history.boundingBox())!;
+    const menu = await openFilters(page);
+    await menu.getByRole("button", { name: /^Uploaded/ }).click();
+    await expect(menu.getByLabel("After", { exact: true })).toBeVisible();
+    await menu.getByRole("button", { name: "Back", exact: true }).click();
+    await menu.getByRole("button", { name: /^Print history/ }).click();
+    await expect(menu.getByLabel(/Finished on or after/)).toBeVisible();
+    await expect(menu.getByLabel("After", { exact: true })).toHaveCount(0);
+    const box = (await menu.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(1024);
-    expect(await filters.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
-      true,
-    );
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
-      true,
-    );
+    expect(await menu.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   });
 
-  test("retains the filter drawer on a phone", async ({ page }) => {
+  test("keeps filter choices reachable on a phone", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");
-    await page
-      .getByRole("main")
-      .getByRole("button", { name: /^Filters(?: \d+)?$/ })
-      .filter({ visible: true })
-      .click();
-    const drawer = page.getByRole("dialog", { name: "Filters", exact: true });
-    await expect(drawer).toBeVisible();
-    await expect(drawer.getByRole("button", { name: "Uploaded", exact: true })).toBeVisible();
+    const menu = await openFilters(page);
+    await menu.getByRole("button", { name: "Uploaded", exact: true }).click();
+    await expect(menu.getByLabel("After", { exact: true })).toBeInViewport();
+    const box = (await menu.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
   });
 });

@@ -35,7 +35,7 @@ export function libraryBrowseOptions(params: LibraryBrowseParams, firstRowSize =
       } catch (error) {
         // No cursor has been accepted for a first page. One fresh read can
         // recover a concurrent writer without changing any displayed sequence.
-        // A continuation conflict always belongs to the explicit refresh flow.
+        // A continuation conflict belongs to the coordinated refresh flow.
         if (
           pageParam !== null ||
           !(error instanceof ApiError) ||

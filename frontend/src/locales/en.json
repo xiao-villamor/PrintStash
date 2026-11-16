@@ -5158,10 +5158,10 @@
   "modelCover.reviewFailed": "The latest Model could not be loaded.",
   "modelCover.applyReviewed": "Apply my cover to this version",
   "modelPreview.cover": "Cover",
-  "modelPreview.orbit0": "Orbit 1 · −35°",
-  "modelPreview.orbit1": "Orbit 2 · 55°",
-  "modelPreview.orbit2": "Orbit 3 · 145°",
-  "modelPreview.orbit3": "Orbit 4 · 235°",
+  "modelPreview.orbit0": "Oblique 1",
+  "modelPreview.orbit1": "Oblique 2",
+  "modelPreview.orbit2": "Oblique 3",
+  "modelPreview.orbit3": "Oblique 4",
   "modelPreview.top": "Top",
   "modelPreview.bottom": "Bottom",
   "modelPreview.face": "Broad face",
@@ -5341,5 +5341,9 @@
   "A Multipart with this name already exists. Rename it or review a new import with another name.": "A Multipart with this name already exists. Rename it or review a new import with another name.",
   "The selected cover is not a valid JPEG, PNG or WebP image within the size limits.": "The selected cover is not a valid JPEG, PNG or WebP image within the size limits.",
   "A selected guide is missing from the archive. Prepare and review the archive again.": "A selected guide is missing from the archive. Prepare and review the archive again.",
-  "The selected cover is missing from the archive. Prepare and review the archive again.": "The selected cover is missing from the archive. Prepare and review the archive again."
+  "The selected cover is missing from the archive. Prepare and review the archive again.": "The selected cover is missing from the archive. Prepare and review the archive again.",
+  "One thumbnail": "One thumbnail",
+  "Oblique views": "Oblique views",
+  "Oblique views + top and bottom": "Oblique views + top and bottom",
+  "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background."
 }

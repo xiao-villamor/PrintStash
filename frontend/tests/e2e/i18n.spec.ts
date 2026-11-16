@@ -29,7 +29,9 @@ test.describe("localization", () => {
         { locale },
       );
       await page.goto("/settings");
-      await expect(page.getByRole("heading", { name: expected, exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: expected, exact: true, level: 1 }),
+      ).toBeVisible();
       const headings = await page.evaluate(() => window.__initialLocaleHeadings);
       expect(headings).toContain(expected);
       expect(headings).not.toContain(forbidden);
@@ -40,14 +42,17 @@ test.describe("localization", () => {
   for (const width of [1280, 390]) {
     test(`language selection survives reload at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 844 });
-      await page.goto("/settings");
-      await page.getByRole("button", { name: /^Language:/ }).click();
-      await page.getByRole("menuitemradio", { name: "Español" }).click();
-      await expect(page.getByRole("heading", { name: "Ajustes", exact: true })).toBeVisible();
+      await page.goto("/settings?section=design");
+      await page.getByRole("combobox", { name: "Language", exact: true }).selectOption("es");
+      await expect(
+        page.getByRole("heading", { name: "Ajustes", exact: true, level: 1 }),
+      ).toBeVisible();
       await expect(page.locator("html")).toHaveAttribute("lang", "es");
       await page.reload();
-      await expect(page.getByRole("heading", { name: "Ajustes", exact: true })).toBeVisible();
-      await expect(page.getByRole("button", { name: /^Idioma:/ })).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Ajustes", exact: true, level: 1 }),
+      ).toBeVisible();
+      await expect(page.getByRole("combobox", { name: "Idioma", exact: true })).toHaveValue("es");
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
@@ -56,11 +61,11 @@ test.describe("localization", () => {
 
   test("search shortcut works with localized accessible labels", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("button", { name: /^Language:/ }).click();
+    await page.getByRole("button", { name: "My workspace", exact: true }).click();
     await page.getByRole("menuitemradio", { name: "Español" }).click();
-    await page.getByRole("button", { name: /^Idioma:/ }).blur();
+    await page.keyboard.press("Escape");
     await page.keyboard.press("/");
-    await expect(page.getByRole("searchbox", { name: "Buscar en la biblioteca" })).toBeFocused();
+    await expect(page.getByRole("searchbox", { name: "Buscar modelos" })).toBeFocused();
   });
 
   test("localizes the offline shell without an API or network", async ({ page, context }) => {

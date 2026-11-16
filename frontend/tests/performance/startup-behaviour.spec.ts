@@ -1,7 +1,7 @@
 /** Deterministic contracts against the production build; timing samples live separately. */
 import { test, expect } from "@playwright/test";
 import { aJob } from "../../src/test-support/factories";
-import { scrollToEnd } from "../e2e/_scroll";
+import { assertBoundedFirstRender, visitDenseModels } from "./_dense-library";
 const api = `http://127.0.0.1:${process.env.STARTUP_API_PORT ?? 8420}`;
 
 test.describe("production library startup", () => {
@@ -130,17 +130,23 @@ test.describe("production library startup", () => {
     await expect(upload.locator('input[type="file"]').first()).toBeAttached();
     await upload.getByRole("button", { name: "Close", exact: true }).click();
     await expect(upload).toHaveCount(0);
-    await page.getByRole("button", { name: "New multipart set", exact: true }).click();
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "More", exact: true })
+      .filter({ visible: true })
+      .click();
+    await page.getByRole("menuitem", { name: "New multipart set", exact: true }).click();
     const multipart = page.getByRole("dialog", { name: "New multipart set" });
     await expect(multipart.getByRole("textbox").first()).toBeEditable();
     await multipart.getByRole("button", { name: "Close", exact: true }).click();
     await expect(multipart).toHaveCount(0);
+    await page.locator("main article").first().click({ button: "right" });
     await page
-      .getByRole("button", { name: /(?:Add tags to|Edit tags for) Benchmark model/ })
+      .getByRole("menuitem", { name: /(?:Add tags to|Edit tags for) Benchmark model/ })
       .first()
       .click();
     const tags = page.getByRole("dialog");
-    await expect(tags.getByLabel("Search or create a tag")).toBeEditable();
+    await expect(tags.getByLabel("Find or create tag")).toBeEditable();
     await tags.getByRole("button", { name: "Close", exact: true }).click();
     await expect(tags).toHaveCount(0);
     // Only the ZIP manifest is stood in for here; the purpose is the lazy form boundary.
@@ -188,7 +194,7 @@ test.describe("production library startup", () => {
       expect(modelRequests[0].searchParams.get("view")).toBe(
         mode === "multipart" ? "multipart" : "all",
       );
-      const names = await page.locator("main article h2").allTextContents();
+      const names = await page.locator("main article h3").allTextContents();
       if (mode === "multipart") expect(names).toEqual([]);
       else {
         expect(names.length).toBeGreaterThan(0);
@@ -204,17 +210,8 @@ test.describe("production library startup", () => {
     test("pages through all ninety models after the bounded first render", async ({ page }) => {
       await page.goto("/?c=collection-01");
       await ready(page);
-      await expect(page.locator("main article")).toHaveCount(24);
-      while (await page.locator("[data-load-more-sentinel]").count()) {
-        const count = await page.locator("main article").count();
-        await scrollToEnd(page);
-        await expect.poll(() => page.locator("main article").count()).toBeGreaterThan(count);
-      }
-      await expect(page.locator("main article")).toHaveCount(90);
-      const identities = await page
-        .locator("main article [data-library-entry]")
-        .evaluateAll((links) => links.map((link) => link.getAttribute("data-library-entry")));
-      expect(new Set(identities).size).toBe(90);
+      await assertBoundedFirstRender(page);
+      await visitDenseModels(page);
     });
   }
 });

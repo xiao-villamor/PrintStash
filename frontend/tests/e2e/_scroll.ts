@@ -5,7 +5,9 @@ export async function scrollToEnd(page: Page): Promise<void> {
   // Scrolling an empty container reaches nothing: wait for the first page.
   await page.locator("main [data-library-entry]").first().waitFor();
   await page.getByRole("main").evaluate((main) => {
-    main.scrollTop = main.scrollHeight;
+    const list = main.querySelector<HTMLElement>("[data-library-list]");
+    const scroll = list && list.scrollHeight > list.clientHeight ? list : main;
+    scroll.scrollTop = scroll.scrollHeight;
   });
 }
 
@@ -13,13 +15,15 @@ export async function scrollToEnd(page: Page): Promise<void> {
 export async function scrollToLibraryEntry(
   page: Page,
   entry: import("@playwright/test").Locator,
+  advanceClock = false,
 ): Promise<void> {
   const { expect } = await import("@playwright/test");
-  await page.getByRole("main").evaluate((main) => {
-    const list = main.querySelector<HTMLElement>("[data-library-list]");
-    const scroll = list && list.scrollHeight > list.clientHeight ? list : main;
-    scroll.scrollTop = 0;
-  });
+  if (!(await entry.count()))
+    await page.getByRole("main").evaluate((main) => {
+      const list = main.querySelector<HTMLElement>("[data-library-list]");
+      const scroll = list && list.scrollHeight > list.clientHeight ? list : main;
+      scroll.scrollTop = 0;
+    });
   await expect
     .poll(
       async () => {
@@ -29,6 +33,7 @@ export async function scrollToLibraryEntry(
           const scroll = list && list.scrollHeight > list.clientHeight ? list : main;
           scroll.scrollTop += scroll.clientHeight / 2;
         });
+        if (advanceClock) await page.clock.runFor(50);
         return false;
       },
       { intervals: [50, 100, 150] },
@@ -36,6 +41,10 @@ export async function scrollToLibraryEntry(
     .toBe(true);
   await page.evaluate(() => document.fonts.ready);
   await entry.evaluate((node) => node.scrollIntoView({ block: "center", inline: "nearest" }));
+  if (advanceClock) {
+    await page.clock.runFor(50);
+    return;
+  }
   await page.evaluate(
     () =>
       new Promise<void>((resolve) =>

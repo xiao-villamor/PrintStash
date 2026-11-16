@@ -31,6 +31,7 @@ class VaultConfigRead(EditingBase):
     derivatives_gcode_enabled: bool
     derivatives_toolpath_enabled: bool
     derivatives_previews_enabled: bool
+    derivatives_previews_include_poles: bool
     storage_backend: str = "local"
     data_dir: str = ""
     thumb_dir: str = ""
@@ -89,6 +90,7 @@ class VaultConfigUpdate(BaseModel):
     derivatives_gcode_enabled: StrictBool | None = None
     derivatives_toolpath_enabled: StrictBool | None = None
     derivatives_previews_enabled: StrictBool | None = None
+    derivatives_previews_include_poles: StrictBool | None = None
     auto_mark_known_good: Optional[bool] = None
     external_libraries_enabled: Optional[bool] = None
     currency: Optional[str] = Field(default=None, min_length=3, max_length=3)

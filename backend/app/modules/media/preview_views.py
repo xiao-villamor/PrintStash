@@ -1,4 +1,4 @@
-"""Conservative, area-weighted camera profiles; one prepared mesh per batch."""
+"""Consistent source-relative oblique cameras; one prepared mesh per batch."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import numpy as np
 from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 from printstash_core.mesh.rasterizer import render_prepared_thumbnail
 from printstash_core.mesh.render_geometry import prepare_mesh, prepare_normals
-from printstash_core.mesh.similarity.geometry import prepare_surface
 
 from app.core.cancellation import checkpoint
 from app.modules.media import thumbnail
@@ -64,52 +63,24 @@ def _orbit(azimuth: float) -> Matrix:
 
 
 def candidates(
-    mesh: Trimesh, *, max_faces: int
+    mesh: Trimesh, *, max_faces: int, include_poles: bool = False
 ) -> tuple[ViewProfile, tuple[CameraView, ...]]:
     if not 0 < len(mesh.faces) <= max_faces:
         raise PreviewLimitError
-    surface = prepare_surface(mesh.vertices, mesh.faces)
-    values = surface.eigenvalues
-    # One confidently small principal extent, with two substantial broad axes.
-    planar = (
-        values[1] > 0 and values[0] / values[1] < 0.04 and values[1] / values[2] >= 0.09
-    )
     views: list[CameraView] = []
-    if planar:
-        normal = surface.frame[:, 0].copy()
-        # Eigenvector sign is arbitrary; anchor it in the imported coordinate frame.
-        normal *= 1 if normal[np.argmax(np.abs(normal))] >= 0 else -1
-        face = np.asarray(_looking_from(normal))
-        for identifier, role, direction in (
-            ("face", ViewRole.FACE, normal),
-            ("reverse", ViewRole.REVERSE, -normal),
-            (
-                "edge",
-                ViewRole.EDGE,
-                normal * np.cos(np.radians(65)) + face[0] * np.sin(np.radians(65)),
-            ),
-        ):
-            views.append(
-                CameraView(
-                    id=ViewId(identifier),
-                    role=role,
-                    rotation=_looking_from(direction),
-                    azimuth_degrees=None,
-                    elevation_degrees=None,
-                )
+    for index in range(4):
+        azimuth = PREVIEW_PROFILE.hero_azimuth_degrees + index * 90
+        views.append(
+            CameraView(
+                id=ViewId(f"orbit-{index}"),
+                role=ViewRole.ORBIT,
+                rotation=_orbit(azimuth),
+                azimuth_degrees=azimuth,
+                elevation_degrees=PREVIEW_PROFILE.hero_elevation_degrees,
             )
-    else:
-        for index in range(4):
-            azimuth = PREVIEW_PROFILE.hero_azimuth_degrees + index * 90
-            views.append(
-                CameraView(
-                    id=ViewId(f"orbit-{index}"),
-                    role=ViewRole.ORBIT,
-                    rotation=_orbit(azimuth),
-                    azimuth_degrees=azimuth,
-                    elevation_degrees=PREVIEW_PROFILE.hero_elevation_degrees,
-                )
-            )
+        )
+    if not include_poles:
+        return ViewProfile.ORBIT, tuple(views)
     for identifier, role, normal, elevation in (
         ("top", ViewRole.TOP, (0, 0, 1), 90),
         ("bottom", ViewRole.BOTTOM, (0, 0, -1), -90),
@@ -123,7 +94,7 @@ def candidates(
                 elevation_degrees=elevation,
             )
         )
-    return ViewProfile.PLANAR if planar else ViewProfile.ORBIT, tuple(views)
+    return ViewProfile.ORBIT, tuple(views)
 
 
 def render_views(
@@ -132,9 +103,10 @@ def render_views(
     source_sha256: str,
     max_faces: int,
     recipe: int = 1,
+    include_poles: bool = False,
     progress: Callable[[int, int], None] | None = None,
 ) -> tuple[PreviewManifest, list[bytes]]:
-    profile, views = candidates(mesh, max_faces=max_faces)
+    profile, views = candidates(mesh, max_faces=max_faces, include_poles=include_poles)
     geometry = prepare_mesh(mesh)
     if geometry is None:
         raise ValueError("preview_no_geometry")

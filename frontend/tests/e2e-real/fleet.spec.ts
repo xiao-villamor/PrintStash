@@ -7,7 +7,7 @@
  * actually connected, which is the failure no unit test can see.
  */
 import { test, expect } from "./helpers";
-import { modelCard, uploadGcodeModel } from "./util";
+import { openModelPage, uploadGcodeModel } from "./util";
 
 // Fleet (0.11.0): a real, live Moonraker emulator (backend/tests/fakes/
 // mock_printer.py, booted standalone by playwright.real.config.ts's webServer
@@ -28,7 +28,10 @@ test.describe("fleet queue", () => {
     // Add the printer pointed at the live emulator.
     await page.goto("/printers");
     await page.getByRole("button", { name: "Add printer" }).click();
-    await page.getByPlaceholder("Voron 2.4").fill(printerName);
+    await page
+      .getByRole("dialog", { name: "Add printer", exact: true })
+      .getByLabel("Name", { exact: true })
+      .fill(printerName);
     await page
       .getByPlaceholder("http://printer.local:7125")
       .fill(`http://127.0.0.1:${MOCK_PRINTER_PORT}`);
@@ -49,12 +52,12 @@ test.describe("fleet queue", () => {
     // Queue a print from a model's send dialog against the (now sole, least-busy)
     // fleet printer.
     await uploadGcodeModel(page, modelName);
-    await modelCard(page, modelName).click();
+    await openModelPage(page, modelName);
     await expect(page.getByRole("heading", { name: modelName })).toBeVisible();
     await page.getByRole("button", { name: "Send to printer" }).last().click();
-    const dialog = page.getByRole("dialog", { name: "Send to printer" });
+    const dialog = page.getByRole("dialog", { name: "Send Rev 1 to printer" });
     await expect(dialog).toBeVisible();
-    await dialog.getByRole("button", { name: "Add to queue" }).first().click();
+    await dialog.getByRole("radio", { name: "Add to queue" }).click();
     await dialog.getByRole("button", { name: "Add to queue" }).last().click();
     await expect(dialog).toHaveCount(0);
 
@@ -66,6 +69,7 @@ test.describe("fleet queue", () => {
     await expect(async () => {
       await page.reload();
       await page.getByRole("tab", { name: "Queue" }).click();
+      await page.getByRole("combobox", { name: "View", exact: true }).selectOption("recent");
       await expect(page.getByText(/\.gcode/).first()).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 30_000 });
 
@@ -74,14 +78,18 @@ test.describe("fleet queue", () => {
     const maintenanceCard = page.locator("section").filter({ hasText: printerName });
     await expect(maintenanceCard).toBeVisible();
     await maintenanceCard.getByRole("button", { name: "Soft drain" }).click();
-    await expect(maintenanceCard.getByText("Draining")).toBeVisible();
+    await expect(maintenanceCard.getByText("Manual soft drain", { exact: true })).toBeVisible();
     await maintenanceCard.getByRole("button", { name: "Resume routing" }).click();
-    await expect(maintenanceCard.getByText("Draining")).toHaveCount(0);
+    await expect(maintenanceCard.getByText("Manual soft drain", { exact: true })).toHaveCount(0);
 
     // Cleanup: remove the printer so it doesn't linger as "offline" in later runs
     // once this webServer instance's port is inevitably reused.
     await page.getByRole("tab", { name: "Fleet" }).click();
-    await card.getByRole("button", { name: "Remove" }).click();
+    await card.getByRole("button", { name: "Settings" }).click();
+    await page
+      .getByRole("dialog", { name: "Edit printer connection" })
+      .getByRole("button", { name: "Remove printer", exact: true })
+      .click();
     await page.getByRole("dialog").getByRole("button", { name: "Remove" }).click();
     await expect(page.getByRole("link", { name: new RegExp(printerName) })).toHaveCount(0);
   });
