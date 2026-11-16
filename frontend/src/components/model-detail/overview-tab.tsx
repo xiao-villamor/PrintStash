@@ -154,9 +154,7 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
             </p>
             {editor.description.trim() && (
               <details className="mt-2 rounded border border-border p-3">
-                <summary className="cursor-pointer text-sm font-medium">
-                  {uiText("Preview")}
-                </summary>
+                <summary className="text-sm font-medium">{uiText("Preview")}</summary>
                 <div className="mt-3">
                   <MarkdownView source={editor.description} />
                 </div>

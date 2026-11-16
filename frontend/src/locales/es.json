@@ -5172,7 +5172,7 @@
   "modelPreview.gallery": "Vistas del modelo",
   "modelPreview.views": "{count} vistas",
   "modelPreview.retry": "Reintentar vista",
-  "modelPreview.discrete": "Vistas discretas en la orientación importada. Abre el visor 3D para una inspección detallada.",
+  "modelPreview.discrete": "Elige una foto o una vista generada. Abre el visor 3D para una inspección detallada.",
   "Couldn’t load sliced plates": "No se pudieron cargar las placas laminadas",
   "Loading sliced plates…": "Cargando placas laminadas…",
   "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.": "Este 3MF no contiene G-code laminado. Lamínalo en Bambu Studio u OrcaSlicer y sube el archivo laminado.",

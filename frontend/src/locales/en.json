@@ -5172,7 +5172,7 @@
   "modelPreview.gallery": "Model views",
   "modelPreview.views": "{count} views",
   "modelPreview.retry": "Retry preview",
-  "modelPreview.discrete": "Discrete views in the imported orientation. Open the 3D viewer for detailed inspection.",
+  "modelPreview.discrete": "Choose a photo or generated preview. Open the 3D viewer for detailed inspection.",
   "Couldn’t load sliced plates": "Couldn’t load sliced plates",
   "Loading sliced plates…": "Loading sliced plates…",
   "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.": "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.",
