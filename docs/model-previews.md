@@ -1,10 +1,20 @@
 # Model covers and multi-angle previews
 
-Library cards keep one large cover. Use the arrows to walk around a solid Model,
+Library cards keep one large cover. Use the arrows to browse a Model's views,
 or **Model views** to open a selectable thumbnail strip. Top and Bottom are named
 choices in that gallery; they are outside the horizontal orbit. Planar objects
-use named Face, Reverse and Oblique edge choices instead of horizontal arrows.
+cycle through Cover, Face, Reverse, Oblique edge, Top and Bottom with the same arrows.
 There is no autoplay or pointer-position scrubbing.
+
+Single-cover and multi-angle cards reserve the same image area and control row.
+The expanded gallery grows with the screen, up to 1152 px wide, while its image
+height stays within the viewport and its thumbnail strip scrolls on narrow screens.
+
+On cards, the cover occupies the default face in the arrow cycle: Cover → 55° →
+145° → 235° → Cover (or the reverse). This avoids repeating the automatic cover's
+−35° angle on the first click and always lets you return to the cover. **Model
+views** retains every generated image, including −35° for custom or source-image
+covers. Cards without a cover cycle through all four generated orbit views.
 
 A chosen cover can be an uploaded PNG/JPEG/WebP, a capture of the current 3D view,
 or a source image. Reset to automatic restores the latest automatic thumbnail.
@@ -14,7 +24,7 @@ as covers, separately from generated viewpoints.
 ## Fetching and access
 
 Primary image requests start only inside the viewport preload range. A 350 ms
-sustained fine-pointer hover warms the adjacent published orbit views. Arrow
+sustained fine-pointer hover warms the adjacent published views. Arrow
 hover/focus promotes its destination; clicking fetches immediately. The current
 decoded image remains visible until the latest selection has downloaded and
 decoded. Failed replacements are retryable.
@@ -28,6 +38,10 @@ A deliberate expanded gallery may fetch its directly selectable thumbnails.
 
 Native buttons have names, keyboard focus, and 44 px targets; dots are indicators,
 not extra tab stops. Preview buttons do not activate, select, or drag the card.
+The view-count button stays visible beside the current angle. On pointer devices,
+arrows fade in on preview hover; keyboard focus and reduced motion reveal
+them immediately. Touch keeps the arrows visible. Controls use the same outlined
+surfaces as the rest of the app, and the gallery retains its normal exit transition.
 Session changes retire private cached bytes and suppress stale decoded results.
 
 The additive `previews` read model leaves `thumbnail_url` intact. A Model with
@@ -43,7 +57,7 @@ other previews; revoked shares and trashed subjects cannot read them.
 
 ## Camera and generation contract
 
-Solid profiles use azimuths −35°, +55°, +145°, +235° at elevation +18°, in that
+Solid profiles follow the shared cover camera profile (recipe 2), using azimuths −35°, +55°, +145°, +235° at elevation +30°, in that
 wrapping order. Top/Bottom use ±90°. Their screen-up direction is imported +Y;
 other generated cameras retain imported +Z as screen up where possible.
 Camera matrices, orthographic projection scale/offset, source center, dimensions,
@@ -57,7 +71,7 @@ semantic front/back. Ambiguous shapes keep the imported-frame orbit. The oblique
 edge view is 65° from the face. 3MF build/component transforms are applied before
 analysis. No candidates are pruned by silhouette or presumed symmetry.
 
-Recipe 1 produces lossless 480 × 360 WebPs: six views for solids, five for planar
+Recipe 2 produces lossless 480 × 360 WebPs: six views for solids, five for planar
 objects, including Top and Bottom. Sources follow the same limits as covers and
 every other mesh path: `VAULT_MESH_MAX_LOAD_MB` (default 200) and
 `VAULT_MESH_MAX_RENDER_TRIANGLES` (default 2,000,000). Raise them in your
@@ -112,3 +126,18 @@ opening one. They do not show every surface and do not replace the 3D viewer
 for detailed inspection. No measured human recognition-speed or accuracy
 improvement is claimed. That evaluation needs people choosing between similar
 candidates with rear or underside differences, and has not been run.
+
+## Generation preferences and progress
+
+Administrators can turn **Multi-angle previews** on or off in **Settings →
+Previews → Model preview images**. This is the same vault-wide control as
+Background work. Turning it off saves extra rendering work; ordinary cover
+images continue, existing views remain available, and an in-flight job may
+finish. Turning it on fills missing or outdated view sets in the background.
+
+The **Preparing previews** task shows total, done, remaining, skipped and failed
+counts for enabled image producers across the live library, including work not
+yet admitted to the queue. One preview task produces one cover image or one
+multi-angle set for an Artifact. Counts follow the current recipe and reset
+for requested regeneration; they are not estimates from queue size. Retryable
+failures remain pending until they succeed or exhaust their attempts.

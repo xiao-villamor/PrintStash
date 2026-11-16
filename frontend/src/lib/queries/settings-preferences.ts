@@ -11,6 +11,7 @@ import type { EditingBase } from "@/types/editing";
 import type { VaultConfigRead, VaultConfigUpdate } from "@/types";
 
 export type PreferenceIntent =
+  | { kind: "multi-angle"; value: boolean }
   | { kind: "auto-mark"; value: boolean }
   | { kind: "currency"; value: string }
   | { kind: "backup-retention" | "trash-retention"; value: number; draft: string }
@@ -28,6 +29,8 @@ type PreferenceReview =
 
 function payload(intent: PreferenceIntent): VaultConfigUpdate {
   switch (intent.kind) {
+    case "multi-angle":
+      return { derivatives_previews_enabled: intent.value };
     case "auto-mark":
       return { auto_mark_known_good: intent.value };
     case "currency":
@@ -42,6 +45,8 @@ function payload(intent: PreferenceIntent): VaultConfigUpdate {
 }
 export function savedPreference(snapshot: VaultConfigRead, intent: PreferenceIntent) {
   switch (intent.kind) {
+    case "multi-angle":
+      return snapshot.derivatives_previews_enabled;
     case "auto-mark":
       return snapshot.auto_mark_known_good;
     case "currency":

@@ -52,7 +52,10 @@ def _looking_from(normal) -> Matrix:
 
 
 def _orbit(azimuth: float) -> Matrix:
-    angle, tilt = np.radians(azimuth), np.radians(-18)
+    angle, tilt = (
+        np.radians(azimuth),
+        np.radians(-PREVIEW_PROFILE.hero_elevation_degrees),
+    )
     ca, sa = np.cos(angle), np.sin(angle)
     ct, st = np.cos(tilt), np.sin(tilt)
     spin = np.array([[ca, -sa, 0], [sa, ca, 0], [0, 0, 1]])
@@ -96,14 +99,15 @@ def candidates(
                 )
             )
     else:
-        for index, azimuth in enumerate((-35, 55, 145, 235)):
+        for index in range(4):
+            azimuth = PREVIEW_PROFILE.hero_azimuth_degrees + index * 90
             views.append(
                 CameraView(
                     id=ViewId(f"orbit-{index}"),
                     role=ViewRole.ORBIT,
                     rotation=_orbit(azimuth),
                     azimuth_degrees=azimuth,
-                    elevation_degrees=18,
+                    elevation_degrees=PREVIEW_PROFILE.hero_elevation_degrees,
                 )
             )
     for identifier, role, normal, elevation in (

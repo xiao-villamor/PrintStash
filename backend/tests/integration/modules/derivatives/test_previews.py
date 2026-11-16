@@ -12,8 +12,8 @@ from sqlmodel import select
 from app.core.time import utcnow
 from app.db.models import ArtifactDerivative, DerivativeKind, DerivativeState, JobKind
 from app.db.session import get_session_factory
-from app.modules.derivatives import previews, producers, records
-from app.modules.derivatives.kinds import group
+from app.modules.derivatives import policy, previews, producers, records
+from app.modules.derivatives.kinds import PREVIEWS_RECIPE, group
 from app.modules.derivatives.preview_source import PreviewSource
 from app.modules.library.model_views.previews import resolve, summaries
 from app.modules.storage.storage_backend.runtime import get_backend
@@ -142,6 +142,18 @@ def _garbled_progress(manifest, bundle, kwargs):
 
 
 class TestPreviewPublication:
+    def test_keeps_generated_views_when_disabled(
+        self, db_session, artifact, ready
+    ):
+        policy.update(db_session, {policy.SettingName.PREVIEWS: False}, commit=False)
+        db_session.commit()
+
+        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+
+        assert summary.state == "disabled"
+        assert len(summary.published.views) == 6
+        assert get_backend().read_bytes(ready.storage_key)
+
     def test_rejects_invalid_advertised_image(
         self, db_session, artifact, malformed_worker_image
     ):
@@ -203,9 +215,15 @@ class TestPreviewPublication:
             # A reset or retry claims the subject while this batch renders.
             with get_session_factory().scoped_session() as session:
                 file = session.get(type(artifact), artifact.id)
-                records.reset(session, file, {DerivativeKind.PREVIEWS: 1})
+                records.reset(session, file, {DerivativeKind.PREVIEWS: PREVIEWS_RECIPE})
                 session.commit()
-                records.begin(session, file, DerivativeKind.PREVIEWS, 1, now=utcnow())
+                records.begin(
+                    session,
+                    file,
+                    DerivativeKind.PREVIEWS,
+                    PREVIEWS_RECIPE,
+                    now=utcnow(),
+                )
                 session.commit()
             return manifest
 
@@ -219,9 +237,16 @@ class TestPreviewPublication:
         self, db_session, artifact, ready, monkeypatch
     ):
         monkeypatch.setattr(
-            "app.modules.library.model_views.previews.PREVIEWS_RECIPE", 2
+            "app.modules.library.model_views.previews.PREVIEWS_RECIPE",
+            PREVIEWS_RECIPE + 1,
         )
-        records.begin(db_session, artifact, DerivativeKind.PREVIEWS, 2, now=utcnow())
+        records.begin(
+            db_session,
+            artifact,
+            DerivativeKind.PREVIEWS,
+            PREVIEWS_RECIPE + 1,
+            now=utcnow(),
+        )
         db_session.commit()
         summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
         assert summary.state == "running"
@@ -230,7 +255,7 @@ class TestPreviewPublication:
             artifact.model_id,
             summary.published.manifest_url.rsplit("/", 1)[1],
         )
-        assert manifest.recipe == 1
+        assert manifest.recipe == PREVIEWS_RECIPE
         assert len(manifest.views) == 6
 
     def test_publishes_known_camera_frames(self, db_session, artifact, ready):
@@ -261,7 +286,9 @@ class TestPreviewPublication:
         db_session.expire_all()
         assert artifact.thumbnail_path is not None
         previous = get_backend().read_bytes(artifact.thumbnail_path)
-        records.begin(db_session, artifact, DerivativeKind.PREVIEWS, 1, now=utcnow())
+        records.begin(
+            db_session, artifact, DerivativeKind.PREVIEWS, PREVIEWS_RECIPE, now=utcnow()
+        )
         db_session.commit()
         db_session.refresh(artifact)
         assert get_backend().read_bytes(artifact.thumbnail_path) == previous
@@ -286,7 +313,9 @@ class TestPreviewPublication:
         self, db_session, artifact, ready
     ):
         previous = ready.storage_key
-        records.begin(db_session, artifact, DerivativeKind.PREVIEWS, 1, now=utcnow())
+        records.begin(
+            db_session, artifact, DerivativeKind.PREVIEWS, PREVIEWS_RECIPE, now=utcnow()
+        )
         db_session.commit()
         summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
         assert summary.state == "running"
@@ -297,14 +326,14 @@ class TestPreviewPublication:
         self, db_session, artifact, ready
     ):
         begun = records.begin(
-            db_session, artifact, DerivativeKind.PREVIEWS, 1, now=utcnow()
+            db_session, artifact, DerivativeKind.PREVIEWS, PREVIEWS_RECIPE, now=utcnow()
         )
         authority = records.attempt(db_session, artifact, begun)
         records.mark_failed(
             db_session, authority, "renderer_failed", now=utcnow(), deterministic=True
         )
         db_session.commit()
-        records.reset(db_session, artifact, {DerivativeKind.PREVIEWS: 1})
+        records.reset(db_session, artifact, {DerivativeKind.PREVIEWS: PREVIEWS_RECIPE})
         db_session.commit()
         summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
         assert summary.state == "queued"
@@ -313,7 +342,12 @@ class TestPreviewPublication:
 
     def test_cancels_optional_work_durably(self, db_session, artifact, make_derivative):
         make_derivative(artifact, DerivativeKind.THUMBNAIL)
-        records.cancel(db_session, artifact, {DerivativeKind.PREVIEWS: 1}, now=utcnow())
+        records.cancel(
+            db_session,
+            artifact,
+            {DerivativeKind.PREVIEWS: PREVIEWS_RECIPE},
+            now=utcnow(),
+        )
         db_session.commit()
         source = PreviewSource(group(JobKind.DERIVATIVES_PREVIEWS))
         assert source.pending(db_session, now=utcnow(), limit=20) == []

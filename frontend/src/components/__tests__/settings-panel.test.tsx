@@ -3157,6 +3157,81 @@ describe("SettingsPanel", () => {
   });
 
   describe("preview quality", () => {
+    it.each([true, false])("saves multi-angle generation as %s", async (enabled) => {
+      const user = userEvent.setup();
+      const app = renderSettings({
+        at: "/settings?section=previews",
+        routes: {
+          "GET /api/v1/config": json({ ...VAULT_CONFIG, derivatives_previews_enabled: !enabled }),
+          "PUT /api/v1/config": json({
+            ...VAULT_CONFIG,
+            edit_version: 2,
+            derivatives_previews_enabled: enabled,
+          }),
+        },
+      });
+      const toggle = await screen.findByRole("switch", { name: "Multi-angle previews" });
+      await waitFor(() => expect(toggle).toBeEnabled());
+
+      await user.click(toggle);
+
+      await waitFor(() =>
+        expect(app.client.getQueryData(queryKeys.vaultConfig)).toMatchObject({
+          derivatives_previews_enabled: enabled,
+        }),
+      );
+      expect(JSON.parse(app.requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toEqual({
+        derivatives_previews_enabled: enabled,
+      });
+      expect(toggle).toHaveAttribute("aria-checked", String(enabled));
+    });
+
+    it("restores the saved generation setting after a refused write", async () => {
+      renderSettings({
+        at: "/settings?section=previews",
+        routes: {
+          "GET /api/v1/config": json({ ...VAULT_CONFIG, derivatives_previews_enabled: true }),
+          "PUT /api/v1/config": json({ detail: "forbidden" }, 403),
+        },
+      });
+      const toggle = await screen.findByRole("switch", { name: "Multi-angle previews" });
+      await waitFor(() => expect(toggle).toBeEnabled());
+
+      await userEvent.click(toggle);
+
+      await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+    });
+
+    it("requires review when the generation setting changed elsewhere", async () => {
+      const app = renderSettings({
+        at: "/settings?section=previews",
+        routes: {
+          "GET /api/v1/config": json({ ...VAULT_CONFIG, derivatives_previews_enabled: true }),
+          "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      const toggle = await screen.findByRole("switch", { name: "Multi-angle previews" });
+      await waitFor(() => expect(toggle).toBeEnabled());
+
+      await userEvent.click(toggle);
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+
+      const latest = await screen.findByRole("region", { name: "Latest saved version" });
+      expect(within(latest).getByText("On")).toBeVisible();
+      expect(toggle).toBeDisabled();
+      expect(toggle).toHaveAttribute("aria-checked", "false");
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    });
+
+    it("disables generation controls without a readable configuration", async () => {
+      renderSettings({
+        at: "/settings?section=previews",
+        routes: { "GET /api/v1/config": json({ detail: "forbidden" }, 403) },
+      });
+
+      expect(await screen.findByRole("switch", { name: "Multi-angle previews" })).toBeDisabled();
+    });
+
     it("saves the model image width", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({

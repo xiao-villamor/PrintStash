@@ -1,4 +1,8 @@
 {
+  "Multi-angle previews": "Vistas multiángulo",
+  "Multi-angle preview setting saved.": "Se ha guardado la configuración de vistas multiángulo.",
+  "Generate extra views for each Model. Turn off to save preparation time; cover images and existing views stay available.": "Genera vistas adicionales de cada modelo. Desactívalo para ahorrar tiempo de preparación; las portadas y las vistas existentes seguirán disponibles.",
+  "{total} preview tasks · {completed} done · {remaining} remaining · {skipped} skipped · {failed} failed": "{total} tareas de vista previa · {completed} completadas · {remaining} pendientes · {skipped} omitidas · {failed} fallidas",
   "library.collectionOverview.previewLoading": "Cargando vistas previas",
   "library.collectionOverview.previewError": "No se pudieron cargar las vistas previas",
   "library.collectionOverview.previewRetry": "Reintentar",
@@ -5151,7 +5155,7 @@
   "modelCover.saveFailed": "No se pudo guardar la portada. Comprueba la imagen y tus permisos de edición.",
   "modelCover.reviewFailed": "No se pudo cargar la versión más reciente del modelo.",
   "modelCover.applyReviewed": "Aplicar mi portada a esta versión",
-  "modelPreview.cover": "Portada · cámara desconocida",
+  "modelPreview.cover": "Portada",
   "modelPreview.orbit0": "Órbita 1 · −35°",
   "modelPreview.orbit1": "Órbita 2 · 55°",
   "modelPreview.orbit2": "Órbita 3 · 145°",

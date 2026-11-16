@@ -17,6 +17,9 @@ const views: PreviewImage[] = [
   })),
   { id: "top", role: "top", url: "/hook-previews/top" },
 ];
+const planar: PreviewImage[] = (["face", "reverse", "edge", "top", "bottom"] as const).map(
+  (id) => ({ id, role: id, url: `/hook-previews/${id}` }),
+);
 
 let responses: Map<string, PromiseWithResolvers<Response>>;
 let requested: string[];
@@ -114,6 +117,17 @@ describe("useModelPreviews", () => {
     expect(hook.result.current.displayed).toBeNull();
   });
 
+  it("keeps the cover after an abandoned view finishes loading", async () => {
+    const hook = renderHook(() => useModelPreviews("/cover", views, true));
+    act(() => hook.result.current.select("orbit-1"));
+    await waitFor(() => expect(responses.has("/hook-previews/orbit-1")).toBe(true));
+    act(() => hook.result.current.select("cover"));
+    act(() => respond("/hook-previews/orbit-1"));
+    await act(async () => {});
+    expect(hook.result.current.selected).toBe("cover");
+    expect(hook.result.current.displayed).toBeNull();
+  });
+
   it("reports a failed view as retryable", async () => {
     const hook = renderHook(() => useModelPreviews("/cover", views, true));
     act(() => hook.result.current.select("orbit-1"));
@@ -128,10 +142,65 @@ describe("useModelPreviews", () => {
     await waitFor(() => expect(hook.result.current.displayed?.id).toBe("orbit-1"));
   });
 
-  it("wraps arrow destinations around the orbit only", () => {
+  it("starts the card rotation at the side after the cover", () => {
     const hook = renderHook(() => useModelPreviews("/cover", views, true));
-    expect(hook.result.current.destination(1)?.id).toBe("orbit-0");
+    expect(hook.result.current.destination(1)?.id).toBe("orbit-1");
     expect(hook.result.current.destination(-1)?.id).toBe("orbit-3");
+  });
+
+  it.each([
+    ["orbit-1", -1],
+    ["orbit-3", 1],
+  ] as const)("returns from %s to the cover in direction %s", (id, delta) => {
+    const hook = renderHook(() => useModelPreviews("/cover", views, true));
+    act(() => hook.result.current.select(id));
+    expect(hook.result.current.destination(delta)?.id).toBe("cover");
+  });
+
+  it("retains the complete orbit when there is no cover", () => {
+    const hook = renderHook(() => useModelPreviews(null, views, true));
+    expect(hook.result.current.selected).toBe("orbit-0");
+    expect(hook.result.current.destination(-1)?.id).toBe("orbit-3");
+    act(() => hook.result.current.select("orbit-3"));
+    expect(hook.result.current.destination(1)?.id).toBe("orbit-0");
+  });
+
+  it("does not fetch the first orbit when the next neighbor is the cover", async () => {
+    const hook = renderHook(() => useModelPreviews("/cover", views, true));
+    act(() => hook.result.current.select("orbit-3"));
+    act(() => hook.result.current.prioritize(hook.result.current.destination(1)));
+    await waitFor(() => expect(requested).toEqual(["/hook-previews/orbit-3"]));
+  });
+
+  it("has no navigation without generated views", () => {
+    const hook = renderHook(() => useModelPreviews("/cover", [], true));
+    expect(hook.result.current.destination(1)).toBeUndefined();
+    expect(hook.result.current.destination(-1)).toBeUndefined();
+  });
+
+  it("includes all planar views in the cover cycle", () => {
+    const hook = renderHook(() => useModelPreviews("/cover", planar, true));
+    expect(hook.result.current.destination(-1)?.id).toBe("bottom");
+    for (const id of ["face", "reverse", "edge", "top", "bottom", "cover"] as const) {
+      expect(hook.result.current.destination(1)?.id).toBe(id);
+      act(() => hook.result.current.select(id));
+    }
+    expect(hook.result.current.selected).toBe("cover");
+  });
+
+  it("wraps planar navigation without a cover", () => {
+    const hook = renderHook(() => useModelPreviews(null, planar, true));
+    expect(hook.result.current.selected).toBe("face");
+    expect(hook.result.current.destination(-1)?.id).toBe("bottom");
+    act(() => hook.result.current.select("bottom"));
+    expect(hook.result.current.destination(1)?.id).toBe("face");
+  });
+
+  it("fetches only the selected planar view while saving data", async () => {
+    stubPolicy({ hover: true, saveData: true });
+    const hook = renderHook(() => useModelPreviews("/cover", planar, true));
+    act(() => hook.result.current.select("edge"));
+    await waitFor(() => expect(requested).toEqual(["/hook-previews/edge"]));
   });
 
   it("warms both orbit neighbors after a sustained hover", async () => {
@@ -142,11 +211,11 @@ describe("useModelPreviews", () => {
     expect(requested).toEqual([]);
     act(() => vi.advanceTimersByTime(1));
     // At most one speculative transfer runs at a time; the other neighbor follows.
-    expect(requested).toEqual(["/hook-previews/orbit-0"]);
+    expect(requested).toEqual(["/hook-previews/orbit-1"]);
     vi.useRealTimers();
-    act(() => respond("/hook-previews/orbit-0"));
+    act(() => respond("/hook-previews/orbit-1"));
     await waitFor(() =>
-      expect(requested).toEqual(["/hook-previews/orbit-0", "/hook-previews/orbit-3"]),
+      expect(requested).toEqual(["/hook-previews/orbit-1", "/hook-previews/orbit-3"]),
     );
   });
 

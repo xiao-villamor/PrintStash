@@ -118,7 +118,11 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
             </span>
           </div>
           {(task.detail || task.stage) && (
-            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{taskDetail(task)}</p>
+            <p
+              className={`mt-0.5 text-xs text-muted-foreground ${task.ambient ? "" : "line-clamp-2"}`}
+            >
+              {taskDetail(task)}
+            </p>
           )}
           {task.status === "completed" && task.uploadedModel && (
             <div className="mt-2 space-y-1 text-xs">

@@ -5,8 +5,98 @@ import { test, expect } from "./helpers";
 import type { ModelRead } from "../../src/types";
 
 test.describe("Generated Model views", () => {
-  test("browses published views after ingestion", async ({ page }) => {
+  test("browses every generated flat-model view from its card", async ({ page }, testInfo) => {
     test.setTimeout(240_000);
+    await page.setViewportSize({ width: 2560, height: 1440 });
+    const name = `e2e-flat-tray-${Date.now()}`;
+    const backend = resolve("../backend");
+    const mesh = execFileSync(
+      resolve(backend, ".venv/bin/python"),
+      [
+        "-c",
+        "import sys,trimesh; m=trimesh.creation.box(extents=(100,120,float(sys.argv[1]))); sys.stdout.buffer.write(m.export(file_type='stl'))",
+        String(1 + (Date.now() % 1_000_000) / 1_000_000),
+      ],
+      { cwd: backend },
+    );
+    const upload = await page.request.post("/api/v1/ingest/model", {
+      multipart: {
+        file: { name: `${name}.stl`, mimeType: "model/stl", buffer: mesh },
+        model_name: name,
+      },
+    });
+    expect(upload.status(), await upload.text()).toBe(202);
+    const jobId: string = (await upload.json()).job_id;
+    let modelId = 0;
+    await expect
+      .poll(
+        async () => {
+          const job = await (await page.request.get(`/api/v1/jobs/${jobId}`)).json();
+          modelId = job.model_id;
+          return job.state;
+        },
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    try {
+      await expect
+        .poll(
+          async () => {
+            const model: ModelRead = await (
+              await page.request.get(`/api/v1/models/${modelId}`)
+            ).json();
+            return model.previews.kind === "artifact" ? model.previews.published?.profile : null;
+          },
+          { timeout: 180_000 },
+        )
+        .toBe("planar");
+      await page.goto(`/?q=${name}`);
+      const card = page.locator("main article").filter({
+        has: page.locator(`[data-model-preview="${name}"]`),
+      });
+      await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
+      for (const id of ["face", "reverse", "edge", "top", "bottom", "cover"]) {
+        await card.getByRole("button", { name: "Next preview", exact: true }).click();
+        await expect(card.locator("img")).toHaveAttribute("data-preview-view", id);
+      }
+      await card.getByRole("button", { name: "Previous preview", exact: true }).click();
+      await expect(card.locator("img")).toHaveAttribute("data-preview-view", "bottom");
+      await page.screenshot({ path: testInfo.outputPath("flat-card-2k.png") });
+      await card.getByRole("button", { name: "Model views", exact: true }).click();
+      const gallery = page.getByRole("dialog", { name: "Model views" });
+      await gallery.getByRole("button", { name: "Oblique edge", exact: true }).click();
+      await expect(gallery.locator("img[data-preview-view]")).toHaveAttribute(
+        "data-preview-view",
+        "edge",
+      );
+      await page.screenshot({ path: testInfo.outputPath("flat-gallery-2k.png") });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await gallery.getByRole("button", { name: "Reverse face", exact: true }).click();
+      await expect(gallery.locator("img[data-preview-view]")).toHaveAttribute(
+        "data-preview-view",
+        "reverse",
+      );
+      await expect(gallery.getByRole("button", { name: "Close", exact: true })).toBeInViewport();
+      await page.screenshot({ path: testInfo.outputPath("flat-gallery-mobile.png") });
+    } finally {
+      expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
+    }
+  });
+
+  test("controls multi-angle generation without delaying ordinary covers", async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(240_000);
+    await page.goto("/settings?section=previews");
+    const toggle = page.getByRole("switch", { name: "Multi-angle previews", exact: true });
+    await expect(toggle).toBeEnabled();
+    await expect(toggle).toBeChecked();
+    await toggle.click();
+    await expect(toggle).not.toBeChecked();
+    await expect(toggle).toBeEnabled();
+    await page.reload();
+    await expect(toggle).toBeEnabled();
+    await expect(toggle).not.toBeChecked();
     const name = `e2e-multi-angle-${Date.now()}`;
     const backend = resolve("../backend");
     const mesh = execFileSync(
@@ -44,6 +134,33 @@ test.describe("Generated Model views", () => {
             const model: ModelRead = await (
               await page.request.get(`/api/v1/models/${modelId}`)
             ).json();
+            return {
+              cover: Boolean(model.thumbnail_url),
+              previews: model.previews.kind === "artifact" ? model.previews.state : "none",
+            };
+          },
+          { timeout: 60_000 },
+        )
+        .toEqual({ cover: true, previews: "disabled" });
+      await toggle.click();
+      await expect(toggle).toBeChecked();
+      await expect(toggle).toBeEnabled();
+      await page.reload();
+      await expect(toggle).toBeChecked();
+      await page.screenshot({ path: testInfo.outputPath("preview-settings.png"), fullPage: true });
+      const activity = await page.request.get("/api/v1/admin/work/preview-activity");
+      expect(activity.status()).toBe(200);
+      const counts = await activity.json();
+      expect(counts.total).toBeGreaterThanOrEqual(2);
+      expect(counts.total).toBe(
+        counts.completed + counts.remaining + counts.skipped + counts.failed,
+      );
+      await expect
+        .poll(
+          async () => {
+            const model: ModelRead = await (
+              await page.request.get(`/api/v1/models/${modelId}`)
+            ).json();
             return model.previews.kind === "artifact" ? model.previews.state : "none";
           },
           { timeout: 180_000 },
@@ -57,9 +174,13 @@ test.describe("Generated Model views", () => {
         .filter({ has: page.locator(`[data-model-preview="${name}"]`) });
       await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
       await card.getByRole("button", { name: "Next preview", exact: true }).click();
-      await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
-      await card.getByRole("button", { name: "Next preview", exact: true }).click();
       await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+      await card.getByRole("button", { name: "Next preview", exact: true }).click();
+      await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-2");
+      await card.getByRole("button", { name: "Previous preview", exact: true }).click();
+      await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+      await card.getByRole("button", { name: "Previous preview", exact: true }).click();
+      await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
       await card.getByRole("button", { name: "Model views", exact: true }).click();
       const gallery = page.getByRole("dialog", { name: "Model views" });
       await gallery.getByRole("button", { name: "Bottom", exact: true }).click();

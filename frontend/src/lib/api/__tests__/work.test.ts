@@ -14,6 +14,7 @@ import {
   cancelQueuedJobs,
   createEventsTicket,
   getWorkOverview,
+  getPreviewActivity,
   listDerivatives,
   regenerateDerivatives,
   retryDerivative,
@@ -30,6 +31,18 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("getPreviewActivity", () => {
+  it("reads all generation counts fresh", async () => {
+    const counts = { total: 100, completed: 30, remaining: 60, skipped: 5, failed: 5 };
+    respondWith(counts);
+
+    await expect(getPreviewActivity()).resolves.toEqual(counts);
+
+    expectRequest("/api/v1/admin/work/preview-activity");
+    expect(lastCall().init).toMatchObject({ cache: "no-store" });
+  });
 });
 
 describe("getWorkOverview", () => {

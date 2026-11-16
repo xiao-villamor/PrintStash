@@ -391,6 +391,8 @@ function parseTrashRetentionDays(value: string): number | null {
 }
 function preferenceLabel(intent: PreferenceIntent): string {
   switch (intent.kind) {
+    case "multi-angle":
+      return uiText("Multi-angle previews");
     case "auto-mark":
       return uiText("Auto-mark known good on successful print");
     case "currency":
@@ -669,6 +671,10 @@ export function SettingsPanel() {
   const preferenceCommand = useSettingsPreferenceCommand();
   const preferenceIntent = preferenceCommand.intent;
   const preferenceReview = preferenceCommand.state;
+  const multiAngleEnabled =
+    preferenceIntent?.kind === "multi-angle"
+      ? preferenceIntent.value
+      : (remoteConfigData?.derivatives_previews_enabled ?? false);
   const autoMarkKnownGood =
     preferenceIntent?.kind === "auto-mark"
       ? preferenceIntent.value
@@ -1021,6 +1027,23 @@ export function SettingsPanel() {
       await preferenceCommand.run({ kind: "thumbnail-width", value: next }, remoteConfigData);
       if (accountCurrent(session))
         toast.success(uiText("Model image quality updated for new previews."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
+    }
+  }
+  async function saveMultiAnglePreviews(next: boolean) {
+    if (
+      !user?.is_superuser ||
+      !remoteConfigData ||
+      remoteConfig.isError ||
+      backupPolicy.isPending ||
+      preferenceCommand.blocked
+    )
+      return;
+    const session = getSessionVersion();
+    try {
+      await preferenceCommand.run({ kind: "multi-angle", value: next }, remoteConfigData);
+      if (accountCurrent(session)) toast.success(uiText("Multi-angle preview setting saved."));
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
     }
@@ -2745,9 +2768,13 @@ export function SettingsPanel() {
                     <section aria-label={uiText("library.latestVersion")} className="space-y-3">
                       <h3 className="font-semibold">{uiText("library.latestVersion")}</h3>
                       <p>
-                        {String(
-                          savedPreference(preferenceReview.snapshot, preferenceReview.intent),
-                        )}
+                        {preferenceReview.intent.kind === "multi-angle"
+                          ? uiText(
+                              preferenceReview.snapshot.derivatives_previews_enabled ? "On" : "Off",
+                            )
+                          : String(
+                              savedPreference(preferenceReview.snapshot, preferenceReview.intent),
+                            )}
                       </p>
                       <div className="flex flex-wrap gap-2">
                         <Button
@@ -5357,6 +5384,29 @@ export function SettingsPanel() {
                         <option value={1280}>{uiText("High · 1280 × 960")}</option>
                       </select>
                     </label>
+                    <div className="settings-preference-row">
+                      <span>
+                        {uiText("Multi-angle previews")}
+                        <span className="settings-row-hint">
+                          {uiText(
+                            "Generate extra views for each Model. Turn off to save preparation time; cover images and existing views stay available.",
+                          )}
+                        </span>
+                      </span>
+                      <SettingsSwitch
+                        label={uiText("Multi-angle previews")}
+                        checked={multiAngleEnabled}
+                        onChange={saveMultiAnglePreviews}
+                        disabled={
+                          !user?.is_superuser ||
+                          !remoteConfigData ||
+                          remoteConfig.isError ||
+                          previewBusy !== null ||
+                          preferenceCommand.blocked ||
+                          backupPolicy.isPending
+                        }
+                      />
+                    </div>
                     <p className="settings-footnote">
                       {uiText(
                         "Quality changes apply to new images. Recreate all images to update existing Models in the background.",
