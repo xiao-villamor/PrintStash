@@ -79,7 +79,7 @@ test.describe("Library navigation", () => {
     ).toHaveCount(0);
   });
 
-  test("recovers an unaccepted Library read through explicit refresh", async ({ page }) => {
+  test("recovers an unaccepted Library read automatically", async ({ page }) => {
     const model = aModelListItem({ id: 1, name: "Recovered initial read" });
     let reads = 0;
     let recoverable = false;
@@ -99,7 +99,8 @@ test.describe("Library navigation", () => {
     });
     await page.goto("/?type=all&sort=date-desc");
     const refresh = page.getByRole("main").getByRole("button", { name: "Refresh library" });
-    await expect(refresh).toBeVisible();
+    await expect.poll(() => reads).toBeGreaterThanOrEqual(2);
+    await expect(refresh).toBeHidden();
     const beforeRefresh = reads;
     expect(beforeRefresh).toBeGreaterThan(0);
     const link = page
@@ -404,7 +405,7 @@ test.describe("Library navigation", () => {
   }
 
   for (const recovery of ["available", "removed", "stale"] as const) {
-    test(`bounds explicit refresh when its anchor is ${recovery}`, async ({ page }) => {
+    test(`bounds automatic refresh when its anchor is ${recovery}`, async ({ page }) => {
       await page.clock.install();
       const first = Array.from({ length: 20 }, (_, index) =>
         aModelListItem({ id: 100 + index, name: `First ${index}` }),
@@ -413,6 +414,7 @@ test.describe("Library navigation", () => {
         aModelListItem({ id: 200 + index, name: `Second ${index}` }),
       );
       let changed = false;
+      let conflicts = 0;
       let removed: number | null = null;
       const refreshed: (string | null)[] = [];
       await page.route("**/api/v1/models/browse/revision", (route) =>
@@ -423,7 +425,7 @@ test.describe("Library navigation", () => {
       await page.route("**/api/v1/models/browse?**", (route) => {
         const cursor = new URL(route.request().url()).searchParams.get("cursor");
         if (changed) refreshed.push(cursor);
-        if (changed && cursor && recovery === "stale")
+        if (changed && cursor && recovery === "stale" && conflicts++ === 0)
           return route.fulfill({ status: 409, json: { detail: "browse_refresh_required" } });
         const models = cursor
           ? second
@@ -464,13 +466,18 @@ test.describe("Library navigation", () => {
       changed = true;
       await page.clock.fastForward(31_000);
       const refresh = page.getByRole("button", { name: "Refresh library", exact: true });
-      await expect(refresh).toBeVisible();
-      // Activate the actual control without locator auto-scroll changing the reading bookmark.
-      await refresh.evaluate((button: HTMLButtonElement) => button.click());
-      if (recovery === "available") {
+      await expect(refresh).toBeHidden();
+      await page.clock.runFor(1000);
+      const expectedReads =
+        recovery === "stale" ? [null, "second-new", null, "second-new"] : [null, "second-new"];
+      if (recovery === "stale") {
+        await expect.poll(() => refreshed).toEqual([null, "second-new"]);
+        await page.clock.runFor(4000);
+      }
+      if (recovery !== "removed") {
         // The coherent old snapshot keeps this anchor in place while refresh is
         // pending. Prove fresh pages published before checking its new position.
-        await expect.poll(() => refreshed).toEqual([null, "second-new"]);
+        await expect.poll(() => refreshed).toEqual(expectedReads);
         await expect(
           page
             .getByRole("main")
@@ -493,7 +500,7 @@ test.describe("Library navigation", () => {
             "Your previous reading position could not be restored. Showing the start of this view.",
           ),
         ).toBeVisible();
-      expect(refreshed).toEqual([null, "second-new"]);
+      expect(refreshed).toEqual(expectedReads);
     });
   }
 });

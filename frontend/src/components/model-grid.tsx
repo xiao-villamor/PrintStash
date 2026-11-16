@@ -678,7 +678,7 @@ function canWriteCollection(collection: CollectionRead | null | undefined): bool
 }
 
 type LibraryRefreshState = { entry: LibraryEntry } & (
-  | { status: "pending" | "stale"; feedback: "visible" | "silent" }
+  | { status: "pending" | "stale" }
   | { status: "failed" | "denied"; error: string }
 );
 
@@ -1550,20 +1550,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     animateOnEnable: true,
   });
 
-  // A change to the library applies by itself while the view is a single page:
-  // new Models ease in where they belong and a change elsewhere only moves the
-  // counts. Deeper in the list the notice stays, since reloading every page
-  // read so far on each change would move the place being read.
+  // Reconcile changed pages in the background, including stale continuations.
+  // Reading-position recovery reloads only the previously visited pages and
+  // restores the visible anchor. Selection postpones reordering until it ends.
   const settlesByItself =
-    ((authority.refreshRequired && !modelQuery.refreshRequired && currentRefresh === null) ||
-      (currentRefresh?.status === "stale" && currentRefresh.feedback === "silent")) &&
     !selectMode &&
-    (snapshot?.modelPages ?? 0) <= 1 &&
-    (snapshot?.folderPages ?? 0) <= 1;
-  const showRefreshNotice =
-    refreshRequired &&
-    !settlesByItself &&
-    !(currentRefresh?.status === "pending" && currentRefresh.feedback === "silent");
+    !authority.authorizationChanged &&
+    ((currentRefresh === null && (authority.refreshRequired || modelQuery.refreshRequired)) ||
+      currentRefresh?.status === "stale");
   const lastSettled = useRef(0);
   // The timer must survive re-renders, so it reads the latest refresh through a
   // ref instead of depending on an object that is new on every render.
@@ -1571,7 +1565,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   useLayoutEffect(() => {
     settleNow.current = () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.outliner });
-      void reading.refresh(() => refresh("silent"));
+      void (snapshot?.entry === entry ? reading.refresh(refresh) : refresh());
     };
   });
   useEffect(() => {
@@ -1605,6 +1599,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         pending: modelQuery.isFetching,
         failed:
           modelQuery.isError &&
+          !modelQuery.refreshRequired &&
           currentRefresh?.status !== "pending" &&
           currentRefresh?.status !== "stale",
         next: () => void modelQuery.loadMore(),
@@ -1631,7 +1626,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (hasMore && !loadingMore && !refreshRequired && !authority.authorizationChanged)
       void modelQuery.loadMore();
   }
-  async function refresh(feedback: "visible" | "silent" = "visible") {
+  async function refresh() {
     const session = getSessionVersion();
     if (
       entry.session !== session ||
@@ -1648,7 +1643,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     for (const queryKey of [queryKeys.models, queryKeys.collections])
       void queryClient.invalidateQueries({ queryKey, refetchType: "none" });
     void queryClient.invalidateQueries({ queryKey: queryKeys.vaultStats });
-    setRefreshState({ entry, status: "pending", feedback });
+    setRefreshState({ entry, status: "pending" });
     let lookupPending = selectedCollection !== null;
     try {
       const previousFolders =
@@ -1726,7 +1721,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         // Ingest completion replaces ongoing reads; further catalog writes can
         // also reject both first-page attempts. Preserve the displayed snapshot
         // and reading anchor, then settle replaced reads through the same timer.
-        setRefreshState({ entry, status: "stale", feedback: interrupted ? "silent" : feedback });
+        setRefreshState({ entry, status: "stale" });
         return;
       }
       const denied = lookupPending && failure.status === 404;
@@ -3758,28 +3753,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 >
                   {uiText("library.readingPositionReset")}
                 </p>
-              )}
-              {showRefreshNotice && (
-                <div
-                  role="status"
-                  className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-md border border-border bg-muted p-3 text-sm"
-                >
-                  <p>{uiText("library.updatesAvailable")}</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    loading={refreshing}
-                    onClick={() =>
-                      void (currentRefresh || modelQuery.refreshRequired
-                        ? snapshot?.entry === entry
-                          ? reading.refresh(refresh)
-                          : refresh()
-                        : authority.refresh())
-                    }
-                  >
-                    {uiText("library.refresh")}
-                  </Button>
-                </div>
               )}
               {authority.error && (
                 <div

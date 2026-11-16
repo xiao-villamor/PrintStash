@@ -59,6 +59,8 @@
 
 ### Fixed
 
+- The Library now refreshes automatically after catalog changes or expired browse cursors, including paged galleries. Updates preserve the reading position, wait until selection ends, and no longer require a Refresh library banner.
+
 - Completing a ZIP import no longer leaves the Library empty with a request error when it interrupts an in-progress refresh. Interrupted reads recover automatically while preserving the displayed Models and reading position.
 
 - Library refreshes recover automatically when an ongoing ZIP import changes the catalog during a read, keeping the displayed Models and reading position instead of showing a stuck request error.
