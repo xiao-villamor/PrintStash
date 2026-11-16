@@ -203,28 +203,41 @@ test.describe("shared cursor policy", () => {
   ]) {
     test(`all visible buttons follow the hover policy on ${route}`, async ({ page }, testInfo) => {
       await page.goto(route, { waitUntil: "networkidle" });
-      await expect(page.locator("main").first()).toBeVisible();
+      await expect(page.getByRole("main").first()).toBeVisible();
       // TanStack's development-only launcher owns its styles and is absent
       // from the production app. Audit every user-facing action here.
-      const buttons = page.locator(
-        'button:visible:not([aria-label="Open Tanstack query devtools"]), [role="button"]:visible',
-      );
+      const buttons = page
+        .getByRole("button")
+        .and(page.locator(':visible:not([aria-label="Open Tanstack query devtools"])'));
       await expect(buttons.first()).toBeVisible();
       let checked = 0;
-      for (const button of await buttons.all()) {
+      for (const button of await buttons.elementHandles()) {
         if (!(await button.isVisible())) continue;
         // Card actions become interactive when the pointer enters the card.
         // Move there first, then retain the ordinary hover actionability check.
         await button.scrollIntoViewIfNeeded();
+        // Center controls in their scrolling surface so sticky group headers do not cover them.
+        await button.evaluate((element) => {
+          if (!(element instanceof HTMLElement)) throw new Error("Expected an HTML control");
+          element.scrollIntoView({ block: "center", inline: "nearest" });
+        });
         const box = await button.boundingBox();
         if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-        await button.hover({ force: await button.isDisabled() });
+        const label = (await button.getAttribute("aria-label")) ?? (await button.textContent());
+        const disabledBeforeHover = await button.isDisabled();
+        await test.step(`Hover ${label}`, () => button.hover({ force: disabledBeforeHover }));
         // A loading action may become enabled while Playwright moves to it.
         // Assert the state at hover time, not the earlier loading snapshot.
         const disabled = await button.isDisabled();
         const allowed = disabled ? ["default"] : ["default", "grab", "grabbing", "col-resize"];
-        const cursor = await button.evaluate((element) => getComputedStyle(element).cursor);
-        const description = await button.evaluate((element) => element.outerHTML.slice(0, 500));
+        const cursor = await button.evaluate((element) => {
+          if (!(element instanceof Element)) throw new Error("Expected a control element");
+          return getComputedStyle(element).cursor;
+        });
+        const description = await button.evaluate((element) => {
+          if (!(element instanceof Element)) throw new Error("Expected a control element");
+          return element.outerHTML.slice(0, 500);
+        });
         expect(allowed, `${route}: ${description}`).toContain(cursor);
         checked++;
       }

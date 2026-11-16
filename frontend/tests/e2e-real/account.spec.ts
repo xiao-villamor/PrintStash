@@ -9,6 +9,7 @@ test.describe("account administration", () => {
     const stamp = Date.now();
     const username = `e2e-account-${stamp}`;
     await page.goto("/settings?section=access");
+    await page.getByRole("button", { name: "Create user", exact: true }).click();
     await page.getByLabel("Username", { exact: true }).fill(username);
     await page.getByLabel("Initial password").fill("FakeInitialPassword123");
     const createdResponse = page.waitForResponse(
@@ -22,7 +23,13 @@ test.describe("account administration", () => {
     const account: UserRead = await created.json();
     const row = page.getByRole("group", { name: `User: ${username}`, exact: true });
     await expect(row).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Create user", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Create user", exact: true }).click();
     await expect(page.getByLabel("Username", { exact: true })).toHaveValue("");
+    await page
+      .getByRole("dialog", { name: "Create user", exact: true })
+      .getByRole("button", { name: "Close", exact: true })
+      .click();
     const updatedResponse = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === `/api/v1/admin/users/${account.id}` &&
@@ -34,15 +41,17 @@ test.describe("account administration", () => {
     const promoted: UserRead = await updated.json();
     expect(promoted.is_superuser).toBe(true);
     await expect(row.getByText("Admin", { exact: true })).toBeVisible();
-    await row.getByPlaceholder("New password").fill("FakeUpdatedPassword123");
+    await row.getByRole("button", { name: "Reset password", exact: true }).click();
+    const reset = page.getByRole("dialog", { name: "Reset password", exact: true });
+    await reset.getByLabel("New password").fill("FakeUpdatedPassword123");
     const resetResponse = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === `/api/v1/admin/users/${account.id}/password` &&
         response.request().method() === "POST",
     );
-    await row.getByRole("button", { name: "Reset password" }).click();
+    await reset.getByRole("button", { name: "Reset password", exact: true }).click();
     expect((await resetResponse).ok()).toBe(true);
-    await expect(row.getByPlaceholder("New password")).toHaveValue("");
+    await expect(reset).toHaveCount(0);
     const disabledResponse = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === `/api/v1/admin/users/${account.id}` &&
@@ -75,7 +84,7 @@ test.describe("account administration", () => {
         new URL(response.url()).pathname === `/api/v1/auth/api-keys/${minted.id}` &&
         response.request().method() === "DELETE",
     );
-    await keyRow.getByTitle("Revoke API key", { exact: true }).click();
+    await keyRow.getByRole("button", { name: "Revoke API key", exact: true }).click();
     expect((await revokeResponse).status()).toBe(204);
     await expect(keyRow).toHaveCount(0);
     const keys: ApiKeyRead[] = await (await page.request.get(`${API}/api/v1/auth/api-keys`)).json();

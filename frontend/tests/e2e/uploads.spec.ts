@@ -52,11 +52,11 @@ test.describe("upload and capture", () => {
 
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
-    await page.getByRole("button", { name: "From URL" }).click();
+    await page.getByRole("tab", { name: "From URL" }).click();
     await page
       .getByPlaceholder("Model page, collection, or direct .stl/.zip link")
       .fill("https://www.printables.com/model/41-capture-bracket");
-    await page.getByRole("button", { name: "Review URL" }).click();
+    await page.getByRole("button", { name: "Capture for review" }).click();
 
     await expect(page).toHaveURL(/\/inbox\/41$/);
     await expect(page.getByRole("heading", { name: "Capture bracket" })).toBeVisible();
@@ -82,7 +82,7 @@ test.describe("upload and capture", () => {
     const editCreator = page.getByRole("button", { name: "Edit Creator", exact: true });
     await editCreator.click();
     await page.getByLabel("Creator override").fill("Corrected maker");
-    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByRole("button", { name: "Save override", exact: true }).click();
     await expect(page.getByText("Corrected maker")).toBeVisible();
     await expect(page.getByText("Edited")).toBeVisible();
     await editCreator.click();

@@ -13,7 +13,7 @@ test.describe("Collection tree", () => {
       await route.continue();
     });
     await page.goto("/");
-    const folder = page.getByRole("button", { name: "maraio", exact: true });
+    const folder = page.getByRole("treeitem", { name: "maraio", exact: true });
     await expect(folder).toBeVisible();
     const continuity = await folder.evaluateHandle((row) => {
       const state = { removals: 0 };

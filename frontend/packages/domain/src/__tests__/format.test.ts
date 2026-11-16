@@ -17,6 +17,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   formatBytes,
+  formatCalendarDate,
+  pluralRules,
   formatCost,
   formatDuration,
   formatGrams,
@@ -197,5 +199,23 @@ describe("date labels across renders", () => {
   it("retains invalid date display", () => {
     expect(timeAgo("invalid", "en")).toBe("Invalid Date");
     expect(timeAgoShort("invalid", "es")).toBe("Invalid Date");
+  });
+});
+
+describe("locale display helpers", () => {
+  it("reuses plural rules within a locale without mixing locales", () => {
+    const english = pluralRules("en");
+    expect(english.select(1)).toBe("one");
+    expect(english.select(2)).toBe("other");
+    expect(pluralRules("en")).toBe(english);
+    const arabic = pluralRules("ar");
+    expect(arabic.select(2)).toBe("two");
+    expect(arabic).not.toBe(english);
+  });
+
+  it("formats the short calendar date independently of elapsed time", () => {
+    expect(formatCalendarDate("2026-05-01T12:00:00Z")).toBe("May 1");
+    expect(formatCalendarDate("2026-05-01T12:00:00Z", "es")).toBe("1 may");
+    expect(formatCalendarDate("invalid")).toBe("Invalid Date");
   });
 });

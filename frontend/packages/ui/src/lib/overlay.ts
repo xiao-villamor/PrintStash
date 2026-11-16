@@ -71,7 +71,7 @@ export function useOverlayBehavior(
       document.body.style.overflow = "hidden";
     }
     layers.push(layer);
-    const initial = panel?.querySelector<HTMLElement>("[autofocus]") ?? panel;
+    const initial = panel?.querySelector<HTMLElement>("[autofocus], [data-autofocus]") ?? panel;
     initial?.focus({ preventScroll: true });
 
     function onKey(e: KeyboardEvent) {

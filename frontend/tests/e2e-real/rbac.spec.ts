@@ -8,10 +8,10 @@
  */
 import { test, expect, authBundleFor, authedContext } from "./helpers";
 import {
+  openModelPage,
   clickModelAction,
   createCollectionViaVault,
   modelActionItem,
-  modelCard,
   uploadModel,
 } from "./util";
 
@@ -113,7 +113,7 @@ test.describe("role-based access", () => {
     // Admin: collection + a model inside it; capture the model URL.
     await createCollectionViaVault(page, col);
     await uploadModel(page, model, { collection: col });
-    await modelCard(page, model).click();
+    await openModelPage(page, model);
     await expect(page.getByRole("heading", { name: model })).toBeVisible();
     const modelUrl = page.url();
 

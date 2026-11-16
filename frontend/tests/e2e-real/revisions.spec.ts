@@ -7,7 +7,7 @@
  * one pass because it is the transitions, not the states, that go wrong.
  */
 import { test, expect } from "./helpers";
-import { modelCard, uploadGcodeModel } from "./util";
+import { openModelPage, uploadGcodeModel } from "./util";
 
 // The compact table keeps one row group per Revision; its selected actionbar owns editing.
 function revRow(page: import("@playwright/test").Page, n: number) {
@@ -22,7 +22,7 @@ test.describe("revisions", () => {
   }) => {
     const name = `e2e-rev-${Date.now()}`;
     await uploadGcodeModel(page, name);
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
 
     // The first uploaded G-code is auto-marked recommended.

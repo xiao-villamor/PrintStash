@@ -11,7 +11,7 @@
  */
 import { test, expect } from "./helpers";
 import type { ModelRead } from "../../src/types/models";
-import { modelCard, uploadModel } from "./util";
+import { openModelPage, uploadModel } from "./util";
 
 test.describe("background work", () => {
   test("@critical an open Model hears its thumbnail re-derived", async ({ page }) => {
@@ -27,7 +27,7 @@ test.describe("background work", () => {
     });
     await uploadModel(page, name, { mesh: true, gcode: false });
 
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page).toHaveURL(/\/models\/\d+/);
     const modelId = Number(new URL(page.url()).pathname.split("/").at(-1));
     await expect.poll(() => sent).toContain(JSON.stringify({ subscribe: `model:${modelId}` }));
@@ -69,23 +69,33 @@ test.describe("derivative processing policy", () => {
     test.setTimeout(180_000);
     const name = `e2e-policy-${Date.now()}`;
     await page.goto("/settings?section=work");
-    const mesh = page.getByRole("checkbox", { name: "Mesh metadata and preview images" });
-    await expect(mesh).toBeChecked();
+    const mesh = page.getByRole("button", {
+      name: "Turn off Mesh metadata and preview images",
+      exact: true,
+    });
+    await expect(mesh).toBeVisible();
     await mesh.click();
-    await expect(mesh).not.toBeChecked();
+    await expect(
+      page.getByRole("button", { name: "Turn on Mesh metadata and preview images", exact: true }),
+    ).toBeVisible();
     try {
       await uploadModel(page, name, { mesh: true, gcode: false });
-      await modelCard(page, name).click();
+      await openModelPage(page, name);
       await expect(page).toHaveURL(/\/models\/\d+/);
       await page.getByRole("tab", { name: /^Files/ }).click();
       await expect(page.getByText("Processing disabled", { exact: true })).toBeVisible();
       const settings = await page.context().newPage();
       try {
         await settings.goto("/settings?section=work");
-        await settings.getByRole("checkbox", { name: "Mesh metadata and preview images" }).click();
+        await settings
+          .getByRole("button", { name: "Turn on Mesh metadata and preview images", exact: true })
+          .click();
         await expect(
-          settings.getByRole("checkbox", { name: "Mesh metadata and preview images" }),
-        ).toBeChecked();
+          settings.getByRole("button", {
+            name: "Turn off Mesh metadata and preview images",
+            exact: true,
+          }),
+        ).toBeVisible();
         await expect(page.getByText("Processing disabled", { exact: true })).toHaveCount(0);
         await expect(page.getByRole("status").filter({ hasText: "Preparing" })).toHaveCount(0, {
           timeout: 120_000,

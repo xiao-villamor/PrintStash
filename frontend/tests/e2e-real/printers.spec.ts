@@ -16,7 +16,10 @@ test.describe("printers", () => {
     await expect(page.getByRole("heading", { name: "Printers" })).toBeVisible();
 
     await page.getByRole("button", { name: "Add printer" }).click();
-    await page.getByPlaceholder("Voron 2.4").fill(name);
+    await page
+      .getByRole("dialog", { name: "Add printer", exact: true })
+      .getByLabel("Name", { exact: true })
+      .fill(name);
     await page.getByPlaceholder("http://printer.local:7125").fill("http://127.0.0.1:7125");
     await page.getByRole("button", { name: "Add printer" }).last().click();
 
@@ -66,13 +69,21 @@ test.describe("printer settings conflict recovery", () => {
         (r) =>
           r.url().endsWith(`/api/v1/printers/${printer.id}`) && r.request().method() === "PATCH",
       );
-      await page.getByRole("button", { name: "Save changes", exact: true }).click();
+      await page
+        .locator("form")
+        .filter({ has: page.getByLabel("Name", { exact: true }) })
+        .getByRole("button", { name: "Save changes", exact: true })
+        .click();
       expect((await firstSave).status()).toBe(200);
       const staleSave = second.waitForResponse(
         (r) =>
           r.url().endsWith(`/api/v1/printers/${printer.id}`) && r.request().method() === "PATCH",
       );
-      await second.getByRole("button", { name: "Save changes", exact: true }).click();
+      await second
+        .locator("form")
+        .filter({ has: page.getByLabel("Name", { exact: true }) })
+        .getByRole("button", { name: "Save changes", exact: true })
+        .click();
       expect((await staleSave).status()).toBe(412);
       await expect(second.getByLabel("Name", { exact: true })).toHaveValue(`${name}-revised`);
       await second.getByRole("button", { name: "Review current settings" }).click();

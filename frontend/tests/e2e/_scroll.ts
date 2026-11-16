@@ -5,7 +5,9 @@ export async function scrollToEnd(page: Page): Promise<void> {
   // Scrolling an empty container reaches nothing: wait for the first page.
   await page.locator("main [data-library-entry]").first().waitFor();
   await page.getByRole("main").evaluate((main) => {
-    main.scrollTop = main.scrollHeight;
+    const list = main.querySelector<HTMLElement>("[data-library-list]");
+    const scroll = list && list.scrollHeight > list.clientHeight ? list : main;
+    scroll.scrollTop = scroll.scrollHeight;
   });
 }
 

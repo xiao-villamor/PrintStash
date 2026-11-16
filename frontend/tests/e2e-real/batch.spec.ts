@@ -8,7 +8,7 @@
  * leave a library in a state nobody asked for and no way to tell which half went.
  */
 import { test, expect, authBundleFor, authedContext } from "./helpers";
-import { createCollectionViaVault, modelCard, uploadModel } from "./util";
+import { openModelPage, createCollectionViaVault, modelCard, uploadModel } from "./util";
 
 // Batch move/tag/delete (new in 0.8.0). Models live in their own collection so
 // "Select all on screen" is scoped to just them — the shared serial DB is never
@@ -127,7 +127,7 @@ test.describe("batch actions", () => {
     const label = `verified-${Date.now()}`;
 
     await uploadModel(page, name);
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await page.getByRole("tab", { name: /Revisions/ }).click();
     await expect(page.getByText("Rev 1", { exact: true }).first()).toBeVisible();

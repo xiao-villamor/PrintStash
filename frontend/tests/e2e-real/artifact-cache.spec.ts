@@ -5,6 +5,7 @@ test.describe("remote Artifact cache", () => {
   test("reviews a cache policy conflict in the browser", async ({ page, context }) => {
     await page.goto("/settings?section=storage");
     await page.getByRole("button", { name: "Storage", exact: true }).click();
+    await page.getByRole("tab", { name: "Remote cache", exact: true }).click();
     await page.getByRole("tab", { name: "Cache limits" }).click();
     const maximum = page.getByRole("spinbutton", { name: "Maximum cached files" });
     await maximum.fill("120");
@@ -12,6 +13,7 @@ test.describe("remote Artifact cache", () => {
     try {
       await other.goto("/settings?section=storage");
       await other.getByRole("button", { name: "Storage", exact: true }).click();
+      await other.getByRole("tab", { name: "Remote cache", exact: true }).click();
       await other.getByRole("tab", { name: "Cache limits" }).click();
       await other.getByRole("spinbutton", { name: "Maximum cached files" }).fill("140");
       await other.getByRole("button", { name: "Save cache settings" }).click();
@@ -30,6 +32,7 @@ test.describe("remote Artifact cache", () => {
   test("manages cache policy through Settings", async ({ page }) => {
     await page.goto("/settings");
     await page.getByRole("button", { name: "Storage", exact: true }).click();
+    await page.getByRole("tab", { name: "Remote cache", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Remote file cache" })).toBeVisible();
     await expect(
       page.getByRole("checkbox", { name: "Enable remote Artifact cache" }),
@@ -51,6 +54,7 @@ test.describe("remote Artifact cache", () => {
     await expect(page.getByText("Artifact cache settings updated.")).toBeVisible();
     await page.reload();
     await page.getByRole("button", { name: "Storage", exact: true }).click();
+    await page.getByRole("tab", { name: "Remote cache", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Remote file cache" })).toBeVisible();
     await page.getByRole("tab", { name: "Cache limits" }).click();
     await expect(page.getByRole("spinbutton", { name: "Maximum cached files" })).toHaveValue("125");

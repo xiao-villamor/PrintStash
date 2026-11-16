@@ -11,10 +11,10 @@ import { existsSync } from "node:fs";
 
 import { test, expect, type Page } from "./helpers";
 import {
+  openModelPage,
   backupFromAccepted,
   clickModelAction,
   createBackupViaApi,
-  modelCard,
   seedExpiredStaging,
   uploadGcodeModel,
 } from "./util";
@@ -167,7 +167,7 @@ const storageInsightsExample: StorageInventoryReport = {
 };
 
 async function openAiSearchSettings(page: Page) {
-  const ready = page.getByRole("tab", { name: "Guided setup" });
+  const ready = page.getByRole("button", { name: "Technical settings", exact: true });
   for (let attempt = 0; attempt < 3; attempt++) {
     await page.goto("/settings?section=ai-search", { waitUntil: "domcontentloaded" });
     try {
@@ -271,20 +271,21 @@ test.describe("settings", () => {
     const insightsCard = page
       .getByRole("heading", { name: "Storage insights" })
       .locator('xpath=ancestor::*[contains(@class,"overflow-hidden")][1]');
+    await page.getByRole("button", { name: "Plan migration" }).click();
     await expect(page.getByRole("button", { name: "Move storage" })).toBeVisible({
       timeout: 45_000,
     });
     await expect(
       page.getByRole("region", { name: "Storage connection details" }).locator("dd"),
     ).toHaveCount(2);
+    await expect(move.getByRole("heading", { name: "Destination storage" })).toBeVisible();
+    await page.getByRole("tab", { name: "Usage", exact: true }).click();
     await expect(page.getByText("Files stored here")).toBeVisible({ timeout: 45_000 });
     await expect(page.getByText("Temporary files").locator("xpath=..")).toContainText("0 MB");
     await expect(page.getByRole("region", { name: "What uses space" })).toContainText("635 MB");
     await expect(page.getByRole("img", { name: "Recorded owned storage over time" })).toBeVisible();
     await expect(page.getByRole("region", { name: "Free up space" })).toContainText("69.3 MB");
-    await expect(move.getByRole("heading", { name: "Destination storage" })).toBeVisible({
-      timeout: 45_000,
-    });
+    await page.getByRole("tab", { name: "Remote cache", exact: true }).click();
     await expect(cache).toBeVisible();
     for (const viewport of [
       { width: 1920, height: 1080 },
@@ -293,7 +294,8 @@ test.describe("settings", () => {
       const { width } = viewport;
       await page.setViewportSize(viewport);
       await page.evaluate(() => document.documentElement.classList.add("dark"));
-      await page.getByRole("heading", { name: "Settings" }).scrollIntoViewIfNeeded();
+      await page.getByRole("tab", { name: "Location", exact: true }).click();
+      await page.getByRole("heading", { name: "Settings", level: 1 }).scrollIntoViewIfNeeded();
       await page.screenshot({
         path: testInfo.outputPath(`storage-top-${width}.png`),
         fullPage: true,
@@ -303,6 +305,7 @@ test.describe("settings", () => {
         .scrollIntoViewIfNeeded();
       await page.screenshot({ path: testInfo.outputPath(`storage-connection-${width}.png`) });
 
+      await page.getByRole("tab", { name: "Usage", exact: true }).click();
       await page.getByRole("heading", { name: "Storage insights" }).scrollIntoViewIfNeeded();
       await insightsCard.screenshot({ path: testInfo.outputPath(`storage-summary-${width}.png`) });
       if (width === 390) {
@@ -324,6 +327,7 @@ test.describe("settings", () => {
       }
       await page.getByText("Measurement details").click();
 
+      await page.getByRole("tab", { name: "Location", exact: true }).click();
       await move.screenshot({ path: testInfo.outputPath(`move-${width}.png`) });
       await move.getByText("Migration policy · Advanced settings").click();
       await move.screenshot({ path: testInfo.outputPath(`move-advanced-${width}.png`) });
@@ -332,6 +336,7 @@ test.describe("settings", () => {
       await move.screenshot({ path: testInfo.outputPath(`move-s3-${width}.png`) });
       await move.getByRole("button", { name: "This machine" }).click();
 
+      await page.getByRole("tab", { name: "Remote cache", exact: true }).click();
       await expect(
         page.getByRole("checkbox", { name: "Enable remote Artifact cache" }),
       ).toBeVisible({ timeout: 30_000 });
@@ -470,6 +475,7 @@ test.describe("settings", () => {
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto("/settings?section=storage", { waitUntil: "domcontentloaded" });
+      await page.getByRole("tab", { name: "Usage", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Storage insights" })).toBeVisible({
         timeout: 45_000,
       });
@@ -570,6 +576,7 @@ test.describe("settings", () => {
       const pageSize = width >= 640 ? 8 : 5;
       await page.setViewportSize({ width, height: 900 });
       await page.goto("/settings?section=storage", { waitUntil: "domcontentloaded" });
+      await page.getByRole("tab", { name: "Usage", exact: true }).click();
       const collections = page
         .getByRole("heading", { name: "Collection storage" })
         .locator("xpath=ancestor::section[1]");
@@ -763,6 +770,7 @@ test.describe("settings", () => {
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 1000 });
         await openAiSearchSettings(page);
+        await page.getByRole("button", { name: /^(Start|Change) setup$/ }).click();
         await expect(
           page.getByRole("heading", { name: "Where should AI Search run?" }),
         ).toBeVisible({ timeout: 45_000 });
@@ -784,11 +792,13 @@ test.describe("settings", () => {
         await page.getByRole("button", { name: "Change location" }).click();
         await page.getByRole("button", { name: "Connect another server" }).click();
         await expect(page.getByRole("form", { name: "Inference server" })).toBeVisible();
-        await page.getByRole("tab", { name: "Technical" }).click();
+        await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+        await page.getByRole("button", { name: "Technical settings", exact: true }).click();
         await expect(
           page.getByRole("checkbox", { name: "Enable AI Search", exact: true }),
         ).toBeVisible();
-        await page.getByRole("tab", { name: "Guided setup" }).click();
+        await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+        await page.getByRole("button", { name: /^(Start|Change) setup$/ }).click();
         await expect(
           page.getByRole("heading", { name: "Where should AI Search run?" }),
         ).toBeVisible();
@@ -800,11 +810,11 @@ test.describe("settings", () => {
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await openAiSearchSettings(page);
-      await expect(page.getByRole("tab", { name: "Search types" })).toBeVisible({
+      await expect(page.getByRole("button", { name: "Manage indexes", exact: true })).toBeVisible({
         timeout: 45_000,
       });
-      await page.getByRole("tab", { name: "Search types" }).click();
-      await expect(page.getByRole("tab", { name: "Technical" })).toBeInViewport();
+      await page.getByRole("button", { name: "Manage indexes", exact: true }).click();
+      await expect(page.getByRole("dialog", { name: "Search types" })).toBeVisible();
       await expect(page.getByRole("heading", { name: "Search currently in use" })).toBeVisible({
         timeout: 45_000,
       });
@@ -839,7 +849,8 @@ test.describe("settings", () => {
       });
       await page.getByRole("button", { name: "Back to search choices" }).click();
       await expect(page.getByRole("button", { name: "Build new index" })).toBeVisible();
-      await page.getByRole("tab", { name: "AI servers" }).click();
+      await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+      await page.getByRole("button", { name: "Manage servers", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Connect an AI server" })).toBeVisible();
       await page.getByRole("button", { name: "Add a server" }).click();
       await expect(page.getByRole("form", { name: "Inference server" })).toBeVisible();
@@ -849,7 +860,8 @@ test.describe("settings", () => {
         fullPage: true,
         animations: "disabled",
       });
-      await page.getByRole("tab", { name: "Technical" }).click();
+      await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+      await page.getByRole("button", { name: "Technical settings", exact: true }).click();
       await expect(page.getByLabel("Keyword ranking weight")).toBeVisible();
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
@@ -861,18 +873,21 @@ test.describe("settings", () => {
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 800 });
       await openAiSearchSettings(page);
-      await expect(page.getByRole("tab", { name: "Technical" })).toBeVisible({ timeout: 45_000 });
-      await page.getByRole("tab", { name: "Technical" }).click();
+      await expect(
+        page.getByRole("button", { name: "Technical settings", exact: true }),
+      ).toBeVisible({ timeout: 45_000 });
+      await page.getByRole("button", { name: "Technical settings", exact: true }).click();
       await page
         .getByRole("checkbox", { name: "Enable AI Search", exact: true })
         .scrollIntoViewIfNeeded();
-      const back = page.getByRole("tab", { name: "Guided setup" });
+      const back = page.getByRole("dialog").getByRole("button", { name: "Close", exact: true });
       await expect(back).toBeInViewport();
       await page.screenshot({
         path: testInfo.outputPath(`advanced-${width}.png`),
         animations: "disabled",
       });
       await back.click();
+      await page.getByRole("button", { name: /^(Start|Change) setup$/ }).click();
       await expect(
         page.getByRole("heading", { name: "Where should AI Search run?" }),
       ).toBeInViewport();
@@ -898,13 +913,13 @@ test.describe("settings", () => {
     await expect(page.getByText(keyName)).toBeVisible();
 
     // Revoke it.
-    await page.getByTitle("Revoke API key").click();
+    await page.getByRole("button", { name: "Revoke API key", exact: true }).click();
     await expect(page.getByText(keyName)).toHaveCount(0);
   });
 
   test("change display currency persists", async ({ page }) => {
     await page.goto("/settings");
-    await page.getByRole("button", { name: "Design" }).click();
+    await page.getByRole("button", { name: "Appearance" }).click();
 
     const currency = page
       .getByRole("combobox")
@@ -918,7 +933,7 @@ test.describe("settings", () => {
     ]);
 
     await page.reload();
-    await page.getByRole("button", { name: "Design" }).click();
+    await page.getByRole("button", { name: "Appearance" }).click();
     await expect(
       page
         .getByRole("combobox")
@@ -943,7 +958,7 @@ test.describe("settings", () => {
 
   test("create a manual backup", async ({ page }) => {
     await page.goto("/settings");
-    await page.getByRole("button", { name: "Backup", exact: true }).click();
+    await page.getByRole("button", { name: "Backups", exact: true }).click();
 
     const [created] = await Promise.all([
       page.waitForResponse(
@@ -1085,6 +1100,7 @@ test.describe("settings", () => {
     const connectionName = `e2e-remote-${Date.now()}`;
     await page.goto("/settings?section=remote-storage");
 
+    await page.getByRole("button", { name: "Add remote connection", exact: true }).click();
     await page.getByLabel("Connection name").fill(connectionName);
     await page.getByLabel("Bucket").fill("printstash-e2e");
     await page.getByLabel("Access key").fill("e2e-access");
@@ -1131,7 +1147,12 @@ test.describe("settings", () => {
     await expect(remote.getByLabel("Connection name")).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath("remote-loading-1920.png") });
     releaseProviders();
-    await expect(remote.getByRole("group", { name: "Storage category" })).toBeVisible();
+    await remote.getByRole("button", { name: "Add remote connection", exact: true }).click();
+    await expect(
+      page
+        .getByRole("dialog", { name: "Add remote connection" })
+        .getByRole("group", { name: "Storage category" }),
+    ).toBeVisible();
     await page.unroute("**/api/v1/storage/providers");
   });
 
@@ -1139,7 +1160,8 @@ test.describe("settings", () => {
     await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.goto("/settings?section=remote-storage");
-    const remote = page.getByRole("region", { name: "Remote storage" });
+    await page.getByRole("button", { name: "Add remote connection", exact: true }).click();
+    const remote = page.getByRole("dialog", { name: "Add remote connection" });
     await expect(remote.getByRole("group", { name: "Storage category" })).toBeVisible();
     await remote
       .getByRole("group", { name: "Storage category" })
@@ -1309,7 +1331,7 @@ test.describe("settings", () => {
 
   test("auto-mark-known-good toggle persists across reload", async ({ page }) => {
     await page.goto("/settings");
-    await page.getByRole("button", { name: "Design" }).click();
+    await page.getByRole("button", { name: "Appearance" }).click();
 
     const sw = page.getByRole("switch", { name: "Auto-mark known good on successful print" });
     await expect(sw).toBeEnabled();
@@ -1325,7 +1347,7 @@ test.describe("settings", () => {
     await expect(sw).toHaveAttribute("aria-checked", after);
 
     await page.reload();
-    await page.getByRole("button", { name: "Design" }).click();
+    await page.getByRole("button", { name: "Appearance" }).click();
     await expect(
       page.getByRole("switch", { name: "Auto-mark known good on successful print" }),
     ).toHaveAttribute("aria-checked", after);
@@ -1383,7 +1405,7 @@ test.describe("settings", () => {
     const names = [`e2e-bulk-a-${stamp}`, `e2e-bulk-b-${stamp}`];
     for (const name of names) {
       await uploadGcodeModel(page, name);
-      await modelCard(page, name).click();
+      await openModelPage(page, name);
       await clickModelAction(page, "Delete model");
       await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
     }
@@ -1408,7 +1430,7 @@ test.describe("settings", () => {
   test("expired GC preview is non-destructive without an independent backup", async ({ page }) => {
     const name = `e2e-purge-${Date.now()}`;
     await uploadGcodeModel(page, name);
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await clickModelAction(page, "Delete model");
     await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
 
@@ -1512,6 +1534,7 @@ test.describe("settings", () => {
     const staged = await seedExpiredStaging();
     try {
       await page.goto("/settings?section=storage");
+      await page.getByRole("tab", { name: "Usage", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Storage insights" })).toBeVisible();
       const [measurement] = await Promise.all([
         page.waitForResponse(

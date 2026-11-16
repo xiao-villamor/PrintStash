@@ -245,6 +245,7 @@ function ProfileRow({
   name,
   summary,
   editor,
+  feedback,
   onBlur,
   onClose,
   onSelect,
@@ -258,6 +259,7 @@ function ProfileRow({
   name: string;
   summary: string;
   editor: React.ReactNode;
+  feedback: React.ReactNode;
   onBlur: React.FocusEventHandler<HTMLDivElement>;
   onClose: () => void;
   onSelect: () => void;
@@ -313,7 +315,9 @@ function ProfileRow({
           </p>
           {editor}
         </div>
+        {feedback}
       </Modal>
+      {!editing && feedback}
       {children}
     </div>
   ) : null;
@@ -1023,7 +1027,7 @@ export function FilamentProfilesCard() {
                           onChange={(e) => setNewName(e.target.value)}
                           placeholder={uiText("Everyday PLA")}
                           className={compactInputClass}
-                          autoFocus
+                          data-autofocus
                           required
                           maxLength={128}
                           aria-describedby={`${helpId}-filament-name`}
@@ -1318,33 +1322,35 @@ export function FilamentProfilesCard() {
                               </div>
                             </>
                           }
+                          feedback={
+                            review && (
+                              <PresetReviewPanel
+                                review={review}
+                                replaced={
+                                  review.phase === "ready" &&
+                                  review.snapshot.edit_epoch !==
+                                    (filamentEdits[profile.id]?.base ?? profile).edit_epoch
+                                }
+                                busy={rowStatus[`f${profile.id}`] === "saving"}
+                                canSave={
+                                  !linked &&
+                                  Boolean(edit.name.trim()) &&
+                                  review.phase === "ready" &&
+                                  review.snapshot.edit_epoch ===
+                                    (filamentEdits[profile.id]?.base ?? profile).edit_epoch
+                                }
+                                onReview={() => void reviewFilament(profile.id)}
+                                onAdopt={() => adoptFilament(profile.id)}
+                                onSave={() => void autoSaveFilament(profile, true)}
+                              />
+                            )
+                          }
                         >
                           <ProfileSettingsDetails
                             kind="filament"
                             profile={profile}
                             initiallyExpanded
                           />
-                          {review && (
-                            <PresetReviewPanel
-                              review={review}
-                              replaced={
-                                review.phase === "ready" &&
-                                review.snapshot.edit_epoch !==
-                                  (filamentEdits[profile.id]?.base ?? profile).edit_epoch
-                              }
-                              busy={rowStatus[`f${profile.id}`] === "saving"}
-                              canSave={
-                                !linked &&
-                                Boolean(edit.name.trim()) &&
-                                review.phase === "ready" &&
-                                review.snapshot.edit_epoch ===
-                                  (filamentEdits[profile.id]?.base ?? profile).edit_epoch
-                              }
-                              onReview={() => void reviewFilament(profile.id)}
-                              onAdopt={() => adoptFilament(profile.id)}
-                              onSave={() => void autoSaveFilament(profile, true)}
-                            />
-                          )}
                         </ProfileRow>
                       );
                     })}
@@ -1407,7 +1413,7 @@ export function FilamentProfilesCard() {
                           onChange={(e) => setNewPrinterName(e.target.value)}
                           placeholder={uiText("Voron 2.4 — 0.4 mm")}
                           className={compactInputClass}
-                          autoFocus
+                          data-autofocus
                           required
                           maxLength={128}
                           aria-describedby={`${helpId}-printer-name`}
@@ -1644,32 +1650,34 @@ export function FilamentProfilesCard() {
                               </div>
                             </>
                           }
+                          feedback={
+                            review && (
+                              <PresetReviewPanel
+                                review={review}
+                                replaced={
+                                  review.phase === "ready" &&
+                                  review.snapshot.edit_epoch !==
+                                    (printerEdits[profile.id]?.base ?? profile).edit_epoch
+                                }
+                                busy={rowStatus[`p${profile.id}`] === "saving"}
+                                canSave={
+                                  Boolean(edit.name.trim()) &&
+                                  review.phase === "ready" &&
+                                  review.snapshot.edit_epoch ===
+                                    (printerEdits[profile.id]?.base ?? profile).edit_epoch
+                                }
+                                onReview={() => void reviewPrinter(profile.id)}
+                                onAdopt={() => adoptPrinter(profile.id)}
+                                onSave={() => void autoSavePrinter(profile, true)}
+                              />
+                            )
+                          }
                         >
                           <ProfileSettingsDetails
                             kind="printer"
                             profile={profile}
                             initiallyExpanded
                           />
-                          {review && (
-                            <PresetReviewPanel
-                              review={review}
-                              replaced={
-                                review.phase === "ready" &&
-                                review.snapshot.edit_epoch !==
-                                  (printerEdits[profile.id]?.base ?? profile).edit_epoch
-                              }
-                              busy={rowStatus[`p${profile.id}`] === "saving"}
-                              canSave={
-                                Boolean(edit.name.trim()) &&
-                                review.phase === "ready" &&
-                                review.snapshot.edit_epoch ===
-                                  (printerEdits[profile.id]?.base ?? profile).edit_epoch
-                              }
-                              onReview={() => void reviewPrinter(profile.id)}
-                              onAdopt={() => adoptPrinter(profile.id)}
-                              onSave={() => void autoSavePrinter(profile, true)}
-                            />
-                          )}
                         </ProfileRow>
                       );
                     })}

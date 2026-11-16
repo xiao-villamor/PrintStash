@@ -103,7 +103,7 @@ test.describe("authentication", () => {
     expect((await ok.json()).access_token).toBeTruthy();
 
     // Revoke it, and the same key is rejected.
-    await page.getByTitle("Revoke API key").click();
+    await page.getByRole("button", { name: "Revoke API key", exact: true }).click();
     await expect(page.getByText(keyName)).toHaveCount(0);
     const denied = await page.request.post("/api/v1/auth/login", {
       data: { username: ADMIN.username, api_key: secret },

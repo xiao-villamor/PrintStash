@@ -7,7 +7,7 @@
  * actually connected, which is the failure no unit test can see.
  */
 import { test, expect } from "./helpers";
-import { modelCard, uploadGcodeModel } from "./util";
+import { openModelPage, uploadGcodeModel } from "./util";
 
 // Fleet (0.11.0): a real, live Moonraker emulator (backend/tests/fakes/
 // mock_printer.py, booted standalone by playwright.real.config.ts's webServer
@@ -28,7 +28,10 @@ test.describe("fleet queue", () => {
     // Add the printer pointed at the live emulator.
     await page.goto("/printers");
     await page.getByRole("button", { name: "Add printer" }).click();
-    await page.getByPlaceholder("Voron 2.4").fill(printerName);
+    await page
+      .getByRole("dialog", { name: "Add printer", exact: true })
+      .getByLabel("Name", { exact: true })
+      .fill(printerName);
     await page
       .getByPlaceholder("http://printer.local:7125")
       .fill(`http://127.0.0.1:${MOCK_PRINTER_PORT}`);
@@ -49,7 +52,7 @@ test.describe("fleet queue", () => {
     // Queue a print from a model's send dialog against the (now sole, least-busy)
     // fleet printer.
     await uploadGcodeModel(page, modelName);
-    await modelCard(page, modelName).click();
+    await openModelPage(page, modelName);
     await expect(page.getByRole("heading", { name: modelName })).toBeVisible();
     await page.getByRole("button", { name: "Send to printer" }).last().click();
     const dialog = page.getByRole("dialog", { name: "Send to printer" });

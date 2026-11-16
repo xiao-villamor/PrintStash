@@ -22,15 +22,14 @@ async function hideDevtools(page: import("@playwright/test").Page) {
 }
 
 test.describe("mobile layout", () => {
-  test("opens the Similar models primary tab", async ({ page }) => {
+  test("opens Similar models from mobile navigation", async ({ page }) => {
     await page.goto("/");
     await hideDevtools(page);
     const nav = bottomNav(page);
     await expect(nav).toBeVisible();
-    await expect(nav.getByRole("link", { name: "Vault" })).toBeVisible();
-    await expect(nav.getByRole("link", { name: "Similar" })).toBeVisible();
-
-    await nav.getByRole("link", { name: "Similar" }).click();
+    await expect(nav.getByRole("link", { name: "Library" })).toBeVisible();
+    await nav.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Similar models", exact: true }).click();
     await expect(page).toHaveURL(/\/library\/similar$/);
   });
 
@@ -40,11 +39,11 @@ test.describe("mobile layout", () => {
     await bottomNav(page).getByRole("button", { name: "More" }).click();
 
     // The bottom sheet holds overflow destinations and account actions.
-    const sheet = page.getByRole("dialog", { name: "More" });
-    await expect(sheet.getByRole("link", { name: "Settings" })).toBeVisible();
+    const sheet = page.getByRole("menu");
+    await expect(sheet.getByRole("menuitem", { name: "Settings" })).toBeVisible();
 
-    await sheet.getByRole("link", { name: "Settings" }).click();
+    await sheet.getByRole("menuitem", { name: "Settings" }).click();
     await expect(page).toHaveURL(/\/settings$/);
-    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
   });
 });

@@ -8,7 +8,7 @@
  * keep cancelled name drafts out of the saved Model.
  */
 import { test, expect } from "./helpers";
-import { clickModelAction, modelCard, uploadGcodeModel } from "./util";
+import { openModelPage, clickModelAction, modelCard, uploadGcodeModel } from "./util";
 
 test.describe("model detail", () => {
   test("reads a Model's detail once when opening it", async ({ page }) => {
@@ -77,7 +77,7 @@ test.describe("model detail", () => {
     const name = `e2e-quick-rename-${Date.now()}`;
     const renamed = `${name}-renamed`;
     await uploadGcodeModel(page, name);
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
 
     // ── Double-click the heading and persist the new name ──
     await page.getByRole("heading", { name, exact: true }).dblclick();
@@ -125,7 +125,7 @@ test.describe("model detail", () => {
     const printerName = `E2E Rig ${Date.now()}`;
     await uploadGcodeModel(page, name);
 
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await page.getByRole("tab", { name: /History/ }).click();
     await page.getByRole("button", { name: /Add Record/ }).click();
@@ -150,7 +150,7 @@ test.describe("model detail", () => {
     const keepTag = `e2e-keep-${stamp}`;
     await uploadGcodeModel(page, name);
 
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
 
     const tagInput = page.getByPlaceholder("Search or create — press Enter");
@@ -176,13 +176,13 @@ test.describe("model detail", () => {
     const name = `e2e-dl-${Date.now()}`;
     await uploadGcodeModel(page, name);
 
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await page.getByRole("tab", { name: "Revisions" }).click();
 
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      page.getByTitle("Download").first().click(),
+      page.getByRole("button", { name: "Download", exact: true }).first().click(),
     ]);
     expect(download.suggestedFilename()).toBe(`${name}.gcode`);
   });

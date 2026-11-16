@@ -1,7 +1,7 @@
 /*
  * A folder that only holds subfolders has no models of its own, so filters that
  * looked at its direct models alone offered nothing at all. Facets describe the
- * whole subtree, and an active filter searches it too; an unfiltered folder
+ * whole subtree, and an active filter searches it too; an explicitly scoped folder
  * still lists only its direct models.
  */
 import { expect, test, type Page } from "@playwright/test";
@@ -44,12 +44,12 @@ async function folderOfFolders(page: Page) {
     });
     return route.fulfill({
       json: {
-        file_types: [{ value: "stl", count: 7 }],
-        revision_statuses: [],
-        material_types: [],
-        slicers: [],
-        printer_models: [],
-        print_outcomes: [],
+        file_type: [{ value: "stl", count: 7 }],
+        revision_status: [],
+        material_type: [],
+        slicer: [],
+        printer_model: [],
+        print_outcome: [],
         storage: [],
         printed: [],
       },
@@ -76,17 +76,16 @@ async function folderOfFolders(page: Page) {
 }
 
 test.describe("filters in a folder of folders", () => {
-  test("a folder of folders still lists only its own models until a filter is applied", async ({
-    page,
-  }) => {
+  test("an explicit current-folder scope lists only its own models", async ({ page }) => {
     const requests = await folderOfFolders(page);
-    await page.goto("/?c=parent");
+    await page.goto("/?c=parent&scope=here");
     await expect(page.getByRole("heading", { name: "parent", exact: true })).toBeVisible();
 
     await expect.poll(() => requests.some((r) => r.kind === "browse")).toBe(true);
     expect(requests.filter((r) => r.kind === "browse").every((r) => r.direct === "true")).toBe(
       true,
     );
+    await page.getByRole("button", { name: "Filters", exact: true }).click();
     // Facets never ask for direct models only, so options exist below this folder.
     await expect.poll(() => requests.some((r) => r.kind === "facets")).toBe(true);
     expect(requests.filter((r) => r.kind === "facets").every((r) => r.direct === null)).toBe(true);

@@ -154,7 +154,7 @@ test.describe("Library readiness", () => {
       .getByRole("dialog", { name: "Collections", exact: true })
       .waitFor({ state: "hidden" });
     await page.keyboard.press("/");
-    await page.locator("header").getByRole("searchbox", { name: "Search library" }).fill("skadis");
+    await page.getByRole("searchbox", { name: "Search library" }).fill("skadis");
     await expect(page).toHaveURL(/q=skadis/);
     await page.keyboard.press("Escape");
     // The compact search owns the full header while focused, as in the reference.

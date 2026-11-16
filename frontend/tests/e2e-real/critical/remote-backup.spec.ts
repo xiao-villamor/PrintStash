@@ -2,11 +2,11 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  openModelPage,
   backupFromAccepted,
   clickModelAction,
   completedJob,
   gcodeFor,
-  modelCard,
   uploadGcodeModel,
 } from "../util";
 
@@ -79,7 +79,7 @@ test.describe("remote-only backup recovery", () => {
       .toBe("completed");
 
     await page.goto("/");
-    await modelCard(page, modelName).click();
+    await openModelPage(page, modelName);
     await clickModelAction(page, "Delete model");
     await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
     await page.goto("/settings?section=trash");

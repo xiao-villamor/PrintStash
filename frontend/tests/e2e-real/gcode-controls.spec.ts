@@ -5,7 +5,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { test, expect } from "./helpers";
-import { modelCard, uploadModel } from "./util";
+import { openModelPage, uploadModel } from "./util";
 
 test.describe("G-code layer controls", () => {
   for (const width of [320, 390, 1440]) {
@@ -23,7 +23,7 @@ test.describe("G-code layer controls", () => {
         },
       });
       await page.setViewportSize({ width, height: width === 1440 ? 1000 : 844 });
-      await modelCard(page, name).click();
+      await openModelPage(page, name);
       const modelId = new URL(page.url()).pathname.split("/").at(-1);
       try {
         await expect(page.getByRole("button", { name: "Fit to view" })).toBeEnabled({

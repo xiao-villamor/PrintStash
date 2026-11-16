@@ -1,7 +1,7 @@
 /** An actual PrusaSlicer BGCODE can be inspected without changing its original bytes. */
 import { readFile } from "node:fs/promises";
 import { test, expect } from "./helpers";
-import { modelCard } from "./util";
+import { openModelPage, modelCard } from "./util";
 
 const API = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}/api/v1`;
 
@@ -33,7 +33,7 @@ test.describe("BGCODE toolpath", () => {
       await page.reload();
       await expect(modelCard(page, name)).toBeVisible({ timeout: 5000 });
     }).toPass({ timeout: 60000 });
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await page.getByRole("button", { name: "Layers", exact: true }).click();
     const slider = page.getByRole("slider", { name: "Current layer" });
     await expect(slider).toBeVisible({ timeout: 30000 });

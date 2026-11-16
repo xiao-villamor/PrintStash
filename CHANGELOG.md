@@ -61,6 +61,8 @@
 
 ### Fixed
 
+- Profile conflict reviews remain accessible inside the edit dialog, and cancelling a new profile returns keyboard focus to its creation button. Native dropdowns follow the app’s shared cursor preference.
+
 - Collection previews remain visible during background Library refreshes, routine count updates no longer flash an Updating label, and Add tag is visible without hovering.
 
 - The Library now refreshes automatically after catalog changes or expired browse cursors, including paged galleries. Updates preserve the reading position, wait until selection ends, and no longer require a Refresh library banner.

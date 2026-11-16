@@ -7,7 +7,7 @@
  * question wrongly rather than not at all.
  */
 import { test, expect } from "./helpers";
-import { modelCard, uploadModel } from "./util";
+import { openModelPage, uploadModel } from "./util";
 
 // Compare Artifacts (0.10.0): with two G-code revisions on a model, the compare
 // panel appears and shows a field-level diff — matching values render plain,
@@ -33,7 +33,7 @@ test.describe("revision comparison", () => {
       },
     });
 
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await page.getByRole("tab", { name: /Revisions/ }).click();
     await expect(page.getByText("Rev 1", { exact: true }).first()).toBeVisible();

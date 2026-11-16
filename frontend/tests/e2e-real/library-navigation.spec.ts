@@ -4,7 +4,7 @@ import path from "node:path";
 import { test, expect } from "./helpers";
 import { scrollToLibraryEntry } from "../e2e/_scroll";
 import { settleLibraryRead } from "../e2e/_library";
-import { loadNextLibraryPage, modelCard, uploadGcodeModel } from "./util";
+import { openModelPage, modelCard, uploadGcodeModel } from "./util";
 import type { LibraryAuthority, LibraryBrowsePage } from "../../src/types/library-browse";
 
 test.describe("Library navigation", () => {
@@ -30,7 +30,7 @@ test.describe("Library navigation", () => {
       expect(admitted).toBeGreaterThan(0);
 
       // ── Detail and Back are application paths: nothing is reopened ─────────
-      await modelCard(page, name).click();
+      await openModelPage(page, name);
       await expect(page.getByRole("heading", { name })).toBeVisible();
       await page.getByRole("link", { name: "Back", exact: true }).click();
       await expect(modelCard(page, name)).toBeVisible();
@@ -70,13 +70,13 @@ test.describe("Library navigation", () => {
         await page.goto(`/?c=${encodeURIComponent(seeded.folder.path)}&type=all&sort=name-asc`);
         const entries = page.locator("main [data-library-entry]");
         await settleLibraryRead(page, entries.first());
-        const firstPageCount = await entries.count();
-        await loadNextLibraryPage(page, firstPageCount + 10);
-        const target = entries.nth(firstPageCount + 10);
-        const targetHref = await target.getAttribute("data-library-entry");
+        const link = page
+          .getByRole("main")
+          .getByRole("link", { name: new RegExp(seeded.target.name) })
+          .first();
+        await scrollToLibraryEntry(page, link);
+        const targetHref = await link.getAttribute("data-library-entry");
         if (!targetHref) throw new Error("Missing paged reading anchor");
-        const link = page.locator(`main [data-library-entry="${targetHref}"]`);
-        await link.scrollIntoViewIfNeeded();
         const before = await link.evaluate((node) => ({
           top: node.getBoundingClientRect().top,
           offsets: Array.from(document.querySelectorAll("main, main .overflow-y-auto")).map(
@@ -91,6 +91,10 @@ test.describe("Library navigation", () => {
         // The upper-left corner is the selection control; navigate through
         // the visible card body without scrolling the captured reading anchor.
         await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        await page
+          .locator("#model-drawer")
+          .getByRole("link", { name: "Open page", exact: true })
+          .click();
         await expect(page).toHaveURL(new RegExp(`${targetHref}\\?return=`));
         await page.getByRole("link", { name: "Back", exact: true }).click();
 

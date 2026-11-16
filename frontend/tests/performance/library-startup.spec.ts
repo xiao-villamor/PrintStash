@@ -155,7 +155,7 @@ async function sample(page: Page, label: string) {
     await page.goto(`${base}${destination}`, { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => performance.getEntriesByName("observed:ready").length > 0);
     await expect(
-      page.locator("aside").getByRole("button", { name: "Collection 01", exact: true }),
+      page.locator("aside").getByRole("treeitem", { name: "Collection 01", exact: true }),
     ).toBeVisible();
     if (!baseline) {
       await page.waitForFunction(

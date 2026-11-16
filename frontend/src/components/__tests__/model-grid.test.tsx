@@ -2581,7 +2581,8 @@ describe("ModelBrowser", () => {
         await screen.findByRole("button", { name: "Rename Parts" }, { timeout: 3000 }),
       );
       await user.clear(screen.getByRole("textbox", { name: "Collection name" }));
-      await user.type(screen.getByRole("textbox", { name: "Collection name" }), "Spares{Enter}");
+      await user.paste("Spares");
+      await user.keyboard("{Enter}");
       await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
       await user.click(screen.getByRole("button", { name: "Open multipart location" }));
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -2595,7 +2596,8 @@ describe("ModelBrowser", () => {
       expect(name).toBeEnabled();
       expect(name).toHaveValue("Parts");
       await user.clear(name);
-      await user.type(name, "New draft{Enter}");
+      await user.paste("New draft");
+      await user.keyboard("{Enter}");
       await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(2));
       await act(async () => {
         pending.resolve(json({ detail: "collection_already_exists" }, 409));
