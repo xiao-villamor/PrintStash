@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Model descriptions render Markdown in detail, inspection and shared views, with an edit preview. Browser capture can retain up to 64 publication photos, show them in the card gallery, and choose any captured image as the cover. Gallery transfers recover verified images, preserve source provenance, and remain included in Vault backups and portable exports.
+
 - Browser captures can suggest an editable collection and tags, include a selected cover for every resulting Model, and show download and upload byte progress. Recovering an interrupted capture retains its original suggestions and verified files; a pending local cover must be selected again.
 
 - Archive review identifies omitted images, documents and unsupported entries before importing Models, and explains how selected files and subfolders become Models and collections.

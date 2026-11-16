@@ -383,3 +383,88 @@ describe("recoverable capture options", () => {
     },
   );
 });
+
+it("recovers confirmed gallery images after an interrupted transfer", async () => {
+  const saved: Record<string, unknown> = {};
+  const slots: Record<string, unknown>[] = [];
+  const downloads: string[] = [];
+  let failSecond = true;
+  let finalized = false;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith("capture-capabilities"))
+      return Response.json({ resumable_slots: true, resumable_gallery: true });
+    if (path.endsWith("capture-sessions"))
+      return Response.json({ item: { id: 9, state: "captured" }, recoverable: true, slots });
+    if (/capture-images\/\d+$/.test(path)) {
+      const body = JSON.parse(String(init?.body));
+      const position = Number(path.split("/").at(-1));
+      const slot = {
+        ...body,
+        id: `image-${position}`,
+        role: "cover",
+        image_position: position,
+        source_file_id: null,
+        state: "pending",
+      };
+      const index = slots.findIndex((s) => s.id === slot.id);
+      if (index < 0) slots.push(slot);
+      else slots[index] = slot;
+      return Response.json(slot);
+    }
+    if (path.includes("/capture-upload-slots/")) {
+      const slot = slots.find((s) => s.id === path.split("/").at(-1))!;
+      if (slot.image_position === 1 && failSecond) return new Response(null, { status: 503 });
+      slot.state = "uploaded";
+      return Response.json({});
+    }
+    if (path.endsWith("capture-upload-finalize")) {
+      finalized = true;
+      return Response.json({ id: 9 });
+    }
+    throw Error("Unexpected gallery request");
+  };
+  const options = {
+    vault: "https://vault.test",
+    authorization: "test",
+    source,
+    fetchImpl,
+    candidates: [],
+    storage: {
+      get: async () => saved,
+      set: async (value: Record<string, unknown>) => {
+        Object.assign(saved, value);
+      },
+      remove: async (key: string | string[]) => {
+        for (const k of [key].flat()) delete saved[k];
+      },
+    },
+    download: async () => {
+      throw Error("No model download expected");
+    },
+    progress: () => {},
+    gallery: [0, 1, 2].map((position) => ({
+      id: String(position).repeat(64),
+      filename: `image-${position}.png`,
+      download: async () => {
+        downloads.push(String(position));
+        return {
+          id: String(position).repeat(64),
+          filename: `image-${position}.png`,
+          file: new Blob(["image"]),
+          mediaType: "image/png",
+        };
+      },
+    })),
+  };
+  await expect(captureSequentialFiles(options)).rejects.toThrow("Gallery transfer interrupted");
+  expect(finalized).toBe(false);
+  expect(downloads).toEqual(["0", "1"]);
+  expect(JSON.stringify(saved)).not.toContain("image-");
+  failSecond = false;
+  expect(await captureSequentialFiles(options)).toMatchObject({ id: 9 });
+  expect(downloads).toEqual(["0", "1", "1", "2"]);
+  expect(slots.map((slot) => slot.state)).toEqual(["uploaded", "uploaded", "uploaded"]);
+  expect(finalized).toBe(true);
+  expect(saved).toEqual({});
+});

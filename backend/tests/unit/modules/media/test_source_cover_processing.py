@@ -26,6 +26,7 @@ class TestProcessSourceCoverUpload:
             ("image/jpeg", "JPEG"),
             ("image/png", "PNG"),
             ("image/webp", "WEBP"),
+            ("image/gif", "GIF"),
         ],
     )
     def test_normalizes_each_allowed_source_format_to_webp(
@@ -189,3 +190,24 @@ class TestValidateSourceCover:
             source_cover_processing.process_source_cover_upload(payload, "image/png")
 
         assert str(exc.value) == "source_cover_invalid"
+
+
+def test_gif_gallery_uses_only_the_first_frame():
+    buffer = io.BytesIO()
+    Image.new("RGB", (8, 8), "red").save(
+        buffer,
+        format="GIF",
+        save_all=True,
+        append_images=[Image.new("RGB", (8, 8), "blue")],
+        duration=100,
+        loop=0,
+    )
+    processed = source_cover_processing.process_source_cover_upload(
+        buffer.getvalue(), "image/gif"
+    )
+    with Image.open(io.BytesIO(processed.data)) as image:
+        assert getattr(image, "n_frames", 1) == 1
+        red, green, blue = image.convert("RGB").getpixel(
+            (image.width // 2, image.height // 2)
+        )
+        assert red > 200 and green < 30 and blue < 30

@@ -91,6 +91,19 @@ function renderShare(options: RenderAppOptions & { token?: string } = {}) {
   });
 }
 
+it("renders a public model description as sanitized Markdown", async () => {
+  renderShare({
+    routes: {
+      "GET /api/v1/share/abc123": json(
+        sharedModel({ description: "## Assembly\n\nUse **two** clips. <script>bad()</script>" }),
+      ),
+    },
+  });
+  expect(await screen.findByRole("heading", { name: "Assembly" })).toBeVisible();
+  expect(screen.getByText("two").tagName).toBe("STRONG");
+  expect(document.querySelector("script")).toBeNull();
+});
+
 beforeEach(() => {
   window.localStorage.clear();
 });

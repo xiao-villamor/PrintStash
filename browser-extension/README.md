@@ -65,6 +65,21 @@ resulting Model's source without changing model bytes. If a reload interrupted i
 upload, reselect the same cover; verified model uploads are retained. Cover bytes
 and collection labels are not saved in extension storage.
 
+The publication gallery lists the detected images with all selected initially. Deselect
+images before confirming to choose a smaller set. Up to 64 JPEG, PNG, WebP or GIF
+images can be retained, at 15 MiB per image; GIFs become a still image of the first
+frame. The first selected image supplies the default card cover. Cards and Model
+previews retain the rest of the gallery, and **Edit cover** can select another
+image without discarding the others. An existing chosen cover is preserved.
+
+Gallery support requires a server advertising `resumable_gallery`; older servers
+ask you to deselect the gallery or upgrade, rather than silently dropping images.
+After interruption, select the same files and images to recover confirmed slots.
+Only opaque image identifiers and filenames persist in extension storage, never
+image URLs, cookies or bytes. If the provider gallery cannot be read, the panel
+says so and allows file-only capture. Provider markup and lazy loading can limit
+which photos are detected; Printables uses its explicit publication image list.
+
 Download progress uses a percentage only when the decoded file size is known.
 Upload progress counts bytes sent; reaching 100% still waits for server confirmation.
 The final import remains a separate action in Pending Imports.

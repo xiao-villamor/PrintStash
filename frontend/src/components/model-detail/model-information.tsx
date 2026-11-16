@@ -1,3 +1,4 @@
+import { MarkdownView } from "@/components/markdown-view";
 import { ProjectProfile } from "./project-profile";
 import { RelatedProfiles } from "./related-profiles";
 import { GeometryReport } from "./geometry-report";
@@ -144,7 +145,7 @@ export function ModelInformation({
 
 function ModelDescription({ description }: { description: string }) {
   const id = useId();
-  const content = useRef<HTMLParagraphElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   useLayoutEffect(() => {
@@ -161,13 +162,13 @@ function ModelDescription({ description }: { description: string }) {
   }, [description]);
   return (
     <div className="mt-2">
-      <p
+      <div
         id={id}
         ref={content}
-        className={`whitespace-pre-wrap wrap-anywhere text-sm leading-5 text-muted-foreground ${expanded ? "" : "line-clamp-4"}`}
+        className={`wrap-anywhere text-sm leading-5 text-muted-foreground ${expanded ? "" : "max-h-20 overflow-hidden"}`}
       >
-        {description}
-      </p>
+        <MarkdownView source={description} />
+      </div>
       {overflows && (
         <Button
           size="sm"

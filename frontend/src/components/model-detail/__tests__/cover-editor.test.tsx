@@ -45,6 +45,38 @@ function routes(extra: RouteTable = {}): RouteTable {
 }
 
 describe("Model cover editor", () => {
+  it("chooses a later gallery image as the model cover", async () => {
+    const model = aModel({
+      previews: {
+        kind: "none",
+        cover_camera: "unknown",
+        source_images: [
+          {
+            id: "source-2",
+            role: "source",
+            source_id: 8,
+            position: 1,
+            provider: "printables",
+            url: "/gallery/2",
+          },
+        ],
+      },
+    });
+    const app = renderApp(<Editor initial={model} />, {
+      routes: routes({
+        "POST /api/v1/models/1/cover/source": json(
+          aModel({ has_custom_cover: true, edit_version: 2 }),
+        ),
+      }),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Use image from printables · 2" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(JSON.parse(app.requestsWithMethod("POST")[0].body)).toEqual({
+      source_id: 8,
+      position: 1,
+    });
+    expect(screen.getByText("Saved custom cover")).toBeVisible();
+  });
   it("uploads an image with the original editing base", async () => {
     const model = aModel();
     let sent: RequestInit | undefined;

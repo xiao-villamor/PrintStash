@@ -1803,6 +1803,7 @@ describe("popup browser adapters", () => {
           data: {
             print: {
               id: "3161",
+              images: [],
               name: "3DBenchy",
               description:
                 "<p>Live <strong>description</strong></p><p>Second paragraph</p><script>document.cookie = 'session-cookie'</script>",
@@ -1862,10 +1863,10 @@ describe("popup browser adapters", () => {
     expect(element("#candidate-panel").hidden).toBe(false);
     expect(element("#candidate-panel legend").textContent).toBe("Select Printables files");
     expect(button("#capture").textContent).toBe("Confirm and upload selected files");
-    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
     expect(
       fetchImpl.mock.calls.filter(([url]) => url === "https://api.printables.com/graphql/"),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     expect(
       vi.mocked(fakeBrowser.scripting.executeScript).mock.calls.filter(([details]) => {
         const args = details.args;
@@ -1890,8 +1891,8 @@ describe("popup browser adapters", () => {
     const linkCalls = fetchImpl.mock.calls.filter(
       ([url]) => url === "https://api.printables.com/graphql/",
     );
-    expect(linkCalls).toHaveLength(2);
-    const linkCall = linkCalls[1];
+    expect(linkCalls).toHaveLength(3);
+    const linkCall = linkCalls[2];
     if (!linkCall?.[1]) throw new Error("Missing extension-context Printables link request");
     expect(linkCall[1].credentials).toBe("omit");
     expect(linkCall[1].headers).not.toHaveProperty("Authorization");
@@ -2026,6 +2027,7 @@ describe("popup browser adapters", () => {
           data: {
             print: {
               id: "3161",
+              images: [],
               name: "3DBenchy",
               otherFiles: [
                 { id: "first", name: "first.3mf", fileSize: 4 },
@@ -2136,6 +2138,7 @@ describe("popup browser adapters", () => {
           },
         },
       ])
+      .mockResolvedValueOnce([{ result: [] }])
       .mockResolvedValueOnce([
         {
           result: {
@@ -2328,6 +2331,7 @@ describe("popup browser adapters", () => {
           },
         },
       ])
+      .mockResolvedValueOnce([{ result: [] }])
       .mockResolvedValueOnce([{ result: { ok: false, code: "challenge" } }]);
     vi.stubGlobal(
       "fetch",
@@ -2493,7 +2497,7 @@ describe("popup browser adapters", () => {
     button("#capture").click();
     for (let attempt = 0; attempt < 6; attempt += 1) await settle();
 
-    expect(fakeBrowser.scripting.executeScript).toHaveBeenCalledTimes(3);
+    expect(fakeBrowser.scripting.executeScript).toHaveBeenCalledTimes(4);
     expect(button("#capture").disabled).toBe(false);
     expect(element("#status").textContent).toContain("Select Thingiverse files");
     expect(fetchImpl).toHaveBeenCalledTimes(3);

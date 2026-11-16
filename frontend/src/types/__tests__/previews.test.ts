@@ -60,6 +60,22 @@ describe("model previews", () => {
         published: { ...published.published!, views: [{ id: "side", role: "orbit", url: "/x" }] },
       },
     ],
+    [
+      "a negative source image position",
+      {
+        ...NO_PREVIEWS,
+        source_images: [
+          {
+            id: "source-1",
+            role: "source",
+            source_id: 1,
+            position: -1,
+            provider: "thingiverse",
+            url: "/image",
+          },
+        ],
+      },
+    ],
     ["null", null],
   ])("rejects %s", (_, value) =>
     // Malformed values reach the decoder as parsed HTTP JSON, never as typed data.

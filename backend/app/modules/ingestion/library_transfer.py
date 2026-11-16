@@ -796,19 +796,17 @@ def create_archive(session: Session, user: User, *, version: Literal[1, 2] = 2) 
                 for link in links
             ):
                 raise ValueError("portable_provenance_invalid")
-            cover = session.exec(
-                select(ModelSourceCover).where(
-                    ModelSourceCover.provenance_source_id == source.id
-                )
-            ).first()
-            if cover is not None:
+            images = session.exec(
+                select(ModelSourceCover)
+                .where(ModelSourceCover.provenance_source_id == source.id)
+                .order_by(ModelSourceCover.position)
+            ).all()
+            for cover in images:
                 if cover.size_bytes < 0 or cover.size_bytes > _MAX_COVER_BYTES:
                     raise ValueError("archive_blob_hash_mismatch")
-                cover_entry = f"covers/{model.id}-{source.id}.webp"
+                cover_entry = f"covers/{model.id}-{source.id}{'-' + str(cover.position) if cover.position else ''}.webp"
                 cover_entries.append((cover, cover_entry))
-                # The member is portable archive-relative metadata; the local
-                # storage key is deliberately never exported.
-                portable_source["cover"] = {
+                portable_image = {
                     "entry": cover_entry,
                     "content_type": cover.content_type,
                     "size_bytes": cover.size_bytes,
@@ -816,6 +814,12 @@ def create_archive(session: Session, user: User, *, version: Literal[1, 2] = 2) 
                         get_backend().read_bytes(cover.storage_key)
                     ).hexdigest(),
                 }
+                if cover.position == 0:
+                    portable_source["cover"] = portable_image
+                else:
+                    portable_source.setdefault("images", []).append(
+                        {**portable_image, "position": cover.position}
+                    )
             # Keep ordinary sidecars byte/schema-compatible with the original
             # format.  The optional key is only needed when a sparse field has
             # an explicit override that must survive transport.
@@ -896,10 +900,11 @@ def create_archive(session: Session, user: User, *, version: Literal[1, 2] = 2) 
                         data = get_backend().read_bytes(cover.storage_key)
                         digest = hashlib.sha256(data).hexdigest()
                         if len(data) != cover.size_bytes or digest != next(
-                            source["cover"]["sha256"]
+                            image["sha256"]
                             for model_data in provenance_models
                             for source in model_data["sources"]
-                            if source.get("cover", {}).get("entry") == entry
+                            for _position, image in _portable_source_images(source)
+                            if image["entry"] == entry
                         ):
                             raise ValueError("archive_blob_hash_mismatch")
                         archive.writestr(entry, data)
@@ -994,6 +999,34 @@ def _read_provenance_sidecar(
     return sidecar
 
 
+def _portable_source_images(source: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
+    """Read legacy primary cover plus explicitly positioned gallery images."""
+    result = [(0, source["cover"])] if "cover" in source else []
+    images = source.get("images", [])
+    if not isinstance(images, list):
+        raise ValueError("portable_provenance_invalid")
+    seen = {0}
+    for image in images:
+        if not isinstance(image, dict):
+            raise ValueError("portable_provenance_invalid")
+        position = image.get("position")
+        if (
+            not isinstance(position, int)
+            or isinstance(position, bool)
+            or position <= 0
+            or position in seen
+        ):
+            raise ValueError("portable_provenance_invalid")
+        seen.add(position)
+        result.append(
+            (
+                position,
+                {key: value for key, value in image.items() if key != "position"},
+            )
+        )
+    return result
+
+
 def _validate_provenance_cover_members(
     archive: zipfile.ZipFile, sidecar: dict[str, Any] | None
 ) -> None:
@@ -1007,59 +1040,59 @@ def _validate_provenance_cover_members(
         ):
             raise ValueError("portable_provenance_invalid")
         for source in model_row["sources"]:
-            if not isinstance(source, dict) or "cover" not in source:
-                continue
-            cover = source["cover"]
-            if not isinstance(cover, dict) or set(cover) != {
-                "entry",
-                "content_type",
-                "size_bytes",
-                "sha256",
-            }:
+            if not isinstance(source, dict):
                 raise ValueError("portable_provenance_invalid")
-            entry = cover["entry"]
-            content_type = cover["content_type"]
-            size_bytes = cover["size_bytes"]
-            expected_sha256 = cover["sha256"]
-            if (
-                not isinstance(entry, str)
-                or not _safe_entry(entry)
-                or not entry.startswith("covers/")
-                or not isinstance(content_type, str)
-                or content_type != "image/webp"
-                or not isinstance(size_bytes, int)
-                or isinstance(size_bytes, bool)
-                or size_bytes < 0
-                or size_bytes > _MAX_COVER_BYTES
-                or not isinstance(expected_sha256, str)
-                or not re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha256)
-            ):
-                raise ValueError("portable_provenance_invalid")
-            if (
-                entry in seen_entries
-                or sum(info.filename == entry for info in archive.infolist()) != 1
-            ):
-                raise ValueError("portable_provenance_invalid")
-            seen_entries.add(entry)
-            try:
-                info = archive.getinfo(entry)
-            except KeyError as exc:
-                raise ValueError("portable_provenance_invalid") from exc
-            if info.is_dir() or info.file_size != size_bytes:
-                raise ValueError("portable_provenance_invalid")
-            digest = hashlib.sha256()
-            actual_size = 0
-            with archive.open(info) as stream:
-                while chunk := stream.read(_HASH_CHUNK_SIZE):
-                    actual_size += len(chunk)
-                    if actual_size > size_bytes:
-                        raise ValueError("portable_provenance_invalid")
-                    digest.update(chunk)
-            if (
-                actual_size != size_bytes
-                or digest.hexdigest() != expected_sha256.lower()
-            ):
-                raise ValueError("portable_provenance_invalid")
+            for _position, cover in _portable_source_images(source):
+                if not isinstance(cover, dict) or set(cover) != {
+                    "entry",
+                    "content_type",
+                    "size_bytes",
+                    "sha256",
+                }:
+                    raise ValueError("portable_provenance_invalid")
+                entry = cover["entry"]
+                content_type = cover["content_type"]
+                size_bytes = cover["size_bytes"]
+                expected_sha256 = cover["sha256"]
+                if (
+                    not isinstance(entry, str)
+                    or not _safe_entry(entry)
+                    or not entry.startswith("covers/")
+                    or not isinstance(content_type, str)
+                    or content_type != "image/webp"
+                    or not isinstance(size_bytes, int)
+                    or isinstance(size_bytes, bool)
+                    or size_bytes < 0
+                    or size_bytes > _MAX_COVER_BYTES
+                    or not isinstance(expected_sha256, str)
+                    or not re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha256)
+                ):
+                    raise ValueError("portable_provenance_invalid")
+                if (
+                    entry in seen_entries
+                    or sum(info.filename == entry for info in archive.infolist()) != 1
+                ):
+                    raise ValueError("portable_provenance_invalid")
+                seen_entries.add(entry)
+                try:
+                    info = archive.getinfo(entry)
+                except KeyError as exc:
+                    raise ValueError("portable_provenance_invalid") from exc
+                if info.is_dir() or info.file_size != size_bytes:
+                    raise ValueError("portable_provenance_invalid")
+                digest = hashlib.sha256()
+                actual_size = 0
+                with archive.open(info) as stream:
+                    while chunk := stream.read(_HASH_CHUNK_SIZE):
+                        actual_size += len(chunk)
+                        if actual_size > size_bytes:
+                            raise ValueError("portable_provenance_invalid")
+                        digest.update(chunk)
+                if (
+                    actual_size != size_bytes
+                    or digest.hexdigest() != expected_sha256.lower()
+                ):
+                    raise ValueError("portable_provenance_invalid")
 
 
 def _portable_v2_provenance_contexts(
@@ -1113,10 +1146,9 @@ def _portable_v2_provenance_contexts(
             raise ValueError("portable_provenance_invalid")
         for source in model_row["sources"]:
             if not isinstance(source, dict) or not (
-                set(source) == base_source_keys | {"cover"}
-                or set(source) == base_source_keys | {"overrides"}
-                or set(source) == base_source_keys | {"cover", "overrides"}
-                or set(source) == base_source_keys
+                base_source_keys
+                <= set(source)
+                <= base_source_keys | {"cover", "overrides", "images"}
             ):
                 raise ValueError("portable_provenance_invalid")
             source_id = source.get("source_id")
@@ -1528,8 +1560,8 @@ def _restore_portable_covers(
         if model is None or model.id is None:
             raise ValueError("portable_provenance_invalid")
         for source_data in model_row["sources"]:
-            cover_data = source_data.get("cover")
-            if cover_data is None:
+            images = _portable_source_images(source_data)
+            if not images:
                 continue
             source_query = select(ModelProvenanceSource).where(
                 ModelProvenanceSource.model_id == model.id,
@@ -1546,17 +1578,19 @@ def _restore_portable_covers(
             if len(sources) != 1 or sources[0].id is None:
                 raise ValueError("portable_provenance_invalid")
             source = sources[0]
-            data = archive.read(cover_data["entry"])
-            writes.append(
-                source_covers.prepare_put(
-                    session,
-                    get_backend(),
-                    provenance_source_id=source.id,
-                    actor_id=user.id,
-                    data=data,
-                    content_type=cover_data["content_type"],
+            for position, cover_data in images:
+                data = archive.read(cover_data["entry"])
+                writes.append(
+                    source_covers.prepare_put(
+                        session,
+                        get_backend(),
+                        provenance_source_id=source.id,
+                        actor_id=user.id,
+                        data=data,
+                        content_type=cover_data["content_type"],
+                        position=position,
+                    )
                 )
-            )
     return writes
 
 

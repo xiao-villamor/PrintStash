@@ -136,7 +136,8 @@ def _provenance_sources(session: Session, model_id: int) -> list[ProvenanceSourc
         cover.provenance_source_id: ModelSourceCoverRead.model_validate(cover)
         for cover in session.exec(
             select(ModelSourceCover).where(
-                col(ModelSourceCover.provenance_source_id).in_(source_ids)
+                col(ModelSourceCover.provenance_source_id).in_(source_ids),
+                ModelSourceCover.position == 0,
             )
         ).all()
     }
@@ -197,8 +198,9 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
         session, user, [collection_path]
     ).get(collection_path)
 
+    previews = preview_summaries(session, [model_id])[model_id]
     return ModelRead(
-        previews=preview_summaries(session, [model_id])[model_id],
+        previews=previews,
         has_custom_cover=m.cover_filename is not None,
         similarity=similarity_summaries(session, user, [model_id]).get(model_id, {}),
         edit_epoch=m.edit_epoch,
@@ -215,7 +217,12 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
         effective_role=role,
         # m.tags loads via selectin (see the Model relationship) — no extra query.
         tags=sorted(t.name for t in m.tags),
-        thumbnail_url=thumb_url(m),
+        thumbnail_url=thumb_url(
+            m,
+            source_image_url=previews.source_images[0].url
+            if previews.source_images
+            else None,
+        ),
         created_at=m.created_at,
         updated_at=m.updated_at,
         files=_file_reads_with_revisions(session, files_with_meta, model_id),

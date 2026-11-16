@@ -273,12 +273,14 @@ def _merge_sources(
     assert target.id is not None and obsolete.id is not None
     obsolete_cover = session.exec(
         select(ModelSourceCover).where(
-            ModelSourceCover.provenance_source_id == obsolete.id
+            ModelSourceCover.provenance_source_id == obsolete.id,
+            ModelSourceCover.position == 0,
         )
     ).first()
     target_cover = session.exec(
         select(ModelSourceCover).where(
-            ModelSourceCover.provenance_source_id == target.id
+            ModelSourceCover.provenance_source_id == target.id,
+            ModelSourceCover.position == 0,
         )
     ).first()
     retirement = (
@@ -353,13 +355,15 @@ def _merge_sources(
 
     obsolete_cover = session.exec(
         select(ModelSourceCover).where(
-            ModelSourceCover.provenance_source_id == obsolete.id
+            ModelSourceCover.provenance_source_id == obsolete.id,
+            ModelSourceCover.position == 0,
         )
     ).first()
     if obsolete_cover is not None:
         target_cover = session.exec(
             select(ModelSourceCover).where(
-                ModelSourceCover.provenance_source_id == target.id
+                ModelSourceCover.provenance_source_id == target.id,
+                ModelSourceCover.position == 0,
             )
         ).first()
         if target_cover is None:
@@ -375,6 +379,27 @@ def _merge_sources(
             # Exact evidence was prepared before source mutations. The caller
             # attaches retirement only after its remaining links/domain work.
             session.delete(obsolete_cover)
+    session.flush()
+    # Additional photos retain their bytes and ownership when a URL-only source
+    # acquires a stable provider identity. Append rather than overwrite images.
+    retained_images = session.exec(
+        select(ModelSourceCover).where(
+            ModelSourceCover.provenance_source_id == target.id
+        )
+    ).all()
+    next_position = max((image.position for image in retained_images), default=0) + 1
+    for image in session.exec(
+        select(ModelSourceCover)
+        .where(
+            ModelSourceCover.provenance_source_id == obsolete.id,
+            ModelSourceCover.position > 0,
+        )
+        .order_by(ModelSourceCover.position)
+    ).all():
+        image.provenance_source_id = target.id
+        image.position = next_position
+        next_position += 1
+        session.add(image)
     session.flush()
     session.delete(obsolete)
     session.flush()

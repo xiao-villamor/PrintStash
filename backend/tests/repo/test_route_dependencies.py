@@ -123,6 +123,7 @@ class TestRouteDependencies:
             ("/inbox", "POST"),
             ("/inbox/capture-sessions", "POST"),
             ("/inbox/{item_id}/capture-files", "POST"),
+            ("/inbox/{item_id}/capture-images/{position}", "POST"),
             ("/inbox/capture-capabilities", "GET"),
             ("/inbox/capture-destinations", "GET"),
             ("/inbox/capture-source-status", "GET"),

@@ -468,3 +468,49 @@ class TestModelCover:
         result = client.get(saved.json()["thumbnail_url"], headers=outsider_headers)
 
         assert result.status_code == 403, result.text
+
+
+def test_chosen_cover_survives_gallery_replacement(
+    client, auth_headers, db_session, model, make_provenance_source
+):
+    from app.modules.library import source_covers
+    from app.modules.storage.storage_backend.runtime import get_backend
+
+    source = make_provenance_source(model)
+    source_covers.put(
+        db_session,
+        get_backend(),
+        provenance_source_id=source.id,
+        actor_id=None,
+        data=png(),
+        content_type="image/png",
+        position=1,
+    )
+    db_session.commit()
+    selected = client.post(
+        f"/api/v1/models/{model.id}/cover/source",
+        headers=auth_headers,
+        json={"source_id": source.id, "position": 1},
+    )
+    assert selected.status_code == 200, selected.text
+    chosen = selected.json()["thumbnail_url"]
+    before = client.get(chosen, headers=auth_headers).content
+    source_covers.put(
+        db_session,
+        get_backend(),
+        provenance_source_id=source.id,
+        actor_id=None,
+        data=png(width=16),
+        content_type="image/png",
+        position=1,
+    )
+    db_session.commit()
+    detail = client.get(f"/api/v1/models/{model.id}", headers=auth_headers).json()
+    assert detail["thumbnail_url"] == chosen
+    assert client.get(chosen, headers=auth_headers).content == before
+    assert (
+        client.get(
+            detail["previews"]["source_images"][0]["url"], headers=auth_headers
+        ).content
+        != before
+    )

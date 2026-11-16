@@ -1059,7 +1059,12 @@ def select_model_cover_source(
             session, current_user, model_id, CollectionRole.EDIT
         )
         model_covers.select_source(
-            session, current_user, model, payload.source_id, precondition
+            session,
+            current_user,
+            model,
+            payload.source_id,
+            precondition,
+            position=payload.position,
         )
         response.headers["ETag"] = etag(
             EditKind.MODEL, model_id, model.edit_version, model.edit_epoch
@@ -1141,12 +1146,13 @@ def get_model_source_cover(
 def stream_model_source_cover(
     model_id: int,
     source_id: int,
+    position: int = Query(default=0, ge=0),
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> Response:
     _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
     _provenance_source_or_404(session, model_id, source_id)
-    cover = source_covers.get(session, source_id)
+    cover = source_covers.get(session, source_id, position=position)
     if cover is None:
         raise HTTPException(status_code=404, detail="source_cover_not_found")
     return Response(

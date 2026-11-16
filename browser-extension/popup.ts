@@ -1,3 +1,10 @@
+import {
+  readSourceGalleryInMainWorld,
+  readPrintablesGallery,
+  sourceGallery,
+  downloadSourceImage,
+  type SourceGalleryImage,
+} from "./source-gallery.ts";
 import { captureTransferFetch, progressLabel, type ByteProgress } from "./transfer-progress.ts";
 import { captureDestinations, captureTags, selectedCaptureCover } from "./capture-preferences.ts";
 import {
@@ -218,6 +225,9 @@ let pendingMakerWorldCapture: BrowserCaptureMessage | null = null;
 let pendingThingiverseCapture: BrowserCaptureMessage | null = null;
 let pendingMarketplaceCapture: BrowserCaptureMessage | null = null;
 let pendingThingiverseLinks = new Map<string, string>();
+let pendingGallery: SourceGalleryImage[] = [];
+let galleryUnavailable = false;
+let gallerySelection: HTMLFieldSetElement | null = null;
 let pendingManualCapture: BrowserCaptureMessage | null = null;
 
 declare global {
@@ -471,6 +481,10 @@ function clearInboxAction() {
 }
 
 function clearCandidateSelection() {
+  pendingGallery = [];
+  galleryUnavailable = false;
+  gallerySelection?.remove();
+  gallerySelection = null;
   pendingMarketplaceCapture = null;
   pendingPrintablesCapture = null;
   pendingMakerWorldCapture = null;
@@ -556,6 +570,29 @@ function renderCandidateSelection(capture: BrowserCaptureMessage) {
     label.append(input, filename);
     candidateList.append(label);
   });
+  gallerySelection?.remove();
+  gallerySelection = document.createElement("fieldset");
+  const legend = document.createElement("legend");
+  legend.textContent = `Publication gallery (${pendingGallery.length} images)`;
+  gallerySelection.append(legend);
+  for (const [index, image] of pendingGallery.entries()) {
+    const label = document.createElement("label");
+    label.className = "candidate-option";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = true;
+    input.dataset.imageId = image.id;
+    label.append(input, `Image ${index + 1}${index === 0 ? " · default cover" : ""}`);
+    gallerySelection.append(label);
+  }
+  const note = document.createElement("small");
+  note.textContent = galleryUnavailable
+    ? "The publication gallery could not be read. Reopen the page to retry, or continue with files only and add images later."
+    : pendingGallery.length
+      ? "Selected images are saved with the model. Choose another cover in PrintStash. GIF images are saved as a still image."
+      : "No publication images were captured. You can attach a cover below.";
+  gallerySelection.append(note);
+  candidatePanel.after(gallerySelection);
   candidatePanel.hidden = false;
   captureButton.textContent = "Confirm and upload selected files";
 }
@@ -1663,6 +1700,22 @@ captureButton.addEventListener("click", async () => {
       tags: captureTags(tagsInput.value),
       cover: selectedCaptureCover(coverInput.files?.[0]),
     };
+    const selectedImages = pendingGallery.filter(
+      (image) =>
+        gallerySelection?.querySelector<HTMLInputElement>(`input[data-image-id="${image.id}"]`)
+          ?.checked,
+    );
+    const downloadOrigins = [
+      ...new Set(selectedImages.map((image) => `${new URL(image.url).origin}/*`)),
+    ];
+    if (pendingMarketplaceCapture?.source.provider === "cults")
+      downloadOrigins.push(...CULTS_DOWNLOAD_ORIGINS);
+    if (pendingMarketplaceCapture?.source.provider === "myminifactory")
+      downloadOrigins.push(...MYMINIFACTORY_DOWNLOAD_ORIGINS);
+    if (pendingMarketplaceCapture?.source.provider === "makeronline")
+      downloadOrigins.push("https://acop-prod-private.s3-accelerate.amazonaws.com/*");
+    if (downloadOrigins.length) await ensureOriginPermissions([...new Set(downloadOrigins)]);
+    capture.assertCurrent();
     // Ask while the import click still carries user activation, before provider verification.
     if (pendingMarketplaceCapture?.source.provider === "cults") {
       await ensureOriginPermissions(CULTS_DOWNLOAD_ORIGINS);
@@ -1739,6 +1792,11 @@ captureButton.addEventListener("click", async () => {
           source: draft.source,
           title: activePage?.title,
           candidates: selected,
+          gallery: selectedImages.map((image) => ({
+            id: image.id,
+            filename: image.filename,
+            download: (signal) => downloadSourceImage(image, signal),
+          })),
           storage: browser.storage,
           signal,
           progress: (message) => {
@@ -1932,6 +1990,35 @@ captureButton.addEventListener("click", async () => {
     }
     if (captureRoute === "candidate_confirmation") {
       if (!visibleCapture) throw new Error("The active tab has no normalized capture source.");
+      pendingGallery = [];
+      galleryUnavailable = false;
+      if (activePage?.id) {
+        const tabId = activePage.id;
+        try {
+          if (visibleCapture.source.provider === "printables") {
+            pendingGallery = await capture.run((signal) =>
+              readPrintablesGallery(visibleCapture.source.canonical_url, signal),
+            );
+          } else {
+            const results = await capture.run(() =>
+              browser.scripting.executeScript({
+                target: { tabId },
+                world: "MAIN",
+                func: readSourceGalleryInMainWorld,
+                args: [visibleCapture.source.provider],
+              }),
+            );
+            pendingGallery = await sourceGallery(
+              visibleCapture.source.canonical_url,
+              results[0]?.result ?? [],
+            );
+          }
+        } catch {
+          capture.assertCurrent();
+          galleryUnavailable = true;
+        }
+        capture.assertCurrent();
+      }
       runCaptureSyncStage(
         () => renderCandidateSelection(visibleCapture),
         "capture_candidate_render_failed",

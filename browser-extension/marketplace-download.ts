@@ -44,6 +44,7 @@ export async function readMarketplaceFile(
   provider: string,
   signal?: AbortSignal,
   progress?: ByteProgress,
+  maximum = 512 * 1024 * 1024,
 ): Promise<BrowserCaptureFile> {
   if (
     !response.ok ||
@@ -53,7 +54,6 @@ export async function readMarketplaceFile(
     throw new MarketplaceDownloadError(
       `${provider} file download failed. Refresh the selection to obtain a new download link.`,
     );
-  const maximum = 512 * 1024 * 1024;
   const length = response.headers.get("Content-Length");
   if (
     length !== null &&

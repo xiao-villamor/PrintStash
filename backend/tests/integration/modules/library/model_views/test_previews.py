@@ -20,4 +20,50 @@ class TestSummaries:
             "state": "disabled",
             "reason": None,
             "published": None,
+            "source_images": [],
         }
+
+    def test_projects_gallery_without_a_mesh(
+        self, db_session, make_model, make_provenance_source, make_cover
+    ):
+        model = make_model()
+        source = make_provenance_source(model)
+        images = [make_cover(source, position=index) for index in range(3)]
+        result = summaries(db_session, [model.id])[model.id]
+        assert result.kind == "none"
+        assert [image.position for image in result.source_images] == [0, 1, 2]
+        assert [image.id for image in result.source_images] == [
+            f"source-{image.id}" for image in images
+        ]
+        assert all(
+            image.url.startswith(
+                f"/api/v1/models/{model.id}/provenance/{source.id}/cover/content?position="
+            )
+            for image in result.source_images
+        )
+
+    def test_does_not_publish_private_gallery_in_shared_previews(
+        self, db_session, make_model, make_provenance_source, make_cover
+    ):
+        model = make_model()
+        source = make_provenance_source(model)
+        make_cover(source, position=1)
+        result = summaries(db_session, [model.id], root="/api/v1/shares/public")[
+            model.id
+        ]
+        assert result.source_images == []
+
+    def test_gallery_address_changes_after_replacement(
+        self, db_session, make_model, make_provenance_source, make_cover
+    ):
+        from datetime import timedelta
+
+        model = make_model()
+        source = make_provenance_source(model)
+        image = make_cover(source, position=1)
+        before = summaries(db_session, [model.id])[model.id].source_images[0].url
+        image.updated_at += timedelta(seconds=1)
+        db_session.add(image)
+        db_session.flush()
+        after = summaries(db_session, [model.id])[model.id].source_images[0].url
+        assert before != after

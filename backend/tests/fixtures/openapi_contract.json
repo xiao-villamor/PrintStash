@@ -329,6 +329,13 @@
             ],
             "title": "Reason"
           },
+          "source_images": {
+            "items": {
+              "$ref": "#/components/schemas/SourceImageRead"
+            },
+            "title": "Source Images",
+            "type": "array"
+          },
           "state": {
             "$ref": "#/components/schemas/PreviewState"
           }
@@ -336,6 +343,7 @@
         "required": [
           "kind",
           "cover_camera",
+          "source_images",
           "file_id",
           "state",
           "reason",
@@ -3156,6 +3164,10 @@
             "title": "Resumable Cover",
             "type": "boolean"
           },
+          "resumable_gallery": {
+            "title": "Resumable Gallery",
+            "type": "boolean"
+          },
           "resumable_slots": {
             "title": "Resumable Slots",
             "type": "boolean"
@@ -3181,7 +3193,8 @@
           "max_files",
           "max_file_bytes",
           "capture_preferences",
-          "resumable_cover"
+          "resumable_cover",
+          "resumable_gallery"
         ],
         "title": "CaptureCapabilitiesRead",
         "type": "object"
@@ -3225,6 +3238,28 @@
           "origin"
         ],
         "title": "CaptureFieldDraft",
+        "type": "object"
+      },
+      "CaptureImageIntent": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "CaptureImageIntent",
         "type": "object"
       },
       "CaptureManifestFileRead": {
@@ -3556,6 +3591,22 @@
             "title": "Files",
             "type": "array"
           },
+          "gallery": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CaptureImageIntent"
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gallery"
+          },
           "profiles": {
             "anyOf": [
               {
@@ -3785,6 +3836,17 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "image_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Position"
           },
           "media_type": {
             "title": "Media Type",
@@ -11351,6 +11413,12 @@
       "ModelCoverSource": {
         "additionalProperties": false,
         "properties": {
+          "position": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Position",
+            "type": "integer"
+          },
           "source_id": {
             "exclusiveMinimum": 0.0,
             "title": "Source Id",
@@ -13677,11 +13745,19 @@
             "default": "none",
             "title": "Kind",
             "type": "string"
+          },
+          "source_images": {
+            "items": {
+              "$ref": "#/components/schemas/SourceImageRead"
+            },
+            "title": "Source Images",
+            "type": "array"
           }
         },
         "required": [
           "kind",
-          "cover_camera"
+          "cover_camera",
+          "source_images"
         ],
         "title": "NoPreviewSubject",
         "type": "object"
@@ -20915,6 +20991,45 @@
           "settings"
         ],
         "title": "SlicerProfileRead",
+        "type": "object"
+      },
+      "SourceImageRead": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "role": {
+            "const": "source",
+            "default": "source",
+            "title": "Role",
+            "type": "string"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source_id",
+          "position",
+          "provider",
+          "url"
+        ],
+        "title": "SourceImageRead",
         "type": "object"
       },
       "SpoolRead": {
@@ -32358,6 +32473,72 @@
         ]
       }
     },
+    "/api/v1/inbox/{item_id}/capture-images/{position}": {
+      "post": {
+        "operationId": "declare_capture_image_api_v1_inbox__item_id__capture_images__position__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "position",
+            "required": true,
+            "schema": {
+              "title": "Position",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptureUploadFileDeclaration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureUploadSlotRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Declare Capture Image",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
     "/api/v1/inbox/{item_id}/capture-upload": {
       "delete": {
         "description": "Release an unfinished capture's exact slot leases after extension failure.",
@@ -38897,6 +39078,17 @@
             "required": true,
             "schema": {
               "title": "Source Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "position",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Position",
               "type": "integer"
             }
           }

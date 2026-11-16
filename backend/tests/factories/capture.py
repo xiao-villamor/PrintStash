@@ -96,6 +96,7 @@ def build_inbox_item(
     `owner_user_id` is not nullable and the whole surface is owner-scoped, so the
     user is positional rather than an override a test can forget.
     """
+    overrides.setdefault("gallery_json", "[]")
     overrides.setdefault("source_url", DEFAULT_SOURCE_URL)
     overrides.setdefault(
         "manifest_json",
@@ -132,6 +133,7 @@ def build_capture_slot(
     reject_aliases(
         overrides, {"state": "uploaded", "storage_key": "uploaded"} if uploaded else {}
     )
+    overrides.setdefault("image_position", None)
     index = nth("capture_slot")
     overrides.setdefault("id", f"slot-{index}")
     overrides.setdefault("filename", f"capture-{index}.3mf")

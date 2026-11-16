@@ -12,10 +12,11 @@ function show(
   sourceUrl: string | null = null,
   sourceFile: FileRead | null = null,
   canEdit = false,
+  description: string | null = null,
 ) {
   return renderApp(
     <ModelInformation
-      model={aModel({ source_url: sourceUrl })}
+      model={aModel({ source_url: sourceUrl, description })}
       sourceFile={sourceFile}
       canEdit={canEdit}
       onEdit={() => {}}
@@ -36,6 +37,40 @@ function show(
 }
 
 describe("ModelInformation", () => {
+  it("renders a Markdown model description", () => {
+    show(
+      null,
+      null,
+      false,
+      "## Assembly\n\n- **Base**\n- Top\n\n[Guide](https://example.test/guide)\n\n| Part | Count |\n| --- | --- |\n| Screw | 4 |",
+    );
+    expect(screen.getByRole("heading", { name: "Assembly" })).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "Base",
+      "Top",
+    ]);
+    expect(screen.getByText("Base").tagName).toBe("STRONG");
+    expect(screen.getByRole("link", { name: "Guide" })).toHaveAttribute(
+      "href",
+      "https://example.test/guide",
+    );
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.queryByText("## Assembly")).not.toBeInTheDocument();
+  });
+  it("rejects executable description content", () => {
+    show(
+      null,
+      null,
+      false,
+      '<script>window.unsafe=true</script>\n\n<img src="x" onerror="window.unsafe=true">\n\n[unsafe](javascript:alert(1))\n\nSafe instructions',
+    );
+    expect(document.querySelector("script, [onerror], a[href^='javascript:']")).toBeNull();
+    expect(screen.getByText("Safe instructions")).toBeInTheDocument();
+  });
+  it("preserves a plain description", () => {
+    show(null, null, false, "Print upright with supports.");
+    expect(screen.getByText("Print upright with supports.")).toBeInTheDocument();
+  });
   it("normalizes safe source links", () => {
     show("HTTPS://EXAMPLE.TEST/cube");
     expect(screen.getByRole("link", { name: "Source model" })).toHaveAttribute(

@@ -16,6 +16,8 @@ from app.db.models import (
     File,
     JobKind,
     Model,
+    ModelProvenanceSource,
+    ModelSourceCover,
 )
 from app.db.scopes import live
 from app.modules.derivatives import policy
@@ -30,6 +32,7 @@ from app.schemas.previews import (
     PreviewManifestRead,
     PreviewState,
     PublishedPreviewRead,
+    SourceImageRead,
 )
 
 
@@ -83,6 +86,29 @@ def summaries(
         raise ValueError("shared_preview_root_needs_one_model")
     if not model_ids:
         return {}
+    images: dict[int, list[SourceImageRead]] = defaultdict(list)
+    if root is None:
+        for source, image in session.exec(
+            select(ModelProvenanceSource, ModelSourceCover)
+            .join(
+                ModelSourceCover,
+                ModelSourceCover.provenance_source_id == ModelProvenanceSource.id,
+            )
+            .where(col(ModelProvenanceSource.model_id).in_(model_ids))
+            .order_by(ModelProvenanceSource.id, ModelSourceCover.position)
+        ).all():
+            version = hashlib.sha256(
+                f"{image.storage_key}:{image.updated_at.isoformat()}".encode()
+            ).hexdigest()[:16]
+            images[source.model_id].append(
+                SourceImageRead(
+                    id=f"source-{image.id}",
+                    source_id=source.id,
+                    position=image.position,
+                    provider=source.provider,
+                    url=f"/api/v1/models/{source.model_id}/provenance/{source.id}/cover/content?position={image.position}&v={version}",
+                )
+            )
     files = selected_files(session, model_ids)
     enabled = not files or policy.resolve(session)[JobKind.DERIVATIVES_PREVIEWS].enabled
     by_file: dict[int, list[ArtifactDerivative]] = defaultdict(list)
@@ -102,7 +128,7 @@ def summaries(
     for model_id in model_ids:
         file = files.get(model_id)
         if file is None:
-            result[model_id] = NoPreviewSubject()
+            result[model_id] = NoPreviewSubject(source_images=images[model_id])
             continue
         assert file.id is not None
         rows = by_file[file.id]
@@ -143,6 +169,7 @@ def summaries(
         else:
             state = PreviewState(current.state.value)
         result[model_id] = ArtifactPreviews(
+            source_images=images[model_id],
             file_id=file.id,
             state=state,
             reason=current.failure_reason

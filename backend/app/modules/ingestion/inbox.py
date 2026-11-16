@@ -95,6 +95,7 @@ from app.modules.work.contracts import JobContext, JobExecution, JobOutcome
 from app.modules.work.jobs import TERMINAL_STATES, failure_of, safe_error, safe_item
 from app.modules.work.jobs import jobs as registry
 from app.schemas.inbox import (
+    CaptureImageIntent,
     CaptureRecoveryRead,
     CaptureSessionCreate,
     CaptureSourceDraft,
@@ -502,6 +503,7 @@ def slot_read(slot: CaptureUploadSlot) -> CaptureUploadSlotRead:
     return CaptureUploadSlotRead(
         id=slot.id,
         role=cast(Literal["file", "cover"], slot.role),
+        image_position=slot.image_position,
         source_file_id=slot.source_file_id,
         filename=slot.filename,
         media_type=slot.media_type,
@@ -624,6 +626,7 @@ def _reserve_capture_slot(
     declaration: CaptureUploadFileDeclaration,
     role: Literal["file", "cover"],
     source_file_id: str | None,
+    image_position: int | None = None,
 ) -> CaptureUploadSlot:
     if user.id is None:
         raise ValueError("not_authenticated")
@@ -635,6 +638,7 @@ def _reserve_capture_slot(
         inbox_item_id=item_id,
         role=role,
         source_file_id=source_file_id,
+        image_position=image_position,
         filename=filename,
         media_type=declaration.media_type.lower(),
         size_bytes=declaration.size_bytes,
@@ -682,14 +686,18 @@ def start_capture_session(
 ) -> InboxItem:
     if user.id is None:
         raise ValueError("not_authenticated")
-    if payload.cover is not None and (
-        payload.cover.size_bytes > 15 * 1024 * 1024
-        or payload.cover.media_type.lower()
-        not in {"image/png", "image/jpeg", "image/webp"}
-        or payload.cover.filename in {".", ".."}
-        or any(char in payload.cover.filename for char in ("/", "\\", "\x00"))
-    ):
-        raise ValueError("invalid_cover_image")
+    if payload.cover is not None and payload.gallery is not None:
+        raise ValueError("cover_and_gallery_are_exclusive")
+    if payload.cover is not None:
+        _validate_capture_image(payload.cover)
+    gallery = payload.gallery or []
+    if len({image.id for image in gallery}) != len(gallery):
+        raise ValueError("duplicate_capture_image_id")
+    for image in gallery:
+        if image.name in {".", ".."} or any(
+            char in image.name for char in ("/", "\\", "\x00")
+        ):
+            raise ValueError("invalid_capture_filename")
     for file in payload.files:
         if file.name in {".", ".."} or any(
             char in file.name for char in ("/", "\\", "\x00")
@@ -728,6 +736,11 @@ def start_capture_session(
                     source.provider,
                     source.source_item_id or source.canonical_url,
                 ],
+                **(
+                    {"gallery": [image.model_dump() for image in gallery]}
+                    if payload.gallery is not None
+                    else {}
+                ),
                 "files": sorted(
                     [(file.id, file.name, file.file_type) for file in manifest.files]
                 ),
@@ -755,13 +768,14 @@ def start_capture_session(
         manifest_json=json.dumps(manifest.to_dict()),
         capture_request_key=payload.request_key,
         capture_request_hash=request_hash,
+        gallery_json=json.dumps([image.model_dump() for image in gallery]),
     )
     try:
         with session.begin_nested():
             session.add(row)
             session.flush()
+            assert row.id is not None
             if payload.cover is not None:
-                assert row.id is not None
                 _reserve_capture_slot(
                     session, user, row.id, payload.cover, "cover", None
                 )
@@ -777,11 +791,45 @@ def start_capture_session(
     return row
 
 
+def _validate_capture_image(declaration: CaptureUploadFileDeclaration) -> None:
+    if (
+        declaration.size_bytes > 15 * 1024 * 1024
+        or declaration.media_type.lower()
+        not in {"image/png", "image/jpeg", "image/webp", "image/gif"}
+        or declaration.filename in {".", ".."}
+        or any(char in declaration.filename for char in ("/", "\\", "\x00"))
+    ):
+        raise ValueError("invalid_cover_image")
+
+
 def declare_capture_file(
     session: Session,
     user: User,
     item_id: int,
     declaration: CaptureUploadFileDeclaration,
+) -> CaptureUploadSlot:
+    return _declare_capture_object(session, user, item_id, declaration)
+
+
+def declare_capture_image(
+    session: Session,
+    user: User,
+    item_id: int,
+    position: int,
+    declaration: CaptureUploadFileDeclaration,
+) -> CaptureUploadSlot:
+    return _declare_capture_object(
+        session, user, item_id, declaration, image_position=position
+    )
+
+
+def _declare_capture_object(
+    session: Session,
+    user: User,
+    item_id: int,
+    declaration: CaptureUploadFileDeclaration,
+    *,
+    image_position: int | None = None,
 ) -> CaptureUploadSlot:
     if user.id is None:
         raise ValueError("not_authenticated")
@@ -800,16 +848,31 @@ def declare_capture_file(
         <= utcnow()
     ):
         raise OperationError("staging_expired", kind=ErrorKind.CONFLICT)
-    manifest = parse_capture_manifest(_json_dict(row.manifest_json))
-    expected = next(
-        (file for file in manifest.files if file.id == declaration.id), None
-    )
-    if expected is None or expected.name != declaration.filename:
+    if image_position is None:
+        manifest = parse_capture_manifest(_json_dict(row.manifest_json))
+        expected = next(
+            (file for file in manifest.files if file.id == declaration.id), None
+        )
+        identity = CaptureUploadSlot.source_file_id == declaration.id
+    else:
+        _validate_capture_image(declaration)
+        gallery = [
+            CaptureImageIntent.model_validate(image)
+            for image in json.loads(row.gallery_json)
+        ]
+        expected = (
+            gallery[image_position] if 0 <= image_position < len(gallery) else None
+        )
+        identity = CaptureUploadSlot.image_position == image_position
+    if (
+        expected is None
+        or expected.id != declaration.id
+        or expected.name != declaration.filename
+    ):
         raise OperationError("capture_request_conflict", kind=ErrorKind.CONFLICT)
     existing = session.exec(
         select(CaptureUploadSlot).where(
-            CaptureUploadSlot.inbox_item_id == row.id,
-            CaptureUploadSlot.source_file_id == declaration.id,
+            CaptureUploadSlot.inbox_item_id == row.id, identity
         )
     ).first()
     if existing is not None:
@@ -830,8 +893,9 @@ def declare_capture_file(
     slot = CaptureUploadSlot(
         id=uuid.uuid4().hex,
         inbox_item_id=item_id,
-        role="file",
-        source_file_id=declaration.id,
+        role="file" if image_position is None else "cover",
+        source_file_id=declaration.id if image_position is None else None,
+        image_position=image_position,
         filename=declaration.filename,
         media_type=declaration.media_type.lower(),
         size_bytes=declaration.size_bytes,
@@ -846,7 +910,7 @@ def declare_capture_file(
         concurrent = session.exec(
             select(CaptureUploadSlot).where(
                 CaptureUploadSlot.inbox_item_id == item_id,
-                CaptureUploadSlot.source_file_id == declaration.id,
+                identity,
             )
         ).first()
         if concurrent is None:
@@ -1013,7 +1077,8 @@ def upload_capture_slot(
             raise ValueError("capture_upload_sha256_mismatch")
         if slot.role == "cover":
             if (
-                slot.media_type not in {"image/jpeg", "image/png", "image/webp"}
+                slot.media_type
+                not in {"image/jpeg", "image/png", "image/webp", "image/gif"}
                 or size > 15 * 1024 * 1024
             ):
                 raise ValueError("capture_cover_invalid")
@@ -1315,7 +1380,7 @@ def _cleanup_capture_slots(
 
 
 def _attach_capture_cover(
-    session: Session, row: InboxItem
+    session: Session, row: InboxItem, *, position: int = 0
 ) -> source_covers.SourceCoverCandidate | bool | None:
     """Normalize a durable optional cover only after provenance has been attached."""
     if row.id is None or row.resulting_model_id is None:
@@ -1324,6 +1389,8 @@ def _attach_capture_cover(
         select(CaptureUploadSlot).where(
             CaptureUploadSlot.inbox_item_id == row.id,
             CaptureUploadSlot.role == "cover",
+            (CaptureUploadSlot.image_position == position)
+            | ((CaptureUploadSlot.image_position.is_(None)) & (position == 0)),
             CaptureUploadSlot.state == CaptureUploadSlotState.UPLOADED,
         )
     ).first()
@@ -1374,6 +1441,7 @@ def _attach_capture_cover(
         actor_id=row.owner_user_id,
         data=data,
         content_type=cover.media_type,
+        position=position,
     )
     # Test doubles and legacy adapters may acknowledge without returning the
     # ownership write; production publication always returns it.
@@ -1403,10 +1471,17 @@ def finalize_capture_upload(session: Session, user: User, item_id: int) -> Inbox
     manifest = parse_capture_manifest(_json_dict(row.manifest_json))
     expected_ids = {file.id for file in manifest.files}
     actual_ids = {slot.source_file_id for slot in slots if slot.role == "file"}
+    gallery = json.loads(row.gallery_json)
+    image_positions = {
+        slot.image_position for slot in slots if slot.image_position is not None
+    }
+    if image_positions != set(range(len(gallery))):
+        raise OperationError("capture_upload_slots_incomplete", kind=ErrorKind.CONFLICT)
     if expected_ids != actual_ids:
         raise OperationError("capture_upload_slots_incomplete", kind=ErrorKind.CONFLICT)
     if not slots or any(
-        slot.role == "file" and slot.state != CaptureUploadSlotState.UPLOADED
+        (slot.role == "file" or slot.image_position is not None)
+        and slot.state != CaptureUploadSlotState.UPLOADED
         for slot in slots
     ):
         raise OperationError("capture_upload_slots_incomplete", kind=ErrorKind.CONFLICT)
@@ -3021,6 +3096,30 @@ def _finish_import(
                             cover_result, source_covers.SourceCoverCandidate
                         ):
                             cover_writes.append(cover_result)
+                    positions = session.exec(
+                        select(CaptureUploadSlot.image_position)
+                        .where(
+                            CaptureUploadSlot.inbox_item_id == item_id,
+                            CaptureUploadSlot.role == "cover",
+                            CaptureUploadSlot.image_position > 0,
+                        )
+                        .order_by(CaptureUploadSlot.image_position)
+                    ).all()
+                    for position in positions:
+                        assert position is not None
+                        for model_id in sorted(model_ids):
+                            image_result = _attach_capture_cover(
+                                session,
+                                row.model_copy(update={"resulting_model_id": model_id}),
+                                position=position,
+                            )
+                            if image_result is False:
+                                row.error_code = "capture_cover_attach_pending"
+                                row.retryable = True
+                            elif isinstance(
+                                image_result, source_covers.SourceCoverCandidate
+                            ):
+                                cover_writes.append(image_result)
                 # Byte publication above precedes the short authority transaction.
                 # Never clean staging or commit completion across a retry.
                 if not _lock_import_completion(session, item_id, execution):

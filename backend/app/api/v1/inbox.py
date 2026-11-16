@@ -96,6 +96,29 @@ def declare_capture_file(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post(
+    "/{item_id}/capture-images/{position}",
+    response_model=CaptureUploadSlotRead,
+    status_code=201,
+)
+@bounded_command
+def declare_capture_image(
+    item_id: int,
+    position: int,
+    payload: CaptureUploadFileDeclaration,
+    actor: CommandActor = Depends(require_capture_actor),
+) -> CaptureUploadSlotRead:
+    with command_session(actor) as (session, user):
+        try:
+            return inbox.slot_read(
+                inbox.declare_capture_image(session, user, item_id, position, payload)
+            )
+        except staging_leases.StagingCapacityExceeded as exc:
+            raise HTTPException(status_code=507, detail=str(exc)) from exc
+        except (ValueError, importer.ImportError_) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/capture-capabilities", response_model=CaptureCapabilitiesRead)
 @bounded_command
 def capture_capabilities(
@@ -107,6 +130,7 @@ def capture_capabilities(
             resumable_slots=True,
             capture_preferences=True,
             resumable_cover=True,
+            resumable_gallery=True,
             idempotent_requests=True,
             storage="managed",
             max_files=64,

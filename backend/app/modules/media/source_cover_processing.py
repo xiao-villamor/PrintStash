@@ -21,6 +21,7 @@ _CONTENT_TYPE_TO_FORMAT = {
     "image/jpeg": "JPEG",
     "image/png": "PNG",
     "image/webp": "WEBP",
+    "image/gif": "GIF",
 }
 
 
@@ -81,7 +82,7 @@ def process_source_cover_upload(
 ) -> ProcessedSourceCover:
     """Return a metadata-free, size-normalized WebP cover or a safe error.
 
-    JPEG, PNG, and WebP are accepted only when their declared content type
+    JPEG, PNG, WebP, and the first frame of GIF are accepted only when their declared content type
     agrees with Pillow's decoded format.  No raw source bytes are returned or
     persisted; ``thumbnail.to_webp`` is the repository-wide conversion seam
     and strips metadata by re-encoding the decoded image.

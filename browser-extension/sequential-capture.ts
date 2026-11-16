@@ -19,6 +19,7 @@ interface CaptureSession {
     state: "pending" | "uploaded";
     size_bytes: number;
     cover?: { id: string; filename: string; media_type: string; sha256: string };
+    imagePosition?: number;
   }>;
   recoverable: boolean;
 }
@@ -73,8 +74,21 @@ function sessionReceipt(value: unknown): CaptureSession {
         sha256: slot.sha256,
       };
     }
+    if (
+      slot.image_position !== undefined &&
+      slot.image_position !== null &&
+      (!cover ||
+        !Number.isSafeInteger(slot.image_position) ||
+        slot.image_position < 0 ||
+        slot.image_position >= 64 ||
+        slots.some((existing) => existing.imagePosition === slot.image_position))
+    )
+      throw new CaptureRecoveryError("PrintStash returned an invalid gallery position.");
     slots.push({
       ...(cover ? { cover } : {}),
+      ...(Number.isSafeInteger(slot.image_position) && slot.image_position >= 0
+        ? { imagePosition: slot.image_position }
+        : {}),
       source_file_id: slot.source_file_id,
       state: slot.state,
       size_bytes: slot.size_bytes,
@@ -101,6 +115,11 @@ export async function captureSequentialFiles(options: {
   collectionId?: number;
   tags?: string[];
   cover?: BrowserCaptureFile;
+  gallery?: Array<{
+    id: string;
+    filename: string;
+    download(signal?: AbortSignal): Promise<BrowserCaptureFile>;
+  }>;
   candidates: CaptureCandidate[];
   download(candidate: CaptureCandidate, signal?: AbortSignal): Promise<BrowserCaptureFile>;
   storage: {
@@ -136,6 +155,8 @@ export async function captureSequentialFiles(options: {
     "resumable_slots" in support &&
     support.resumable_slots === true;
   if (capability.status === 404 || (capability.ok && !resumable)) {
+    if (options.gallery?.length)
+      throw new CaptureRecoveryError("Update PrintStash to preserve the provider gallery.");
     // Older servers retain their established transport and validation contract.
     const files: BrowserCaptureFile[] = [];
     for (const candidate of candidates) files.push(await options.download(candidate, signal));
@@ -187,6 +208,33 @@ export async function captureSequentialFiles(options: {
   const preparedCover = options.cover
     ? await prepareCaptureFile(options.cover, "cover", "cover")
     : undefined;
+  const images = options.gallery?.length
+    ? [
+        ...(preparedCover && options.cover
+          ? [
+              {
+                id: preparedCover.declaration.sha256,
+                filename: preparedCover.declaration.filename,
+                download: async () => options.cover!,
+              },
+            ]
+          : []),
+        ...options.gallery,
+      ]
+    : undefined;
+  if (
+    images &&
+    (!(
+      typeof support === "object" &&
+      support !== null &&
+      "resumable_gallery" in support &&
+      support.resumable_gallery === true
+    ) ||
+      images.length > 64)
+  )
+    throw new CaptureRecoveryError(
+      "Gallery transfer needs a compatible PrintStash server and at most 64 selected images.",
+    );
   const supportsProfiles =
     typeof support === "object" &&
     support !== null &&
@@ -196,7 +244,7 @@ export async function captureSequentialFiles(options: {
   const profiles = Object.fromEntries(
     candidates.filter((c) => c.profile).map((c) => [c.id, validateCaptureProfile(c.profile, c.id)]),
   );
-  const key = `capture-request:${await digest(new TextEncoder().encode(JSON.stringify([base, authorization, source.canonical_url, candidates.map((c) => c.id).sort()])).buffer)}`;
+  const key = `capture-request:${await digest(new TextEncoder().encode(JSON.stringify([base, authorization, source.canonical_url, candidates.map((c) => c.id).sort(), ...(images ? [images.map((image) => [image.id, image.filename])] : [])])).buffer)}`;
   const saved = (await storage.get(key))[key];
   const requestKey =
     typeof saved === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(saved) ? saved : crypto.randomUUID();
@@ -205,7 +253,11 @@ export async function captureSequentialFiles(options: {
     method: "POST",
     body: JSON.stringify({
       request_key: requestKey,
-      ...(preparedCover ? { cover: preparedCover.declaration } : {}),
+      ...(images
+        ? { gallery: images.map((image) => ({ id: image.id, name: image.filename })) }
+        : preparedCover
+          ? { cover: preparedCover.declaration }
+          : {}),
       ...(supportsProfiles && Object.keys(profiles).length ? { schema_version: 3, profiles } : {}),
       source_url: source.canonical_url,
       capture_source: source,
@@ -236,12 +288,25 @@ export async function captureSequentialFiles(options: {
       "Staging expired. Capture again to download fresh files from this source.",
     );
   }
-  const coverSlots = session.slots.filter((slot) => slot.cover);
+  if (
+    session.slots.some(
+      (slot) =>
+        slot.imagePosition !== undefined &&
+        (!images ||
+          slot.imagePosition >= images.length ||
+          slot.cover?.filename !== images[slot.imagePosition]?.filename),
+    )
+  )
+    throw new CaptureRecoveryError(
+      "PrintStash returned a gallery that does not match this selection.",
+    );
+  const coverSlots = session.slots.filter((slot) => slot.cover && slot.imagePosition === undefined);
   if (coverSlots.length > 1)
     throw new CaptureRecoveryError("PrintStash returned multiple cover receipts.");
   const coverSlot = coverSlots[0];
   if (
     preparedCover &&
+    !images &&
     (!coverSlot ||
       coverSlot.size_bytes !== preparedCover.declaration.size_bytes ||
       coverSlot.cover?.filename !== preparedCover.declaration.filename ||
@@ -317,6 +382,74 @@ export async function captureSequentialFiles(options: {
       throw new CaptureRecoveryError(
         `Transfer interrupted (${uploaded.status}). Reopen this source to recover confirmed files.`,
       );
+  }
+  if (images) {
+    for (const [position, image] of images.entries()) {
+      if (
+        session.slots.some((slot) => slot.imagePosition === position && slot.state === "uploaded")
+      )
+        continue;
+      progress(`Downloading gallery image ${position + 1}/${images.length}`);
+      const upload = await image.download(signal);
+      if (
+        upload.filename !== image.filename ||
+        upload.file.size === 0 ||
+        upload.file.size > 15 * 1024 * 1024 ||
+        !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(upload.mediaType)
+      )
+        throw new CaptureRecoveryError(
+          "The provider image is unsupported or exceeds 15 MiB. Confirmed files are preserved.",
+        );
+      total += upload.file.size;
+      if (total > CAPTURE_MAX_TOTAL_SIZE_BYTES)
+        throw new CaptureRecoveryError("Capture exceeds the supported size limit.");
+      const checksum = await digest(await upload.file.arrayBuffer());
+      const reserved = await request(`/${session.item.id}/capture-images/${position}`, {
+        method: "POST",
+        body: JSON.stringify({
+          id: image.id,
+          filename: image.filename,
+          media_type: upload.mediaType,
+          size_bytes: upload.file.size,
+          sha256: checksum,
+        }),
+      });
+      if (!reserved.ok)
+        throw new CaptureRecoveryError(
+          `Could not reserve gallery image (${reserved.status}). Confirmed files are preserved.`,
+        );
+      const slot: unknown = await reserved.json();
+      if (
+        typeof slot !== "object" ||
+        slot === null ||
+        !("id" in slot) ||
+        typeof slot.id !== "string" ||
+        !slot.id ||
+        !("image_position" in slot) ||
+        slot.image_position !== position ||
+        !("sha256" in slot) ||
+        slot.sha256 !== checksum ||
+        !("size_bytes" in slot) ||
+        slot.size_bytes !== upload.file.size ||
+        !("filename" in slot) ||
+        slot.filename !== image.filename ||
+        !("media_type" in slot) ||
+        slot.media_type !== upload.mediaType ||
+        !("role" in slot) ||
+        slot.role !== "cover"
+      )
+        throw new CaptureRecoveryError("Invalid gallery slot receipt. No image bytes were sent.");
+      progress(`Transferring gallery image ${position + 1}/${images.length}`);
+      const uploaded = await request(`/capture-upload-slots/${encodeURIComponent(slot.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": upload.mediaType },
+        body: upload.file,
+      });
+      if (!uploaded.ok)
+        throw new CaptureRecoveryError(
+          `Gallery transfer interrupted (${uploaded.status}). Reopen this source to recover confirmed files.`,
+        );
+    }
   }
   if (coverSlot?.cover && coverSlot.state === "pending" && preparedCover) {
     progress("Transferring selected cover…");

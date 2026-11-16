@@ -1,4 +1,6 @@
 {
+  "Source image": "Imagen de origen",
+  "Markdown supported: headings, lists, links and tables.": "Admite Markdown: títulos, listas, enlaces y tablas.",
   "Multi-angle previews": "Vistas multiángulo",
   "Multi-angle preview setting saved.": "Se ha guardado la configuración de vistas multiángulo.",
   "Generate extra views for each Model. Turn off to save preparation time; cover images and existing views stay available.": "Genera vistas adicionales de cada modelo. Desactívalo para ahorrar tiempo de preparación; las portadas y las vistas existentes seguirán disponibles.",

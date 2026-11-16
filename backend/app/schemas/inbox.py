@@ -93,6 +93,7 @@ class CaptureUploadSlotRead(BaseModel):
 
     id: str
     role: Literal["file", "cover"]
+    image_position: int | None = None
     source_file_id: str | None = None
     filename: str
     media_type: str
@@ -262,6 +263,7 @@ class CaptureCapabilitiesRead(BaseModel):
     max_file_bytes: int
     capture_preferences: bool
     resumable_cover: bool
+    resumable_gallery: bool
 
 
 class CaptureDestinationRead(BaseModel):
@@ -269,8 +271,19 @@ class CaptureDestinationRead(BaseModel):
     label: str
 
 
+class CaptureImageIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^[a-f0-9]{64}$")
+    name: str = Field(min_length=1, max_length=512)
+
+
 class CaptureSessionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    gallery: list[CaptureImageIntent] | None = Field(
+        default=None, min_length=1, max_length=64
+    )
 
     cover: CaptureUploadFileDeclaration | None = None
 

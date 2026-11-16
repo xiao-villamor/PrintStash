@@ -9,7 +9,7 @@ import { useModelPreviewCard, type PreviewCard } from "@/lib/use-model-preview-c
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import type { ModelPreviews, PreviewViewId } from "@/types/previews";
+import type { ModelPreviews, PreviewViewId, SourceImage } from "@/types/previews";
 
 const labels = {
   cover: "modelPreview.cover",
@@ -23,6 +23,12 @@ const labels = {
   reverse: "modelPreview.reverse",
   edge: "modelPreview.edge",
 } as const satisfies Record<PreviewViewId | "cover", string>;
+
+function viewLabel(id: PreviewViewId | SourceImage["id"] | "cover") {
+  if (id.startsWith("source-")) return uiText("Source image");
+  // SAFETY: source-* is the only member of this closed union absent from labels.
+  return uiText(labels[id as PreviewViewId | "cover"]);
+}
 
 function stop(event: MouseEvent) {
   event.preventDefault();
@@ -84,7 +90,7 @@ function ViewIndicator({ state, className }: { state: PreviewCard; className?: s
       aria-live="polite"
       aria-atomic="true"
     >
-      <span className="truncate">{uiText(labels[shown])}</span>
+      <span className="truncate">{viewLabel(shown)}</span>
       {navigationViews.length >= 2 && (
         <span aria-hidden="true" className="inline-flex shrink-0 gap-1">
           {navigationViews.map((view) => (
@@ -180,7 +186,7 @@ export function ModelPreviewControls({ name, state }: { name: string; state: Pre
                     size="icon"
                     className={`pointer-events-auto absolute top-1/2 h-11 w-11 -translate-y-1/2 ${index === 0 ? "left-1" : "right-1"}`}
                     aria-label={uiText(index === 0 ? "modelPreview.previous" : "modelPreview.next")}
-                    title={uiText(labels[view.id])}
+                    title={viewLabel(view.id)}
                     onPointerEnter={() => {
                       state.enter();
                       preview.prioritize(view);
@@ -305,7 +311,7 @@ export function ModelPreviewGallery({
                 className="h-16 w-20"
                 imageClassName="h-full w-full object-contain"
               />
-              <span>{uiText(labels[view.id])}</span>
+              <span>{viewLabel(view.id)}</span>
             </Button>
           ))}
         </div>
