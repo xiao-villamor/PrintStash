@@ -817,6 +817,13 @@ class TestStepTessellation:
         """STEP outputs carry the 0.05 mm tessellation's recipes."""
         headers = await _setup_and_login(api, tmp_path)
 
+        enabled = await api.put(
+            "/api/v1/config",
+            headers=headers,
+            json={"derivatives_previews_enabled": True},
+        )
+        assert enabled.status_code == 200, enabled.text
+
         uploaded = await api.post(
             "/api/v1/ingest/model",
             files={
@@ -850,6 +857,13 @@ class TestThreeMFReader:
     async def test_a_3mf_is_derived_at_its_own_recipes(self, api, tmp_path, e2e_db):
         """3MF outputs carry their reader's recipes; other meshes keep theirs."""
         headers = await _setup_and_login(api, tmp_path)
+
+        enabled = await api.put(
+            "/api/v1/config",
+            headers=headers,
+            json={"derivatives_previews_enabled": True},
+        )
+        assert enabled.status_code == 200, enabled.text
 
         uploaded = await api.post(
             "/api/v1/ingest/model",

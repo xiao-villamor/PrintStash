@@ -51,7 +51,10 @@ def vault_env(request, tmp_path: Path) -> dict[str, str]:
         if request.param == "postgresql"
         else f"sqlite:///{tmp_path / 'vault.sqlite'}"
     )
-    return vault_environment(tmp_path, db_url)
+    return {
+        **vault_environment(tmp_path, db_url),
+        "VAULT_DERIVATIVES_PREVIEWS_ENABLED": "true",
+    }
 
 
 def _stall(environment: dict[str, str], marker: Path) -> tuple[subprocess.Popen, int]:
@@ -258,6 +261,7 @@ class TestRestore:
         vault_env = vault_environment(
             tmp_path, f"sqlite:///{tmp_path / 'vault.sqlite'}"
         )
+        vault_env["VAULT_DERIVATIVES_PREVIEWS_ENABLED"] = "true"
         process, held = _start(vault_env, "stall_backup", str(tmp_path / "running"))
         _kill(process)
         _discard_engine_state(vault_env)

@@ -1187,8 +1187,9 @@ class TestModelCoverStorage:
 
 class TestPreviewBundleStorage:
     def test_publishes_range_addressed_preview_images(
-        self, versioned_s3_backend, db_session
+        self, versioned_s3_backend, db_session, make_system_config
     ):
+        make_system_config(derivatives_previews_enabled=True)
         import trimesh
 
         from app.api.preview_response import preview_response
