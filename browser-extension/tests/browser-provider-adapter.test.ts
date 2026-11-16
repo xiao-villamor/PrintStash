@@ -9,6 +9,7 @@ describe("BrowserProviderAdapter", () => {
   it("exposes the popup's storage, permission, tab, and scripting seams without changing their results", async () => {
     const adapter: BrowserExtensionApi = {
       runtime: {
+        sendMessage: vi.fn().mockResolvedValue(null),
         getManifest: vi.fn().mockReturnValue({ version: "0.12.1" }),
       },
       storage: {

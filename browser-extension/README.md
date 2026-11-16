@@ -1,6 +1,6 @@
 # PrintStash
 
-This Manifest V3 Chrome and Firefox extension recognizes MakerWorld, Printables, and
+This Manifest V3 Chrome, Edge and Firefox extension recognizes MakerWorld, Printables, and
 Thingiverse model pages, Printables collections, and direct model/archive file
 URLs, then sends them to the Pending Imports inbox of a self-hosted PrintStash
 instance.
@@ -41,6 +41,44 @@ for the store's privacy-policy URL; the site also provides a Spanish version.
    and username, then choose **Send to Pending Imports**.
 5. Review the detected files in **Pending Imports** before completing the
    import.
+
+### Capture panel and recovery
+
+On an individual MakerWorld, Printables, Thingiverse, MyMiniFactory, Cults,
+Thangs, Creality Cloud or MakerOnline publication, use **Enable panel on this site** in the popup to grant that site's permission. The panel shows file
+choices and your previous captures of the publication. That history is not a
+comparison of file bytes. Hide and reopen the panel without stopping a transfer.
+Reloading or closing the tab interrupts browser work: return to the same page,
+select the same files, and confirm to recover verified uploads before staging
+expires. Recovery is per file, not per byte; expired staging requires downloading
+again. Older servers retain the existing non-resumable transport.
+
+Files download and transfer sequentially. Finishing transfer opens the specific
+Pending Import for review; it does not mean Models have finished importing.
+Review lists every result and its error, including partially completed imports.
+MakerWorld requires signing in on its own site. PrintStash receives model bytes
+and allowlisted metadata, never marketplace cookies. Download blocks, challenges
+and unavailable sessions may still require action on the provider's page or
+manual file attachment.
+
+Provider adapters use the current source page and explicitly selected files:
+
+- MyMiniFactory reads native file forms and downloads from the observed `dl4.myminifactory.com` host. Other CDN hosts require validation before enabling them.
+- Cults resolves its native free-download form inside the source page, then transfers the archive from `download.cults3d.com`. It never submits a paid checkout. Creator and published license terms remain literal; use the source page for purchases and manual attachment when automatic resolution is unavailable.
+- Thangs transfers the selected native archive. PrintStash expands supported mesh entries using its existing archive safety checks.
+- Creality Cloud selects a print-profile package; the current adapter supports the observed USA download region.
+- MakerOnline selects one package per print profile. A source-site slider or other verification must be completed manually; hide the panel while doing so. File access is requested before starting verification.
+
+These adapters do not guarantee access to every publication, paid entitlement,
+regional CDN, or changed provider interface. Sign in on the provider's own page.
+Temporary download URLs remain in memory. Neither a challenge solver nor copied
+marketplace cookies is a production dependency.
+
+Compatible servers retain MakerWorld profile identity, authorship, printer,
+materials, plate count and explicit time/filament estimates when supplied.
+Unavailable facts stay unknown. These estimates do not create print history or
+mark a Revision as recommended. Related profiles link to their existing Models
+and original Artifacts; Models are not merged.
 
 ### Verify a refreshed Chrome popup
 
@@ -110,8 +148,11 @@ It never receives their credentials. Every capture first enters **Pending
 Imports** through the paired PrintStash API, where a user reviews the selected
 files and metadata.
 
-Finalizing a capture writes to managed Vault storage or to a mounted Library
-source that explicitly permits create-only write-back. Read-only S3, WebDAV and
+Finalizing a capture prepares it for review; importing writes to managed Vault
+storage. The selected collection organizes Models and does not change where
+their bytes are stored. Mounted Library write-back is available separately in
+the Files/Bulk upload workflow. External Library originals are not included in
+Vault backups. Read-only S3, WebDAV and
 SFTP Library sources are discovery destinations, not capture targets, and do
 not appear in the upload destination selector. Capturing a page cannot overwrite
 or delete a source object.

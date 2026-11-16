@@ -249,6 +249,57 @@ export async function requestThingiverseFilesInMainWorld(args: {
   }
   if (files.length > 0) return { ok: true, files };
 
+  // The current React Files view already owns an authenticated/public file list.
+  // Inspect only publication-bound props; never return the component or its account state.
+  if (
+    ["thingiverse.com", "www.thingiverse.com"].includes(location.hostname) &&
+    new RegExp(`^/(?:thing:|things/)${args.sourceItemId}(?:/files)?/?$`).test(location.pathname)
+  ) {
+    const buttons = [
+      ...document.querySelectorAll<HTMLButtonElement>('button[aria-label^="Download "]'),
+    ];
+    if (buttons.length > 256) return { ok: false, code: "contract_changed" };
+    for (const button of buttons) {
+      const key = Object.keys(button).find((key) => key.startsWith("__reactFiber$"));
+      if (!key) continue;
+      type FileFiber = {
+        memoizedProps?: { thing?: { id?: unknown; files?: unknown } };
+        return?: FileFiber | null;
+      };
+      let fiber = (button as unknown as Record<string, FileFiber>)[key];
+      for (let depth = 0; fiber && depth < 20; depth++) {
+        const thing = fiber.memoizedProps?.thing;
+        if (thing && String(thing.id) === args.sourceItemId && Array.isArray(thing.files)) {
+          if (thing.files.length > 256) return { ok: false, code: "contract_changed" };
+          const native: ThingiversePageFile[] = [];
+          for (const file of thing.files) {
+            if (
+              !file ||
+              typeof file !== "object" ||
+              !Number.isSafeInteger(file.id) ||
+              file.id <= 0 ||
+              typeof file.name !== "string" ||
+              safeFilename(file.name) !== file.name ||
+              file.name.startsWith(".")
+            )
+              return { ok: false, code: "contract_changed" };
+            native.push({
+              id: String(file.id),
+              filename: file.name,
+              fileType: typeFor(file.name),
+              url: `https://www.thingiverse.com/download:${file.id}`,
+            });
+          }
+          if (new Set(native.map((file) => file.id)).size !== native.length)
+            return { ok: false, code: "contract_changed" };
+          if (native.length) return { ok: true, files: native };
+        }
+        if (!fiber.return) break;
+        fiber = fiber.return;
+      }
+    }
+  }
+
   try {
     const readBoundedJson = async (
       response: Response,
@@ -450,7 +501,7 @@ export async function requestThingiverseFilesInMainWorld(args: {
     const completeRawFiles = completeFiles.ok ? completeFiles.files : undefined;
     if (collectSafeFiles(completeRawFiles)) return { ok: true, files };
 
-    const filesEndpoint = `https://api.thingiverse.com/things/${args.sourceItemId}/files`;
+    const filesEndpoint = `${new URL(args.endpoint).origin}/api/things/${args.sourceItemId}/files`;
     const filesResult = await requestJson(filesEndpoint);
     if (!filesResult.ok) return filesResult;
     const dedicatedFiles = findFiles(filesResult.value);

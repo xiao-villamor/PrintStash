@@ -1,3 +1,6 @@
+import { RelatedProfiles } from "./related-profiles";
+import { GeometryReport } from "./geometry-report";
+import { ModelSourceSummary } from "./source-summary";
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -102,6 +105,8 @@ export function ModelInformation({
           <dt>{uiText("Created")}</dt>
           <dd>{new Date(model.created_at).toLocaleDateString(currentLocale())}</dd>
         </dl>
+        <ModelSourceSummary modelId={model.id} />
+        <RelatedProfiles modelId={model.id} />
       </div>
       <div className="model-information-geometry">
         <h2 className="text-sm font-semibold">{uiText("Geometry")}</h2>
@@ -123,6 +128,11 @@ export function ModelInformation({
               : uiText("Not recorded")}
           </dd>
         </dl>
+        <GeometryReport
+          modelId={model.id}
+          fileId={sourceFile?.file_type === "gcode" ? null : (sourceFile?.id ?? null)}
+          volume={geometry?.volume_measurement ?? null}
+        />
       </div>
     </section>
   );

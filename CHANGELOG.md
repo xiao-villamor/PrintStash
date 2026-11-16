@@ -31,6 +31,9 @@
 
 ### Added
 
+- Opt-in corner import panels for MakerWorld, Printables, Thingiverse, MyMiniFactory, Cults, Thangs, Creality Cloud and MakerOnline publications, with per-file transfer recovery, owner-scoped capture history and direct links to Pending Imports review. MakerWorld profiles retain allowlisted provider estimates and link related, accessible Models without merging them.
+- Advisory geometry checks, an import-readiness summary, and source/license summaries expose existing evidence without certifying printability or interpreting license terms.
+
 - Custom recovery pages distinguish missing content, restricted access and connection failures, with retry and return actions that match the workbench.
 - Model cards offer lightweight multi-angle previews with deliberate arrows and an expanded gallery, including Top/Bottom and shape-aware planar views. Visible-image admission, intent-based prefetching and bounded background generation preserve primary covers and avoid hover-triggered geometry downloads. Generation has its own Background work control (`VAULT_DERIVATIVES_PREVIEWS_ENABLED`). See [preview behavior and limits](docs/model-previews.md).
 
@@ -54,6 +57,9 @@
 - The default number of simultaneous mesh jobs is now one per usable CPU (it was one more). With admission no longer stalling, the extra job only competed for the CPU: on a 3-CPU, 8 GB install a 60-file archive's thumbnails finish in 38.7 s instead of 44.9 s, at the same CPU cost. `VAULT_MAX_RENDER_JOBS` and *Models processed at once* still override it.
 
 ### Fixed
+
+- Partial imports show every file result and its failure reason. Expired browser staging prompts a fresh capture, and collection selection is distinguished from physical storage.
+- Slicer handoff remembers the current user's browser preference, retains a download fallback for the selected Artifact and distinguishes a requested launch from a confirmed opening.
 
 - Model previews use a raised three-quarter camera and more directional studio lighting to reveal cavities and surface depth. Tall and narrow parts retain their upright view instead of being mistaken for flat plates.
 

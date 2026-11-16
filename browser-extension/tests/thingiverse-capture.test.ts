@@ -1,3 +1,4 @@
+/** Thingiverse file selection is bound to one publication and preserves original download bytes. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   THINGIVERSE_MAX_FILE_SIZE_BYTES,
@@ -15,6 +16,141 @@ afterEach(() => {
 });
 
 describe("Thingiverse browser capture", () => {
+  it("reads publication-bound native file props", async () => {
+    vi.stubGlobal("fetch", async () => {
+      throw Error("Native file list must not require another request");
+    });
+    vi.stubGlobal("location", { hostname: "www.thingiverse.com", pathname: "/thing:100/files" });
+    document.body.innerHTML = '<button aria-label="Download cube.stl">Download</button>';
+    Object.defineProperty(document.querySelector("button"), "__reactFiber$test", {
+      enumerable: true,
+      value: {
+        memoizedProps: {},
+        return: {
+          memoizedProps: {
+            thing: {
+              id: 100,
+              files: [
+                {
+                  id: 200,
+                  name: "cube.stl",
+                  direct_url:
+                    "https://api.thingiverse.com/files/200/download?access_token=never-export",
+                },
+              ],
+            },
+          },
+          return: null,
+        },
+      },
+    });
+    const result = await requestThingiverseFilesInMainWorld({
+      sourceItemId: "100",
+      endpoint: "https://www.thingiverse.com/api/v2/things/100/complete",
+      maxResponseBytes: 1024,
+    });
+    expect(result).toEqual({
+      ok: true,
+      files: [
+        {
+          id: "200",
+          filename: "cube.stl",
+          fileType: "stl",
+          url: "https://www.thingiverse.com/download:200",
+        },
+      ],
+    });
+  });
+  it.each([
+    {
+      label: "too many files",
+      files: Array.from({ length: 257 }, (_, index) => ({
+        id: index + 1,
+        name: `cube${index}.stl`,
+      })),
+    },
+    { label: "unsafe filename", files: [{ id: 200, name: "../cube.stl" }] },
+    {
+      label: "duplicate identity",
+      files: [
+        { id: 200, name: "cube.stl" },
+        { id: 200, name: "other.stl" },
+      ],
+    },
+  ])("rejects native $label", async ({ files }) => {
+    vi.stubGlobal("location", { hostname: "www.thingiverse.com", pathname: "/thing:100/files" });
+    document.body.innerHTML = '<button aria-label="Download cube.stl">Download</button>';
+    Object.defineProperty(document.querySelector("button"), "__reactFiber$test", {
+      enumerable: true,
+      value: { memoizedProps: { thing: { id: 100, files } }, return: null },
+    });
+    expect(
+      await requestThingiverseFilesInMainWorld({
+        sourceItemId: "100",
+        endpoint: "https://www.thingiverse.com/api/v2/things/100/complete",
+        maxResponseBytes: 1024,
+      }),
+    ).toEqual({ ok: false, code: "contract_changed" });
+  });
+  it("rejects stale native publication props", async () => {
+    vi.stubGlobal("location", { hostname: "www.thingiverse.com", pathname: "/thing:100/files" });
+    document.body.innerHTML = '<button aria-label="Download cube.stl">Download</button>';
+    Object.defineProperty(document.querySelector("button"), "__reactFiber$test", {
+      enumerable: true,
+      value: {
+        memoizedProps: { thing: { id: 101, files: [{ id: 200, name: "cube.stl" }] } },
+        return: null,
+      },
+    });
+    vi.stubGlobal("fetch", async () => new Response("offline", { status: 503 }));
+    expect(
+      await requestThingiverseFilesInMainWorld({
+        sourceItemId: "100",
+        endpoint: "https://www.thingiverse.com/api/v2/things/100/complete",
+        maxResponseBytes: 1024,
+      }),
+    ).toEqual({ ok: false, code: "request_failed" });
+  });
+
+  it("uses the current same-origin file service when complete omits files", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        const path = new URL(String(input)).pathname;
+        return new Response(
+          JSON.stringify(
+            path === "/api/things/7433325/files"
+              ? [
+                  {
+                    id: 16461811,
+                    name: "SantaHatFidget_colored.3mf",
+                    public_url: "https://www.thingiverse.com/download:16461811",
+                  },
+                ]
+              : { id: 7433325 },
+          ),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      }),
+    );
+    const result = await requestThingiverseFilesInMainWorld({
+      sourceItemId: "7433325",
+      endpoint: "https://www.thingiverse.com/api/v2/things/7433325/complete",
+      maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+    });
+    expect(result).toEqual({
+      ok: true,
+      files: [
+        {
+          id: "16461811",
+          filename: "SantaHatFidget_colored.3mf",
+          fileType: "other",
+          url: "https://www.thingiverse.com/download:16461811",
+        },
+      ],
+    });
+  });
+
   it("lists individual files from the current page API without rendered links", async () => {
     document.body.innerHTML = `<button aria-label="Download Cable Mount.stl">Download</button>`;
     vi.stubGlobal(
@@ -226,7 +362,7 @@ describe("Thingiverse browser capture", () => {
     });
     expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
       "https://www.thingiverse.com/api/v2/things/7398551/complete",
-      "https://api.thingiverse.com/things/7398551/files",
+      "https://www.thingiverse.com/api/things/7398551/files",
     ]);
     expect(JSON.stringify(result)).not.toContain(viewToken);
   });
@@ -330,7 +466,7 @@ describe("Thingiverse browser capture", () => {
     });
     expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
       "https://www.thingiverse.com/api/v2/things/7398551/complete",
-      "https://api.thingiverse.com/things/7398551/files",
+      "https://www.thingiverse.com/api/things/7398551/files",
     ]);
   });
 

@@ -239,3 +239,5 @@ sends no further setup probe.
 
 - `model-covers.spec.ts`: source selection, upload, real 3D-view capture, preservation through thumbnail regeneration, and reset to automatic.
 - `gcode-plates.spec.ts`: upload sliced 3MF exports with or without meshes, then switch between distinct plate toolpaths in the real viewer.
+
+`inbox-capture.spec.ts`: pairs a browser, interrupts a two-file transfer, resumes only the pending file, imports both Models through review, and verifies revocation denies importer recovery. Provider bytes are controlled; the API, staging and ingestion are real.

@@ -3087,6 +3087,48 @@
         "title": "CaptionRead",
         "type": "object"
       },
+      "CaptureCapabilitiesRead": {
+        "properties": {
+          "idempotent_requests": {
+            "title": "Idempotent Requests",
+            "type": "boolean"
+          },
+          "max_file_bytes": {
+            "title": "Max File Bytes",
+            "type": "integer"
+          },
+          "max_files": {
+            "title": "Max Files",
+            "type": "integer"
+          },
+          "resumable_slots": {
+            "title": "Resumable Slots",
+            "type": "boolean"
+          },
+          "schema_versions": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Schema Versions",
+            "type": "array"
+          },
+          "storage": {
+            "const": "managed",
+            "title": "Storage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_versions",
+          "resumable_slots",
+          "idempotent_requests",
+          "storage",
+          "max_files",
+          "max_file_bytes"
+        ],
+        "title": "CaptureCapabilitiesRead",
+        "type": "object"
+      },
       "CaptureFieldDraft": {
         "additionalProperties": false,
         "properties": {
@@ -3187,6 +3229,175 @@
         "title": "CaptureManifestV2Read",
         "type": "object"
       },
+      "CaptureManifestV3Read": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/CaptureManifestFileRead"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "kind": {
+            "const": "model_files",
+            "title": "Kind",
+            "type": "string"
+          },
+          "profiles": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CaptureProfileDraft"
+            },
+            "title": "Profiles",
+            "type": "object"
+          },
+          "schema_version": {
+            "const": 3,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "selected_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected Ids",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/CaptureSourceDraft"
+          }
+        },
+        "required": [
+          "schema_version",
+          "kind",
+          "source",
+          "files",
+          "selected_ids",
+          "profiles"
+        ],
+        "title": "CaptureManifestV3Read",
+        "type": "object"
+      },
+      "CaptureProfileDraft": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "creator_relationship": {
+            "anyOf": [
+              {
+                "enum": [
+                  "model_creator",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creator Relationship"
+          },
+          "estimated_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 31622400.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Seconds"
+          },
+          "filament_grams": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filament Grams"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "materials": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Materials",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "provider",
+              "file"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "plate_count": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Count"
+          },
+          "printer": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "origin"
+        ],
+        "title": "CaptureProfileDraft",
+        "type": "object"
+      },
       "CaptureProvider": {
         "enum": [
           "myminifactory",
@@ -3194,6 +3405,116 @@
         ],
         "title": "CaptureProvider",
         "type": "string"
+      },
+      "CaptureRecoveryRead": {
+        "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "item": {
+            "$ref": "#/components/schemas/InboxItemRead"
+          },
+          "recoverable": {
+            "title": "Recoverable",
+            "type": "boolean"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/CaptureUploadSlotRead"
+            },
+            "title": "Slots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "item",
+          "slots",
+          "expires_at",
+          "recoverable"
+        ],
+        "title": "CaptureRecoveryRead",
+        "type": "object"
+      },
+      "CaptureSessionCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "capture_source": {
+            "$ref": "#/components/schemas/CaptureSourceDraft"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/CaptureManifestFileRead"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Files",
+            "type": "array"
+          },
+          "profiles": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/CaptureProfileDraft"
+                },
+                "maxProperties": 64,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profiles"
+          },
+          "request_key": {
+            "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "schema_version": {
+            "default": 2,
+            "enum": [
+              2,
+              3
+            ],
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "source_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Source Url",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "request_key",
+          "source_url",
+          "capture_source",
+          "files"
+        ],
+        "title": "CaptureSessionCreate",
+        "type": "object"
       },
       "CaptureSourceDraft": {
         "additionalProperties": false,
@@ -3225,7 +3546,10 @@
               "printables",
               "thingiverse",
               "myminifactory",
-              "cults"
+              "cults",
+              "thangs",
+              "crealitycloud",
+              "makeronline"
             ],
             "title": "Provider",
             "type": "string"
@@ -3269,6 +3593,40 @@
           "adapter_version"
         ],
         "title": "CaptureSourceDraft",
+        "type": "object"
+      },
+      "CaptureSourceStatusRead": {
+        "properties": {
+          "completion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxItemCompletion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/InboxItemState"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "completion",
+          "updated_at"
+        ],
+        "title": "CaptureSourceStatusRead",
         "type": "object"
       },
       "CaptureUploadFileDeclaration": {
@@ -3411,6 +3769,18 @@
             "minItems": 1,
             "title": "Files",
             "type": "array"
+          },
+          "request_key": {
+            "anyOf": [
+              {
+                "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Key"
           },
           "source_url": {
             "maxLength": 2048,
@@ -7286,6 +7656,9 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/CaptureManifestV2Read"
+              },
+              {
+                "$ref": "#/components/schemas/CaptureManifestV3Read"
               },
               {
                 "$ref": "#/components/schemas/LegacyInboxManifestRead"
@@ -17955,6 +18328,70 @@
         ],
         "title": "RegenerateMode",
         "type": "string"
+      },
+      "RelatedProfileRead": {
+        "properties": {
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "integer"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/CaptureProfileDraft"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "model_name",
+          "file_id",
+          "filename",
+          "provider",
+          "captured_at",
+          "profile"
+        ],
+        "title": "RelatedProfileRead",
+        "type": "object"
+      },
+      "RelatedProfilesRead": {
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RelatedProfileRead"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "title": "RelatedProfilesRead",
+        "type": "object"
       },
       "RetainRequest": {
         "properties": {
@@ -30971,6 +31408,143 @@
         ]
       }
     },
+    "/api/v1/inbox/capture-capabilities": {
+      "get": {
+        "operationId": "capture_capabilities_api_v1_inbox_capture_capabilities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureCapabilitiesRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Capture Capabilities",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/capture-sessions": {
+      "post": {
+        "operationId": "start_capture_session_api_v1_inbox_capture_sessions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptureSessionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureRecoveryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Start Capture Session",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/capture-source-status": {
+      "get": {
+        "operationId": "capture_source_status_api_v1_inbox_capture_source_status_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_url",
+            "required": true,
+            "schema": {
+              "maxLength": 2048,
+              "minLength": 1,
+              "title": "Source Url",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CaptureSourceStatusRead"
+                  },
+                  "title": "Response Capture Source Status Api V1 Inbox Capture Source Status Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Capture Source Status",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
     "/api/v1/inbox/capture-upload-slots": {
       "post": {
         "operationId": "create_capture_upload_slots_api_v1_inbox_capture_upload_slots_post",
@@ -31204,6 +31778,63 @@
         ]
       }
     },
+    "/api/v1/inbox/{item_id}/capture-files": {
+      "post": {
+        "operationId": "declare_capture_file_api_v1_inbox__item_id__capture_files_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptureUploadFileDeclaration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureUploadSlotRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Declare Capture File",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
     "/api/v1/inbox/{item_id}/capture-upload": {
       "delete": {
         "description": "Release an unfinished capture's exact slot leases after extension failure.",
@@ -31240,6 +31871,51 @@
           }
         ],
         "summary": "Cancel Capture Upload",
+        "tags": [
+          "pending imports"
+        ]
+      },
+      "get": {
+        "operationId": "recover_capture_upload_api_v1_inbox__item_id__capture_upload_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureRecoveryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Recover Capture Upload",
         "tags": [
           "pending imports"
         ]
@@ -37785,6 +38461,53 @@
           }
         ],
         "summary": "Permanently delete a model from the trash",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/related-profiles": {
+      "get": {
+        "operationId": "get_related_profiles_api_v1_models__model_id__related_profiles_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelatedProfilesRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Related Profiles",
         "tags": [
           "models"
         ]

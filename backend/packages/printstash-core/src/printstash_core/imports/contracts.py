@@ -8,6 +8,7 @@ is useful only while downloading and must never be serialised into a manifest.
 from __future__ import annotations
 
 import json
+import math
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -51,6 +52,9 @@ _PROVIDER_PAGE_HOSTS: dict[str, frozenset[str]] = {
     "makerworld": frozenset({"makerworld.com"}),
     "thingiverse": frozenset({"thingiverse.com", "www.thingiverse.com"}),
     "cults": frozenset({"cults3d.com", "www.cults3d.com"}),
+    "thangs": frozenset({"thangs.com", "www.thangs.com"}),
+    "crealitycloud": frozenset({"crealitycloud.com", "www.crealitycloud.com"}),
+    "makeronline": frozenset({"makeronline.com", "www.makeronline.com"}),
     "myminifactory": frozenset(
         {
             "myminifactory.com",
@@ -149,7 +153,7 @@ def sanitize_canonical_url(value: Any) -> str:
     return urlunsplit((split.scheme.lower(), netloc, split.path, "", ""))
 
 
-def _path_segments(path: str) -> tuple[list[str], bool]:
+def _path_segments(path: str, *, encoded_names: bool = False) -> tuple[list[str], bool]:
     """Return non-empty path segments and whether the path had a final slash.
 
     URL paths are validated before provider matching.  In particular, encoded
@@ -171,6 +175,20 @@ def _path_segments(path: str) -> tuple[list[str], bool]:
     segments = raw_segments[1:-1] if trailing_slash else raw_segments[1:]
     if not segments or any(segment in {".", ".."} for segment in segments):
         raise CaptureContractError("canonical_url path is invalid")
+    if encoded_names:
+        for segment in segments:
+            try:
+                name = unquote(segment, errors="strict")
+            except UnicodeError as error:
+                raise CaptureContractError("canonical_url path is invalid") from error
+            if (
+                not name
+                or name in {".", ".."}
+                or any(character in name for character in "/\\%?#<>\"")
+                or any(unicodedata.category(character).startswith("C") for character in name)
+            ):
+                raise CaptureContractError("canonical_url path is invalid")
+        return segments, trailing_slash
     # Reject encoded slash/dot traversal and any other encoded character that
     # would make the durable path differ from the path being validated.  Real
     # provider model routes use ASCII IDs/slugs, so accepting these adds no
@@ -241,7 +259,9 @@ def canonicalize_provider_url(
         or not _provider_host_matches(provider_name, hostname.lower())
     ):
         raise CaptureContractError("canonical_url host does not match provider")
-    segments, trailing_slash = _path_segments(split.path)
+    segments, trailing_slash = _path_segments(
+        split.path, encoded_names=provider_name in {"thangs", "crealitycloud", "makeronline"}
+    )
     normalized_segments = list(segments)
 
     if provider_name == "printables":
@@ -320,6 +340,25 @@ def canonicalize_provider_url(
         ):
             raise CaptureContractError("canonical_url path does not match provider")
         normalized_segments[route_index] = "3d-model"
+    elif provider_name == "thangs":
+        if len(segments) != 4 or segments[0] != "designer" or segments[2] != "3d-model":
+            raise CaptureContractError("canonical_url path does not match provider")
+        match = re.fullmatch(r"(?:.+-)?(\d+)", segments[3])
+        if match is None or (source_item_id is not None and match[1] != source_item_id):
+            raise CaptureContractError("canonical_url item does not match source")
+    elif provider_name == "crealitycloud":
+        route = segments[1:] if len(segments) == 3 and _CULTS_LOCALE.fullmatch(segments[0]) else segments
+        if len(route) != 2 or route[0] != "model-detail":
+            raise CaptureContractError("canonical_url path does not match provider")
+        if source_item_id is not None and route[1] != source_item_id:
+            raise CaptureContractError("canonical_url item does not match source")
+    elif provider_name == "makeronline":
+        route = segments[1:] if len(segments) == 4 and _CULTS_LOCALE.fullmatch(segments[0]) else segments
+        if len(route) != 3 or route[0] != "model":
+            raise CaptureContractError("canonical_url path does not match provider")
+        match = re.fullmatch(r"(\d+)\.html", route[2])
+        if match is None or (source_item_id is not None and match[1] != source_item_id):
+            raise CaptureContractError("canonical_url item does not match source")
     else:  # myminifactory
         if len(segments) != 2 or segments[0].lower() != "object":
             raise CaptureContractError("canonical_url path does not match provider")
@@ -555,10 +594,165 @@ class CaptureManifestV2:
 
 
 @dataclass(frozen=True, slots=True)
+class CaptureProfile:
+    """Explicit estimates, never measured print outcomes or recommendations."""
+
+    id: str
+    name: str
+    origin: Literal["provider", "file"]
+    author: str | None = None
+    creator_relationship: Literal["model_creator", "other"] | None = None
+    printer: str | None = None
+    estimated_seconds: float | None = None
+    filament_grams: float | None = None
+    plate_count: int | None = None
+    materials: tuple[str, ...] = ()
+
+    @classmethod
+    def from_dict(cls, data: Any) -> CaptureProfile:
+        value = _require_mapping(data, "profile")
+        allowed = {
+            "id",
+            "name",
+            "origin",
+            "author",
+            "creator_relationship",
+            "printer",
+            "estimated_seconds",
+            "filament_grams",
+            "plate_count",
+            "materials",
+        }
+        if set(value) - allowed or not {"id", "name", "origin"} <= set(value):
+            raise CaptureContractError("profile contains unknown or missing fields")
+        origin = value["origin"]
+        relationship = value.get("creator_relationship")
+        if origin not in ("provider", "file") or relationship not in (
+            None,
+            "model_creator",
+            "other",
+        ):
+            raise CaptureContractError("invalid profile fact origin or relationship")
+        texts = {}
+        for key in ("author", "printer"):
+            if key in value:
+                texts[key] = _bounded_string(value[key], f"profile.{key}", 512)
+        numbers = {}
+        for key, maximum in (
+            ("estimated_seconds", 366 * 86400),
+            ("filament_grams", 1_000_000),
+            ("plate_count", 1000),
+        ):
+            if key not in value:
+                continue
+            number = value[key]
+            if (
+                isinstance(number, bool)
+                or not isinstance(number, (int, float))
+                or not math.isfinite(number)
+                or not 0 < number <= maximum
+            ):
+                raise CaptureContractError(f"invalid profile.{key}")
+            if key == "plate_count" and not isinstance(number, int):
+                raise CaptureContractError("profile.plate_count must be an integer")
+            numbers[key] = number
+        raw_materials = value.get("materials", [])
+        if not isinstance(raw_materials, list) or len(raw_materials) > 64:
+            raise CaptureContractError("invalid profile.materials")
+        return cls(
+            id=_bounded_string(value["id"], "profile.id", MAX_ID_LENGTH),
+            name=_bounded_string(value["name"], "profile.name", 512),
+            origin=origin,
+            creator_relationship=relationship,
+            materials=tuple(
+                _bounded_string(item, "profile.material", 128) for item in raw_materials
+            ),
+            **texts,
+            **numbers,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        value = {"id": self.id, "name": self.name, "origin": self.origin}
+        for key in (
+            "author",
+            "creator_relationship",
+            "printer",
+            "estimated_seconds",
+            "filament_grams",
+            "plate_count",
+        ):
+            item = getattr(self, key)
+            if item is not None:
+                value[key] = item
+        if self.materials:
+            value["materials"] = list(self.materials)
+        return value
+
+
+@dataclass(frozen=True, slots=True)
+class CaptureManifestV3:
+    source: CaptureSource
+    files: tuple[CaptureFile, ...]
+    selected_ids: tuple[str, ...]
+    profiles: Mapping[str, CaptureProfile]
+    kind: Literal["model_files"] = "model_files"
+    schema_version: Literal[3] = 3
+
+    @classmethod
+    def from_dict(cls, data: Any) -> CaptureManifestV3:
+        value = _require_mapping(data, "manifest")
+        if value.get("schema_version") != 3 or "profiles" not in value:
+            raise CaptureContractError("manifest must be a version 3 capture")
+        base = CaptureManifestV2.from_dict(
+            {**{k: v for k, v in value.items() if k != "profiles"}, "schema_version": 2}
+        )
+        profiles = _require_mapping(value["profiles"], "profiles")
+        if not set(profiles) <= set(base.selected_ids):
+            raise CaptureContractError("profiles must belong to selected files")
+        manifest = cls(
+            source=base.source,
+            files=base.files,
+            selected_ids=base.selected_ids,
+            profiles={
+                key: CaptureProfile.from_dict(profile)
+                for key, profile in profiles.items()
+            },
+        )
+        if (
+            len(json.dumps(manifest.to_dict(), separators=(",", ":")).encode())
+            > MAX_MANIFEST_BYTES
+        ):
+            raise CaptureContractError("manifest exceeds maximum size")
+        return manifest
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": 3,
+            "kind": self.kind,
+            "source": self.source.to_dict(),
+            "files": [file.to_dict() for file in self.files],
+            "selected_ids": list(self.selected_ids),
+            "profiles": {
+                key: profile.to_dict() for key, profile in self.profiles.items()
+            },
+        }
+
+
+CaptureManifest = CaptureManifestV2 | CaptureManifestV3
+
+
+def parse_capture_manifest(data: Any) -> CaptureManifest:
+    value = _require_mapping(data, "manifest")
+    if value.get("schema_version") == 3:
+        return CaptureManifestV3.from_dict(value)
+    return CaptureManifestV2.from_dict(value)
+
+
+@dataclass(frozen=True, slots=True)
 class ResolvedAsset:
     """A selected external file with an in-memory-only download descriptor."""
 
-    manifest: CaptureManifestV2
+    manifest: CaptureManifest
     source_selection_id: str
     source_file_id: str | None
     source_filename: str
@@ -583,7 +777,7 @@ class StagedAsset:
         return self.resolved.source_selection_id
 
     @property
-    def manifest(self) -> CaptureManifestV2:
+    def manifest(self) -> CaptureManifest:
         return self.resolved.manifest
 
 
@@ -591,6 +785,10 @@ __all__ = [
     "CaptureContractError",
     "CaptureFile",
     "CaptureManifestV2",
+    "CaptureManifestV3",
+    "CaptureManifest",
+    "CaptureProfile",
+    "parse_capture_manifest",
     "CaptureSource",
     "CapturedField",
     "MAX_MANIFEST_BYTES",

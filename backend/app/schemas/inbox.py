@@ -28,7 +28,7 @@ class CaptureSourceDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: Literal[
-        "makerworld", "printables", "thingiverse", "myminifactory", "cults"
+        "makerworld", "printables", "thingiverse", "myminifactory", "cults", "thangs", "crealitycloud", "makeronline"
     ]
     canonical_url: str = Field(min_length=1, max_length=2048)
     source_item_id: str | None = Field(default=None, max_length=255)
@@ -62,6 +62,7 @@ class CaptureUploadFileDeclaration(BaseModel):
 class CaptureUploadSlotsCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    request_key: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
     source_url: str = Field(min_length=1, max_length=2048)
     capture_source: CaptureSourceDraft
     title: str | None = Field(default=None, max_length=255)
@@ -150,6 +151,23 @@ class CaptureManifestFileRead(BaseModel):
     size: int | None = None
 
 
+class CaptureProfileDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    id: str = Field(min_length=1, max_length=256)
+    name: str = Field(min_length=1, max_length=512)
+    origin: Literal["provider", "file"]
+    author: str | None = Field(default=None, min_length=1, max_length=512)
+    creator_relationship: Literal["model_creator", "other"] | None = None
+    printer: str | None = Field(default=None, min_length=1, max_length=512)
+    estimated_seconds: float | None = Field(
+        default=None, strict=True, gt=0, le=31622400
+    )
+    filament_grams: float | None = Field(default=None, strict=True, gt=0, le=1000000)
+    plate_count: int | None = Field(default=None, strict=True, gt=0, le=1000)
+    materials: list[str] = Field(default_factory=list, max_length=64)
+
+
 class CaptureManifestV2Read(BaseModel):
     """Strict additive read shape for a finalized rich capture manifest."""
 
@@ -162,17 +180,30 @@ class CaptureManifestV2Read(BaseModel):
     selected_ids: list[str]
 
 
+class CaptureManifestV3Read(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[3]
+    kind: Literal["model_files"]
+    source: CaptureSourceDraft
+    files: list[CaptureManifestFileRead]
+    selected_ids: list[str]
+    profiles: dict[str, CaptureProfileDraft]
+
+
 class LegacyInboxManifestRead(RootModel[dict[str, Any]]):
     """Compatibility wrapper for the pre-capture manifest variants."""
 
     @model_validator(mode="after")
     def reject_v2_fallback(self) -> LegacyInboxManifestRead:
-        if self.root.get("schema_version") == 2:
+        if self.root.get("schema_version") in (2, 3):
             raise ValueError("invalid_v2_capture_manifest")
         return self
 
 
-InboxManifestRead = CaptureManifestV2Read | LegacyInboxManifestRead
+InboxManifestRead = (
+    CaptureManifestV2Read | CaptureManifestV3Read | LegacyInboxManifestRead
+)
 
 
 class InboxItemRead(BaseModel):
@@ -201,3 +232,43 @@ class InboxItemRead(BaseModel):
 class CaptureUploadSlotsRead(BaseModel):
     item: InboxItemRead
     slots: list[CaptureUploadSlotRead]
+
+
+class CaptureRecoveryRead(CaptureUploadSlotsRead):
+    expires_at: datetime | None
+    recoverable: bool
+
+
+class CaptureSourceStatusRead(BaseModel):
+    id: int
+    state: InboxItemState
+    completion: InboxItemCompletion | None
+    updated_at: datetime
+
+
+class CaptureCapabilitiesRead(BaseModel):
+    schema_versions: list[int]
+    resumable_slots: bool
+    idempotent_requests: bool
+    storage: Literal["managed"]
+    max_files: int
+    max_file_bytes: int
+
+
+class CaptureSessionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2, 3] = 2
+    profiles: dict[str, CaptureProfileDraft] | None = Field(default=None, max_length=64)
+
+    @model_validator(mode="after")
+    def profile_version(self) -> CaptureSessionCreate:
+        if (self.schema_version == 3) != (self.profiles is not None):
+            raise ValueError("profiles_require_capture_version_3")
+        return self
+
+    request_key: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    source_url: str = Field(min_length=1, max_length=2048)
+    capture_source: CaptureSourceDraft
+    title: str | None = Field(default=None, max_length=255)
+    files: list[CaptureManifestFileRead] = Field(min_length=1, max_length=64)

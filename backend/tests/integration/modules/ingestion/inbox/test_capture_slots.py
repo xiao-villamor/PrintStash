@@ -1577,3 +1577,292 @@ class TestPublishedSlotInputCustody:
             assert session.get(StagingLease, lease_id) is None
             assert session.exec(select(IngestionScratchWindow)).all() == []
             assert session.exec(select(CapacityReservation)).all() == []
+
+
+class TestCaptureRecovery:
+    def test_replayed_request_keeps_uploaded_slots(self, db_session, make_user):
+        owner = make_user(superuser=True)
+        payload = _slot_payload().model_copy(update={"request_key": "same-request"})
+        first, slots = inbox.create_capture_upload_slots(db_session, owner, payload)
+        _upload(db_session, slots[0])
+        replay, recovered = inbox.create_capture_upload_slots(
+            db_session, owner, payload
+        )
+        assert replay.id == first.id
+        assert recovered[0].id == slots[0].id
+        assert recovered[0].state == CaptureUploadSlotState.UPLOADED
+
+    def test_request_key_is_owner_scoped(self, db_session, make_user):
+        payload = _slot_payload().model_copy(update={"request_key": "same-request"})
+        first, _ = inbox.create_capture_upload_slots(
+            db_session, make_user(superuser=True), payload
+        )
+        second, _ = inbox.create_capture_upload_slots(
+            db_session, make_user(superuser=True), payload
+        )
+        assert first.id != second.id
+
+    def test_reusing_key_with_changed_files_is_a_conflict(self, db_session, make_user):
+        owner = make_user(superuser=True)
+        payload = _slot_payload().model_copy(update={"request_key": "same-request"})
+        inbox.create_capture_upload_slots(db_session, owner, payload)
+        changed = _slot_payload(b"different").model_copy(
+            update={"request_key": "same-request"}
+        )
+        with pytest.raises(OperationError, match="capture_request_conflict"):
+            inbox.create_capture_upload_slots(db_session, owner, changed)
+
+    def test_lost_finalize_response_can_be_retried(self, db_session, make_user):
+        owner = make_user(superuser=True)
+        row, slots = inbox.create_capture_upload_slots(
+            db_session, owner, _slot_payload()
+        )
+        _upload(db_session, slots[0])
+        first = inbox.finalize_capture_upload(db_session, owner, row.id)
+        second = inbox.finalize_capture_upload(db_session, owner, row.id)
+        assert first.id == second.id
+        assert second.state == InboxItemState.REVIEW
+
+    def test_incremental_capture_requires_every_selected_file(
+        self, db_session, make_user
+    ):
+        from app.schemas.inbox import CaptureSessionCreate
+
+        owner = make_user(superuser=True)
+        declaration = _slot_payload().files[0]
+        payload = CaptureSessionCreate.model_validate(
+            {
+                "request_key": "incremental",
+                "source_url": _slot_payload().source_url,
+                "capture_source": _capture_source(),
+                "files": [
+                    {
+                        "id": declaration.id,
+                        "name": declaration.filename,
+                        "file_type": "3mf",
+                        "size": None,
+                    },
+                    {
+                        "id": "second",
+                        "name": "second.stl",
+                        "file_type": "stl",
+                        "size": None,
+                    },
+                ],
+            }
+        )
+        row = inbox.start_capture_session(db_session, owner, payload)
+        assert inbox.capture_recovery(db_session, owner, row.id).recoverable
+        slot = inbox.declare_capture_file(db_session, owner, row.id, declaration)
+        _upload(db_session, slot)
+        assert inbox.start_capture_session(db_session, owner, payload).id == row.id
+        recovery = inbox.capture_recovery(db_session, owner, row.id)
+        assert recovery.slots[0].state == "uploaded"
+        assert recovery.expires_at is not None
+        with pytest.raises(OperationError, match="capture_upload_slots_incomplete"):
+            inbox.finalize_capture_upload(db_session, owner, row.id)
+
+    def test_recovery_does_not_reveal_another_owners_capture(
+        self, db_session, make_user
+    ):
+        owner = make_user(superuser=True)
+        stranger = make_user(superuser=True)
+        row, _ = inbox.create_capture_upload_slots(db_session, owner, _slot_payload())
+        with pytest.raises(OperationError, match="pending_import_not_found"):
+            inbox.capture_recovery(db_session, stranger, row.id)
+        assert inbox.capture_source_status(db_session, stranger, row.source_url) == []
+        assert (
+            inbox.capture_source_status(db_session, owner, row.source_url)[0].id
+            == row.id
+        )
+
+    def test_resolver_leaves_browser_transfers_to_the_browser(
+        self, db_session, make_user
+    ):
+        from app.schemas.inbox import CaptureSessionCreate
+
+        owner = make_user(superuser=True)
+        payload = CaptureSessionCreate.model_validate(
+            {
+                "request_key": "browser-owned",
+                "source_url": _slot_payload().source_url,
+                "capture_source": _capture_source(),
+                "files": [
+                    {"id": "one", "name": "one.stl", "file_type": "stl", "size": None},
+                ],
+            }
+        )
+        row = inbox.start_capture_session(db_session, owner, payload)
+        pending = inbox.ResolveSource().pending(db_session, now=utcnow(), limit=20)
+        assert f"inbox_item/{row.id}" not in [work.subject_key for work in pending]
+        assert inbox._begin_resolve(row.id) == (False, None, None)
+
+    def test_expired_uploaded_slots_cannot_be_finalized(self, db_session, make_user):
+        owner = make_user(superuser=True)
+        row, slots = inbox.create_capture_upload_slots(
+            db_session, owner, _slot_payload()
+        )
+        _upload(db_session, slots[0])
+        lease = db_session.exec(
+            select(StagingLease).where(
+                StagingLease.capture_upload_slot_id == slots[0].id
+            )
+        ).one()
+        lease.expires_at = utcnow() - timedelta(seconds=1)
+        db_session.add(lease)
+        db_session.commit()
+        with pytest.raises(OperationError, match="staging_expired"):
+            inbox.finalize_capture_upload(db_session, owner, row.id)
+        db_session.refresh(row)
+        assert row.state == InboxItemState.CAPTURED
+
+    @pytest.mark.parametrize(
+        "filename", ["../outside.stl", "folder/part.stl", "folder\\part.stl", ".", ".."]
+    )
+    def test_incremental_capture_rejects_path_filenames(
+        self, db_session, make_user, filename
+    ):
+        from app.schemas.inbox import CaptureSessionCreate
+
+        payload = CaptureSessionCreate.model_validate(
+            {
+                "request_key": "unsafe-name",
+                "source_url": _slot_payload().source_url,
+                "capture_source": _capture_source(),
+                "files": [
+                    {"id": "one", "name": filename, "file_type": "stl", "size": None},
+                ],
+            }
+        )
+        with pytest.raises(ValueError, match="invalid_capture_filename"):
+            inbox.start_capture_session(db_session, make_user(superuser=True), payload)
+        assert (
+            db_session.exec(
+                select(InboxItem).where(InboxItem.capture_request_key == "unsafe-name")
+            ).all()
+            == []
+        )
+
+    def test_abandoned_empty_capture_session_expires(self, db_session, make_user):
+        from app.schemas.inbox import CaptureSessionCreate
+
+        payload = CaptureSessionCreate.model_validate(
+            {
+                "request_key": "abandoned",
+                "source_url": _slot_payload().source_url,
+                "capture_source": _capture_source(),
+                "files": [
+                    {"id": "one", "name": "one.stl", "file_type": "stl", "size": None},
+                ],
+            }
+        )
+        row = inbox.start_capture_session(
+            db_session, make_user(superuser=True), payload
+        )
+        row.created_at = utcnow() - timedelta(days=365)
+        db_session.add(row)
+        db_session.commit()
+        inbox.prune_expired_browser_leases()
+        db_session.refresh(row)
+        assert (row.state, row.error_code, row.retryable) == (
+            InboxItemState.FAILED,
+            "staging_expired",
+            False,
+        )
+
+    def test_source_status_matches_the_publication_across_locales(
+        self, db_session, make_user
+    ):
+        owner = make_user(superuser=True)
+        row, _ = inbox.create_capture_upload_slots(db_session, owner, _slot_payload())
+        matches = inbox.capture_source_status(
+            db_session,
+            owner,
+            "https://makerworld.com/es/models/1234-renamed?from=recommend#profileId-1",
+        )
+        assert [match.id for match in matches] == [row.id]
+        assert (
+            inbox.capture_source_status(
+                db_session, owner, "https://makerworld.com/es/models/12345-other"
+            )
+            == []
+        )
+
+
+class TestCaptureSessionMetadata:
+    def test_recovery_keeps_the_first_snapshot_when_provider_estimates_change(
+        self, db_session, make_user
+    ):
+        from app.schemas.inbox import CaptureSessionCreate
+
+        owner = make_user(superuser=True)
+        raw = {
+            "request_key": "stable-profile-request",
+            "source_url": _slot_payload().source_url,
+            "capture_source": _capture_source(),
+            "schema_version": 3,
+            "files": [
+                {
+                    "id": "profile",
+                    "name": "profile.3mf",
+                    "file_type": "other",
+                    "size": None,
+                }
+            ],
+            "profiles": {
+                "profile": {
+                    "id": "profile",
+                    "name": "First name",
+                    "origin": "provider",
+                    "estimated_seconds": 300,
+                }
+            },
+        }
+        first = inbox.start_capture_session(
+            db_session, owner, CaptureSessionCreate.model_validate(raw)
+        )
+        raw["profiles"]["profile"]["estimated_seconds"] = 600
+        raw["title"] = "Provider changed the page title"
+        replay = inbox.start_capture_session(
+            db_session, owner, CaptureSessionCreate.model_validate(raw)
+        )
+        assert replay.id == first.id
+        assert (
+            json.loads(replay.manifest_json)["profiles"]["profile"]["estimated_seconds"]
+            == 300
+        )
+
+    def test_oversized_declaration_does_not_reserve_staging(
+        self, db_session, make_user
+    ):
+        from app.core.config import settings
+        from app.schemas.inbox import CaptureSessionCreate
+
+        owner = make_user(superuser=True)
+        declaration = _slot_payload().files[0]
+        payload = CaptureSessionCreate.model_validate(
+            {
+                "request_key": "oversized",
+                "source_url": _slot_payload().source_url,
+                "capture_source": _capture_source(),
+                "files": [
+                    {
+                        "id": declaration.id,
+                        "name": declaration.filename,
+                        "file_type": "other",
+                        "size": None,
+                    }
+                ],
+            }
+        )
+        row = inbox.start_capture_session(db_session, owner, payload)
+        with pytest.raises(ValueError, match="file_too_large"):
+            inbox.declare_capture_file(
+                db_session,
+                owner,
+                row.id,
+                declaration.model_copy(
+                    update={"size_bytes": settings.max_upload_bytes + 1}
+                ),
+            )
+        assert inbox.capture_recovery(db_session, owner, row.id).slots == []

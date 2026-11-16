@@ -2531,6 +2531,20 @@ class TestPortableProvenanceContextsV2:
     def test_builds_a_context_for_each_artifact_link(self) -> None:
         assert list(self._contexts(self._sidecar())) == [(7, 11)]
 
+    def test_profile_estimates_survive_portable_provenance(self) -> None:
+        profile = {
+            "id": "shelf",
+            "name": "Shelf",
+            "origin": "provider",
+            "estimated_seconds": 30277,
+        }
+        snapshot = self._snapshot(profiles={"42:cube": profile})
+        (context, _overrides) = self._contexts(self._sidecar(snapshot=snapshot))[
+            (7, 11)
+        ][0]
+        assert context.manifest.to_dict()["profiles"]["42:cube"] == profile
+        assert context.manifest.schema_version == 3
+
     def test_carries_the_whole_capture_snapshot(self) -> None:
         (context, _overrides) = self._contexts(self._sidecar())[(7, 11)][0]
 

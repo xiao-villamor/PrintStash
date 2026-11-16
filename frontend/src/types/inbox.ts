@@ -62,7 +62,7 @@ export interface InboxCapturedField {
   origin: "confirmed" | "inferred";
 }
 
-export type InboxManifest = InboxManifestV1 | InboxManifestV2;
+export type InboxManifest = InboxManifestV1 | InboxManifestV2 | InboxManifestV3;
 
 export interface InboxItemResult {
   id: number;
@@ -100,4 +100,21 @@ export interface InboxItem {
   updated_at: string;
   completed_at: string | null;
   completion: InboxItemCompletion | null;
+}
+
+export interface CaptureProfile {
+  id: string;
+  name: string;
+  origin: "provider" | "file";
+  author?: string | null;
+  creator_relationship?: "model_creator" | "other" | null;
+  printer?: string | null;
+  estimated_seconds?: number | null;
+  filament_grams?: number | null;
+  plate_count?: number | null;
+  materials?: string[];
+}
+export interface InboxManifestV3 extends Omit<InboxManifestV2, "schema_version"> {
+  schema_version: 3;
+  profiles: Record<string, CaptureProfile>;
 }

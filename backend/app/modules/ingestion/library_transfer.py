@@ -14,7 +14,11 @@ from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Literal
 
-from printstash_core.imports import CaptureContractError, CaptureManifestV2
+from printstash_core.imports import (
+    CaptureContractError,
+    CaptureManifestV2,
+    parse_capture_manifest,
+)
 from printstash_core.mesh.measurements import encode_volume
 from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic import Field as PydanticField
@@ -1142,6 +1146,8 @@ def _portable_v2_provenance_contexts(
                 "fields",
                 "files",
             }
+            if "profiles" in snapshot:
+                snapshot_keys.add("profiles")
             if set(snapshot) != snapshot_keys:
                 raise ValueError("portable_provenance_invalid")
             encoded_snapshot = json.dumps(
@@ -1262,7 +1268,10 @@ def _portable_v2_provenance_contexts(
             if matched_artifacts != {link["artifact_source_id"] for link in links}:
                 raise ValueError("portable_provenance_invalid")
             raw_manifest = {
-                "schema_version": 2,
+                "schema_version": 3 if "profiles" in snapshot else 2,
+                **(
+                    {"profiles": snapshot["profiles"]} if "profiles" in snapshot else {}
+                ),
                 "kind": "model_files",
                 "source": {
                     "provider": snapshot["provider"],
@@ -1277,7 +1286,7 @@ def _portable_v2_provenance_contexts(
                 "selected_ids": [file["id"] for file in raw_files],
             }
             try:
-                capture_manifest = CaptureManifestV2.from_dict(raw_manifest)
+                capture_manifest = parse_capture_manifest(raw_manifest)
             except CaptureContractError, TypeError, ValueError:
                 raise ValueError("portable_provenance_invalid") from None
             for link in links:

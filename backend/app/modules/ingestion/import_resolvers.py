@@ -367,11 +367,51 @@ def classify_page(url: str) -> str | None:
     parts = urlsplit(url)
     host = (parts.hostname or "").lower().removeprefix("www.")
     path = parts.path.strip("/").split("/")
+    browser_provider = {
+        "thangs.com": "thangs",
+        "crealitycloud.com": "crealitycloud",
+        "makeronline.com": "makeronline",
+    }.get(host)
+    if browser_provider is not None:
+        try:
+            canonicalize_provider_url(browser_provider, url)
+        except CaptureContractError:
+            return None
+        return browser_provider
     if host == "myminifactory.com" and len(path) >= 2 and path[0] == "object":
         return "myminifactory"
     if host == "cults3d.com" and "3d-model" in path:
         return "cults"
     return None
+
+
+def publication_identity(url: str) -> tuple[str, str] | None:
+    """Public model identity, independent of locale and selected profile."""
+    provider = classify_page(url)
+    extractors = {
+        "printables": _resolver_rules.printables_id,
+        "makerworld": _resolver_rules.makerworld_id,
+        "thingiverse": _resolver_rules.thingiverse_id,
+    }
+    if provider in extractors:
+        item_id = extractors[provider](url)
+        return (provider, str(item_id)) if item_id is not None else None
+    if provider not in {"thangs", "crealitycloud", "makeronline"}:
+        return None
+    # The core contract validates the entire route and host before extracting
+    # an identity. Slugs from an unrelated page must never match a publication.
+    try:
+        canonical = canonicalize_provider_url(provider, url)
+    except CaptureContractError:
+        return None
+    segment = urlsplit(canonical).path.rstrip("/").rsplit("/", 1)[-1]
+    if provider == "thangs":
+        item_id = segment.rsplit("-", 1)[-1]
+    elif provider == "makeronline":
+        item_id = segment.removesuffix(".html")
+    else:
+        item_id = segment
+    return provider, item_id
 
 
 _looks_like_download = _resolver_rules.looks_like_download

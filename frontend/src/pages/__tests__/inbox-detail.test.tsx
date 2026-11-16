@@ -155,7 +155,7 @@ describe("InboxDetailPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    expect(await screen.findByRole("combobox", { name: "Destination" })).toHaveValue("new");
+    expect(await screen.findByRole("combobox", { name: "Collection" })).toHaveValue("new");
     expect(screen.getByRole("textbox", { name: "Collection name" })).toHaveValue(
       "Calibration cube",
     );
@@ -312,7 +312,7 @@ describe("InboxDetailPage", () => {
     const user = userEvent.setup();
     renderPage([parts]);
 
-    await user.selectOptions(await screen.findByRole("combobox", { name: "Destination" }), "pick");
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Collection" }), "pick");
     expect(screen.getByRole("button", { name: "Import selected" })).toBeDisabled();
     await user.click(await screen.findByRole("option", { name: /Parts/ }));
     await user.click(screen.getByRole("button", { name: "Import selected" }));
@@ -341,7 +341,7 @@ describe("InboxDetailPage", () => {
     vi.mocked(api.getPendingImport).mockResolvedValue({ ...reviewItem, target_collection_id: 12 });
     renderPage([parts]);
 
-    const destination = await screen.findByRole("combobox", { name: "Destination" });
+    const destination = await screen.findByRole("combobox", { name: "Collection" });
     await waitFor(() =>
       expect(within(destination).getByRole("option", { name: "Parts" })).toBeVisible(),
     );
@@ -389,6 +389,7 @@ describe("InboxDetailPage", () => {
       ...reviewItem,
       state: "completed",
       completion: "partial",
+      retryable: true,
       results: [
         {
           id: 11,
@@ -412,6 +413,7 @@ describe("InboxDetailPage", () => {
     renderPage();
 
     expect(await screen.findByText("Partial")).toBeInTheDocument();
+    expect(screen.getByText(/Retry failed files to try this file again/)).toBeInTheDocument();
     const retry = screen.getByRole("button", { name: "Retry failed files" });
     await userEvent.setup().click(retry);
     expect(api.retryPendingImport).toHaveBeenCalledWith(7);
@@ -450,7 +452,7 @@ describe("InboxDetailPage", () => {
     );
     expect(screen.getByText("Archivos para importar")).toBeInTheDocument();
     expect(screen.getByLabelText("Seleccionar cube.stl")).toBeChecked();
-    expect(screen.getByText("Destino")).toBeInTheDocument();
+    expect(screen.getByText("Colección")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("separadas por comas")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Importar seleccionados" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Eliminar importación" })).toBeInTheDocument();
@@ -463,7 +465,7 @@ describe("InboxDetailPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    const destination = await screen.findByRole("combobox", { name: "Destination" });
+    const destination = await screen.findByRole("combobox", { name: "Collection" });
     for (let step = 0; step < 20 && document.activeElement !== destination; step += 1) {
       await user.tab();
     }

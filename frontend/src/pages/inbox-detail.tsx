@@ -1,3 +1,5 @@
+import { ProfileFacts } from "@/components/model-detail/profile-facts";
+import { CaptureSourceSummary } from "@/components/model-detail/source-summary";
 import { useTaxonomyCommands } from "@/features/library/taxonomy";
 import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
@@ -99,7 +101,7 @@ function resultLabel(result: InboxItem["results"][number], t: ReturnType<typeof 
 }
 
 function capturedTitle(item: InboxItem): string | null {
-  if (item.manifest.schema_version === 2) {
+  if (item.manifest.schema_version === 2 || item.manifest.schema_version === 3) {
     const title = item.manifest.source.fields.title?.value.trim();
     if (title) return title;
   }
@@ -108,7 +110,7 @@ function capturedTitle(item: InboxItem): string | null {
 
 function providerLabel(item: InboxItem): string {
   const provider =
-    item.manifest.schema_version === 2
+    item.manifest.schema_version === 2 || item.manifest.schema_version === 3
       ? item.manifest.source.provider
       : item.source_hostname?.split(".").at(-2);
   if (!provider) return uiText("Web");
@@ -366,6 +368,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
                 {timeAgo(item.created_at)}
               </time>
             </p>
+            <CaptureSourceSummary manifest={item.manifest} />
             {item.source_url && !sourceUrl && (
               <p className="mt-2 truncate text-xs text-muted-foreground">{item.source_url}</p>
             )}
@@ -397,6 +400,11 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
             className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
           >
             {getErrorMessage(item.error_code)}
+            {item.error_code === "staging_expired" && sourceUrl && (
+              <a className="ml-2 underline" href={sourceUrl} target="_blank" rel="noreferrer">
+                {uiText("Return to the source and capture the files again")}
+              </a>
+            )}
           </div>
         )}
         {item.state === "importing" && (
@@ -439,9 +447,13 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
                           ariaLabel={t("inbox.selectFile", { name: file.name })}
                         />
 
-                        <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                          {file.name}
-                        </span>
+                        <div className="min-w-0 flex-1 text-sm font-medium">
+                          <span className="block truncate">{file.name}</span>
+                          {item.manifest.schema_version === 3 &&
+                            item.manifest.profiles[file.id] && (
+                              <ProfileFacts profile={item.manifest.profiles[file.id]} />
+                            )}
+                        </div>
                         <span className="shrink-0 text-xs uppercase text-muted-foreground">
                           {file.file_type} · {formatBytes(file.size)}
                         </span>
@@ -463,7 +475,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
               </CardHeader>
               <CardContent className="space-y-5 p-5">
                 <label className="block text-sm font-medium">
-                  {t("inbox.destination")}
+                  {uiText("Collection")}
                   <select
                     value={destination}
                     onChange={(event) => setDestination(event.target.value)}
@@ -520,6 +532,9 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
                     </p>
                   </div>
                 )}
+                <p className="text-xs text-muted-foreground">
+                  {uiText("Storage: managed Vault. Changing the collection does not move files.")}
+                </p>
                 <label className="block text-sm font-medium">
                   <span>{t("inbox.tags")}</span>
                   <Input
@@ -559,11 +574,20 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
             <CardContent className="space-y-3 p-5">
               <h2 className="text-sm font-medium">{t("inbox.results")}</h2>
               {item.results.map((result) => (
-                <div key={result.id} className="flex items-center gap-2 text-sm">
+                <div key={result.id} className="flex flex-wrap items-center gap-2 text-sm">
                   <Badge variant={result.state === "failed" ? "destructive" : "success"}>
                     {resultLabel(result, t)}
                   </Badge>
                   <span>{result.original_filename}</span>
+                  {result.error_code && (
+                    <p className="w-full text-sm text-destructive">
+                      {getErrorMessage(result.error_code)}
+                      {" · "}
+                      {result.retryable && item.error_code !== "staging_expired"
+                        ? uiText("Retry failed files to try this file again.")
+                        : uiText("Return to the source and capture the files again")}
+                    </p>
+                  )}
                   {result.model_id && (
                     <Link
                       className="text-primary hover:underline"
@@ -575,6 +599,8 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
                 </div>
               ))}
               {item.completion === "partial" &&
+                item.retryable &&
+                item.error_code !== "staging_expired" &&
                 item.results.some((result) => result.state === "failed" && result.retryable) && (
                   <Button size="sm" variant="outline" onClick={() => void retry()}>
                     {t("inbox.retryFailedFiles")}
@@ -583,7 +609,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
             </CardContent>
           </Card>
         )}
-        {item.state === "failed" && item.retryable && (
+        {item.state === "failed" && item.retryable && item.error_code !== "staging_expired" && (
           <Button variant="outline" onClick={() => void retry()}>
             {t("inbox.retry")}
           </Button>

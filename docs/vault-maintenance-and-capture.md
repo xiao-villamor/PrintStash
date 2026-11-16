@@ -58,6 +58,26 @@ Resolver requests are SSRF-guarded and provider traffic is bounded: requests
 use approved public endpoints, limited redirects and retries, and bounded
 concurrency. Capture code does not log provider payloads or credentials.
 
+## Recovering individual browser captures
+
+Enable the marketplace panel independently for each supported site. Hiding it
+keeps the transfer running; reloading the page requires recovery. With a compatible
+server, reselecting the same files recovers verified uploads until their staging
+leases expire. Provider metadata may have changed in the meantime: recovery keeps
+the original capture snapshot. It never persists signed download links or model
+bytes in extension storage.
+
+Transfer completion leads to that capture's review page. A partial import shows
+all results and file-specific errors. Retry retains successful results; expired
+staging instead requires returning to the source for fresh bytes. Collection
+selection organizes Models, while browser captures use managed Vault storage.
+
+MakerWorld profiles can carry explicit provider estimates and creator/printer
+information. Review and Model details distinguish their source from measured
+print outcomes. **Profiles from this publication** links only readable Models and
+the exact original Artifact. Original source terms and user corrections remain
+separate in the Source tab and portable provenance.
+
 ## Provider connections and browser pairing
 
 Provider connections are per user. In Settings, connect MyMiniFactory through

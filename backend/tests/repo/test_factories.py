@@ -545,6 +545,29 @@ class TestCaptureManifests:
         assert source["source_item_id"]
 
 
+class TestBuildInboxItem:
+    def test_retains_capture_recovery_identity(self, db_session: Session) -> None:
+        user = factories.build_user(db_session)
+
+        item = factories.build_inbox_item(
+            db_session,
+            user,
+            capture_request_key="test-request",
+            source_identity_key="a" * 64,
+        )
+
+        assert item.capture_request_key == "test-request"
+        assert item.source_identity_key == "a" * 64
+
+    def test_preserves_legacy_missing_identity(self, db_session: Session) -> None:
+        user = factories.build_user(db_session)
+
+        item = factories.build_inbox_item(db_session, user)
+
+        assert item.capture_request_key is None
+        assert item.source_identity_key is None
+
+
 class TestBuildCaptureSlot:
     def test_uploaded_gives_the_slot_bytes_the_import_path_can_find(
         self, db_session: Session

@@ -1,7 +1,8 @@
+import { renderApp, json } from "@/test-support/render";
 /* Model facts belong to the source file. Missing geometry stays unknown, zero
  * stays zero, and untrusted legacy source URLs never become executable links. */
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ModelInformation } from "../model-information";
 import { aMetadata, aModel, aRevision } from "@/test-support/factories";
@@ -12,7 +13,7 @@ function show(
   sourceFile: FileRead | null = null,
   canEdit = false,
 ) {
-  return render(
+  return renderApp(
     <ModelInformation
       model={aModel({ source_url: sourceUrl })}
       sourceFile={sourceFile}
@@ -20,6 +21,17 @@ function show(
       onEdit={() => {}}
       onTags={() => {}}
     />,
+    {
+      routes: {
+        "GET /api/v1/models/1/provenance": json({
+          edit_epoch: "a".repeat(32),
+          edit_version: 1,
+          sources: [],
+        }),
+        "GET /api/v1/files/1/derivatives": json([]),
+        "GET /api/v1/models/1/related-profiles": json({ items: [], has_more: false }),
+      },
+    },
   );
 }
 

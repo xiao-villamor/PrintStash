@@ -1,3 +1,5 @@
+import { sourcePublication, type SourceProviderCode } from "./source-providers.ts";
+import type { CaptureProfile } from "./print-profile.ts";
 const FIELD_LIMITS = {
   title: 512,
   description: 64 * 1024,
@@ -73,6 +75,10 @@ const PROVIDER_CODES = {
   MakerWorld: "makerworld",
   Thingiverse: "thingiverse",
   Cults: "cults",
+  MyMiniFactory: "myminifactory",
+  Thangs: "thangs",
+  "Creality Cloud": "crealitycloud",
+  MakerOnline: "makeronline",
 };
 type JsonRecord = Record<string, unknown>;
 
@@ -104,6 +110,8 @@ function canonicalUrl(value: unknown): string | null {
 }
 
 function sourceItemId(provider: keyof typeof PROVIDER_CODES, pageUrl: string): string | null {
+  const publication = sourcePublication(pageUrl);
+  if (publication?.label === provider) return publication.itemId;
   const pathname = new URL(pageUrl).pathname;
   if (provider === "Printables") return pathname.match(/\/model\/(\d+)/)?.[1] || null;
   if (provider === "MakerWorld") return pathname.match(/\/models\/(\d+)/)?.[1] || null;
@@ -268,7 +276,7 @@ export interface CaptureSourceTextField {
 export type CaptureSourceField = CaptureSourceTextField;
 
 export interface CaptureSourceDraft {
-  provider: "printables" | "makerworld" | "thingiverse" | "cults";
+  provider: SourceProviderCode;
   canonical_url: string;
   source_item_id: string | null;
   source_revision: string | null;
@@ -305,6 +313,7 @@ export interface BrowserCaptureMessage {
     fileType: "stl" | "gcode" | "sla" | "other";
     mediaType?: string;
     sizeBytes?: number;
+    profile?: CaptureProfile;
   }>;
 }
 
@@ -390,8 +399,7 @@ export function buildBrowserCaptureMessage({
     else add(fields, "license_code", license);
   }
   const candidates: BrowserCaptureMessage["candidates"] = [];
-  const manualFileRequired =
-    providerCode === "thingiverse" || providerCode === "cults" || providerCode === "printables";
+  const manualFileRequired = providerCode !== "makerworld";
 
   return {
     schema_version: 2,
@@ -401,11 +409,9 @@ export function buildBrowserCaptureMessage({
     ...(manualFileRequired
       ? {
           message:
-            providerCode === "thingiverse"
-              ? "Choose a downloaded Thingiverse file to attach it to this metadata draft."
-              : providerCode === "cults"
-                ? "Choose a downloaded Cults file to attach it to this metadata draft."
-                : "Choose a downloaded Printables file to attach it in Pending Imports.",
+            provider === "Printables"
+              ? "Choose a downloaded Printables file to attach it in Pending Imports."
+              : `Choose a downloaded ${provider} file to attach it to this metadata draft.`,
           manual_file: {
             mapping: "user_selected_file",
             source_item_id: sourceItemId(provider, canonical),

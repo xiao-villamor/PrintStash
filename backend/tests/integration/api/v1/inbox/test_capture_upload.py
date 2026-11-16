@@ -140,6 +140,58 @@ def slots(client: TestClient, staging):
 
 
 class TestCreateCaptureUploadSlots:
+    @pytest.mark.parametrize(
+        ("provider", "url", "item_id"),
+        [
+            pytest.param(
+                "myminifactory",
+                "https://www.myminifactory.com/object/3d-print-cube-123",
+                "3d-print-cube-123",
+                id="myminifactory",
+            ),
+            pytest.param(
+                "cults", "https://cults3d.com/en/3d-model/tool/cube", "cube", id="cults"
+            ),
+            pytest.param(
+                "thangs",
+                "https://thangs.com/designer/Test%20Maker/3d-model/Test%20Cube-123",
+                "123",
+                id="thangs",
+            ),
+            pytest.param(
+                "crealitycloud",
+                "https://www.crealitycloud.com/en/model-detail/test-cube",
+                "test-cube",
+                id="crealitycloud",
+            ),
+            pytest.param(
+                "makeronline",
+                "https://www.makeronline.com/en/model/Test%20Cube/123.html",
+                "123",
+                id="makeronline",
+            ),
+        ],
+    )
+    def test_accepts_a_browser_only_provider_source(
+        self, client, user_headers, staging, provider, url, item_id
+    ):
+        payload = _create_payload()
+        payload["source_url"] = url
+        payload["capture_source"].update(
+            provider=provider, canonical_url=url, source_item_id=item_id
+        )
+
+        response = client.post(
+            "/api/v1/inbox/capture-upload-slots",
+            headers=user_headers("marketplace-capture"),
+            json=payload,
+        )
+
+        assert response.status_code == 201, response.text
+        source = response.json()["item"]["manifest"]["source"]
+        assert source["provider"] == provider
+        assert source["canonical_url"] == url
+
     def test_oversized_batch_rolls_back_earlier_slot_reservations(
         self,
         client: TestClient,
@@ -1370,3 +1422,133 @@ class TestCaptureCommandOwnership:
             with suppress(asyncio.CancelledError):
                 await asyncio.wait_for(request, timeout=5)
             cleanup.close()
+
+
+class TestCaptureCapabilitiesAuthorization:
+    @pytest.mark.parametrize(
+        "method,path",
+        [
+            ("get", "/api/v1/inbox/capture-capabilities"),
+            (
+                "get",
+                "/api/v1/inbox/capture-source-status?source_url=https://www.printables.com/model/123",
+            ),
+            ("get", "/api/v1/inbox/1/capture-upload"),
+            ("post", "/api/v1/inbox/capture-sessions"),
+            ("post", "/api/v1/inbox/1/capture-files"),
+        ],
+    )
+    def test_requires_authenticated_importer(self, client, method, path):
+        assert client.request(method, path).status_code == 401
+
+
+class TestBrowserArchiveImport:
+    @pytest.mark.parametrize("materialization", ["local", "streamed"])
+    def test_expands_a_browser_zip_into_original_mesh_artifacts(
+        self,
+        client,
+        user_headers,
+        staging,
+        local_storage,
+        work_engine,
+        monkeypatch,
+        materialization,
+    ):
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from tests.factories.content import binary_stl, zip_bytes
+
+        backend = get_backend()
+        direct_path = backend.direct_path
+        paths = {
+            "local": direct_path,
+            "streamed": lambda key: None if "capture" in key else direct_path(key),
+        }
+
+        first = binary_stl(triangles=10)
+        second = binary_stl(triangles=20)
+        body = zip_bytes({"parts/first.stl": first, "parts/second.stl": second})
+        payload = _create_payload(body)
+        payload["files"][0].update(id="package", filename="parts.zip")
+        headers = user_headers("browser-archive", is_superuser=True)
+        created = client.post(
+            "/api/v1/inbox/capture-upload-slots", headers=headers, json=payload
+        )
+        assert created.status_code == 201, created.text
+        item_id = created.json()["item"]["id"]
+        slot = created.json()["slots"][0]
+        uploaded = client.put(
+            f"/api/v1/inbox/capture-upload-slots/{slot['id']}",
+            headers={**headers, **OCTET},
+            content=body,
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        finalized = client.post(
+            f"/api/v1/inbox/{item_id}/capture-upload-finalize", headers=headers
+        )
+        assert finalized.status_code == 200, finalized.text
+        monkeypatch.setattr(backend, "direct_path", paths[materialization])
+
+        imported = client.post(
+            f"/api/v1/inbox/{item_id}/import",
+            headers=headers,
+            json={"selected_ids": ["package"]},
+        )
+        assert imported.status_code == 200, imported.text
+        work_engine.drain()
+
+        receipt = client.get(f"/api/v1/inbox/{item_id}", headers=headers).json()
+        assert receipt["state"] == "completed", receipt
+        assert {r["original_filename"] for r in receipt["results"]} == {
+            "first.stl",
+            "second.stl",
+        }
+        artifacts = [
+            client.get(
+                f"/api/v1/files/{r['file_id']}/download", headers=headers
+            ).content
+            for r in receipt["results"]
+        ]
+        assert {hashlib.sha256(data).hexdigest() for data in artifacts} == {
+            hashlib.sha256(first).hexdigest(),
+            hashlib.sha256(second).hexdigest(),
+        }
+
+    def test_rejects_unsafe_paths_inside_a_browser_zip(
+        self, client, user_headers, staging, local_storage, work_engine
+    ):
+        from tests.factories.content import binary_stl, zip_bytes
+
+        body = zip_bytes({"../outside.stl": binary_stl()})
+        payload = _create_payload(body)
+        payload["files"][0].update(id="package", filename="unsafe.zip")
+        headers = user_headers("unsafe-browser-archive", is_superuser=True)
+        created = client.post(
+            "/api/v1/inbox/capture-upload-slots", headers=headers, json=payload
+        )
+        assert created.status_code == 201, created.text
+        item_id = created.json()["item"]["id"]
+        slot_id = created.json()["slots"][0]["id"]
+        uploaded = client.put(
+            f"/api/v1/inbox/capture-upload-slots/{slot_id}",
+            headers={**headers, **OCTET},
+            content=body,
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        finalized = client.post(
+            f"/api/v1/inbox/{item_id}/capture-upload-finalize", headers=headers
+        )
+        assert finalized.status_code == 200, finalized.text
+
+        imported = client.post(
+            f"/api/v1/inbox/{item_id}/import",
+            headers=headers,
+            json={"selected_ids": ["package"]},
+        )
+        assert imported.status_code == 200, imported.text
+        work_engine.drain()
+
+        receipt = client.get(f"/api/v1/inbox/{item_id}", headers=headers).json()
+        assert receipt["state"] == "failed", receipt
+        assert [
+            (r["model_id"], r["file_id"], r["error_code"]) for r in receipt["results"]
+        ] == [(None, None, "archive_unsafe_entry")]

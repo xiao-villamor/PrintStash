@@ -1046,3 +1046,31 @@ class TestConditionalProvenance:
 
         assert response.status_code == 200, response.text
         assert response.json()["edit_version"] == 1
+
+
+class TestRelatedProfilesAuthorization:
+    def test_requires_authentication(self, client, model):
+        assert (
+            client.get(f"/api/v1/models/{model.id}/related-profiles").status_code == 401
+        )
+
+    def test_requires_access_to_the_requested_model(
+        self, client, model, db_session, make_user, headers_for
+    ):
+        private = build_collection(
+            db_session,
+            name="Private profiles",
+            slug="private-profiles",
+            path="private-profiles",
+        )
+        model.collection_id = private.id
+        db_session.add(model)
+        db_session.commit()
+        outsider = make_user("profile-outsider")
+        assert (
+            client.get(
+                f"/api/v1/models/{model.id}/related-profiles",
+                headers=headers_for(outsider),
+            ).status_code
+            == 403
+        )

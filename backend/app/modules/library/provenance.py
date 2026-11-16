@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Literal, Mapping
 from urllib.parse import urlsplit, urlunsplit
 
-from printstash_core.imports import CapturedField, CaptureManifestV2
+from printstash_core.imports import CapturedField, CaptureManifest, CaptureManifestV3
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -93,7 +93,7 @@ def _field_snapshot(value: CapturedField) -> dict[str, str]:
     return {"origin": value.origin, "value": _normalise_text(value.value)}
 
 
-def normalized_snapshot(manifest: CaptureManifestV2) -> dict:
+def normalized_snapshot(manifest: CaptureManifest) -> dict:
     """The exact allowlisted structure that is serialized and hashed."""
     return {
         "provider": _bounded(manifest.source.provider, 64, "provider"),
@@ -109,6 +109,15 @@ def normalized_snapshot(manifest: CaptureManifestV2) -> dict:
             name: _field_snapshot(value)
             for name, value in sorted(manifest.source.fields.items())
         },
+        **(
+            {
+                "profiles": {
+                    key: profile.to_dict() for key, profile in manifest.profiles.items()
+                }
+            }
+            if isinstance(manifest, CaptureManifestV3)
+            else {}
+        ),
         "files": [
             {
                 "source_selection_id": _normalise_text(item.id),
@@ -120,15 +129,15 @@ def normalized_snapshot(manifest: CaptureManifestV2) -> dict:
     }
 
 
-def snapshot_json(manifest: CaptureManifestV2) -> str:
+def snapshot_json(manifest: CaptureManifest) -> str:
     return _canonical_json(normalized_snapshot(manifest))
 
 
-def snapshot_sha256(manifest: CaptureManifestV2) -> str:
+def snapshot_sha256(manifest: CaptureManifest) -> str:
     return hashlib.sha256(snapshot_json(manifest).encode("utf-8")).hexdigest()
 
 
-def identity_key(manifest: CaptureManifestV2) -> str:
+def identity_key(manifest: CaptureManifest) -> str:
     stable = manifest.source.source_item_id or canonicalize_url(
         manifest.source.canonical_url
     )
@@ -146,7 +155,7 @@ def _identity_key(provider: str, stable: str) -> str:
 
 
 def _source_values(
-    manifest: CaptureManifestV2,
+    manifest: CaptureManifest,
 ) -> tuple[str, str | None, str, str | None]:
     provider = _bounded(manifest.source.provider, 64, "provider")
     assert provider is not None
@@ -159,7 +168,7 @@ def _source_values(
 
 
 def import_key(
-    manifest: CaptureManifestV2,
+    manifest: CaptureManifest,
     *,
     source_file_id: str | None,
     source_filename: str,
@@ -217,7 +226,7 @@ def finish_storage_retirements(
 
 @dataclass(frozen=True)
 class ProvenanceContext:
-    manifest: CaptureManifestV2
+    manifest: CaptureManifest
     source_file_id: str | None
     source_filename: str
     source_selection_id: str | None = None
@@ -376,7 +385,7 @@ def upsert_capture(
     session: Session,
     *,
     model_id: int,
-    manifest: CaptureManifestV2,
+    manifest: CaptureManifest,
     inbox_item_id: int | None = None,
     actor_id: int | None = None,
     update_captured_fields: bool = True,

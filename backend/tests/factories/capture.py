@@ -87,6 +87,8 @@ def build_inbox_item(
     state: InboxItemState = InboxItemState.CAPTURED,
     source_kind: InboxSourceKind = InboxSourceKind.URL,
     manifest: dict[str, Any] | None = None,
+    capture_request_key: str | None = None,
+    source_identity_key: str | None = None,
     **overrides: Any,
 ) -> InboxItem:
     """A pending import owned by *owner*.
@@ -105,6 +107,8 @@ def build_inbox_item(
             owner_user_id=owner.id,
             source_kind=source_kind,
             state=state,
+            capture_request_key=capture_request_key,
+            source_identity_key=source_identity_key,
             **overrides,
         ),
     )
