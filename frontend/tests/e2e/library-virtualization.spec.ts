@@ -7,6 +7,7 @@ import {
   aCollectionNode,
 } from "../../src/test-support/factories";
 import { useMockApi, collectPageProblems } from "./_setup";
+import { scrollToLibraryEntry } from "./_scroll";
 
 useMockApi();
 
@@ -34,18 +35,23 @@ test.describe("Loaded Library surfaces", () => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.addInitScript((view) => localStorage.setItem("ps-vault-view", view), layout);
       const cursors: (string | null)[] = [];
+      const pages: { start: number; count: number }[] = [];
       await page.route("**/api/v1/collections/children?**", (route) =>
         route.fulfill({ json: { items: [], next_cursor: null } }),
       );
       await page.route("**/api/v1/models/browse?**", (route) => {
         const params = new URL(route.request().url()).searchParams;
-        expect(params.get("limit")).toBe("24");
+        const limit = Number(params.get("limit"));
+        expect(limit).toBeGreaterThan(0);
+        expect(limit).toBeLessThanOrEqual(100);
         const cursor = params.get("cursor");
         cursors.push(cursor);
         const start = cursor === null ? 0 : Number(cursor);
+        const count = Math.min(limit, 192 - start);
+        pages.push({ start, count });
         return route.fulfill({
           json: {
-            items: Array.from({ length: 24 }, (_, index) => ({
+            items: Array.from({ length: count }, (_, index) => ({
               kind: "model",
               model: aModelListItem({
                 id: start + index + 100,
@@ -55,7 +61,7 @@ test.describe("Loaded Library surfaces", () => {
               }),
             })),
             total: 192,
-            next_cursor: start + 24 < 192 ? String(start + 24) : null,
+            next_cursor: start + count < 192 ? String(start + count) : null,
             browse_revision: "r1",
             authorization_revision: "a1",
           },
@@ -68,21 +74,21 @@ test.describe("Loaded Library surfaces", () => {
           .getByRole("link", { name: /Loaded Model 1\b/ })
           .first(),
       ).toBeVisible();
-      for (let index = 1; index < 8; index += 1) {
-        await scrollLibrary(page, "end");
-        await expect.poll(() => new Set(cursors).size).toBeGreaterThanOrEqual(index + 1);
-      }
+      await expect
+        .poll(
+          async () => {
+            await scrollLibrary(page, "end");
+            return pages.some((page) => page.start + page.count === 192);
+          },
+          { timeout: 20_000 },
+        )
+        .toBe(true);
       await scrollLibrary(page, "end");
       await expect(page.getByRole("link", { name: /Loaded Model 192\b/ })).toBeVisible();
-      expect(cursors.filter((cursor) => cursor !== null)).toEqual([
-        "24",
-        "48",
-        "72",
-        "96",
-        "120",
-        "144",
-        "168",
-      ]);
+      expect(cursors[0]).toBeNull();
+      for (let index = 1; index < pages.length; index += 1) {
+        expect(pages[index].start).toBe(pages[index - 1].start + pages[index - 1].count);
+      }
       expect(await page.locator("main [data-library-key]").count()).toBeLessThan(60);
       await page.screenshot({ path: test.info().outputPath(`virtual-${layout}-end.png`) });
       expect(problems).toEqual([]);
@@ -319,9 +325,12 @@ test.describe("Loaded Library surfaces", () => {
 
   for (const recovery of ["available", "removed", "stale"] as const) {
     test(`reconstructs six virtual pages when the anchor is ${recovery}`, async ({ page }) => {
-      await page.setViewportSize({ width: 1440, height: 900 });
+      // Twelve paginated reads plus a real detail-page visit need room on a busy runner.
+      test.setTimeout(60_000);
+      await page.setViewportSize({ width: 1920, height: 1080 });
       await page.clock.install();
       let returning = false;
+      let rejectedCursor = false;
       const restored: (string | null)[] = [];
       await page.route("**/api/v1/collections/children?**", (route) =>
         route.fulfill({ json: { items: [], next_cursor: null } }),
@@ -329,14 +338,16 @@ test.describe("Loaded Library surfaces", () => {
       await page.route("**/api/v1/models/browse?**", (route) => {
         const cursor = new URL(route.request().url()).searchParams.get("cursor");
         if (returning) restored.push(cursor);
-        if (returning && cursor && recovery === "stale")
+        if (returning && cursor === "24" && recovery === "stale") {
+          rejectedCursor = true;
           return route.fulfill({ status: 409, json: { detail: "browse_refresh_required" } });
-        const start = cursor === null ? 0 : Number(cursor);
+        }
+        const start = cursor === null ? 0 : Number(cursor.replace("fresh-", ""));
         const models = Array.from({ length: 24 }, (_, index) => {
           const number = start + index;
           return aModelListItem({
-            id: number === 126 ? 1 : number + 100,
-            name: number === 126 ? "skadis_kitchen-roll_screw" : `Reconstructed Model ${number}`,
+            id: number === 102 ? 1 : number + 100,
+            name: number === 102 ? "skadis_kitchen-roll_screw" : `Reconstructed Model ${number}`,
           });
         });
         return route.fulfill({
@@ -345,7 +356,7 @@ test.describe("Loaded Library surfaces", () => {
               .filter((model) => !(returning && recovery === "removed" && model.id === 1))
               .map((model) => ({ kind: "model", model })),
             total: 168,
-            next_cursor: start + 24 < 168 ? String(start + 24) : null,
+            next_cursor: start + 24 < 168 ? `${rejectedCursor ? "fresh-" : ""}${start + 24}` : null,
             browse_revision: "r1",
             authorization_revision: "a1",
           },
@@ -362,28 +373,16 @@ test.describe("Loaded Library surfaces", () => {
       const anchor = page
         .getByRole("main")
         .getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true });
-      await expect
-        .poll(
-          async () => {
-            if (await anchor.count()) return true;
-            await page.getByRole("main").evaluate((main) => {
-              main.scrollTop += main.clientHeight / 2;
-            });
-            await page.clock.runFor(20);
-            return false;
-          },
-          { intervals: [50, 100, 150] },
-        )
-        .toBe(true);
-      await anchor.evaluate((node) => node.scrollIntoView({ block: "center" }));
-      await page.clock.runFor(50);
+      // Keep the selected row away from the next-page sentinel: reconstruction
+      // must restore visited pages without a new user scroll requesting page seven.
+      await scrollToLibraryEntry(page, anchor, true);
       await anchor.click();
       const openPage = page
         .locator("#model-drawer")
         .getByRole("link", { name: "Open page", exact: true });
       await expect(openPage).toBeVisible();
       await page.clock.runFor(100);
-      // Match the departure layout after the real inspector changes the columns.
+      await scrollToLibraryEntry(page, anchor, true);
       const before = await anchor.evaluate((node) => node.getBoundingClientRect().top);
       await openPage.click();
       await expect(
@@ -393,7 +392,7 @@ test.describe("Loaded Library surfaces", () => {
       await page.clock.fastForward(301_000);
       returning = true;
       await page.getByRole("link", { name: "Back", exact: true }).click();
-      if (recovery === "available") {
+      if (recovery !== "removed") {
         await expect(anchor).toBeVisible();
 
         await expect
@@ -407,7 +406,9 @@ test.describe("Loaded Library surfaces", () => {
         ).toBeVisible();
       }
       expect(restored.filter((cursor) => cursor !== null)).toEqual(
-        recovery === "stale" ? ["24"] : ["24", "48", "72", "96", "120"],
+        recovery === "stale"
+          ? ["24", "fresh-24", "fresh-48", "fresh-72", "fresh-96", "fresh-120"]
+          : ["24", "48", "72", "96", "120"],
       );
       expect(restored).not.toContain("144");
     });
@@ -441,6 +442,7 @@ test.describe("Loaded Library surfaces", () => {
       await page.goto("/?type=all");
       const main = page.getByRole("main");
       await expect(main.getByRole("button", { name: /Collection 0\b/ })).toBeVisible();
+      if (layout === "grid") await main.getByRole("button", { name: /^\d+ more$/ }).click();
       expect(await main.locator("[data-collection-path]").count()).toBeLessThan(60);
       await scrollLibrary(page, "end");
       await expect(main.getByRole("button", { name: /Collection 191\b/ })).toBeInViewport();

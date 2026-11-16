@@ -42,8 +42,8 @@ test.describe("BGCODE toolpath", () => {
     await slider.focus();
     await slider.press("Home");
     await expect(slider).toHaveValue("0");
-    await page.getByRole("button", { name: "Show travel moves" }).click();
-    await expect(page.getByRole("button", { name: "Hide travel moves" })).toHaveAttribute(
+    await page.getByRole("button", { name: "Travel", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Travel", exact: true })).toHaveAttribute(
       "aria-pressed",
       "true",
     );

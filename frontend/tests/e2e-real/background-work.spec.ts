@@ -68,6 +68,12 @@ test.describe("derivative processing policy", () => {
   test("reenabling mesh processing backfills an uploaded preview", async ({ page }) => {
     test.setTimeout(180_000);
     const name = `e2e-policy-${Date.now()}`;
+    // This flow tests resuming every mesh derivative. Extra-angle previews are
+    // optional now, so explicitly opt in before expecting no disabled output.
+    const enabled = await page.request.put("/api/v1/config", {
+      data: { derivatives_previews_enabled: true },
+    });
+    expect(enabled.ok()).toBe(true);
     await page.goto("/settings?section=work");
     const mesh = page.getByRole("button", {
       name: "Turn off Mesh metadata and preview images",
@@ -117,7 +123,7 @@ test.describe("derivative processing policy", () => {
       }
     } finally {
       const restored = await page.request.put("/api/v1/config", {
-        data: { derivatives_mesh_enabled: null },
+        data: { derivatives_mesh_enabled: null, derivatives_previews_enabled: null },
       });
       expect(restored.ok()).toBe(true);
     }

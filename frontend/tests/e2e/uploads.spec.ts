@@ -57,6 +57,11 @@ test.describe("upload and capture", () => {
       .getByPlaceholder("Model page, collection, or direct .stl/.zip link")
       .fill("https://www.printables.com/model/41-capture-bracket");
     await page.getByRole("button", { name: "Capture for review" }).click();
+    await expect(page).toHaveURL(/\/inbox\/\d+$/);
+    await page.mouse.move(0, 0);
+    await expect(
+      page.getByText("Captured URL. Review it before importing.", { exact: true }),
+    ).toBeHidden();
 
     await expect(page).toHaveURL(/\/inbox\/41$/);
     await expect(page.getByRole("heading", { name: "Capture bracket" })).toBeVisible();
@@ -71,7 +76,7 @@ test.describe("upload and capture", () => {
 
     await page.getByRole("link", { name: "Open model" }).click();
     await page.getByRole("tab", { name: "Source info", exact: true }).click();
-    await expect(page.getByText("Fixture maker")).toBeVisible();
+    await expect(page.getByTestId("model-detail-sidebar").getByText("Fixture maker")).toBeVisible();
     await expect(page.getByText("CC BY 4.0")).toBeVisible();
     await expect(page.getByText("Print with supports.")).toBeVisible();
     // Each field's edit control names the field it edits, so this addresses the
@@ -83,6 +88,7 @@ test.describe("upload and capture", () => {
     await editCreator.click();
     await page.getByLabel("Creator override").fill("Corrected maker");
     await page.getByRole("button", { name: "Save override", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Edit Creator" })).toBeHidden();
     await expect(page.getByText("Corrected maker")).toBeVisible();
     await expect(page.getByText("Edited")).toBeVisible();
     await editCreator.click();
@@ -90,7 +96,7 @@ test.describe("upload and capture", () => {
     const dialog = page.getByRole("dialog", { name: "Restore captured value?" });
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Restore" }).click();
-    await expect(page.getByText("Fixture maker")).toBeVisible();
+    await expect(page.getByTestId("model-detail-sidebar").getByText("Fixture maker")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Source information", exact: true }),
     ).toBeVisible();

@@ -25,7 +25,7 @@ test.describe("printer routes", () => {
 
     await expect(page.getByRole("heading", { name: "Printers" })).toBeVisible();
     await expect(page.getByRole("link", { name: /ender/i })).toBeVisible();
-    await expect(page.getByText("Moonraker", { exact: true })).toBeVisible();
+    await expect(page.getByText(/^Moonraker(?: ·.*)?$/)).toBeVisible();
     await expect(page.getByText("ready", { exact: true }).first()).toBeVisible();
     await expect(page.getByLabel("Fleet summary").getByText("Ready")).toBeVisible();
     await expect(page.getByText("No printers configured yet.")).toHaveCount(0);
@@ -42,14 +42,14 @@ test.describe("printer routes", () => {
     await page.goto("/printers/3");
 
     await expect(page.getByRole("heading", { name: "ender" })).toBeVisible();
-    await expect(page.getByText("Moonraker", { exact: true })).toBeVisible();
+    await expect(page.getByText(/^Moonraker(?: ·.*)?$/)).toBeVisible();
     await expect(page.getByText("ready", { exact: true }).first()).toBeVisible();
-    await expect(page.getByText("Temperatures")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Temperatures", exact: true })).toBeVisible();
     await page.getByRole("tab", { name: "Settings" }).click();
-    await expect(page.getByRole("heading", { name: "Printer settings" })).toBeVisible();
+    await expect(page.getByLabel("Name", { exact: true })).toBeVisible();
     const printerName = page.getByLabel("Name");
     await printerName.fill("Workshop printer");
-    await page.getByRole("button", { name: "Save changes" }).click();
+    await page.locator("form").getByRole("button", { name: "Save changes", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Workshop printer" })).toBeVisible();
     await page.getByRole("tab", { name: "Files" }).click();
     await expect(page.getByText("skadis_kitchen-roll_screw_PLA_30m12s.gcode")).toBeVisible();
@@ -67,6 +67,9 @@ test.describe("printer routes", () => {
 
     await page.goto("/printers");
     await page.getByRole("tab", { name: "Queue" }).click();
+    await page
+      .getByRole("combobox", { name: "View", exact: true })
+      .selectOption({ label: "Active" });
     await expect(page.getByText("interrupted-part.gcode")).toBeVisible();
     await page.getByRole("button", { name: "Resolve" }).click();
 
@@ -74,8 +77,13 @@ test.describe("printer routes", () => {
     await expect(dialog).toContainText("does not send a command to the printer");
     await dialog.getByRole("button", { name: "Mark failed" }).click();
 
-    await expect(page.getByRole("heading", { name: "Recent" })).toBeVisible();
-    await expect(page.getByText("failed", { exact: true })).toBeVisible();
+    await page
+      .getByRole("combobox", { name: "View", exact: true })
+      .selectOption({ label: "Recent" });
+    await expect(page.getByRole("region", { name: "Recent print jobs" })).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Recent print jobs" }).getByText(/ · failed$/),
+    ).toBeVisible();
     expect(problems).toEqual([]);
   });
 });

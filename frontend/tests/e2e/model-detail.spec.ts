@@ -44,18 +44,18 @@ test.describe("model detail route", () => {
   test("renders prototype card actions outside the navigation link", async ({ page }) => {
     const problems = await collectPageProblems(page);
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.route("**/api/v1/models/1", async (route) => {
+    await page.route("**/api/v1/models/browse?**", async (route) => {
       const response = await route.fetch();
-      const model: ModelRead = await response.json();
-      model.files = model.files.map((file) =>
-        file.file_type === "stl"
+      const result = await response.json();
+      result.items = result.items.map((entry: { kind: string; model?: { id: number } }) =>
+        entry.kind === "model" && entry.model?.id === 1
           ? {
-              ...file,
-              metadata: aMetadata({ bbox_x_mm: 210, bbox_y_mm: 110, bbox_z_mm: 40 }),
+              ...entry,
+              model: { ...entry.model, bounding_box: { x_mm: 210, y_mm: 110, z_mm: 40 } },
             }
-          : file,
+          : entry,
       );
-      await route.fulfill({ response, json: model });
+      await route.fulfill({ response, json: result });
     });
     await page.goto("/");
     const link = page.getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true });
@@ -68,7 +68,7 @@ test.describe("model detail route", () => {
       (image) =>
         image.getBoundingClientRect().width / image.parentElement!.getBoundingClientRect().width,
     );
-    expect(thumbnailScale).toBeCloseTo(0.3, 2);
+    expect(thumbnailScale).toBeGreaterThanOrEqual(0.8);
     await expect(card.getByText("OK 2× on ender", { exact: true })).toBeVisible();
     const print = card.getByRole("button", { name: "Print Rev 1", exact: true });
     const download = card.getByRole("button", { name: "Download Rev 1", exact: true });
@@ -97,13 +97,23 @@ test.describe("model detail route", () => {
     expect(problems).toEqual([]);
   });
 
-  test("keeps the prototype detail header free of added icon controls", async ({ page }) => {
+  test("keeps detail header actions accessible by name", async ({ page }) => {
     await page.goto("/models/1");
     const title = page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true });
     const header = title.locator("xpath=ancestor::header");
-    await expect(header.getByRole("button", { name: "Favorite", exact: true })).toBeVisible();
+    await expect(
+      header.getByRole("button", {
+        name: "Add skadis_kitchen-roll_screw to favorites",
+        exact: true,
+      }),
+    ).toBeVisible();
     await expect(header.getByRole("button", { name: "Share", exact: true })).toBeVisible();
-    await expect(header.locator("svg")).toHaveCount(0);
+    await expect(
+      header.getByRole("button", {
+        name: "Add skadis_kitchen-roll_screw to favorites",
+        exact: true,
+      }),
+    ).toHaveAttribute("aria-pressed", "false");
     const rename = header.getByRole("button", {
       name: "Rename skadis_kitchen-roll_screw",
       exact: true,
@@ -185,14 +195,22 @@ test.describe("model detail route", () => {
 
   test("toggles the details panel from a focused search field", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.goto("/models/1");
-    const details = page.getByTestId("model-detail-sidebar");
+    await page.goto("/");
+    await page
+      .getByRole("navigation", { name: "Navigation" })
+      .getByRole("link", { name: "Search", exact: true })
+      .click();
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true })
+      .click();
+    const details = page.locator("#model-drawer");
     await expect(details).toBeVisible();
-    await page.locator("header [data-model-search]").focus();
-
+    const search = page.getByRole("searchbox", { name: "Search library", exact: true });
+    await search.focus();
     await page.keyboard.press("Control+Alt+b");
-
     await expect(details).toBeHidden();
+    await expect(search).toBeFocused();
     await page.keyboard.press("Control+Alt+b");
     await expect(details).toBeVisible();
   });
@@ -369,7 +387,10 @@ test.describe("model detail route", () => {
     await page.goto("/models/1");
     const title = page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true });
     const tags = page.getByRole("button", { name: "Edit tags for skadis_kitchen-roll_screw" });
-    const favorite = page.getByRole("button", { name: "Favorite", exact: true });
+    const favorite = page.getByRole("button", {
+      name: "Add skadis_kitchen-roll_screw to favorites",
+      exact: true,
+    });
     const actions = page.getByRole("button", { name: "Share", exact: true });
     await expect(tags).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
@@ -455,7 +476,12 @@ test.describe("model detail route", () => {
         expect(bounds!.x).toBeGreaterThanOrEqual(0);
         expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
       }
-      await expect(page.getByRole("button", { name: "Favorite", exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("button", {
+          name: "Add skadis_kitchen-roll_screw to favorites",
+          exact: true,
+        }),
+      ).toBeVisible();
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);

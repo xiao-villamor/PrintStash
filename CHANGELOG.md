@@ -61,6 +61,8 @@
 
 ### Fixed
 
+- Captured-source conflict recovery stays inside the edit dialog, keeping review and retry controls reachable. Keyboard focus remains on its card when a growing Library switches to virtual rows.
+
 - Profile conflict reviews remain accessible inside the edit dialog, and cancelling a new profile returns keyboard focus to its creation button. Native dropdowns follow the app’s shared cursor preference.
 
 - Collection previews remain visible during background Library refreshes, routine count updates no longer flash an Updating label, and Add tag is visible without hovering.

@@ -130,6 +130,7 @@ test.describe("Library motion", () => {
     await page.goBack();
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
 
+    await expect.poll(() => page.evaluate(() => window.libraryReveals.length)).toBe(2);
     const reveals = await page.evaluate(() => window.libraryReveals);
     expect(reveals).toHaveLength(2);
     expect(reveals[1].opacity[0]).toBeCloseTo(interruptedOpacity, 5);

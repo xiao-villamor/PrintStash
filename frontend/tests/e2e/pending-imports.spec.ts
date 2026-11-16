@@ -19,7 +19,7 @@ test.describe("pending imports", () => {
       await pending.click();
       await expect(pending).toHaveAttribute("aria-expanded", "true");
       await expect(page.getByRole("complementary", { name: "Pending Imports" })).toBeVisible();
-      await expect(page).toHaveURL(new RegExp(route === "/" ? "/$" : "/inbox/41$"));
+      await expect(page).toHaveURL((url) => url.pathname === route);
     }
   });
 
@@ -154,7 +154,7 @@ test.describe("pending imports", () => {
     await page.getByRole("link", { name: "Open model" }).click();
     expect(problems, "before opening the Source tab").toEqual([]);
     await page.getByRole("tab", { name: "Source info", exact: true }).click();
-    await expect(page.getByText("Fixture maker")).toBeVisible();
+    await expect(page.getByTestId("model-detail-sidebar").getByText("Fixture maker")).toBeVisible();
     await expect(page.getByText("CC BY 4.0")).toBeVisible();
     await expect(page.getByText("Print with supports.")).toBeVisible();
     expect(problems, "after opening the Source tab").toEqual([]);
@@ -170,6 +170,7 @@ test.describe("pending imports", () => {
       .getByRole("dialog", { name: "Edit Creator" })
       .getByRole("button", { name: "Save override" })
       .click();
+    await expect(page.getByRole("dialog", { name: "Edit Creator" })).toBeHidden();
     await expect(page.getByText("Corrected maker")).toBeVisible();
     await expect(page.getByText("Edited")).toBeVisible();
     expect(problems, "after saving the override").toEqual([]);
@@ -181,7 +182,7 @@ test.describe("pending imports", () => {
     const dialog = page.getByRole("dialog", { name: "Restore captured value?" });
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Restore" }).click();
-    await expect(page.getByText("Fixture maker")).toBeVisible();
+    await expect(page.getByTestId("model-detail-sidebar").getByText("Fixture maker")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Source information", exact: true }),
     ).toBeVisible();

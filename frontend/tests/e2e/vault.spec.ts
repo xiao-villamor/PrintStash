@@ -49,6 +49,7 @@ test.describe("vault route", () => {
       .hover();
     await page.getByRole("checkbox", { name: "Select Selection 2", exact: true }).click();
 
+    await scrollToEnd(page);
     await page.locator('main [data-library-entry="/models/103"]').click({ modifiers: ["Shift"] });
 
     await expect(
@@ -284,11 +285,18 @@ test.describe("vault route", () => {
     });
     await page.goto("/?favorites=true");
 
-    await page.getByRole("button", { name: "Remove Favorite bracket from favorites" }).click();
+    await page
+      .getByRole("link", { name: "Favorite bracket", exact: true })
+      .click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Remove Favorite bracket from favorites" }).click();
 
-    await expect(page.getByText("Favorite bracket", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("main").getByRole("link", { name: "Favorite bracket", exact: true }),
+    ).toBeVisible();
     confirmation.resolve();
-    await expect(page.getByText("Favorite bracket", { exact: true })).toHaveCount(0);
+    await expect(
+      page.getByRole("main").getByRole("link", { name: "Favorite bracket", exact: true }),
+    ).toHaveCount(0);
   });
 
   test("the next page loads as the list is scrolled, with no button to press", async ({ page }) => {
@@ -347,9 +355,10 @@ test.describe("vault route", () => {
     await page.goto("/?type=all&sort=name-asc");
     await expect(page.getByRole("link", { name: /Zeta/ })).toBeVisible();
 
+    await scrollToEnd(page);
     const cards = page
       .getByRole("main")
-      .locator("article")
+      .locator("[data-library-entry]")
       .filter({ hasText: /Zeta|Älpha/ });
     await expect(cards).toHaveCount(2);
     await expect(cards.nth(0)).toContainText("Zeta");
@@ -407,7 +416,10 @@ test.describe("vault route", () => {
 
   test("browser Back returns through collection navigation", async ({ page }) => {
     await page.goto("/settings");
-    await page.getByRole("link", { name: "PrintStash" }).click();
+    await page
+      .getByRole("navigation", { name: "Navigation", exact: true })
+      .getByRole("link", { name: "PrintStash", exact: true })
+      .click();
     await expect(page.getByRole("heading", { name: "All Models" })).toBeVisible();
 
     await page
@@ -427,7 +439,8 @@ test.describe("vault route", () => {
 
   test("vault display choice survives reload", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("button", { name: "Display" }).click();
+    await page.getByRole("main").getByRole("button", { name: "More", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Display" }).click();
     await page.getByRole("menuitem", { name: "List View" }).click();
     await expect(page.getByText("Thumb", { exact: true })).toBeVisible();
     await page.reload();
@@ -440,7 +453,7 @@ test.describe("vault route", () => {
       const url = new URL(request.url());
       if (url.pathname === "/api/v1/models/browse") pageRequests.push(url.search);
     });
-    await page.goto("/");
+    await page.goto("/?c=maraio");
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
 
     await page.getByRole("button", { name: "Sort models" }).click();
@@ -452,7 +465,7 @@ test.describe("vault route", () => {
           url.searchParams.get("sort") === "success-desc"
         );
       }),
-      page.getByRole("menuitem", { name: "Best success rate" }).click(),
+      page.getByRole("menuitemradio", { name: "Best success rate" }).click(),
     ]);
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
     await page.waitForTimeout(200);
@@ -471,13 +484,13 @@ test.describe("vault route", () => {
     });
 
     await page.goto("/");
-    await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
     await expect.poll(() => roots.length).toBeGreaterThan(0);
     expect(roots.every((url) => url.searchParams.get("limit") === "50")).toBe(true);
-    await expect(page.getByRole("dialog", { name: "Filters", exact: true })).toBeHidden();
+    await expect(page.getByRole("dialog", { name: "Collections", exact: true })).toBeHidden();
     const restoredReads = roots.length;
-    await page.getByRole("button", { name: "Filters", exact: true }).click();
-    await expect(page.getByRole("dialog", { name: "Filters", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Collections", exact: true })).toBeVisible();
     await page.waitForTimeout(200);
     expect(roots).toHaveLength(restoredReads);
   });
@@ -600,7 +613,7 @@ test.describe("vault route on a phone-width viewport", () => {
     const sort = page.getByRole("button", { name: "Sort models", exact: true });
 
     await sort.click();
-    await page.getByRole("menuitem", { name: "Best success rate" }).click();
+    await page.getByRole("menuitemradio", { name: "Best success rate" }).click();
 
     await expect(sort).toContainText("Best success rate");
   });
@@ -657,8 +670,8 @@ test.describe("vault route on a phone-width viewport", () => {
   test("offers a way out of keyboard selection mode", async ({ page }) => {
     await gotoMobileVault(page);
     await page
-      .getByRole("group", { name: "Library tools" })
-      .getByRole("button", { name: "New collection" })
+      .getByRole("main")
+      .getByRole("button", { name: "New collection", exact: true })
       .focus();
     await page.keyboard.press("s");
     await expect(page.getByRole("button", { name: "Done", exact: true })).toBeVisible();

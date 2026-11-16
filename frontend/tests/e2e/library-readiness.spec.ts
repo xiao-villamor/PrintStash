@@ -413,8 +413,8 @@ test.describe("Library readiness", () => {
     });
     try {
       await page.goto("/?c=maraio", { waitUntil: "domcontentloaded" });
-      await expect.poll(() => requests.length).toBe(2);
-      const visible = await page.locator("main article").evaluateAll((cards) =>
+      await expect.poll(() => requests.length).toBe(6);
+      const visible = await page.locator("main .library-model-card").evaluateAll((cards) =>
         cards
           .filter((card) => {
             const rect = card.querySelector("[data-library-thumbnail]")?.getBoundingClientRect();

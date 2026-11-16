@@ -29,7 +29,7 @@ test.describe("app navigation", () => {
   test("desktop toolbar opens Similar models", async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.goto("/");
-    const actions = page.getByRole("main").getByRole("group", { name: "Library tools" });
+    const actions = page.getByRole("main");
     await actions.getByRole("button", { name: "More", exact: true }).click();
     const similar = page.getByRole("menuitem", { name: "Similar models", exact: true });
     await expect(similar).toBeVisible();

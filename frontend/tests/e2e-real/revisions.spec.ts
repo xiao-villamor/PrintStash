@@ -31,14 +31,17 @@ test.describe("revisions", () => {
     await expect(revRow(page, 1).getByText("Recommended")).toBeVisible();
 
     // Add a second revision (unique bytes so the content-hash dedupe keeps it).
-    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await page.getByRole("button", { name: "Add revision", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Add G-code revision" })).toBeVisible();
     await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
       name: "rev2.gcode",
       mimeType: "text/plain",
       buffer: Buffer.from(`; second revision for ${name}\nG28\nG1 Z0.2\n`),
     });
-    await page.getByRole("button", { name: "Add revision" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Add revision", exact: true })
+      .click();
     await expect(page.getByText("Rev 2", { exact: true }).first()).toBeVisible();
 
     // Promote Rev 2 to recommended + known-good; Rev 1 loses the marker. Only one
@@ -47,14 +50,12 @@ test.describe("revisions", () => {
       .getByRole("button", { name: /^Rev 2/ })
       .click();
     await page.getByRole("button", { name: "Edit revision", exact: true }).click();
-    await page
-      .getByRole("checkbox", { name: "Mark as recommended G-code for this model", exact: true })
+    const editor = page.getByRole("dialog", { name: "Edit revision", exact: true });
+    await editor
+      .getByRole("radio", { name: "Make this Revision recommended", exact: true })
       .check();
-    await page
-      .getByRole("combobox")
-      .filter({ has: page.getByRole("option", { name: "Known good" }) })
-      .selectOption("known_good");
-    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await editor.getByRole("radio", { name: "Known good", exact: true }).check();
+    await editor.getByRole("button", { name: "Save Revision", exact: true }).click();
 
     await expect(revRow(page, 2).getByText("Recommended")).toBeVisible();
     await expect(revRow(page, 1).getByText("Recommended")).toHaveCount(0);
