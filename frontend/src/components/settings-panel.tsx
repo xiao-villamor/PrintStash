@@ -5405,7 +5405,7 @@ export function SettingsPanel() {
                         </span>
                       </span>
                       <select
-                        className="settings-select"
+                        className={INPUT}
                         aria-label={uiText("Multi-angle previews")}
                         value={selectedPreviewMode}
                         onChange={(event) => {
