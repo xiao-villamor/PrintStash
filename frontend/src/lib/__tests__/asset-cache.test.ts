@@ -468,7 +468,7 @@ describe("preview transfer scheduling", () => {
     visible.release();
   });
 
-  it("admits intent, visible covers and mosaics before a speculative neighbor", async () => {
+  it("orders queued downloads by priority under contention", async () => {
     const release = Promise.withResolvers<void>();
     vi.mocked(fetch).mockImplementation(async () => {
       await release.promise;

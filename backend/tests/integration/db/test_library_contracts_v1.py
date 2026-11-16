@@ -335,7 +335,8 @@ class TestUpgrade:
             assert _revision(session) != before
             session.refresh(document)
             assert document.edit_version > 1
-        command.downgrade(config, "-1")
+        # Keep the Model preview branch while rolling back the Library browse revision.
+        command.downgrade(config, "55535d2c13e3")
         command.upgrade(config, "head")
         with Session(engine) as session:
             assert session.get(Document, ids[2]).body == "After upgrade"

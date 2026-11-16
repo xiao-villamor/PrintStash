@@ -560,7 +560,9 @@ describe("derivative controls", () => {
     };
     const api = stubApi(withPreviews);
     renderPanel(api);
-    await user.click(await screen.findByRole("checkbox", { name: "Multi-angle Model card views" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Turn off Multi-angle Model card views" }),
+    );
     await waitFor(() =>
       expect(api.setPolicy).toHaveBeenCalledWith(
         { derivatives_previews_enabled: false },
@@ -568,8 +570,8 @@ describe("derivative controls", () => {
       ),
     );
     expect(
-      screen.getByRole("checkbox", { name: "Mesh metadata and preview images" }),
-    ).toBeChecked();
+      screen.getByRole("button", { name: "Turn off Mesh metadata and preview images" }),
+    ).toBeEnabled();
   });
 
   it("restores the server value after a failed save", async () => {
