@@ -16,6 +16,7 @@
  * Favouriting publishes the confirmed server state. A failed write must leave
  * the earlier star visible rather than claim something was saved.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 
 import "@testing-library/jest-dom/vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
@@ -57,6 +58,8 @@ function aFile(over: Partial<FileRead> = {}): FileRead {
 
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    previews: NO_PREVIEWS,
+    has_custom_cover: false,
     edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 1,

@@ -42,6 +42,28 @@ class TestRemapOwnedKey:
 
 
 class TestCensus:
+    def test_remaps_chosen_cover_as_primary_data(
+        self, db_session, make_model, make_model_cover, tmp_path
+    ):
+        source = get_backend()
+        model = make_model()
+        data = b"normalized-cover"
+        cover = make_model_cover(
+            model, size_bytes=len(data), sha256=hashlib.sha256(data).hexdigest()
+        )
+        key = source.model_cover_key(model.id, cover.filename)
+        source.create_bytes(data, key)
+        destination = LocalStorageBackend(
+            data_dir=tmp_path / "new-files", thumb_dir=tmp_path / "new-thumbs"
+        )
+
+        result = census(db_session, source, destination)
+
+        chosen = next(blob for blob in result if blob.resource_type == "model_cover")
+        assert chosen.source_key == key
+        assert chosen.destination_key == destination.model_cover_key(
+            model.id, cover.filename
+        )
 
     def test_model_cover_without_file_thumbnail_is_owned(self, db_session, make_model):
         source = get_backend()

@@ -81,6 +81,7 @@ from app.modules.ingestion import library_transfer, staging_leases
 from app.modules.ingestion.ingestion import add_gcode_revision_to_model
 from app.modules.library import commands as model_commands
 from app.modules.library import (
+    model_covers,
     provenance,
     revisions,
     source_covers,
@@ -105,6 +106,8 @@ from app.modules.library.trash import (
 from app.modules.library.trash import (
     restore_model as trash_restore_model,
 )
+from app.modules.media.preview_contracts import ViewId
+from app.modules.media.source_cover_processing import MAX_SOURCE_COVER_BYTES
 from app.modules.printing import job_import, print_results
 from app.modules.printing.moonraker import MoonrakerError
 from app.modules.printing.printer_jobs import reproducibility_payload
@@ -138,6 +141,7 @@ from app.schemas.models import (
     ModelBatchMove,
     ModelBatchResult,
     ModelBatchTags,
+    ModelCoverSource,
     ModelEditBatchResult,
     ModelFacetsRead,
     ModelFilters,
@@ -968,6 +972,113 @@ def patch_model_provenance(
     return result
 
 
+@router.get("/{model_id}/cover/content", summary="Read the Model's chosen cover")
+def get_model_cover(
+    model_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> Response:
+    model = _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    return Response(
+        content=model_covers.content(model),
+        media_type="image/webp",
+        headers={
+            "Cache-Control": "private, no-cache",
+            "ETag": f'"model-cover-{model_id}-{model.cover_filename}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.put(
+    "/{model_id}/cover",
+    response_model=ModelRead,
+    summary="Choose an uploaded Model cover",
+)
+@bounded_command
+def put_model_cover(
+    model_id: int,
+    response: Response,
+    file: UploadFile = UploadFileParam(...),
+    actor: CommandActor = Depends(require_command_writer),
+    precondition: EditPrecondition = Depends(edit_precondition),
+) -> ModelRead:
+    with command_session(actor) as (session, current_user):
+        model = _require_model_role(
+            session, current_user, model_id, CollectionRole.EDIT
+        )
+        model_covers.put(
+            session,
+            current_user,
+            model,
+            file.file.read(MAX_SOURCE_COVER_BYTES + 1),
+            file.content_type,
+            precondition,
+        )
+        response.headers["ETag"] = etag(
+            EditKind.MODEL, model_id, model.edit_version, model.edit_epoch
+        )
+        result = models_detail.detail(session, model_id, current_user)
+        if result is None:
+            raise HTTPException(status_code=404, detail="model_not_found")
+        return result
+
+
+@router.post(
+    "/{model_id}/cover/source",
+    response_model=ModelRead,
+    summary="Choose a source image as the Model cover",
+)
+@bounded_command
+def select_model_cover_source(
+    model_id: int,
+    payload: ModelCoverSource,
+    response: Response,
+    actor: CommandActor = Depends(require_command_writer),
+    precondition: EditPrecondition = Depends(edit_precondition),
+) -> ModelRead:
+    with command_session(actor) as (session, current_user):
+        model = _require_model_role(
+            session, current_user, model_id, CollectionRole.EDIT
+        )
+        model_covers.select_source(
+            session, current_user, model, payload.source_id, precondition
+        )
+        response.headers["ETag"] = etag(
+            EditKind.MODEL, model_id, model.edit_version, model.edit_epoch
+        )
+        result = models_detail.detail(session, model_id, current_user)
+        if result is None:
+            raise HTTPException(status_code=404, detail="model_not_found")
+        return result
+
+
+@router.delete(
+    "/{model_id}/cover",
+    response_model=ModelRead,
+    summary="Reset the Model cover to automatic",
+)
+@bounded_command
+def reset_model_cover(
+    model_id: int,
+    response: Response,
+    actor: CommandActor = Depends(require_command_writer),
+    precondition: EditPrecondition = Depends(edit_precondition),
+) -> ModelRead:
+    with command_session(actor) as (session, current_user):
+        model = _require_model_role(
+            session, current_user, model_id, CollectionRole.EDIT
+        )
+        model_covers.reset(session, current_user, model, precondition)
+        response.headers["ETag"] = etag(
+            EditKind.MODEL, model_id, model.edit_version, model.edit_epoch
+        )
+        result = models_detail.detail(session, model_id, current_user)
+        if result is None:
+            raise HTTPException(status_code=404, detail="model_not_found")
+        return result
+
+
 def _provenance_source_or_404(
     session: Session, model_id: int, source_id: int
 ) -> ModelProvenanceSource:
@@ -1783,3 +1894,32 @@ def delete_model(
     m = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
     soft_delete_model(session, m)
     return Response(status_code=204)
+
+
+@router.get("/{model_id}/previews/{generation}")
+def get_model_preview_manifest(
+    model_id: int,
+    generation: str,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+):
+    from app.modules.library.model_views import previews
+
+    _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    return previews.resolve(session, model_id, generation)[1]
+
+
+@router.get("/{model_id}/previews/{generation}/{view_id}")
+def get_model_preview_image(
+    model_id: int,
+    generation: str,
+    view_id: ViewId,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+):
+    from app.api.preview_response import preview_response
+    from app.modules.library.model_views import previews
+
+    _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    row, manifest = previews.resolve(session, model_id, generation)
+    return preview_response(row, manifest, view_id)

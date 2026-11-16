@@ -73,7 +73,9 @@ class TestThumbnailItems:
             event.listen(reader.connection(), "after_cursor_execute", record)
             result = thumbnail_items(reader, user, ids)
         assert len(result.items) == count
-        assert len(statements) == 4
+        # One more for the preview read's selected mesh Artifacts; it is fixed
+        # per page (their derivative rows add one more only when meshes exist).
+        assert len(statements) == 5
         assert all(
             statement.lstrip().upper().startswith("SELECT") for statement in statements
         )

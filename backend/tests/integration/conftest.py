@@ -55,6 +55,7 @@ from tests.factories.protocols import (
     MakeMeshContinuation,
     MakeMetadata,
     MakeModel,
+    MakeModelCover,
     MakeMultipartBuild,
     MakeMultipartBuildAttempt,
     MakeMultipartBuildConfirmation,
@@ -173,6 +174,11 @@ def grant_printer_role(db_session: Session) -> Any:
 # --------------------------------------------------------------------------- #
 # The library
 # --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def make_model_cover(db_session: Session) -> MakeModelCover:
+    return _bound(factories.build_model_cover, db_session)
 
 
 @pytest.fixture
@@ -522,6 +528,7 @@ __all__ = [
     "MakeMetadata",
     "MakeInboxItem",
     "MakeModel",
+    "MakeModelCover",
     "MakeMultipartModel",
     "MakeMultipartModelStar",
     "MakeOwnedStorageObject",
@@ -571,6 +578,7 @@ __all__ = [
     "make_inbox_result",
     "make_metadata",
     "make_model",
+    "make_model_cover",
     "make_multipart_model",
     "make_multipart_model_star",
     "make_notification_channel",

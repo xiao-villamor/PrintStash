@@ -20,6 +20,7 @@ class AssetEntry {
   data: AssetData | null = null;
   references = 0;
   counted = false;
+  priority: "display" | "intent" | "speculative" = "display";
 
   constructor(readonly path: string) {
     let resolve!: (url: string) => void;
@@ -82,7 +83,12 @@ function evictInactive(): void {
 function pump(): void {
   if (disposing) return;
   while (downloads < MAX_DOWNLOADS && queue.length > 0) {
-    const entry = queue.shift()!;
+    const preferred = queue.findIndex((entry) => entry.priority !== "speculative");
+    const speculativeRunning = [...entries.values()].some(
+      (entry) => entry.status === "loading" && entry.priority === "speculative",
+    );
+    if (preferred === -1 && speculativeRunning) break;
+    const [entry] = queue.splice(preferred === -1 ? 0 : preferred, 1);
     if (entry.status !== "queued") continue;
     entry.status = "loading";
     downloads += 1;
@@ -138,9 +144,22 @@ export interface AssetLease {
 }
 
 /** Own a share of protected bytes; other consumers survive this caller's cancellation. */
-export function acquireAssetUrl(path: string, signal?: AbortSignal): AssetLease {
+export function acquireAssetUrl(
+  path: string,
+  signal?: AbortSignal,
+  priority: "display" | "intent" | "speculative" = "display",
+): AssetLease {
   if (signal?.aborted) return { url: Promise.reject(signal.reason), release() {} };
+  const existed = entries.has(path);
   const entry = getEntry(path);
+  if (!existed || priority !== "speculative") entry.priority = priority;
+  if (priority === "intent" && entry.status === "queued") {
+    const index = queue.indexOf(entry);
+    if (index >= 0) {
+      queue.splice(index, 1);
+      queue.unshift(entry);
+    }
+  }
   entry.references += 1;
   let active = true;
   let reject!: (reason: Error) => void;
@@ -159,6 +178,19 @@ export function acquireAssetUrl(path: string, signal?: AbortSignal): AssetLease 
   signal?.addEventListener("abort", cancel, { once: true });
   pump();
   return { url, release };
+}
+
+/** Promote already-owned work without adding another consumer or transfer. */
+export function prioritizeCachedAsset(path: string): void {
+  const entry = entries.get(path);
+  if (!entry) return;
+  entry.priority = "intent";
+  const index = queue.indexOf(entry);
+  if (index >= 0) {
+    queue.splice(index, 1);
+    queue.unshift(entry);
+  }
+  pump();
 }
 
 /** Synchronous reuse; display consumers must still acquire a lease in their effect. */

@@ -5,7 +5,7 @@ from app.db import (
     browser_edit_contracts_v1 as _browser_edit_contracts_v1,  # noqa: F401, E402
 )
 from app.db import (
-    config_edit_contracts_v1 as _config_edit_contracts_v1,  # noqa: F401, E402
+    config_edit_contracts_v2 as _config_edit_contracts_v2,  # noqa: F401, E402
 )
 from app.db import (
     connection_edit_contracts_v1 as _connection_edit_contracts_v1,  # noqa: F401, E402
@@ -154,6 +154,7 @@ from .library import (
 from .library import (
     Model as Model,
 )
+from .library import ModelCover as ModelCover
 from .library import (
     ModelStar as ModelStar,
 )

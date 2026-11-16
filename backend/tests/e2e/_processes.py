@@ -8,8 +8,15 @@ with, over a database of its own (a SQLite file, or a fresh database from
 
 from __future__ import annotations
 
+import json
 import os
+import selectors
+import signal
+import subprocess
+import time
 from pathlib import Path
+
+import psutil
 
 from tests.paths import BACKEND_DIR
 
@@ -55,3 +62,44 @@ def worker_roles(environment: dict[str, str]) -> list[str]:
             )
     finally:
         engine.dispose()
+
+
+def _first_outcome(process: subprocess.Popen, log) -> dict:
+    assert process.stdout is not None
+    deadline = time.monotonic() + 80
+    with selectors.DefaultSelector() as selector:
+        selector.register(process.stdout, selectors.EVENT_READ)
+        while time.monotonic() < deadline:
+            if not selector.select(timeout=0.2):
+                continue
+            line = process.stdout.readline()
+            if line.startswith("{"):
+                return json.loads(line)
+            if not line and process.poll() is not None:
+                break
+    log.flush()
+    log.seek(0)
+    raise AssertionError(f"native worker did not become ready:\n{log.read()[-6000:]}")
+
+
+def _stop(process: subprocess.Popen, native_pid: int | None) -> None:
+    if process.poll() is None:
+        try:
+            descendants = psutil.Process(process.pid).children(recursive=True)
+        except psutil.NoSuchProcess:
+            descendants = []
+        for descendant in descendants:
+            try:
+                descendant.kill()
+            except psutil.NoSuchProcess:
+                pass
+    for pid in (native_pid, process.pid):
+        if pid is None:
+            continue
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.wait(timeout=10)
+    if process.stdout is not None:
+        process.stdout.close()

@@ -481,6 +481,40 @@ def cancel(
         session.add(row)
 
 
+def _retain_preview_output(
+    session: Session, file_id: int, recipe: int, *, failed_only: bool
+) -> bool:
+    """Retry intent must not retire the last readable bundle."""
+    predicate = [
+        col(ArtifactDerivative.file_id) == file_id,
+        col(ArtifactDerivative.kind) == DerivativeKind.PREVIEWS,
+        col(ArtifactDerivative.recipe_version) == recipe,
+        col(ArtifactDerivative.storage_key).is_not(None),
+    ]
+    if failed_only:
+        predicate.append(
+            col(ArtifactDerivative.state).in_(
+                (DerivativeState.FAILED, DerivativeState.CANCELLED)
+            )
+        )
+    return (
+        affected(
+            session,
+            update(ArtifactDerivative)
+            .where(*predicate)
+            .values(
+                state=DerivativeState.QUEUED,
+                attempt_token=None,
+                attempts=0,
+                failure_reason=None,
+                next_attempt_at=None,
+                updated_at=utcnow() - STALE_IN_FLIGHT,
+            ),
+        )
+        == 1
+    )
+
+
 def reset(
     session: Session, file: File, kinds: dict[DerivativeKind, int] | None = None
 ) -> int:
@@ -490,6 +524,12 @@ def reset(
     wanted = recipes if kinds is None else kinds
     removed = 0
     for kind, recipe in wanted.items():
+        if kind is DerivativeKind.PREVIEWS and _retain_preview_output(
+            session, file.id, recipe, failed_only=True
+        ):
+            removed += 1
+            continue
+
         removed += affected(
             session,
             delete(ArtifactDerivative).where(
@@ -517,6 +557,11 @@ def invalidate(session: Session, file: File, kinds: list[DerivativeKind]) -> int
     for kind in kinds:
         if kind not in recipes:
             raise ValueError(f"derivative_not_applicable:{kind}")
+        if kind is DerivativeKind.PREVIEWS and _retain_preview_output(
+            session, file.id, recipes[kind], failed_only=False
+        ):
+            removed += 1
+            continue
         removed += affected(
             session,
             delete(ArtifactDerivative).where(

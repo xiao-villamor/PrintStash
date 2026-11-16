@@ -32,6 +32,7 @@ from app.db.models import (
     GcRun,
     GcRunState,
     Model,
+    ModelCover,
     ModelProvenanceSource,
     ModelSourceCover,
     MultipartModel,
@@ -135,6 +136,10 @@ def _model_candidate(session: Session, row: Model) -> _Candidate:
         file_keys, file_bytes = _file_metrics(file_row)
         key_count += file_keys
         size_bytes += file_bytes
+    chosen_cover = session.get(ModelCover, row.id)
+    if chosen_cover is not None:
+        key_count += 1
+        size_bytes += chosen_cover.size_bytes
     cover_count = session.exec(
         select(func.count(ModelSourceCover.id))
         .select_from(ModelSourceCover)

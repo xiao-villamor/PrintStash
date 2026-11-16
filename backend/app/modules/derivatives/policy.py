@@ -17,10 +17,14 @@ class SettingName(StrEnum):
     MESH = "derivatives_mesh_enabled"
     GCODE = "derivatives_gcode_enabled"
     TOOLPATH = "derivatives_toolpath_enabled"
+    # Independent of MESH so operators can keep covers while skipping the
+    # extra CPU and storage of generated views. Views still need a cover.
+    PREVIEWS = "derivatives_previews_enabled"
 
 
 SETTINGS = {
     JobKind.DERIVATIVES_MESH: SettingName.MESH,
+    JobKind.DERIVATIVES_PREVIEWS: SettingName.PREVIEWS,
     JobKind.DERIVATIVES_VIEWER_STL: SettingName.MESH,
     JobKind.DERIVATIVES_PLATES: SettingName.MESH,
     JobKind.DERIVATIVES_GCODE: SettingName.GCODE,

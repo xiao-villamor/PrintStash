@@ -187,6 +187,9 @@ class ReconcileCursor(SQLModel, table=True):
     # positions, not foreign keys: deletion must not invalidate pagination.
     scan_recent_at: datetime | None = None
     scan_recent_file_id: int | None = None
+    # The start of a secondary admission grace period. Unlike the active
+    # primary queue's oldest Job, this cannot move forward under steady input.
+    secondary_deferred_at: datetime | None = None
 
 
 class WorkFence(SQLModel, table=True):

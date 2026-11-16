@@ -563,6 +563,11 @@ toolpaths. All groups default to enabled. Deployment defaults are:
 | `VAULT_DERIVATIVES_MESH_ENABLED` | `true` |
 | `VAULT_DERIVATIVES_GCODE_ENABLED` | `true` |
 | `VAULT_DERIVATIVES_TOOLPATH_ENABLED` | `true` |
+| `VAULT_DERIVATIVES_PREVIEWS_ENABLED` | `true` |
+
+Multi-angle previews are generated only after a Model's cover, so they also
+need mesh processing enabled. Turn them off to keep covers without the extra
+CPU and storage of generated views.
 
 A saved Boolean overrides the environment; **Use deployment default** clears it.
 The controls persist in the application database and take effect in running API

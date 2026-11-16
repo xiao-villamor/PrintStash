@@ -8,13 +8,14 @@ import { useUiLocale } from "@/lib/i18n";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { memo, useEffect, useState } from "react";
 import { ModelListItem, FileRevisionStatus } from "@/types";
-import { FileText, Star, Tags, ScanSearch } from "lucide-react";
+import { Star, Tags, ScanSearch } from "lucide-react";
 import { LibraryCardSelection } from "@/components/library-card-selection";
 import { Button } from "@/components/ui/button";
 import { useLibraryStar } from "@/features/library/mutations";
 import { toast } from "@/lib/toast";
 import { timeAgoShort } from "@/lib/format";
-import { ProtectedThumbnail } from "@/components/protected-thumbnail";
+import { ModelPreviewControls, ModelPreviewFrame } from "@/components/model-preview";
+import { useModelPreviewCard } from "@/lib/use-model-preview-card";
 import { Localized } from "@/components/ui/localized";
 import { MODEL_DND_MIME, captureModelDrag } from "@/lib/model-dnd";
 
@@ -197,6 +198,7 @@ function ModelCardInner({
   const starBusy = starMutation.isPending;
   const printerPresence = model.printer_presence ?? [];
   const hasPrinter = printerPresence.length > 0;
+  const [previewAdmission, preview] = useModelPreviewCard(model.thumbnail_url, model.previews);
   const ps = model.print_summary;
   const canEditTags = model.effective_role === "edit" || model.effective_role === "admin";
 
@@ -277,6 +279,7 @@ function ModelCardInner({
             <Tags className="h-4 w-4" />
           </Button>
         )}
+        <ModelPreviewControls name={model.name} state={preview} />
         <LibraryItemLink
           origin={origin}
           href={`/models/${model.id}`}
@@ -293,27 +296,13 @@ function ModelCardInner({
             }
           }}
         >
-          {/* Thumbnail */}
-          <ProtectedThumbnail
-            path={model.thumbnail_url}
-            alt={model.name}
-            fade
-            className="bg-muted relative overflow-hidden h-48 border-b border-border shrink-0"
-            imageClassName="w-full h-full object-cover"
-            placeholder={
-              <div className="flex h-full w-full items-center justify-center">
-                <FileText className="h-10 w-10 text-muted-foreground/40" />
-              </div>
-            }
-          >
+          <ModelPreviewFrame name={model.name} state={preview} admission={previewAdmission}>
             {hasPrinter && (
-              <div className="absolute bottom-2 right-2">
-                <span className="text-3xs font-bold text-green-700 bg-green-50 dark:bg-green-950/60 px-1.5 py-0.5 border border-green-200 dark:border-green-800 rounded-sm uppercase">
-                  {uiText("On printer")}
-                </span>
-              </div>
+              <span className="absolute top-2 left-2 rounded-sm border border-green-200 bg-green-50 px-1.5 py-0.5 text-3xs font-bold uppercase text-green-700 dark:bg-green-950/60">
+                {uiText("On printer")}
+              </span>
             )}
-          </ProtectedThumbnail>
+          </ModelPreviewFrame>
 
           {/* Title + revision */}
           <div className="px-3 pt-3 pb-1 flex items-start justify-between gap-2">

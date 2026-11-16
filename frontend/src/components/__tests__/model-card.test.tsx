@@ -7,6 +7,7 @@
  * displays the custom label alone hides that the revision was never verified,
  * which is exactly the information somebody about to print it needs.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 
 import "@testing-library/jest-dom/vitest";
 import { act, screen, waitFor } from "@testing-library/react";
@@ -31,6 +32,7 @@ const model: ModelListItem = {
   effective_role: "admin",
   tags: [],
   thumbnail_url: null,
+  previews: NO_PREVIEWS,
   file_count: 2,
   mesh_file_id: null,
   printer_presence: [],
@@ -152,6 +154,16 @@ describe("ModelCard", () => {
       expect(onIntent).toHaveBeenCalledWith(1);
     });
 
+    it("reports the Model under the pointer on its thumbnail", async () => {
+      const user = userEvent.setup();
+      const onIntent = vi.fn<(id: number | null) => void>();
+      const { container } = renderApp(<ModelCard model={model} onIntent={onIntent} />);
+
+      await user.hover(container.querySelector("[data-model-preview]")!);
+
+      expect(onIntent).toHaveBeenLastCalledWith(1);
+    });
+
     it("stays silent while cards are being selected", async () => {
       const user = userEvent.setup();
       const onIntent = vi.fn<(id: number | null) => void>();
@@ -160,6 +172,44 @@ describe("ModelCard", () => {
       await user.hover(screen.getByRole("link", { name: /Cam Holder v4/ }));
 
       expect(onIntent).not.toHaveBeenCalledWith(1);
+    });
+  });
+
+  describe("library entry", () => {
+    it("exposes the card as a single library entry", () => {
+      const { container } = renderCard();
+
+      // Reading-position restore, keyboard and screen-reader users see the card once.
+      expect(container.querySelectorAll('[data-library-entry="/models/1"]')).toHaveLength(1);
+      expect(container.querySelectorAll('a[href^="/models/1"]')).toHaveLength(1);
+    });
+
+    it("opens the Model from its thumbnail", async () => {
+      const user = userEvent.setup();
+      const { container } = renderApp(
+        <>
+          <ModelCard model={model} />
+          <CardLocation />
+        </>,
+      );
+
+      await user.click(container.querySelector("[data-model-preview]")!);
+
+      expect(
+        await screen.findByRole("status", { name: "Current card location" }),
+      ).toHaveTextContent("/models/1");
+    });
+
+    it("toggles selection from its thumbnail while selecting", async () => {
+      const user = userEvent.setup();
+      const onToggleSelect = vi.fn<(id: number, range?: boolean) => void>();
+      const { container } = renderApp(
+        <ModelCard model={model} selectable onToggleSelect={onToggleSelect} />,
+      );
+
+      await user.click(container.querySelector("[data-model-preview]")!);
+
+      expect(onToggleSelect).toHaveBeenCalledWith(1, false);
     });
   });
 

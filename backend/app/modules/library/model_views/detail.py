@@ -43,6 +43,7 @@ from app.schemas.provenance import (
 
 from .access import _effective_model_role
 from .extensions import similarity_summaries
+from .previews import summaries as preview_summaries
 from .projections import _file_reads_with_revisions, collection_name_for, thumb_url
 
 # ---------------------------------------------------------------------------
@@ -197,6 +198,8 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
     ).get(collection_path)
 
     return ModelRead(
+        previews=preview_summaries(session, [model_id])[model_id],
+        has_custom_cover=m.cover_filename is not None,
         similarity=similarity_summaries(session, user, [model_id]).get(model_id, {}),
         edit_epoch=m.edit_epoch,
         edit_version=m.edit_version,
