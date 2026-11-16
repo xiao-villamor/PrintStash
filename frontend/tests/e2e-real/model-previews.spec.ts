@@ -96,9 +96,13 @@ test.describe("Generated Model views", () => {
         .filter({ has: page.locator(`[data-model-preview="${name}"]`) });
       await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
       await card.getByRole("button", { name: "Next preview", exact: true }).click();
-      await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
-      await card.getByRole("button", { name: "Next preview", exact: true }).click();
       await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+      await card.getByRole("button", { name: "Next preview", exact: true }).click();
+      await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-2");
+      await card.getByRole("button", { name: "Previous preview", exact: true }).click();
+      await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+      await card.getByRole("button", { name: "Previous preview", exact: true }).click();
+      await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
       await card.getByRole("button", { name: "Model views", exact: true }).click();
       const gallery = page.getByRole("dialog", { name: "Model views" });
       await gallery.getByRole("button", { name: "Bottom", exact: true }).click();

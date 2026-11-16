@@ -6,6 +6,12 @@ choices in that gallery; they are outside the horizontal orbit. Planar objects
 use named Face, Reverse and Oblique edge choices instead of horizontal arrows.
 There is no autoplay or pointer-position scrubbing.
 
+On cards, the cover occupies the default face in the arrow cycle: Cover → 55° →
+145° → 235° → Cover (or the reverse). This avoids repeating the automatic cover's
+−35° angle on the first click and always lets you return to the cover. **Model
+views** retains every generated image, including −35° for custom or source-image
+covers. Cards without a cover cycle through all four generated orbit views.
+
 A chosen cover can be an uploaded PNG/JPEG/WebP, a capture of the current 3D view,
 or a source image. Reset to automatic restores the latest automatic thumbnail.
 Chosen covers survive regeneration. Covers with no measured camera are labelled

@@ -126,7 +126,8 @@ with `VAULT_SETUP_MODE=environment` and `VAULT_SETUP_ADMIN_*` set, as an app-sto
 install form leaves it: sign in with the provisioned credentials, get redirected to
 the storage step from any page, choose storage, then upload a first Model.
 
-auth (UI login, wrong-password, username + API-key login then revoke) ·
+auth (centered login in both themes at desktop/mobile sizes, short-screen scrolling,
+UI login, wrong-password, username + API-key login then revoke) ·
 vault (search, tag filter, list/grid toggle, empty state, narrow responsive toolbar) · collections
 (create / nest / anchored heading rename at 1080p preserving the visible tree, populated nested collection, Model identity and downloaded Artifact bytes across reload, plus keyboard pen/Escape cancellation / subtree count / delete / recursive-delete non-empty from the sidebar / lazy child expansion and Model move) ·
 documents (markdown editor, collection README, GFM tables) · tags (quick create/assign from a card,

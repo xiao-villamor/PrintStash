@@ -72,7 +72,7 @@ function PreviewImage({
 }
 
 function ViewIndicator({ state, className }: { state: PreviewCard; className?: string }) {
-  const orbit = state.views.filter((view) => view.role === "orbit");
+  const { orbit } = state.preview;
   const shown = state.view?.id ?? "cover";
   if (state.views.length < 2) return null;
   return (
@@ -158,7 +158,7 @@ const keepOffCard = {
 export function ModelPreviewControls({ name, state }: { name: string; state: PreviewCard }) {
   useUiLocale();
   const { preview, views } = state;
-  const orbit = views.filter((view) => view.role === "orbit");
+  const { orbit } = preview;
   const previous = preview.destination(-1);
   const next = preview.destination(1);
   return (

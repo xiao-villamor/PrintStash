@@ -11,6 +11,7 @@ import type { PreviewImage, PreviewViewId } from "@/types/previews";
 
 export const PREVIEW_INTENT_MS = 350;
 export type PreviewSelection = PreviewViewId | "cover";
+type PreviewDestination = PreviewImage | { id: "cover"; url: string };
 
 interface ConnectionBudget {
   saveData?: boolean;
@@ -68,6 +69,13 @@ export function useModelPreviews(cover: string | null, views: PreviewImage[], ad
         : (views[0]?.id ?? "cover");
   const path = selected === "cover" ? null : views.find((view) => view.id === selected)?.url;
   const active = session === mountedSession;
+  // The card uses its cover as the default face. Keep the generated first
+  // face in the gallery, where it is useful for custom/source-image covers.
+  const generatedOrbit = views.filter((view) => view.role === "orbit");
+  const orbit: PreviewDestination[] =
+    cover && generatedOrbit.length > 0
+      ? [{ id: "cover", url: cover }, ...generatedOrbit.filter((view) => view.id !== "orbit-0")]
+      : generatedOrbit;
 
   useEffect(() => {
     if (!active || !admitted || !path) return;
@@ -114,10 +122,10 @@ export function useModelPreviews(cover: string | null, views: PreviewImage[], ad
   );
 
   function warm(
-    view: PreviewImage | undefined,
+    view: PreviewDestination | undefined,
     priority: "intent" | "speculative" = "speculative",
   ) {
-    if (!active || !view) return;
+    if (!active || !view || view.id === "cover") return;
     if (warming.current.has(view.url)) {
       if (priority === "intent") prioritizeCachedAsset(view.url);
       return;
@@ -133,6 +141,7 @@ export function useModelPreviews(cover: string | null, views: PreviewImage[], ad
       });
   }
   function select(id: PreviewSelection) {
+    cancelIntent();
     if (id === "cover") {
       // The cover presents itself; a retained view must not reappear later.
       displayedLease.current?.release();
@@ -147,15 +156,12 @@ export function useModelPreviews(cover: string | null, views: PreviewImage[], ad
     setAttempt((value) => value + 1);
     // A deliberate interaction may warm one neighbor, including on touch.
     if (!previewTransferPolicy().neighbor || id === "cover") return;
-    const ring = views.filter((view) => view.role === "orbit");
-    const index = ring.findIndex((view) => view.id === id);
-    if (index >= 0) warm(ring[(index + 1) % ring.length]);
+    if (orbit.some((view) => view.id === id)) warm(destination(1, id));
   }
-  function destination(delta: number) {
-    const ring = views.filter((view) => view.role === "orbit");
-    const index = ring.findIndex((view) => view.id === selected);
-    return ring[
-      index < 0 ? (delta < 0 ? ring.length - 1 : 0) : (index + delta + ring.length) % ring.length
+  function destination(delta: -1 | 1, from: PreviewSelection = selected) {
+    const index = orbit.findIndex((view) => view.id === from);
+    return orbit[
+      index < 0 ? (delta < 0 ? orbit.length - 1 : 0) : (index + delta + orbit.length) % orbit.length
     ];
   }
   function hover() {
@@ -166,10 +172,11 @@ export function useModelPreviews(cover: string | null, views: PreviewImage[], ad
       warm(destination(-1));
     }, PREVIEW_INTENT_MS);
   }
-  function prioritize(view: PreviewImage | undefined) {
+  function prioritize(view: PreviewDestination | undefined) {
     if (previewTransferPolicy().hover) warm(view, "intent");
   }
   return {
+    orbit,
     selected,
     displayed: active && displayed?.session === session ? displayed : null,
     failed: failure !== null && failure.path === path && failure.attempt === attempt,

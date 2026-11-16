@@ -57,6 +57,9 @@
 
 ### Fixed
 
+- Model card arrows return to the cover in both directions and skip the repeated default camera angle. The expanded gallery keeps every generated view available.
+- The login card is centered in the viewport, with scrolling preserved on short screens.
+
 - Multi-angle preview controls stay readable in light and dark themes. The view count remains visible beside a separate angle label, arrow hover respects reduced motion, and the gallery uses the app's normal closing transition.
 
 - Model previews use a raised three-quarter camera and more directional studio lighting to reveal cavities and surface depth. Tall and narrow parts retain their upright view instead of being mistaken for flat plates.
