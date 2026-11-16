@@ -26,7 +26,7 @@ test.describe("ZIP upload", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
     const upload = page.getByRole("dialog", { name: "Upload model" });
-    await upload.getByRole("button", { name: "From archive" }).click();
+    await upload.getByRole("tab", { name: "From archive" }).click();
     await upload.locator('input[accept*=".zip"]').setInputFiles({
       name: `${name}.zip`,
       mimeType: "application/zip",
@@ -81,7 +81,7 @@ test.describe("ZIP upload", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
     const upload = page.getByRole("dialog", { name: "Upload model" });
-    await upload.getByRole("button", { name: "From archive" }).click();
+    await upload.getByRole("tab", { name: "From archive" }).click();
     await upload.locator('input[accept*=".zip"]').setInputFiles({
       name: `${name}.zip`,
       mimeType: "application/zip",

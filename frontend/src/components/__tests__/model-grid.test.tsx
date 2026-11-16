@@ -4243,6 +4243,81 @@ describe("ModelBrowser", () => {
       ).not.toBeInTheDocument();
     });
 
+    it("keeps manual refresh available after a conflict", async () => {
+      const user = userEvent.setup();
+      const app = renderVault({
+        models: [aModelListItem({ name: "Original bracket" })],
+        routes: {
+          "GET /api/v1/models/browse/revision": json({
+            browse_revision: "r2",
+            authorization_revision: "a1",
+          }),
+        },
+      });
+      await user.click(await screen.findByRole("checkbox", { name: "Select Original bracket" }));
+      app.route({
+        "GET /api/v1/models/browse": json({ detail: "browse_refresh_required" }, 409),
+      });
+
+      await user.click(await screen.findByRole("button", { name: "Refresh library" }));
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Refresh library" })).toBeEnabled(),
+      );
+      expect(screen.getByText("Original bracket")).toBeVisible();
+      expect(screen.queryByText("This request could not be completed. Try again.")).toBeNull();
+      expect(
+        screen.queryByText(
+          "Your previous reading position could not be restored. Showing the start of this view.",
+        ),
+      ).toBeNull();
+      app.route({
+        "GET /api/v1/models/browse": json({
+          items: [{ kind: "model", model: aModelListItem({ name: "Current bracket" }) }],
+          next_cursor: null,
+          total: 1,
+          browse_revision: "r2",
+          authorization_revision: "a1",
+        }),
+      });
+      await user.click(screen.getByRole("button", { name: "Refresh library" }));
+      expect(await screen.findByText("Current bracket")).toBeVisible();
+    });
+
+    it("retries a failed library refresh", async () => {
+      const user = userEvent.setup();
+      const app = renderVault({
+        models: [aModelListItem({ name: "Original bracket" })],
+        routes: {
+          "GET /api/v1/models/browse/revision": json({
+            browse_revision: "r2",
+            authorization_revision: "a1",
+          }),
+        },
+      });
+      await user.click(await screen.findByRole("checkbox", { name: "Select Original bracket" }));
+      app.route({
+        "GET /api/v1/models/browse": json({ detail: "unavailable" }, 503),
+      });
+
+      await user.click(await screen.findByRole("button", { name: "Refresh library" }));
+
+      expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();
+      expect(screen.getByText("Original bracket")).toBeVisible();
+      app.route({
+        "GET /api/v1/models/browse": json({
+          items: [{ kind: "model", model: aModelListItem({ name: "Current bracket" }) }],
+          next_cursor: null,
+          total: 1,
+          browse_revision: "r2",
+          authorization_revision: "a1",
+        }),
+      });
+      await user.click(screen.getByRole("button", { name: "Retry" }));
+      expect(await screen.findByText("Current bracket")).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    });
+
     it("restarts a rejected continuation from the first page", async () => {
       const nextPage = observePagination();
       const user = userEvent.setup();

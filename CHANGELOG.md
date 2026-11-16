@@ -59,6 +59,8 @@
 
 ### Fixed
 
+- Library refreshes recover automatically when an ongoing ZIP import changes the catalog during a read, keeping the displayed Models and reading position instead of showing a stuck request error.
+
 - Model card arrows return to the cover in both directions and skip the repeated default camera angle. The expanded gallery keeps every generated view available.
 - The login card is centered in the viewport, with scrolling preserved on short screens.
 
