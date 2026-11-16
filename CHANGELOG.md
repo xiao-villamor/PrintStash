@@ -38,6 +38,8 @@
 
 ### Fixed
 
+- Model previews use a raised three-quarter camera and more directional studio lighting to reveal cavities and surface depth. Tall and narrow parts retain their upright view instead of being mistaken for flat plates.
+
 - Real Library cards now reveal after they mount on both first load and cached returns, including development effect replays. Loading placeholders can no longer consume the entrance before the real cards appear. Search and Pending sidebar changes keep their stationary handoff; Favorites filters the cards without fading the whole page.
 
 - Collection navigation no longer inserts a temporary subcollection gap above existing Model cards. Settings stays reachable from the rail and restores its section sidebar; Collections correctly exits Favorites.

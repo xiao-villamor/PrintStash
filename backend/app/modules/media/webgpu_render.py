@@ -68,19 +68,26 @@ struct Vertex { @builtin(position) pos: vec4<f32>, @location(0) normal: vec3<f32
     var out: Vertex;
     out.pos = vec4(2.*xy.x/frame.extent.x, 2.*xy.y/frame.extent.y,
                   clamp((position.z-frame.extent.z)/frame.extent.w,0.,1.)*0.999999,1.);
+    // Preserve screen X/Y when reflecting depth into the lighting frame.
     out.normal = select(-normal,normal,normal.z>=0.);
+    if frame.style.x > 0. { out.normal = vec3(-out.normal.xy,out.normal.z); }
     return out;
 }
 fn shade(value: vec3<f32>) -> vec3<f32> {
     let n = unit(value);
-    let key = normalize(vec3(-0.5,0.65,1.));
+    // Zero specular selects the stable analytical matte recipe.
+    let matte = frame.style.x == 0.;
+    let key = normalize(select(vec3(-0.8,0.9,0.65),vec3(-0.5,0.65,1.),matte));
     let fill = normalize(vec3(0.55,-0.25,0.55));
     let half_vector = normalize(key+vec3(0.,0.,1.));
-    let diffuse = (0.3+1.05*clamp(dot(n,key),0.,1.)*vec3(1.,0.98,0.95)
-                       +0.3*clamp(dot(n,fill),0.,1.)*vec3(0.55,0.62,0.78))*frame.albedo.xyz;
+    let ambient = select(0.2,0.3,matte);
+    let key_strength = select(1.0,1.05,matte);
+    let fill_strength = select(0.22,0.3,matte);
+    let diffuse = (ambient+key_strength*clamp(dot(n,key),0.,1.)*vec3(1.,0.98,0.95)
+                       +fill_strength*clamp(dot(n,fill),0.,1.)*vec3(0.55,0.62,0.78))*frame.albedo.xyz;
     let fresnel = pow(1.-clamp(n.z,0.,1.),3.);
-    let specular = frame.style.x*pow(clamp(dot(n,half_vector),0.,1.),32.);
-    return clamp(diffuse+0.22*fresnel*vec3(0.85,0.92,1.)+specular,vec3(0.),vec3(1.));
+    let specular = frame.style.x*pow(clamp(dot(n,half_vector),0.,1.),24.);
+    return clamp(diffuse+select(0.12,0.22,matte)*fresnel*vec3(0.85,0.92,1.)+specular,vec3(0.),vec3(1.));
 }
 @fragment fn fs(in: Vertex) -> @location(0) vec4<f32> {
     return vec4(floor(255.*shade(in.normal))/255.,1.);

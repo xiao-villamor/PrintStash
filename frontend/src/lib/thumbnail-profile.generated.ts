@@ -1,11 +1,11 @@
 // Generated from printstash-core/mesh/preview_profile.json. Do not edit by hand.
 export const THUMBNAIL_PROFILE = {
-  version: 4,
+  version: 5,
   aspectRatio: [4, 3],
   background: "transparent",
   upAxis: "z",
-  hero: { azimuthDegrees: -35, elevationDegrees: 18 },
-  flat: { tiltDegrees: 25, thicknessRatio: 0.35 },
+  hero: { azimuthDegrees: -35, elevationDegrees: 30 },
+  flat: { tiltDegrees: 25, thicknessRatio: 0.15 },
   marginFraction: 0.1,
   supersampling: { maxOutputWidth: 640, smallFactor: 2, largeFactor: 1 },
   encoding: {

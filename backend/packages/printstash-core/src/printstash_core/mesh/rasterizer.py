@@ -463,39 +463,43 @@ def render_prepared_pixels(
         albedo = np.array(PREVIEW_PROFILE.material_albedo)
 
         # Key light: main illumination, upper-left and well in front of the
-        # camera so the lit side reads as one clean gradient. Strength >1 so the
-        # directly-lit side drives toward white — the gradient has real range now.
-        key_dir = _normalise(np.array([-0.5, 0.65, 1.0]))
+        # camera. Side lighting separates adjacent faces without washing the
+        # brightest face out to white.
+        # Matte views feed persisted similarity descriptors. Preserve their
+        # established illumination independently of the presentation recipe.
+        key_dir = _normalise(
+            np.array([-0.5, 0.65, 1.0] if matte else [-0.8, 0.9, 0.65])
+        )
         key_color = np.array([1.00, 0.98, 0.95])  # warm white
-        key_str = 1.05
+        key_str = 1.05 if matte else 1.0
 
         # Fill light: opposite side, soft and cool. Kept gentle so it only lifts
         # the shadow side and never forms a second highlight — competing
         # directional highlights are what made smooth surfaces look muddy/blotchy.
         fill_dir = _normalise(np.array([0.55, -0.25, 0.55]))
         fill_color = np.array([0.55, 0.62, 0.78])  # cool blue-grey
-        fill_str = 0.30
+        fill_str = 0.30 if matte else 0.22
 
         # Rim: a view-based Fresnel edge light (brightens the silhouette where the
         # surface turns away from the camera). Additive white, so it lifts the
         # silhouette off the dark card rather than darkening into it.
         rim_color = np.array([0.85, 0.92, 1.00])  # near-white, slightly cool
-        rim_str = 0.22
+        rim_str = 0.22 if matte else 0.12
         rim_power = 3.0
 
         # Ambient: blue-grey floor tied to the albedo so shadowed faces stay a
         # dark version of the body colour (never crushed to muddy near-black, never
         # a flat grey wash). Lifted enough that curved faces turned away from the
         # key still read as form against the dark card.
-        ambient_str = 0.30
+        ambient_str = 0.30 if matte else 0.20
 
         # Blinn-Phong specular off the key light — an additive *white* sheen that
         # picks out ridges, like the 3D viewer. Kept gentle: a strong spec sparkles
         # facet to facet on tessellated curves. Camera is on +Z in view-space, so
         # the half-vector is between key_dir and (0,0,1).
         half = _normalise(key_dir + np.array([0.0, 0.0, 1.0]))
-        spec_str = 0.0 if matte else 0.22
-        spec_power = 32.0
+        spec_str = 0.0 if matte else 0.16
+        spec_power = 24.0
 
         def _shade(n: FloatArray) -> FloatArray:
             # Per-fragment (Phong) shading from a view-space unit normal of any
@@ -578,12 +582,17 @@ def render_prepared_pixels(
                     1.0,
                     np.linalg.norm(corner_n, axis=2, keepdims=True),
                 )
-                # Into view-space and flip toward the camera (+Z). These per-corner
-                # normals are interpolated per pixel in the rasteriser (Phong); the
+                # The depth camera looks along +Z. Orient normals toward it,
+                # then reflect only Z into the lighting frame (camera at +Z).
+                # Negating the whole vector here reverses left/right and up/down
+                # lighting, making upward faces dark under an overhead key.
+                # Per-corner normals are interpolated per pixel in the rasteriser (Phong); the
                 # Fresnel rim, diffuse and specular are all evaluated there from the
                 # interpolated normal, so there is no separate per-vertex colour pass.
                 cvn = corner_n @ rot_T  # (c, 3, 3)
                 cvn = np.where(cvn[..., 2:3] >= 0, cvn, -cvn)
+                if not matte:
+                    cvn[..., :2] *= -1
 
                 front = (raw_normals[:, 2] * view_handedness) < 0.0
                 valid = front & (norm_len > 1e-8)
@@ -687,14 +696,15 @@ def _select_view_rotation(verts: FloatArray) -> FloatArray:
     extents = verts.max(axis=0) - verts.min(axis=0)
     thin_axis = int(np.argmin(extents))
     thin_extent = float(extents[thin_axis])
-    broad_extent = float(np.max(np.delete(extents, thin_axis)))
+    broad_extent = float(np.min(np.delete(extents, thin_axis)))
 
+    # A plate is thin relative to both other axes; rods are not plates.
     if broad_extent > 1e-6 and thin_extent / broad_extent <= FLAT_MESH_THICKNESS_RATIO:
         return _front_rotation_for_thin_axis(thin_axis)
 
     # "Hero" 3/4 view for a solid model. 3D-print models are Z-up (they sit
     # flat-based on the bed), so we keep Z as screen-up and look from the
-    # front-left tilted ~18° down — the way the interactive 3D viewer frames a
+    # front-left tilted 30° down — the way the interactive 3D viewer frames a
     # model. The old view stared 30° *down the Z axis*, which showed the top of
     # an upright model (e.g. the gathered top of a dumpling) instead of its face.
     azim = np.radians(PREVIEW_PROFILE.hero_azimuth_degrees)
@@ -726,6 +736,11 @@ def _front_rotation_for_thin_axis(thin_axis: int) -> FloatArray:
     else:
         # Base: camera from +Z (screen X=X, screen Y=Y, top-down).
         base = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=np.float64)
+        # Keep flat parts on the same diagonal as the hero view without
+        # tipping standing signs or lithophanes sideways.
+        azimuth = np.radians(PREVIEW_PROFILE.hero_azimuth_degrees)
+        ca, sa = np.cos(azimuth), np.sin(azimuth)
+        base = np.array([[ca, -sa, 0], [sa, ca, 0], [0, 0, 1]]) @ base
 
     # Tilt: rotate 25° around the screen-X axis so the far edge dips toward the
     # viewer, making depth recesses and raised features visible.

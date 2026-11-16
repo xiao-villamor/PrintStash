@@ -19,12 +19,12 @@ from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 class TestPreviewProfile:
     @staticmethod
     def test_canonical_thumbnail_profile_is_stable() -> None:
-        assert PREVIEW_PROFILE.version == 4
+        assert PREVIEW_PROFILE.version == 5
         assert PREVIEW_PROFILE.aspect_ratio == (4, 3)
         assert PREVIEW_PROFILE.margin_fraction == 0.10
         assert PREVIEW_PROFILE.material_albedo == (0.70, 0.75, 0.84)
         assert PREVIEW_PROFILE.hero_azimuth_degrees == -35.0
-        assert PREVIEW_PROFILE.hero_elevation_degrees == 18.0
+        assert PREVIEW_PROFILE.hero_elevation_degrees == 30.0
         assert PREVIEW_PROFILE.flat_tilt_degrees == 25.0
         assert PREVIEW_PROFILE.supersample_for(320) == 2
         assert PREVIEW_PROFILE.supersample_for(640) == 2

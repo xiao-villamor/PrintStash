@@ -597,3 +597,32 @@ class TestGpuPostprocess:
         assert renderer.postprocessor is None
         assert struct.unpack("!III", raw[:12]) == (128, 96, 1)
         assert postprocess_rgba(raw[12:], 64, 48).rgba == expected[12:]
+
+
+class TestStudioPreview:
+    @pytest.mark.parametrize(
+        "extents",
+        [(2, 2, 2), (2, 2, 20), (20, 2, 2), (20, 30, 1)],
+        ids=["solid", "upright-rod", "horizontal-rod", "plate"],
+    )
+    @pytest.mark.parametrize("matte", [False, True], ids=["studio", "analytical"])
+    def test_matches_cpu_studio_framing(self, renderer, extents, matte):
+        import trimesh
+        from printstash_core.mesh.rasterizer import render_prepared_pixels
+
+        prepared = prepare_mesh_render(trimesh.creation.box(extents=extents))
+        expected = render_prepared_pixels(
+            prepared, "studio", width=160, height=120, matte=matte
+        )
+        assert expected is not None
+        result = renderer.execute(encode(prepared, 160, 120, [None], matte))
+        width, height, count = struct.unpack("!III", result[:12])
+        assert (width, height, count) == (160, 120, 1)
+        actual = np.frombuffer(result[12:], dtype=np.uint8).reshape(120, 160, 4)
+        cpu = np.frombuffer(expected.rgba, dtype=np.uint8).reshape(120, 160, 4)
+        visible = (actual[..., 3] == 255) & (cpu[..., 3] == 255)
+        union = (actual[..., 3] >= 128) | (cpu[..., 3] >= 128)
+        overlap = (actual[..., 3] >= 128) & (cpu[..., 3] >= 128)
+
+        assert overlap.sum() / union.sum() > 0.97
+        assert np.abs(actual[visible, :3].astype(float) - cpu[visible, :3]).mean() < 4

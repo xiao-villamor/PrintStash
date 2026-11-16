@@ -18,12 +18,12 @@ describe("thumbnail camera", () => {
   it("keeps the hero camera above the build plane", () => {
     const direction = heroCameraDirection();
 
-    expect(direction.y).toBeGreaterThan(0);
+    expect(direction.y).toBeCloseTo(0.5);
     expect(direction.length()).toBeCloseTo(1);
     // Same object-to-camera direction as printstash-core after the viewer's
     // Z-up mesh is mapped into Three.js' Y-up scene.
-    expect(direction.x).toBeCloseTo(-0.5455, 3);
-    expect(direction.z).toBeCloseTo(-0.7791, 3);
+    expect(direction.x).toBeCloseTo(-0.4967, 3);
+    expect(direction.z).toBeCloseTo(-0.7094, 3);
   });
 
   it.each([

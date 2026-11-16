@@ -95,7 +95,7 @@ fn camera() {
         var axis = 0u;
         if extents.y < extents.x { axis = 1u; }
         if extents.z < extents[axis] { axis = 2u; }
-        let broad = max(extents[(axis+1u)%3u], extents[(axis+2u)%3u]);
+        let broad = min(extents[(axis+1u)%3u], extents[(axis+2u)%3u]);
         var choice = 3u;
         if broad > 1e-6 && extents[axis] / broad <= FLAT_RATIO { choice = axis; }
         r0 = rotations[choice*3u]; r1 = rotations[choice*3u+1u];
@@ -144,6 +144,7 @@ def _auto_rotations() -> str:
             [0, 0, 1],
         ]
     )
+    rotations[2] = tilt @ spin @ bases[2]
     hero_tilt = np.array(
         [
             [1, 0, 0],
@@ -165,7 +166,7 @@ def frame_config(rotation: Any, width: int, height: int, matte: bool) -> bytes:
     if rotation is not None:
         rows[:3, :3] = rotation
     rows[3] = (width, height, PREVIEW_PROFILE.margin_fraction, rotation is None)
-    rows[5, 0] = 0.0 if matte else 0.22
+    rows[5, 0] = 0.0 if matte else 0.16
     rows[6, :3] = PREVIEW_PROFILE.material_albedo
     return rows.tobytes()
 
