@@ -1068,8 +1068,36 @@ class TestPreviewControl:
                 json={"derivatives_previews_enabled": value},
             )
             assert response.status_code == 200, response.text
-        assert response.json()["derivatives_previews_enabled"] is True
+        assert response.json()["derivatives_previews_enabled"] is False
         db_session.expire_all()
         row = db_session.get(SystemConfig, 1)
         assert row is not None
         assert row.derivatives_previews_enabled is None
+
+    @pytest.mark.parametrize(
+        "enabled,poles", [(False, False), (True, False), (True, True)]
+    )
+    def test_persists_the_complete_preview_choice(
+        self, client, auth_headers, db_session, enabled, poles
+    ):
+        before = client.get("/api/v1/config", headers=auth_headers).json()
+        response = client.put(
+            "/api/v1/config",
+            headers=auth_headers,
+            json={
+                "derivatives_previews_enabled": enabled,
+                "derivatives_previews_include_poles": poles,
+            },
+        )
+        assert response.status_code == 200, response.text
+        saved = client.get("/api/v1/config", headers=auth_headers).json()
+        assert (
+            saved["derivatives_previews_enabled"],
+            saved["derivatives_previews_include_poles"],
+        ) == (enabled, poles)
+        assert saved["edit_version"] > before["edit_version"]
+        row = db_session.get(SystemConfig, 1)
+        assert (
+            row.derivatives_previews_enabled,
+            row.derivatives_previews_include_poles,
+        ) == (enabled, poles)

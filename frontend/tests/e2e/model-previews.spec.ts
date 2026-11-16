@@ -485,7 +485,7 @@ test.describe("Model preview browsing", () => {
     const { card } = await library(page);
     await card.getByRole("button", { name: "Model views", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Model views" });
-    await dialog.getByRole("button", { name: "Orbit 1 · −35°", exact: true }).click();
+    await dialog.getByRole("button", { name: "Oblique 1", exact: true }).click();
     await expect(dialog.locator("img[data-preview-view]")).toHaveAttribute(
       "data-preview-view",
       "orbit-0",

@@ -20,7 +20,7 @@ from app.db.models import (
 from app.db.scopes import live
 from app.modules.derivatives import policy
 from app.modules.derivatives.kinds import MESH_TYPES, PREVIEWS_RECIPE
-from app.modules.media.preview_contracts import PreviewManifest
+from app.modules.media.preview_contracts import PreviewManifest, ViewProfile, ViewRole
 from app.schemas.previews import (
     REASONED_STATES,
     ArtifactPreviews,
@@ -85,6 +85,7 @@ def summaries(
         return {}
     files = selected_files(session, model_ids)
     enabled = not files or policy.resolve(session)[JobKind.DERIVATIVES_PREVIEWS].enabled
+    include_poles = policy.preview_poles(session)
     by_file: dict[int, list[ArtifactDerivative]] = defaultdict(list)
     if files:
         for row in session.exec(
@@ -112,7 +113,7 @@ def summaries(
         release = None
         for row in rows:
             manifest = published(row, file.sha256)
-            if manifest is None:
+            if not enabled or manifest is None or manifest.profile != ViewProfile.ORBIT:
                 continue
             base = (
                 root if root is not None else f"/api/v1/models/{model_id}"
@@ -125,6 +126,7 @@ def summaries(
                         id=view.id, role=view.role, url=f"{base}/{view.id}"
                     )
                     for view in manifest.views
+                    if include_poles or view.role not in (ViewRole.TOP, ViewRole.BOTTOM)
                 ],
             )
             break

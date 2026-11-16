@@ -1291,6 +1291,23 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       entry,
       favorites: favoritesOnly,
       items: orderedItems,
+      previewSource:
+        modelQuery.data?.pages[0] &&
+        !foldersHidden &&
+        !searchQuery &&
+        libraryView === "all" &&
+        sortKey === "date-desc"
+          ? {
+              page: modelQuery.data.pages[0],
+              params: {
+                view: "all" as const,
+                sort: "date-desc" as const,
+                limit: pageSize ?? UNMEASURED_PAGE_SIZE,
+                collection: selectedCollection ?? undefined,
+                direct: !includeSubfolders,
+              },
+            }
+          : undefined,
       authorizationRevision: modelQuery.data?.pages[0]?.authorization_revision,
       modelPages: modelQuery.data?.pages.length ?? 0,
       folderPages: foldersHidden ? 0 : (folderPages.data?.pages.length ?? 0),
@@ -1307,6 +1324,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     };
   }, [
     browseReady,
+    searchQuery,
+    libraryView,
+    sortKey,
+    pageSize,
+    selectedCollection,
+    includeSubfolders,
     entry,
     favoritesOnly,
     orderedItems,
@@ -3560,11 +3583,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                                 count: displayCount,
                               },
                             )}
-                      {refreshing && (
-                        <span className="ml-2 font-mono text-xs text-muted-foreground">
-                          {uiText("Updating...")}
-                        </span>
-                      )}
                     </p>
                   )}
                   {displayedCollection && (
@@ -3872,11 +3890,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                                 authorizationRevision={snapshot?.authorizationRevision}
                                 onAuthorityRetired={onAuthorityRetired}
                                 previewsReady={browseReady}
-                                previewSource={
-                                  browseReady && modelQuery.data?.pages[0]
-                                    ? { page: modelQuery.data.pages[0], params: browseParams }
-                                    : undefined
-                                }
+                                previewSource={snapshot?.previewSource}
                                 onSelect={handleCollectionChange}
                                 onIntent={prefetchFolder}
                                 onDropModel={canUploadToVault ? handleMoveModel : undefined}

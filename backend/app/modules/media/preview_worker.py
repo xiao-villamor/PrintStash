@@ -34,6 +34,7 @@ def produce(
     progress: Callable[[int, int], None] | None = None,
     *,
     recipe: int = 1,
+    include_poles: bool = False,
 ) -> bytes:
     identity = FileIdentity.of(path.stat())
     # The same size and triangle ceilings as every other mesh path.
@@ -62,6 +63,7 @@ def produce(
             max_faces=limit,
             progress=progress,
             recipe=recipe,
+            include_poles=include_poles,
         )
     if FileIdentity.of(path.stat()) != identity:
         raise MeshWorkerError(ThumbnailFailureReason.SOURCE_CHANGED)
@@ -119,6 +121,7 @@ def main(argv: list[str]) -> int:
             Path(spec["output_directory"]),
             progress=lambda done, total: output.write(f"P:{done}:{total}\n".encode()),
             recipe=spec["recipe"],
+            include_poles=spec["include_poles"],
         )
     except EXPECTED_FAILURES as exc:
         payload = b"FAIL" + failure_reason(exc).value.encode()

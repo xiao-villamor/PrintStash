@@ -2221,6 +2221,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
           derivatives_gcode_enabled,
           derivatives_toolpath_enabled,
           derivatives_previews_enabled,
+          derivatives_previews_include_poles,
           ...publicFields
         } = update;
         configuration = {
@@ -2242,7 +2243,11 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
           derivatives_previews_enabled:
             derivatives_previews_enabled === undefined
               ? configuration.derivatives_previews_enabled
-              : (derivatives_previews_enabled ?? true),
+              : (derivatives_previews_enabled ?? false),
+          derivatives_previews_include_poles:
+            derivatives_previews_include_poles === undefined
+              ? configuration.derivatives_previews_include_poles
+              : (derivatives_previews_include_poles ?? false),
           has_oidc_client_secret:
             oidc_client_secret === undefined
               ? configuration.has_oidc_client_secret

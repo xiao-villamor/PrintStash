@@ -10,8 +10,20 @@ import { useVaultConfigCommand, vaultConfigOptions } from "./settings-config";
 import type { EditingBase } from "@/types/editing";
 import type { VaultConfigRead, VaultConfigUpdate } from "@/types";
 
+export type PreviewMode = "single" | "oblique" | "oblique-poles";
+export function previewMode(
+  config:
+    | Pick<VaultConfigRead, "derivatives_previews_enabled" | "derivatives_previews_include_poles">
+    | undefined,
+): PreviewMode {
+  return !config?.derivatives_previews_enabled
+    ? "single"
+    : config.derivatives_previews_include_poles
+      ? "oblique-poles"
+      : "oblique";
+}
 export type PreferenceIntent =
-  | { kind: "multi-angle"; value: boolean }
+  | { kind: "multi-angle"; value: PreviewMode }
   | { kind: "auto-mark"; value: boolean }
   | { kind: "currency"; value: string }
   | { kind: "backup-retention" | "trash-retention"; value: number; draft: string }
@@ -30,7 +42,10 @@ type PreferenceReview =
 function payload(intent: PreferenceIntent): VaultConfigUpdate {
   switch (intent.kind) {
     case "multi-angle":
-      return { derivatives_previews_enabled: intent.value };
+      return {
+        derivatives_previews_enabled: intent.value !== "single",
+        derivatives_previews_include_poles: intent.value === "oblique-poles",
+      };
     case "auto-mark":
       return { auto_mark_known_good: intent.value };
     case "currency":
@@ -46,7 +61,7 @@ function payload(intent: PreferenceIntent): VaultConfigUpdate {
 export function savedPreference(snapshot: VaultConfigRead, intent: PreferenceIntent) {
   switch (intent.kind) {
     case "multi-angle":
-      return snapshot.derivatives_previews_enabled;
+      return previewMode(snapshot);
     case "auto-mark":
       return snapshot.auto_mark_known_good;
     case "currency":

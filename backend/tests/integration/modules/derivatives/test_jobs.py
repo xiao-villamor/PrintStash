@@ -73,6 +73,13 @@ def _pass_sources(engine) -> list[JobKind]:
     )
 
 
+@pytest.fixture(autouse=True)
+def enabled_preview_default(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings.frozen, "derivatives_previews_enabled", True)
+
+
 class TestDefinitions:
     @pytest.mark.parametrize(
         ("name", "lane"),

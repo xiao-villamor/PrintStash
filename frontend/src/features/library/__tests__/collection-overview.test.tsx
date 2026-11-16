@@ -2,12 +2,24 @@
 import "@testing-library/jest-dom/vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useCollectionOverview } from "../collection-overview";
-import { aCollection } from "@/test-support/factories";
+import { useCollectionOverview, type CollectionPreviewSource } from "../collection-overview";
+import { aCollection, aModelListItem } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
 
-function Mosaic({ afterPrimary }: { afterPrimary: boolean }) {
-  const { ref, models } = useCollectionOverview(aCollection(), "a1", () => {}, afterPrimary);
+function Mosaic({
+  afterPrimary,
+  source,
+}: {
+  afterPrimary: boolean;
+  source?: CollectionPreviewSource;
+}) {
+  const { ref, models } = useCollectionOverview(
+    aCollection(),
+    "a1",
+    () => {},
+    afterPrimary,
+    source,
+  );
   return <div ref={ref}>{models ? `${models.length} previews` : "no previews"}</div>;
 }
 
@@ -28,6 +40,25 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("useCollectionOverview", () => {
+  it("retains the displayed mosaic while primary results refresh", async () => {
+    const collection = aCollection();
+    const source: CollectionPreviewSource = {
+      params: { view: "all", sort: "date-desc", limit: 4 },
+      page: {
+        items: [{ kind: "model", model: aModelListItem({ collection: collection.path }) }],
+        next_cursor: null,
+        total: 1,
+        browse_revision: "r1",
+        authorization_revision: "a1",
+      },
+    };
+    const app = renderApp(<Mosaic afterPrimary source={source} />);
+    expect(screen.getByText("1 previews")).toBeVisible();
+    app.rerender(<Mosaic afterPrimary={false} source={source} />);
+    expect(screen.getByText("1 previews")).toBeVisible();
+    expect(mosaicReads(app.requests)).toEqual([]);
+  });
+
   it("does not read a mosaic before the page's own list has arrived", async () => {
     const app = renderApp(<Mosaic afterPrimary={false} />, {
       routes: { "GET /api/v1/models/browse": previews },

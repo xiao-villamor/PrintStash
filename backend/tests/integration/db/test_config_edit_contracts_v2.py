@@ -112,6 +112,7 @@ class TestConfigurationEditVersion:
                     "derivatives_gcode_enabled",
                     "derivatives_toolpath_enabled",
                     "derivatives_previews_enabled",
+                    "derivatives_previews_include_poles",
                 )
             ],
             *[

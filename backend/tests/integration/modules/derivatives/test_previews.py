@@ -21,6 +21,13 @@ from app.modules.storage.storage_utils import ownership_snapshot
 from tests.factories.geometry import three_mf
 
 
+@pytest.fixture(autouse=True)
+def enabled_preview_default(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings.frozen, "derivatives_previews_enabled", True)
+
+
 @pytest.fixture
 def artifact(stored, local_storage):
     return stored(
@@ -142,16 +149,14 @@ def _garbled_progress(manifest, bundle, kwargs):
 
 
 class TestPreviewPublication:
-    def test_keeps_generated_views_when_disabled(
-        self, db_session, artifact, ready
-    ):
+    def test_keeps_generated_views_when_disabled(self, db_session, artifact, ready):
         policy.update(db_session, {policy.SettingName.PREVIEWS: False}, commit=False)
         db_session.commit()
 
         summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
 
         assert summary.state == "disabled"
-        assert len(summary.published.views) == 6
+        assert summary.published is None
         assert get_backend().read_bytes(ready.storage_key)
 
     def test_rejects_invalid_advertised_image(
@@ -256,7 +261,7 @@ class TestPreviewPublication:
             summary.published.manifest_url.rsplit("/", 1)[1],
         )
         assert manifest.recipe == PREVIEWS_RECIPE
-        assert len(manifest.views) == 6
+        assert len(manifest.views) == 4
 
     def test_publishes_known_camera_frames(self, db_session, artifact, ready):
         summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
@@ -319,7 +324,7 @@ class TestPreviewPublication:
         db_session.commit()
         summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
         assert summary.state == "running"
-        assert len(summary.published.views) == 6
+        assert len(summary.published.views) == 4
         assert get_backend().read_bytes(previous)
 
     def test_preserves_valid_generation_after_failed_retry(
@@ -338,7 +343,7 @@ class TestPreviewPublication:
         summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
         assert summary.state == "queued"
         assert summary.reason is None
-        assert len(summary.published.views) == 6
+        assert len(summary.published.views) == 4
 
     def test_cancels_optional_work_durably(self, db_session, artifact, make_derivative):
         make_derivative(artifact, DerivativeKind.THUMBNAIL)
@@ -573,7 +578,7 @@ class TestPreviewLimits:
             ).kinds[DerivativeKind.PREVIEWS]
             is DerivativeState.READY
         )
-        assert observed == [(index, 6) for index in range(1, 7)]
+        assert observed == [(index, 4) for index in range(1, 5)]
 
 
 class TestPreviewLinkedSources:
@@ -599,3 +604,79 @@ class TestPreviewLinkedSources:
             is DerivativeState.READY
         )
         assert path.read_bytes() == content
+
+
+class TestPreviewModes:
+    def test_mode_changes_replace_existing_views(self, db_session, artifact, ready):
+        assert (
+            len(
+                summaries(db_session, [artifact.model_id])[
+                    artifact.model_id
+                ].published.views
+            )
+            == 4
+        )
+        policy.update(db_session, {policy.SettingName.PREVIEW_POLES: True})
+        assert DerivativeKind.PREVIEWS in records.needed(
+            db_session,
+            artifact,
+            {DerivativeKind.PREVIEWS: PREVIEWS_RECIPE},
+            now=utcnow(),
+        )
+        assert previews.derive(artifact.id).kinds == {
+            DerivativeKind.PREVIEWS: DerivativeState.READY
+        }
+        db_session.expire_all()
+        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        assert [view.id for view in summary.published.views] == [
+            "orbit-0",
+            "orbit-1",
+            "orbit-2",
+            "orbit-3",
+            "top",
+            "bottom",
+        ]
+        policy.update(db_session, {policy.SettingName.PREVIEW_POLES: False})
+        # The smaller selection applies immediately, before replacement finishes.
+        assert (
+            len(
+                summaries(db_session, [artifact.model_id])[
+                    artifact.model_id
+                ].published.views
+            )
+            == 4
+        )
+        assert previews.derive(artifact.id).kinds == {
+            DerivativeKind.PREVIEWS: DerivativeState.READY
+        }
+        db_session.expire_all()
+        from app.modules.media.preview_contracts import PreviewManifest
+
+        row = records.rows_for(db_session, artifact)[DerivativeKind.PREVIEWS]
+        assert len(PreviewManifest.model_validate_json(row.output_json).views) == 4
+
+    def test_mode_change_fences_an_inflight_batch(self, db_session, artifact):
+        row = records.begin(
+            db_session, artifact, DerivativeKind.PREVIEWS, PREVIEWS_RECIPE, now=utcnow()
+        )
+        attempt = records.attempt(db_session, artifact, row)
+        db_session.commit()
+        policy.update(db_session, {policy.SettingName.PREVIEW_POLES: True})
+        with pytest.raises(records.AttemptSuperseded):
+            records.claim_running(db_session, attempt)
+
+    def test_hides_old_camera_profiles_until_replaced(
+        self, db_session, artifact, ready
+    ):
+        from app.modules.media.preview_contracts import PreviewManifest, ViewProfile
+
+        manifest = PreviewManifest.model_validate_json(ready.output_json)
+        ready.recipe_version = PREVIEWS_RECIPE - 1
+        ready.output_json = manifest.model_copy(
+            update={"recipe": PREVIEWS_RECIPE - 1, "profile": ViewProfile.PLANAR}
+        ).model_dump_json()
+        db_session.add(ready)
+        db_session.commit()
+        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        assert summary.state == "pending"
+        assert summary.published is None
