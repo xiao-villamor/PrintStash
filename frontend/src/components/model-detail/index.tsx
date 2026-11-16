@@ -36,6 +36,7 @@ import { FileText, Link2, Loader2, Pencil, Star, Trash2, Wifi } from "lucide-rea
 
 import type {
   STLViewerControls,
+  ViewerControls,
   STLPreviewFeedback,
   ViewerDisplayMode,
 } from "@/components/stl-viewer";
@@ -83,6 +84,7 @@ import { useContentReveal } from "@/lib/use-content-reveal";
 import { DetailTabLoading } from "./tab-loading";
 import { useDerivativeRefresh } from "./use-derivative-refresh";
 import { ViewerToolbar } from "./viewer-toolbar";
+import { ModelCoverEditor } from "./cover-editor";
 import { PlatePicker } from "./plate-picker";
 import { useFilePlates } from "@/lib/queries/file-plates";
 import { Localized } from "@/components/ui/localized";
@@ -200,6 +202,7 @@ function ModelDetailPresentation({
   const reviewPublication = useRef<typeof setModel | null>(null);
   const [reviewedModel, setReviewedModel] = useState<ModelRead | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [tagDialogSession, setTagDialogSession] = useState(0);
@@ -320,9 +323,9 @@ function ModelDetailPresentation({
   const [viewerReady, setViewerReady] = useState(false);
   const [previewFeedback, setPreviewFeedback] = useState<STLPreviewFeedback | null>(null);
   const viewerControls = useRef<STLViewerControls | null>(null);
-  const toolpathControls = useRef<STLViewerControls | null>(null);
+  const toolpathControls = useRef<ViewerControls | null>(null);
   const [toolpathReady, setToolpathReady] = useState(false);
-  const connectToolpathControls = useCallback((controls: STLViewerControls | null) => {
+  const connectToolpathControls = useCallback((controls: ViewerControls | null) => {
     toolpathControls.current = controls;
     setToolpathReady(controls !== null);
   }, []);
@@ -778,6 +781,22 @@ function ModelDetailPresentation({
             }}
           />
         )}
+        {coverOpen && canEditModel && auth.isAuthenticated && (
+          <ModelCoverEditor
+            model={model}
+            publish={setModel}
+            capture={
+              viewerReady && viewerMode === "model" && meshFile
+                ? async () => {
+                    const controls = viewerControls.current;
+                    if (!controls) throw new Error("preview_not_ready");
+                    return controls.captureImage();
+                  }
+                : null
+            }
+            onClose={() => setCoverOpen(false)}
+          />
+        )}
         <ShareDialog
           modelName={model.name}
           modelId={model.id}
@@ -1071,6 +1090,11 @@ function ModelDetailPresentation({
                       }
                     />
                   </Button>
+                  {canEditModel && auth.isAuthenticated && (
+                    <Button variant="outline" size="sm" onClick={() => setCoverOpen(true)}>
+                      {uiText("modelCover.edit")}
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"

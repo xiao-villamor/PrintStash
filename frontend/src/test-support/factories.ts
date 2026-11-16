@@ -1,3 +1,4 @@
+import { NO_PREVIEWS } from "@/types/previews";
 import type { SlicerProfileRead } from "@/types/slicer-profiles";
 import type { ComputeStatus } from "@/types/system";
 import type { GcPlan } from "@/lib/api/gc";
@@ -310,6 +311,7 @@ export function aModelListItem(override?: Partial<ModelListItem>): ModelListItem
     effective_role: null,
     tags: [],
     thumbnail_url: null,
+    previews: NO_PREVIEWS,
     file_count: 1,
     gcode_file_count: 0,
     mesh_file_id: null,
@@ -328,6 +330,8 @@ export function aModel(
   override?: Partial<import("@/types").ModelRead>,
 ): import("@/types").ModelRead {
   return {
+    previews: NO_PREVIEWS,
+    has_custom_cover: false,
     edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 1,
@@ -839,6 +843,7 @@ export function aVaultConfig(
     derivatives_mesh_enabled: true,
     derivatives_gcode_enabled: true,
     derivatives_toolpath_enabled: true,
+    derivatives_previews_enabled: true,
     storage_backend: "local",
     storage_provider: "local",
     storage_provider_config: {

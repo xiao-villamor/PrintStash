@@ -83,6 +83,7 @@ export interface VaultConfigRead extends EditingBase {
   derivatives_mesh_enabled: boolean;
   derivatives_gcode_enabled: boolean;
   derivatives_toolpath_enabled: boolean;
+  derivatives_previews_enabled: boolean;
 
   storage_backend: string;
   storage_provider: string;
@@ -136,6 +137,7 @@ export interface VaultConfigUpdate {
   derivatives_mesh_enabled?: boolean | null;
   derivatives_gcode_enabled?: boolean | null;
   derivatives_toolpath_enabled?: boolean | null;
+  derivatives_previews_enabled?: boolean | null;
 
   storage_backend?: string;
   storage_provider?: string;

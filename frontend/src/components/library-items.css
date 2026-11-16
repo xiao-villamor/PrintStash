@@ -42,7 +42,7 @@
 .library-model-card[data-favorites] .library-card-content {
   min-height: 128px;
 }
-.library-model-card[data-favorites] .library-preview {
+.library-model-card[data-favorites] :is(.library-preview, .library-preview-controls) {
   height: 156px;
 }
 
@@ -60,7 +60,7 @@
   outline-offset: -1px;
 }
 
-.library-model-card:not([data-favorites]) .library-preview {
+.library-model-card:not([data-favorites]) :is(.library-preview, .library-preview-controls) {
   height: auto;
   aspect-ratio: 8 / 5;
 }

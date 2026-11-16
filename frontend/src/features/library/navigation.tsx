@@ -8,8 +8,9 @@ type LibraryLinkProps = Omit<LinkProps, "state"> & { href: string };
 export function LibraryItemLink({
   href,
   origin,
+  trackPosition = true,
   ...props
-}: LibraryLinkProps & { origin?: LibraryEntry }) {
+}: LibraryLinkProps & { origin?: LibraryEntry; trackPosition?: boolean }) {
   const location = useLocation();
   const target = new URL(href, window.location.origin);
   if (origin) target.searchParams.set("return", origin.href);
@@ -22,7 +23,7 @@ export function LibraryItemLink({
           ? { libraryOrigin: origin.key }
           : undefined
       }
-      data-library-entry={target.pathname}
+      data-library-entry={trackPosition ? target.pathname : undefined}
     />
   );
 }

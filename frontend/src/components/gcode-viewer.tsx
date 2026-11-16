@@ -17,7 +17,7 @@ import { previewPixelRatio, usePreviewPreferences } from "@/lib/preview-preferen
 import type { ToolpathData } from "@/lib/gcode";
 import { parseGcodeInWorker, ToolpathParseError } from "@/lib/gcode-worker-client";
 
-import type { STLViewerControls, ViewerCameraPreset } from "@/components/stl-viewer";
+import type { ViewerControls, ViewerCameraPreset } from "@/components/stl-viewer";
 
 // ---- Three.js Scene ----
 
@@ -39,7 +39,7 @@ function GcodeScene({
   showBed: boolean;
   printerBedMm: { x: number; y: number } | null;
   showGrid: boolean;
-  onControlsReady: (controls: STLViewerControls | null) => void;
+  onControlsReady: (controls: ViewerControls | null) => void;
   screenshotName: string;
 }) {
   const { camera, gl, scene } = useThree();
@@ -277,7 +277,7 @@ export interface GcodeViewerProps {
   screenshotName?: string;
   showGrid?: boolean;
   showDimensions?: boolean;
-  onControlsReady?: (controls: STLViewerControls | null) => void;
+  onControlsReady?: (controls: ViewerControls | null) => void;
   canvasRenderer?: ComponentType<CanvasRendererProps>;
   toolpathParser?: typeof parseGcodeInWorker;
   toolpathFetcher?: typeof getDerivedText;
@@ -308,10 +308,10 @@ export function GcodeViewer({
   const [onlyCurrentLayer, setOnlyCurrentLayer] = useState(false);
   const [showTravel, setShowTravel] = useState(false);
   const [showBed, setShowBed] = useState(true);
-  const localControls = useRef<STLViewerControls | null>(null);
+  const localControls = useRef<ViewerControls | null>(null);
   const [cameraPreset, setCameraPreset] = useState<ViewerCameraPreset>("isometric");
   const connectControls = React.useCallback(
-    (controls: STLViewerControls | null) => {
+    (controls: ViewerControls | null) => {
       localControls.current = controls;
       if (controls) setCameraPreset("isometric");
       onControlsReady?.(controls);

@@ -315,7 +315,7 @@ def zip_view(
     limits = _archive_limits()
     try:
         planned = archive_formats.planned_zip_bytes(
-            path, archive, limits=limits, keep=_kept_in_review
+            path, archive, limits=limits, keep=_kept_in_review, on_chunk=checkpoint
         )
         with scratch_windows.open_window(
             kind=scratch_windows.WindowKind.ARCHIVE_TRANSCODE,

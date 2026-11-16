@@ -5,7 +5,7 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { toast } from "sonner";
 import type {
-  STLViewerControls,
+  ViewerControls,
   ViewerDisplayMode,
   ViewerCameraPreset,
 } from "@/components/stl-viewer";
@@ -35,7 +35,7 @@ export function ViewerToolbar({
   setDisplayMode: (mode: ViewerDisplayMode) => void;
   showGrid: boolean;
   setShowGrid: (visible: boolean) => void;
-  controls: React.RefObject<STLViewerControls | null>;
+  controls: React.RefObject<ViewerControls | null>;
   viewerMode: ViewerMode;
   setViewerMode: (mode: ViewerMode) => void;
   hasGcode: boolean;

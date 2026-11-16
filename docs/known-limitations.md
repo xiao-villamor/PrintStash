@@ -219,7 +219,10 @@ available builds. Anything marked beta here remains beta.
   models and preview images for review, and again when the selection is
   imported, so staging briefly needs room for those files uncompressed.
   Encrypted archives, links inside archives and multi-volume archives are not
-  read. Compressed RAR members need `bsdtar`, which the container image
+  read. A TAR archive must not unpack to more than the archive size limit
+  (`VAULT_MAX_ARCHIVE_UNCOMPRESSED_MB`) in total, counting files that are not
+  models; sparse members, member types other than files, folders, links and
+  devices, and names that are not UTF-8 are refused. Compressed RAR members need `bsdtar`, which the container image
   includes; uncompressed members are read without it. Browser captures and
   Pending Imports accept ZIP only.
 - The G-code toolpath viewer is a browser-side visualization aid. It is not a
@@ -419,3 +422,7 @@ remains downloadable. CTB files without an embedded preview have no thumbnail.
 
 Other resin formats, spreadsheets and Word documents can be stored in collection
 Documents and downloaded unchanged. Their contents do not have an in-app preview.
+
+## Multi-angle Model previews
+
+Generated card views are discrete recognition aids, not complete geometry inspection. Recipe 1 follows the shared mesh limits (`VAULT_MESH_MAX_LOAD_MB`, default 200; `VAULT_MESH_MAX_RENDER_TRIANGLES`, default 2,000,000) and produces five or six 480 × 360 images; native memory admission also applies. Unsupported or refused optional views leave the original Artifact and primary cover usable. Primary work gets scheduling priority, with a finite grace period to keep continuous ingestion from starving secondary views. See [behavior and limits](model-previews.md).

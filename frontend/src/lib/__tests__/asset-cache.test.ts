@@ -28,6 +28,7 @@ import {
   getAssetCacheStats,
   invalidateCachedAsset,
   peekCachedAssetUrl,
+  prioritizeCachedAsset,
 } from "@/lib/asset-cache";
 
 /** Complete a non-mounted test consumer through the production lease interface. */
@@ -443,5 +444,79 @@ describe("private asset scope", () => {
       inactiveEntries: 4,
     });
     mounted.release();
+  });
+});
+
+describe("preview transfer scheduling", () => {
+  it("reserves a download slot for visible images", async () => {
+    const pending = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockImplementation(async () => {
+      await pending.promise;
+      return new Response("webp");
+    });
+    const first = acquireAssetUrl("/preview/a", undefined, "speculative");
+    const second = acquireAssetUrl("/preview/b", undefined, "speculative");
+    const visible = acquireAssetUrl("/preview/cover");
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringContaining("/preview/a"),
+      expect.stringContaining("/preview/cover"),
+    ]);
+    pending.resolve(new Response("webp"));
+    await Promise.all([first.url, second.url, visible.url]);
+    first.release();
+    second.release();
+    visible.release();
+  });
+
+  it("admits intent, visible covers and mosaics before a speculative neighbor", async () => {
+    const release = Promise.withResolvers<void>();
+    vi.mocked(fetch).mockImplementation(async () => {
+      await release.promise;
+      return new Response("webp");
+    });
+    const active = Array.from({ length: 6 }, (_, i) => acquireAssetUrl(`/preview/active-${i}`));
+    const neighbor = acquireAssetUrl("/preview/neighbor", undefined, "speculative");
+    const mosaic = acquireAssetUrl("/preview/mosaic", undefined, "background");
+    const cover = acquireAssetUrl("/preview/cover");
+    const arrow = acquireAssetUrl("/preview/arrow", undefined, "speculative");
+    prioritizeCachedAsset("/preview/arrow");
+
+    release.resolve();
+    const leases = [...active, neighbor, mosaic, cover, arrow];
+    await Promise.all(leases.map((lease) => lease.url));
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.slice(active.length)
+        .map(([url]) => String(url)),
+    ).toEqual([
+      expect.stringContaining("/preview/arrow"),
+      expect.stringContaining("/preview/cover"),
+      expect.stringContaining("/preview/mosaic"),
+      expect.stringContaining("/preview/neighbor"),
+    ]);
+    leases.forEach((lease) => lease.release());
+  });
+
+  it("promotes the queued arrow destination ahead of another neighbor", async () => {
+    const pending = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockImplementation(async () => {
+      await pending.promise;
+      return new Response("webp");
+    });
+    const first = acquireAssetUrl("/preview/active", undefined, "speculative");
+    const other = acquireAssetUrl("/preview/other", undefined, "speculative");
+    const destination = acquireAssetUrl("/preview/destination", undefined, "speculative");
+    prioritizeCachedAsset("/preview/destination");
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringContaining("/preview/active"),
+      expect.stringContaining("/preview/destination"),
+    ]);
+    pending.resolve(new Response("webp"));
+    await Promise.all([first.url, other.url, destination.url]);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    first.release();
+    other.release();
+    destination.release();
   });
 });

@@ -70,6 +70,22 @@ step_duration = Histogram(
     registry=registry,
 )
 
+job_queue_wait = Histogram(
+    "printstash_job_queue_wait_seconds",
+    "Enqueue to first start of a background Job: polling, lane slots, admission.",
+    labelnames=("kind",),
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 300),
+    registry=registry,
+)
+
+sqlite_writer_wait = Histogram(
+    "printstash_sqlite_writer_wait_seconds",
+    "Time a BEGIN IMMEDIATE waited for the SQLite writer, by Job definition.",
+    labelnames=("kind",),
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+    registry=registry,
+)
+
 job_resubmits = Counter(
     "printstash_job_resubmits_total",
     "Interrupted executions the reconciler resubmitted, by definition.",
@@ -322,6 +338,20 @@ def record_step(kind: str, step: str, result: str, duration_seconds: float) -> N
             max(0.0, duration_seconds)
         )
     except Exception:  # noqa: BLE001 — metrics must never break a job
+        pass
+
+
+def record_queue_wait(kind: str, seconds: float) -> None:
+    try:
+        job_queue_wait.labels(kind=kind).observe(max(0.0, seconds))
+    except Exception:  # noqa: BLE001 — metrics must never break a job
+        pass
+
+
+def record_writer_wait(kind: str, seconds: float) -> None:
+    try:
+        sqlite_writer_wait.labels(kind=kind).observe(max(0.0, seconds))
+    except Exception:  # noqa: BLE001 — metrics must never break a write
         pass
 
 

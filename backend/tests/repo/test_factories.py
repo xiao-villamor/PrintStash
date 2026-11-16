@@ -62,6 +62,16 @@ from tests.factories.library_scale import build_library_at_scale
 
 
 class TestGeneratedIdentities:
+    def test_model_cover_builder_exposes_an_independent_selection(self, db_session):
+        model = factories.build_model(db_session)
+        cover = factories.build_model_cover(db_session, model)
+        db_session.refresh(model)
+
+        assert model.cover_filename == cover.filename
+        assert model.thumbnail_file_id is None
+        assert cover.size_bytes > 0
+        assert len(cover.sha256) == 64
+
     def test_search_dependency_builder_tracks_removed_sources(self, db_session):
         from app.db.projections import ContentSource
         from app.modules.search.projection import affected_subjects

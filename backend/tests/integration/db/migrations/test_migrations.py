@@ -45,6 +45,7 @@ from sqlmodel import Session, SQLModel
 
 import app.db.models  # noqa: F401 — register all tables on SQLModel.metadata
 from alembic import command
+from app.db import library_browse_v3
 from app.db import migrate as migrate_mod
 from app.db.session import _is_alembic_managed, init_db
 from tests.factories import build_user
@@ -1067,6 +1068,50 @@ class TestInitDb:
 
 
 class TestUpgrade:
+    @pytest.mark.parametrize(
+        "parent_revision",
+        ["16c087bb845e", "55535d2c13e3"],
+        ids=["library-browse", "model-previews"],
+    )
+    def test_upgrades_existing_vault_from_either_merge_parent(
+        self, tmp_path: Path, parent_revision: str
+    ) -> None:
+        db_path = tmp_path / "parent.sqlite"
+        config = _upgrade_to(db_path, parent_revision)
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            with engine.begin() as connection:
+                seed_schema_row(connection, "system_config", id=1, currency="EUR")
+                seed_schema_row(
+                    connection,
+                    "models",
+                    id=7,
+                    name="Existing Model",
+                    slug="existing",
+                    hash="a" * 64,
+                    edit_version=1,
+                )
+            command.upgrade(config, "head")
+            with engine.connect() as connection:
+                assert library_browse_v3.installed(connection)
+                assert (
+                    connection.execute(
+                        text(
+                            "SELECT derivatives_previews_enabled FROM system_config WHERE id=1"
+                        )
+                    ).scalar_one()
+                    is None
+                )
+                assert (
+                    connection.execute(
+                        text("SELECT name FROM models WHERE id=7")
+                    ).scalar_one()
+                    == "Existing Model"
+                )
+            assert migrate_mod._current_revision(engine) == _head_revision()
+        finally:
+            engine.dispose()
+
     def test_alembic_upgrade_creates_expected_schema(
         self, tmp_path: Path, monkeypatch
     ) -> None:

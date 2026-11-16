@@ -30,6 +30,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 
 from sqlalchemy import and_, case, func, or_, update
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 from sqlmodel.sql.expression import SelectOfScalar
 
@@ -57,6 +58,7 @@ from .contracts import (
     EngineEvidence,
     EngineStatus,
     ExecutionKind,
+    InteractiveBacklogSource,
     JobDefinition,
     JobOutcome,
     LaneOrder,
@@ -116,6 +118,7 @@ class PassNote(StrEnum):
     ALREADY_ACTIVE = "already_active"
     CLAIMED_ELSEWHERE = "claimed_elsewhere"
     WAITING_FOR_ADDITIONS = "waiting_for_additions"
+    YIELDING_TO_INTERACTIVE = "yielding_to_interactive"
 
 
 @dataclass(frozen=True)
@@ -669,6 +672,12 @@ def _discover(definition: JobDefinition, *, now: datetime, result: PassResult) -
                 result.count(PassNote.WAITING_FOR_ADDITIONS)
                 return
             result.paced = True
+        if definition.yields_to and _interactive_ahead(
+            session, definition.yields_to, now=now
+        ):
+            # The last of those Jobs to settle nudges this definition.
+            result.count(PassNote.YIELDING_TO_INTERACTIVE)
+            return
         if isinstance(source, PrioritizedWorkSource):
             budget = _discovery_budget(session, definition)
             limit = budget.total
@@ -706,7 +715,7 @@ def _discover(definition: JobDefinition, *, now: datetime, result: PassResult) -
             return
     try:
         cooldown = timedelta(seconds=settings.jobs_resubmit_cooldown_seconds)
-        created = 0
+        eligible = []
         for item in items:
             last = finished.get(item.subject_key)
             if last is not None:
@@ -716,9 +725,10 @@ def _discover(definition: JobDefinition, *, now: datetime, result: PassResult) -
                 if result.cooling_until is None or due < result.cooling_until:
                     result.cooling_until = due
                 continue
-            created += _create_and_submit(
-                definition, item, now=now, result=result, lease=lease
-            )
+            eligible.append(item)
+        created = _create_and_submit_all(
+            definition, eligible, now=now, result=result, lease=lease
+        )
         # A full batch continues straight away only when it made progress. The same
         # subjects would come straight back if it did not: ones held back by the
         # cooldown, or ones whose Jobs are still queued (the source is ahead of the
@@ -729,6 +739,25 @@ def _discover(definition: JobDefinition, *, now: datetime, result: PassResult) -
     finally:
         if lease is not None:
             fences.release(lease.name, holder=lease.holder)
+
+
+def _interactive_ahead(
+    session: Session, definitions: tuple[JobKind, ...], *, now: datetime
+) -> bool:
+    """Whether a person waits on interactive work of ``definitions``.
+
+    Active Jobs alone miss the gap between discovery batches, when the last
+    batch has settled and the next is not created yet: a yielding definition
+    discovered in that gap ran beside the rest of an import's mesh work.
+    """
+    if jobs.any_active(session, definitions, priority=WorkPriority.INTERACTIVE):
+        return True
+    catalog = catalog_module.get_catalog()
+    return any(
+        isinstance(source, InteractiveBacklogSource)
+        and source.owes_interactive(session, now=now)
+        for source in (catalog.definition(name).source for name in definitions)
+    )
 
 
 def _recently_finished(
@@ -786,65 +815,92 @@ def _renew_discovery_lease(session: Session, lease: _DiscoveryLease) -> bool:
     )
 
 
-def _create_and_submit(
+def _create_and_submit_all(
     definition: JobDefinition,
-    item: WorkItem,
+    items: Sequence[WorkItem],
     *,
     now: datetime,
     result: PassResult,
     lease: _DiscoveryLease | None = None,
 ) -> int:
-    """Create (and submit) the item's Job; 1 when a Job was created."""
-    try:
-        with get_session_factory().scoped_session() as session:
-            if lease is not None:
-                begin_write(session, immediate=True)
-                if not _renew_discovery_lease(session, lease):
+    """Create the items' Jobs in one write transaction, then submit each.
+
+    One writer acquisition per batch instead of one per item: under ingest
+    load each SQLite ``BEGIN IMMEDIATE`` waited ~60 ms behind mesh
+    publication. The lease is renewed and the lane budget read once, and the
+    budget is then spent locally, since every Job created here is QUEUED.
+    Returns how many Jobs were created.
+    """
+    if not items:
+        return 0
+    created: list[tuple[WorkItem, str]] = []
+    latest_occurrence: datetime | None = None
+    with get_session_factory().scoped_session() as session:
+        room: dict[WorkPriority, int] | None = None
+        # Explicitly begun, and immediately: sqlite3's legacy mode would make
+        # each SAVEPOINT below its own outer transaction, committed at release,
+        # and a deferred snapshot taken by the reads could not upgrade to write.
+        begin_write(session, immediate=True)
+        if lease is not None:
+            if not _renew_discovery_lease(session, lease):
+                for _item in items:
                     result.count(PassNote.CLAIMED_ELSEWHERE)
-                    return 0
-                budget = _discovery_budget(session, definition)
-                room = (
-                    budget.interactive
-                    if item.priority is WorkPriority.INTERACTIVE
-                    else budget.backfill
-                )
-                if room == 0:
-                    result.count(PassNote.LANE_FULL)
-                    return 0
+                return 0
+            budget = _discovery_budget(session, definition)
+            room = {
+                WorkPriority.INTERACTIVE: budget.interactive,
+                WorkPriority.BACKFILL: budget.backfill,
+            }
+        for item in items:
+            if room is not None and room[item.priority] == 0:
+                result.count(PassNote.LANE_FULL)
+                continue
             # Domain-owned hooks decide admission; coordinator knows no settings.
             if definition.admission(session) is not None:
-                return 0
-            job_id = jobs.create(
-                definition=definition.name,
-                subject_key=item.subject_key,
-                owner_user_id=item.owner_user_id,
-                priority=item.priority,
-                session=session,
-            )
-            session.commit()
-    except ActiveJobExists:
-        result.count(PassNote.ALREADY_ACTIVE)
-        return 0
-    if item.occurrence_at is not None:
-        _record_occurrence(definition.name, item.occurrence_at)
-    if item.skip is not None:
-        jobs.finish(job_id, JobOutcome.CANCELLED, error=item.skip)
-        result.skipped += 1
-        result.count(item.skip)
-        return 1
-    submit_job(job_id, result, lease=lease)
-    return 1
-
-
-def _record_occurrence(source: JobKind, occurrence: datetime) -> None:
-    with get_session_factory().scoped_session() as session:
-        cursor = session.get(ReconcileCursor, source) or ReconcileCursor(source=source)
-        if cursor.last_occurrence_at is None or ensure_utc(
-            cursor.last_occurrence_at
-        ) < ensure_utc(occurrence):
-            cursor.last_occurrence_at = occurrence
-        session.add(cursor)
+                continue
+            try:
+                # A savepoint keeps one subject's conflict from undoing the
+                # batch (PostgreSQL can race the unique index; SQLite holds the
+                # writer and is refused by the active-Job check instead).
+                with session.begin_nested():
+                    job_id = jobs.create(
+                        definition=definition.name,
+                        subject_key=item.subject_key,
+                        owner_user_id=item.owner_user_id,
+                        priority=item.priority,
+                        session=session,
+                    )
+            except (ActiveJobExists, IntegrityError):
+                result.count(PassNote.ALREADY_ACTIVE)
+                continue
+            if room is not None:
+                room[item.priority] -= 1
+            if item.occurrence_at is not None and (
+                latest_occurrence is None
+                or ensure_utc(latest_occurrence) < ensure_utc(item.occurrence_at)
+            ):
+                latest_occurrence = item.occurrence_at
+            created.append((item, job_id))
+        if latest_occurrence is not None:
+            _record_occurrence(session, definition.name, latest_occurrence)
         session.commit()
+    for item, job_id in created:
+        if item.skip is not None:
+            jobs.finish(job_id, JobOutcome.CANCELLED, error=item.skip)
+            result.skipped += 1
+            result.count(item.skip)
+            continue
+        submit_job(job_id, result, lease=lease)
+    return len(created)
+
+
+def _record_occurrence(session: Session, source: JobKind, occurrence: datetime) -> None:
+    cursor = session.get(ReconcileCursor, source) or ReconcileCursor(source=source)
+    if cursor.last_occurrence_at is None or ensure_utc(
+        cursor.last_occurrence_at
+    ) < ensure_utc(occurrence):
+        cursor.last_occurrence_at = occurrence
+    session.add(cursor)
 
 
 def _claim(source: JobKind, holder: str, *, now: datetime) -> bool:

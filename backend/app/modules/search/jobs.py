@@ -667,6 +667,10 @@ def definitions() -> list[JobDefinition]:
             # writing to: projected during an import, it doubled the import's
             # time. Library browsing and filters do not read the projection.
             during_additions=DuringAdditions.WAITS,
+            # Mesh Jobs that follow an import publish thumbnails and metadata
+            # through the same writer; projected beside them, each page held
+            # it for hundreds of statements and stalled every mesh settlement.
+            yields_to=(JobKind.DERIVATIVES_MESH,),
         ),
         JobDefinition(
             name=JobKind.SEARCH_GENERATION,

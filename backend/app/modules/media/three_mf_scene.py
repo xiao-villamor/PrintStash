@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 import zipfile
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, TypeVar, cast
 
@@ -23,6 +22,7 @@ from printstash_core.mesh.similarity.components import (
 )
 
 from app.core.native_settings import settings
+from app.modules.media.mesh_telemetry import ReaderChoice, ThreeMFReader
 
 if TYPE_CHECKING:
     import numpy as np
@@ -108,13 +108,6 @@ def _attribute_columns(
     return np.array(columns, dtype=dtype).T.copy()
 
 
-class ThreeMFReader(StrEnum):
-    """Which reader produced a scene; each has its own memory weight per face."""
-
-    LIB3MF = "lib3mf"
-    XML = "xml"
-
-
 def read_scene(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> ExpandedScene:
     """Read through lib3mf when it can answer exactly; otherwise parse the XML."""
     return read_scene_with_reader(path, max_faces=max_faces)[0]
@@ -122,8 +115,8 @@ def read_scene(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> ExpandedSc
 
 def read_scene_with_reader(
     path: Path, *, max_faces: int = MAX_ANALYSIS_FACES
-) -> tuple[ExpandedScene, ThreeMFReader]:
-    """The scene and the reader that produced it."""
+) -> tuple[ExpandedScene, ReaderChoice]:
+    """The scene, the reader that produced it and why lib3mf declined, if it did."""
     from app.modules.media import three_mf_native
 
     if type(max_faces) is not int or not 1 <= max_faces <= MAX_ANALYSIS_FACES:
@@ -131,10 +124,13 @@ def read_scene_with_reader(
     try:
         return (
             three_mf_native.read_scene(path, max_faces=max_faces),
-            ThreeMFReader.LIB3MF,
+            ReaderChoice(ThreeMFReader.LIB3MF),
         )
-    except three_mf_native.NativeUnavailable:
-        return _read_scene_xml(path, max_faces=max_faces), ThreeMFReader.XML
+    except three_mf_native.NativeUnavailable as declined:
+        return (
+            _read_scene_xml(path, max_faces=max_faces),
+            ReaderChoice(ThreeMFReader.XML, declined.reason),
+        )
 
 
 def _read_scene_xml(path: Path, *, max_faces: int) -> ExpandedScene:

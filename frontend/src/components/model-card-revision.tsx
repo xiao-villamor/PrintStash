@@ -144,6 +144,7 @@ export function ModelCardRevision({
               <LibraryItemLink
                 origin={origin}
                 href={`/models/${model.id}?tab=history`}
+                trackPosition={false}
                 className="library-card-result"
                 aria-label={uiText("Print history")}
               >

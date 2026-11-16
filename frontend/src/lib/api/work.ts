@@ -79,7 +79,10 @@ export function createEventsTicket(
 /** The Background work owner changes only derivative policy overrides. */
 export type WorkDerivativePolicy = Pick<
   VaultConfigUpdate,
-  "derivatives_mesh_enabled" | "derivatives_gcode_enabled" | "derivatives_toolpath_enabled"
+  | "derivatives_mesh_enabled"
+  | "derivatives_gcode_enabled"
+  | "derivatives_toolpath_enabled"
+  | "derivatives_previews_enabled"
 >;
 
 export async function updateWorkDerivativePolicy(

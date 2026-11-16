@@ -8,9 +8,10 @@ const MAX_INACTIVE_ENTRIES = 400;
 const MAX_INACTIVE_BYTES = 32 * 1024 * 1024;
 
 type AssetStatus = "queued" | "loading" | "ready" | "retired";
-/** "background" assets (collection mosaics) yield every free slot to
- * "primary" ones (the cards the reader came for). */
-export type AssetPriority = "primary" | "background";
+// Explicit preview intent takes the next slot. Visible covers and mosaics can
+// fill the rest before hover-initiated work takes its single speculative slot.
+const priorityOrder = { intent: 0, primary: 1, background: 2, speculative: 3 } as const;
+export type AssetPriority = keyof typeof priorityOrder;
 interface AssetData {
   url: string;
   bytes: number;
@@ -88,6 +89,13 @@ function evictInactive(): void {
 function pump(): void {
   if (disposing) return;
   while (downloads < MAX_DOWNLOADS && queue.length > 0) {
+    if (
+      queue[0].priority === "speculative" &&
+      Array.from(entries.values()).some(
+        (entry) => entry.status === "loading" && entry.priority === "speculative",
+      )
+    )
+      break;
     const entry = queue.shift()!;
     if (entry.status !== "queued") continue;
     entry.status = "loading";
@@ -114,27 +122,31 @@ function pump(): void {
 }
 
 function enqueue(entry: AssetEntry): void {
-  // Primary assets wait only behind other primary ones, in request order.
-  const firstBackground =
-    entry.priority === "primary"
-      ? queue.findIndex((queued) => queued.priority === "background")
-      : -1;
-  if (firstBackground === -1) queue.push(entry);
-  else queue.splice(firstBackground, 0, entry);
+  if (entry.priority === "intent") {
+    queue.unshift(entry);
+    return;
+  }
+  const next = queue.findIndex(
+    (queued) => priorityOrder[queued.priority] > priorityOrder[entry.priority],
+  );
+  if (next === -1) queue.push(entry);
+  else queue.splice(next, 0, entry);
+}
+
+function promote(entry: AssetEntry, priority: AssetPriority): void {
+  if (priorityOrder[priority] >= priorityOrder[entry.priority]) return;
+  entry.priority = priority;
+  const index = queue.indexOf(entry);
+  if (index === -1) return;
+  queue.splice(index, 1);
+  enqueue(entry);
 }
 
 function getEntry(path: string, priority: AssetPriority): AssetEntry {
   const cached = entries.get(path);
   if (cached) {
     touch(cached);
-    if (priority === "primary" && cached.priority === "background") {
-      cached.priority = "primary";
-      const queued = queue.indexOf(cached);
-      if (queued !== -1) {
-        queue.splice(queued, 1);
-        enqueue(cached);
-      }
-    }
+    promote(cached, priority);
     return cached;
   }
   const entry = new AssetEntry(path);
@@ -188,6 +200,14 @@ export function acquireAssetUrl(
   signal?.addEventListener("abort", cancel, { once: true });
   pump();
   return { url, release };
+}
+
+/** Promote already-owned work without adding another consumer or transfer. */
+export function prioritizeCachedAsset(path: string): void {
+  const entry = entries.get(path);
+  if (!entry) return;
+  promote(entry, "intent");
+  pump();
 }
 
 /** Synchronous reuse; display consumers must still acquire a lease in their effect. */

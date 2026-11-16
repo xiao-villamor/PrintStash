@@ -43,7 +43,12 @@ def _upload_disabled(client):
     assert job["state"] == "completed", job
     file_id = job["file_id"]
     states = client.get(f"/api/v1/files/{file_id}/derivatives").json()
-    assert {row["state"] for row in states} == {"disabled"}, states
+    # Previews have their own control; they wait behind the disabled cover.
+    assert {row["kind"]: row["state"] for row in states} == {
+        "metadata": "disabled",
+        "previews": "pending",
+        "thumbnail": "disabled",
+    }, states
     with get_session_factory().scoped_session() as session:
         assert (
             session.exec(

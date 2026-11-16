@@ -27,14 +27,31 @@
 - Sign-in and first-run setup share one frame and one field style. On the Storage step, Continue runs the storage check itself and moves on when it passes; Check storage remains for checking without leaving the step. The Account step reports every invalid field at once, Review labels Email plainly, lists the previews folder and offers Edit account and Edit storage, and the final button reads Create account. A refused sign-in no longer marks both fields invalid, and the sign-in page explains that another administrator resets a forgotten password in Settings → Users.
 - Storage folders use one name everywhere: "Your files" and "Previews" in setup, its review and Settings, with a note that Docker installs enter the path inside the container. A failed storage check shows "Needs attention" like a passed one shows "Storage ready" and marks the folder it names. Remote providers explain their deletion behaviour in one plain sentence instead of tier names, and beta connections say so. Setup marks completed steps clearly, and the sign-in recovery hint sits below single sign-on.
 - Library motion flows instead of cutting: the details panel eases in from its edge and leaves the same way, pointing it at another Model swaps its contents in place, opening the collections pane eases it in, and a filter, sort, layout or pane change settles the results in place. Cards no longer slide in again when the grid reflows or scrolls them back into view. Opening a folder from the tree, a breadcrumb or a folder card resolves it in one lookup instead of two.
+- The background engine uses DBOS 3.5.0 (was 3.3.0). Its first start adds indexes, a column and a table to the disposable engine database; queued Jobs resume. Stop every API and worker process and restart them together on the same image. DBOS 3.3.0 is not guaranteed to read the migrated engine database: to roll back, stop every process and discard the engine state (the `-dbos` SQLite sibling with its `-wal` and `-shm` files, or the PostgreSQL `dbos` schema) before starting the previous image; Jobs are recorded in the application database and are submitted again.
 
 ### Added
 
 - Custom recovery pages distinguish missing content, restricted access and connection failures, with retry and return actions that match the workbench.
+- Model cards offer lightweight multi-angle previews with deliberate arrows and an expanded gallery, including Top/Bottom and shape-aware planar views. Visible-image admission, intent-based prefetching and bounded background generation preserve primary covers and avoid hover-triggered geometry downloads. Generation has its own Background work control (`VAULT_DERIVATIVES_PREVIEWS_ENABLED`). See [preview behavior and limits](docs/model-previews.md).
+
+- Model covers can use an uploaded PNG/JPEG/WebP, the current 3D view, or an available source image. Chosen covers survive thumbnail regeneration and source-image changes; Reset to automatic restores the latest generated thumbnail. Cover edits support conflict review and are included in backup, storage migration, and purge.
 - **Multi-plate G-code previews.** Browse the sliced plates inside Bambu Studio and OrcaSlicer `.3mf` and `.gcode.3mf` files, including exports without source meshes. Choose a file and a plate in the G-code viewer; ordinary G-code revisions keep their existing preview.
 
 - CTB (v2–5) and GOO (V3.0) resin slices can be uploaded as source files with embedded previews and available layer height/count, exposure, estimated print time, resin volume, printer and slicer metadata. Original printer bytes remain downloadable. Resin printing and layer/toolpath simulation are not included.
 - Collection Documents accepts spreadsheets, Word files and arbitrary binary attachments, including other resin formats, with original-byte downloads.
+- Background work on SQLite starts as soon as it is queued instead of at the next poll: the image patches DBOS with hash-checked queue notifications, on by default. A 60-file archive's thumbnails finish 2.5 s sooner on a 3-CPU host, and an idle server uses 2% of a core instead of 11%. Set `VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS=false` to return to polling. PostgreSQL is unchanged.
+
+### Security
+
+- A TAR upload or URL import can no longer exhaust the server's memory or CPU with a few hundred bytes. TAR headers are read with fixed caps: oversized long-name or pax headers and unknown member types are refused, folders and links count toward the entry limit, the whole unpacked stream is held to the archive size limit, and cancelling an import stops its archive check.
+
+### Performance
+
+- Thumbnails for an imported archive finish sooner: search indexing of the new Models now waits until their thumbnails and measurements are done instead of competing with them for the database. New Models become searchable shortly after their thumbnails appear.
+- Mesh processing no longer stalls behind a job that has already started: admission could read a just-admitted job as still waiting, and every later job then waited for it to finish.
+- Background discovery creates each batch of Jobs in one database write instead of one per Job, so it waits less behind thumbnail publication during an import.
+- Search indexing of an import's new Models no longer starts early in the gap between two batches of thumbnail work, where it slowed the remaining thumbnails by about 5 s.
+- The default number of simultaneous mesh jobs is now one per usable CPU (it was one more). With admission no longer stalling, the extra job only competed for the CPU: on a 3-CPU, 8 GB install a 60-file archive's thumbnails finish in 38.7 s instead of 44.9 s, at the same CPU cost. `VAULT_MAX_RENDER_JOBS` and *Models processed at once* still override it.
 
 ### Fixed
 
@@ -53,6 +70,9 @@
 - Library preview updates no longer flash a refresh banner or hide the details-panel toggle. The displayed list and open inspector stay in place during background refreshes; explicit refreshes and failures keep their feedback.
 - ZIP and model selection searches keep the search icon inside the field. Selected entries use neutral highlighting, and the ZIP destination picker and import actions stay visible in the dialog footer on narrow screens.
 - G-code preview views stay where you put them: choosing Front or Top, fitting, or changing layers no longer snaps the camera back, and orbiting still works after the top view. Layers are browsed like a slicer: a vertical layer rail with step buttons, the layer number and its height, plus a This layer toggle that shows only the current layer. A compact bar holds the view menu, fit, travel and bed; scrolling zooms.
+- Mesh processing logs which 3MF reader read each file and, when the XML reader stood in for lib3mf, why (`mesh_phases`, `printstash_mesh_3mf_reads_total`).
+- 7z archives with more than one folder (non-solid, appended or split into blocks) import instead of failing as invalid.
+- Uploads interrupted by a crash or restart before they were recorded no longer stay in staging forever: on startup the API removes unrecorded uploads older than a day.
 - API key and OrcaSlicer command copy buttons work on HTTP installations without the secure Clipboard API, with a visible error if the browser refuses copying.
 - Confirmed Trash purges reclaim owned files, thumbnails and multipart covers on guarded local/FUSE storage using hash-checked quarantine. Previously blocked guarded cleanup intents are retried; changed objects and external originals remain protected.
 

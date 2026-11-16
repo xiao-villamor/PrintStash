@@ -15,8 +15,9 @@ version with an anti-join and re-derives it at backfill priority, and each old
 output stays visible until its replacement is ready. Do not bump for a refactor
 that cannot change any output.
 
-An Artifact belongs to exactly one group (it is a mesh or it is G-code), so a
-kind's recipe version is read relative to the Artifact's group. A group may
+An Artifact has one primary group (mesh or G-code) and may also have independent
+secondary groups (previews, plates, toolpath, viewer STL). A kind's recipe
+version is read relative to its producer group. A group may
 version a kind separately for one source format, when only that format's
 reader changed: bumping it re-derives those Artifacts and no others. A version
 is therefore always read for a file (``recipes_for``), never for a group alone.
@@ -49,6 +50,7 @@ GCODE_THUMBNAIL_RECIPE = 3
 TOOLPATH_RECIPE = 1
 VIEWER_STL_RECIPE = 3
 PLATES_RECIPE = 1
+PREVIEWS_RECIPE = 1
 VIEWER_TYPES = (
     FileType.THREE_MF,
     FileType.OBJ,
@@ -137,6 +139,15 @@ def _is_binary_gcode(file: File) -> bool:
 
 
 GROUPS: tuple[DerivativeGroup, ...] = (
+    DerivativeGroup(
+        definition=JobKind.DERIVATIVES_PREVIEWS,
+        recipes={DerivativeKind.PREVIEWS: PREVIEWS_RECIPE},
+        label="Multi-angle previews",
+        applies=lambda: and_(_real(), col(File.file_type).in_(MESH_TYPES)),
+        applies_to=lambda file: (
+            file.sha256 != SENTINEL_FILE_HASH and file.file_type in MESH_TYPES
+        ),
+    ),
     DerivativeGroup(
         definition=JobKind.DERIVATIVES_MESH,
         recipes={

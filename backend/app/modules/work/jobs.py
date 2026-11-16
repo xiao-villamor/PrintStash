@@ -330,15 +330,24 @@ class JobStore:
 
     @staticmethod
     def any_active(
-        session: Session, definitions: Iterable[JobKind], *, besides: str | None = None
+        session: Session,
+        definitions: Iterable[JobKind],
+        *,
+        besides: str | None = None,
+        priority: WorkPriority | None = None,
     ) -> bool:
-        """Whether a Job of any of ``definitions`` other than ``besides`` is active."""
+        """Whether a Job of any of ``definitions`` other than ``besides`` is active.
+
+        With ``priority``, only Jobs of that priority count.
+        """
         kinds = list(definitions)
         if not kinds:
             return False
         statement = select(Job.id).where(
             col(Job.kind).in_(kinds), active_job_predicate()
         )
+        if priority is not None:
+            statement = statement.where(col(Job.priority) == priority)
         if besides is not None:
             statement = statement.where(col(Job.id) != besides)
         return session.exec(statement.limit(1)).first() is not None

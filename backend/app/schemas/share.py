@@ -14,6 +14,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 from app.db.models import FileRevisionStatus
+from app.schemas.previews import ModelPreviewRead
 
 
 class ShareLinkCreate(BaseModel):
@@ -83,6 +84,7 @@ class PublicModelRead(BaseModel):
 
     name: str
     description: Optional[str] = None
+    previews: ModelPreviewRead
     has_thumbnail: bool
     allow_download: bool
     files: list[PublicFileRead]

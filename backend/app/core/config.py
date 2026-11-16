@@ -225,6 +225,9 @@ class Settings(BaseSettings):
     # recovery tick. Every look is a transaction on the engine database whether
     # or not work is there, so an idle server pays each lane's cadence all day.
     jobs_queue_poll_interval_seconds: float = Field(default=1.0, ge=0.05, le=5)
+    # Opt-in requires the verified build-time DBOS patch. PostgreSQL ignores
+    # this SQLite-only capability. Restart to change; no runtime SDK mutation.
+    jobs_sqlite_queue_notifications: bool = False
     # The ingest lane, where an accepted upload or import waits for its Job to
     # start. Never slower than the interval above.
     jobs_interactive_queue_poll_interval_seconds: float = Field(
@@ -264,6 +267,8 @@ class Settings(BaseSettings):
     derivatives_mesh_enabled: bool = True
     derivatives_gcode_enabled: bool = True
     derivatives_toolpath_enabled: bool = True
+    # Optional multi-angle card views; they follow the primary cover.
+    derivatives_previews_enabled: bool = True
 
     derivative_max_attempts: int = Field(default=5, ge=1, le=100)
     derivative_backoff_seconds: int = Field(default=30, ge=1, le=86400)
@@ -341,10 +346,10 @@ class Settings(BaseSettings):
 
     # Maximum simultaneous native mesh jobs across processes sharing this local
     # data root. This also defaults the derive.native lane. The default is one
-    # job per usable CPU plus one (cgroup quota rounded up to whole CPUs), and
-    # no more than fit the native pool at the 640 MiB thumbnail floor, between
-    # 1 and 8: the extra job keeps cores busy while another waits on I/O, and
-    # memory admission still decides which claims run together. An explicit
+    # job per usable CPU (cgroup quota rounded up to whole CPUs), and no more
+    # than fit the native pool at the 640 MiB thumbnail floor, between 1 and 8:
+    # more jobs than CPUs only oversubscribe the quota, and memory admission
+    # still decides which claims run together. An explicit
     # value also bounds local inference. Zero remains serial.
     max_render_jobs: int = Field(
         default_factory=lambda data: default_native_jobs(

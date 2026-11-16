@@ -1,4 +1,5 @@
 /* The detail edit form retains tag keyboard behavior and writable model fields. */
+import { NO_PREVIEWS } from "@/types/previews";
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -29,6 +30,8 @@ const editor: ModelMetaEditor = {
 };
 
 const model: ModelRead = {
+  previews: NO_PREVIEWS,
+  has_custom_cover: false,
   edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   edit_version: 1,
   id: 1,

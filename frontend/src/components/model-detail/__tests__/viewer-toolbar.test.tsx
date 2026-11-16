@@ -35,6 +35,7 @@ function renderToolbar(
     resetView: vi.fn<() => void>(),
     fit: actions.fit ?? vi.fn<() => void>(),
     screenshot,
+    captureImage: vi.fn<() => Promise<Blob>>().mockResolvedValue(new Blob()),
   };
   render(
     <ViewerToolbar

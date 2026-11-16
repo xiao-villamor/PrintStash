@@ -9,7 +9,7 @@ import { LibraryItemLink } from "@/features/library/navigation";
 import { displayModelName } from "@/lib/display-name";
 import { memo, useEffect, useRef, useState } from "react";
 import { ModelListItem, FileRevisionStatus } from "@/types";
-import { Box, ScanSearch, ArrowUpRight, PanelRight, Star, Tags } from "lucide-react";
+import { ScanSearch, ArrowUpRight, PanelRight, Star, Tags } from "lucide-react";
 import { useCardDetail, cardDimensions, cardRevisions } from "@/features/library/card-detail";
 import { ModelCardRevision } from "@/components/model-card-revision";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
@@ -17,8 +17,8 @@ import { LibraryCardSelection } from "@/components/library-card-selection";
 import { Button } from "@/components/ui/button";
 import { useLibraryStar } from "@/features/library/mutations";
 import { toast } from "@/lib/toast";
-import { ProtectedThumbnail } from "@/components/protected-thumbnail";
-import { LibraryPreviewPlaceholder } from "@/components/library-card-placeholder";
+import { ModelPreviewControls, ModelPreviewFrame } from "@/components/model-preview";
+import { useModelPreviewCard } from "@/lib/use-model-preview-card";
 import { Localized } from "@/components/ui/localized";
 import "./library-items.css";
 import { MODEL_DND_MIME, captureModelDrag } from "@/lib/model-dnd";
@@ -196,6 +196,7 @@ function ModelCardInner({
       ? starMutation.variables.starred
       : model.starred;
   const starBusy = starMutation.isPending;
+  const [previewAdmission, preview] = useModelPreviewCard(model.thumbnail_url, model.previews);
   const menuOpener = useRef<HTMLAnchorElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null);
@@ -320,24 +321,11 @@ function ModelCardInner({
                 }
               }}
             >
-              {/* Thumbnail */}
-              <ProtectedThumbnail
-                path={model.thumbnail_url}
-                alt={model.name}
-                fade
-                loadingPlaceholder={<LibraryPreviewPlaceholder />}
-                className="library-preview relative overflow-hidden shrink-0 h-36"
-                imageClassName={
-                  favorites ? "w-full h-full object-contain" : "library-card-thumbnail"
-                }
-                placeholder={
-                  <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center">
-                    <Box className="h-6 w-6 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">
-                      {uiText("library.previewMissing")}
-                    </span>
-                  </div>
-                }
+              <ModelPreviewFrame
+                name={model.name}
+                state={preview}
+                admission={previewAdmission}
+                favorites={favorites}
               >
                 {/* The footer already says "No G-code yet"; the corner only speaks for a known status. */}
                 {!favorites && cornerStatus && (
@@ -348,7 +336,7 @@ function ModelCardInner({
                     />
                   </div>
                 )}
-              </ProtectedThumbnail>
+              </ModelPreviewFrame>
 
               {favorites ? (
                 <div className="library-card-content flex flex-1 flex-col">
@@ -408,6 +396,7 @@ function ModelCardInner({
                 </div>
               )}
             </LibraryItemLink>
+            {!selectable && <ModelPreviewControls name={model.name} state={preview} />}
             {!favorites && (
               <ModelCardRevision
                 model={model}
@@ -430,7 +419,11 @@ function ModelCardInner({
             {favorites && (
               <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
                 <Button variant="outline" size="xs" asChild>
-                  <LibraryItemLink origin={origin} href={`/models/${model.id}`}>
+                  <LibraryItemLink
+                    origin={origin}
+                    href={`/models/${model.id}`}
+                    trackPosition={false}
+                  >
                     {uiText("Open")}
                   </LibraryItemLink>
                 </Button>
@@ -457,6 +450,7 @@ function ModelCardInner({
         <LibraryItemLink
           origin={origin}
           href={`/models/${model.id}`}
+          trackPosition={false}
           role="menuitem"
           className="library-card-menu-item"
           onClick={() => setMenuOpen(false)}

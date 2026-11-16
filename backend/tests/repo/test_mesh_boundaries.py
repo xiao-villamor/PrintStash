@@ -39,6 +39,9 @@ OWNERS = {
     "modules/media/step_worker.py",
     "modules/media/stl_worker.py",
     "modules/media/visual_worker.py",
+    # Preview rendering is reached only by its supervised, bounded worker.
+    "modules/media/preview_worker.py",
+    "modules/media/preview_views.py",
     "modules/media/embedding_worker.py",
     "modules/media/verification_worker.py",
 }
@@ -83,6 +86,8 @@ ORCHESTRATORS = {
 }
 
 RAW = {
+    "app.modules.media.preview_views.render_views",
+    "app.modules.media.preview_views.candidates",
     "printstash_core.mesh.render_geometry.prepare_mesh_render",
     "printstash_core.mesh.render_geometry.prepare_scene_render",
     "printstash_core.mesh.rasterizer.render_prepared_pixels",

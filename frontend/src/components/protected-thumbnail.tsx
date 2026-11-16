@@ -14,6 +14,7 @@ export function ProtectedThumbnail({
   imageClassName,
   fade = false,
   priority = "primary",
+  previewView,
   children,
 }: {
   path: string | null | undefined;
@@ -26,6 +27,8 @@ export function ProtectedThumbnail({
   fade?: boolean;
   /** Collection mosaics are "background": they never delay the cards' own images. */
   priority?: AssetPriority;
+  /** Names the presented Model view, when this image is one of several. */
+  previewView?: string;
   children?: ReactNode;
 }) {
   const { ref, admitted: inView } = useViewportAdmission();
@@ -92,6 +95,7 @@ export function ProtectedThumbnail({
           key={url}
           src={url}
           alt={alt}
+          data-preview-view={previewView}
           draggable={false}
           loading="eager"
           decoding="async"

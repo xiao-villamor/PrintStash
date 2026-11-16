@@ -662,7 +662,7 @@ class TestClosedSchemas:
 
     @pytest.mark.parametrize(
         "phase_stats",
-        [None, {}, {"stages": []}, {"version": 2, "stages": []}],
+        [None, {}, {"stages": []}, {"version": 1, "stages": []}],
         ids=repr,
     )
     def test_requires_versioned_phase_stats(self, phase_stats):

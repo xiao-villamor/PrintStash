@@ -7,6 +7,7 @@
  * displays the custom label alone hides that the revision was never verified,
  * which is exactly the information somebody about to print it needs.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
@@ -34,6 +35,7 @@ const model: ModelListItem = {
   effective_role: "admin",
   tags: [],
   thumbnail_url: null,
+  previews: NO_PREVIEWS,
   file_count: 2,
   gcode_file_count: 1,
   mesh_file_id: null,
@@ -198,6 +200,16 @@ describe("ModelCard", () => {
       expect(onIntent).toHaveBeenCalledWith(1);
     });
 
+    it("reports the Model under the pointer on its thumbnail", async () => {
+      const user = userEvent.setup();
+      const onIntent = vi.fn<(id: number | null) => void>();
+      const { container } = renderApp(<ModelCard model={model} onIntent={onIntent} />);
+
+      await user.hover(container.querySelector("[data-model-preview]")!);
+
+      expect(onIntent).toHaveBeenLastCalledWith(1);
+    });
+
     it("stays silent while cards are being selected", async () => {
       const user = userEvent.setup();
       const onIntent = vi.fn<(id: number | null) => void>();
@@ -222,6 +234,41 @@ describe("ModelCard", () => {
     expect(onInspect).toHaveBeenCalledWith(model.id, link);
     expect(screen.getByLabelText("Current card location")).toHaveTextContent(/^\/$/);
     expect(link).toHaveAttribute("href", "/models/1");
+  });
+
+  describe("library entry", () => {
+    it("exposes one position anchor for the Model", () => {
+      const { container } = renderCard();
+
+      expect(container.querySelectorAll('[data-library-entry="/models/1"]')).toHaveLength(1);
+      expect(screen.getAllByRole("link", { name: model.name })).toHaveLength(1);
+    });
+
+    it("opens the Model from its thumbnail", async () => {
+      const user = userEvent.setup();
+      const { container } = renderModelCard(
+        <>
+          <ModelCard model={model} />
+          <CardLocation />
+        </>,
+      );
+
+      await user.click(container.querySelector("[data-model-preview]")!);
+
+      expect(screen.getByLabelText("Current card location")).toHaveTextContent("/models/1");
+    });
+
+    it("toggles selection from its thumbnail while selecting", async () => {
+      const user = userEvent.setup();
+      const onToggleSelect = vi.fn<(id: number, range?: boolean) => void>();
+      const { container } = renderModelCard(
+        <ModelCard model={model} selectable onToggleSelect={onToggleSelect} />,
+      );
+
+      await user.click(container.querySelector("[data-model-preview]")!);
+
+      expect(onToggleSelect).toHaveBeenCalledWith(1, false);
+    });
   });
 
   describe("quick tag access", () => {

@@ -79,6 +79,47 @@ def _authorize(
             raise OperationCancelled()
 
 
+def _authorized_unlocked(
+    session: Session, execution: JobExecution | JobContext, owner: BatchOwner
+) -> None:
+    """What :func:`_authorize` checks, read without taking the writer.
+
+    For calls that only read the ledger: a stale answer is harmless, because
+    every write that follows re-authorizes under the lock.
+    """
+    if not jobs.owns_execution(
+        session,
+        execution.job_id,
+        epoch=execution.execution_epoch,
+        attempt=execution.attempt,
+        state=JobState.RUNNING,
+    ):
+        raise OperationCancelled()
+    if isinstance(owner, JobBatch):
+        if owner.job_id != execution.job_id:
+            raise OperationCancelled()
+        return
+    inbox = session.exec(
+        select(InboxItem.job_id, InboxItem.state).where(InboxItem.id == owner.item_id)
+    ).first()
+    if inbox is None or tuple(inbox) != (execution.job_id, InboxItemState.IMPORTING):
+        raise OperationCancelled()
+
+
+def _already_recorded(row: IngestionEntry, outcome: EntryOutcome) -> bool:
+    """Whether the Artifact commit already wrote ``outcome`` to ``row``."""
+    if isinstance(outcome, Imported):
+        state = IngestionEntryState.IMPORTED
+    elif isinstance(outcome, Deduplicated):
+        state = IngestionEntryState.DEDUPLICATED
+    else:
+        return False
+    return row.state is state and (row.model_id, row.file_id) == (
+        outcome.model_id,
+        outcome.file_id,
+    )
+
+
 def _record(row: IngestionEntry, owner: BatchOwner) -> EntryRecord:
     if row.id is None:
         raise RuntimeError("entry_not_persisted")
@@ -196,6 +237,13 @@ def record_outcome(
 ) -> EntryRecord:
     factory = session_factory or get_session_factory()
     with factory.scoped_session() as session:
+        # A canonical Artifact commit records its outcome in its own
+        # transaction; acknowledging it again would only queue for the writer.
+        _authorized_unlocked(session, ctx, owner)
+        row = _find(session, owner, key)
+        if _already_recorded(row, outcome):
+            return _record(row, owner)
+    with factory.scoped_session() as session:
         _authorize(session, ctx, owner)
         row = _find(session, owner, key)
         _apply(row, outcome)
@@ -288,6 +336,19 @@ def reconcile(
 ) -> EntryRecord | None:
     """Recover a File commit before ledger acknowledgement; provenance dedup commits atomically."""
     factory = session_factory or get_session_factory()
+    keys = (ingestion_key(owner, key), *legacy_keys)
+    with factory.scoped_session() as session:
+        # Nearly every call finds a fresh entry with no File: answer that from
+        # a read, and take the writer only to adopt a File a crash left behind.
+        _authorized_unlocked(session, ctx, owner)
+        row = _find(session, owner, key)
+        if row.state in (
+            IngestionEntryState.IMPORTED,
+            IngestionEntryState.DEDUPLICATED,
+        ):
+            return _record(row, owner)
+        if _adoptable_file(session, keys) is None:
+            return None
     with factory.scoped_session() as session:
         _authorize(session, ctx, owner)
         row = _find(session, owner, key)
@@ -297,13 +358,7 @@ def reconcile(
         ):
             session.commit()
             return _record(row, owner)
-        keys = (ingestion_key(owner, key), *legacy_keys)
-        file = session.exec(
-            select(File)
-            .where(col(File.ingestion_key).in_(keys))
-            .order_by(col(File.id))
-            .limit(1)
-        ).first()
+        file = _adoptable_file(session, keys)
         if file is None:
             session.commit()
             return None
@@ -313,6 +368,15 @@ def reconcile(
         session.add(row)
         session.commit()
         return _record(row, owner)
+
+
+def _adoptable_file(session: Session, keys: Sequence[str]) -> File | None:
+    return session.exec(
+        select(File)
+        .where(col(File.ingestion_key).in_(keys))
+        .order_by(col(File.id))
+        .limit(1)
+    ).first()
 
 
 confirmed = reconcile
