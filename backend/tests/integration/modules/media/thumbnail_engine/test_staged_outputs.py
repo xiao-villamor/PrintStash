@@ -1,15 +1,14 @@
 """Requested basic outputs are observable before later expensive mesh work.
 
 Geometry is published before the picture rendered from it, and both before the
-fingerprint. A 3MF that carries its slicer's own picture publishes that first
-of all, before the mesh is read: it needs nothing from the mesh, and reading
-one can take as long as everything else together. When this goes red a Model
-waits for work that its already-available output does not depend on.
+fingerprint. When configured to prefer the slicer picture from a 3MF, that
+picture can be published before the mesh scan.
 """
 
 import pytest
 from printstash_core.mesh.measurements import VolumeMeasured
 
+from app.core.config import _overlay
 from app.modules.media import mesh_render, thumbnail_engine
 from app.modules.media.mesh_contracts import (
     GeometryNotLoaded,
@@ -28,9 +27,14 @@ def _with_slicer_picture() -> bytes:
     return three_mf(extras={"Metadata/thumbnail.png": png()})
 
 
+@pytest.fixture
+def prefer_slicer_picture(monkeypatch):
+    monkeypatch.setitem(_overlay, "prefer_rendered_3mf_preview", False)
+
+
 class TestGenerate:
     def test_emits_a_documents_own_picture_before_reading_the_mesh(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, prefer_slicer_picture
     ):
         from app.modules.media.mesh_protocol import GeometryOutput, ThumbnailOutput
 
@@ -52,7 +56,9 @@ class TestGenerate:
 
         assert order == [ThumbnailOutput, "load", GeometryOutput]
 
-    def test_the_early_picture_is_the_one_the_document_supplied(self, tmp_path):
+    def test_the_early_picture_is_the_one_the_document_supplied(
+        self, tmp_path, prefer_slicer_picture
+    ):
         from app.modules.media.mesh_contracts import ThumbnailStrategy
 
         path = tmp_path / "plate.3mf"
@@ -70,7 +76,9 @@ class TestGenerate:
             PreviewCoverage.DOCUMENT_SUPPLIED,
         )
 
-    def test_geometry_still_follows_an_early_picture(self, tmp_path):
+    def test_geometry_still_follows_an_early_picture(
+        self, tmp_path, prefer_slicer_picture
+    ):
         path = tmp_path / "plate.3mf"
         path.write_bytes(_with_slicer_picture())
         outputs = []
@@ -85,7 +93,7 @@ class TestGenerate:
             1000.0,
         )
 
-    def test_an_early_picture_is_emitted_once(self, tmp_path):
+    def test_an_early_picture_is_emitted_once(self, tmp_path, prefer_slicer_picture):
         from app.modules.media.mesh_protocol import ThumbnailOutput
 
         path = tmp_path / "plate.3mf"
@@ -99,7 +107,7 @@ class TestGenerate:
         assert [type(output) for output in outputs].count(ThumbnailOutput) == 1
 
     def test_an_early_picture_survives_a_mesh_that_cannot_be_read(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, prefer_slicer_picture
     ):
         from printstash_core.mesh.similarity import GeometryError
 

@@ -480,7 +480,7 @@ class TestRenderStlThumbnail:
 
         monkeypatch.setattr(stl_fallback, "_read_samples", lambda *_args: sampled)
         monkeypatch.setattr(
-            mesh_render, "_select_view_rotation", lambda *_args: np.eye(3)
+            mesh_render, "_select_view_rotation", lambda *_args, **_kwargs: np.eye(3)
         )
 
         assert stl_fallback.render_stl_thumbnail(path) is None
@@ -488,8 +488,8 @@ class TestRenderStlThumbnail:
     @pytest.mark.parametrize(
         "rotation",
         [
-            lambda *_args: (_ for _ in ()).throw(ValueError("rotation")),
-            lambda *_args: np.full((3, 3), np.nan),
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("rotation")),
+            lambda *_args, **_kwargs: np.full((3, 3), np.nan),
         ],
         ids=["raises", "returns-nan"],
     )
@@ -692,9 +692,7 @@ class TestPartialSampling:
 
 
 class TestSampleWorkingSet:
-    def test_bounds_sampling_working_set(
-        self, tmp_path, monkeypatch
-    ):
+    def test_bounds_sampling_working_set(self, tmp_path, monkeypatch):
         path = tmp_path / "working-set.stl"
         _write_renderable_binary_stl(path, 120)
         original = np.concatenate

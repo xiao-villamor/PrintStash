@@ -186,7 +186,7 @@ def _read_samples(
 ) -> STLSample | None:
     try:
         return read_stl_sample(path, max_triangles=budget, limits=limits)
-    except (InvalidSTL, OSError):
+    except InvalidSTL, OSError:
         return None
 
 
@@ -266,7 +266,9 @@ def render_stl_thumbnail(
         center = (np.asarray(sampled.bounds_min) + np.asarray(sampled.bounds_max)) * 0.5
         if not np.isfinite(center).all():
             return None
-        rotation = _select_view_rotation(corners - center, np).astype(np.float64)
+        rotation = _select_view_rotation(corners - center, np, reference=True).astype(
+            np.float64
+        )
         view_corners = (corners - center) @ rotation.T
         if not np.isfinite(rotation).all() or not np.isfinite(view_corners).all():
             return None
@@ -283,7 +285,7 @@ def render_stl_thumbnail(
         view_mid = (view_corners.max(axis=0) + view_corners.min(axis=0)) * 0.5
         if not math.isfinite(scale) or scale <= 0 or not np.isfinite(view_mid).all():
             return None
-    except (FloatingPointError, ValueError, RuntimeError):
+    except FloatingPointError, ValueError, RuntimeError:
         return None
 
     # Half-resolution coverage keeps the silhouette detailed while actual

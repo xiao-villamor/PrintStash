@@ -479,8 +479,8 @@ def fail_unfinished(
                 or_(
                     *(
                         and_(
-                            ArtifactDerivative.kind == kind,
-                            ArtifactDerivative.recipe_version == recipe,
+                            col(ArtifactDerivative.kind) == kind,
+                            col(ArtifactDerivative.recipe_version) == recipe,
                         )
                         for kind, recipe in kinds.items()
                     )

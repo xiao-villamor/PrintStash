@@ -6,7 +6,7 @@ from sqlalchemy import and_, select, text, update
 from sqlmodel import Session, SQLModel
 
 from app.core.errors import OperationError
-from app.db import library_browse_v2
+from app.db import library_browse_v2, library_browse_v3
 from app.db.library_contracts_v1 import BROWSE_TABLES
 from app.db.models import User
 from app.modules.library import commands, multipart_models, provenance
@@ -122,9 +122,12 @@ def catalog_writer(db_session: Session, table: str) -> User:
     return user
 
 
-# Tables whose v1 browse triggers library_browse_v2 narrows; its own tests
-# cover them (tests/integration/db/test_library_browse_v2.py).
-NARROWED = {*library_browse_v2.SILENT_TABLES, *library_browse_v2.WATCHED_FIELDS}
+# Later browse contracts narrow these writers to particular changes.
+NARROWED = {
+    *library_browse_v2.SILENT_TABLES,
+    *library_browse_v2.WATCHED_FIELDS,
+    "index_generations",
+}
 V1_TABLES = tuple(table for table in BROWSE_TABLES if table not in NARROWED)
 
 
@@ -165,6 +168,12 @@ class TestInstall:
 
         if table in library_browse_v2.SILENT_TABLES:
             expected = set()
+        elif table == "index_generations":
+            expected = {
+                f"ps_browse_{table}_insert_v1",
+                library_browse_v3.MARKER,
+                f"ps_browse_{table}_delete_v1",
+            }
         elif table in library_browse_v2.WATCHED_FIELDS:
             expected = {
                 f"ps_browse_{table}_insert_v1",
@@ -179,9 +188,55 @@ class TestInstall:
         assert {name for name, _ddl in rows} == expected
         assert len(rows) == len(expected)
         assert all(
-            "INSERT INTO library_revision" in ddl and "ON CONFLICT" in ddl
-            for _name, ddl in rows
+            "UPDATE library_revision" in ddl
+            if name == library_browse_v3.MARKER
+            else "INSERT INTO library_revision" in ddl and "ON CONFLICT" in ddl
+            for name, ddl in rows
         )
+
+    def test_keeps_a_continuation_during_index_progress(
+        self,
+        db_session,
+        make_user,
+        make_model,
+        make_embedding_space,
+        make_index_generation,
+    ):
+        user = make_user(superuser=True)
+        make_model("Anchor")
+        make_model("Tail")
+        generation = make_index_generation(make_embedding_space())
+        page = page_items(db_session, user, BrowseQuery(limit=1))
+        assert page.next_cursor is not None
+
+        generation.processed += 1
+        db_session.commit()
+
+        next_page = page_items(
+            db_session, user, BrowseQuery(limit=1, cursor=page.next_cursor)
+        )
+        assert next_page.total == 2
+
+    def test_rejects_a_continuation_after_index_version_changes(
+        self,
+        db_session,
+        make_user,
+        make_model,
+        make_embedding_space,
+        make_index_generation,
+    ):
+        user = make_user(superuser=True)
+        make_model("Anchor")
+        make_model("Tail")
+        generation = make_index_generation(make_embedding_space())
+        page = page_items(db_session, user, BrowseQuery(limit=1))
+        assert page.next_cursor is not None
+
+        generation.version_token = "new-index-version"
+        db_session.commit()
+
+        with pytest.raises(OperationError, match="browse_refresh_required"):
+            page_items(db_session, user, BrowseQuery(limit=1, cursor=page.next_cursor))
 
     @pytest.mark.parametrize(
         "operation", ["insert", "update", "delete"], ids=["insert", "update", "delete"]
