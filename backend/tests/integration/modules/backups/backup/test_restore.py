@@ -263,3 +263,52 @@ class TestRestoredEditingIdentity:
 
         assert rejected.status_code == 412, rejected.text
         assert client.get(path, headers=headers).json()["name"] == "Restored history"
+
+
+class TestGalleryRestore:
+    def test_restores_every_gallery_image_from_backup(self, backup_env):
+        import io
+        from pathlib import Path
+
+        from PIL import Image
+        from sqlmodel import select
+
+        from app.db.models import ModelSourceCover
+        from app.modules.backups.backup import creation, restore
+        from app.modules.library import source_covers
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from tests.factories import build_model, build_provenance_source
+
+        expected = {}
+        with backup_env.new_session() as session:
+            model = build_model(session)
+            source = build_provenance_source(session, model)
+            source_id = source.id
+            for position, color in enumerate(("red", "green", "blue")):
+                buffer = io.BytesIO()
+                Image.new("RGB", (16, 16), color).save(buffer, "PNG")
+                write = source_covers.put(
+                    session,
+                    get_backend(),
+                    provenance_source_id=source_id,
+                    actor_id=None,
+                    data=buffer.getvalue(),
+                    content_type="image/png",
+                    position=position,
+                )
+                session.commit()
+                expected[write.cover.storage_key] = get_backend().read_bytes(
+                    write.cover.storage_key
+                )
+        archive = creation.create_backup()
+        for key in expected:
+            Path(key).unlink()
+        restore.restore_backup(archive.id)
+        with backup_env.new_session() as session:
+            images = session.exec(
+                select(ModelSourceCover).where(
+                    ModelSourceCover.provenance_source_id == source_id
+                )
+            ).all()
+            assert {image.storage_key for image in images} == set(expected)
+        assert {key: get_backend().read_bytes(key) for key in expected} == expected

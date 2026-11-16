@@ -1074,3 +1074,34 @@ class TestRelatedProfilesAuthorization:
             ).status_code
             == 403
         )
+
+
+class TestGalleryContentAccess:
+    def test_gallery_content_requires_model_access(
+        self,
+        client,
+        db_session,
+        auth_headers,
+        make_model,
+        make_provenance_source,
+        make_cover,
+        make_user,
+        headers_for,
+    ):
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        model = make_model()
+        source = make_provenance_source(model)
+        image = make_cover(source, position=1)
+        get_backend().write_bytes(b"private-gallery", image.storage_key)
+        db_session.commit()
+        url = (
+            f"/api/v1/models/{model.id}/provenance/{source.id}/cover/content?position=1"
+        )
+        assert client.get(url).status_code == 401
+        outsider = make_user(superuser=False)
+        assert client.get(url, headers=headers_for(outsider)).status_code == 403
+        allowed = client.get(url, headers=auth_headers)
+        assert allowed.status_code == 200
+        assert allowed.content == b"private-gallery"
+        assert "private" in allowed.headers["Cache-Control"]

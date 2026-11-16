@@ -2112,8 +2112,7 @@ class TestDeclareCaptureFile:
 
         assert replay.id == original.id
         assert [
-            slot.id
-            for slot in inbox.capture_recovery(db_session, owner, row.id).slots
+            slot.id for slot in inbox.capture_recovery(db_session, owner, row.id).slots
         ] == [original.id]
 
     @pytest.mark.parametrize(
@@ -2196,3 +2195,71 @@ class TestDeclareCaptureFile:
             inbox.declare_capture_file(db_session, outsider, row.id, declaration)
 
         assert db_session.exec(select(CaptureUploadSlot)).all() == []
+
+
+class TestGalleryCaptureRecovery:
+    def test_recovers_gallery_capture(self, db_session, make_user):
+        from app.modules.ingestion import inbox
+        from app.schemas.inbox import CaptureSessionCreate, CaptureUploadFileDeclaration
+        from tests.factories.capture import DEFAULT_SOURCE_URL, capture_source
+
+        owner = make_user(superuser=True)
+        payload = CaptureSessionCreate.model_validate(
+            {
+                "request_key": "gallery-recovery",
+                "source_url": DEFAULT_SOURCE_URL,
+                "capture_source": capture_source(),
+                "files": [{"id": "part", "name": "part.stl", "file_type": "stl"}],
+                "gallery": [
+                    {"id": str(i) * 64, "name": f"photo-{i}.png"} for i in range(3)
+                ],
+            }
+        )
+        first = inbox.start_capture_session(db_session, owner, payload)
+        replay = inbox.start_capture_session(db_session, owner, payload)
+        for index, image in enumerate(payload.gallery):
+            inbox.declare_capture_image(
+                db_session,
+                owner,
+                first.id,
+                index,
+                CaptureUploadFileDeclaration(
+                    id=image.id,
+                    filename=image.name,
+                    media_type="image/png",
+                    size_bytes=20,
+                    sha256=str(index) * 64,
+                ),
+            )
+        receipt = inbox.capture_recovery(db_session, owner, first.id)
+        assert replay.id == first.id
+        assert sorted(slot.image_position for slot in receipt.slots) == [0, 1, 2]
+        assert {slot.filename for slot in receipt.slots} == {
+            f"photo-{i}.png" for i in range(3)
+        }
+
+    def test_rejects_changed_gallery_on_replay(self, db_session, make_user):
+        import pytest
+
+        from app.core.errors import OperationError
+        from app.modules.ingestion import inbox
+        from app.schemas.inbox import CaptureSessionCreate
+        from tests.factories.capture import DEFAULT_SOURCE_URL, capture_source
+
+        owner = make_user(superuser=True)
+        raw = {
+            "request_key": "gallery-conflict",
+            "source_url": DEFAULT_SOURCE_URL,
+            "capture_source": capture_source(),
+            "files": [{"id": "part", "name": "part.stl", "file_type": "stl"}],
+            "gallery": [{"id": "a" * 64, "name": "photo.png"}],
+        }
+        first = inbox.start_capture_session(
+            db_session, owner, CaptureSessionCreate.model_validate(raw)
+        )
+        raw["gallery"][0]["id"] = "b" * 64
+        with pytest.raises(OperationError, match="capture_request_conflict"):
+            inbox.start_capture_session(
+                db_session, owner, CaptureSessionCreate.model_validate(raw)
+            )
+        assert first.gallery_json == '[{"id": "' + "a" * 64 + '", "name": "photo.png"}]'
