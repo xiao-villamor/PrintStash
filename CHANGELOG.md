@@ -55,6 +55,8 @@
 
 ### Fixed
 
+- G-code print settings use the selected build plate's bed temperature, including Supertack and textured plates, instead of always reading the hot-plate preset. Existing G-code metadata refreshes automatically in the background (#606).
+
 - Model previews use a raised three-quarter camera and more directional studio lighting to reveal cavities and surface depth. Tall and narrow parts retain their upright view instead of being mistaken for flat plates.
 
 - Real Library cards now reveal after they mount on both first load and cached returns, including development effect replays. Loading placeholders can no longer consume the entrance before the real cards appear. Search and Pending sidebar changes keep their stationary handoff; Favorites filters the cards without fading the whole page.
