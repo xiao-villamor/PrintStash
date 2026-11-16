@@ -81,6 +81,116 @@ function secondaries(paths: string[]) {
 }
 
 test.describe("Model preview browsing", () => {
+  for (const theme of ["light", "dark"] as const) {
+    for (const controlName of ["Next preview", "Model views"] as const) {
+      test(`keeps ${controlName} readable in ${theme} mode`, async ({ page }) => {
+        await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
+        const { card, next } = await library(page);
+        await next.hover();
+        const control = card.getByRole("button", { name: controlName, exact: true });
+        const contrast = await control.evaluate((element) => {
+          const canvas = document.createElement("canvas");
+          canvas.width = canvas.height = 1;
+          const context = canvas.getContext("2d")!;
+          function luminance(color: string) {
+            context.clearRect(0, 0, 1, 1);
+            context.fillStyle = color;
+            context.fillRect(0, 0, 1, 1);
+            const [r, g, b] = [...context.getImageData(0, 0, 1, 1).data].map((value) => {
+              const channel = value / 255;
+              return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+            });
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          }
+          const style = getComputedStyle(element);
+          const foreground = luminance(style.color);
+          const background = luminance(style.backgroundColor);
+          return (
+            (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05)
+          );
+        });
+        expect(contrast).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+  }
+
+  test("keeps the view count discoverable before hover", async ({ page }) => {
+    const { card } = await library(page);
+    await page.mouse.move(0, 0);
+    const gallery = card.getByRole("button", { name: "Model views", exact: true });
+    await expect(gallery).toHaveText("6 views");
+    const opacity = await gallery.evaluate((element) => {
+      let opacity = 1;
+      for (let current: Element | null = element; current; current = current.parentElement) {
+        opacity *= Number(getComputedStyle(current).opacity);
+      }
+      return opacity;
+    });
+    expect(opacity).toBe(1);
+    await expect(card.locator("[data-preview-navigation]")).toHaveCSS("opacity", "0");
+  });
+
+  test("keeps the gallery control clear of the view status on narrow cards", async ({ page }) => {
+    const { card } = await library(page);
+    await card.evaluate((element) => {
+      element.style.width = "220px";
+    });
+    await card.hover();
+    const gallery = await card
+      .getByRole("button", { name: "Model views", exact: true })
+      .boundingBox();
+    const status = await card.locator('[aria-live="polite"]').boundingBox();
+    expect(gallery).not.toBeNull();
+    expect(status).not.toBeNull();
+    const overlaps =
+      gallery!.x < status!.x + status!.width &&
+      gallery!.x + gallery!.width > status!.x &&
+      gallery!.y < status!.y + status!.height &&
+      gallery!.y + gallery!.height > status!.y;
+    expect(overlaps).toBe(false);
+  });
+
+  test("keeps keyboard-focused preview controls opaque", async ({ page }) => {
+    const { card, next } = await library(page);
+    await page.mouse.move(0, 0);
+    await next.focus();
+    await expect(card.locator("[data-preview-navigation]")).toHaveCSS("opacity", "1");
+    await next.press("Enter");
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
+  });
+
+  test("keeps the preview image above the gallery toolbar", async ({ page }) => {
+    const { card } = await library(page);
+    const image = await card.locator("img").boundingBox();
+    const gallery = await card
+      .getByRole("button", { name: "Model views", exact: true })
+      .boundingBox();
+    expect(image).not.toBeNull();
+    expect(gallery).not.toBeNull();
+    expect(image!.y + image!.height).toBeLessThanOrEqual(gallery!.y);
+  });
+
+  test("reveals preview controls immediately with reduced motion", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const { card } = await library(page);
+    await card.hover();
+    await expect(card.locator("[data-preview-navigation]")).toHaveCSS("transition-duration", "0s");
+  });
+
+  test("retains the gallery through its shared modal exit", async ({ page }) => {
+    await page.clock.install({ time: new Date("2026-01-01T00:00:00Z") });
+    const { card } = await library(page);
+    await card.getByRole("button", { name: "Model views", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Model views" });
+    await expect(dialog).toHaveAttribute("data-state", "open");
+    await page.clock.pauseAt(new Date("2026-01-01T00:01:00Z"));
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveAttribute("data-state", "closed");
+    await page.clock.runFor(300);
+    await expect(dialog).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "Model views", exact: true })).toBeFocused();
+  });
+
   test("defers off-screen primary transfers", async ({ page }) => {
     await page.setViewportSize({ width: 1000, height: 650 });
     const { transferred } = await library(page, views, 60);

@@ -71,23 +71,26 @@ function PreviewImage({
   );
 }
 
-function ViewIndicator({ state }: { state: PreviewCard }) {
+function ViewIndicator({ state, className }: { state: PreviewCard; className?: string }) {
   const orbit = state.views.filter((view) => view.role === "orbit");
   const shown = state.view?.id ?? "cover";
   if (state.views.length < 2) return null;
   return (
     <div
-      className="pointer-events-none absolute right-1 bottom-1 rounded bg-card/90 px-2 py-1 text-2xs text-foreground"
+      className={cn(
+        "pointer-events-none flex min-w-0 items-center gap-2 bg-card px-2 py-1 text-2xs text-card-foreground",
+        className,
+      )}
       aria-live="polite"
       aria-atomic="true"
     >
-      <span>{uiText(labels[shown])}</span>
+      <span className="truncate">{uiText(labels[shown])}</span>
       {orbit.length >= 2 && (
-        <span aria-hidden="true" className="ml-2 inline-flex gap-1">
+        <span aria-hidden="true" className="inline-flex shrink-0 gap-1">
           {orbit.map((view) => (
             <span
               key={view.id}
-              className={`h-1.5 w-1.5 rounded-full ${shown === view.id ? "bg-primary" : "bg-muted-foreground/40"}`}
+              className={`h-1.5 w-1.5 rounded-full ${shown === view.id ? "bg-foreground" : "bg-muted-foreground/40"}`}
             />
           ))}
         </span>
@@ -115,7 +118,10 @@ export function ModelPreviewFrame({
   return (
     <div
       ref={admission}
-      className="library-preview relative h-36 shrink-0 overflow-hidden"
+      className={cn(
+        "library-preview relative h-36 shrink-0 overflow-hidden",
+        state.views.length >= 2 && "pb-11",
+      )}
       data-model-preview={name}
       onPointerEnter={state.enter}
       onPointerLeave={state.leave}
@@ -135,7 +141,6 @@ export function ModelPreviewFrame({
         }
       />
       {children}
-      <ViewIndicator state={state} />
     </div>
   );
 }
@@ -160,67 +165,70 @@ export function ModelPreviewControls({ name, state }: { name: string; state: Pre
     <>
       <div
         data-model-preview-controls={name}
-        className={cn(
-          "library-preview-controls pointer-events-none absolute inset-x-0 top-0 z-10 transition-opacity duration-fast ease-out focus-within:opacity-100",
-          state.hovered ? "opacity-100" : "opacity-100 [@media(hover:hover)]:opacity-0",
-        )}
+        data-hovered={state.hovered || undefined}
+        className="library-preview-controls pointer-events-none absolute inset-x-0 top-0 z-10"
       >
         {views.length >= 2 && (
           <>
-            {orbit.length >= 2 &&
-              [previous, next].map(
-                (view, index) =>
-                  view && (
-                    <Button
-                      key={index}
-                      {...keepOffCard}
-                      variant="secondary"
-                      size="icon"
-                      className={`pointer-events-auto absolute top-1/2 h-11 w-11 -translate-y-1/2 bg-card/90 ${index === 0 ? "left-1" : "right-1"}`}
-                      aria-label={uiText(
-                        index === 0 ? "modelPreview.previous" : "modelPreview.next",
-                      )}
-                      title={uiText(labels[view.id])}
-                      onPointerEnter={() => {
-                        state.enter();
-                        preview.prioritize(view);
-                      }}
-                      onPointerLeave={state.leave}
-                      onFocus={() => preview.prioritize(view)}
-                      onClick={(event) => {
-                        stop(event);
-                        preview.select(view.id);
-                      }}
-                    >
-                      {index === 0 ? (
-                        <ChevronLeft className="h-5 w-5" />
-                      ) : (
-                        <ChevronRight className="h-5 w-5" />
-                      )}
-                    </Button>
-                  ),
-              )}
-            <Button
-              {...keepOffCard}
-              variant="secondary"
-              className="pointer-events-auto absolute bottom-1 left-1 h-11 bg-card/90"
-              aria-label={uiText("modelPreview.gallery")}
-              onPointerEnter={state.enter}
-              onPointerLeave={state.leave}
-              onClick={(event) => {
-                stop(event);
-                state.setOpen(true);
-              }}
-            >
-              <Images className="h-4 w-4" />
-              <span>{uiText("modelPreview.views", { count: views.length })}</span>
-            </Button>
+            {orbit.length >= 2 && (
+              <div className="library-preview-navigation absolute inset-0" data-preview-navigation>
+                {[previous, next].map(
+                  (view, index) =>
+                    view && (
+                      <Button
+                        key={index}
+                        {...keepOffCard}
+                        variant="outline"
+                        size="icon"
+                        className={`pointer-events-auto absolute top-1/2 h-11 w-11 -translate-y-1/2 ${index === 0 ? "left-1" : "right-1"}`}
+                        aria-label={uiText(
+                          index === 0 ? "modelPreview.previous" : "modelPreview.next",
+                        )}
+                        title={uiText(labels[view.id])}
+                        onPointerEnter={() => {
+                          state.enter();
+                          preview.prioritize(view);
+                        }}
+                        onPointerLeave={state.leave}
+                        onFocus={() => preview.prioritize(view)}
+                        onClick={(event) => {
+                          stop(event);
+                          preview.select(view.id);
+                        }}
+                      >
+                        {index === 0 ? (
+                          <ChevronLeft className="h-5 w-5" />
+                        ) : (
+                          <ChevronRight className="h-5 w-5" />
+                        )}
+                      </Button>
+                    ),
+                )}
+              </div>
+            )}
+            <div className="absolute inset-x-0 bottom-0 flex items-center border-t border-border bg-card text-card-foreground">
+              <Button
+                {...keepOffCard}
+                variant="outline"
+                className="pointer-events-auto h-11 shrink-0 border-0 border-r px-2.5 text-xs"
+                aria-label={uiText("modelPreview.gallery")}
+                onPointerEnter={state.enter}
+                onPointerLeave={state.leave}
+                onClick={(event) => {
+                  stop(event);
+                  state.setOpen(true);
+                }}
+              >
+                <span>{uiText("modelPreview.views", { count: views.length })}</span>
+              </Button>
+              <ViewIndicator state={state} className="flex-1 justify-end" />
+            </div>
           </>
         )}
         {preview.failed && (
           <Button
             {...keepOffCard}
-            variant="secondary"
+            variant="outline"
             className="pointer-events-auto absolute right-1 top-1 h-11"
             onClick={(event) => {
               stop(event);
@@ -231,11 +239,13 @@ export function ModelPreviewControls({ name, state }: { name: string; state: Pre
           </Button>
         )}
       </div>
-      {state.open && (
-        <Modal open title={uiText("modelPreview.gallery")} onClose={() => state.setOpen(false)}>
-          <ModelPreviewGallery name={name} cover={state.cover} previews={state.previews} />
-        </Modal>
-      )}
+      <Modal
+        open={state.open}
+        title={uiText("modelPreview.gallery")}
+        onClose={() => state.setOpen(false)}
+      >
+        <ModelPreviewGallery name={name} cover={state.cover} previews={state.previews} />
+      </Modal>
     </>
   );
 }
@@ -263,13 +273,12 @@ export function ModelPreviewGallery({
         onPointerLeave={state.leave}
       >
         <PreviewImage name={name} state={state} imageClassName="h-full w-full object-contain" />
-        <ViewIndicator state={state} />
+        <ViewIndicator
+          state={state}
+          className="absolute right-1 bottom-1 max-w-full border border-border"
+        />
         {preview.failed && (
-          <Button
-            variant="secondary"
-            className="absolute left-1 top-1 h-11"
-            onClick={preview.retry}
-          >
+          <Button variant="outline" className="absolute left-1 top-1 h-11" onClick={preview.retry}>
             {uiText("modelPreview.retry")}
           </Button>
         )}

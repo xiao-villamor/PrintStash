@@ -14,6 +14,29 @@
   background-color: var(--plate);
 }
 
+/* The view count stays discoverable; only the orbit arrows reveal on intent. */
+.library-preview-navigation {
+  opacity: 1;
+  transition: opacity var(--duration-press) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .library-preview-navigation {
+    opacity: 0;
+  }
+  .library-preview-controls[data-hovered] .library-preview-navigation,
+  .library-preview-controls:focus-within .library-preview-navigation {
+    opacity: 1;
+  }
+}
+.library-preview-controls:focus-within .library-preview-navigation {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .library-preview-navigation {
+    transition: none;
+  }
+}
+
 /* Data and image readiness fill a stationary frame, independently of navigation. */
 .library-preview-placeholder {
   background: color-mix(in srgb, var(--muted) 40%, transparent);

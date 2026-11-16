@@ -28,6 +28,10 @@ A deliberate expanded gallery may fetch its directly selectable thumbnails.
 
 Native buttons have names, keyboard focus, and 44 px targets; dots are indicators,
 not extra tab stops. Preview buttons do not activate, select, or drag the card.
+The view-count button stays visible beside the current angle. On pointer devices,
+orbit arrows fade in on preview hover; keyboard focus and reduced motion reveal
+them immediately. Touch keeps the arrows visible. Controls use the same outlined
+surfaces as the rest of the app, and the gallery retains its normal exit transition.
 Session changes retire private cached bytes and suppress stale decoded results.
 
 The additive `previews` read model leaves `thumbnail_url` intact. A Model with
