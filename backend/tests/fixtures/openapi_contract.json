@@ -3136,6 +3136,10 @@
       },
       "CaptureCapabilitiesRead": {
         "properties": {
+          "capture_preferences": {
+            "title": "Capture Preferences",
+            "type": "boolean"
+          },
           "idempotent_requests": {
             "title": "Idempotent Requests",
             "type": "boolean"
@@ -3147,6 +3151,10 @@
           "max_files": {
             "title": "Max Files",
             "type": "integer"
+          },
+          "resumable_cover": {
+            "title": "Resumable Cover",
+            "type": "boolean"
           },
           "resumable_slots": {
             "title": "Resumable Slots",
@@ -3171,9 +3179,29 @@
           "idempotent_requests",
           "storage",
           "max_files",
-          "max_file_bytes"
+          "max_file_bytes",
+          "capture_preferences",
+          "resumable_cover"
         ],
         "title": "CaptureCapabilitiesRead",
+        "type": "object"
+      },
+      "CaptureDestinationRead": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "CaptureDestinationRead",
         "type": "object"
       },
       "CaptureFieldDraft": {
@@ -3497,6 +3525,28 @@
           "capture_source": {
             "$ref": "#/components/schemas/CaptureSourceDraft"
           },
+          "collection_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CaptureUploadFileDeclaration"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "files": {
             "items": {
               "$ref": "#/components/schemas/CaptureManifestFileRead"
@@ -3540,6 +3590,14 @@
             "minLength": 1,
             "title": "Source Url",
             "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Tags",
+            "type": "array"
           },
           "title": {
             "anyOf": [
@@ -31763,6 +31821,71 @@
           }
         ],
         "summary": "Capture Capabilities",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/capture-destinations": {
+      "get": {
+        "operationId": "capture_destinations_api_v1_inbox_capture_destinations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 128,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CaptureDestinationRead"
+                  },
+                  "title": "Response Capture Destinations Api V1 Inbox Capture Destinations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Capture Destinations",
         "tags": [
           "pending imports"
         ]

@@ -6,6 +6,7 @@ import {
   CAPTURE_MAX_TOTAL_SIZE_BYTES,
   CaptureCapacityError,
   captureRichFiles,
+  prepareCaptureFile,
   type BrowserCaptureFile,
 } from "./capture-transport.ts";
 
@@ -17,6 +18,7 @@ interface CaptureSession {
     source_file_id: string | null;
     state: "pending" | "uploaded";
     size_bytes: number;
+    cover?: { id: string; filename: string; media_type: string; sha256: string };
   }>;
   recoverable: boolean;
 }
@@ -52,7 +54,27 @@ function sessionReceipt(value: unknown): CaptureSession {
       slot.size_bytes <= 0
     )
       throw new CaptureRecoveryError("PrintStash returned an invalid capture slot receipt.");
+    let cover: CaptureSession["slots"][number]["cover"];
+    if (slot.source_file_id === null) {
+      if (
+        slot.role !== "cover" ||
+        typeof slot.id !== "string" ||
+        !slot.id ||
+        typeof slot.filename !== "string" ||
+        typeof slot.media_type !== "string" ||
+        typeof slot.sha256 !== "string" ||
+        !/^[a-f0-9]{64}$/.test(slot.sha256)
+      )
+        throw new CaptureRecoveryError("PrintStash returned an invalid cover receipt.");
+      cover = {
+        id: slot.id,
+        filename: slot.filename,
+        media_type: slot.media_type,
+        sha256: slot.sha256,
+      };
+    }
     slots.push({
+      ...(cover ? { cover } : {}),
       source_file_id: slot.source_file_id,
       state: slot.state,
       size_bytes: slot.size_bytes,
@@ -76,6 +98,9 @@ export async function captureSequentialFiles(options: {
   authorization: string;
   source: CaptureSourceDraft;
   title?: string;
+  collectionId?: number;
+  tags?: string[];
+  cover?: BrowserCaptureFile;
   candidates: CaptureCandidate[];
   download(candidate: CaptureCandidate, signal?: AbortSignal): Promise<BrowserCaptureFile>;
   storage: {
@@ -131,6 +156,37 @@ export async function captureSequentialFiles(options: {
   }
   if (!capability.ok)
     throw new CaptureRecoveryError(`PrintStash readiness check failed (${capability.status}).`);
+  const supportsPreferences =
+    typeof support === "object" &&
+    support !== null &&
+    "capture_preferences" in support &&
+    support.capture_preferences === true;
+  if ((options.collectionId !== undefined || options.tags?.length) && !supportsPreferences)
+    throw new CaptureRecoveryError(
+      "Update PrintStash to send collection and tag suggestions, or choose them in Pending Imports.",
+    );
+  if (
+    options.cover &&
+    !(
+      typeof support === "object" &&
+      support !== null &&
+      "resumable_cover" in support &&
+      support.resumable_cover === true
+    )
+  )
+    throw new CaptureRecoveryError(
+      "Update PrintStash to include a recoverable cover, or add it after importing.",
+    );
+  if (
+    options.cover &&
+    (options.cover.file.size > 15 * 1024 * 1024 ||
+      options.cover.file.size === 0 ||
+      !["image/jpeg", "image/png", "image/webp"].includes(options.cover.mediaType))
+  )
+    throw new CaptureRecoveryError("Choose a JPEG, PNG or WebP cover up to 15 MiB.");
+  const preparedCover = options.cover
+    ? await prepareCaptureFile(options.cover, "cover", "cover")
+    : undefined;
   const supportsProfiles =
     typeof support === "object" &&
     support !== null &&
@@ -149,10 +205,14 @@ export async function captureSequentialFiles(options: {
     method: "POST",
     body: JSON.stringify({
       request_key: requestKey,
+      ...(preparedCover ? { cover: preparedCover.declaration } : {}),
       ...(supportsProfiles && Object.keys(profiles).length ? { schema_version: 3, profiles } : {}),
       source_url: source.canonical_url,
       capture_source: source,
       title: options.title ?? null,
+      ...(supportsPreferences
+        ? { collection_id: options.collectionId ?? null, tags: options.tags ?? [] }
+        : {}),
       files: candidates.map((c) => ({
         id: c.id,
         name: c.filename,
@@ -176,6 +236,25 @@ export async function captureSequentialFiles(options: {
       "Staging expired. Capture again to download fresh files from this source.",
     );
   }
+  const coverSlots = session.slots.filter((slot) => slot.cover);
+  if (coverSlots.length > 1)
+    throw new CaptureRecoveryError("PrintStash returned multiple cover receipts.");
+  const coverSlot = coverSlots[0];
+  if (
+    preparedCover &&
+    (!coverSlot ||
+      coverSlot.size_bytes !== preparedCover.declaration.size_bytes ||
+      coverSlot.cover?.filename !== preparedCover.declaration.filename ||
+      coverSlot.cover?.sha256 !== preparedCover.declaration.sha256 ||
+      coverSlot.cover?.media_type !== preparedCover.declaration.media_type)
+  )
+    throw new CaptureRecoveryError(
+      "The selected cover does not match this capture. Reselect the original cover.",
+    );
+  if (coverSlot?.state === "pending" && !preparedCover)
+    throw new CaptureRecoveryError(
+      "Reselect the original cover to continue this capture. Confirmed model files are preserved.",
+    );
   let total = session.slots
     .filter((s) => s.state === "uploaded")
     .reduce((sum, s) => sum + s.size_bytes, 0);
@@ -237,6 +316,21 @@ export async function captureSequentialFiles(options: {
     if (!uploaded.ok)
       throw new CaptureRecoveryError(
         `Transfer interrupted (${uploaded.status}). Reopen this source to recover confirmed files.`,
+      );
+  }
+  if (coverSlot?.cover && coverSlot.state === "pending" && preparedCover) {
+    progress("Transferring selected cover…");
+    const uploaded = await request(
+      `/capture-upload-slots/${encodeURIComponent(coverSlot.cover.id)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": preparedCover.declaration.media_type },
+        body: preparedCover.file,
+      },
+    );
+    if (!uploaded.ok)
+      throw new CaptureRecoveryError(
+        `Cover transfer interrupted (${uploaded.status}). Confirmed model files are preserved.`,
       );
   }
   progress("Transfer complete. Preparing review…");

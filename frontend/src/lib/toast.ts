@@ -86,8 +86,12 @@ export const toast = {
     sonner.success(message, { duration: 3000 });
   },
 
-  successAction(message: string, label: string, onClick: () => void): void {
-    sonner.success(message, { duration: 10000, action: { label, onClick } });
+  successAction(message: string, label: string, onClick: () => void, id?: string): void {
+    sonner.success(message, { id, duration: 10000, action: { label, onClick } });
+  },
+
+  dismiss(id: string): void {
+    sonner.dismiss(id);
   },
 
   undo(message: string, onUndo: () => void | Promise<void>): void {

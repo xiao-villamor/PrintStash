@@ -6,7 +6,7 @@ import json
 import uuid
 import zipfile
 from collections.abc import Iterator
-from contextlib import closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -45,6 +45,7 @@ from app.db.models import (
     InboxItem,
     InboxItemCompletion,
     InboxItemResult,
+    InboxItemResultState,
     InboxItemState,
     InboxSourceKind,
     IngestionEntryState,
@@ -291,7 +292,7 @@ def list_visible(
     if not include_completed:
         stmt = stmt.where(InboxItem.state != InboxItemState.COMPLETED)
     rows = session.exec(
-        stmt.order_by(InboxItem.updated_at.desc(), InboxItem.id.desc())  # type: ignore[attr-defined]
+        stmt.order_by(col(InboxItem.updated_at).desc(), col(InboxItem.id).desc())  # type: ignore[attr-defined]
     ).all()
     item_ids = [row.id for row in rows if row.id is not None]
     all_results = (
@@ -602,42 +603,78 @@ def create_capture_upload_slots(
         return replay
     assert row.id is not None
     slots: list[CaptureUploadSlot] = []
-    backend = get_backend()
     declarations: list[tuple[Literal["file", "cover"], Any, str | None]] = [
         ("file", item, item.id) for item in payload.files
     ]
     if payload.cover is not None:
         declarations.append(("cover", payload.cover, None))
     for role, item, source_file_id in declarations:
-        filename = Path(item.filename.replace("\\", "/")).name
-        if not filename:
-            raise importer.ImportError_("filename_required")
-        slot = CaptureUploadSlot(
-            id=uuid.uuid4().hex,
-            inbox_item_id=row.id,
-            role=role,
-            source_file_id=source_file_id,
-            filename=filename,
-            media_type=item.media_type.lower(),
-            size_bytes=item.size_bytes,
-            sha256=item.sha256,
-            storage_key=backend.capture_upload_slot_key(uuid.uuid4().hex),
+        slots.append(
+            _reserve_capture_slot(session, user, row.id, item, role, source_file_id)
         )
-        session.add(slot)
-        session.flush()
-        assert slot.storage_key is not None
-        staging_leases.create_capture_slot_lease(
-            session,
-            slot_id=slot.id,
-            owner_user_id=user.id,
-            destination_key=slot.storage_key,
-            size_bytes=slot.size_bytes,
-            sha256=slot.sha256,
-        )
-        slots.append(slot)
     session.commit()
     session.refresh(row)
     return row, slots
+
+
+def _reserve_capture_slot(
+    session: Session,
+    user: User,
+    item_id: int,
+    declaration: CaptureUploadFileDeclaration,
+    role: Literal["file", "cover"],
+    source_file_id: str | None,
+) -> CaptureUploadSlot:
+    if user.id is None:
+        raise ValueError("not_authenticated")
+    filename = Path(declaration.filename.replace("\\", "/")).name
+    if not filename:
+        raise importer.ImportError_("filename_required")
+    slot = CaptureUploadSlot(
+        id=uuid.uuid4().hex,
+        inbox_item_id=item_id,
+        role=role,
+        source_file_id=source_file_id,
+        filename=filename,
+        media_type=declaration.media_type.lower(),
+        size_bytes=declaration.size_bytes,
+        sha256=declaration.sha256,
+        storage_key=get_backend().capture_upload_slot_key(uuid.uuid4().hex),
+    )
+    session.add(slot)
+    session.flush()
+    assert slot.storage_key is not None
+    staging_leases.create_capture_slot_lease(
+        session,
+        slot_id=slot.id,
+        owner_user_id=user.id,
+        destination_key=slot.storage_key,
+        size_bytes=slot.size_bytes,
+        sha256=slot.sha256,
+    )
+    return slot
+
+
+def _check_capture_cover_replay(
+    slots: list[CaptureUploadSlot], declaration: CaptureUploadFileDeclaration | None
+) -> None:
+    # A reload cannot restore the local File. Omission retains the original slot;
+    # a newly selected cover must match it, never silently replace confirmed bytes.
+    if declaration is None:
+        return
+    cover = next((slot for slot in slots if slot.role == "cover"), None)
+    if cover is None or (
+        cover.filename,
+        cover.size_bytes,
+        cover.sha256,
+        cover.media_type,
+    ) != (
+        declaration.filename,
+        declaration.size_bytes,
+        declaration.sha256,
+        declaration.media_type.lower(),
+    ):
+        raise OperationError("capture_request_conflict", kind=ErrorKind.CONFLICT)
 
 
 def start_capture_session(
@@ -645,6 +682,14 @@ def start_capture_session(
 ) -> InboxItem:
     if user.id is None:
         raise ValueError("not_authenticated")
+    if payload.cover is not None and (
+        payload.cover.size_bytes > 15 * 1024 * 1024
+        or payload.cover.media_type.lower()
+        not in {"image/png", "image/jpeg", "image/webp"}
+        or payload.cover.filename in {".", ".."}
+        or any(char in payload.cover.filename for char in ("/", "\\", "\x00"))
+    ):
+        raise ValueError("invalid_cover_image")
     for file in payload.files:
         if file.name in {".", ".."} or any(
             char in file.name for char in ("/", "\\", "\x00")
@@ -693,9 +738,14 @@ def start_capture_session(
     ).hexdigest()
     replay = _capture_request_replay(session, user, payload.request_key, request_hash)
     if replay is not None:
+        _check_capture_cover_replay(replay[1], payload.cover)
         return replay[0]
+    if payload.collection_id is not None:
+        _require_target(session, user, payload.collection_id)
     row = InboxItem(
         owner_user_id=user.id,
+        target_collection_id=payload.collection_id,
+        requested_tags_json=json.dumps(payload.tags),
         source_kind=InboxSourceKind.BROWSER,
         source_url=source_url,
         source_identity_key=_publication_key(source_url),
@@ -710,12 +760,18 @@ def start_capture_session(
         with session.begin_nested():
             session.add(row)
             session.flush()
+            if payload.cover is not None:
+                assert row.id is not None
+                _reserve_capture_slot(
+                    session, user, row.id, payload.cover, "cover", None
+                )
     except IntegrityError:
         replay = _capture_request_replay(
             session, user, payload.request_key, request_hash
         )
         if replay is None:
             raise
+        _check_capture_cover_replay(replay[1], payload.cover)
         return replay[0]
     session.commit()
     return row
@@ -727,6 +783,8 @@ def declare_capture_file(
     item_id: int,
     declaration: CaptureUploadFileDeclaration,
 ) -> CaptureUploadSlot:
+    if user.id is None:
+        raise ValueError("not_authenticated")
     if declaration.size_bytes > settings.max_upload_bytes:
         raise ValueError("file_too_large")
     row = require_visible(session, user, item_id)
@@ -835,7 +893,7 @@ def capture_recovery(session: Session, user: User, item_id: int) -> CaptureRecov
         select(StagingLease)
         .join(
             CaptureUploadSlot,
-            StagingLease.capture_upload_slot_id == CaptureUploadSlot.id,
+            col(StagingLease.capture_upload_slot_id) == col(CaptureUploadSlot.id),
         )
         .where(CaptureUploadSlot.inbox_item_id == row.id)
     ).all()
@@ -875,7 +933,7 @@ def capture_source_status(
             matches,
             InboxItem.state != InboxItemState.DISMISSED,
         )
-        .order_by(InboxItem.updated_at.desc(), InboxItem.id.desc())
+        .order_by(col(InboxItem.updated_at).desc(), col(InboxItem.id).desc())
         .limit(limit)
     ).all()
     return [
@@ -1074,7 +1132,7 @@ def _cleanup_capture_slots(
     row: InboxItem,
     *,
     durable_only: bool = False,
-    cover_candidate: source_covers.SourceCoverCandidate | None = None,
+    cover_candidates: tuple[source_covers.SourceCoverCandidate, ...] = (),
 ) -> bool:
     """Release exact slot receipts only after the whole inbox job is terminal."""
     if row.id is None:
@@ -1195,11 +1253,12 @@ def _cleanup_capture_slots(
                 )
                 .with_for_update()
             ).all()
-        if cover_candidate is not None:
+        if cover_candidates:
             receipts = [receipt for _slot_id, receipt in validated_receipts]
-            receipts.append(cover_candidate.publication.receipt)
-            if cover_candidate.previous is not None:
-                receipts.append(cover_candidate.previous.receipt)
+            for candidate in cover_candidates:
+                receipts.append(candidate.publication.receipt)
+                if candidate.previous is not None:
+                    receipts.append(candidate.previous.receipt)
             for receipt in sorted(
                 receipts,
                 key=lambda receipt: (receipt.backend, receipt.namespace, receipt.key),
@@ -2282,10 +2341,11 @@ class _InboxBatchImport:
                 )
                 digest = hashlib.sha256()
                 received = 0
-                with (
-                    closing(backend.stream_chunks(key)) as chunks,
-                    target.open("xb") as output,
-                ):
+                with ExitStack() as stream_scope, target.open("xb") as output:
+                    chunks = backend.stream_chunks(key)
+                    close = getattr(chunks, "close", None)
+                    if callable(close):
+                        stream_scope.callback(close)
                     for chunk in chunks:
                         checkpoint(force=True)
                         received += len(chunk)
@@ -2900,7 +2960,7 @@ def _finish_import(
         row = session.get(InboxItem, item_id)
         if row is None:
             return
-        cover_write: source_covers.SourceCoverCandidate | None = None
+        cover_writes: list[source_covers.SourceCoverCandidate] = []
         # The cover intent uses a separate engine-bound transaction. Keep this
         # terminalization session in ``no_autoflush`` until that intent commit
         # is complete; otherwise result upserts or Inbox state assignment can
@@ -2923,12 +2983,44 @@ def _finish_import(
                 )
                 row.retryable = failed > 0
                 if not row.retryable:
-                    cover_result = _attach_capture_cover(session, row)
-                    if cover_result is False:
-                        row.error_code = "capture_cover_attach_pending"
-                        row.retryable = True
-                    elif isinstance(cover_result, source_covers.SourceCoverCandidate):
-                        cover_write = cover_result
+                    # Result upserts have not flushed: include both new receipts
+                    # and previously committed results from selective retries.
+                    results = list(
+                        session.exec(
+                            select(InboxItemResult).where(
+                                InboxItemResult.inbox_item_id == item_id
+                            )
+                        ).all()
+                    )
+                    results.extend(
+                        result
+                        for result in session.new
+                        if isinstance(result, InboxItemResult)
+                        and result.inbox_item_id == item_id
+                    )
+                    model_ids = {
+                        result.model_id
+                        for result in results
+                        if result.model_id is not None
+                        and result.state
+                        in {
+                            InboxItemResultState.IMPORTED,
+                            InboxItemResultState.DEDUPLICATED,
+                        }
+                    }
+                    model_ids.add(job.model_id)
+                    for model_id in sorted(model_ids):
+                        cover_result = _attach_capture_cover(
+                            session,
+                            row.model_copy(update={"resulting_model_id": model_id}),
+                        )
+                        if cover_result is False:
+                            row.error_code = "capture_cover_attach_pending"
+                            row.retryable = True
+                        elif isinstance(
+                            cover_result, source_covers.SourceCoverCandidate
+                        ):
+                            cover_writes.append(cover_result)
                 # Byte publication above precedes the short authority transaction.
                 # Never clean staging or commit completion across a retry.
                 if not _lock_import_completion(session, item_id, execution):
@@ -2945,10 +3037,13 @@ def _finish_import(
                     else:
                         row.error_code = "capture_upload_cleanup_pending"
                         row.retryable = True
-                if cover_write is not None:
+                for cover_write in cover_writes:
                     source_covers.attach_candidate(session, cover_write)
                 if not row.retryable and not _cleanup_capture_slots(
-                    session, row, durable_only=True, cover_candidate=cover_write
+                    session,
+                    row,
+                    durable_only=True,
+                    cover_candidates=tuple(cover_writes),
                 ):
                     row.error_code = "capture_upload_cleanup_pending"
                     row.retryable = True
@@ -2969,12 +3064,12 @@ def _finish_import(
             session.add(row)
         try:
             session.flush()
-            if cover_write is not None:
+            for cover_write in cover_writes:
                 source_covers.adopt_candidate(session, cover_write)
             session.commit()
         except Exception:
             session.rollback()
-            if cover_write is not None:
+            for cover_write in cover_writes:
                 abandon_publication(session, cover_write.publication)
             raise
 

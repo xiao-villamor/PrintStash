@@ -1,3 +1,5 @@
+import { captureTransferFetch, progressLabel, type ByteProgress } from "./transfer-progress.ts";
+import { captureDestinations, captureTags, selectedCaptureCover } from "./capture-preferences.ts";
 import {
   requestCultsInMainWorld,
   cultsCaptureFromPage,
@@ -160,6 +162,13 @@ const statusTitle = requiredElement("#status-title", HTMLElement);
 const statusMessage = requiredElement("#status-message", HTMLElement);
 const statusDetails = requiredElement("#status-details", HTMLDetailsElement);
 const statusCode = requiredElement("#status-code", HTMLElement);
+const preferenceFields = requiredElement("#capture-preferences", HTMLFieldSetElement);
+const collectionQuery = requiredElement("#collection-query", HTMLInputElement);
+const collectionSelect = requiredElement("#capture-collection", HTMLSelectElement);
+const coverInput = requiredElement("#capture-cover", HTMLInputElement);
+const tagsInput = requiredElement("#capture-tags", HTMLInputElement);
+const findCollection = requiredElement("#find-collection", HTMLButtonElement);
+const suggestionOperations = new CaptureOperationOwner();
 const captureButton = requiredElement("#capture", HTMLButtonElement);
 const inboxButton = requiredElement("#open-inbox", HTMLButtonElement);
 const importPanel = requiredElement("#import-panel", HTMLElement);
@@ -433,6 +442,12 @@ function showDiagnosticStatus(error: unknown, fallbackMessage?: string) {
 
 function retireCapture() {
   captureOperations.retire();
+  suggestionOperations.retire();
+  collectionQuery.value = "";
+  collectionSelect.replaceChildren(new Option("Choose in Pending Imports", ""));
+  tagsInput.value = "";
+  coverInput.value = "";
+  findCollection.disabled = false;
   importBusy = false;
   setButtonBusy(captureButton, false);
   clearCandidateSelection();
@@ -620,6 +635,7 @@ function renderImportAvailability() {
   const connected = connectionState === "connected" && connectedConfig;
   const readyConnection = connected && !editingConnection;
   importPanel.hidden = !readyConnection;
+  preferenceFields.disabled = importBusy || !readyConnection;
   captureButton.disabled = importBusy || !readyConnection || !activeSource;
   if (importBusy) {
     importHint.textContent =
@@ -938,6 +954,7 @@ async function downloadPrintablesCandidate(
   candidate: BrowserCaptureMessage["candidates"][number],
   link: string,
   signal?: AbortSignal,
+  progress?: ByteProgress,
 ): Promise<BrowserCaptureFile> {
   if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
   const response = await fetch(link, {
@@ -962,7 +979,7 @@ async function downloadPrintablesCandidate(
       );
     }
   }
-  const file = await readBoundedPrintablesResponse(response, candidate.sizeBytes, signal);
+  const file = await readBoundedPrintablesResponse(response, candidate.sizeBytes, signal, progress);
   return {
     id: candidate.id,
     file,
@@ -1580,6 +1597,40 @@ apiSettingsButton.addEventListener("click", () => {
   }
 });
 
+findCollection.addEventListener("click", async () => {
+  if (importBusy || !connectedConfig || connectionState !== "connected") return;
+  const authorization = accessToken || connectedConfig.deviceCredential;
+  if (!authorization) return;
+  suggestionOperations.retire();
+  const operation = suggestionOperations.begin(connectedConfig, authorization);
+  findCollection.disabled = true;
+  try {
+    const destinations = await operation.run((signal) =>
+      captureDestinations({
+        vault: operation.config.vault,
+        authorization,
+        query: collectionQuery.value,
+        signal,
+      }),
+    );
+    collectionSelect.replaceChildren(
+      new Option("Choose in Pending Imports", ""),
+      ...destinations.map((destination) => new Option(destination.label, String(destination.id))),
+    );
+    showStatus(
+      destinations.length
+        ? "Choose a collection suggestion for review."
+        : "No editable collections match this search.",
+    );
+  } catch (error) {
+    if (!suggestionOperations.isCurrent(operation)) return;
+    if (error instanceof CaptureAuthenticationError) recoverCaptureConnection();
+    else showStatus(messageFrom(error), "error");
+  } finally {
+    if (suggestionOperations.finish(operation)) findCollection.disabled = false;
+  }
+});
+
 captureButton.addEventListener("click", async () => {
   if (!connectedConfig || connectionState !== "connected") {
     showStatus("Connect PrintStash before importing.", "error");
@@ -1592,6 +1643,8 @@ captureButton.addEventListener("click", async () => {
     showStatus("The browser connection expired. Connect PrintStash again.", "error");
     return;
   }
+  suggestionOperations.retire();
+  findCollection.disabled = false;
   const capture = captureOperations.begin(config, authorization);
   const runStage = vaultStage(capture);
   importBusy = true;
@@ -1599,6 +1652,17 @@ captureButton.addEventListener("click", async () => {
   renderImportAvailability();
   showStatus();
   try {
+    const transferFetch = captureTransferFetch((loaded, total) => {
+      capture.assertCurrent();
+      showStatus(
+        `Transferring to PrintStash: ${progressLabel(loaded, total)}${total !== null && loaded === total ? " · awaiting confirmation" : ""}`,
+      );
+    });
+    const preferences = {
+      ...(collectionSelect.value ? { collectionId: Number(collectionSelect.value) } : {}),
+      tags: captureTags(tagsInput.value),
+      cover: selectedCaptureCover(coverInput.files?.[0]),
+    };
     // Ask while the import click still carries user activation, before provider verification.
     if (pendingMarketplaceCapture?.source.provider === "cults") {
       await ensureOriginPermissions(CULTS_DOWNLOAD_ORIGINS);
@@ -1637,6 +1701,8 @@ captureButton.addEventListener("click", async () => {
       const file = selectedManualFile(draft);
       const receipt = await capture.run(() =>
         captureRichFiles({
+          ...preferences,
+          fetchImpl: transferFetch,
           vault: capture.config.vault,
           authorization,
           sourceUrl: draft.source.canonical_url,
@@ -1666,6 +1732,8 @@ captureButton.addEventListener("click", async () => {
       }
       const receipt = await capture.run((signal) =>
         captureSequentialFiles({
+          ...preferences,
+          fetchImpl: transferFetch,
           vault: capture.config.vault,
           authorization,
           source: draft.source,
@@ -1678,12 +1746,16 @@ captureButton.addEventListener("click", async () => {
             showStatus(message);
           },
           download: async (candidate, signal) => {
+            const progress: ByteProgress = (loaded, total) => {
+              capture.assertCurrent();
+              showStatus(`Downloading ${candidate.filename}: ${progressLabel(loaded, total)}`);
+            };
             if (draft.source.provider === "printables") {
               const links = await resolvePrintablesLinks(draft, [candidate], capture.signal);
               const link = links.find((link) => link.id === candidate.id)?.url;
               if (!link) throw new Error("Printables link mapping changed.");
               await ensurePrintablesFilePermissions([link], capture.signal);
-              return downloadPrintablesCandidate(candidate, link, signal);
+              return downloadPrintablesCandidate(candidate, link, signal, progress);
             }
             if (draft.source.provider === "makerworld") {
               const links = await resolveMakerWorldLinks(draft, [candidate], capture.signal);
@@ -1695,6 +1767,7 @@ captureButton.addEventListener("click", async () => {
                 totalBefore: 0,
                 ensureOriginPermission,
                 signal,
+                progress,
               });
             }
             if (draft.source.provider === "cults") {
@@ -1709,7 +1782,7 @@ captureButton.addEventListener("click", async () => {
               const result = results[0]?.result as CultsPageResult | undefined;
               if (!result)
                 throw new MarketplaceDownloadError("Cults download could not be checked.");
-              return downloadCultsCandidate({ candidate, result, signal });
+              return downloadCultsCandidate({ candidate, result, signal, progress });
             }
             if (draft.source.provider === "myminifactory") {
               if (!activePage?.id || !draft.source.source_item_id)
@@ -1732,6 +1805,7 @@ captureButton.addEventListener("click", async () => {
                 result,
                 ensureOriginPermissions,
                 signal,
+                progress,
               });
             }
             if (draft.source.provider === "makeronline") {
@@ -1764,6 +1838,7 @@ captureButton.addEventListener("click", async () => {
                 result,
                 ensureOriginPermission,
                 signal,
+                progress,
               });
             }
             if (draft.source.provider === "crealitycloud") {
@@ -1793,6 +1868,7 @@ captureButton.addEventListener("click", async () => {
                 result,
                 ensureOriginPermission,
                 signal,
+                progress,
               });
             }
             if (draft.source.provider === "thangs") {
@@ -1806,7 +1882,13 @@ captureButton.addEventListener("click", async () => {
               });
               const result = results[0]?.result as ThangsPageResult | undefined;
               if (!result) throw new Error("Thangs did not return a download response.");
-              return downloadThangsCandidate({ candidate, result, ensureOriginPermission, signal });
+              return downloadThangsCandidate({
+                candidate,
+                result,
+                ensureOriginPermission,
+                signal,
+                progress,
+              });
             }
             const link = pendingThingiverseLinks.get(candidate.id);
             if (!link) throw new Error("Thingiverse file mapping changed.");
@@ -1815,6 +1897,7 @@ captureButton.addEventListener("click", async () => {
               link,
               ensureOriginPermissions,
               signal,
+              progress,
             });
           },
         }),

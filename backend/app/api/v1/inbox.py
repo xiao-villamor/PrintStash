@@ -30,6 +30,7 @@ from app.api.command_execution import bounded_command, run_command
 from app.core.config import settings
 from app.core.security import require_auth, require_user
 from app.db.models import (
+    CollectionRole,
     InboxItemState,
     InboxSourceKind,
     JobKind,
@@ -41,6 +42,7 @@ from app.modules.storage import storage
 from app.modules.work import nudge
 from app.schemas.inbox import (
     CaptureCapabilitiesRead,
+    CaptureDestinationRead,
     CaptureRecoveryRead,
     CaptureSessionCreate,
     CaptureSourceStatusRead,
@@ -66,6 +68,8 @@ def start_capture_session(
     with command_session(actor) as (session, user):
         try:
             row = inbox.start_capture_session(session, user, payload)
+        except staging_leases.StagingCapacityExceeded as exc:
+            raise HTTPException(status_code=507, detail=str(exc)) from exc
         except (ValueError, importer.ImportError_) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         assert row.id is not None
@@ -101,11 +105,37 @@ def capture_capabilities(
         return CaptureCapabilitiesRead(
             schema_versions=[1, 2, 3],
             resumable_slots=True,
+            capture_preferences=True,
+            resumable_cover=True,
             idempotent_requests=True,
             storage="managed",
             max_files=64,
             max_file_bytes=settings.max_upload_bytes,
         )
+
+
+@router.get("/capture-destinations", response_model=list[CaptureDestinationRead])
+@bounded_command
+def capture_destinations(
+    q: str = Query("", max_length=128),
+    limit: int = Query(20, ge=1, le=20),
+    actor: CommandActor = Depends(require_capture_actor),
+) -> list[CaptureDestinationRead]:
+    from app.modules.library import collection_tree
+
+    with command_session(actor) as (session, user):
+        page = collection_tree.search(
+            session,
+            user,
+            query=q,
+            minimum=CollectionRole.EDIT,
+            cursor=None,
+            limit=limit,
+        )
+        return [
+            CaptureDestinationRead(id=item.id, label=item.display_path)
+            for item in page.items
+        ]
 
 
 @router.get("/capture-source-status", response_model=list[CaptureSourceStatusRead])

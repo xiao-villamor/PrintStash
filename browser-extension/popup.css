@@ -276,7 +276,8 @@ label {
   font-weight: 650;
 }
 
-input {
+input,
+select {
   width: 100%;
   min-height: 38px;
   border: 1px solid var(--border);
@@ -296,7 +297,8 @@ input::placeholder {
   color: var(--muted-foreground);
 }
 
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   border-color: var(--ring);
   outline-color: var(--primary-soft);
 }

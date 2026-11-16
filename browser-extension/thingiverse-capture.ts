@@ -1,3 +1,4 @@
+import { downloadProgress, type ByteProgress } from "./transfer-progress.ts";
 import { buildBrowserCaptureMessage, type BrowserCaptureMessage } from "./capture-adapter.ts";
 import type { BrowserCaptureFile } from "./capture-transport.ts";
 
@@ -595,7 +596,11 @@ export function thingiverseCaptureFromPage({
   };
 }
 
-async function readBoundedFile(response: Response, signal?: AbortSignal): Promise<Blob> {
+async function readBoundedFile(
+  response: Response,
+  signal?: AbortSignal,
+  progress?: ByteProgress,
+): Promise<Blob> {
   const contentLengthValue = response.headers.get("Content-Length");
   if (contentLengthValue !== null) {
     const contentLength = Number(contentLengthValue);
@@ -614,6 +619,7 @@ async function readBoundedFile(response: Response, signal?: AbortSignal): Promis
       "user_file_required: Thingiverse did not provide a file stream. Download it normally, then attach it in Pending Imports.",
     );
   }
+  const report = downloadProgress(response, progress);
   const reader = response.body.getReader();
   const chunks: ArrayBuffer[] = [];
   let total = 0;
@@ -637,6 +643,7 @@ async function readBoundedFile(response: Response, signal?: AbortSignal): Promis
       const copy = new ArrayBuffer(next.value.byteLength);
       new Uint8Array(copy).set(next.value);
       chunks.push(copy);
+      report(total);
     }
   } finally {
     signal?.removeEventListener("abort", abortReader);
@@ -653,12 +660,14 @@ export async function downloadThingiverseCandidate({
   link,
   ensureOriginPermissions = async () => {},
   signal,
+  progress,
 }: {
   fetchImpl?: typeof fetch;
   candidate: BrowserCaptureMessage["candidates"][number];
   link: string;
   ensureOriginPermissions?: (origins: string[]) => Promise<void>;
   signal?: AbortSignal;
+  progress?: ByteProgress;
 }): Promise<BrowserCaptureFile> {
   const fileId = candidate.id.match(/:file:(\d{1,20})$/)?.[1];
   if (!fileId || !validFilename(candidate.filename) || !validDownloadUrl(link, fileId)) {
@@ -695,7 +704,7 @@ export async function downloadThingiverseCandidate({
   }
   return {
     id: candidate.id,
-    file: await readBoundedFile(response, signal),
+    file: await readBoundedFile(response, signal, progress),
     filename: candidate.filename,
     mediaType:
       candidate.fileType === "stl"

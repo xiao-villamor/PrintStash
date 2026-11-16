@@ -1,3 +1,4 @@
+import type { ByteProgress } from "./transfer-progress.ts";
 import {
   buildBrowserCaptureMessage,
   type BrowserCaptureMessage,
@@ -236,6 +237,7 @@ export async function downloadCrealityCloudCandidate(options: {
   result: CrealityCloudPageResult;
   ensureOriginPermission(origin: string): Promise<void>;
   signal?: AbortSignal;
+  progress?: ByteProgress;
 }) {
   if (!options.result.ok || options.result.kind !== "download")
     throw new MarketplaceDownloadError(

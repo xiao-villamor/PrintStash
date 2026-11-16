@@ -27,6 +27,8 @@ import { screen, waitFor } from "@testing-library/react";
 import { useLocation } from "@tanstack/react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { requestArchiveReview } from "@/lib/archive-review-events";
+import { toast } from "@/lib/toast";
 import { AppShell } from "@/components/app-shell";
 import { queryClient, queryKeys } from "@/lib/query-client";
 import { aJob } from "@/test-support/factories";
@@ -120,6 +122,32 @@ describe("AppShell", () => {
     await waitFor(() =>
       expect(queryClient.getQueryState(queryKeys.models)?.isInvalidated).toBe(true),
     );
+  });
+
+  it("dismisses the ready notice when its archive review opens", async () => {
+    const job = aJob({
+      job_id: "review-toast",
+      kind: "ingestion.archive_inspect",
+      state: "completed",
+      result: {
+        kind: "archive_manifest",
+        archive_id: "archive-toast",
+        archive_name: "parts.zip",
+        entries: [],
+      },
+    });
+    renderShell({ routes: { "GET /api/v1/jobs/review-toast": json(job) } });
+    await screen.findByText("at /");
+    toast.error("Keep this unrelated message.");
+    window.dispatchEvent(new CustomEvent("printstash:import-job-terminal", { detail: job }));
+    expect(await screen.findByRole("button", { name: "Choose files" })).toBeVisible();
+    requestArchiveReview(job.job_id);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Choose files" })).not.toBeInTheDocument(),
+    );
+    for (const notice of screen.getAllByText("Keep this unrelated message."))
+      expect(notice).toBeVisible();
+    expect(await screen.findByRole("dialog")).toBeVisible();
   });
 
   it("notifies the user when ZIP preparation fails", async () => {

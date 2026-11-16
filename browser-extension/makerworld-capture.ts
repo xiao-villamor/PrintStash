@@ -1,3 +1,4 @@
+import { downloadProgress, type ByteProgress } from "./transfer-progress.ts";
 import { validateCaptureProfile, type CaptureProfile } from "./print-profile.ts";
 /**
  * The bounded MakerWorld browser boundary.
@@ -508,6 +509,7 @@ export async function readBoundedMakerWorldResponse(
   expectedSize?: number,
   totalBefore = 0,
   signal?: AbortSignal,
+  progress?: ByteProgress,
 ): Promise<Blob> {
   if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
   if (
@@ -538,6 +540,7 @@ export async function readBoundedMakerWorldResponse(
   }
   if (!response.body)
     throw new Error("user_file_required: MakerWorld did not provide a file stream.");
+  const report = downloadProgress(response, progress);
   const reader = response.body.getReader();
   const chunks: ArrayBuffer[] = [];
   let total = 0;
@@ -567,6 +570,7 @@ export async function readBoundedMakerWorldResponse(
       const copy = new ArrayBuffer(next.value.byteLength);
       new Uint8Array(copy).set(next.value);
       chunks.push(copy);
+      report(total);
     }
   } finally {
     signal?.removeEventListener("abort", abortReader);
@@ -596,6 +600,7 @@ export async function downloadMakerWorldCandidate({
   totalBefore = 0,
   ensureOriginPermission = async () => {},
   signal,
+  progress,
 }: {
   fetchImpl?: typeof fetch;
   candidate: MakerWorldPackageFile;
@@ -603,6 +608,7 @@ export async function downloadMakerWorldCandidate({
   totalBefore?: number;
   ensureOriginPermission?: (origin: string) => Promise<void>;
   signal?: AbortSignal;
+  progress?: ByteProgress;
 }): Promise<BrowserCaptureFile> {
   if (!safeMakerWorldDownloadUrl(link)) {
     throw new Error(
@@ -631,6 +637,7 @@ export async function downloadMakerWorldCandidate({
     candidate.sizeBytes,
     totalBefore,
     signal,
+    progress,
   );
   return {
     id: candidate.id,

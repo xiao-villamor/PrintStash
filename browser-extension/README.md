@@ -57,6 +57,17 @@ again. Older servers retain the existing non-resumable transport.
 Files download and transfer sequentially. Finishing transfer opens the specific
 Pending Import for review; it does not mean Models have finished importing.
 Review lists every result and its error, including partially completed imports.
+Open **Collection, tags and cover** to suggest an editable collection, comma-separated
+tags and an explicitly selected JPEG, PNG or WebP (up to 15 MiB). These are review
+suggestions, not a physical storage destination. Recovery preserves the first
+suggestions; change them in Pending Imports. A cover is normalized onto each
+resulting Model's source without changing model bytes. If a reload interrupted its
+upload, reselect the same cover; verified model uploads are retained. Cover bytes
+and collection labels are not saved in extension storage.
+
+Download progress uses a percentage only when the decoded file size is known.
+Upload progress counts bytes sent; reaching 100% still waits for server confirmation.
+The final import remains a separate action in Pending Imports.
 MakerWorld requires signing in on its own site. PrintStash receives model bytes
 and allowlisted metadata, never marketplace cookies. Download blocks, challenges
 and unavailable sessions may still require action on the provider's page or

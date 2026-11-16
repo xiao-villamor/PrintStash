@@ -1,3 +1,4 @@
+import type { ByteProgress } from "./transfer-progress.ts";
 import {
   buildBrowserCaptureMessage,
   type BrowserCaptureMessage,
@@ -157,6 +158,7 @@ export async function downloadMyMiniFactoryCandidate(options: {
   result: MyMiniFactoryPageResult;
   ensureOriginPermissions(origins: string[]): Promise<void>;
   signal?: AbortSignal;
+  progress?: ByteProgress;
   fetchImpl?: typeof fetch;
 }) {
   const { candidate, result, signal } = options;
@@ -201,5 +203,5 @@ export async function downloadMyMiniFactoryCandidate(options: {
       "MyMiniFactory did not return a supported file download. Download it on the source page and attach it in Pending Imports.",
     );
   }
-  return readMarketplaceFile(response, candidate, "MyMiniFactory", signal);
+  return readMarketplaceFile(response, candidate, "MyMiniFactory", signal, options.progress);
 }

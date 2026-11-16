@@ -1,3 +1,4 @@
+import type { ByteProgress } from "./transfer-progress.ts";
 import { downloadMarketplaceFile } from "./marketplace-download.ts";
 import {
   buildBrowserCaptureMessage,
@@ -151,6 +152,7 @@ export async function downloadThangsCandidate(options: {
   result: ThangsPageResult;
   ensureOriginPermission(origin: string): Promise<void>;
   signal?: AbortSignal;
+  progress?: ByteProgress;
   fetchImpl?: typeof fetch;
 }): Promise<BrowserCaptureFile> {
   const { result, candidate } = options;

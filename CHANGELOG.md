@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Browser captures can suggest an editable collection and tags, include a selected cover for every resulting Model, and show download and upload byte progress. Recovering an interrupted capture retains its original suggestions and verified files; a pending local cover must be selected again.
+
 - Archive review identifies omitted images, documents and unsupported entries before importing Models, and explains how selected files and subfolders become Models and collections.
 
 - Library filters open beside the toolbar in a searchable picker. Search by category or value, combine selections, and see results immediately; resetting the picker preserves the current folder and search. Card context menus show the Model name once with concise actions for opening its page, showing details, Favorites and tags.

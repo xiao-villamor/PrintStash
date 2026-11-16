@@ -31,6 +31,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from printstash_core.imports import (
     CaptureContractError,
+    CaptureManifest,
     CaptureManifestV2,
     ResolvedAsset,
     canonicalize_provider_url,
@@ -855,7 +856,7 @@ async def resolve_selected_download(url: str, files: list[ModelFile]) -> list[st
 
 async def resolve_selected_assets(
     url: str,
-    manifest: CaptureManifestV2,
+    manifest: CaptureManifest,
     selected_ids: list[str],
     context: ProviderResolutionContext | None = None,
 ) -> list[ResolvedAsset]:

@@ -115,7 +115,7 @@ async function sha256Hex(file: Blob): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function prepareCaptureFile(
+export async function prepareCaptureFile(
   upload: BrowserCaptureFile,
   id: string,
   role: "file" | "cover",
@@ -164,6 +164,8 @@ export async function captureRichFiles({
   authorization,
   sourceUrl,
   title,
+  collectionId,
+  tags,
   captureSource,
   files,
   cover,
@@ -175,6 +177,8 @@ export async function captureRichFiles({
   authorization: string;
   sourceUrl: string;
   title?: string;
+  collectionId?: number;
+  tags?: string[];
   captureSource: CaptureSourceDraft;
   files: BrowserCaptureFile[];
   cover?: BrowserCaptureFile;
@@ -223,6 +227,8 @@ export async function captureRichFiles({
       body: JSON.stringify({
         source_url: sourceUrl,
         title: title || null,
+        collection_id: collectionId ?? null,
+        tags: tags ?? [],
         capture_source: captureSource,
         files: preparedFiles.map(({ declaration }) => declaration),
         ...(preparedCover ? { cover: preparedCover.declaration } : {}),

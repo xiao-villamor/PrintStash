@@ -1,3 +1,4 @@
+import type { ByteProgress } from "./transfer-progress.ts";
 import {
   buildBrowserCaptureMessage,
   type BrowserCaptureMessage,
@@ -224,6 +225,7 @@ export async function downloadCultsCandidate(options: {
   candidate: BrowserCaptureMessage["candidates"][number];
   result: CultsPageResult;
   signal?: AbortSignal;
+  progress?: ByteProgress;
   fetchImpl?: typeof fetch;
 }) {
   const { candidate, result, signal } = options;
@@ -248,5 +250,6 @@ export async function downloadCultsCandidate(options: {
     ensureOriginPermission: async () => {},
     signal,
     fetchImpl: options.fetchImpl,
+    progress: options.progress,
   });
 }

@@ -137,6 +137,7 @@ test.describe("ZIP upload", () => {
       await review
         .getByRole("combobox", { name: "Multipart cover", exact: true })
         .selectOption("photo.png");
+      await expect(page.getByRole("button", { name: "Choose files", exact: true })).toHaveCount(0);
       await page.screenshot({ path: test.info().outputPath("multipart-review.png") });
       const accepted = page.waitForResponse(
         (response) => response.url().endsWith("/select") && response.status() === 202,

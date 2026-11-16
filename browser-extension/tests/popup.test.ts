@@ -1,4 +1,5 @@
 /** Defends the popup's user-visible states through real DOM events and browser boundary fakes. */
+import { UploadRequest } from "./support/upload-request.ts";
 import { readFile } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "@webext-core/fake-browser";
@@ -59,6 +60,8 @@ describe("popup browser adapters", () => {
 
   beforeEach(() => {
     vi.resetModules();
+    UploadRequest.instances = [];
+    vi.stubGlobal("XMLHttpRequest", UploadRequest);
     fakeBrowser.reset();
     document.documentElement.innerHTML = popupHtml;
     vi.stubGlobal("chrome", fakeBrowser);
@@ -76,6 +79,58 @@ describe("popup browser adapters", () => {
     fakeBrowser.scripting.executeScript = vi.fn();
     fakeBrowser.tabs.create = vi.fn();
     fakeBrowser.runtime.getManifest = vi.fn().mockReturnValue({ version: extensionVersion });
+  });
+
+  it("shows literal collection suggestions without persisting private labels", async () => {
+    await fakeBrowser.storage.local.set({
+      vault: "https://vault.test",
+      deviceCredential: "device-secret",
+    });
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.includes("/capture-destinations?"))
+        return response([{ id: 7, label: "Parts / <img src=x>" }]);
+      if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+      return response({});
+    });
+    await import("../popup.ts");
+    await settle();
+    requiredElement("#collection-query", HTMLInputElement).value = "Parts";
+    button("#find-collection").click();
+    await settle();
+    expect(requests).toContain("https://vault.test/api/v1/inbox/capture-destinations?q=Parts");
+    const select = requiredElement("#capture-collection", HTMLSelectElement);
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      "Choose in Pending Imports",
+      "Parts / <img src=x>",
+    ]);
+    expect(select.querySelector("img")).toBeNull();
+    expect(JSON.stringify(await fakeBrowser.storage.local.get(null))).not.toContain("Parts");
+  });
+
+  it("ignores suggestions returned after disconnecting", async () => {
+    await fakeBrowser.storage.local.set({
+      vault: "https://vault.test",
+      deviceCredential: "device-secret",
+    });
+    const pending = deferred<Response>();
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      if (String(input).includes("/capture-destinations?")) return pending.promise;
+      if (String(input).endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+      return response({});
+    });
+    await import("../popup.ts");
+    await settle();
+    button("#find-collection").click();
+    await settle();
+    button("#disconnect").click();
+    await settle();
+    pending.resolve(response([{ id: 7, label: "Old account" }]));
+    await settle();
+    expect(requiredElement("#capture-collection", HTMLSelectElement).options).toHaveLength(1);
+    expect(element("#connection-title").textContent).toBe("Not connected");
   });
 
   it("shows the packaged release version in the popup header", async () => {
@@ -1090,6 +1145,8 @@ describe("popup browser adapters", () => {
             : { vault: nextVault, username: "test-user", apiKey: "test-new-key" };
         expect(await fakeBrowser.storage.local.get()).toEqual(expected);
         vi.resetModules();
+        UploadRequest.instances = [];
+        vi.stubGlobal("XMLHttpRequest", UploadRequest);
         document.documentElement.innerHTML = popupHtml;
         await import("../popup.ts");
         await settle();

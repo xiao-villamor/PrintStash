@@ -260,10 +260,19 @@ class CaptureCapabilitiesRead(BaseModel):
     storage: Literal["managed"]
     max_files: int
     max_file_bytes: int
+    capture_preferences: bool
+    resumable_cover: bool
+
+
+class CaptureDestinationRead(BaseModel):
+    id: int
+    label: str
 
 
 class CaptureSessionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    cover: CaptureUploadFileDeclaration | None = None
 
     schema_version: Literal[2, 3] = 2
     profiles: dict[str, CaptureProfileDraft] | None = Field(default=None, max_length=64)
@@ -273,6 +282,9 @@ class CaptureSessionCreate(BaseModel):
         if (self.schema_version == 3) != (self.profiles is not None):
             raise ValueError("profiles_require_capture_version_3")
         return self
+
+    collection_id: int | None = Field(default=None, gt=0)
+    tags: list[str] = Field(default_factory=list, max_length=100)
 
     request_key: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
     source_url: str = Field(min_length=1, max_length=2048)

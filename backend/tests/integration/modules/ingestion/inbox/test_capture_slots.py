@@ -1866,3 +1866,211 @@ class TestCaptureSessionMetadata:
                 ),
             )
         assert inbox.capture_recovery(db_session, owner, row.id).slots == []
+
+
+class TestIncrementalCaptureOptions:
+    def test_retains_collection_suggestions(
+        self, db_session, make_user, make_collection
+    ):
+        from app.schemas.inbox import CaptureSessionCreate
+
+        user = make_user(superuser=True)
+        collection = make_collection("Suggested")
+        source = _slot_payload()
+        payload = CaptureSessionCreate.model_validate(
+            {
+                "request_key": "suggested-destination",
+                "source_url": source.source_url,
+                "capture_source": _capture_source(),
+                "collection_id": collection.id,
+                "tags": ["assembly", "desk"],
+                "files": [
+                    {"id": "part", "name": "part.stl", "file_type": "stl", "size": None}
+                ],
+            }
+        )
+        item = inbox.start_capture_session(db_session, user, payload)
+        assert item.target_collection_id == collection.id
+        assert json.loads(item.requested_tags_json) == ["assembly", "desk"]
+
+    def test_refuses_an_inaccessible_suggestion(
+        self, db_session, make_user, make_collection
+    ):
+        from app.schemas.inbox import CaptureSessionCreate
+
+        user = make_user()
+        private = make_collection("Private")
+        source = _slot_payload()
+        payload = CaptureSessionCreate.model_validate(
+            {
+                "request_key": "private-destination",
+                "source_url": source.source_url,
+                "capture_source": _capture_source(),
+                "collection_id": private.id,
+                "files": [
+                    {"id": "part", "name": "part.stl", "file_type": "stl", "size": None}
+                ],
+            }
+        )
+        with pytest.raises(OperationError):
+            inbox.start_capture_session(db_session, user, payload)
+        assert (
+            db_session.exec(
+                select(InboxItem).where(
+                    InboxItem.capture_request_key == "private-destination"
+                )
+            ).first()
+            is None
+        )
+
+    def test_preserves_the_first_suggestion_on_replay(
+        self, db_session, make_user, make_collection
+    ):
+        from app.schemas.inbox import CaptureSessionCreate
+
+        user = make_user(superuser=True)
+        source = _slot_payload()
+        first_collection = make_collection("First")
+        second_collection = make_collection("Second")
+        payload = CaptureSessionCreate.model_validate(
+            {
+                "request_key": "stable-destination",
+                "source_url": source.source_url,
+                "capture_source": _capture_source(),
+                "collection_id": first_collection.id,
+                "files": [
+                    {"id": "part", "name": "part.stl", "file_type": "stl", "size": None}
+                ],
+            }
+        )
+        first = inbox.start_capture_session(db_session, user, payload)
+        replay = inbox.start_capture_session(
+            db_session,
+            user,
+            payload.model_copy(update={"collection_id": second_collection.id}),
+        )
+        assert replay.id == first.id
+        assert replay.target_collection_id == first_collection.id
+
+
+class TestIncrementalCaptureCover:
+    @pytest.mark.parametrize("replay_cover", [True, False])
+    def test_recovers_the_original_cover_slot(
+        self, db_session, make_user, replay_cover
+    ):
+        from app.schemas.inbox import CaptureSessionCreate
+
+        owner = make_user(superuser=True)
+        payload = CaptureSessionCreate.model_validate(
+            {
+                "request_key": "cover-recovery",
+                "source_url": _slot_payload().source_url,
+                "capture_source": _capture_source(),
+                "files": [
+                    {"id": "part", "name": "part.stl", "file_type": "stl", "size": None}
+                ],
+                "cover": {
+                    "id": "cover",
+                    "filename": "cover.png",
+                    "media_type": "image/png",
+                    "size_bytes": 3,
+                    "sha256": hashlib.sha256(b"png").hexdigest(),
+                },
+            }
+        )
+        first = inbox.start_capture_session(db_session, owner, payload)
+        first_slots = inbox.capture_recovery(db_session, owner, first.id).slots
+        replay = inbox.start_capture_session(
+            db_session,
+            owner,
+            payload if replay_cover else payload.model_copy(update={"cover": None}),
+        )
+        slots = inbox.capture_recovery(db_session, owner, replay.id).slots
+        assert first.id == replay.id
+        assert len(slots) == 1
+        assert slots[0].id == first_slots[0].id
+        assert slots[0].role == "cover"
+        assert slots[0].source_file_id is None
+        assert slots[0].state == "pending"
+        assert (
+            db_session.exec(
+                select(StagingLease).where(
+                    StagingLease.capture_upload_slot_id == slots[0].id
+                )
+            )
+            .one()
+            .size_bytes
+            == 3
+        )
+
+    def test_refuses_replacing_the_reserved_cover(self, db_session, make_user):
+        from app.schemas.inbox import CaptureSessionCreate
+
+        owner = make_user(superuser=True)
+        payload = CaptureSessionCreate.model_validate(
+            {
+                "request_key": "cover-conflict",
+                "source_url": _slot_payload().source_url,
+                "capture_source": _capture_source(),
+                "files": [
+                    {"id": "part", "name": "part.stl", "file_type": "stl", "size": None}
+                ],
+                "cover": {
+                    "id": "cover",
+                    "filename": "cover.png",
+                    "media_type": "image/png",
+                    "size_bytes": 3,
+                    "sha256": hashlib.sha256(b"png").hexdigest(),
+                },
+            }
+        )
+        item = inbox.start_capture_session(db_session, owner, payload)
+        changed = payload.model_copy(
+            update={
+                "cover": payload.cover.model_copy(
+                    update={"sha256": hashlib.sha256(b"new").hexdigest()}
+                )
+            }
+        )
+        with pytest.raises(OperationError, match="capture_request_conflict"):
+            inbox.start_capture_session(db_session, owner, changed)
+        assert len(inbox.capture_recovery(db_session, owner, item.id).slots) == 1
+
+    @pytest.mark.parametrize(
+        "field,value",
+        [("size_bytes", 15 * 1024 * 1024 + 1), ("media_type", "text/html")],
+    )
+    def test_refuses_invalid_covers_before_reserving(
+        self, db_session, make_user, field, value
+    ):
+        from app.schemas.inbox import CaptureSessionCreate
+
+        owner = make_user(superuser=True)
+        payload = CaptureSessionCreate.model_validate(
+            {
+                "request_key": "invalid-cover",
+                "source_url": _slot_payload().source_url,
+                "capture_source": _capture_source(),
+                "files": [
+                    {"id": "part", "name": "part.stl", "file_type": "stl", "size": None}
+                ],
+                "cover": {
+                    "id": "cover",
+                    "filename": "cover.png",
+                    "media_type": "image/png",
+                    "size_bytes": 3,
+                    "sha256": hashlib.sha256(b"png").hexdigest(),
+                    field: value,
+                },
+            }
+        )
+        with pytest.raises(ValueError, match="invalid_cover_image"):
+            inbox.start_capture_session(db_session, owner, payload)
+        assert (
+            db_session.exec(
+                select(InboxItem).where(
+                    InboxItem.capture_request_key == "invalid-cover"
+                )
+            ).first()
+            is None
+        )

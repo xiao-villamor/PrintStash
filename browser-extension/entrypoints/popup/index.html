@@ -155,6 +155,32 @@
             accept=".3mf,.stl,.obj,.step,.stp,.gcode,.g,.gco,.bgcode,.zip"
           />
         </fieldset>
+        <details id="capture-options">
+          <summary>Collection, tags and cover</summary>
+          <fieldset id="capture-preferences" class="candidate-panel">
+            <legend>Suggestions for review</legend>
+            <label
+              >Find a collection <input id="collection-query" type="search" maxlength="128"
+            /></label>
+            <button id="find-collection" class="secondary" type="button">Find collections</button>
+            <label for="capture-collection">Collection</label>
+            <select id="capture-collection">
+              <option value="">Choose in Pending Imports</option>
+            </select>
+            <label>Tags, separated by commas <input id="capture-tags" type="text" /></label>
+            <label
+              >Optional cover
+              <input id="capture-cover" type="file" accept="image/jpeg,image/png,image/webp"
+            /></label>
+            <p class="section-description">
+              Choose a JPEG, PNG or WebP up to 15 MiB. Cover bytes stay in memory until transferred.
+            </p>
+            <p class="section-description">
+              Files use managed storage. Choosing a collection does not move existing files. Confirm
+              these suggestions in Pending Imports.
+            </p>
+          </fieldset>
+        </details>
         <button id="capture" class="wide" type="button" disabled>Send to Pending Imports</button>
       </section>
       <button id="open-inbox" class="secondary wide" hidden>Open Pending Imports</button>
