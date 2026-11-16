@@ -71,10 +71,12 @@ test.describe("model library", () => {
 
       // ── Restore from Settings → Trash ───────────────────────────────────────────
       await page.goto("/settings?section=trash");
-      await expect(page.getByText(renamed)).toBeVisible();
-      const trashRow = page.getByText(renamed, { exact: true }).locator("../../..");
+      const trash = page.getByRole("group", { name: "Deleted models and multipart sets" });
+      const trashedModel = trash.getByText(renamed, { exact: true });
+      await expect(trashedModel).toBeVisible();
+      const trashRow = trashedModel.locator("../../..");
       await trashRow.getByRole("button", { name: "Restore", exact: true }).click();
-      await expect(page.getByText(renamed)).toHaveCount(0); // gone from trash
+      await expect(trashedModel).toHaveCount(0);
 
       // Back in the library.
       await page.goto("/");
@@ -85,10 +87,10 @@ test.describe("model library", () => {
       await clickModelAction(page, "Delete model");
       await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
       await page.goto("/settings?section=trash");
-      await expect(page.getByText(renamed)).toBeVisible();
+      await expect(trashedModel).toBeVisible();
       await trashRow.getByRole("button", { name: "Delete", exact: true }).click();
       await page.getByRole("button", { name: "Delete forever" }).click();
-      await expect(page.getByText(renamed)).toHaveCount(0);
+      await expect(trashedModel).toHaveCount(0);
     },
   );
 });

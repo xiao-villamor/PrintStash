@@ -637,7 +637,7 @@ describe("ExternalLibrariesPanel", () => {
           .mockResolvedValue([aVolume({ enabled: false })]),
       });
 
-      expect(await screen.findByText(/paused/i)).toBeInTheDocument();
+      expect(await screen.findByText(/^· paused$/)).toBeInTheDocument();
     });
 
     it("explains that a legacy root needs proof before recovery", async () => {

@@ -1142,7 +1142,7 @@ describe("ModelBrowser", () => {
         routes: {
           "GET /api/v1/models/browse": (url) =>
             url.includes("parts%2Fbrackets")
-              ? pending.promise
+              ? pending.promise.then((response) => response.clone())
               : json({
                   items: [{ kind: "model", model: aModelListItem({ name: "Shelf rig" }) }],
                   total: 1,
@@ -1190,8 +1190,9 @@ describe("ModelBrowser", () => {
         routes: {
           "GET /api/v1/models/browse": (url) => {
             const collection = new URL(url, "http://test").searchParams.get("collection");
-            if (collection === null) return root.promise;
-            if (collection === "parts/brackets") return child.promise;
+            if (collection === null) return root.promise.then((response) => response.clone());
+            if (collection === "parts/brackets")
+              return child.promise.then((response) => response.clone());
             return json({
               items: [{ kind: "model", model: aModelListItem({ name: "Displayed shelf" }) }],
               total: 1,
@@ -1265,9 +1266,25 @@ describe("ModelBrowser", () => {
       expect(requestsFor(requests, "/api/v1/models/facets", "parts/brackets")).toHaveLength(0);
     });
 
+    // No direct entries. The server resolves automatic scope on its first page.
+    const autoScopeBrowse = {
+      "GET /api/v1/models/browse": json({
+        items: [],
+        total: 0,
+        next_cursor: null,
+        browse_revision: "r1",
+        authorization_revision: "a1",
+        effective_direct: false,
+      }),
+    };
+
     it("opens a warmed folder without asking the server again", async () => {
       const user = userEvent.setup();
-      const { requests } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
+      const { requests } = renderVault({
+        at: "/?c=parts",
+        collections: PARTS_TREE,
+        routes: autoScopeBrowse,
+      });
       await screen.findByRole("heading", { name: "Parts" });
       await user.hover(await folderCard("parts/brackets"));
       await waitFor(() =>
@@ -1277,7 +1294,8 @@ describe("ModelBrowser", () => {
       await user.click(await folderCard("parts/brackets"));
 
       await screen.findByRole("heading", { name: "Brackets" });
-      expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1);
+      const reads = requestsFor(requests, "/api/v1/models/browse", "parts/brackets");
+      expect(reads, reads.map(({ url }) => url).join("\n")).toHaveLength(1);
       expect(requestsFor(requests, "/api/v1/multipart-models", "parts/brackets")).toHaveLength(0);
     });
 
@@ -1337,11 +1355,16 @@ describe("ModelBrowser", () => {
     it("does not re-warm the folder that is already open", async () => {
       // Its data is on screen; the sidebar row for it is the most-hovered one.
       const user = userEvent.setup();
-      const { requests, client } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
+      const { requests, client } = renderVault({
+        at: "/?c=parts",
+        collections: PARTS_TREE,
+        routes: autoScopeBrowse,
+      });
       await screen.findByRole("heading", { name: "Parts" });
-      await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/browse", "parts")).toHaveLength(1),
-      );
+      await waitFor(() => {
+        const reads = requestsFor(requests, "/api/v1/models/browse", "parts");
+        expect(reads, reads.map(({ url }) => url).join("\n")).toHaveLength(1);
+      });
       // Past production's staleTime, a prefetch of this folder would refetch it.
       client.setDefaultOptions({ queries: { retry: false, staleTime: 0 } });
       const outliner = screen.getByPlaceholderText("Filter outliner...").closest("aside")!;

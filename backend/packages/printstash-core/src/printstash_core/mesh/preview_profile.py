@@ -65,7 +65,7 @@ class PreviewProfile:
         return self.supersample_large_factor
 
 
-def _load_profile(filename: str) -> PreviewProfile:
+def _load_profile(filename: str = "preview_profile.json") -> PreviewProfile:
     payload = files("printstash_core.mesh").joinpath(filename).read_bytes()
     raw: object = json.loads(payload)
     root = _mapping(raw, "root")
@@ -121,7 +121,7 @@ def _load_profile(filename: str) -> PreviewProfile:
     )
 
 
-PREVIEW_PROFILE = _load_profile("preview_profile.json")
+PREVIEW_PROFILE = _load_profile()
 # Persisted visual spaces depend on the exact v4 encoder thumbnail.
 REFERENCE_THUMBNAIL_PROFILE = _load_profile("reference_thumbnail_profile.json")
 
