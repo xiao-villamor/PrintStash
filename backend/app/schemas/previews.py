@@ -20,6 +20,7 @@ from app.modules.media.preview_contracts import (
 
 
 class PreviewState(StrEnum):
+    DISABLED = "disabled"
     # No derivative row exists yet for the current recipe.
     PENDING = "pending"
     QUEUED = "queued"

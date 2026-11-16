@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Preview settings now include the vault-wide multi-angle generation switch. Preview activity reports total, completed, remaining, skipped and failed image tasks across the library, including work waiting to enter the queue. Multi-angle orbits use the shared cover camera elevation; enabled generators refresh older view sets in the background.
+
 - Library filters open beside the toolbar in a searchable picker. Search by category or value, combine selections, and see results immediately; resetting the picker preserves the current folder and search. Card context menus show the Model name once with concise actions for opening its page, showing details, Favorites and tags.
 
 - Collection rows expand and collapse continuously as folders change, keeping the Model grid attached to their movement. Settings sections, Model detail tabs, Upload modes and main destinations use a stationary reveal instead of a zoom; interrupted selections continue from their current appearance.

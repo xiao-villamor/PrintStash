@@ -47,7 +47,7 @@ other previews; revoked shares and trashed subjects cannot read them.
 
 ## Camera and generation contract
 
-Solid profiles use azimuths −35°, +55°, +145°, +235° at elevation +18°, in that
+Solid profiles follow the shared cover camera profile (recipe 2), using azimuths −35°, +55°, +145°, +235° at elevation +30°, in that
 wrapping order. Top/Bottom use ±90°. Their screen-up direction is imported +Y;
 other generated cameras retain imported +Z as screen up where possible.
 Camera matrices, orthographic projection scale/offset, source center, dimensions,
@@ -61,7 +61,7 @@ semantic front/back. Ambiguous shapes keep the imported-frame orbit. The oblique
 edge view is 65° from the face. 3MF build/component transforms are applied before
 analysis. No candidates are pruned by silhouette or presumed symmetry.
 
-Recipe 1 produces lossless 480 × 360 WebPs: six views for solids, five for planar
+Recipe 2 produces lossless 480 × 360 WebPs: six views for solids, five for planar
 objects, including Top and Bottom. Sources follow the same limits as covers and
 every other mesh path: `VAULT_MESH_MAX_LOAD_MB` (default 200) and
 `VAULT_MESH_MAX_RENDER_TRIANGLES` (default 2,000,000). Raise them in your
@@ -116,3 +116,18 @@ opening one. They do not show every surface and do not replace the 3D viewer
 for detailed inspection. No measured human recognition-speed or accuracy
 improvement is claimed. That evaluation needs people choosing between similar
 candidates with rear or underside differences, and has not been run.
+
+## Generation preferences and progress
+
+Administrators can turn **Multi-angle previews** on or off in **Settings →
+Previews → Model preview images**. This is the same vault-wide control as
+Background work. Turning it off saves extra rendering work; ordinary cover
+images continue, existing views remain available, and an in-flight job may
+finish. Turning it on fills missing or outdated view sets in the background.
+
+The **Preparing previews** task shows total, done, remaining, skipped and failed
+counts for enabled image producers across the live library, including work not
+yet admitted to the queue. One preview task produces one cover image or one
+multi-angle set for an Artifact. Counts follow the current recipe and reset
+for requested regeneration; they are not estimates from queue size. Retryable
+failures remain pending until they succeed or exhaust their attempts.

@@ -11,6 +11,7 @@ export type PreviewViewId =
   | "edge";
 export type PreviewViewRole = "orbit" | "top" | "bottom" | "face" | "reverse" | "edge";
 export type PreviewState =
+  | "disabled"
   | "pending"
   | "queued"
   | "running"
@@ -39,6 +40,7 @@ export const PREVIEW_VIEW_ROLES: readonly PreviewViewRole[] = [
   "edge",
 ];
 export const PREVIEW_STATES: readonly PreviewState[] = [
+  "disabled",
   "pending",
   "queued",
   "running",

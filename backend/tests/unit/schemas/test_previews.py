@@ -21,7 +21,7 @@ PUBLISHED = PublishedPreviewRead(
 
 class TestArtifactPreviews:
     @pytest.mark.parametrize(
-        "state", [PreviewState.PENDING, PreviewState.QUEUED, PreviewState.READY]
+        "state", [PreviewState.DISABLED, PreviewState.PENDING, PreviewState.QUEUED, PreviewState.READY]
     )
     def test_rejects_a_reason_outside_failure_states(self, state):
         with pytest.raises(ValidationError, match="preview_reason_without_failure"):

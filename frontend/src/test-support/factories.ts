@@ -1,3 +1,4 @@
+import type { PreviewActivity } from "@/lib/preview-activity";
 import { NO_PREVIEWS } from "@/types/previews";
 import type { SlicerProfileRead } from "@/types/slicer-profiles";
 import type { ComputeStatus } from "@/types/system";
@@ -1162,4 +1163,9 @@ export function aModelFacets(override: Partial<ModelFacetsRead> = {}): ModelFace
     printed: [],
     ...override,
   };
+}
+
+/** A settled image preparation census, including enabled producers only. */
+export function aPreviewActivity(override?: Partial<PreviewActivity>): PreviewActivity {
+  return { total: 0, completed: 0, remaining: 0, skipped: 0, failed: 0, ...override };
 }

@@ -14,9 +14,11 @@ from app.db.models import (
     DerivativeKind,
     DerivativeState,
     File,
+    JobKind,
     Model,
 )
 from app.db.scopes import live
+from app.modules.derivatives import policy
 from app.modules.derivatives.kinds import MESH_TYPES, PREVIEWS_RECIPE
 from app.modules.media.preview_contracts import PreviewManifest
 from app.schemas.previews import (
@@ -82,6 +84,7 @@ def summaries(
     if not model_ids:
         return {}
     files = selected_files(session, model_ids)
+    enabled = not files or policy.resolve(session)[JobKind.DERIVATIVES_PREVIEWS].enabled
     by_file: dict[int, list[ArtifactDerivative]] = defaultdict(list)
     if files:
         for row in session.exec(
@@ -125,7 +128,9 @@ def summaries(
                 ],
             )
             break
-        if current is None:
+        if not enabled:
+            state = PreviewState.DISABLED
+        elif current is None:
             state = PreviewState.PENDING
         elif current.state is DerivativeState.SKIPPED:
             state = PreviewState.UNSUPPORTED

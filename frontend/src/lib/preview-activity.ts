@@ -1,22 +1,26 @@
-import type { JobStatus } from "@/types";
+import { uiText } from "@/lib/locale";
 
-const ACTIVE = new Set<JobStatus["state"]>(["queued", "running", "interrupted"]);
-
-/** Previews, thumbnails and 3D views being prepared: every derivative Job still to finish. */
-export function previewJobsRemaining(jobs: readonly Pick<JobStatus, "kind" | "state">[]): number {
-  return jobs.filter((job) => job.kind.startsWith("derivatives.") && ACTIVE.has(job.state)).length;
+/** Each task produces one cover image or one multi-angle set for an Artifact. */
+export interface PreviewActivity {
+  total: number;
+  completed: number;
+  remaining: number;
+  skipped: number;
+  failed: number;
 }
 
-export interface PreviewProgress {
-  /** The most Jobs seen waiting during this burst of work. */
-  peak: number;
-  done: number;
-  percent: number;
-}
-
-/** Progress of a burst: it grows when more Jobs arrive and finishes at zero remaining. */
-export function previewProgress(peak: number, remaining: number): PreviewProgress {
-  const top = Math.max(peak, remaining);
-  const done = top - remaining;
-  return { peak: top, done, percent: top === 0 ? 100 : (done / top) * 100 };
+export function previewProgress(activity: PreviewActivity) {
+  const processed = activity.total - activity.remaining;
+  return {
+    total: activity.total,
+    processed,
+    succeeded: activity.completed,
+    failed: activity.failed,
+    skipped: activity.skipped,
+    progress: activity.total === 0 ? 100 : (processed / activity.total) * 100,
+    detail: uiText(
+      "{total} preview tasks · {completed} done · {remaining} remaining · {skipped} skipped · {failed} failed",
+      { ...activity },
+    ),
+  };
 }

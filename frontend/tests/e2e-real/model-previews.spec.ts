@@ -5,8 +5,20 @@ import { test, expect } from "./helpers";
 import type { ModelRead } from "../../src/types";
 
 test.describe("Generated Model views", () => {
-  test("browses published views after ingestion", async ({ page }) => {
+  test("controls multi-angle generation without delaying ordinary covers", async ({
+    page,
+  }, testInfo) => {
     test.setTimeout(240_000);
+    await page.goto("/settings?section=previews");
+    const toggle = page.getByRole("switch", { name: "Multi-angle previews", exact: true });
+    await expect(toggle).toBeEnabled();
+    await expect(toggle).toBeChecked();
+    await toggle.click();
+    await expect(toggle).not.toBeChecked();
+    await expect(toggle).toBeEnabled();
+    await page.reload();
+    await expect(toggle).toBeEnabled();
+    await expect(toggle).not.toBeChecked();
     const name = `e2e-multi-angle-${Date.now()}`;
     const backend = resolve("../backend");
     const mesh = execFileSync(
@@ -38,6 +50,33 @@ test.describe("Generated Model views", () => {
       )
       .toBe("completed");
     try {
+      await expect
+        .poll(
+          async () => {
+            const model: ModelRead = await (
+              await page.request.get(`/api/v1/models/${modelId}`)
+            ).json();
+            return {
+              cover: Boolean(model.thumbnail_url),
+              previews: model.previews.kind === "artifact" ? model.previews.state : "none",
+            };
+          },
+          { timeout: 60_000 },
+        )
+        .toEqual({ cover: true, previews: "disabled" });
+      await toggle.click();
+      await expect(toggle).toBeChecked();
+      await expect(toggle).toBeEnabled();
+      await page.reload();
+      await expect(toggle).toBeChecked();
+      await page.screenshot({ path: testInfo.outputPath("preview-settings.png"), fullPage: true });
+      const activity = await page.request.get("/api/v1/admin/work/preview-activity");
+      expect(activity.status()).toBe(200);
+      const counts = await activity.json();
+      expect(counts.total).toBeGreaterThanOrEqual(2);
+      expect(counts.total).toBe(
+        counts.completed + counts.remaining + counts.skipped + counts.failed,
+      );
       await expect
         .poll(
           async () => {

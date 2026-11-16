@@ -82,6 +82,32 @@ function secondaries(paths: string[]) {
 
 test.describe("Model preview browsing", () => {
   for (const theme of ["light", "dark"] as const) {
+    test(`shows complete preview counts on a narrow ${theme} screen`, async ({
+      page,
+    }, testInfo) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
+      await page.route("**/api/v1/admin/work/preview-activity", (route) =>
+        route.fulfill({
+          json: { total: 1000, completed: 250, remaining: 700, skipped: 40, failed: 10 },
+        }),
+      );
+      await library(page);
+      await page.getByRole("button", { name: "Notifications", exact: true }).click();
+      const counts = page.getByText(
+        "1000 preview tasks · 250 done · 700 remaining · 40 skipped · 10 failed",
+        { exact: true },
+      );
+
+      await expect(counts).toBeVisible();
+      expect(await counts.evaluate((element) => element.scrollHeight <= element.clientHeight)).toBe(
+        true,
+      );
+      await page.screenshot({ path: testInfo.outputPath(`preview-progress-${theme}.png`) });
+    });
+  }
+
+  for (const theme of ["light", "dark"] as const) {
     for (const controlName of ["Next preview", "Model views"] as const) {
       test(`keeps ${controlName} readable in ${theme} mode`, async ({ page }) => {
         await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
