@@ -1,6 +1,11 @@
 import { getJson, jsonHeaders, requestApi, sendJson, type GetJsonOptions } from "@/lib/api/request";
-import type { DerivativeRead, WorkOverview, VaultConfigUpdate, VaultConfigRead } from "@/types";
-import type { PreviewActivity } from "@/lib/preview-activity";
+import type {
+  DerivativeRead,
+  WorkOverview,
+  VaultConfigUpdate,
+  VaultConfigRead,
+  PreviewActivity,
+} from "@/types";
 
 /** Current image tasks across the library, including the undiscovered backlog. */
 export function getPreviewActivity(options?: GetJsonOptions): Promise<PreviewActivity> {

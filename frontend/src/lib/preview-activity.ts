@@ -1,13 +1,6 @@
 import { uiText } from "@/lib/locale";
 
-/** Each task produces one cover image or one multi-angle set for an Artifact. */
-export interface PreviewActivity {
-  total: number;
-  completed: number;
-  remaining: number;
-  skipped: number;
-  failed: number;
-}
+import type { PreviewActivity } from "@/types";
 
 export function previewProgress(activity: PreviewActivity) {
   const processed = activity.total - activity.remaining;

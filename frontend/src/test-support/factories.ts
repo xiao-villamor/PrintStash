@@ -1,4 +1,3 @@
-import type { PreviewActivity } from "@/lib/preview-activity";
 import { NO_PREVIEWS } from "@/types/previews";
 import type { SlicerProfileRead } from "@/types/slicer-profiles";
 import type { ComputeStatus } from "@/types/system";
@@ -65,6 +64,7 @@ import type {
   TagRead,
   VaultStatsRead,
   WorkOverview,
+  PreviewActivity,
 } from "@/types";
 
 /** A fixed instant. Every builder's timestamps derive from this one. */
