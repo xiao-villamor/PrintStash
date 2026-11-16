@@ -357,6 +357,10 @@ class TestOpenDALStorageBackend:
         assert backend.legacy_thumbnail_key(7) == "vault/data/thumbs/7.png"
         assert backend.source_cover_key(8) == "vault/data/source-covers/8.webp"
         assert (
+            backend.model_cover_key(8, "chosen.webp")
+            == "vault/data/model-covers/8/chosen.webp"
+        )
+        assert (
             backend.capture_upload_slot_key("slot") == "vault/data/capture-slots/slot"
         )
         assert backend.stl_cache_key("a" * 64) == f"vault/data/cache/stl/{'a' * 64}.stl"

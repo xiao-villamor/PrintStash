@@ -28,6 +28,7 @@ from sqlalchemy import (
     and_,
     cast,
     exists,
+    false,
     func,
     literal,
     not_,
@@ -155,8 +156,12 @@ class DerivativeSource:
         """The timestamp that orders this group's work, and the interactive test."""
         if self.group.definition is JobKind.DERIVATIVES_VIEWER_STL:
             timestamp = col(File.viewer_requested_at)
-            return timestamp, timestamp.is_not(None)
+            return timestamp, (
+                timestamp.is_not(None) if self.interactive else false()
+            )
         timestamp = col(File.uploaded_at)
+        if not self.interactive:
+            return timestamp, false()
         return timestamp, timestamp >= now - FRESH_INTERACTIVE
 
     def _active(self) -> Any:
@@ -196,6 +201,13 @@ class DerivativeSource:
             budget=DiscoveryBudget(total=limit, interactive=limit, backfill=limit),
         )
 
+    # Whether a fresh upload's gap is discovered at INTERACTIVE priority.
+    interactive = True
+
+    def prerequisite(self) -> ColumnElement[bool]:
+        """A File predicate that must hold before this group's gap is owed."""
+        return true()
+
     def pending_prioritized(
         self, session: Session, *, now: datetime, budget: DiscoveryBudget
     ) -> Sequence[WorkItem]:
@@ -214,6 +226,8 @@ class DerivativeSource:
             predicate = and_(
                 pending_predicate(self.group, session, now=now), not_(active)
             )
+
+            predicate = and_(predicate, self.prerequisite())
 
             def eligible(
                 ids: list[int],

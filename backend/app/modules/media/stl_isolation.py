@@ -159,7 +159,8 @@ class _PublicationReader(io.BufferedReader):
         return super().readinto1(buffer)
 
 
-def _open_output(path: Path) -> BinaryIO:
+def open_worker_output(path: Path) -> BinaryIO:
+    """Open a worker-written regular file without following a planted link."""
     try:
         directory_fd = os.open(
             path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -211,7 +212,7 @@ def prepare_stl(
                         remaining -= len(chunk)
             except OSError as exc:
                 raise MeshWorkerError(ThumbnailFailureReason.STORAGE) from exc
-            with _open_output(output) as stream:
+            with open_worker_output(output) as stream:
                 manifest = manifest_for(stream)
                 if manifest.sha256 != expected_sha256:
                     raise MeshWorkerError(ThumbnailFailureReason.SOURCE_CHANGED)
@@ -245,7 +246,7 @@ def prepare_stl(
         if manifest.size > MAX_STL_BYTES:
             raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
         output = directory / "mesh.stl"
-        with _open_output(output) as stream:
+        with open_worker_output(output) as stream:
             output_identity = FileIdentity.of(os.fstat(stream.fileno()))
             # Converted outputs are binary STL; a matching digest alone cannot
             # certify an empty file or a truncated facet payload.

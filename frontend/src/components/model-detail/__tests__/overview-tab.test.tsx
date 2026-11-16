@@ -9,6 +9,7 @@
  * Safe URLs are normalized rather than passed through, so the two cases here are
  * the whole contract: `http`/`https` become links, everything else becomes text.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -40,6 +41,8 @@ const editor: ModelMetaEditor = {
 };
 
 const model: ModelRead = {
+  previews: NO_PREVIEWS,
+  has_custom_cover: false,
   edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   edit_version: 1,
   id: 1,

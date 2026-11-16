@@ -457,6 +457,10 @@ class StorageBackend(ABC):
         server-generated ``{sha256}.{ext}`` — never raw user input."""
 
     @abstractmethod
+    def model_cover_key(self, model_id: int, name: str) -> str:
+        """Key for a user-chosen Model cover with a server-generated name."""
+
+    @abstractmethod
     def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
         """Key for a normalized Multipart Model cover uploaded by its user."""
 
@@ -732,6 +736,10 @@ class UnavailableStorageBackend(StorageBackend):
 
     def document_image_key(self, document_id: int, name: str) -> str:
         del document_id, name
+        return self._fail()
+
+    def model_cover_key(self, model_id: int, name: str) -> str:
+        del model_id, name
         return self._fail()
 
     def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:

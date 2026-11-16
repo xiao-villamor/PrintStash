@@ -109,6 +109,7 @@ class TestListFileDerivatives:
 
         assert _states(response) == {
             DerivativeKind.METADATA: "pending",
+            DerivativeKind.PREVIEWS: "pending",
             DerivativeKind.THUMBNAIL: "pending",
         }
 
@@ -217,6 +218,7 @@ class TestRetryFileDerivative:
         )
         assert _states(settled) == {
             DerivativeKind.METADATA: "ready",
+            DerivativeKind.PREVIEWS: "ready",
             DerivativeKind.THUMBNAIL: "ready",
         }
         db_session.expire_all()

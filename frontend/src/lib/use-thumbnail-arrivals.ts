@@ -1,4 +1,5 @@
 "use client";
+import { previewsInFlight, type ModelPreviews } from "@/types/previews";
 
 import { useEffect, useMemo, useRef } from "react";
 
@@ -31,7 +32,7 @@ export const ARRIVAL_COALESCE_MS = 250;
  * the user reloading.
  */
 export function useThumbnailArrivals(
-  models: ReadonlyArray<{ id: number; thumbnail_url: string | null }>,
+  models: ReadonlyArray<{ id: number; thumbnail_url: string | null; previews: ModelPreviews }>,
   onArrival: () => void,
 ): void {
   // A stable key of the waited-for ids, so re-rendering the same page does not
@@ -39,7 +40,7 @@ export function useThumbnailArrivals(
   const waiting = useMemo(
     () =>
       models
-        .filter((model) => model.thumbnail_url === null)
+        .filter((model) => model.thumbnail_url === null || previewsInFlight(model.previews))
         .slice(0, MAX_FOLLOWED)
         .map((model) => model.id)
         .join(","),
@@ -65,8 +66,11 @@ export function useThumbnailArrivals(
     const stops = waiting.split(",").map((id) =>
       followModel(Number(id), (notice) => {
         if (notice.type === "resync" || notice.type === "subscribed") return arrived();
-        if (notice.type === "derivative" && notice.kind === "thumbnail") {
-          if (notice.state === "ready" || notice.state === "skipped") arrived();
+        if (
+          notice.type === "derivative" &&
+          (notice.kind === "thumbnail" || notice.kind === "previews")
+        ) {
+          if (["ready", "skipped", "failed", "cancelled"].includes(notice.state)) arrived();
         }
       }),
     );

@@ -400,8 +400,17 @@ def thumbnail_items(
         )
     ).all()
     models = {model.id: model for model in rows}
+    from .previews import summaries as preview_summaries
+
+    previews = preview_summaries(
+        session, [model.id for model in rows if model.id is not None]
+    )
     items = [
-        BrowseThumbnail(model_id=model_id, thumbnail_url=thumb_url(models[model_id]))
+        BrowseThumbnail(
+            model_id=model_id,
+            thumbnail_url=thumb_url(models[model_id]),
+            previews=previews[model_id],
+        )
         for model_id in ids
         if model_id in models
     ]

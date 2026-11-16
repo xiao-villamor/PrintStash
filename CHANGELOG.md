@@ -8,6 +8,9 @@
 
 ### Added
 
+- Model cards offer lightweight multi-angle previews with deliberate arrows and an expanded gallery, including Top/Bottom and shape-aware planar views. Visible-image admission, intent-based prefetching and bounded background generation preserve primary covers and avoid hover-triggered geometry downloads. Generation has its own Background work control (`VAULT_DERIVATIVES_PREVIEWS_ENABLED`). See [preview behavior and limits](docs/model-previews.md).
+
+- Model covers can use an uploaded PNG/JPEG/WebP, the current 3D view, or an available source image. Chosen covers survive thumbnail regeneration and source-image changes; Reset to automatic restores the latest generated thumbnail. Cover edits support conflict review and are included in backup, storage migration, and purge.
 - **Multi-plate G-code previews.** Browse the sliced plates inside Bambu Studio and OrcaSlicer `.3mf` and `.gcode.3mf` files, including exports without source meshes. Choose a file and a plate in the G-code viewer; ordinary G-code revisions keep their existing preview.
 
 - CTB (v2–5) and GOO (V3.0) resin slices can be uploaded as source files with embedded previews and available layer height/count, exposure, estimated print time, resin volume, printer and slicer metadata. Original printer bytes remain downloadable. Resin printing and layer/toolpath simulation are not included.

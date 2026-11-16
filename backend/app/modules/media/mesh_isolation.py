@@ -807,6 +807,7 @@ def prepared_worker_result(
     sources: tuple[MeshSource, ...],
     work: WorkProfile,
     reply_limit: int = MAX_REPLY_BYTES,
+    on_chunk: Callable[[bytes], None] | None = None,
 ) -> Iterator[tuple[SupervisedReply, Path]]:
     """Supervise native work, then retain staged custody through publication.
 
@@ -846,6 +847,7 @@ def prepared_worker_result(
                 lifecycle=WorkerLifecycle.GUARDED,
                 temporary_directory=directory,
                 reply_limit=reply_limit,
+                on_chunk=on_chunk,
             )
         try:
             current = directory.lstat()

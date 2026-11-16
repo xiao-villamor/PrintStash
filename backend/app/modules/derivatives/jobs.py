@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Protocol
+from typing import Protocol, cast
 
 from sqlmodel import Session, select
 
@@ -21,8 +21,9 @@ from app.modules.work.contracts import (
     Step,
 )
 
-from . import policy, producers, records
+from . import policy, previews, producers, records
 from .kinds import DerivativeGroup, group
+from .preview_source import PreviewSource
 from .source import DerivativeSource, file_id_of
 
 
@@ -32,15 +33,32 @@ class Producer(Protocol):
     ) -> producers.Outcome: ...
 
 
+class PreviewProducer(Protocol):
+    def __call__(
+        self,
+        file_id: int,
+        *,
+        execution: JobExecution | None = None,
+        progress: Callable[[int, int], None] | None = None,
+    ) -> producers.Outcome: ...
+
+
 def _step(
     produce: Producer, derivative_group: DerivativeGroup
 ) -> Callable[[JobContext], None]:
     def run(ctx: JobContext) -> None:
         try:
-            outcome = produce(
-                file_id_of(ctx.subject_key),
-                execution=JobExecution(ctx.job_id, ctx.attempt, ctx.execution_epoch),
-            )
+            execution = JobExecution(ctx.job_id, ctx.attempt, ctx.execution_epoch)
+            if derivative_group.definition is JobKind.DERIVATIVES_PREVIEWS:
+                outcome = cast(PreviewProducer, produce)(
+                    file_id_of(ctx.subject_key),
+                    execution=execution,
+                    progress=lambda done, total: ctx.update(
+                        processed=done, total=total
+                    ),
+                )
+            else:
+                outcome = produce(file_id_of(ctx.subject_key), execution=execution)
         except OperationError as exc:
             if exc.code != SkipReason.DERIVATIVE_GROUP_DISABLED:
                 raise
@@ -50,7 +68,10 @@ def _step(
                 retryable=False,
             )
             return
-        ctx.update(result=outcome.as_result(), processed=1, total=1)
+        if derivative_group.definition is JobKind.DERIVATIVES_PREVIEWS:
+            ctx.update(result=outcome.as_result())
+        else:
+            ctx.update(result=outcome.as_result(), processed=1, total=1)
 
     return run
 
@@ -114,7 +135,7 @@ def _during_additions(name: JobKind) -> DuringAdditions:
     """
     if name is JobKind.DERIVATIVES_VIEWER_STL:
         return DuringAdditions.RUNS
-    if name is JobKind.DERIVATIVES_MESH:
+    if name in {JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_PREVIEWS}:
         return DuringAdditions.PACED
     return DuringAdditions.WAITS
 
@@ -126,10 +147,15 @@ def _definition(name: JobKind, lane: LaneName, produce: Producer) -> JobDefiniti
         name=name,
         lane=lane,
         steps=(Step(f"{name.value}.produce", _step(produce, derivative_group)),),
-        source=DerivativeSource(derivative_group),
+        source=PreviewSource(derivative_group)
+        if name is JobKind.DERIVATIVES_PREVIEWS
+        else DerivativeSource(derivative_group),
         cancel=cancel,
         on_failure=on_failure,
         retry=retry,
+        completion_nudges=(JobKind.DERIVATIVES_PREVIEWS,)
+        if name in {JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_GCODE}
+        else (),
         label=derivative_group.label,
         admission=lambda session: policy.admission(session, name),
         during_additions=_during_additions(name),
@@ -138,6 +164,9 @@ def _definition(name: JobKind, lane: LaneName, produce: Producer) -> JobDefiniti
 
 def definitions() -> list[JobDefinition]:
     return [
+        _definition(
+            JobKind.DERIVATIVES_PREVIEWS, LaneName.DERIVE_NATIVE, previews.derive
+        ),
         _definition(
             JobKind.DERIVATIVES_VIEWER_STL,
             LaneName.DERIVE_NATIVE,

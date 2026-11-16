@@ -28,6 +28,7 @@ import {
   getAssetCacheStats,
   invalidateCachedAsset,
   peekCachedAssetUrl,
+  prioritizeCachedAsset,
 } from "@/lib/asset-cache";
 
 /** Complete a non-mounted test consumer through the production lease interface. */
@@ -399,5 +400,49 @@ describe("private asset scope", () => {
       inactiveEntries: 4,
     });
     mounted.release();
+  });
+});
+
+describe("preview transfer scheduling", () => {
+  it("reserves a download slot for visible images", async () => {
+    const pending = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockImplementation(async () => {
+      await pending.promise;
+      return new Response("webp");
+    });
+    const first = acquireAssetUrl("/preview/a", undefined, "speculative");
+    const second = acquireAssetUrl("/preview/b", undefined, "speculative");
+    const visible = acquireAssetUrl("/preview/cover");
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringContaining("/preview/a"),
+      expect.stringContaining("/preview/cover"),
+    ]);
+    pending.resolve(new Response("webp"));
+    await Promise.all([first.url, second.url, visible.url]);
+    first.release();
+    second.release();
+    visible.release();
+  });
+
+  it("promotes the queued arrow destination ahead of another neighbor", async () => {
+    const pending = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockImplementation(async () => {
+      await pending.promise;
+      return new Response("webp");
+    });
+    const first = acquireAssetUrl("/preview/active", undefined, "speculative");
+    const other = acquireAssetUrl("/preview/other", undefined, "speculative");
+    const destination = acquireAssetUrl("/preview/destination", undefined, "speculative");
+    prioritizeCachedAsset("/preview/destination");
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringContaining("/preview/active"),
+      expect.stringContaining("/preview/destination"),
+    ]);
+    pending.resolve(new Response("webp"));
+    await Promise.all([first.url, other.url, destination.url]);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    first.release();
+    other.release();
+    destination.release();
   });
 });

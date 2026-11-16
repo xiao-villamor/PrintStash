@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { aVaultConfig, aPrinter, aRevision } from "../../src/test-support/factories";
+import { NO_PREVIEWS } from "../../src/types/previews";
 import type { VaultConfigUpdate, PrinterUpdate } from "../../src/types";
 import { aCaption } from "../../src/test-support/captions";
 import { searchPreferences, searchStatus } from "../../src/test-support/search";
@@ -90,6 +91,8 @@ const model = {
   effective_role: "admin",
   tags: ["tete"],
   thumbnail_url: "/api/v1/files/1/thumbnail",
+  // Cover only: specs that browse generated views supply their own set.
+  previews: NO_PREVIEWS,
   created_at: "2026-05-31T10:46:55.658492",
   updated_at: now,
   files: [
@@ -243,6 +246,7 @@ const modelList = [
     effective_role: model.effective_role,
     tags: model.tags,
     thumbnail_url: model.thumbnail_url,
+    previews: model.previews,
     file_count: model.files.length,
     printer_presence: [{ printer_id: printer.id, printer_name: printer.name, file_count: 1 }],
     updated_at: model.updated_at,
@@ -1347,7 +1351,11 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     sendJson(res, {
       items: modelList
         .filter((model) => ids.has(model.id))
-        .map((model) => ({ model_id: model.id, thumbnail_url: model.thumbnail_url })),
+        .map((model) => ({
+          model_id: model.id,
+          thumbnail_url: model.thumbnail_url,
+          previews: model.previews,
+        })),
       authorization_revision: "a1",
     });
     return;
@@ -2010,6 +2018,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
           derivatives_mesh_enabled,
           derivatives_gcode_enabled,
           derivatives_toolpath_enabled,
+          derivatives_previews_enabled,
           ...publicFields
         } = update;
         configuration = {
@@ -2028,6 +2037,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
             derivatives_toolpath_enabled === undefined
               ? configuration.derivatives_toolpath_enabled
               : (derivatives_toolpath_enabled ?? true),
+          derivatives_previews_enabled:
+            derivatives_previews_enabled === undefined
+              ? configuration.derivatives_previews_enabled
+              : (derivatives_previews_enabled ?? true),
           has_oidc_client_secret:
             oidc_client_secret === undefined
               ? configuration.has_oidc_client_secret

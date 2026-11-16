@@ -41,6 +41,7 @@ export interface STLViewerControls {
   resetView: () => void;
   fit: () => void;
   screenshot: () => Promise<void>;
+  captureImage: () => Promise<Blob>;
 }
 
 export interface STLPreviewFeedback {
@@ -306,7 +307,7 @@ function Scene({
       orbitRef.current?.update();
       invalidate();
     },
-    screenshot: async () => {
+    captureImage: async () => {
       if (!loaded) throw new Error("preview_not_ready");
       let captured;
       try {
@@ -327,6 +328,10 @@ function Scene({
           else reject(new Error("screenshot_encoding_failed"));
         }, "image/png");
       });
+      return blob;
+    },
+    screenshot: async () => {
+      const blob = await controlsApi.captureImage();
       const dataUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = dataUrl;

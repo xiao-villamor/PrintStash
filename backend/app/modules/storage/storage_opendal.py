@@ -73,6 +73,9 @@ class OpenDALStorageBackend(_RemoteAdapter, StorageBackend):
     def document_image_key(self, document_id: int, name: str) -> str:
         return self._key(f"document-images/{document_id}/{name}")
 
+    def model_cover_key(self, model_id: int, name: str) -> str:
+        return self._key(f"model-covers/{model_id}/{name}")
+
     def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
         return self._key(f"multipart-covers/{multipart_model_id}/{name}")
 

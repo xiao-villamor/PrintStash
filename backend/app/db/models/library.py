@@ -527,6 +527,7 @@ class Model(SQLModel, table=True):
     """Logical asset, deduplicated by `hash` (source mesh sha256, gcode fallback)."""
 
     __tablename__ = "models"
+    cover_filename: ClassVar[Mapped[str | None]]
     __table_args__ = (
         Index("ix_models_deleted_updated_id", "deleted_at", "updated_at", "id"),
     )
@@ -580,6 +581,20 @@ class Model(SQLModel, table=True):
             "lazy": "selectin",
         },
     )
+
+
+class ModelCover(SQLModel, table=True):
+    """User-chosen presentation, independent of every Artifact derivative."""
+
+    __tablename__ = "model_covers"
+    __table_args__ = (
+        CheckConstraint("size_bytes > 0", name="model_cover_size_positive"),
+    )
+
+    model_id: int = Field(primary_key=True, foreign_key="models.id", ondelete="CASCADE")
+    filename: str = Field(max_length=255)
+    size_bytes: int = Field(gt=0)
+    sha256: str = Field(max_length=64)
 
 
 class MultipartModel(SQLModel, table=True):
@@ -806,3 +821,12 @@ for _editable_aggregate in (Model, MultipartModel, Document):
     _editable_aggregate.edit_epoch = column_property(
         select(LibraryRevision.epoch).where(LibraryRevision.id == 1).scalar_subquery()
     )
+
+# A bounded primary-key lookup in the Model SELECT, never a per-card query.
+# Keeping user presentation in its own table leaves derivative pointers intact.
+Model.cover_filename = column_property(
+    select(ModelCover.filename)
+    .where(ModelCover.model_id == Model.id)
+    .correlate_except(ModelCover)
+    .scalar_subquery()
+)
