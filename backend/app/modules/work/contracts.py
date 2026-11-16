@@ -293,6 +293,15 @@ class DiscoveryBudget:
 
 
 @runtime_checkable
+class InteractiveBacklogSource(WorkSource, Protocol):
+    """A source that can tell, by a read alone, that a person waits on work it
+    has not yet turned into Jobs. Definitions that yield to its Jobs also wait
+    for that work, which between discovery batches has no active Job."""
+
+    def owes_interactive(self, session: Session, *, now: datetime) -> bool: ...
+
+
+@runtime_checkable
 class PrioritizedWorkSource(WorkSource, Protocol):
     """A source that respects separate finite pending quotas."""
 
@@ -352,6 +361,11 @@ class JobDefinition:
     # What discovery does while the library is still being added to. The last
     # addition to settle nudges every definition that held back.
     during_additions: DuringAdditions = DuringAdditions.RUNS
+    # Definitions whose interactive Jobs this one's discovery waits behind:
+    # background writes that would otherwise hold the database writer while a
+    # person waits on that work. The last such Job to settle nudges it. An
+    # InteractiveBacklogSource of theirs also holds it while it owes such work.
+    yields_to: tuple[JobKind, ...] = ()
     # Whether each step is admitted as a write-capable operation (drained by a
     # restore, deferred while one holds the fence). Only work that itself takes
     # the restore fence (a vault migration's cutover) opts out and gates itself.

@@ -112,8 +112,11 @@ class _Ticket:
 
     @classmethod
     def read(cls, descriptor: int) -> _Ticket:
+        return cls.decode(_read_record(descriptor))
+
+    @classmethod
+    def decode(cls, raw: bytes) -> _Ticket:
         try:
-            raw = os.pread(descriptor, _MAX_RECORD_BYTES + 1, 0)
             if len(raw) > _MAX_RECORD_BYTES:
                 raise ValueError("oversized record")
             data = json.loads(raw)
@@ -156,6 +159,10 @@ class _Ticket:
             return ticket
         except (ValueError, KeyError, TypeError, UnicodeError) as exc:
             raise AdmissionCorrupted("invalid live resource ticket") from exc
+
+
+def _read_record(descriptor: int) -> bytes:
+    return os.pread(descriptor, _MAX_RECORD_BYTES + 1, 0)
 
 
 def _open(path: Path, *, exclusive: bool = False) -> BinaryIO:
@@ -224,7 +231,7 @@ class LocalResourcePool:
     ) -> None:
         self.directory = directory
         self._reclaim = reclaim
-        self._records: dict[tuple[int, int, int, int, int], _Ticket] = {}
+        self._records: dict[bytes, _Ticket] = {}
 
     @contextmanager
     def _coordinator(self, checkpoint: Callable[[], None]) -> Iterator[None]:
@@ -258,21 +265,17 @@ class LocalResourcePool:
                         recovery.enter_context(opened.pop_all())
                         abandoned.append((path, handle))
                     continue
-                # Decode only changed receipts, but re-prove descriptor custody
-                # every scan. ctime also invalidates writes that restore mtime;
-                # dead/inode-replaced receipts never inherit cached authority.
-                stat = os.fstat(handle.fileno())
-                key = (
-                    stat.st_dev,
-                    stat.st_ino,
-                    stat.st_size,
-                    stat.st_mtime_ns,
-                    stat.st_ctime_ns,
-                )
-                ticket = self._records.get(key)
+                # Decode only changed receipts, but read every record and
+                # re-prove descriptor custody every scan. The cache is keyed by
+                # the record's bytes, never by stat: file timestamps advance by
+                # a coarse clock tick, so a same-size QUEUED -> ACTIVE rewrite
+                # within one tick keeps every stat field, and an admitted claim
+                # would stay a queued head that blocks every later claim.
+                raw = _read_record(handle.fileno())
+                ticket = self._records.get(raw)
                 if ticket is None:
-                    ticket = _Ticket.read(handle.fileno())
-                records[key] = ticket
+                    ticket = _Ticket.decode(raw)
+                records[raw] = ticket
                 if path.name != ticket.name + ".ticket":
                     raise AdmissionCorrupted("ticket path does not match identity")
                 live.append(ticket)
@@ -393,6 +396,11 @@ class LocalResourcePool:
                             ):
                                 raise AdmissionCorrupted("recovery ticket was replaced")
                             path.unlink()
+                if abandoned:
+                    # Retiring a finished claim's record frees its share: look
+                    # again at once. Waiting here for a release that already
+                    # happened cost each reservation a full wait interval.
+                    continue
                 _releases.wait(seen, _WAIT_SECONDS)
             checkpoint()
             yield NativePermit(

@@ -218,3 +218,19 @@ class TestAdditions:
         from .conftest import PACED
 
         assert catalog_module.get_catalog().paced_during_additions == (PACED,)
+
+
+class TestYielding:
+    def test_lists_the_definitions_that_yield_to_a_definition(
+        self, yielding_engine
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        assert catalog_module.get_catalog().yielding_to(INTERACTIVE_WORK) == (YIELDING,)
+
+    def test_lists_none_for_a_definition_nothing_yields_to(
+        self, yielding_engine
+    ) -> None:
+        from .conftest import YIELDING
+
+        assert catalog_module.get_catalog().yielding_to(YIELDING) == ()

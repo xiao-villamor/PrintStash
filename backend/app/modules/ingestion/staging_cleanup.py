@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import stat
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import or_
@@ -219,3 +220,49 @@ def prune_expired(
         )
     session.flush()
     return removed, unlinked
+
+
+# An upload streams into ``_incoming`` before its lease commits, so a process
+# that dies in between leaves bytes no receipt names and no capacity sum sees.
+# Nothing at the top of ``_incoming`` legitimately outlives this without a
+# lease: an upload becomes leased or is unlinked by its own request, and an
+# import's extracted entries live only as long as its Job.
+UNRECEIPTED_INCOMING_AGE = timedelta(hours=24)
+
+
+def sweep_unreceipted_incoming(
+    session: Session, *, incoming: Path, now: datetime
+) -> int:
+    """Unlink old top-level files in *incoming* that no staging lease names.
+
+    Only the process holding the vault's API lock calls this, at startup,
+    before it accepts uploads. Subdirectories belong to owners that recover
+    them by their own receipts (scratch windows, capture slots, the Inbox,
+    chunked uploads) and are left alone, as are links and anything younger
+    than :data:`UNRECEIPTED_INCOMING_AGE`. Returns the number of files removed.
+    """
+    try:
+        entries = list(incoming.iterdir())
+    except FileNotFoundError:
+        return 0
+    leased = set(
+        session.exec(
+            select(StagingLease.path).where(
+                col(StagingLease.path).startswith(f"{incoming}/")
+            )
+        )
+    )
+    cutoff = (now - UNRECEIPTED_INCOMING_AGE).timestamp()
+    removed = 0
+    for entry in entries:
+        if str(entry) in leased:
+            continue
+        try:
+            status = entry.lstat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISREG(status.st_mode) or status.st_mtime > cutoff:
+            continue
+        entry.unlink(missing_ok=True)
+        removed += 1
+    return removed

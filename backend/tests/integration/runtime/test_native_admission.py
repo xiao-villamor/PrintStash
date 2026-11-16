@@ -114,6 +114,35 @@ class TestLocalResourcePool:
                 assert live == [changed]
                 assert _Ticket.read(permit.fileno).request.bytes == 41
 
+    def test_observes_a_state_rewrite_within_one_timestamp_tick(
+        self, tmp_path, monkeypatch
+    ):
+        """Coarse file clocks: a same-size rewrite can keep every stat field.
+
+        An admitted claim read back as QUEUED stays the queue head, and every
+        later claim waits behind it until it ends (seen at 3 CPU / 8 GB).
+        """
+        from contextlib import ExitStack
+        from dataclasses import replace
+
+        from app.runtime import native_admission
+        from app.runtime.native_admission import _State
+
+        pool = LocalResourcePool(tmp_path)
+        with pool.reserve(
+            Resources(1, 40), Resources(2, 100), checkpoint=lambda: None
+        ) as permit:
+            frozen = os.fstat(permit.fileno)
+            monkeypatch.setattr(native_admission.os, "fstat", lambda _fd: frozen)
+            with ExitStack() as recovery, pool._coordinator(lambda: None):
+                (active,) = pool._live(recovery)[0]
+                queued = replace(active, state=_State.QUEUED)
+                assert len(queued.encode()) == len(active.encode())
+                with permit.path.open("r+b", buffering=0) as handle:
+                    pool._write(handle, queued)
+
+                assert pool._live(recovery)[0] == [queued]
+
     def test_rejects_corrupted_cached_receipts(self, tmp_path):
         from contextlib import ExitStack
 

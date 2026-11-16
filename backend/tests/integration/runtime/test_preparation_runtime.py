@@ -69,6 +69,24 @@ class TestPreparationRecovery:
             assert first.result(timeout=5) is True
             assert second.result(timeout=5) is True
 
+    def test_a_reservation_after_a_finished_claim_does_not_wait(self, tmp_path):
+        # A finished claim leaves its record for the next reservation to
+        # retire; retiring it must not cost that reservation a wait interval.
+        import time
+
+        from app.runtime import native_admission
+
+        pool = LocalResourcePool(tmp_path, reclaim=lambda _identity: None)
+        amount = Resources(1, 100)
+        with pool.reserve(amount, amount, checkpoint=lambda: None):
+            pass
+
+        started = time.monotonic()
+        with pool.reserve(amount, amount, checkpoint=lambda: None):
+            elapsed = time.monotonic() - started
+
+        assert elapsed < native_admission._WAIT_SECONDS / 2
+
     def test_failed_cleanup_keeps_recoverable_disk_ownership(self, tmp_path):
         owner = make_pools(tmp_path / "prepared", tmp_path / "io").prepared
         amount = Resources(1, 100)

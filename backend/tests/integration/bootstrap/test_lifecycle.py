@@ -403,6 +403,28 @@ class TestStorageComposition:
         assert lifecycle._prepare_storage_for_startup() is backend
         assert events == ["ensure", "bind", "recover", "inbox"]
 
+    @pytest.mark.parametrize("owner", [True, False], ids=["owner", "not-owner"])
+    def test_owner_startup_sweeps_uploads_left_without_a_receipt(
+        self, _local_storage: None, owner: bool
+    ) -> None:
+        """A crash between streaming an upload and its lease leaves no leak."""
+        import os
+        from datetime import timedelta
+
+        from app.core.config import settings
+        from app.core.time import utcnow
+
+        settings.incoming_dir.mkdir(parents=True, exist_ok=True)
+        orphan = settings.incoming_dir / "interrupted-upload.zip"
+        orphan.write_bytes(b"half an upload")
+        stamp = (utcnow() - timedelta(days=2)).timestamp()
+        os.utime(orphan, (stamp, stamp))
+        storage_runtime._backend = None
+
+        lifecycle._prepare_storage_for_startup(recover_publications=owner)
+
+        assert orphan.exists() is not owner
+
 
 async def _done() -> None:
     pass

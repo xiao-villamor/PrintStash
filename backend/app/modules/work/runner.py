@@ -25,8 +25,9 @@ from sqlmodel import col, select
 
 from app.core.cancellation import OperationCancelled, cancellation_scope
 from app.core.config import settings
+from app.core.execution_scope import ExecutionIdentity, execution_scope
 from app.core.logging import get_logger
-from app.core.time import utcnow
+from app.core.time import ensure_utc, utcnow
 from app.core.work_priority import priority_scope
 from app.db.models import ACTIVE_JOB_STATES, Job, JobKind, JobState, WorkPriority
 from app.db.session import get_session_factory
@@ -193,6 +194,20 @@ class ExecutionContext:
             if adding:
                 # Paced work looks again on its own while additions go on.
                 sources.difference_update(catalog.paced_during_additions)
+            yielding = catalog.yielding_to(definition.name)
+            if (
+                yielding
+                and self.priority is WorkPriority.INTERACTIVE
+                and not jobs.any_active(
+                    session,
+                    (definition.name,),
+                    besides=self.job_id,
+                    priority=WorkPriority.INTERACTIVE,
+                )
+            ):
+                # The last interactive Job to end releases the work that
+                # yielded to it.
+                sources.update(yielding)
             for source in sorted(sources):
                 if stamp(session, source, now=now):
                     passes.append(source)
@@ -426,6 +441,13 @@ def _begin(job_id: str, attempt: int, execution_epoch: str) -> dict[str, str] | 
         if row.attempts > attempt:
             return None
         now = utcnow()
+        if row.started_at is None:
+            from app.core.metrics import record_queue_wait
+
+            # Enqueue to first start: polling, lane slots and admission.
+            record_queue_wait(
+                row.kind.value, (now - ensure_utc(row.created_at)).total_seconds()
+            )
         row.attempts = max(row.attempts, attempt)
         row.submitted_epoch = execution_epoch
         row.state = JobState.RUNNING
@@ -505,6 +527,13 @@ def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
             with (
                 cancellation_scope(withdrawn, idle=waiting),
                 priority_scope(context.priority),
+                execution_scope(
+                    ExecutionIdentity(
+                        job_id=context.job_id,
+                        execution_id=context.execution_id,
+                        definition=context.definition.value,
+                    )
+                ),
             ):
                 step.fn(context)
         finally:

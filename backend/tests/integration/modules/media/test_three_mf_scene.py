@@ -222,9 +222,10 @@ class TestReadSceneWithReader:
         path = tmp_path / "plain.3mf"
         path.write_bytes(three_mf())
 
-        _scene, reader = three_mf_scene.read_scene_with_reader(path)
+        _scene, choice = three_mf_scene.read_scene_with_reader(path)
 
-        assert reader is three_mf_scene.ThreeMFReader.LIB3MF
+        assert choice.reader is three_mf_scene.ThreeMFReader.LIB3MF
+        assert choice.fallback is None
 
     def test_names_the_xml_reader_for_a_package_lib3mf_cannot_read_exactly(
         self, tmp_path
@@ -234,9 +235,11 @@ class TestReadSceneWithReader:
         path = tmp_path / "far.3mf"
         path.write_bytes(three_mf(meshes={1: mesh}))
 
-        _scene, reader = three_mf_scene.read_scene_with_reader(path)
+        _scene, choice = three_mf_scene.read_scene_with_reader(path)
 
-        assert reader is three_mf_scene.ThreeMFReader.XML
+        assert choice.reader is three_mf_scene.ThreeMFReader.XML
+        # The reason lib3mf declined travels with the scene into mesh_phases.
+        assert choice.fallback is not None
 
     def test_refuses_an_invalid_budget_before_reading(self, tmp_path):
         path = tmp_path / "plain.3mf"

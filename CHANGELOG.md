@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- The background engine uses DBOS 3.5.0 (was 3.3.0). Its first start adds indexes, a column and a table to the disposable engine database; queued Jobs resume. Stop every API and worker process and restart them together on the same image. DBOS 3.3.0 is not guaranteed to read the migrated engine database: to roll back, stop every process and discard the engine state (the `-dbos` SQLite sibling with its `-wal` and `-shm` files, or the PostgreSQL `dbos` schema) before starting the previous image; Jobs are recorded in the application database and are submitted again.
+
 ### Added
 
 - Model cards offer lightweight multi-angle previews with deliberate arrows and an expanded gallery, including Top/Bottom and shape-aware planar views. Visible-image admission, intent-based prefetching and bounded background generation preserve primary covers and avoid hover-triggered geometry downloads. Generation has its own Background work control (`VAULT_DERIVATIVES_PREVIEWS_ENABLED`). See [preview behavior and limits](docs/model-previews.md).
@@ -11,9 +15,25 @@
 
 - CTB (v2–5) and GOO (V3.0) resin slices can be uploaded as source files with embedded previews and available layer height/count, exposure, estimated print time, resin volume, printer and slicer metadata. Original printer bytes remain downloadable. Resin printing and layer/toolpath simulation are not included.
 - Collection Documents accepts spreadsheets, Word files and arbitrary binary attachments, including other resin formats, with original-byte downloads.
+- Background work on SQLite starts as soon as it is queued instead of at the next poll: the image patches DBOS with hash-checked queue notifications, on by default. A 60-file archive's thumbnails finish 2.5 s sooner on a 3-CPU host, and an idle server uses 2% of a core instead of 11%. Set `VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS=false` to return to polling. PostgreSQL is unchanged.
+
+### Security
+
+- A TAR upload or URL import can no longer exhaust the server's memory or CPU with a few hundred bytes. TAR headers are read with fixed caps: oversized long-name or pax headers and unknown member types are refused, folders and links count toward the entry limit, the whole unpacked stream is held to the archive size limit, and cancelling an import stops its archive check.
+
+### Performance
+
+- Thumbnails for an imported archive finish sooner: search indexing of the new Models now waits until their thumbnails and measurements are done instead of competing with them for the database. New Models become searchable shortly after their thumbnails appear.
+- Mesh processing no longer stalls behind a job that has already started: admission could read a just-admitted job as still waiting, and every later job then waited for it to finish.
+- Background discovery creates each batch of Jobs in one database write instead of one per Job, so it waits less behind thumbnail publication during an import.
+- Search indexing of an import's new Models no longer starts early in the gap between two batches of thumbnail work, where it slowed the remaining thumbnails by about 5 s.
+- The default number of simultaneous mesh jobs is now one per usable CPU (it was one more). With admission no longer stalling, the extra job only competed for the CPU: on a 3-CPU, 8 GB install a 60-file archive's thumbnails finish in 38.7 s instead of 44.9 s, at the same CPU cost. `VAULT_MAX_RENDER_JOBS` and *Models processed at once* still override it.
 
 ### Fixed
 
+- Mesh processing logs which 3MF reader read each file and, when the XML reader stood in for lib3mf, why (`mesh_phases`, `printstash_mesh_3mf_reads_total`).
+- 7z archives with more than one folder (non-solid, appended or split into blocks) import instead of failing as invalid.
+- Uploads interrupted by a crash or restart before they were recorded no longer stay in staging forever: on startup the API removes unrecorded uploads older than a day.
 - API key and OrcaSlicer command copy buttons work on HTTP installations without the secure Clipboard API, with a visible error if the browser refuses copying.
 - Confirmed Trash purges reclaim owned files, thumbnails and multipart covers on guarded local/FUSE storage using hash-checked quarantine. Previously blocked guarded cleanup intents are retried; changed objects and external originals remain protected.
 

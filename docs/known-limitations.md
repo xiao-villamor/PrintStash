@@ -219,7 +219,10 @@ available builds. Anything marked beta here remains beta.
   models and preview images for review, and again when the selection is
   imported, so staging briefly needs room for those files uncompressed.
   Encrypted archives, links inside archives and multi-volume archives are not
-  read. Compressed RAR members need `bsdtar`, which the container image
+  read. A TAR archive must not unpack to more than the archive size limit
+  (`VAULT_MAX_ARCHIVE_UNCOMPRESSED_MB`) in total, counting files that are not
+  models; sparse members, member types other than files, folders, links and
+  devices, and names that are not UTF-8 are refused. Compressed RAR members need `bsdtar`, which the container image
   includes; uncompressed members are read without it. Browser captures and
   Pending Imports accept ZIP only.
 - The G-code toolpath viewer is a browser-side visualization aid. It is not a

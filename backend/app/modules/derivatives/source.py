@@ -152,6 +152,44 @@ class DerivativeSource:
             session.flush()
         return cursor
 
+    def _recency(self, now: datetime) -> tuple[Any, Any]:
+        """The timestamp that orders this group's work, and the interactive test."""
+        if self.group.definition is JobKind.DERIVATIVES_VIEWER_STL:
+            timestamp = col(File.viewer_requested_at)
+            return timestamp, (
+                timestamp.is_not(None) if self.interactive else false()
+            )
+        timestamp = col(File.uploaded_at)
+        if not self.interactive:
+            return timestamp, false()
+        return timestamp, timestamp >= now - FRESH_INTERACTIVE
+
+    def _active(self) -> Any:
+        return exists().where(
+            col(Job.kind) == self.group.definition,
+            col(Job.subject_key) == literal("file/") + cast(col(File.id), String),
+            active_job_predicate(),
+        )
+
+    def owes_interactive(self, session: Session, *, now: datetime) -> bool:
+        """Whether a recent Artifact still owes outputs and has no active Job.
+
+        A read only: the scan cursor is left to discovery.
+        """
+        if not policy.resolve(session)[self.group.definition].enabled:
+            return False
+        _timestamp, recent = self._recency(now)
+        owed = session.exec(
+            select(File.id)
+            .where(
+                pending_predicate(self.group, session, now=now),
+                not_(self._active()),
+                recent,
+            )
+            .limit(1)
+        ).first()
+        return owed is not None
+
     def pending(
         self, session: Session, *, now: datetime, limit: int
     ) -> Sequence[WorkItem]:
@@ -183,23 +221,8 @@ class DerivativeSource:
         # read would take the writer for every query that follows; held back,
         # it is one short write as this pass's choice commits.
         with session.no_autoflush:
-            timestamp = (
-                col(File.viewer_requested_at)
-                if self.group.definition is JobKind.DERIVATIVES_VIEWER_STL
-                else col(File.uploaded_at)
-            )
-            recent = (
-                timestamp.is_not(None)
-                if self.group.definition is JobKind.DERIVATIVES_VIEWER_STL
-                else timestamp >= now - FRESH_INTERACTIVE
-            )
-            if not self.interactive:
-                recent = false()
-            active = exists().where(
-                col(Job.kind) == self.group.definition,
-                col(Job.subject_key) == literal("file/") + cast(col(File.id), String),
-                active_job_predicate(),
-            )
+            timestamp, recent = self._recency(now)
+            active = self._active()
             predicate = and_(
                 pending_predicate(self.group, session, now=now), not_(active)
             )

@@ -27,6 +27,7 @@ from app.db.models import (
     DerivativeState,
     FileType,
     JobKind,
+    ReconcileCursor,
     WorkPriority,
 )
 from app.modules.derivatives import kinds
@@ -51,6 +52,48 @@ def mesh(make_model, make_file):
         return make_file(make_model(), filename="part.stl", **fields)
 
     return build
+
+
+class TestOwesInteractive:
+    """A read-only answer for definitions that yield to mesh work."""
+
+    def test_a_recent_artifact_missing_outputs_is_owed(
+        self, db_session: Session, mesh
+    ) -> None:
+        mesh()
+
+        assert MESH.owes_interactive(db_session, now=utcnow()) is True
+
+    def test_an_old_artifact_is_backfill_work(self, db_session: Session, mesh) -> None:
+        mesh(uploaded_at=utcnow() - timedelta(days=30))
+
+        assert MESH.owes_interactive(db_session, now=utcnow()) is False
+
+    def test_a_fully_derived_artifact_is_not_owed(
+        self, db_session: Session, mesh, make_derivative
+    ) -> None:
+        artifact = mesh()
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL)
+
+        assert MESH.owes_interactive(db_session, now=utcnow()) is False
+
+    def test_an_artifact_with_an_active_job_is_left_to_that_job(
+        self, db_session: Session, mesh, make_job
+    ) -> None:
+        artifact = mesh()
+        make_job(kind=JobKind.DERIVATIVES_MESH, subject=subject_key(artifact.id))
+
+        assert MESH.owes_interactive(db_session, now=utcnow()) is False
+
+    def test_leaves_the_scan_cursor_to_discovery(
+        self, db_session: Session, mesh
+    ) -> None:
+        mesh()
+
+        MESH.owes_interactive(db_session, now=utcnow())
+
+        assert db_session.get(ReconcileCursor, JobKind.DERIVATIVES_MESH) is None
 
 
 class TestPending:

@@ -223,8 +223,10 @@ def load_3mf_within_ram(path: Path) -> PreparedMesh:
     """
     from app.modules.media import mesh_policy
 
-    scene, reader = read_scene_with_reader(path, max_faces=MAX_ANALYSIS_FACES)
-    budget = mesh_policy.load_face_budget(".3mf", lib3mf=reader is ThreeMFReader.LIB3MF)
+    scene, choice = read_scene_with_reader(path, max_faces=MAX_ANALYSIS_FACES)
+    budget = mesh_policy.load_face_budget(
+        ".3mf", lib3mf=choice.reader is ThreeMFReader.LIB3MF
+    )
     if PreparedScene(scene).triangle_count > budget:
         raise GeometryError("scene_resource_limit")
     return materialize_scene(scene)
