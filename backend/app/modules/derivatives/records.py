@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import delete, func, update
+from sqlalchemy import and_, delete, func, or_, update
 from sqlmodel import Session, col, select
 
 from app.core.config import settings
@@ -449,6 +449,60 @@ def fail_in_flight(
         _mark_failed(session, row, reason, now=now, deterministic=False)
         changed += 1
     return changed
+
+
+def fail_unfinished(
+    session: Session,
+    file: File,
+    reason: str,
+    *,
+    now: datetime,
+    kinds: dict[DerivativeKind, int],
+) -> None:
+    """Persist the group's failure even when its producer failed before begin.
+
+    Missing rows are discoverable intent. Leaving them absent after an early
+    exception bypasses backoff and the attempt limit, creating a new Job each
+    time the source runs. Preserve completed/cancelled outputs and already
+    settled failures; only this group's unfinished current recipes failed.
+    """
+    if not kinds:
+        return
+    assert file.id is not None
+    begin_write(session, immediate=True)
+    current = {
+        row.kind: row
+        for row in session.exec(
+            select(ArtifactDerivative)
+            .where(
+                ArtifactDerivative.file_id == file.id,
+                or_(
+                    *(
+                        and_(
+                            col(ArtifactDerivative.kind) == kind,
+                            col(ArtifactDerivative.recipe_version) == recipe,
+                        )
+                        for kind, recipe in kinds.items()
+                    )
+                ),
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    }
+    regen = regenerations(session, definitions=[g.definition for g in groups_for(file)])
+    for kind, recipe in kinds.items():
+        row = current.get(kind)
+        in_flight = row is not None and row.state in {
+            DerivativeState.QUEUED,
+            DerivativeState.RUNNING,
+        }
+        if not in_flight and satisfied(row, now=now, regenerated_at=regen.get(kind)):
+            continue
+        if row is None:
+            row = ArtifactDerivative(file_id=file.id, kind=kind, recipe_version=recipe)
+        row.attempts = max(1, row.attempts) if in_flight else row.attempts + 1
+        _mark_failed(session, row, reason, now=now, deterministic=False)
 
 
 def cancel(

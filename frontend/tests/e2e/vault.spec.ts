@@ -17,6 +17,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { useMockApi } from "./_setup";
 import { scrollToEnd } from "./_scroll";
+import { animationStarts, recordAnimationStarts } from "./_animations";
 import { aModel, aModelListItem, aMultipartModel } from "../../src/test-support/factories";
 
 useMockApi();
@@ -159,6 +160,7 @@ test.describe("vault route", () => {
   });
 
   test("a Model added to the open view eases in while the others stay put", async ({ page }) => {
+    await recordAnimationStarts(page);
     let changed = false;
     const existing = aModelListItem({ id: 1, name: "Existing bracket", thumbnail_url: null });
     const added = aModelListItem({ id: 2, name: "Added bracket", thumbnail_url: null });
@@ -190,9 +192,13 @@ test.describe("vault route", () => {
 
     const arrival = page.locator("article", { hasText: "Added bracket" });
     await expect(arrival).toBeVisible();
-    expect(await arrival.evaluate((node) => getComputedStyle(node).animationName)).toBe(
-      "card-arrive",
-    );
+    await expect
+      .poll(async () =>
+        (await animationStarts(page))
+          .filter((start) => start.name === "card-arrive")
+          .map((start) => start.text),
+      )
+      .toEqual([expect.stringContaining("Added bracket")]);
     const settled = page.locator("article", { hasText: "Existing bracket" });
     expect(await settled.evaluate((node) => getComputedStyle(node).animationName)).toBe("none");
   });

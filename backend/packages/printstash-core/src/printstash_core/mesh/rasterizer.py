@@ -43,7 +43,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, runtime_checkable
 
-from .preview_profile import PREVIEW_PROFILE
+from .preview_profile import (
+    PREVIEW_PROFILE,
+    REFERENCE_THUMBNAIL_PROFILE,
+    PreviewProfile,
+)
 from .render_geometry import (
     MeshRenderInput,
     PreparedRender,
@@ -178,7 +182,10 @@ class RenderedPixels:
 
 
 def encode_rendered_pixels(
-    pixels: RenderedPixels, *, output_format: Literal["PNG", "WEBP"] = "PNG"
+    pixels: RenderedPixels,
+    *,
+    output_format: Literal["PNG", "WEBP"] = "PNG",
+    profile: PreviewProfile = PREVIEW_PROFILE,
 ) -> bytes:
     """Encode a completed frame with the versioned thumbnail compression policy."""
     if output_format not in ("PNG", "WEBP"):
@@ -191,11 +198,11 @@ def encode_rendered_pixels(
         image.save(
             buffer,
             format="WEBP",
-            lossless=PREVIEW_PROFILE.encoding_lossless,
-            exact=PREVIEW_PROFILE.encoding_exact,
+            lossless=profile.encoding_lossless,
+            exact=profile.encoding_exact,
             alpha_quality=100,
-            method=PREVIEW_PROFILE.encoding_method,
-            quality=PREVIEW_PROFILE.encoding_quality,
+            method=profile.encoding_method,
+            quality=profile.encoding_quality,
         )
     else:
         image.save(buffer, format="PNG", optimize=True)
@@ -267,6 +274,7 @@ def render_prepared_thumbnail(
     output_format: Literal["PNG", "WEBP"] = "PNG",
     view_rotation: FloatArray | None = None,
     matte: bool = False,
+    reference_thumbnail: bool = False,
 ) -> bytes | None:
     pixels = render_prepared_pixels(
         prepared,
@@ -278,11 +286,18 @@ def render_prepared_thumbnail(
         rasterise_triangles=rasterise_triangles,
         view_rotation=view_rotation,
         matte=matte,
+        reference_thumbnail=reference_thumbnail,
     )
     if pixels is None:
         return None
     try:
-        return encode_rendered_pixels(pixels, output_format=output_format)
+        return encode_rendered_pixels(
+            pixels,
+            output_format=output_format,
+            profile=REFERENCE_THUMBNAIL_PROFILE
+            if reference_thumbnail
+            else PREVIEW_PROFILE,
+        )
     except Exception:
         if logger is not None:
             logger.warning(
@@ -358,6 +373,7 @@ def render_prepared_pixels(
     rasterise_triangles: Rasteriser | None = None,
     view_rotation: FloatArray | None = None,
     matte: bool = False,
+    reference_thumbnail: bool = False,
 ) -> RenderedPixels | None:
     """Render final RGBA pixels using cached camera-independent geometry.
 
@@ -380,7 +396,10 @@ def render_prepared_pixels(
         geometry = prepared
         verts = geometry.vertices
 
-        supersample = PREVIEW_PROFILE.supersample_for(width)
+        profile = (
+            REFERENCE_THUMBNAIL_PROFILE if reference_thumbnail else PREVIEW_PROFILE
+        )
+        supersample = profile.supersample_for(width)
         ss_width = width * supersample
         ss_height = height * supersample
 
@@ -398,7 +417,7 @@ def render_prepared_pixels(
         #    first-open camera. Chunkier parts keep the older isometric angle.
         # ------------------------------------------------------------------
         rotation = (
-            _select_view_rotation(verts)
+            _select_view_rotation(verts, reference=reference_thumbnail)
             if view_rotation is None
             else np.asarray(view_rotation, dtype=np.float64)
         )
@@ -421,7 +440,7 @@ def render_prepared_pixels(
         y_min, y_max = float(ys.min()), float(ys.max())
         extent_x = max(x_max - x_min, 1e-6)
         extent_y = max(y_max - y_min, 1e-6)
-        margin = PREVIEW_PROFILE.margin_fraction
+        margin = profile.margin_fraction
         scale = min(
             (ss_width * (1 - 2 * margin)) / extent_x,
             (ss_height * (1 - 2 * margin)) / extent_y,
@@ -460,42 +479,46 @@ def render_prepared_pixels(
         # a bright sheen that reads on the dark card instead of clipping at a dim
         # blue-grey ceiling. Slightly lighter + less saturated than the old base so
         # the model pops against a near-black background.
-        albedo = np.array(PREVIEW_PROFILE.material_albedo)
+        albedo = np.array(profile.material_albedo)
 
         # Key light: main illumination, upper-left and well in front of the
-        # camera so the lit side reads as one clean gradient. Strength >1 so the
-        # directly-lit side drives toward white — the gradient has real range now.
-        key_dir = _normalise(np.array([-0.5, 0.65, 1.0]))
+        # camera. Side lighting separates adjacent faces without washing the
+        # brightest face out to white.
+        # Encoder inputs keep their frozen lighting across cover recipe changes.
+        studio = not (matte or reference_thumbnail)
+        key_dir = _normalise(
+            np.array([-0.8, 0.9, 0.65] if studio else [-0.5, 0.65, 1.0])
+        )
         key_color = np.array([1.00, 0.98, 0.95])  # warm white
-        key_str = 1.05
+        key_str = 1.0 if studio else 1.05
 
         # Fill light: opposite side, soft and cool. Kept gentle so it only lifts
         # the shadow side and never forms a second highlight — competing
         # directional highlights are what made smooth surfaces look muddy/blotchy.
         fill_dir = _normalise(np.array([0.55, -0.25, 0.55]))
         fill_color = np.array([0.55, 0.62, 0.78])  # cool blue-grey
-        fill_str = 0.30
+        fill_str = 0.22 if studio else 0.30
 
         # Rim: a view-based Fresnel edge light (brightens the silhouette where the
         # surface turns away from the camera). Additive white, so it lifts the
         # silhouette off the dark card rather than darkening into it.
         rim_color = np.array([0.85, 0.92, 1.00])  # near-white, slightly cool
-        rim_str = 0.22
+        rim_str = 0.12 if studio else 0.22
         rim_power = 3.0
 
         # Ambient: blue-grey floor tied to the albedo so shadowed faces stay a
         # dark version of the body colour (never crushed to muddy near-black, never
         # a flat grey wash). Lifted enough that curved faces turned away from the
         # key still read as form against the dark card.
-        ambient_str = 0.30
+        ambient_str = 0.20 if studio else 0.30
 
         # Blinn-Phong specular off the key light — an additive *white* sheen that
         # picks out ridges, like the 3D viewer. Kept gentle: a strong spec sparkles
         # facet to facet on tessellated curves. Camera is on +Z in view-space, so
         # the half-vector is between key_dir and (0,0,1).
         half = _normalise(key_dir + np.array([0.0, 0.0, 1.0]))
-        spec_str = 0.0 if matte else 0.22
-        spec_power = 32.0
+        spec_str = 0.16 if studio else (0.0 if matte else 0.22)
+        spec_power = 24.0 if studio else 32.0
 
         def _shade(n: FloatArray) -> FloatArray:
             # Per-fragment (Phong) shading from a view-space unit normal of any
@@ -578,12 +601,17 @@ def render_prepared_pixels(
                     1.0,
                     np.linalg.norm(corner_n, axis=2, keepdims=True),
                 )
-                # Into view-space and flip toward the camera (+Z). These per-corner
-                # normals are interpolated per pixel in the rasteriser (Phong); the
+                # The depth camera looks along +Z. Orient normals toward it,
+                # then reflect only Z into the lighting frame (camera at +Z).
+                # Negating the whole vector here reverses left/right and up/down
+                # lighting, making upward faces dark under an overhead key.
+                # Per-corner normals are interpolated per pixel in the rasteriser (Phong); the
                 # Fresnel rim, diffuse and specular are all evaluated there from the
                 # interpolated normal, so there is no separate per-vertex colour pass.
                 cvn = corner_n @ rot_T  # (c, 3, 3)
                 cvn = np.where(cvn[..., 2:3] >= 0, cvn, -cvn)
+                if studio:
+                    cvn[..., :2] *= -1
 
                 front = (raw_normals[:, 2] * view_handedness) < 0.0
                 valid = front & (norm_len > 1e-8)
@@ -640,7 +668,7 @@ def render_prepared_pixels(
         # ------------------------------------------------------------------
         # 7. Post-process: Lanczos downsample (anti-aliasing) + subtle vignette.
         # ------------------------------------------------------------------
-        return postprocess_rgba(rgba.tobytes(), width, height)
+        return postprocess_rgba(rgba.tobytes(), width, height, profile=profile)
 
     except Exception:
         if logger is not None:
@@ -650,12 +678,14 @@ def render_prepared_pixels(
         return None
 
 
-def postprocess_rgba(rgba: bytes, width: int, height: int) -> RenderedPixels:
+def postprocess_rgba(
+    rgba: bytes, width: int, height: int, *, profile: PreviewProfile = PREVIEW_PROFILE
+) -> RenderedPixels:
     """Apply the same canonical downsample/vignette to CPU or GPU raster pixels."""
     import numpy as np
     from PIL import Image  # pyright: ignore[reportMissingTypeStubs]
 
-    supersample = PREVIEW_PROFILE.supersample_for(width)
+    supersample = profile.supersample_for(width)
     ss_width, ss_height = width * supersample, height * supersample
     pil = Image.frombytes("RGBA", (ss_width, ss_height), rgba)
     # ``Resampling`` is present in both supported Pillow lines (10 and 12),
@@ -680,26 +710,32 @@ def postprocess_rgba(rgba: bytes, width: int, height: int) -> RenderedPixels:
 # ---------------------------------------------------------------------------
 
 
-def _select_view_rotation(verts: FloatArray) -> FloatArray:
+def _select_view_rotation(verts: FloatArray, *, reference: bool = False) -> FloatArray:
     """Return an original-space -> view-space matrix for thumbnail rendering."""
     import numpy as np
 
     extents = verts.max(axis=0) - verts.min(axis=0)
     thin_axis = int(np.argmin(extents))
     thin_extent = float(extents[thin_axis])
-    broad_extent = float(np.max(np.delete(extents, thin_axis)))
+    other_extents = np.delete(extents, thin_axis)
+    broad_extent = float(np.max(other_extents) if reference else np.min(other_extents))
+    profile = REFERENCE_THUMBNAIL_PROFILE if reference else PREVIEW_PROFILE
 
-    if broad_extent > 1e-6 and thin_extent / broad_extent <= FLAT_MESH_THICKNESS_RATIO:
-        return _front_rotation_for_thin_axis(thin_axis)
+    # A plate is thin relative to both other axes; rods are not plates.
+    if (
+        broad_extent > 1e-6
+        and thin_extent / broad_extent <= profile.flat_thickness_ratio
+    ):
+        return _front_rotation_for_thin_axis(thin_axis, reference=reference)
 
     # "Hero" 3/4 view for a solid model. 3D-print models are Z-up (they sit
     # flat-based on the bed), so we keep Z as screen-up and look from the
-    # front-left tilted ~18° down — the way the interactive 3D viewer frames a
+    # front-left tilted 30° down — the way the interactive 3D viewer frames a
     # model. The old view stared 30° *down the Z axis*, which showed the top of
     # an upright model (e.g. the gathered top of a dumpling) instead of its face.
-    azim = np.radians(PREVIEW_PROFILE.hero_azimuth_degrees)
+    azim = np.radians(profile.hero_azimuth_degrees)
     # View-space rotation is opposite the positive camera elevation.
-    tilt = np.radians(-PREVIEW_PROFILE.hero_elevation_degrees)
+    tilt = np.radians(-profile.hero_elevation_degrees)
     ca, sa = np.cos(azim), np.sin(azim)
     ct, st = np.cos(tilt), np.sin(tilt)
     spin_z = np.array([[ca, -sa, 0], [sa, ca, 0], [0, 0, 1]], dtype=np.float64)
@@ -709,12 +745,15 @@ def _select_view_rotation(verts: FloatArray) -> FloatArray:
     return tilt_x @ base @ spin_z
 
 
-def _front_rotation_for_thin_axis(thin_axis: int) -> FloatArray:
+def _front_rotation_for_thin_axis(
+    thin_axis: int, *, reference: bool = False
+) -> FloatArray:
     """View a flat mesh mostly face-on but tilted 25° to reveal depth in recesses."""
     import numpy as np
 
     # 25° tilt rotation around the screen-X axis (tips the model top toward camera).
-    tilt = np.radians(PREVIEW_PROFILE.flat_tilt_degrees)
+    profile = REFERENCE_THUMBNAIL_PROFILE if reference else PREVIEW_PROFILE
+    tilt = np.radians(profile.flat_tilt_degrees)
     ct, st = float(np.cos(tilt)), float(np.sin(tilt))
 
     if thin_axis == 0:
@@ -726,6 +765,12 @@ def _front_rotation_for_thin_axis(thin_axis: int) -> FloatArray:
     else:
         # Base: camera from +Z (screen X=X, screen Y=Y, top-down).
         base = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=np.float64)
+        # Keep flat parts on the same diagonal as the hero view without
+        # tipping standing signs or lithophanes sideways.
+        if not reference:
+            azimuth = np.radians(PREVIEW_PROFILE.hero_azimuth_degrees)
+            ca, sa = np.cos(azimuth), np.sin(azimuth)
+            base = np.array([[ca, -sa, 0], [sa, ca, 0], [0, 0, 1]]) @ base
 
     # Tilt: rotate 25° around the screen-X axis so the far edge dips toward the
     # viewer, making depth recesses and raised features visible.

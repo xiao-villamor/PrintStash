@@ -194,7 +194,7 @@ describe("SourceTab", () => {
   it("uses grouped technical rows for source identity and captured metadata", async () => {
     render(<SourceTab modelId={1} canEdit={false} api={api} />);
 
-    expect(await screen.findByRole("heading", { name: "Source" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Source information" })).toBeInTheDocument();
     expect(screen.getByTestId("source-identity-panel")).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Captured metadata" })).toBeInTheDocument();
     expect(screen.getByText("Source ID")).toBeInTheDocument();
@@ -299,7 +299,7 @@ describe("SourceTab", () => {
     await user.clear(input);
     await user.type(input, "Edited title");
 
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save override" }));
 
     await waitFor(() => {
       expect(patchProvenance).toHaveBeenCalledWith(
@@ -421,7 +421,7 @@ describe("SourceTab conditional editing", () => {
         edit_version: 7,
       });
     });
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save override" }));
     await waitFor(() => expect(base).toBe('"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"'));
     expect(screen.getByRole("textbox", { name: "Title override" })).toHaveValue("My draft");
   });
@@ -469,9 +469,9 @@ describe("SourceTab conditional editing", () => {
     await user.click(await screen.findByRole("button", { name: "Edit Title" }));
     await user.clear(screen.getByRole("textbox", { name: "Title override" }));
     await user.type(screen.getByRole("textbox", { name: "Title override" }), "My draft");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save override" }));
     await screen.findByRole("button", { name: "Review latest version" });
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save override" })).toBeDisabled();
     expect(writes).toHaveLength(1);
     view.route({ "GET /api/v1/models/1/provenance": json(latest) });
     await user.click(screen.getByRole("button", { name: "Review latest version" }));
@@ -531,7 +531,7 @@ describe("SourceTab conflict recovery", () => {
     await user.click(await screen.findByRole("button", { name: "Edit Title" }));
     await user.clear(screen.getByRole("textbox", { name: "Title override" }));
     await user.type(screen.getByRole("textbox", { name: "Title override" }), "My draft");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save override" }));
     await screen.findByRole("button", { name: "Review latest version" });
     view.route({ "GET /api/v1/models/1/provenance": json(latest) });
     return { user, view, latest };
@@ -542,7 +542,9 @@ describe("SourceTab conflict recovery", () => {
     await user.click(screen.getByRole("button", { name: "Review latest version" }));
     await user.click(await screen.findByRole("button", { name: "Use latest version" }));
     expect(await screen.findByText("Latest saved title")).toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "Title override" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("textbox", { name: "Title override" })).not.toBeInTheDocument(),
+    );
     expect(view.requestsWithMethod("PATCH")).toHaveLength(1);
   });
 
@@ -728,8 +730,10 @@ describe("SourceTab edit boundaries", () => {
     });
     await user.click(await screen.findByRole("button", { name: "Edit Title" }));
     await user.type(screen.getByRole("textbox", { name: "Title override" }), " draft");
-    await user.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Save override" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save override" })).toBeEnabled(),
+    );
     expect(screen.getByRole("textbox", { name: "Title override" })).toHaveValue(
       "Source title draft",
     );
@@ -760,12 +764,14 @@ describe("SourceTab edit boundaries", () => {
       },
     });
     await user.click(await screen.findByRole("button", { name: "Edit Title" }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("button", { name: "Save override" }));
     view.rerender(<SourceTab modelId={2} canEdit />);
     await screen.findByText("Source title");
     expect(screen.getByRole("button", { name: "Edit Title" })).toBeEnabled();
     await act(async () => held.resolve(json({ ...provenance, edit_version: 9 })));
-    expect(screen.queryByRole("textbox", { name: "Title override" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("textbox", { name: "Title override" })).not.toBeInTheDocument(),
+    );
     expect(view.client.getQueryData([...queryKeys.model(2), "provenance"])).toMatchObject({
       edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 12,

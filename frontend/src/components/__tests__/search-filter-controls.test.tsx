@@ -2,7 +2,7 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { useLocation } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
 import SearchPage from "@/pages/search";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import { aSearchResult, searchResponse, searchStatus } from "@/test-support/search";
@@ -34,7 +34,7 @@ const parsed: ParsedSearch = {
   },
 };
 function Location() {
-  return <span data-testid="location">{useLocation().search}</span>;
+  return <span data-testid="location">{useLocation().searchStr}</span>;
 }
 function setup(options: RenderAppOptions = {}) {
   return renderApp(
@@ -171,8 +171,6 @@ describe("Natural-language search filters", () => {
     setup({ locale: "es" });
     await waitForParsedSearch();
     expect(await screen.findByRole("button", { name: "Quitar Impresión correcta" })).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Filtros del historial de impresión" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Historial de impresión" })).toBeVisible();
   });
 });

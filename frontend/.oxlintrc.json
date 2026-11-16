@@ -11,7 +11,8 @@
     "test-results/**",
     ".agents/**",
     ".claude/**",
-    "tools/oxlint/anti-slop/**"
+    "tools/oxlint/anti-slop/**",
+    "src/routeTree.gen.ts"
   ],
   "jsPlugins": [
     {
@@ -49,5 +50,18 @@
         "assertFunctionNames": ["expect", "expectRequest"]
       }
     ]
-  }
+  },
+  "overrides": [
+    {
+      "files": ["src/routes/**"],
+      "rules": {
+        "react/only-export-components": [
+          "error",
+          {
+            "allowExportNames": ["Route"]
+          }
+        ]
+      }
+    }
+  ]
 }

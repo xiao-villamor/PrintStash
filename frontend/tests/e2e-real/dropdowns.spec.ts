@@ -142,8 +142,8 @@ test.describe("dropdown viewport placement", () => {
       try {
         await member.page.setViewportSize({ width: 390, height: 844 });
         await member.page.goto(`/models/${modelId}`);
-        const trigger = member.page.getByRole("button", { name: "Model actions" });
-        await trigger.click();
+        const trigger = member.page.getByRole("heading", { level: 1 });
+        await trigger.click({ button: "right" });
         const panel = member.page.getByRole("menu");
         await expect(panel).toHaveAttribute("data-state", "open");
         const bounds = await panel.boundingBox();

@@ -374,6 +374,23 @@ class TestSharedFieldMetadata:
                     field.input_type == "password" for field in fields if field.secret
                 )
 
+    def test_local_folders_use_the_names_setup_shows(self):
+        # Setup's check result and review call these folders "Your files" and
+        # "Previews"; the form must use the same names so they read as one thing.
+        from app.modules.storage.storage_providers import provider_catalogue
+
+        local = next(p for p in provider_catalogue() if p.id == "local")
+        labels = {field.name: field.label for field in local.fields_by_use["vault"]}
+        assert labels["data_dir"] == "Your files"
+        assert labels["thumb_dir"] == "Previews"
+
+    def test_local_files_folder_explains_container_paths(self):
+        from app.modules.storage.storage_providers import provider_catalogue
+
+        local = next(p for p in provider_catalogue() if p.id == "local")
+        data_dir = next(f for f in local.fields_by_use["vault"] if f.name == "data_dir")
+        assert "inside the container" in data_dir.help
+
     def test_remote_uses_share_preset_configuration_fields(self):
         from app.modules.storage.storage_providers import provider_catalogue
 

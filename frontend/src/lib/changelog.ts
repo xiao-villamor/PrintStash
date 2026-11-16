@@ -13,6 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 export const GITHUB_REPO = "xiao-villamor/PrintStash";
+export const GITHUB_REPO_LABEL = `github.com/${GITHUB_REPO}`;
 
 export interface ChangelogEntry {
   version: string;
@@ -491,5 +492,5 @@ export const CHANGELOG: ChangelogEntry[] = [
   },
 ];
 
-/** Current app version = newest changelog entry. */
-export const APP_VERSION = CHANGELOG[0].version;
+/** Current release version, shared with the application shell. */
+export { APP_VERSION } from "./app-version";

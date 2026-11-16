@@ -22,7 +22,8 @@ import { outlinerRoutes } from "@/test-support/outliner";
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
+import { useRouter } from "@/lib/navigation";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LibraryStartupProvider } from "@/lib/library-startup-provider";
@@ -38,7 +39,13 @@ import type {
   TagRead,
 } from "@/types";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
-import { anEditingBase, aCollectionNode, aModelListItem, aPrinter } from "@/test-support/factories";
+import {
+  anEditingBase,
+  aCollectionNode,
+  aModel,
+  aModelListItem,
+  aPrinter,
+} from "@/test-support/factories";
 import {
   adminSession,
   json,
@@ -141,6 +148,52 @@ const EMPTY_FACETS = {
   storage: [],
 };
 
+function observePagination() {
+  const observers: {
+    callback: IntersectionObserverCallback;
+    target: Element | null;
+    disconnected: boolean;
+  }[] = [];
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      entry: (typeof observers)[number];
+      constructor(callback: IntersectionObserverCallback) {
+        this.entry = { callback, target: null, disconnected: false };
+        observers.push(this.entry);
+      }
+      observe(target: Element) {
+        this.entry.target = target;
+      }
+      unobserve() {}
+      takeRecords() {
+        return [];
+      }
+      disconnect() {
+        this.entry.disconnected = true;
+      }
+    },
+  );
+  return async (kind: "models" | "folders" = "models") => {
+    const live = await waitFor(() => {
+      fireEvent.scroll(screen.getByRole("main"));
+      const observer = observers.findLast(
+        (entry) =>
+          !entry.disconnected && entry.target?.closest(`[data-library-pagination="${kind}"]`),
+      );
+      if (!observer) throw new Error("pagination is not observing the scrolled list");
+      return observer;
+    });
+    // SAFETY: the component reads only isIntersecting and ignores the observer argument.
+    act(() =>
+      live.callback(
+        [{ isIntersecting: true }] as IntersectionObserverEntry[],
+        {} as IntersectionObserver,
+      ),
+    );
+  };
+}
+
 function renderVault(
   options: RenderAppOptions & {
     models?: ModelListItem[];
@@ -196,6 +249,14 @@ function renderVault(
           }),
         "GET /api/v1/models/outliner": json([]),
         "GET /api/v1/models": json(models),
+        // Card admission reads the detail contract, not the list projection.
+        "GET /api/v1/models/": (url) => {
+          const path = new URL(url, "http://printstash.test").pathname;
+          const detail = path.match(/^\/api\/v1\/models\/(\d+)$/);
+          if (!detail) return json({ detail: "not_found" }, 404);
+          const id = Number(detail[1]);
+          return json(aModel({ ...models.find((model) => model.id === id), id }));
+        },
         "GET /api/v1/saved-views": json([]),
         "GET /api/v1/documents": json([]),
         "GET /api/v1/multipart-models": json(multipartModels),
@@ -211,17 +272,17 @@ function renderVault(
 
 function HistoryProbe() {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigation = useRouter();
   return (
     <>
-      <output data-testid="vault-location">{location.pathname + location.search}</output>
-      <button onClick={() => navigate("/?c=missing&cid=9")}>Open missing collection</button>
-      <button onClick={() => navigate(-1)}>History back</button>
-      <button onClick={() => navigate(1)}>History forward</button>
-      <button onClick={() => navigate("/?type=multipart&sort=name-asc")}>
+      <output data-testid="vault-location">{location.pathname + location.searchStr}</output>
+      <button onClick={() => navigation.push("/?c=missing&cid=9")}>Open missing collection</button>
+      <button onClick={() => navigation.back()}>History back</button>
+      <button onClick={() => navigation.forward()}>History forward</button>
+      <button onClick={() => navigation.push("/?type=multipart&sort=name-asc")}>
         Open multipart location
       </button>
-      <button onClick={() => navigate("/?v=docs&type=all&sort=date-desc")}>
+      <button onClick={() => navigation.push("/?v=docs&type=all&sort=date-desc")}>
         Open documents location
       </button>
     </>
@@ -271,8 +332,10 @@ function lastMultipartQuery(requests: () => { method: string; url: string }[]): 
 }
 
 async function openFilters() {
-  const trigger = screen.getAllByRole("button", { name: "Filters" }).at(-1)!;
-  if (trigger.getAttribute("aria-expanded") === "false") await userEvent.setup().click(trigger);
+  if (!screen.queryByRole("dialog", { name: "Filter Models" })) {
+    await userEvent.click(screen.getAllByRole("button", { name: /^Filters(?: \d+)?$/ }).at(-1)!);
+  }
+  expect(await screen.findByRole("searchbox", { name: "Search filters or values…" })).toBeVisible();
 }
 
 async function waitForLibraryActions() {
@@ -291,7 +354,7 @@ describe("ModelBrowser", () => {
   describe("library actions", () => {
     it("keeps library commands beside Filters", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       const main = screen.getByRole("main");
       const actions = within(main).getByRole("group", { name: "Library tools" });
       expect(within(main).getAllByRole("button", { name: "Filters" })).not.toHaveLength(0);
@@ -301,19 +364,19 @@ describe("ModelBrowser", () => {
         }),
       ).not.toBeInTheDocument();
 
-      expect(within(actions).getByRole("link", { name: "Similar models" })).toBeVisible();
-      expect(within(actions).getByRole("button", { name: "New collection" })).toBeVisible();
-      expect(within(actions).queryByRole("button", { name: "Select" })).not.toBeInTheDocument();
+      expect(within(main).getByRole("button", { name: "New collection" })).toBeVisible();
+      expect(within(actions).getByRole("button", { name: "Select" })).toBeVisible();
       expect(screen.getByRole("checkbox", { name: "Select Benchy" })).toBeVisible();
       expect(screen.queryByRole("button", { name: "Library tools" })).not.toBeInTheDocument();
       expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     });
-    it("links to library-wide similar models", async () => {
+    it("links to library-wide similar models from More", async () => {
+      const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
-      const actions = screen.getByRole("group", { name: "Library tools" });
+      await within(screen.getByRole("main")).findByText("Benchy");
 
-      expect(within(actions).getByRole("link", { name: "Similar models" })).toHaveAttribute(
+      await user.click(screen.getAllByRole("button", { name: "More" }).at(-1)!);
+      expect(await screen.findByRole("menuitem", { name: "Similar models" })).toHaveAttribute(
         "href",
         "/library/similar",
       );
@@ -322,14 +385,14 @@ describe("ModelBrowser", () => {
       const user = userEvent.setup();
       renderVault();
       await within(screen.getByRole("main")).findByRole("button", { name: "All Models" });
-      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(screen.getAllByRole("button", { name: "More" }).at(-1)!);
       await user.click(screen.getByRole("menuitem", { name: "New multipart set" }));
       expect(screen.getByRole("dialog", { name: "New multipart set" })).toBeVisible();
     });
     it("supports the keyboard selection lifecycle", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await user.keyboard("s");
       expect(screen.getByRole("button", { name: "Done" })).toBeVisible();
@@ -339,12 +402,26 @@ describe("ModelBrowser", () => {
     });
     it("hides selection for signed-out readers", async () => {
       renderVault({ auth: signedOutSession(), models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
-      const actions = screen.getByRole("group", { name: "Library tools" });
+      await within(screen.getByRole("main")).findByText("Benchy");
+      const main = screen.getByRole("main");
 
-      expect(within(actions).queryByRole("button", { name: "Select" })).not.toBeInTheDocument();
-      expect(within(actions).getByRole("button", { name: "New collection" })).toBeDisabled();
+      expect(within(main).queryByRole("button", { name: "Select" })).not.toBeInTheDocument();
+      expect(within(main).getByRole("button", { name: "New collection" })).toBeDisabled();
       expect(screen.queryByRole("checkbox", { name: "Select Benchy" })).not.toBeInTheDocument();
+    });
+    it("keeps the Library title when Favorites filters the results", async () => {
+      renderVault({ at: "/?favorites=true" });
+
+      expect(await screen.findByRole("heading", { name: "All Models", level: 1 })).toBeVisible();
+    });
+    it("offers a way back from an empty favorites view", async () => {
+      const user = userEvent.setup();
+      renderVault({ at: "/?favorites=true" });
+
+      expect(await screen.findByText("No favorites yet")).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Back to library" }));
+
+      expect(await screen.findByRole("heading", { name: "All Models", level: 1 })).toBeVisible();
     });
     it("keeps Favorites in quick access", async () => {
       const user = userEvent.setup();
@@ -363,7 +440,7 @@ describe("ModelBrowser", () => {
         ],
       });
 
-      expect(await screen.findByText("Benchy")).toBeInTheDocument();
+      expect(await within(screen.getByRole("main")).findByText("Benchy")).toBeInTheDocument();
       expect(screen.getByText("Cube")).toBeInTheDocument();
     });
 
@@ -690,7 +767,7 @@ describe("ModelBrowser", () => {
         at: "/?printed=invalid&has_similar_candidates=false",
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       expect(lastModelsQuery(requests).has("printed")).toBe(false);
       expect(lastModelsQuery(requests).has("has_similar_candidates")).toBe(false);
     });
@@ -703,7 +780,7 @@ describe("ModelBrowser", () => {
         historyProbe: true,
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       expect(lastModelsQuery(requests).has("printer_id")).toBe(false);
       await waitFor(() =>
         expect(screen.getByTestId("vault-location")).not.toHaveTextContent("printer_id"),
@@ -723,7 +800,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "GET /api/v1/saved-views": json([saved]) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: saved.name }));
@@ -741,7 +818,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "POST /api/v1/saved-views": json(aSavedView()) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: /Save current view/ }));
@@ -769,7 +846,7 @@ describe("ModelBrowser", () => {
           "POST /api/v1/saved-views": json(aSavedView({ id: 2 })),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: `Duplicate ${saved.name}` }));
@@ -789,7 +866,7 @@ describe("ModelBrowser", () => {
         at: "/?file_type=stl&file_type=bad&printed=no&tag=functional",
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await openFilters();
       await waitFor(() =>
         expect(requests().some((call) => call.url.includes("/models/facets"))).toBe(true),
@@ -815,13 +892,13 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         collections: [aCollection()],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
       expect(screen.getAllByText("1 selected").length).toBeGreaterThan(0);
 
       await user.click(
-        within(screen.getByRole("complementary")).getByRole("button", {
+        within(screen.getByRole("complementary")).getByRole("treeitem", {
           name: "Parts",
         }),
       );
@@ -841,7 +918,9 @@ describe("ModelBrowser", () => {
 
       const main = await screen.findByRole("main");
       for (const path of ["christine", "pegboard", "models"]) {
-        expect(main.querySelector(`[data-collection-path="${path}"]`)).toBeVisible();
+        await waitFor(() =>
+          expect(main.querySelector(`[data-collection-path="${path}"]`)).toBeVisible(),
+        );
       }
     });
 
@@ -854,8 +933,7 @@ describe("ModelBrowser", () => {
         ],
       });
 
-      const main = await screen.findByRole("main");
-      expect(within(main).getByRole("button", { name: /Christine/ })).toBeVisible();
+      expect(await screen.findByRole("treeitem", { name: "Christine" })).toBeVisible();
     });
 
     it("opens a collection from its grid card", async () => {
@@ -863,7 +941,7 @@ describe("ModelBrowser", () => {
       renderVault({ collections: [aCollection()] });
 
       const main = await screen.findByRole("main");
-      await user.click(within(main).getByRole("button", { name: /Parts/ }));
+      await user.click(await within(main).findByRole("button", { name: /Parts/ }));
 
       expect(await screen.findByRole("heading", { name: "Parts" })).toBeVisible();
     });
@@ -872,11 +950,11 @@ describe("ModelBrowser", () => {
       renderVault({ collections: [aCollection()], historyProbe: true });
 
       const main = await screen.findByRole("main");
-      fireEvent.click(within(main).getByRole("button", { name: /Parts/ }));
+      fireEvent.click(await within(main).findByRole("button", { name: /Parts/ }));
       expect(await screen.findByRole("heading", { name: "Parts" })).toBeVisible();
 
       const breadcrumb = within(main).getByRole("navigation");
-      fireEvent.click(within(breadcrumb).getByRole("button", { name: "Parts" }));
+      fireEvent.click(within(breadcrumb).getByText("Parts"));
       fireEvent.click(screen.getByRole("button", { name: "History back" }));
 
       await waitFor(() =>
@@ -931,9 +1009,9 @@ describe("ModelBrowser", () => {
       // Every level of the path has to be reachable, or the user is stranded in
       // a folder with no way back up.
       await waitFor(() => {
-        const labels = screen.getAllByRole("button").map((button) => button.textContent);
-        expect(labels).toEqual(expect.arrayContaining([expect.stringContaining("Parts")]));
-        expect(labels).toEqual(expect.arrayContaining([expect.stringContaining("Brackets")]));
+        const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumbs" });
+        expect(within(breadcrumb).getByText("Parts")).toBeVisible();
+        expect(within(breadcrumb).getByText("Brackets")).toHaveAttribute("aria-current", "page");
       });
     });
   });
@@ -949,7 +1027,7 @@ describe("ModelBrowser", () => {
         ],
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       const whole = requests().filter(
         (call) => new URL(call.url, "http://test").pathname === "/api/v1/collections",
@@ -958,7 +1036,8 @@ describe("ModelBrowser", () => {
       expect(whole).toEqual([]);
     });
 
-    it("labels a model card with its folder's names", async () => {
+    it("shows server-provided folder identity in the list", async () => {
+      localStorage.setItem("ps-vault-view", "list");
       renderVault({
         models: [
           aModelListItem({
@@ -970,8 +1049,8 @@ describe("ModelBrowser", () => {
         ],
       });
 
-      // The chip shows the folder's own name and carries its full path.
-      expect(await screen.findByTitle("Parts/Brackets")).toHaveTextContent("Brackets");
+      const row = await within(screen.getByRole("main")).findByRole("link", { name: /Benchy/ });
+      expect(within(row).getByText("Parts/Brackets")).toBeVisible();
     });
   });
 
@@ -982,14 +1061,17 @@ describe("ModelBrowser", () => {
     ];
 
     /**
-     * A folder card in the grid (the sidebar tree lists the same names). The
-     * cards arrive with the open folder's children, after the page has drawn.
+     * The open control of a folder card in the grid (the sidebar tree lists the
+     * same names). The cards arrive with the open folder's children, after the
+     * page has drawn; the card's button, not its frame, opens the folder.
      */
     async function folderCard(path: string) {
       return waitFor(() => {
         const card = screen
           .getByRole("main")
-          .querySelector<HTMLElement>(`[data-collection-path="${path}"]`);
+          .querySelector<HTMLElement>(
+            `[data-collection-path="${path}"][role="button"], [data-collection-path="${path}"] button:not([role])`,
+          );
         if (!card) throw new Error(`no folder card for ${path}`);
         return card;
       });
@@ -1003,7 +1085,7 @@ describe("ModelBrowser", () => {
       return requests().filter(
         (call) =>
           call.method === "GET" &&
-          call.url.startsWith(prefix) &&
+          new URL(call.url, "http://test").pathname === prefix &&
           new URLSearchParams(call.url.split("?")[1] ?? "").get("collection") === collection,
       );
     }
@@ -1014,13 +1096,41 @@ describe("ModelBrowser", () => {
         collections: PARTS_TREE,
         routes: { "GET /api/v1/models/facets": () => pending.promise },
       });
-      const folder = await screen.findByRole("button", { name: /^Parts$/ });
+      const folder = await screen.findByRole("treeitem", { name: /^Parts$/ });
       expect(app.requests().some((request) => request.url.includes("/models/facets"))).toBe(true);
 
       await act(async () => pending.resolve(json(EMPTY_FACETS)));
       await waitFor(() => expect(app.client.isFetching()).toBe(0));
 
       expect(folder).toBeInTheDocument();
+    });
+
+    it("keeps the card of a Model shown in both folders when moving between them", async () => {
+      const user = userEvent.setup();
+      const shared = aModelListItem({ id: 7, name: "Shared bracket" });
+      const page = (models: ReturnType<typeof aModelListItem>[]) =>
+        json({
+          items: models.map((model) => ({ kind: "model", model })),
+          total: models.length,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        });
+      renderVault({
+        at: "/?c=parts",
+        collections: PARTS_TREE,
+        routes: {
+          "GET /api/v1/models/browse": (url) =>
+            url.includes("parts%2Fbrackets")
+              ? page([shared])
+              : page([aModelListItem({ id: 8, name: "Shelf rig" }), shared]),
+        },
+      });
+      const before = (await screen.findByText("Shared bracket")).closest("[data-library-key]");
+      await user.click(await folderCard("parts/brackets"));
+      expect(await screen.findByRole("heading", { name: "Brackets" })).toBeVisible();
+      await waitFor(() => expect(screen.queryByText("Shelf rig")).not.toBeInTheDocument());
+      expect(screen.getByText("Shared bracket").closest("[data-library-key]")).toBe(before);
     });
 
     it("keeps one coherent folder result while the destination loads", async () => {
@@ -1032,7 +1142,7 @@ describe("ModelBrowser", () => {
         routes: {
           "GET /api/v1/models/browse": (url) =>
             url.includes("parts%2Fbrackets")
-              ? pending.promise
+              ? pending.promise.then((response) => response.clone())
               : json({
                   items: [{ kind: "model", model: aModelListItem({ name: "Shelf rig" }) }],
                   total: 1,
@@ -1080,8 +1190,9 @@ describe("ModelBrowser", () => {
         routes: {
           "GET /api/v1/models/browse": (url) => {
             const collection = new URL(url, "http://test").searchParams.get("collection");
-            if (collection === null) return root.promise;
-            if (collection === "parts/brackets") return child.promise;
+            if (collection === null) return root.promise.then((response) => response.clone());
+            if (collection === "parts/brackets")
+              return child.promise.then((response) => response.clone());
             return json({
               items: [{ kind: "model", model: aModelListItem({ name: "Displayed shelf" }) }],
               total: 1,
@@ -1104,7 +1215,7 @@ describe("ModelBrowser", () => {
           ),
         ).toBe(true),
       );
-      expect(within(breadcrumb).getByRole("button", { name: "Parts" })).toBeVisible();
+      expect(within(breadcrumb).getByText("Parts")).toBeVisible();
       fireEvent.click(await folderCard("parts/brackets"));
       await waitFor(() =>
         expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
@@ -1119,7 +1230,7 @@ describe("ModelBrowser", () => {
         }),
       );
       expect(screen.getByRole("heading", { name: "Parts" })).toBeVisible();
-      expect(within(breadcrumb).getByRole("button", { name: "Parts" })).toBeVisible();
+      expect(within(breadcrumb).getByText("Parts")).toBeVisible();
       const href = new URL(
         screen.getByRole("link", { name: /Displayed shelf/ }).getAttribute("href")!,
         "http://test",
@@ -1137,7 +1248,7 @@ describe("ModelBrowser", () => {
       );
       await screen.findByText("Current bracket");
       expect(screen.getByRole("heading", { name: "Brackets" })).toBeVisible();
-      expect(within(breadcrumb).getByRole("button", { name: "Brackets" })).toBeVisible();
+      expect(within(breadcrumb).getByText("Brackets")).toBeVisible();
       expect(screen.queryByText("Displayed shelf")).not.toBeInTheDocument();
       expect(screen.queryByText("Late root")).not.toBeInTheDocument();
     });
@@ -1155,9 +1266,25 @@ describe("ModelBrowser", () => {
       expect(requestsFor(requests, "/api/v1/models/facets", "parts/brackets")).toHaveLength(0);
     });
 
+    // No direct entries. The server resolves automatic scope on its first page.
+    const autoScopeBrowse = {
+      "GET /api/v1/models/browse": json({
+        items: [],
+        total: 0,
+        next_cursor: null,
+        browse_revision: "r1",
+        authorization_revision: "a1",
+        effective_direct: false,
+      }),
+    };
+
     it("opens a warmed folder without asking the server again", async () => {
       const user = userEvent.setup();
-      const { requests } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
+      const { requests } = renderVault({
+        at: "/?c=parts",
+        collections: PARTS_TREE,
+        routes: autoScopeBrowse,
+      });
       await screen.findByRole("heading", { name: "Parts" });
       await user.hover(await folderCard("parts/brackets"));
       await waitFor(() =>
@@ -1167,7 +1294,8 @@ describe("ModelBrowser", () => {
       await user.click(await folderCard("parts/brackets"));
 
       await screen.findByRole("heading", { name: "Brackets" });
-      expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1);
+      const reads = requestsFor(requests, "/api/v1/models/browse", "parts/brackets");
+      expect(reads).toHaveLength(1);
       expect(requestsFor(requests, "/api/v1/multipart-models", "parts/brackets")).toHaveLength(0);
     });
 
@@ -1227,11 +1355,16 @@ describe("ModelBrowser", () => {
     it("does not re-warm the folder that is already open", async () => {
       // Its data is on screen; the sidebar row for it is the most-hovered one.
       const user = userEvent.setup();
-      const { requests, client } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
+      const { requests, client } = renderVault({
+        at: "/?c=parts",
+        collections: PARTS_TREE,
+        routes: autoScopeBrowse,
+      });
       await screen.findByRole("heading", { name: "Parts" });
-      await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/browse", "parts")).toHaveLength(1),
-      );
+      await waitFor(() => {
+        const reads = requestsFor(requests, "/api/v1/models/browse", "parts");
+        expect(reads).toHaveLength(1);
+      });
       // Past production's staleTime, a prefetch of this folder would refetch it.
       client.setDefaultOptions({ queries: { retry: false, staleTime: 0 } });
       const outliner = screen.getByPlaceholderText("Filter outliner...").closest("aside")!;
@@ -1345,7 +1478,7 @@ describe("ModelBrowser", () => {
     it("starts in the everything library view when no preference exists", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
 
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       expect(screen.getAllByRole("button", { name: "Everything" })[0]).toHaveAttribute(
         "aria-pressed",
         "true",
@@ -1355,7 +1488,7 @@ describe("ModelBrowser", () => {
     it("remembers a library view choice", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await user.click(screen.getAllByRole("button", { name: "Multipart sets only" })[0]);
 
@@ -1376,7 +1509,7 @@ describe("ModelBrowser", () => {
 
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
 
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       expect(screen.getAllByRole("button", { name: "Everything" })[0]).toHaveAttribute(
         "aria-pressed",
         "true",
@@ -1388,7 +1521,7 @@ describe("ModelBrowser", () => {
 
       renderVault({ at: "/?type=all", models: [aModelListItem({ name: "Benchy" })] });
 
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       expect(screen.getAllByRole("button", { name: "Everything" })[0]).toHaveAttribute(
         "aria-pressed",
         "true",
@@ -1406,10 +1539,9 @@ describe("ModelBrowser", () => {
     it("remembers a switch to the list view", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
-      await user.click(screen.getByRole("button", { name: /Display/ }));
-      await user.click(screen.getByRole("menuitem", { name: "List View" }));
+      await user.click(screen.getByRole("button", { name: "List View" }));
 
       expect(window.localStorage.getItem("ps-vault-view")).toBe("list");
     });
@@ -1417,10 +1549,10 @@ describe("ModelBrowser", () => {
     it("writes a sort choice into the URL", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })], historyProbe: true });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await user.click(sortButton());
-      await user.click(screen.getAllByRole("menuitem", { name: "Name A–Z" }).at(-1)!);
+      await user.click(screen.getAllByRole("menuitemradio", { name: "Name A–Z" }).at(-1)!);
 
       expect(screen.getByTestId("vault-location")).toHaveTextContent("sort=name-asc");
     });
@@ -1428,7 +1560,7 @@ describe("ModelBrowser", () => {
     it("restores URL-owned mode on history navigation", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })], historyProbe: true });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await user.click(screen.getByRole("button", { name: "Open multipart location" }));
       expect(screen.getAllByRole("button", { name: "Multipart sets only" })[0]).toHaveAttribute(
@@ -1447,12 +1579,12 @@ describe("ModelBrowser", () => {
     it("remembers a sort choice", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       const sort = sortButton();
       await user.click(sort);
       // Each bar owns its own menu, so scope the choice to the one just opened.
-      await user.click(screen.getAllByRole("menuitem", { name: "Name A–Z" }).at(-1)!);
+      await user.click(screen.getAllByRole("menuitemradio", { name: "Name A–Z" }).at(-1)!);
 
       expect(window.localStorage.getItem("ps-vault-sort")).toBe("name-asc");
     });
@@ -1460,9 +1592,9 @@ describe("ModelBrowser", () => {
     it("restores the selected relevance ordering for Model browse", async () => {
       const user = userEvent.setup();
       const app = renderVault({ at: "/?q=benchy", models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await user.click(sortButton());
-      await user.click(screen.getAllByRole("menuitem", { name: "Relevance" }).at(-1)!);
+      await user.click(screen.getAllByRole("menuitemradio", { name: "Relevance" }).at(-1)!);
       expect(window.localStorage.getItem("ps-vault-sort")).toBe("relevance");
       await waitFor(() =>
         expect(
@@ -1481,7 +1613,7 @@ describe("ModelBrowser", () => {
 
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
 
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       expect(sortButton()).toHaveTextContent("Newest");
     });
   });
@@ -1490,30 +1622,22 @@ describe("ModelBrowser", () => {
     it("follows the document tab through browser history", async () => {
       const user = userEvent.setup();
       renderVault({ historyProbe: true });
-      await screen.findByRole("tab", { name: "Models" });
+      await screen.findByRole("heading", { name: "All Models" });
 
       await user.click(screen.getByRole("button", { name: "Open documents location" }));
-      expect(screen.getByRole("tab", { name: "Documents" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(await screen.findByRole("heading", { name: "Documents" })).toBeVisible();
       await user.click(screen.getByRole("button", { name: "History back" }));
-      expect(screen.getByRole("tab", { name: "Models" })).toHaveAttribute("aria-selected", "true");
+      expect(await screen.findByRole("heading", { name: "All Models" })).toBeVisible();
+      expect(screen.queryByRole("heading", { name: "Documents" })).not.toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "History forward" }));
 
-      expect(screen.getByRole("tab", { name: "Documents" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(await screen.findByRole("heading", { name: "Documents" })).toBeVisible();
     });
 
     it("opens on the documents tab when the URL asks for it", async () => {
       renderVault({ at: "/?v=docs" });
 
-      expect(await screen.findByRole("tab", { name: "Documents" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(await screen.findByRole("heading", { name: "Documents" })).toBeVisible();
     });
   });
 
@@ -1638,16 +1762,18 @@ describe("ModelBrowser", () => {
       renderVault({ at: "/?v=multipart", multipartModels: [aMultipartSet()] });
 
       expect(await screen.findByRole("heading", { name: "All Models" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Models" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("group", { name: "Library tools" })).toBeVisible();
       expect(screen.getAllByRole("button", { name: "Multipart sets only" })[0]).toHaveAttribute(
         "aria-pressed",
         "true",
       );
-      await openFilters();
-      expect(screen.getByText("Printer")).toBeInTheDocument();
       expect(screen.getAllByRole("button", { name: "Upload" })).not.toHaveLength(0);
       await waitForLibraryActions();
-      expect(screen.getAllByRole("button", { name: "New multipart set" })).not.toHaveLength(0);
+      await userEvent.click(screen.getAllByRole("button", { name: "More" })[0]);
+      expect(screen.getByRole("menuitem", { name: "New multipart set" })).toBeEnabled();
+      await userEvent.keyboard("{Escape}");
+      await openFilters();
+      expect(screen.getByText("Printer")).toBeInTheDocument();
     });
   });
 
@@ -1850,7 +1976,7 @@ describe("ModelBrowser", () => {
           aModelListItem({ id: 2, name: "Cube" }),
         ],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
 
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
@@ -1882,7 +2008,7 @@ describe("ModelBrowser", () => {
       const user = userEvent.setup();
       window.localStorage.setItem("ps-recent-folders", JSON.stringify(["parts"]));
       renderVault({ models: [aModelListItem({ name: "Benchy" })], collections: [aCollection()] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await user.click(screen.getAllByRole("button", { name: /Recent/ }).at(-1)!);
 
@@ -1896,7 +2022,7 @@ describe("ModelBrowser", () => {
 
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
 
-      expect(await screen.findByText("Benchy")).toBeInTheDocument();
+      expect(await within(screen.getByRole("main")).findByText("Benchy")).toBeInTheDocument();
     });
 
     it("ignores a stored list that is not JSON", async () => {
@@ -1904,13 +2030,45 @@ describe("ModelBrowser", () => {
 
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
 
-      expect(await screen.findByText("Benchy")).toBeInTheDocument();
+      expect(await within(screen.getByRole("main")).findByText("Benchy")).toBeInTheDocument();
     });
   });
 
   describe("upload deep link", () => {
     it("opens the upload dialog for ?upload=1", async () => {
       renderVault({ at: "/?upload=1" });
+
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    });
+
+    it("rejects an upload intent without verified edit access", async () => {
+      const permission = Promise.withResolvers<Response>();
+      const app = renderVault({
+        at: "/?upload=1",
+        auth: memberSession(),
+        historyProbe: true,
+        routes: { "GET /api/v1/collections/search": () => permission.promise },
+      });
+
+      await waitFor(() =>
+        expect(app.requests().some((request) => request.url.includes("/collections/search"))).toBe(
+          true,
+        ),
+      );
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      await act(async () => permission.resolve(json({ items: [], next_cursor: null })));
+      await waitFor(() =>
+        expect(screen.getByTestId("vault-location")).not.toHaveTextContent("upload=1"),
+      );
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("opens an upload intent for a member with an editable collection", async () => {
+      renderVault({
+        at: "/?upload=1",
+        auth: memberSession(),
+        collections: [aCollection({ effective_role: "edit" })],
+      });
 
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
     });
@@ -1924,7 +2082,7 @@ describe("ModelBrowser", () => {
         tags: [aTag({ name: "functional", slug: "functional" })],
       });
 
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       // The chip is the only way back out of a tag that arrived in the URL, so
       // losing it strands the user in a filtered view they cannot widen.
       expect(screen.getByRole("button", { name: /Clear all/ })).toBeInTheDocument();
@@ -1975,12 +2133,17 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "POST /api/v1/collections": json(aCollection({ id: 9, name: "Bolts" })) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: "New collection" }));
-      await user.type(screen.getByPlaceholderText(/New subcollection/), "Bolts");
-      await user.click(screen.getByRole("button", { name: "Create" }));
+      await user.type(
+        within(screen.getByRole("dialog", { name: "New collection" })).getByRole("textbox", {
+          name: "Name",
+        }),
+        "Bolts",
+      );
+      await user.click(screen.getByRole("button", { name: "Create collection" }));
 
       await waitFor(() =>
         expect(
@@ -2006,12 +2169,17 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "POST /api/v1/collections": json(aCollection({ id: 9, name: "Bolts" })) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: "New collection" }));
-      await user.type(screen.getByPlaceholderText("Collection name..."), "Bolts");
-      await user.click(screen.getByRole("button", { name: "Create" }));
+      await user.type(
+        within(screen.getByRole("dialog", { name: "New collection" })).getByRole("textbox", {
+          name: "Name",
+        }),
+        "Bolts",
+      );
+      await user.click(screen.getByRole("button", { name: "Create collection" }));
 
       await waitFor(() =>
         expect(
@@ -2029,18 +2197,18 @@ describe("ModelBrowser", () => {
     it("refuses to create a folder with no name", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: "New collection" }));
 
-      expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Create collection" })).toBeDisabled();
     });
 
     it("abandons the form on cancel", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: "New collection" }));
 
@@ -2052,7 +2220,7 @@ describe("ModelBrowser", () => {
 
   describe("acting on several models at once", () => {
     async function selectBoth(user: ReturnType<typeof userEvent.setup>) {
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.keyboard("s");
       await user.click(screen.getByRole("button", { name: /Select all on screen/ }));
@@ -2125,7 +2293,7 @@ describe("ModelBrowser", () => {
           aModelListItem({ id: 2, name: "Cube" }),
         ],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
 
@@ -2172,7 +2340,7 @@ describe("ModelBrowser", () => {
           },
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.keyboard("s");
       selecting = true;
@@ -2257,10 +2425,7 @@ describe("ModelBrowser", () => {
       const name = await screen.findByRole("textbox", { name: "Collection name" });
       expect(name).toHaveValue("Parts");
       expect(name).toHaveFocus();
-      expect(screen.getByRole("dialog", { name: "Rename Parts" })).not.toHaveAttribute(
-        "aria-modal",
-        "true",
-      );
+      expect(screen.queryByRole("dialog")).toBeNull();
       expect(screen.getByRole("heading", { name: "Parts", level: 1 })).toBeVisible();
     });
 
@@ -2401,11 +2566,16 @@ describe("ModelBrowser", () => {
     it("can rename after returning from a retired pending save", async () => {
       const user = userEvent.setup();
       const pending = Promise.withResolvers<Response>();
+      const nextPending = Promise.withResolvers<Response>();
+      let attempts = 0;
       const app = renderVault({
         at: "/?c=parts",
         collections: [aCollectionNode()],
         historyProbe: true,
-        routes: { "PATCH /api/v1/collections/1": () => pending.promise },
+        routes: {
+          "PATCH /api/v1/collections/1": () =>
+            ++attempts === 1 ? pending.promise : nextPending.promise,
+        },
       });
       await user.click(
         await screen.findByRole("button", { name: "Rename Parts" }, { timeout: 3000 }),
@@ -2424,12 +2594,21 @@ describe("ModelBrowser", () => {
       const name = await screen.findByRole("textbox", { name: "Collection name" });
       expect(name).toBeEnabled();
       expect(name).toHaveValue("Parts");
+      await user.clear(name);
+      await user.type(name, "New draft{Enter}");
+      await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(2));
       await act(async () => {
         pending.resolve(json({ detail: "collection_already_exists" }, 409));
         await pending.promise;
       });
-      expect(name).toBeEnabled();
-      expect(name).toHaveValue("Parts");
+      expect(name).toHaveAttribute("readonly");
+      expect(name).toHaveValue("New draft");
+      await act(async () => {
+        nextPending.resolve(json({ detail: "collection_already_exists" }, 409));
+        await nextPending.promise;
+      });
+      await waitFor(() => expect(name).not.toHaveAttribute("readonly"));
+      expect(name).toHaveValue("New draft");
     });
 
     it("retires a pending collection receipt when edit access is lost", async () => {
@@ -2491,36 +2670,38 @@ describe("ModelBrowser", () => {
       expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
     });
 
-    it("discards a collection draft through Cancel", async () => {
+    it("closes an unchanged inline collection name without writing", async () => {
       const user = userEvent.setup();
       const app = renderVault({ at: "/?c=parts", collections: [aCollectionNode()] });
       const pencil = await screen.findByRole("button", { name: "Rename Parts" }, { timeout: 3000 });
       await user.click(pencil);
-      await user.clear(screen.getByRole("textbox", { name: "Collection name" }));
-      await user.type(screen.getByRole("textbox", { name: "Collection name" }), "Discard me");
-
-      await user.click(screen.getByRole("button", { name: "Cancel" }));
-      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-      await user.click(pencil);
-
-      expect(screen.getByRole("textbox", { name: "Collection name" })).toHaveValue("Parts");
+      await user.keyboard("{Enter}");
+      expect(screen.queryByRole("textbox", { name: "Collection name" })).toBeNull();
+      expect(pencil).toHaveFocus();
       expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
     });
 
-    it("discards a collection draft when clicking outside", async () => {
+    it("saves an inline collection name on blur", async () => {
       const user = userEvent.setup();
-      const app = renderVault({ at: "/?c=parts", collections: [aCollectionNode()] });
-      const pencil = await screen.findByRole("button", { name: "Rename Parts" }, { timeout: 3000 });
-      await user.click(pencil);
+      const collection = aCollectionNode();
+      const app = renderVault({
+        at: "/?c=parts",
+        collections: [collection],
+        routes: {
+          "PATCH /api/v1/collections/1": () => {
+            Object.assign(collection, { name: "Spares", path: "spares", slug: "spares" });
+            return json(collection);
+          },
+        },
+      });
+      await user.click(
+        await screen.findByRole("button", { name: "Rename Parts" }, { timeout: 3000 }),
+      );
       await user.clear(screen.getByRole("textbox", { name: "Collection name" }));
-      await user.type(screen.getByRole("textbox", { name: "Collection name" }), "Discard me");
-
+      await user.type(screen.getByRole("textbox", { name: "Collection name" }), "Spares");
       await user.click(document.body);
-      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-      await user.click(pencil);
-
-      expect(screen.getByRole("textbox", { name: "Collection name" })).toHaveValue("Parts");
-      expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+      expect(await screen.findByRole("heading", { name: "Spares", level: 1 })).toBeVisible();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     });
 
     it("refuses a blank collection name", async () => {
@@ -2533,7 +2714,8 @@ describe("ModelBrowser", () => {
       await user.clear(name);
       await user.type(name, "   {Enter}");
 
-      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(screen.queryByRole("textbox", { name: "Collection name" })).toBeNull();
+      expect(screen.getByRole("heading", { name: "Parts", level: 1 })).toBeVisible();
       expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
     });
 
@@ -2552,19 +2734,17 @@ describe("ModelBrowser", () => {
       await user.type(name, "Spares{Enter}");
       await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
 
-      await user.click(pencil);
-      await user.dblClick(screen.getByRole("heading", { name: "Parts", level: 1 }));
-      await user.keyboard("{Enter}");
+      await user.keyboard("{Enter}{Escape}");
+      fireEvent.blur(name);
 
-      expect(name).toBeDisabled();
+      expect(name).toHaveAttribute("readonly");
       expect(name).toHaveValue("Spares");
-      expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
       await act(async () => {
         pending.resolve(json({ detail: "collection_already_exists" }, 409));
         await pending.promise;
       });
-      await waitFor(() => expect(name).toBeEnabled());
+      await waitFor(() => expect(name).not.toHaveAttribute("readonly"));
     });
 
     it("retains the collection name after a rejected rename", async () => {
@@ -2584,10 +2764,10 @@ describe("ModelBrowser", () => {
       await user.type(name, "Duplicate{Enter}");
 
       await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
-      await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
+      await waitFor(() => expect(name).not.toHaveAttribute("readonly"));
       expect(name).toHaveValue("Duplicate");
-      expect(screen.getByRole("heading", { name: "Parts", level: 1 })).toBeVisible();
-      expect(screen.getByRole("dialog", { name: "Rename Parts" })).toBeVisible();
+      expect(name).toHaveFocus();
+      expect(screen.queryByRole("dialog")).toBeNull();
     });
 
     it.each(["view", "edit"] as const)("hides collection rename from %s members", async (role) => {
@@ -2726,7 +2906,7 @@ describe("ModelBrowser", () => {
 
   describe("batch outcomes", () => {
     async function selectOneModel(user: ReturnType<typeof userEvent.setup>) {
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
     }
@@ -2819,7 +2999,7 @@ describe("ModelBrowser", () => {
 
     it("opens the upload dialog for a dropped mesh", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.drop(main, { dataTransfer: dataTransfer([new File(["x"], "cube.stl")]) });
 
@@ -2828,7 +3008,7 @@ describe("ModelBrowser", () => {
 
     it("ignores a drop that carries nothing importable", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.drop(main, { dataTransfer: dataTransfer([new File(["x"], "notes.txt")]) });
 
@@ -2837,7 +3017,7 @@ describe("ModelBrowser", () => {
 
     it("opens the upload dialog for a dropped archive", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.drop(main, { dataTransfer: dataTransfer([new File(["x"], "pack.zip")]) });
 
@@ -2846,7 +3026,7 @@ describe("ModelBrowser", () => {
 
     it("opens the upload dialog for several dropped meshes", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.drop(main, {
         dataTransfer: dataTransfer([new File(["a"], "a.stl"), new File(["b"], "b.stl")]),
@@ -2857,7 +3037,7 @@ describe("ModelBrowser", () => {
 
     it("opens the upload dialog for a dropped G-code file", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.drop(main, { dataTransfer: dataTransfer([new File(["x"], "part.gcode")]) });
 
@@ -2866,7 +3046,7 @@ describe("ModelBrowser", () => {
 
     it("opens the upload dialog for a dropped BGCODE file", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.drop(main, { dataTransfer: dataTransfer([new File(["GCDE"], "part.bgcode")]) });
 
@@ -2878,7 +3058,7 @@ describe("ModelBrowser", () => {
       // folder drop targets; treating it as a file upload would open the dialog
       // on top of the move the user is doing.
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       const modelDrag: DroppedPayload = {
         types: ["application/x-printstash-model"],
@@ -2900,7 +3080,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "GET /api/v1/saved-views": json([aSavedView()]) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: "Rename PETG only" }));
@@ -2921,7 +3101,7 @@ describe("ModelBrowser", () => {
     it("focuses the saved-view name when creating a view", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: /Save current view/ }));
@@ -2938,7 +3118,7 @@ describe("ModelBrowser", () => {
     it("immediately retires the private create draft with its session", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: /Save current view/ }));
@@ -2956,7 +3136,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "GET /api/v1/saved-views": json({ detail: "temporary_failure" }, 503) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await screen.findByText("Could not load saved views");
@@ -2975,7 +3155,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "POST /api/v1/saved-views": () => pending.promise },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: /Save current view/ }));
@@ -3031,7 +3211,7 @@ describe("ModelBrowser", () => {
           ]),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
 
@@ -3050,7 +3230,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "POST /api/v1/saved-views": json(aSavedView({ name: "PETG" })) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
@@ -3076,8 +3256,7 @@ describe("ModelBrowser", () => {
         tags: [aTag()],
         routes: { "POST /api/v1/saved-views": json(aSavedView()) },
       });
-      await screen.findByText("Benchy");
-      await waitForLibraryActions();
+      await within(screen.getByRole("main")).findByText("Benchy");
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: /Save current view/ }));
       const dialog = await screen.findByRole("dialog");
@@ -3096,7 +3275,7 @@ describe("ModelBrowser", () => {
     it("will not save a view with no name", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
@@ -3113,7 +3292,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "GET /api/v1/saved-views": json([aSavedView({ name: "Ready to print" })]) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
@@ -3124,7 +3303,7 @@ describe("ModelBrowser", () => {
     it("says so when no view has been saved", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
@@ -3145,7 +3324,7 @@ describe("ModelBrowser", () => {
           ]),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
 
@@ -3164,11 +3343,9 @@ describe("ModelBrowser", () => {
           "PATCH /api/v1/saved-views/1": json(aSavedView()),
         },
       });
-      await screen.findByText("Benchy");
-      await waitForLibraryActions();
+      await within(screen.getByRole("main")).findByText("Benchy");
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
-
-      await user.click(await screen.findByRole("button", { name: "Update PETG only" }));
+      await user.click(await screen.findByTitle("Update with current filters"));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
@@ -3186,7 +3363,7 @@ describe("ModelBrowser", () => {
           "PATCH /api/v1/saved-views/1": json(aSavedView({ name: "PLA only" })),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: "Rename PETG only" }));
@@ -3218,7 +3395,7 @@ describe("ModelBrowser", () => {
           "POST /api/v1/saved-views": json(aSavedView({ id: 3 })),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
 
@@ -3237,7 +3414,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "GET /api/v1/saved-views": json([aSavedView()]) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
 
@@ -3257,7 +3434,7 @@ describe("ModelBrowser", () => {
           "DELETE /api/v1/saved-views/1": json(null, 204),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: "Delete PETG only" }));
@@ -3280,8 +3457,7 @@ describe("ModelBrowser", () => {
         routes: { "GET /api/v1/saved-views": json([aSavedView()]) },
       });
 
-      await screen.findByText("Benchy");
-      await waitForLibraryActions();
+      await within(screen.getByRole("main")).findByText("Benchy");
       expect(screen.queryByRole("button", { name: /Saved views/ })).toBeNull();
     });
   });
@@ -3293,7 +3469,7 @@ describe("ModelBrowser", () => {
         at: "/?file_type=stl&tag=functional&favorites=true&sort=name-asc",
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await userEvent.setup().click(screen.getAllByRole("button", { name: /Clear all/ })[0]);
       await waitFor(() => {
         const query = lastModelsQuery(requests);
@@ -3318,7 +3494,7 @@ describe("ModelBrowser", () => {
         at: "/?tag=functional&favorites=true&q=bracket",
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await user.click(await screen.findByRole("button", { name: /Clear all/ }));
 
@@ -3346,9 +3522,10 @@ describe("ModelBrowser", () => {
     it("remembers the tab for the next visit", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
-      await user.click(screen.getByRole("tab", { name: "Documents" }));
+      await user.click(screen.getAllByRole("button", { name: "More" }).at(-1)!);
+      await user.click(screen.getByRole("menuitem", { name: "Documents" }));
 
       expect(window.localStorage.getItem("printstash.last.view")).toBe("docs");
     });
@@ -3356,6 +3533,7 @@ describe("ModelBrowser", () => {
 
   describe("pagination", () => {
     it("retries a failed continuation without discarding read pages", async () => {
+      const nextPage = observePagination();
       const user = userEvent.setup();
       const first = aModelListItem({ id: 1, name: "Already read" });
       const later = aModelListItem({ id: 2, name: "Next page" });
@@ -3377,19 +3555,19 @@ describe("ModelBrowser", () => {
         },
       });
       expect(await screen.findByText("Already read")).toBeVisible();
-      await user.click(screen.getByRole("button", { name: /Load more/ }));
+      await nextPage();
       expect(await screen.findByText("[429] rate_limited")).toBeVisible();
       expect(screen.getByText("Already read")).toBeVisible();
       expect(screen.queryByText("Next page")).not.toBeInTheDocument();
       rateLimited = false;
-      await user.click(screen.getByRole("button", { name: /Load more/ }));
+      await user.click(screen.getByRole("button", { name: "Retry" }));
       expect(await screen.findByText("Next page")).toBeVisible();
       expect(screen.getByText("Already read")).toBeVisible();
       expect(screen.queryByText("[429] rate_limited")).not.toBeInTheDocument();
     });
 
     it("keeps a wide folder level to one page until more is requested", async () => {
-      const user = userEvent.setup();
+      const nextPage = observePagination();
       const first = aCollectionNode();
       const second = aCollectionNode({
         id: 2,
@@ -3414,7 +3592,7 @@ describe("ModelBrowser", () => {
         requests().filter((call) => call.url.startsWith("/api/v1/collections/children")),
       ).toHaveLength(1);
 
-      await user.click(main.getByRole("button", { name: "Show more folders" }));
+      await nextPage("folders");
       expect(await main.findByText("Tools")).toBeInTheDocument();
       expect(
         requests().filter((call) => call.url.startsWith("/api/v1/collections/children")),
@@ -3422,7 +3600,7 @@ describe("ModelBrowser", () => {
     });
 
     it("preserves server order when another mixed page arrives", async () => {
-      const user = userEvent.setup();
+      const nextPage = observePagination();
       renderVault({
         at: "/?type=all&sort=name-asc",
         routes: {
@@ -3440,14 +3618,14 @@ describe("ModelBrowser", () => {
       });
       const first = await screen.findByRole("link", { name: /Zeta/ });
 
-      await user.click(screen.getByRole("button", { name: /Load more/ }));
+      await nextPage();
 
       const second = await screen.findByText("Älpha");
       expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     });
 
     it("reaches matching results after an empty browse page", async () => {
-      const user = userEvent.setup();
+      const nextPage = observePagination();
       renderVault({
         at: "/?file_type=stl",
         routes: {
@@ -3464,7 +3642,7 @@ describe("ModelBrowser", () => {
         },
       });
 
-      await user.click(await screen.findByRole("button", { name: /Load more/ }));
+      await nextPage();
 
       expect(await screen.findByText("Match")).toBeVisible();
     });
@@ -3479,15 +3657,20 @@ describe("ModelBrowser", () => {
           "DELETE /api/v1/models/1/star": () => pending.promise,
         },
       });
-      await screen.findByText("Favorite bracket");
+      await within(screen.getByRole("main")).findByText("Favorite bracket");
 
+      fireEvent.contextMenu(screen.getByRole("link", { name: /Favorite bracket/ }));
       await user.click(
-        screen.getByRole("button", { name: "Remove Favorite bracket from favorites" }),
+        await screen.findByRole("menuitem", { name: "Remove Favorite bracket from favorites" }),
       );
-      expect(screen.getByText("Favorite bracket")).toBeVisible();
+      expect(within(screen.getByRole("main")).getByText("Favorite bracket")).toBeVisible();
       pending.resolve(json({ model_id: 1, starred: false }));
 
-      await waitFor(() => expect(screen.queryByText("Favorite bracket")).not.toBeInTheDocument());
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole("main")).queryByText("Favorite bracket"),
+        ).not.toBeInTheDocument(),
+      );
     });
 
     it("offers more when the page reports a cursor", async () => {
@@ -3504,9 +3687,9 @@ describe("ModelBrowser", () => {
         },
       });
 
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitFor(() =>
-        expect(screen.queryByRole("button", { name: /Load more/ })).toBeInTheDocument(),
+        expect(document.querySelector('[data-library-pagination="models"]')).toBeInTheDocument(),
       );
     });
   });
@@ -3587,6 +3770,42 @@ describe("ModelBrowser", () => {
         expect(screen.queryByRole("button", { name: "Refresh library" })).toBeNull();
       },
     );
+
+    it("keeps automatic refresh quiet while its next page is pending", async () => {
+      const pending = Promise.withResolvers<Response>();
+      const app = renderVault({
+        models: [aModelListItem({ name: "Original model" })],
+        routes: { "GET /api/v1/models/browse/revision": changedRevision },
+      });
+      await changeNoticed(app);
+      app.route({ "GET /api/v1/models/browse": () => pending.promise });
+
+      await refreshStarted(app);
+
+      expect(mainHas("Original model")).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Refresh library" })).not.toBeInTheDocument();
+      pending.resolve(modelPage("Current model"));
+      expect(await within(screen.getByRole("main")).findByText("Current model")).toBeVisible();
+    });
+
+    it("shows progress for an explicit refresh", async () => {
+      const user = userEvent.setup();
+      const pending = Promise.withResolvers<Response>();
+      const app = renderVault({
+        routes: {
+          "GET /api/v1/models/browse": () => json({ detail: "browse_refresh_required" }, 409),
+          "GET /api/v1/models/browse/revision": changedRevision,
+        },
+      });
+      const refresh = await screen.findByRole("button", { name: "Refresh library" });
+      app.route({ "GET /api/v1/models/browse": () => pending.promise });
+
+      await user.click(refresh);
+
+      expect(screen.getByRole("button", { name: "Refresh library" })).toBeDisabled();
+      pending.resolve(modelPage("Current model"));
+      expect(await within(screen.getByRole("main")).findByText("Current model")).toBeVisible();
+    });
 
     it("waits for refreshed folders before replacing models", async () => {
       const pending = Promise.withResolvers<Response>();
@@ -3745,6 +3964,7 @@ describe("ModelBrowser", () => {
     });
 
     it("restarts refreshed folder pagination", async () => {
+      const nextPage = observePagination();
       const user = userEvent.setup();
       const app = renderVault({
         models: [aModelListItem({ name: "Original model" })],
@@ -3763,7 +3983,7 @@ describe("ModelBrowser", () => {
             }),
         },
       });
-      await user.click(await screen.findByRole("button", { name: "Show more folders" }));
+      await nextPage("folders");
       await within(screen.getByRole("main")).findByText("Second folder");
       app.route({
         "GET /api/v1/models/browse": modelPage("Current model"),
@@ -3929,38 +4149,6 @@ describe("ModelBrowser", () => {
   });
 
   describe("loading the next page by scrolling", () => {
-    const observers: { callback: IntersectionObserverCallback; disconnected: boolean }[] = [];
-    beforeEach(() => {
-      observers.length = 0;
-      vi.stubGlobal(
-        "IntersectionObserver",
-        class {
-          entry: { callback: IntersectionObserverCallback; disconnected: boolean };
-          constructor(callback: IntersectionObserverCallback) {
-            this.entry = { callback, disconnected: false };
-            observers.push(this.entry);
-          }
-          observe() {}
-          unobserve() {}
-          takeRecords() {
-            return [];
-          }
-          disconnect() {
-            this.entry.disconnected = true;
-          }
-        },
-      );
-    });
-    afterEach(() => vi.unstubAllGlobals());
-
-    function reachTheEnd() {
-      const live = observers.filter((observer) => !observer.disconnected).at(-1);
-      if (!live) throw new Error("no observer is watching the end of the list");
-      // SAFETY: the component reads only `isIntersecting` from an entry, nothing from the observer.
-      const entries = [{ isIntersecting: true }] as IntersectionObserverEntry[];
-      // SAFETY: the callback ignores its second argument, which only a real observer supplies.
-      act(() => live.callback(entries, {} as IntersectionObserver));
-    }
     function pagedRoutes(rateLimited: () => boolean) {
       return {
         "GET /api/v1/models/browse": (url: string) => {
@@ -3985,24 +4173,34 @@ describe("ModelBrowser", () => {
       };
     }
 
-    it("loads the next page when the end comes into view, with no button", async () => {
+    it("loads the next page automatically without a pagination button", async () => {
+      const nextPage = observePagination();
       renderVault({ routes: pagedRoutes(() => false) });
       expect(await screen.findByText("First page")).toBeVisible();
       expect(screen.queryByRole("button", { name: /Load more/ })).not.toBeInTheDocument();
       expect(screen.queryByText("Next page")).not.toBeInTheDocument();
 
-      reachTheEnd();
+      await nextPage();
 
       expect(await screen.findByText("Next page")).toBeVisible();
     });
 
-    it("brings the button back after a failed read instead of retrying without end", async () => {
+    it("loads a page after scrollbar-driven scrolling", async () => {
+      const nextPage = observePagination();
+      renderVault({ routes: pagedRoutes(() => false) });
+      expect(await screen.findByText("First page")).toBeVisible();
+      await nextPage();
+      expect(await screen.findByText("Next page")).toBeVisible();
+    });
+
+    it("keeps explicit retry after a continuation fails", async () => {
+      const nextPage = observePagination();
       renderVault({ routes: pagedRoutes(() => true) });
       expect(await screen.findByText("First page")).toBeVisible();
 
-      reachTheEnd();
+      await nextPage();
 
-      expect(await screen.findByRole("button", { name: /Load more/ })).toBeVisible();
+      expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();
     });
   });
 
@@ -4046,6 +4244,7 @@ describe("ModelBrowser", () => {
     });
 
     it("restarts a rejected continuation from the first page", async () => {
+      const nextPage = observePagination();
       const user = userEvent.setup();
       const app = renderVault({
         routes: {
@@ -4061,7 +4260,7 @@ describe("ModelBrowser", () => {
                 }),
         },
       });
-      await user.click(await screen.findByRole("button", { name: /Load more/ }));
+      await nextPage();
       await screen.findByText("The library has changed. Refresh before loading more results.");
       expect(screen.getByText("Original bracket")).toBeVisible();
       app.route({
@@ -4181,7 +4380,7 @@ describe("ModelBrowser", () => {
         collections: [aCollection({ effective_role: "view" })],
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       expect(screen.getByRole("button", { name: "New collection" })).toBeDisabled();
@@ -4194,7 +4393,7 @@ describe("ModelBrowser", () => {
         collections: [aCollection({ effective_role: "view" })],
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       expect(screen.getByRole("button", { name: "New collection" })).toHaveAttribute(
@@ -4212,7 +4411,7 @@ describe("ModelBrowser", () => {
         tags: [aTag()],
         routes: { "POST /api/v1/models/batch/tags": json({ detail: "unavailable" }, 503) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
       await user.click(screen.getByRole("button", { name: "Tag" }));
@@ -4252,7 +4451,7 @@ describe("ModelBrowser", () => {
           }),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
       await user.click(screen.getByRole("button", { name: "Tag" }));
@@ -4280,7 +4479,7 @@ describe("ModelBrowser", () => {
           "PATCH /api/v1/models/1": json({ id: 1, tags: ["draft"], edit_version: 12 }),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
       await user.click(screen.getByRole("button", { name: "Tag" }));
@@ -4336,13 +4535,17 @@ describe("ModelBrowser", () => {
       // "printer_presence=none" means nothing to the person reading the chip.
       renderVault({ at: "/?printer_presence=none" });
 
-      expect(await within(screen.getByRole("main")).findByText("Vault only")).toBeInTheDocument();
+      expect(
+        await within(screen.getByRole("main")).findByRole("button", { name: "Vault only" }),
+      ).toBeInTheDocument();
     });
 
     it("names an on-a-printer filter in words", async () => {
       renderVault({ at: "/?printer_presence=any" });
 
-      expect(await within(screen.getByRole("main")).findByText("On a printer")).toBeInTheDocument();
+      expect(
+        await within(screen.getByRole("main")).findByRole("button", { name: "On a printer" }),
+      ).toBeInTheDocument();
     });
 
     it("names a structured filter readably", async () => {
@@ -4410,7 +4613,7 @@ describe("ModelBrowser", () => {
           },
         });
         const folder = await folderCard();
-        await screen.findByText("Benchy");
+        await within(screen.getByRole("main")).findByText("Benchy");
         const values = new Map<string, string>();
         const dataTransfer = {
           types: [MODEL_DND_MIME],
@@ -4486,7 +4689,7 @@ describe("ModelBrowser", () => {
       // Without the overlay a user dragging a file over the page has no way to
       // know the page will take it, and drops it on the desktop instead.
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.dragEnter(main, { dataTransfer: fileDrag() });
 
@@ -4497,7 +4700,7 @@ describe("ModelBrowser", () => {
       // The folder cards are the drop targets for a model; lighting the whole
       // vault up would suggest dropping anywhere works.
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.dragEnter(main, { dataTransfer: { types: [MODEL_DND_MIME] } });
 
@@ -4508,7 +4711,7 @@ describe("ModelBrowser", () => {
       // A drag over a grid fires leave/enter pairs constantly as it passes
       // between cards; a naive handler flickers the overlay on every one.
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
       fireEvent.dragEnter(main, { dataTransfer: fileDrag() });
       fireEvent.dragEnter(main, { dataTransfer: fileDrag() });
 
@@ -4519,7 +4722,7 @@ describe("ModelBrowser", () => {
 
     it("takes the invitation down when the drag really leaves", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
       fireEvent.dragEnter(main, { dataTransfer: fileDrag() });
 
       fireEvent.dragLeave(main, { dataTransfer: fileDrag() });
@@ -4551,7 +4754,7 @@ describe("ModelBrowser", () => {
     });
 
     async function selectAndMove(user: ReturnType<typeof userEvent.setup>) {
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByLabelText("Select Benchy"));
       await user.click(await screen.findByRole("button", { name: /Move/ }));
@@ -4745,5 +4948,45 @@ describe("ModelBrowser", () => {
       await user.click(screen.getByRole("button", { name: "Back to library" }));
       expect(await screen.findByRole("heading", { name: "All Models", level: 1 })).toBeVisible();
     });
+  });
+});
+
+describe("OpenDesign Library strip", () => {
+  it("filters revisions through an authoritative status shortcut", async () => {
+    const user = userEvent.setup();
+    const app = renderVault({
+      models: [aModelListItem({ name: "Status shortcut Model" })],
+      routes: {
+        "GET /api/v1/models/facets": json({
+          ...EMPTY_FACETS,
+          revision_status: [{ value: "known_good", count: 6 }],
+        }),
+      },
+    });
+    await user.click(await screen.findByRole("radio", { name: /^Ready/ }));
+    await waitFor(() =>
+      expect(lastModelsQuery(app.requests).getAll("revision_status")).toEqual(["known_good"]),
+    );
+  });
+  it("clears the revision shortcut while retaining another filter", async () => {
+    const user = userEvent.setup();
+    const app = renderVault({
+      at: "/?revision_status=needs_test&tag=Workshop",
+      models: [aModelListItem({ name: "Retained tag Model" })],
+    });
+    await screen.findByText("Retained tag Model");
+    await user.click(screen.getByRole("radio", { name: /^All(?: \d+)?$/ }));
+    await waitFor(() =>
+      expect(lastModelsQuery(app.requests).getAll("revision_status")).toEqual([]),
+    );
+    expect(lastModelsQuery(app.requests).getAll("tag")).toEqual(["Workshop"]);
+  });
+  it("opens the list from its direct view control", async () => {
+    const user = userEvent.setup();
+    renderVault({ models: [aModelListItem({ name: "List control Model" })] });
+    await screen.findByText("List control Model");
+    await user.click(screen.getByRole("button", { name: /^List View$/ }));
+    expect(screen.getByText("Thumb", { exact: true })).toBeVisible();
+    expect(screen.getByRole("link", { name: /List control Model/ })).toBeVisible();
   });
 });

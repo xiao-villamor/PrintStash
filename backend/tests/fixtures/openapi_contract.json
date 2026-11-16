@@ -1876,6 +1876,14 @@
         "title": "Body_upload_document_image_api_v1_documents__document_id__images_post",
         "type": "object"
       },
+      "BrowseKind": {
+        "enum": [
+          "model",
+          "multipart"
+        ],
+        "title": "BrowseKind",
+        "type": "string"
+      },
       "BrowseModel": {
         "properties": {
           "kind": {
@@ -1922,6 +1930,10 @@
             "title": "Browse Revision",
             "type": "string"
           },
+          "effective_direct": {
+            "title": "Effective Direct",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "discriminator": {
@@ -1966,7 +1978,8 @@
           "next_cursor",
           "total",
           "browse_revision",
-          "authorization_revision"
+          "authorization_revision",
+          "effective_direct"
         ],
         "title": "BrowsePage",
         "type": "object"
@@ -4011,6 +4024,28 @@
           "role"
         ],
         "title": "CollectionPermissionUpdate",
+        "type": "object"
+      },
+      "CollectionPreviewRead": {
+        "properties": {
+          "authorization_revision": {
+            "title": "Authorization Revision",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryPreviewItem"
+            },
+            "maxItems": 4,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "authorization_revision"
+        ],
+        "title": "CollectionPreviewRead",
         "type": "object"
       },
       "CollectionRead": {
@@ -8411,6 +8446,35 @@
         "title": "LibraryPathScan",
         "type": "object"
       },
+      "LibraryPreviewItem": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/BrowseKind"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "thumbnail_url"
+        ],
+        "title": "LibraryPreviewItem",
+        "type": "object"
+      },
       "LibraryRead": {
         "properties": {
           "binding_reason": {
@@ -10745,6 +10809,30 @@
         "title": "ModelBatchTags",
         "type": "object"
       },
+      "ModelBoundingBoxRead": {
+        "description": "Measured extent of a Model's mesh, in millimetres; all three or none.",
+        "properties": {
+          "x_mm": {
+            "title": "X Mm",
+            "type": "number"
+          },
+          "y_mm": {
+            "title": "Y Mm",
+            "type": "number"
+          },
+          "z_mm": {
+            "title": "Z Mm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x_mm",
+          "y_mm",
+          "z_mm"
+        ],
+        "title": "ModelBoundingBoxRead",
+        "type": "object"
+      },
       "ModelCoverSource": {
         "additionalProperties": false,
         "properties": {
@@ -11107,6 +11195,16 @@
       },
       "ModelListItem": {
         "properties": {
+          "bounding_box": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelBoundingBoxRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "collection": {
             "anyOf": [
               {
@@ -11162,6 +11260,11 @@
           },
           "file_count": {
             "title": "File Count",
+            "type": "integer"
+          },
+          "gcode_file_count": {
+            "default": 0,
+            "title": "Gcode File Count",
             "type": "integer"
           },
           "id": {
@@ -34118,6 +34221,18 @@
             }
           },
           {
+            "description": "Expand an empty direct listing to its subtree in the same read.",
+            "in": "query",
+            "name": "auto_scope",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Expand an empty direct listing to its subtree in the same read.",
+              "title": "Auto Scope",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "query",
             "name": "view",
             "required": false,
@@ -34193,6 +34308,55 @@
           }
         ],
         "summary": "Revision-checked mixed library cards",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/browse/collection-preview": {
+      "get": {
+        "operationId": "collection_preview_api_v1_models_browse_collection_preview_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "maxLength": 2048,
+              "minLength": 1,
+              "title": "Collection",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionPreviewRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read four authorized collection cover references without card metadata",
         "tags": [
           "models"
         ]

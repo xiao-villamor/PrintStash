@@ -228,7 +228,7 @@ beforeEach(() => {
 });
 
 describe("FleetQueuePanel", () => {
-  it("renders queued, active, and recent jobs grouped into sections", () => {
+  it("switches the visible queue scope", async () => {
     renderQueuePanel({
       jobs: [
         makeJob({ id: 1, state: "queued", queue_position: 1, remote_filename: "first.gcode" }),
@@ -238,17 +238,18 @@ describe("FleetQueuePanel", () => {
       ],
     });
 
-    expect(screen.getByRole("heading", { name: "Queued" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Active" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Recent" })).toBeInTheDocument();
     expect(screen.getByText("first.gcode")).toBeInTheDocument();
+    expect(screen.queryByText("active.gcode")).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "View" }), "active");
     expect(screen.getByText("active.gcode")).toBeInTheDocument();
+    expect(screen.queryByText("first.gcode")).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "View" }), "recent");
     expect(screen.getByText("done.gcode")).toBeInTheDocument();
   });
 
   it("shows the empty state when there are no jobs", () => {
     renderQueuePanel({ printers: [] });
-    expect(screen.getByText("No queued print jobs")).toBeInTheDocument();
+    expect(screen.getByText("No jobs match these filters.")).toBeInTheDocument();
   });
 
   it("moving a queued job down calls updateFleetJob with the new queue position", async () => {
@@ -312,7 +313,7 @@ describe("FleetQueuePanel", () => {
     await userEvent.selectOptions(within(dialog).getByLabelText("Priority"), "rush");
     await userEvent.clear(within(dialog).getByLabelText("Queue position"));
     await userEvent.type(within(dialog).getByLabelText("Queue position"), "3");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save job" }));
 
     await waitFor(() =>
       expect(updateJob).toHaveBeenCalledWith(
@@ -336,6 +337,7 @@ describe("FleetQueuePanel", () => {
       ],
     });
 
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "View" }), "recent");
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     await waitFor(() => expect(retryJob).toHaveBeenCalledWith(9));
@@ -347,6 +349,7 @@ describe("FleetQueuePanel", () => {
       jobs: [makeJob({ id: 11, state: "paused", remote_filename: "stale.gcode" })],
     });
 
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "View" }), "active");
     await userEvent.click(screen.getByRole("button", { name: "Resolve" }));
     const dialog = screen.getByRole("dialog", { name: "Resolve stale job" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Mark failed" }));
@@ -361,6 +364,7 @@ describe("FleetQueuePanel", () => {
       jobs: [makeJob({ id: 12, state: "paused", remote_filename: "cancelled.gcode" })],
     });
 
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "View" }), "active");
     await userEvent.click(screen.getByRole("button", { name: "Resolve" }));
     const dialog = screen.getByRole("dialog", { name: "Resolve stale job" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Mark cancelled" }));
@@ -374,6 +378,7 @@ describe("FleetQueuePanel", () => {
       jobs: [makeJob({ id: 13, state: "paused", remote_filename: "still-live.gcode" })],
     });
 
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "View" }), "active");
     await userEvent.click(screen.getByRole("button", { name: "Resolve" }));
     const dialog = screen.getByRole("dialog", { name: "Resolve stale job" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Mark failed" }));
@@ -466,12 +471,14 @@ describe("FleetMaintenancePanel", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Schedule" }));
+    await userEvent.click(screen.getByRole("button", { name: "Schedule window" }));
     const dialog = screen.getByRole("dialog", { name: "Schedule maintenance" });
     await userEvent.type(within(dialog).getByLabelText("Starts"), "2026-08-01T09:00");
     await userEvent.type(within(dialog).getByLabelText("Ends"), "2026-08-01T11:00");
     await userEvent.type(within(dialog).getByLabelText("Reason"), "Nozzle swap");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /Schedule window|Save service log/ }),
+    );
 
     await waitFor(() =>
       expect(createWindow).toHaveBeenCalledWith(
@@ -494,17 +501,22 @@ describe("FleetMaintenancePanel", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Log" }));
-    const dialog = screen.getByRole("dialog", { name: "Log maintenance" });
+    await userEvent.click(screen.getByRole("button", { name: "Log service" }));
+    const dialog = screen.getByRole("dialog", { name: "Log printer service" });
     await userEvent.clear(within(dialog).getByLabelText("Category"));
     await userEvent.type(within(dialog).getByLabelText("Category"), "belt");
-    await userEvent.type(within(dialog).getByLabelText("Note"), "Tensioned X belt");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await userEvent.type(within(dialog).getByLabelText("Service notes"), "Tensioned X belt");
+    await userEvent.clear(within(dialog).getByLabelText("Date"));
+    await userEvent.type(within(dialog).getByLabelText("Date"), "2026-08-01");
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /Schedule window|Save service log/ }),
+    );
 
     await waitFor(() =>
       expect(createLog).toHaveBeenCalledWith(1, {
         category: "belt",
         note: "Tensioned X belt",
+        performed_at: new Date("2026-08-01T00:00").toISOString(),
       }),
     );
   });
@@ -523,6 +535,7 @@ describe("FleetMaintenancePanel remote ownership", () => {
         },
       },
     );
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Windows" }), "all");
     await screen.findByText(/Tensioned X belt/);
     expect(app.requests()).toHaveLength(2);
     app.rerender(
@@ -531,7 +544,7 @@ describe("FleetMaintenancePanel remote ownership", () => {
         onPrintersChanged={() => {}}
       />,
     );
-    await screen.findByText("Renamed");
+    await screen.findByRole("heading", { name: "Renamed" });
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(app.requests()).toHaveLength(2);
   });
@@ -548,6 +561,7 @@ describe("FleetMaintenancePanel remote ownership", () => {
         },
       },
     );
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Windows" }), "all");
     await screen.findByText(/Tensioned X belt/);
     app.rerender(
       <FleetMaintenancePanel
@@ -599,6 +613,8 @@ describe("FleetMaintenancePanel remote ownership", () => {
         },
       },
     );
+    for (const filter of screen.getAllByRole("combobox", { name: "Windows" }))
+      await userEvent.selectOptions(filter, "all");
     await waitFor(() => expect(screen.getAllByText(/Tensioned X belt/)).toHaveLength(2));
     expect(app.requests()).toHaveLength(2);
   });
@@ -610,6 +626,7 @@ describe("FleetMaintenancePanel remote ownership", () => {
         "GET /api/v1/fleet/printers/1/maintenance-log": json({ detail: "unavailable" }, 503),
       },
     });
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Windows" }), "all");
     expect(await screen.findByText(/Nozzle swap/)).toBeVisible();
     expect(await screen.findByRole("alert")).toBeVisible();
   });
@@ -624,10 +641,10 @@ describe("FleetMaintenancePanel remote ownership", () => {
         },
       },
     );
-    await userEvent.click(screen.getByRole("button", { name: "Log" }));
-    await userEvent.type(screen.getByLabelText("Note"), "Unsaved service details");
+    await userEvent.click(screen.getByRole("button", { name: "Log service" }));
+    await userEvent.type(screen.getByLabelText("Service notes"), "Unsaved service details");
     await act(async () => app.client.invalidateQueries({ queryKey: ["printers"] }));
-    expect(screen.getByLabelText("Note")).toHaveValue("Unsaved service details");
+    expect(screen.getByLabelText("Service notes")).toHaveValue("Unsaved service details");
   });
 
   it("refreshes only confirmed maintenance windows", async () => {
@@ -643,8 +660,15 @@ describe("FleetMaintenancePanel remote ownership", () => {
         },
       },
     );
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Windows" }), "all");
     await screen.findByText(/Nozzle swap/);
     await userEvent.click(screen.getByRole("button", { name: "Delete maintenance window" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog", { name: "Delete maintenance record?" })).getByRole(
+        "button",
+        { name: "Delete" },
+      ),
+    );
     await waitFor(() => expect(screen.queryByText(/Nozzle swap/)).toBeNull());
     expect(
       app.requests().filter((request) => request.url.endsWith("/maintenance-log")),
@@ -665,8 +689,15 @@ describe("FleetMaintenancePanel remote ownership", () => {
         },
       },
     );
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Windows" }), "all");
     await screen.findByText(/Tensioned X belt/);
     await userEvent.click(screen.getByRole("button", { name: "Delete maintenance log" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog", { name: "Delete maintenance record?" })).getByRole(
+        "button",
+        { name: "Delete" },
+      ),
+    );
     await waitFor(() => expect(screen.queryByText(/Tensioned X belt/)).toBeNull());
     expect(
       app.requests().filter((request) => request.url.endsWith("/maintenance-windows")),
@@ -685,8 +716,15 @@ describe("FleetMaintenancePanel remote ownership", () => {
         },
       },
     );
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Windows" }), "all");
     await screen.findByText(/Tensioned X belt/);
     await userEvent.click(screen.getByRole("button", { name: "Delete maintenance log" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog", { name: "Delete maintenance record?" })).getByRole(
+        "button",
+        { name: "Delete" },
+      ),
+    );
     await waitFor(() => expect(app.requests()).toHaveLength(3));
     expect(screen.getByText(/Tensioned X belt/)).toBeVisible();
   });
@@ -703,9 +741,9 @@ describe("FleetMaintenancePanel remote ownership", () => {
         },
       },
     );
-    await userEvent.click(screen.getByRole("button", { name: "Log" }));
-    await userEvent.type(screen.getByLabelText("Note"), "Retained draft");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(screen.getByRole("button", { name: "Log service" }));
+    await userEvent.type(screen.getByLabelText("Service notes"), "Retained draft");
+    await userEvent.click(screen.getByRole("button", { name: "Save service log" }));
     act(() => retirePrivateSessionScope());
     await act(async () => {});
     const readsAfterRetirement = app
@@ -714,7 +752,7 @@ describe("FleetMaintenancePanel remote ownership", () => {
         (request) => request.url.endsWith("/maintenance-log") && request.method === "GET",
       ).length;
     await act(async () => pending.resolve(json(aMaintenanceLog())));
-    expect(screen.getByLabelText("Note")).toHaveValue("Retained draft");
+    expect(screen.getByLabelText("Service notes")).toHaveValue("Retained draft");
     expect(
       app
         .requests()
@@ -732,6 +770,7 @@ describe("FleetMaintenancePanel remote ownership", () => {
         },
       },
     );
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Windows" }), "all");
     await screen.findByText(/Tensioned X belt/);
     maintenanceSocket.onopen?.();
     act(() => maintenanceSocket.onmessage?.({ data: '{"type":"resync"}' }));

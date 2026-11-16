@@ -10,7 +10,7 @@ from typing import Mapping
 
 # Renderer arithmetic participates in derived visual identities independently
 # of camera/material settings and immutable encoder asset manifests.
-RASTERIZER_RECIPE = "qualified-portable-v6"
+RASTERIZER_RECIPE = "qualified-portable-v7"
 
 
 def _mapping(value: object, name: str) -> Mapping[str, object]:
@@ -65,10 +65,8 @@ class PreviewProfile:
         return self.supersample_large_factor
 
 
-def _load_profile() -> PreviewProfile:
-    payload = (
-        files("printstash_core.mesh").joinpath("preview_profile.json").read_bytes()
-    )
+def _load_profile(filename: str = "preview_profile.json") -> PreviewProfile:
+    payload = files("printstash_core.mesh").joinpath(filename).read_bytes()
     raw: object = json.loads(payload)
     root = _mapping(raw, "root")
     aspect = root.get("aspectRatio")
@@ -124,5 +122,7 @@ def _load_profile() -> PreviewProfile:
 
 
 PREVIEW_PROFILE = _load_profile()
+# Persisted visual spaces depend on the exact v4 encoder thumbnail.
+REFERENCE_THUMBNAIL_PROFILE = _load_profile("reference_thumbnail_profile.json")
 
-__all__ = ["PREVIEW_PROFILE", "PreviewProfile"]
+__all__ = ["PREVIEW_PROFILE", "REFERENCE_THUMBNAIL_PROFILE", "PreviewProfile"]

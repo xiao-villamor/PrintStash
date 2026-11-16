@@ -3,8 +3,8 @@ import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { getErrorMessage, userMessage } from "@/lib/errors";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, ExternalLink, FileBox, FolderPlus, Link2, Tags, Trash2 } from "lucide-react";
-import { useParams } from "react-router-dom";
+import { Trash2 } from "lucide-react";
+import { useParams } from "@tanstack/react-router";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,7 @@ import {
   updatePendingImport,
 } from "@/lib/api";
 import { inboxApi, useInboxItem, useInboxCommands, inboxIsTerminal } from "@/lib/queries/inbox";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, timeAgo } from "@/lib/format";
 import { Link } from "@/lib/link";
 import { useI18n } from "@/lib/i18n";
 import { useRouter } from "@/lib/navigation";
@@ -127,16 +127,9 @@ function providerLabel(item: InboxItem): string {
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
-function statusVariant(item: InboxItem): "destructive" | "secondary" | "success" | "warning" {
-  if (item.state === "failed") return "destructive";
-  if (item.state === "completed") return "success";
-  if (item.state === "review") return "warning";
-  return "secondary";
-}
-
 export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?: InboxDetailApi }) {
   const { locale, t } = useI18n();
-  const { id } = useParams();
+  const { id } = useParams({ strict: false });
   const inboxId = Number(id);
   const routeRef = useRef(inboxId);
   useLayoutEffect(() => {
@@ -343,262 +336,259 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
         </div>
       )}
       <PageHeader
-        title={title}
-        description={t("inbox.detailDescription")}
+        title={t("inbox.title")}
+        description={uiText("Review captured files and choose their destination.")}
         actions={
           <>
-            <Button variant="outline" asChild>
+            <Button variant="outline" size="sm" asChild>
               <Link href="/inbox">{t("inbox.back")}</Link>
             </Button>
-            <Button variant="destructive" onClick={() => setConfirmDeleteId(inboxId)}>
-              <Trash2 className="h-4 w-4" aria-hidden="true" />
-              {t("inbox.delete")}
-            </Button>
+            {sourceUrl && (
+              <Button variant="outline" size="sm" asChild>
+                <a href={sourceUrl} target="_blank" rel="noreferrer">
+                  {uiText("Open source")}
+                </a>
+              </Button>
+            )}
           </>
         }
       />
-      <Card>
-        <CardContent className="grid gap-5 p-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-          <div className="min-w-0 space-y-3">
-            <div className="flex items-center gap-2">
-              <Link2 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                {t("inbox.source")}
-              </p>
-            </div>
-            {sourceUrl ? (
-              <a
-                href={sourceUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex max-w-full items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+      <div className="overflow-hidden border border-border bg-card">
+        <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-5">
+          <div className="min-w-0">
+            <h2 className="break-words text-sm font-semibold">{title}</h2>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {providerLabel(item)} · {item.source_hostname || t("inbox.sourcePreparing")} ·{" "}
+              <time
+                dateTime={item.created_at}
+                title={new Date(item.created_at).toLocaleString(locale)}
               >
-                <span className="truncate">{item.source_hostname || sourceUrl}</span>
-                <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              </a>
-            ) : item.source_url ? (
-              <p className="truncate text-sm text-muted-foreground">{item.source_url}</p>
-            ) : (
-              <p className="text-sm text-muted-foreground">{t("inbox.sourcePreparing")}</p>
+                {timeAgo(item.created_at)}
+              </time>
+            </p>
+            {item.source_url && !sourceUrl && (
+              <p className="mt-2 truncate text-xs text-muted-foreground">{item.source_url}</p>
             )}
-            <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1.5">
-                <FileBox className="h-3.5 w-3.5" aria-hidden="true" />
-                {providerLabel(item)}
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
-                {new Date(item.created_at).toLocaleDateString(locale, { dateStyle: "medium" })}
-              </span>
-            </div>
           </div>
-          <Badge variant={statusVariant(item)}>{statusLabel(item, t)}</Badge>
-        </CardContent>
-      </Card>
-      {item.error_code && (
-        <div
-          role="alert"
-          className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
-        >
-          {getErrorMessage(item.error_code)}
+          <div className="flex items-center gap-2">
+            <span
+              className={
+                item.state === "failed"
+                  ? "text-xs text-destructive"
+                  : "text-xs text-muted-foreground"
+              }
+            >
+              {statusLabel(item, t)}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("inbox.delete")}
+              title={t("inbox.delete")}
+              onClick={() => setConfirmDeleteId(inboxId)}
+            >
+              <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+            </Button>
+          </div>
         </div>
-      )}
-      {item.state === "importing" && (
-        <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-          {t("inbox.importing")}
-        </p>
-      )}
-      {item.state === "review" && (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 border-b border-border/70 p-5">
-              <div>
-                <h2 className="text-base font-semibold">{t("inbox.filesToImport")}</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t("inbox.selectedFiles", {
-                    selected: String(selected.length),
-                    total: String(choices.length),
-                  })}
-                </p>
-              </div>
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => setSelected(allSelected ? [] : choices.map((file) => file.id))}
-              >
-                {allSelected ? t("inbox.clearAll") : t("inbox.selectAll")}
-              </Button>
-            </CardHeader>
-            <CardContent className="p-0">
-              <fieldset aria-label={t("inbox.filesToImport")}>
-                <div className="divide-y divide-border/70">
-                  {choices.map((file) => (
-                    <label
-                      key={file.id}
-                      className="flex cursor-action items-center gap-3 px-5 py-4 hover:bg-muted/50"
-                    >
-                      <Checkbox
-                        checked={selected.includes(file.id)}
-                        onChange={() => toggle(file.id)}
-                        ariaLabel={t("inbox.selectFile", { name: file.name })}
-                      />
-                      <FileBox
-                        className="h-4 w-4 shrink-0 text-muted-foreground"
-                        aria-hidden="true"
-                      />
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                        {file.name}
-                      </span>
-                      <span className="shrink-0 text-xs uppercase text-muted-foreground">
-                        {file.file_type} · {formatBytes(file.size)}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-            </CardContent>
-          </Card>
-
-          <Card className="lg:sticky lg:top-6">
-            <CardHeader className="border-b border-border/70 p-5">
-              <div className="flex items-center gap-2">
-                <FolderPlus className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                <h2 className="text-base font-semibold">{t("inbox.importSettings")}</h2>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                {t("inbox.importSettingsDescription")}
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-5 p-5">
-              <label className="block text-sm font-medium">
-                {t("inbox.destination")}
-                <select
-                  value={destination}
-                  onChange={(event) => setDestination(event.target.value)}
-                  className="mt-1.5 block h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                >
-                  <option value={NEW_COLLECTION}>{t("inbox.newCollectionFromTitle")}</option>
-                  <option value={NO_COLLECTION}>{t("inbox.noCollection")}</option>
-                  <option value={PICK_COLLECTION}>{uiText("Choose existing collection")}</option>
-                  {destinationId !== null && (
-                    <option value={destinationId}>
-                      {destinationCollection?.display_path ??
-                        uiText("Collection #{value1}", { value1: String(destinationId) })}
-                    </option>
-                  )}
-                </select>
-              </label>
-              {destination === PICK_COLLECTION && (
-                <CollectionPicker
-                  minRole="edit"
-                  selectedPath={null}
-                  emptyLabel={uiText("No editable collections.")}
-                  onSelect={(collection) => {
-                    if (collection === null) throw new Error("A collection is required");
-                    editReview({
-                      pickedCollection: collection,
-                      destination: String(collection.id),
-                    });
-                  }}
-                />
-              )}
-              {destinationId !== null && savedCollection.isError && (
-                <p role="alert" className="text-sm text-destructive">
-                  {uiText("Folders could not be loaded.")}
-                </p>
-              )}
-              {destination === NEW_COLLECTION && (
+        {item.error_code && (
+          <div
+            role="alert"
+            className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          >
+            {getErrorMessage(item.error_code)}
+          </div>
+        )}
+        {item.state === "importing" && (
+          <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+            {t("inbox.importing")}
+          </p>
+        )}
+        {item.state === "review" && (
+          <div className="grid gap-5 px-5 pb-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,1fr)] lg:items-start">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 p-5 pb-3">
                 <div>
-                  <label htmlFor={collectionNameId} className="block text-sm font-medium">
-                    {t("inbox.collectionName")}
-                  </label>
-                  <Input
-                    id={collectionNameId}
-                    aria-describedby={collectionNameHintId}
-                    className="mt-1.5"
-                    value={collectionName}
-                    onChange={(event) => setCollectionName(event.target.value)}
-                    maxLength={255}
-                  />
-                  <p
-                    id={collectionNameHintId}
-                    className="mt-1.5 text-xs font-normal text-muted-foreground"
-                  >
-                    {t("inbox.collectionNameHint")}
+                  <h2 className="text-sm font-semibold">{t("inbox.filesToImport")}</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {t("inbox.selectedFiles", {
+                      selected: String(selected.length),
+                      total: String(choices.length),
+                    })}
                   </p>
                 </div>
-              )}
-              <label className="block text-sm font-medium">
-                <span className="inline-flex items-center gap-1.5">
-                  <Tags className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-                  {t("inbox.tags")}
-                </span>
-                <Input
-                  className="mt-1.5"
-                  value={tags}
-                  onChange={(event) => setTags(event.target.value)}
-                  placeholder={t("inbox.commaSeparated")}
-                />
-              </label>
-              <div className="border-t border-border/70 pt-4">
-                <div className="mb-4 flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">{t("inbox.selected")}</span>
-                  <span className="font-medium">
-                    {selected.length}
-                    {selectedBytes > 0 ? ` · ${formatBytes(selectedBytes)}` : ""}
-                  </span>
-                </div>
                 <Button
-                  className="w-full"
-                  onClick={() => void importSelected()}
-                  disabled={
-                    selected.length === 0 ||
-                    collectionNameMissing ||
-                    destination === PICK_COLLECTION
-                  }
-                  loading={busy}
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => setSelected(allSelected ? [] : choices.map((file) => file.id))}
                 >
-                  {t("inbox.importSelected")}
+                  {allSelected ? t("inbox.clearAll") : t("inbox.selectAll")}
                 </Button>
-              </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <fieldset aria-label={t("inbox.filesToImport")}>
+                  <div className="divide-y divide-border/70">
+                    {choices.map((file) => (
+                      <label
+                        key={file.id}
+                        className="flex cursor-action items-center gap-3 px-5 py-4 hover:bg-muted/50"
+                      >
+                        <Checkbox
+                          checked={selected.includes(file.id)}
+                          onChange={() => toggle(file.id)}
+                          ariaLabel={t("inbox.selectFile", { name: file.name })}
+                        />
+
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                          {file.name}
+                        </span>
+                        <span className="shrink-0 text-xs uppercase text-muted-foreground">
+                          {file.file_type} · {formatBytes(file.size)}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              </CardContent>
+            </Card>
+
+            <Card className="lg:sticky lg:top-6">
+              <CardHeader className="p-5 pb-3">
+                <div>
+                  <h2 className="text-sm font-semibold">{t("inbox.importSettings")}</h2>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {t("inbox.importSettingsDescription")}
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-5 p-5">
+                <label className="block text-sm font-medium">
+                  {t("inbox.destination")}
+                  <select
+                    value={destination}
+                    onChange={(event) => setDestination(event.target.value)}
+                    className="mt-1.5 block h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <option value={NEW_COLLECTION}>{t("inbox.newCollectionFromTitle")}</option>
+                    <option value={NO_COLLECTION}>{t("inbox.noCollection")}</option>
+                    <option value={PICK_COLLECTION}>{uiText("Choose existing collection")}</option>
+                    {destinationId !== null && (
+                      <option value={destinationId}>
+                        {destinationCollection?.display_path ??
+                          uiText("Collection #{value1}", { value1: String(destinationId) })}
+                      </option>
+                    )}
+                  </select>
+                </label>
+                {destination === PICK_COLLECTION && (
+                  <CollectionPicker
+                    minRole="edit"
+                    selectedPath={null}
+                    emptyLabel={uiText("No editable collections.")}
+                    onSelect={(collection) => {
+                      if (collection === null) throw new Error("A collection is required");
+                      editReview({
+                        pickedCollection: collection,
+                        destination: String(collection.id),
+                      });
+                    }}
+                  />
+                )}
+                {destinationId !== null && savedCollection.isError && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {uiText("Folders could not be loaded.")}
+                  </p>
+                )}
+                {destination === NEW_COLLECTION && (
+                  <div>
+                    <label htmlFor={collectionNameId} className="block text-sm font-medium">
+                      {t("inbox.collectionName")}
+                    </label>
+                    <Input
+                      id={collectionNameId}
+                      aria-describedby={collectionNameHintId}
+                      className="mt-1.5"
+                      value={collectionName}
+                      onChange={(event) => setCollectionName(event.target.value)}
+                      maxLength={255}
+                    />
+                    <p
+                      id={collectionNameHintId}
+                      className="mt-1.5 text-xs font-normal text-muted-foreground"
+                    >
+                      {t("inbox.collectionNameHint")}
+                    </p>
+                  </div>
+                )}
+                <label className="block text-sm font-medium">
+                  <span>{t("inbox.tags")}</span>
+                  <Input
+                    className="mt-1.5"
+                    value={tags}
+                    onChange={(event) => setTags(event.target.value)}
+                    placeholder={t("inbox.commaSeparated")}
+                  />
+                </label>
+                <div className="border-t border-border/70 pt-4">
+                  <div className="mb-4 flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">{t("inbox.selected")}</span>
+                    <span className="font-medium">
+                      {selected.length}
+                      {selectedBytes > 0 ? ` · ${formatBytes(selectedBytes)}` : ""}
+                    </span>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => void importSelected()}
+                    disabled={
+                      selected.length === 0 ||
+                      collectionNameMissing ||
+                      destination === PICK_COLLECTION
+                    }
+                    loading={busy}
+                  >
+                    {t("inbox.importSelected")}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+        {item.results.length > 0 && (
+          <Card>
+            <CardContent className="space-y-3 p-5">
+              <h2 className="text-sm font-medium">{t("inbox.results")}</h2>
+              {item.results.map((result) => (
+                <div key={result.id} className="flex items-center gap-2 text-sm">
+                  <Badge variant={result.state === "failed" ? "destructive" : "success"}>
+                    {resultLabel(result, t)}
+                  </Badge>
+                  <span>{result.original_filename}</span>
+                  {result.model_id && (
+                    <Link
+                      className="text-primary hover:underline"
+                      href={`/models/${result.model_id}`}
+                    >
+                      {t("inbox.openModel")}
+                    </Link>
+                  )}
+                </div>
+              ))}
+              {item.completion === "partial" &&
+                item.results.some((result) => result.state === "failed" && result.retryable) && (
+                  <Button size="sm" variant="outline" onClick={() => void retry()}>
+                    {t("inbox.retryFailedFiles")}
+                  </Button>
+                )}
             </CardContent>
           </Card>
-        </div>
-      )}
-      {item.results.length > 0 && (
-        <Card>
-          <CardContent className="space-y-3 p-5">
-            <h2 className="text-sm font-medium">{t("inbox.results")}</h2>
-            {item.results.map((result) => (
-              <div key={result.id} className="flex items-center gap-2 text-sm">
-                <Badge variant={result.state === "failed" ? "destructive" : "success"}>
-                  {resultLabel(result, t)}
-                </Badge>
-                <span>{result.original_filename}</span>
-                {result.model_id && (
-                  <Link
-                    className="text-primary hover:underline"
-                    href={`/models/${result.model_id}`}
-                  >
-                    {t("inbox.openModel")}
-                  </Link>
-                )}
-              </div>
-            ))}
-            {item.completion === "partial" &&
-              item.results.some((result) => result.state === "failed" && result.retryable) && (
-                <Button size="sm" variant="outline" onClick={() => void retry()}>
-                  {t("inbox.retryFailedFiles")}
-                </Button>
-              )}
-          </CardContent>
-        </Card>
-      )}
-      {item.state === "failed" && item.retryable && (
-        <Button variant="outline" onClick={() => void retry()}>
-          {t("inbox.retry")}
-        </Button>
-      )}
+        )}
+        {item.state === "failed" && item.retryable && (
+          <Button variant="outline" onClick={() => void retry()}>
+            {t("inbox.retry")}
+          </Button>
+        )}
+      </div>
       <ConfirmModal
         open={confirmDelete}
         onClose={() => setConfirmDeleteId(null)}

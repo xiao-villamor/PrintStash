@@ -452,11 +452,14 @@ class TestGeometryMeasurements:
 
 
 class TestEarlyDocumentThumbnail:
-    def test_a_3mf_publishes_its_slicer_picture_before_its_geometry(self, tmp_path):
+    def test_a_3mf_publishes_its_slicer_picture_before_its_geometry(
+        self, tmp_path, monkeypatch
+    ):
         from app.modules.media.mesh_contracts import ThumbnailStrategy
         from app.modules.media.mesh_protocol import GeometryOutput, ThumbnailOutput
         from tests.factories.content import png
 
+        monkeypatch.setitem(_overlay, "prefer_rendered_3mf_preview", False)
         path = tmp_path / "plate.3mf"
         path.write_bytes(three_mf(extras={"Metadata/thumbnail.png": png()}))
         outputs = []

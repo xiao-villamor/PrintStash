@@ -32,7 +32,7 @@ test.describe("spoolman integration", () => {
 
     // Save a base URL (no external call — updateSpoolman just persists it).
     await page.getByPlaceholder("http://spoolman.local:7912").fill("http://spoolman.example:7912");
-    await page.getByRole("button", { name: "Save" }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Saved.")).toBeVisible();
 
     // Reload + reopen the section: enabled stays on and the URL persisted.

@@ -52,6 +52,7 @@ import type {
   FilePlate,
   JobStatus,
   ModelListItem,
+  ModelFacetsRead,
   OutlinerModelRead,
   PrinterAccess,
   PrinterCapabilities,
@@ -312,7 +313,9 @@ export function aModelListItem(override?: Partial<ModelListItem>): ModelListItem
     thumbnail_url: null,
     previews: NO_PREVIEWS,
     file_count: 1,
+    gcode_file_count: 0,
     mesh_file_id: null,
+    bounding_box: null,
     printer_presence: [],
     updated_at: FROZEN_NOW,
     print_summary: null,
@@ -371,6 +374,23 @@ export function aRevision(
     uploaded_at: FROZEN_NOW,
     metadata: null,
     tags: [],
+    ...override,
+  };
+}
+
+/** The Model history projection adds printer and revision display fields. */
+export function aModelPrintJob(
+  override: Partial<import("@/types").ModelPrintJobRead> = {},
+): import("@/types").ModelPrintJobRead {
+  return {
+    ...aPrintJob(),
+    printer_name: "Workshop",
+    gcode_revision_number: 1,
+    revision_label: null,
+    material_type: null,
+    filament_used_g: null,
+    actual_duration_s: null,
+    filament_cost: null,
     ...override,
   };
 }
@@ -1125,6 +1145,21 @@ export function aTrashedMultipartModel(
     part_count: 2,
     deleted_at: "2026-01-01T00:00:00Z",
     expires_at: "2026-01-31T00:00:00Z",
+    ...override,
+  };
+}
+
+/** Available filter values for one Library scope. */
+export function aModelFacets(override: Partial<ModelFacetsRead> = {}): ModelFacetsRead {
+  return {
+    file_type: [],
+    material_type: [],
+    slicer_name: [],
+    printer_model: [],
+    revision_status: [],
+    print_outcome: [],
+    storage: [],
+    printed: [],
     ...override,
   };
 }

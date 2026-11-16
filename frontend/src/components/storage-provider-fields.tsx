@@ -17,6 +17,7 @@ export function StorageProviderFields({
   editing = false,
   onClear,
   omitFields = [],
+  invalidFields = [],
 }: {
   provider: StorageProvider;
   values: StorageProviderConfigValues;
@@ -27,6 +28,8 @@ export function StorageProviderFields({
   editing?: boolean;
   onClear?: (name: string) => void;
   omitFields?: string[];
+  /** Fields a failed check named; they are marked invalid and described by their help. */
+  invalidFields?: readonly string[];
 }) {
   useUiLocale();
   const prefix = useId();
@@ -42,7 +45,7 @@ export function StorageProviderFields({
             <div key={field.name} className="space-y-1.5">
               <label
                 htmlFor={id}
-                className="flex items-center justify-between gap-2 text-xs font-medium text-on-surface-variant"
+                className="flex items-center justify-between gap-2 text-[13px] font-medium text-on-surface-variant"
               >
                 <span>{knownUiText(field.label)}</span>
                 {!field.required && <span>{uiText("Optional")}</span>}
@@ -72,6 +75,7 @@ export function StorageProviderFields({
                   required={field.required && !stored}
                   placeholder={stored ? uiText("Stored — leave blank to keep") : undefined}
                   autoComplete={field.secret ? "new-password" : "off"}
+                  aria-invalid={invalidFields.includes(field.name)}
                   aria-describedby={`${id}-help`}
                   onChange={(event) =>
                     onChange(

@@ -46,7 +46,13 @@ interface RequestContext extends ResponseContext {
   readonly signal: AbortSignal;
 }
 
-/** Revalidate artifact bytes; failed cross-origin delivery retries with the same credentials. */
+/** A content-versioned artifact URL (`?v=<digest>`): its bytes never change. */
+function isVersionedArtifact(path: string): boolean {
+  return /[?&]v=[^&]/.test(path);
+}
+
+/** Revalidate artifact bytes (versioned ones may come from the HTTP cache);
+ * failed cross-origin delivery retries with the same credentials. */
 async function fetchArtifact(
   path: string,
   session: RequestContext,
@@ -56,7 +62,9 @@ async function fetchArtifact(
 ): Promise<Response> {
   const options: RequestInit = {
     ...delivery,
-    cache: "no-cache",
+    // The server marks the current versioned thumbnail immutable; sign-in and
+    // sign-out clear the browser cache, so it never outlives the account.
+    cache: isVersionedArtifact(path) ? "default" : "no-cache",
     signal: session.signal,
   };
   const proxy = async () => {

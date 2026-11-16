@@ -68,7 +68,7 @@ def _apply_worker_limits(
 
         resource.setrlimit(resource.RLIMIT_AS, (address_space, address_space))
         resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 2))
-    except (ImportError, OSError, ValueError):  # pragma: no cover - platform dependent
+    except ImportError, OSError, ValueError:  # pragma: no cover - platform dependent
         pass
     if sys.platform.startswith("linux"):
         try:
@@ -215,7 +215,7 @@ def _frame(
     corners = np.asarray(
         list(product(*zip(exact_min, exact_max, strict=True))), dtype=np.float64
     )
-    rotation = _select_view_rotation(corners - center, np)
+    rotation = _select_view_rotation(corners - center, np, reference=True)
     view_corners = (corners - center) @ rotation.T
     extent_x = max(float(np.ptp(view_corners[:, 0])), 1e-6)
     extent_y = max(float(np.ptp(view_corners[:, 1])), 1e-6)
@@ -583,7 +583,7 @@ def main(
             },
         )
         return 0
-    except (_InvalidSTL, OSError, ValueError, struct.error):
+    except _InvalidSTL, OSError, ValueError, struct.error:
         return 3
     except MemoryError:
         raise

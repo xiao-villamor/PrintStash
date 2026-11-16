@@ -13,6 +13,24 @@ if (!("setPointerCapture" in Element.prototype)) {
   Element.prototype.hasPointerCapture = () => false;
 }
 
+// jsdom has no layout engine. Keep programmatic scroll offsets observable and
+// allow components to subscribe to resize events in tests that supply geometry.
+if (!("scrollTo" in Element.prototype)) {
+  Element.prototype.scrollTo = function (optionsOrX?: ScrollToOptions | number, y?: number) {
+    const options = optionsOrX === Number(optionsOrX) ? { left: optionsOrX, top: y } : optionsOrX;
+    this.scrollLeft = options?.left ?? this.scrollLeft;
+    this.scrollTop = options?.top ?? this.scrollTop;
+  };
+}
+
+if (!("ResizeObserver" in globalThis)) {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 // Unmount React trees and clear localStorage between tests so state doesn't
 // leak across cases (card metrics, metadata prefs, and auth all use storage).
 afterEach(() => {

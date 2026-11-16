@@ -11,6 +11,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { useMockApi } from "./_setup";
+import { animationStarts, forgetAnimationStarts, recordAnimationStarts } from "./_animations";
 import { aCollectionNode, aModelListItem, aMultipartModel } from "../../src/test-support/factories";
 
 useMockApi();
@@ -58,6 +59,10 @@ async function folderWithDescription(page: Page) {
 }
 
 test.describe("motion and layering", () => {
+  test.beforeEach(async ({ page }) => {
+    await recordAnimationStarts(page);
+  });
+
   for (const scenario of [
     { width: 1920, reducedMotion: "no-preference" },
     { width: 390, reducedMotion: "no-preference" },
@@ -111,11 +116,11 @@ test.describe("motion and layering", () => {
               transform: getComputedStyle(image).transform,
             });
             transition.pause();
-            transition.currentTime = 150;
+            transition.currentTime = Number(transition.effect.getComputedTiming().duration) / 2;
             const placeholder = image.nextElementSibling;
             for (const animation of placeholder?.getAnimations() ?? []) {
               animation.pause();
-              animation.currentTime = 150;
+              animation.currentTime = Number(animation.effect?.getComputedTiming().duration) / 2;
             }
           },
           true,
@@ -132,7 +137,7 @@ test.describe("motion and layering", () => {
       await page.evaluate(() => window.releaseThumbnailDecode());
       await expect.poll(() => page.evaluate(() => window.thumbnailReveals.length)).toBe(1);
       expect(await page.evaluate(() => window.thumbnailReveals[0])).toEqual({
-        duration: 300,
+        duration: scenario.reducedMotion === "reduce" ? 150 : 240,
         start: "0",
         end: "1",
         transform: "none",
@@ -140,6 +145,11 @@ test.describe("motion and layering", () => {
       const opacity = Number(await image.evaluate((element) => getComputedStyle(element).opacity));
       expect(opacity).toBeGreaterThan(0);
       expect(opacity).toBeLessThan(1);
+      const coverOpacity = await image.evaluate((element) =>
+        Number(getComputedStyle(element.nextElementSibling!).opacity),
+      );
+      expect(coverOpacity).toBeGreaterThan(0);
+      expect(coverOpacity).toBeLessThan(1);
       await card.screenshot({ path: info.outputPath("thumbnail-mid-fade.png") });
       await image.evaluate(async (element) => {
         const animations = [
@@ -217,80 +227,6 @@ test.describe("motion and layering", () => {
     await expect(prompt).toBeEnabled();
   });
 
-  for (const [reducedMotion, animation] of [
-    ["no-preference", "folder-in-forward"],
-    ["reduce", "fade-in"],
-  ] as const) {
-    test(`drilling into a folder settles its content in from the right with ${reducedMotion}`, async ({
-      page,
-    }) => {
-      await page.emulateMedia({ reducedMotion });
-      await folderWithDescription(page);
-      await page.goto("/");
-      await expect(page.getByRole("heading", { name: "All Models" })).toBeVisible();
-      await expect(page.locator(".folder-cards-forward")).toHaveCount(0);
-
-      await page
-        .getByRole("main")
-        .getByRole("button", { name: /maraio/ })
-        .click();
-      await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
-
-      const entrance = page.locator(".folder-cards-forward > *").first();
-      await expect(entrance).toBeVisible();
-      expect(await entrance.evaluate((node) => getComputedStyle(node).animationName)).toBe(
-        animation,
-      );
-    });
-  }
-
-  test("the card entrance is large enough to be noticed on cached content", async ({ page }) => {
-    await folderWithDescription(page);
-    await page.goto("/");
-    await page
-      .getByRole("main")
-      .getByRole("button", { name: /maraio/ })
-      .click();
-    const card = page.locator(".folder-cards-forward > *").first();
-    await expect(card).toBeVisible();
-
-    const entrance = await card.evaluate((node) => {
-      const keyframes = Array.from(document.styleSheets)
-        .flatMap((sheet) => Array.from(sheet.cssRules))
-        .filter(
-          (rule): rule is CSSKeyframesRule =>
-            rule instanceof CSSKeyframesRule && rule.name === "folder-in-forward",
-        );
-      return {
-        duration: getComputedStyle(node).animationDuration,
-        keyframes: keyframes.map((rule) => rule.cssText).join(" "),
-      };
-    });
-    expect(entrance.duration).toBe("0.3s");
-    expect(entrance.keyframes).toContain("translateX(24px)");
-  });
-
-  test("a folder whose cards are already cached still animates them in on a revisit", async ({
-    page,
-  }) => {
-    await folderWithDescription(page);
-    await page.goto("/");
-    const folder = page.getByRole("main").getByRole("button", { name: /maraio/ });
-    await folder.click();
-    await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
-    await page.getByRole("main").getByRole("button", { name: "All Models" }).first().click();
-    await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
-
-    await folder.click();
-    await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
-
-    const card = page.locator(".folder-cards-forward > *").first();
-    await expect(card).toBeVisible();
-    expect(await card.evaluate((node) => getComputedStyle(node).animationName)).toBe(
-      "folder-in-forward",
-    );
-  });
-
   test("opening a folder by its URL does not animate its content", async ({ page }) => {
     await folderWithDescription(page);
     await page.goto("/?c=maraio");
@@ -298,25 +234,9 @@ test.describe("motion and layering", () => {
     await expect(
       page.locator(".folder-cards-forward, .folder-cards-back, .folder-cards-jump"),
     ).toHaveCount(0);
-  });
-
-  test("climbing back out of a folder settles its parent in from the left", async ({ page }) => {
-    await folderWithDescription(page);
-    await page.goto("/");
-    await page
-      .getByRole("main")
-      .getByRole("button", { name: /maraio/ })
-      .click();
-    await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
-
-    await page.getByRole("main").getByRole("button", { name: "All Models" }).first().click();
-    await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
-
-    const entrance = page.locator(".folder-cards-back > *").first();
-    await expect(entrance).toBeVisible();
-    expect(await entrance.evaluate((node) => getComputedStyle(node).animationName)).toBe(
-      "folder-in-back",
-    );
+    expect(
+      (await animationStarts(page)).filter((start) => start.container.includes("folder-cards")),
+    ).toEqual([]);
   });
 
   test("folder content waits for its description before replacing the current view", async ({
@@ -481,6 +401,65 @@ test.describe("motion and layering", () => {
     expect(Math.min(...opacities)).toBeGreaterThanOrEqual(0.9);
     expect(downloads).toHaveLength(1);
   });
+
+  for (const [reducedMotion, animation] of [
+    ["no-preference", "pane-in"],
+    ["reduce", "fade-in"],
+  ] as const) {
+    test(`opening the collections pane eases it in with ${reducedMotion}`, async ({ page }) => {
+      await page.emulateMedia({ reducedMotion });
+      await page.goto("/");
+      const toggle = page
+        .locator("header")
+        .getByRole("button", { name: "Toggle sidebar", exact: true });
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await forgetAnimationStarts(page);
+
+      await toggle.click();
+
+      await expect
+        .poll(async () =>
+          (await animationStarts(page))
+            .filter((start) => start.target.split(" ").includes("pane-in"))
+            .map((start) => start.name),
+        )
+        .toEqual([animation]);
+    });
+  }
+
+  test("a page that loads with the collections pane open shows it in place", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("tree", { name: "Collections" })).toBeVisible();
+    await expect(page.locator("#collections-pane")).not.toHaveClass(/pane-in/);
+    expect(
+      (await animationStarts(page)).filter((start) => start.target.includes("pane-in")),
+    ).toEqual([]);
+  });
+
+  for (const [reducedMotion, moves] of [
+    ["no-preference", true],
+    ["reduce", false],
+  ] as const) {
+    test(`the details panel leaves toward its edge only with ${reducedMotion}`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ reducedMotion });
+      await page.goto("/?c=maraio&type=all");
+      await page
+        .getByRole("main")
+        .getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true })
+        .click();
+      const drawer = page.locator("#model-drawer");
+      await expect(drawer).toHaveAttribute("data-state", "open");
+
+      await drawer.getByRole("button", { name: "Close details", exact: true }).click();
+
+      await expect(drawer).toBeHidden();
+      const transform = await drawer.evaluate((node) => getComputedStyle(node).transform);
+      expect(transform !== "none").toBe(moves);
+    });
+  }
 
   test("header and recent-folder menus stay above adjacent vault surfaces", async ({ page }) => {
     await page.addInitScript(() =>

@@ -467,6 +467,47 @@ class TestReadItemsByIds:
             second_file.id,
         )
 
+    def test_carries_card_facts_so_cards_need_no_detail_read(
+        self, db_session, make_user, make_model
+    ):
+        actor = make_user(superuser=True)
+        model = make_model("Measured card")
+        build_file(
+            db_session,
+            model,
+            file_type=FileType.STL,
+            metadata={"bbox_x_mm": 10.0, "bbox_y_mm": 20.0, "bbox_z_mm": 30.0},
+        )
+        # Newer mesh, not yet measured: the measured one still gives the size.
+        build_file(db_session, model, file_type=FileType.STL)
+        build_file(db_session, model, file_type=FileType.GCODE)
+        db_session.commit()
+
+        [item] = models_listing.read_items_by_ids(db_session, actor, [model.id])
+
+        assert item.bounding_box is not None
+        assert (
+            item.bounding_box.x_mm,
+            item.bounding_box.y_mm,
+            item.bounding_box.z_mm,
+        ) == (10.0, 20.0, 30.0)
+        assert (item.file_count, item.gcode_file_count) == (3, 1)
+
+    def test_leaves_size_unknown_until_a_mesh_is_measured(
+        self, db_session, make_user, make_model
+    ):
+        actor = make_user(superuser=True)
+        model = make_model("Unmeasured card")
+        build_file(
+            db_session, model, file_type=FileType.STL, metadata={"bbox_x_mm": 10.0}
+        )
+        db_session.commit()
+
+        [item] = models_listing.read_items_by_ids(db_session, actor, [model.id])
+
+        assert item.bounding_box is None
+        assert item.gcode_file_count == 0
+
     @pytest.mark.parametrize("statistics", ("none", "empty", "small"))
     @pytest.mark.parametrize("unrelated_tags", (False, True))
     def test_bounds_card_work_to_requested_identities(

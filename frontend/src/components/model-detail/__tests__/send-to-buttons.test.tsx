@@ -18,7 +18,7 @@ import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test-support/router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SendToButtons, type SendToCommands } from "@/components/model-detail/send-to-buttons";
@@ -179,6 +179,9 @@ function spoolmanStatus(enabled: boolean): SpoolmanStatus {
 }
 
 interface PanelOptions {
+  initialDeliveryMode?: "send" | "queue";
+  open?: boolean;
+  preselectPrinterId?: number;
   /** Slicer metadata on the single G-code revision the panel offers. */
   metadata?: MetadataRead | null;
   spools?: SpoolRead[];
@@ -194,6 +197,9 @@ function renderPanel({
   spools,
   filename = "cube.gcode",
   printers = [printer],
+  initialDeliveryMode = "send",
+  open,
+  preselectPrinterId,
 }: PanelOptions = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
@@ -203,11 +209,15 @@ function renderPanel({
   client.setQueryData(queryKeys.spools, spools ?? []);
 
   const rendered = render(
-    <MemoryRouter>
+    <TestRouter>
       <QueryClientProvider client={client}>
         <AuthContext.Provider value={adminAuth}>
           <SendToButtons
             commands={commands}
+            initialDeliveryMode={initialDeliveryMode}
+            open={open}
+            preselectPrinterId={preselectPrinterId}
+            compact={open !== undefined}
             gcodeFiles={[
               {
                 id: 42,
@@ -223,7 +233,7 @@ function renderPanel({
           />
         </AuthContext.Provider>
       </QueryClientProvider>
-    </MemoryRouter>,
+    </TestRouter>,
   );
   return { ...rendered, client };
 }
@@ -231,6 +241,7 @@ function renderPanel({
 beforeEach(() => {
   // `useRequireAuth` gates the send buttons on a stored session.
   storeLogin("", adminUser, { silent: true });
+  sendToPrinter.mockReset();
   enqueueFleetJob.mockReset();
   enqueueFleetJob.mockResolvedValue(queuedJob);
   createFleetBatch.mockReset();
@@ -245,6 +256,40 @@ beforeEach(() => {
 });
 
 describe("SendToQueue", () => {
+  it("preserves the inspector's explicit printer through confirmation", async () => {
+    const chosen = aPrinter({ id: 9, name: "Chosen printer" });
+    sendToPrinter.mockResolvedValue(queuedJob);
+    renderPanel({ open: true, preselectPrinterId: 9, printers: [printer, chosen] });
+    await waitFor(() =>
+      expect(screen.getByRole("checkbox", { name: "Select Chosen printer" })).toBeChecked(),
+    );
+    expect(screen.getByRole("checkbox", { name: "Select Farm printer" })).not.toBeChecked();
+    expect(sendToPrinter).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+    await waitFor(() =>
+      expect(sendToPrinter).toHaveBeenCalledWith(
+        9,
+        expect.objectContaining({ file_id: 42, start_print: false }),
+      ),
+    );
+    expect(sendToPrinter).toHaveBeenCalledOnce();
+  });
+
+  it("does not replace an explicitly denied printer with a default target", async () => {
+    const denied = aPrinter({
+      id: 9,
+      name: "Denied printer",
+      access: { ...printer.access, can_print: false },
+    });
+    renderPanel({ open: true, preselectPrinterId: 9, printers: [printer, denied] });
+    await waitFor(() =>
+      expect(screen.getByRole("checkbox", { name: "Select Farm printer" })).not.toBeChecked(),
+    );
+    expect(screen.getByRole("checkbox", { name: "Select Denied printer" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send to printer" })).toBeDisabled();
+    expect(sendToPrinter).not.toHaveBeenCalled();
+  });
+
   it("retires send preflight with its session", async () => {
     const pending =
       Promise.withResolvers<Awaited<ReturnType<SendToCommands["checkFleetCompatibility"]>>>();
@@ -306,7 +351,7 @@ describe("SendToQueue", () => {
     app.client.setQueryData(queryKeys.fleetSummary, {});
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /Send to printer/ }));
-    await user.click(screen.getByRole("button", { name: "Add to queue" }));
+    await user.click(screen.getByRole("radio", { name: "Add to queue" }));
     await user.click(screen.getAllByRole("button", { name: "Add to queue" }).at(-1)!);
     await waitFor(() =>
       expect(app.client.getQueryState(queryKeys.fleetQueue)?.isInvalidated).toBe(true),
@@ -317,7 +362,7 @@ describe("SendToQueue", () => {
     renderPanel();
 
     await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
-    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Add to queue" }));
     await userEvent.click(screen.getAllByRole("button", { name: "Add to queue" }).at(-1)!);
 
     await waitFor(() =>
@@ -352,7 +397,7 @@ describe("SendToQueue", () => {
     });
 
     await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
-    await userEvent.selectOptions(screen.getByLabelText("Spool"), "1");
+    await userEvent.click(screen.getByRole("radio", { name: /Almost empty/ }));
 
     expect(await screen.findByText(/needs ~250g.*10g left/)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)).not.toBeDisabled();
@@ -379,7 +424,7 @@ describe("SendToQueue", () => {
     });
 
     await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
-    await userEvent.selectOptions(screen.getByLabelText("Spool"), "1");
+    await userEvent.click(screen.getByRole("radio", { name: /Untracked/ }));
 
     expect(await screen.findByText(/no tracked remaining weight/)).toBeInTheDocument();
   });
@@ -402,8 +447,8 @@ describe("SendToQueue", () => {
     renderPanel();
 
     await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
-    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
-    await userEvent.selectOptions(screen.getByLabelText("Routing"), "manual");
+    await userEvent.click(screen.getByRole("radio", { name: "Add to queue" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Choose printer" }));
     await userEvent.click(screen.getAllByRole("button", { name: "Add to queue" }).at(-1)!);
     expect(await screen.findByText("Print with a known material mismatch?")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Print anyway" }));
@@ -422,10 +467,10 @@ describe("SendToQueue", () => {
     renderPanel();
 
     await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
-    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Add to queue" }));
     await userEvent.clear(screen.getByLabelText("Copies"));
     await userEvent.type(screen.getByLabelText("Copies"), "3");
-    await userEvent.selectOptions(screen.getByLabelText("Priority"), "rush");
+    await userEvent.click(screen.getByRole("radio", { name: "Rush" }));
     await userEvent.type(screen.getByLabelText("Printer group"), "Workshop");
     await userEvent.click(screen.getAllByRole("button", { name: "Add to queue" }).at(-1)!);
 
@@ -494,5 +539,12 @@ describe("SendToQueue", () => {
     await userEvent.click(screen.getByLabelText("Select Farm printer"));
 
     expect(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)).toBeDisabled();
+  });
+
+  it("opens the overview queue action with the queue mode selected", async () => {
+    renderPanel({ initialDeliveryMode: "queue", open: true });
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Add to queue" })).toBeChecked());
+    expect(screen.queryByRole("button", { name: "Send to printer" })).not.toBeInTheDocument();
+    expect(enqueueFleetJob).not.toHaveBeenCalled();
   });
 });

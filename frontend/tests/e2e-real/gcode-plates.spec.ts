@@ -58,7 +58,7 @@ test.describe("Sliced G-code plates", () => {
           response.url().includes("/embedded-gcode?plate_index=1"),
         );
 
-        await page.getByRole("button", { name: "GCode", exact: true }).click();
+        await page.getByRole("button", { name: "Layers", exact: true }).click();
 
         const first = await firstRequest;
         expect(first.status()).toBe(200);

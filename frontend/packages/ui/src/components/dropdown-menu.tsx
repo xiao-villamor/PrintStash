@@ -5,6 +5,7 @@ import {
   type AriaAttributes,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -34,7 +35,11 @@ export interface DropdownMenuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   trigger: ReactNode;
+  /** Context menus may open from several controls in a shared trigger surface. */
+  returnFocusRef?: RefObject<HTMLElement | null>;
   align?: "start" | "end";
+  /** A context menu opens at the pointer that asked for it, not at its trigger's edge. */
+  anchorPoint?: { x: number; y: number } | null;
   role?: "menu" | "listbox" | "dialog";
   "aria-label"?: AriaAttributes["aria-label"];
   /** Escape a clipping ancestor while retaining the enclosing modal layer. */
@@ -49,7 +54,9 @@ export function DropdownMenu({
   open,
   onOpenChange,
   trigger,
+  returnFocusRef,
   align = "end",
+  anchorPoint = null,
   role = "menu",
   "aria-label": ariaLabel,
   portal = false,
@@ -96,7 +103,15 @@ export function DropdownMenu({
     const configuredMaxHeight = getComputedStyle(panel).maxHeight;
     function position() {
       if (!wrapper || !panel) return;
-      const anchor = wrapper.getBoundingClientRect();
+      const box = wrapper.getBoundingClientRect();
+      const anchor = anchorPoint
+        ? {
+            left: anchorPoint.x,
+            right: anchorPoint.x,
+            top: anchorPoint.y - GAP,
+            bottom: anchorPoint.y - GAP,
+          }
+        : box;
       const viewport = window.visualViewport;
       const leftEdge = (viewport?.offsetLeft ?? 0) + GUTTER;
       const topEdge = (viewport?.offsetTop ?? 0) + GUTTER;
@@ -107,7 +122,7 @@ export function DropdownMenu({
       const naturalHeight = panel.scrollHeight + panel.offsetHeight - panel.clientHeight;
       const limit = Number.parseFloat(configuredMaxHeight);
       const height = Number.isFinite(limit) ? Math.min(naturalHeight, limit) : naturalHeight;
-      const preferredLeft = align === "end" ? anchor.right - width : anchor.left;
+      const preferredLeft = align === "end" && !anchorPoint ? anchor.right - width : anchor.left;
       const left = Math.max(leftEdge, Math.min(preferredLeft, rightEdge - width));
       const below = Math.max(0, bottomEdge - anchor.bottom - GAP);
       const above = Math.max(0, anchor.top - GAP - topEdge);
@@ -116,8 +131,8 @@ export function DropdownMenu({
       const top = upward
         ? Math.max(topEdge, anchor.top - GAP - Math.min(height, available))
         : Math.max(topEdge, Math.min(anchor.bottom + GAP, bottomEdge));
-      panel.style.left = left - (portal ? 0 : anchor.left + wrapper.clientLeft) + "px";
-      panel.style.top = top - (portal ? 0 : anchor.top + wrapper.clientTop) + "px";
+      panel.style.left = left - (portal ? 0 : box.left + wrapper.clientLeft) + "px";
+      panel.style.top = top - (portal ? 0 : box.top + wrapper.clientTop) + "px";
       panel.style.right = "auto";
       panel.style.marginTop = "0";
       panel.style.maxHeight = Number.isFinite(limit)
@@ -125,7 +140,7 @@ export function DropdownMenu({
         : available + "px";
       panel.style.overflowY = height > available ? "auto" : "";
       panel.style.transformOrigin =
-        (align === "end" ? "right" : "left") + (upward ? " bottom" : " top");
+        (align === "end" && !anchorPoint ? "right" : "left") + (upward ? " bottom" : " top");
     }
     function onResize() {
       // A responsive toolbar can disappear while its portaled menu is open.
@@ -165,7 +180,7 @@ export function DropdownMenu({
       window.visualViewport?.removeEventListener("resize", onResize);
       window.visualViewport?.removeEventListener("scroll", position);
     };
-  }, [mounted, align, portal, portalHost, onOpenChange]);
+  }, [mounted, align, anchorPoint, portal, portalHost, onOpenChange]);
 
   function contains(target: Node) {
     return (
@@ -194,7 +209,13 @@ export function DropdownMenu({
   }, [open, role]);
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    const triggerElement = wrapperRef.current?.querySelector<HTMLElement>("[data-menu-trigger]");
+    // Portaled dialogs can bubble through a card's closed contextual menu.
+    // Only an open panel owns Escape or roving focus; otherwise its child
+    // dialog and the page's keyboard commands must receive the event.
+    if (!open) return;
+    const triggerElement =
+      returnFocusRef?.current ??
+      wrapperRef.current?.querySelector<HTMLElement>("[data-menu-trigger]");
     if (e.key === "Escape") {
       e.stopPropagation();
       onOpenChange(false);

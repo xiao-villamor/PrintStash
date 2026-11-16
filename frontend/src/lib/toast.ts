@@ -16,6 +16,35 @@
 import { toast as sonner } from "sonner";
 import { userMessage, parseApiError } from "@/lib/errors";
 import { uiText } from "./locale";
+import { getSessionVersion } from "./session-transport";
+
+type UndoNotice = {
+  session: number;
+  run: () => void | Promise<void>;
+  consumed: boolean;
+  id: string | number | null;
+};
+let undoNotice: UndoNotice | null = null;
+
+function runUndo(notice: UndoNotice): boolean {
+  if (notice.consumed || notice.session !== getSessionVersion()) return false;
+  notice.consumed = true;
+  if (undoNotice === notice) undoNotice = null;
+  if (notice.id !== null) sonner.dismiss(notice.id);
+  void Promise.resolve()
+    .then(() => {
+      if (notice.session === getSessionVersion()) return notice.run();
+    })
+    .catch((error) => {
+      if (notice.session === getSessionVersion()) toast.error(error);
+    });
+  return true;
+}
+
+/** The keyboard and visible Undo action consume the same captured command once. */
+export function undoLastChange(): boolean {
+  return undoNotice !== null && runUndo(undoNotice);
+}
 
 // ---------------------------------------------------------------------------
 // Typed helpers — prefer these over the raw `toast()` function.
@@ -62,12 +91,24 @@ export const toast = {
   },
 
   undo(message: string, onUndo: () => void | Promise<void>): void {
-    sonner.success(message, {
+    const notice: UndoNotice = {
+      session: getSessionVersion(),
+      run: onUndo,
+      consumed: false,
+      id: null,
+    };
+    undoNotice = notice;
+    const expire = () => {
+      if (undoNotice === notice) undoNotice = null;
+    };
+    notice.id = sonner.success(message, {
       duration: 6000,
+      onDismiss: expire,
+      onAutoClose: expire,
       action: {
         label: uiText("Undo"),
         onClick: () => {
-          void onUndo();
+          runUndo(notice);
         },
       },
     });

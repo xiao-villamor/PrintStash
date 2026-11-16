@@ -5,7 +5,7 @@
  */
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test-support/router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TaskList } from "@/components/task-list";
@@ -27,7 +27,7 @@ function task(overrides: Partial<TaskItem> = {}): TaskItem {
 
 function renderTaskList(tasks: TaskItem[], user: AuthState["user"] = null) {
   render(
-    <MemoryRouter>
+    <TestRouter>
       <AuthContext.Provider
         value={{
           user,
@@ -39,7 +39,7 @@ function renderTaskList(tasks: TaskItem[], user: AuthState["user"] = null) {
       >
         <TaskList tasks={tasks} onClear={vi.fn<() => void>()} />
       </AuthContext.Provider>
-    </MemoryRouter>,
+    </TestRouter>,
   );
 }
 

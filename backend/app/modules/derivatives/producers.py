@@ -49,6 +49,7 @@ from app.modules.library.volume_metadata import apply_volume
 from app.modules.media import (
     gcode_parser,
     mesh_isolation,
+    mesh_previews,
     resin,
     stl_isolation,
     thumbnail,
@@ -305,6 +306,29 @@ def _publish_thumbnail(
         adopt_thumbnail(session, prepared)
         session.commit()
     return DerivativeState.READY
+
+
+def _publish_embedded_3mf_cover(
+    file_row: File, attempt: records.DerivativeAttempt
+) -> DerivativeState | None:
+    """Publish a 3MF's own slicer picture, or None when it carries none."""
+    try:
+        with resolve(file_row).materialize() as source:
+            image = mesh_previews.extract_embedded_3mf_thumbnail(
+                source, validate_image=True
+            )
+    except ArtifactContentError:
+        return None
+    if image is None:
+        return None
+    return _publish_thumbnail(
+        file_row,
+        image,
+        attempt=attempt,
+        normalize=True,
+        strategy=ThumbnailStrategy.EMBEDDED.value,
+        complete=True,
+    )
 
 
 def _thumbnail_failure(
@@ -571,6 +595,25 @@ def _derive_mesh(
             "mesh derivation failed in its worker",
             extra={"file_id": file_id, "reason": reason},
         )
+        if (
+            DerivativeKind.THUMBNAIL in attempts
+            and DerivativeKind.THUMBNAIL not in outcome
+            and file_row.file_type is FileType.THREE_MF
+            and settings.prefer_rendered_3mf_preview
+        ):
+            # A preferred render is attempted before the slicer's picture is
+            # published, so a worker that dies while reading the mesh would
+            # otherwise leave the Model without a cover. The picture is a
+            # bounded archive read, done here as G-code's embedded image is.
+            try:
+                state = _publish_embedded_3mf_cover(
+                    file_row, attempts[DerivativeKind.THUMBNAIL]
+                )
+            except records.AttemptSuperseded:
+                return Outcome(outcome)
+            if state is not None:
+                outcome[DerivativeKind.THUMBNAIL] = state
+                published(DerivativeKind.THUMBNAIL, state)
         for kind, authority in attempts.items():
             if kind in outcome:
                 continue

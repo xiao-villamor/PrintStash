@@ -176,6 +176,12 @@ export interface ModelPrinterPresenceRead {
   file_count: number;
 }
 
+export interface ModelBoundingBoxRead {
+  x_mm: number;
+  y_mm: number;
+  z_mm: number;
+}
+
 export interface ModelPrintJobRead {
   id: number;
   printer_id: number | null;
@@ -250,8 +256,12 @@ export interface ModelListItem {
   tags: string[];
   thumbnail_url: string | null;
   file_count: number;
+  /** Live G-code revisions; a card reads the Model detail only when it has one. */
+  gcode_file_count: number;
   /** Newest mesh file (STL/3MF/OBJ), used to preload the 3D preview. */
   mesh_file_id: number | null;
+  /** Extent of the newest measured mesh; null until a mesh is measured. */
+  bounding_box: ModelBoundingBoxRead | null;
   printer_presence: ModelPrinterPresenceRead[];
   updated_at: string;
   print_summary: PrintSummaryRead | null;

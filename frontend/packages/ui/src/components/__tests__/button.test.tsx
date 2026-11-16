@@ -20,7 +20,7 @@ describe("Button", () => {
   it("renders a button carrying the default variant and size", () => {
     render(<Button>Save</Button>);
 
-    expect(screen.getByRole("button", { name: "Save" })).toHaveClass("bg-primary", "h-10");
+    expect(screen.getByRole("button", { name: "Save" })).toHaveClass("bg-primary", "h-9");
   });
 
   it("swaps in the classes of the requested variant and size", () => {
@@ -30,7 +30,10 @@ describe("Button", () => {
       </Button>,
     );
 
-    expect(screen.getByRole("button", { name: "Delete" })).toHaveClass("bg-destructive", "h-9");
+    expect(screen.getByRole("button", { name: "Delete" })).toHaveClass(
+      "bg-destructive",
+      "h-[34px]",
+    );
   });
 
   it("lets a caller's class override the variant's own", () => {

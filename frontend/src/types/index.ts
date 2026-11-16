@@ -21,6 +21,7 @@ export type {
   ModelRead,
   ModelPrinterFileRead,
   ModelPrinterPresenceRead,
+  ModelBoundingBoxRead,
   ModelPrintJobRead,
   ArtifactOutcomeRead,
   ModelListItem,

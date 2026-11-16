@@ -5,7 +5,7 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "@/lib/link";
 import {
   Area,
   AreaChart,
@@ -19,12 +19,14 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { BarChart3, Boxes, Clock, Coins, Layers, Settings2, Weight } from "lucide-react";
+import { BarChart3, Settings2 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
+import { TabBar } from "@/components/ui/tabs";
+import { inputClasses } from "@/components/ui/input";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { usePrintStatistics, useVaultConfig } from "@/lib/queries";
 import type { StatsPeriod } from "@/lib/api";
@@ -113,7 +115,7 @@ type ChartType = (typeof CHART_TYPES)[number]["id"];
 
 const ACCENT = "var(--chart-1)";
 const CHROME = "var(--chart-grid)";
-const AXIS_TICK = { fill: CHROME } as const;
+const AXIS_TICK = { fill: "var(--muted-foreground)" } as const;
 const CURSOR_FILL = { fill: CHROME, fillOpacity: 0.18 } as const;
 const CURSOR_LINE = { stroke: ACCENT, strokeOpacity: 0.4 } as const;
 
@@ -188,40 +190,45 @@ function Segmented<T extends string>({
   );
 }
 
-function MetricCard({
-  icon: Icon,
-  label,
-  value,
-  tone = "blue",
-}: {
-  icon: typeof Coins;
-  label: string;
-  value: string;
-  tone?: "blue" | "cyan" | "violet";
-}) {
+function MetricCard({ label, value }: { label: string; value: string }) {
   useUiLocale();
   const { locale } = useI18n();
-  const toneClasses = {
-    blue: "bg-accent text-primary",
-    cyan: "bg-chart-cyan-soft text-chart-cyan",
-    violet: "bg-chart-violet-soft text-chart-violet",
-  }[tone];
   return (
-    <Card className="overflow-hidden">
-      <CardContent className="flex items-center gap-3 p-4">
-        <div
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${toneClasses}`}
-        >
-          <Icon className="h-5 w-5" />
-        </div>
-        <div className="min-w-0">
-          <div className="truncate text-xs uppercase tracking-wider text-muted-foreground">
-            {translateUiText(locale, label)}
-          </div>
-          <div className="truncate text-xl font-bold text-foreground">{value}</div>
-        </div>
-      </CardContent>
-    </Card>
+    <div className="min-w-0 py-1">
+      <div className="text-xs text-muted-foreground">{translateUiText(locale, label)}</div>
+      <div className="mt-1 break-words text-xl font-semibold tabular-nums text-foreground">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function PeriodSelector({
+  period,
+  onChange,
+}: {
+  period: StatsPeriod;
+  onChange: (period: StatsPeriod) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <label className="inline-flex items-center gap-2 text-xs text-foreground">
+      {t("Period")}
+      <select
+        value={period}
+        onChange={(event) => {
+          const selected = PERIODS.find((option) => option.value === event.target.value);
+          if (selected) onChange(selected.value);
+        }}
+        className={`${inputClasses} h-9 w-auto`}
+      >
+        {PERIODS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -349,14 +356,18 @@ function RankingCard({
 function TimeSeriesCard({
   stats,
   currency,
+  period,
+  onPeriodChange,
 }: {
   stats: PrintStatisticsRead;
   currency: string | null;
+  period: StatsPeriod;
+  onPeriodChange: (period: StatsPeriod) => void;
 }) {
   useUiLocale();
   const { locale, t } = useI18n();
-  const [metric, setMetric] = useState<Metric>("cost");
-  const [chartType, setChartType] = useState<ChartType>("area");
+  const [metric, setMetric] = useState<Metric>("prints");
+  const [chartType, setChartType] = useState<ChartType>("bar");
 
   const data = stats.cost_over_time.map((b) => ({
     bucket: b.bucket,
@@ -379,9 +390,7 @@ function TimeSeriesCard({
         ? formatFilament(v)
         : String(Math.round(v));
 
-  const grid = (
-    <CartesianGrid vertical={false} strokeDasharray="3 5" stroke={CHROME} strokeOpacity={0.32} />
-  );
+  const grid = <CartesianGrid vertical={false} stroke={CHROME} strokeOpacity={0.65} />;
   const xAxis = (
     <XAxis
       dataKey="bucket"
@@ -404,6 +413,7 @@ function TimeSeriesCard({
       axisLine={false}
       tickMargin={8}
       width={56}
+      allowDecimals={metric !== "prints"}
       tick={AXIS_TICK}
       tickFormatter={(v) => formatValue(Number(v))}
     />
@@ -416,77 +426,93 @@ function TimeSeriesCard({
   );
 
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="flex flex-col gap-3 border-b border-border/70 p-5 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+    <>
+      <div className="flex flex-wrap items-center gap-3">
+        <PeriodSelector period={period} onChange={onPeriodChange} />
+        <label className="inline-flex items-center gap-2 text-xs text-foreground">
+          {t("Metric")}
+          <select
+            value={metric}
+            onChange={(event) => {
+              const selected = METRICS.find((option) => option.id === event.target.value);
+              if (selected) setMetric(selected.id);
+            }}
+            className={`${inputClasses} h-9 w-auto`}
+          >
+            {METRICS.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Segmented options={CHART_TYPES} value={chartType} onChange={setChartType} />
+      </div>
+      <Card className="overflow-hidden">
+        <CardHeader className="p-5">
           <CardTitle className="text-sm font-semibold">
-            {uiText("{metric} over time", { metric: localizedMetricLabel })}
+            {metric === "prints"
+              ? t("Completed jobs in selected period")
+              : uiText("{metric} over time", { metric: localizedMetricLabel })}
           </CardTitle>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {translateUiText(locale, "Completed jobs in selected period")}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Segmented options={METRICS} value={metric} onChange={setMetric} />
-          <Segmented options={CHART_TYPES} value={chartType} onChange={setChartType} />
-        </div>
-      </CardHeader>
-      <CardContent className="px-5 pb-5">
-        {metric === "cost" && currency === null ? (
-          <p role="status" className="py-12 text-center text-sm text-muted-foreground">
-            {t("stats.costUnavailable")}
-          </p>
-        ) : (
-          <ResponsiveContainer width="100%" height={260}>
-            {chartType === "area" ? (
-              <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="metricFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={ACCENT} stopOpacity={0.3} />
-                    <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                {grid}
-                {xAxis}
-                {yAxis}
-                {tooltip(CURSOR_LINE)}
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke={ACCENT}
-                  strokeWidth={2}
-                  fill="url(#metricFill)"
-                  activeDot={{ r: 4, fill: "var(--card)", stroke: ACCENT, strokeWidth: 2 }}
-                />
-              </AreaChart>
-            ) : chartType === "line" ? (
-              <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                {grid}
-                {xAxis}
-                {yAxis}
-                {tooltip(CURSOR_LINE)}
-                <Line
-                  type="monotone"
-                  dataKey="value"
-                  stroke={ACCENT}
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4, fill: "var(--card)", stroke: ACCENT, strokeWidth: 2 }}
-                />
-              </LineChart>
-            ) : (
-              <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                {grid}
-                {xAxis}
-                {yAxis}
-                {tooltip(CURSOR_FILL)}
-                <Bar dataKey="value" fill={ACCENT} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            )}
-          </ResponsiveContainer>
-        )}
-      </CardContent>
-    </Card>
+        </CardHeader>
+        <CardContent className="px-5 pb-5">
+          {metric === "cost" && currency === null ? (
+            <p role="status" className="py-12 text-center text-sm text-muted-foreground">
+              {t("stats.costUnavailable")}
+            </p>
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              {chartType === "area" ? (
+                <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="metricFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={ACCENT} stopOpacity={0.3} />
+                      <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  {grid}
+                  {xAxis}
+                  {yAxis}
+                  {tooltip(CURSOR_LINE)}
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    stroke={ACCENT}
+                    strokeWidth={2}
+                    fill="url(#metricFill)"
+                    activeDot={{ r: 4, fill: "var(--card)", stroke: ACCENT, strokeWidth: 2 }}
+                  />
+                </AreaChart>
+              ) : chartType === "line" ? (
+                <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  {grid}
+                  {xAxis}
+                  {yAxis}
+                  {tooltip(CURSOR_LINE)}
+                  <Line
+                    type="monotone"
+                    dataKey="value"
+                    stroke={ACCENT}
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 4, fill: "var(--card)", stroke: ACCENT, strokeWidth: 2 }}
+                  />
+                </LineChart>
+              ) : (
+                <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  {grid}
+                  {xAxis}
+                  {yAxis}
+                  {tooltip(CURSOR_FILL)}
+                  <Bar dataKey="value" fill="var(--secondary)" maxBarSize={28} />
+                </BarChart>
+              )}
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
+    </>
   );
 }
 
@@ -494,10 +520,16 @@ function StatsContent({
   stats,
   currency,
   visibleWidgets,
+  section,
+  period,
+  onPeriodChange,
 }: {
   stats: PrintStatisticsRead;
   currency: string | null;
   visibleWidgets: Set<WidgetId>;
+  section: "overview" | "rankings";
+  period: StatsPeriod;
+  onPeriodChange: (period: StatsPeriod) => void;
 }) {
   useUiLocale();
   const { locale, t } = useI18n();
@@ -516,7 +548,7 @@ function StatsContent({
             )}
           </p>
           <Button variant="outline" className="mt-2" asChild>
-            <Link to="/printers">{translateUiText(locale, "Manage printers")}</Link>
+            <Link href="/printers">{translateUiText(locale, "Manage printers")}</Link>
           </Button>
         </CardContent>
       </Card>
@@ -548,51 +580,57 @@ function StatsContent({
 
   return (
     <div className="space-y-6 animate-panel-in">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-        <MetricCard
-          icon={Coins}
-          label={uiText("Total cost")}
-          value={
-            currency === null
-              ? t("stats.costUnavailable")
-              : formatCurrency(stats.total_cost, currency)
-          }
+      <div hidden={section !== "overview"} className="space-y-6">
+        <div className="space-y-5 border-b border-border pb-5">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
+            <MetricCard
+              label={uiText("Total cost")}
+              value={
+                currency === null
+                  ? t("stats.costUnavailable")
+                  : formatCurrency(stats.total_cost, currency)
+              }
+            />
+            <MetricCard
+              label={uiText("Print time")}
+              value={formatDuration(stats.total_print_time_s)}
+            />
+            <MetricCard
+              label={uiText("Filament used")}
+              value={formatFilament(stats.total_filament_g)}
+            />
+          </div>
+          <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs text-muted-foreground">
+            <span>
+              {uiText("Prints")}{" "}
+              <strong className="ml-1 font-semibold text-foreground">{stats.total_prints}</strong>
+            </span>
+            <span>
+              {uiText("Avg / print")}{" "}
+              <strong className="ml-1 font-semibold text-foreground">
+                {formatFilament(stats.avg_filament_g)}
+              </strong>
+            </span>
+            <span>
+              {uiText("7-day forecast")}{" "}
+              <strong className="ml-1 font-semibold text-foreground">
+                {formatFilament(weeklyFilament)}
+              </strong>
+            </span>
+          </div>
+        </div>
+
+        <TimeSeriesCard
+          stats={stats}
+          currency={currency}
+          period={period}
+          onPeriodChange={onPeriodChange}
         />
-        <MetricCard
-          icon={Boxes}
-          label={uiText("Prints")}
-          value={String(stats.total_prints)}
-          tone="cyan"
-        />
-        <MetricCard
-          icon={Weight}
-          label={uiText("Filament used")}
-          value={formatFilament(stats.total_filament_g)}
-          tone="violet"
-        />
-        <MetricCard
-          icon={Layers}
-          label={uiText("Avg / print")}
-          value={formatFilament(stats.avg_filament_g)}
-        />
-        <MetricCard
-          icon={Clock}
-          label={uiText("Print time")}
-          value={formatDuration(stats.total_print_time_s)}
-        />
-        <MetricCard
-          icon={Weight}
-          label={uiText("7-day forecast")}
-          value={formatFilament(weeklyFilament)}
-          tone="violet"
-        />
+
+        <p className="-mt-3 text-xs text-muted-foreground">
+          {translateUiText(locale, "7-day forecast uses selected period’s daily filament average.")}
+        </p>
       </div>
-
-      <TimeSeriesCard stats={stats} currency={currency} />
-
-      <p className="-mt-3 text-xs text-muted-foreground">
-        {translateUiText(locale, "7-day forecast uses selected period’s daily filament average.")}
-      </p>
 
       <div className="grid gap-6 lg:grid-cols-2">
         {visibleWidgets.has("models") && (
@@ -639,6 +677,7 @@ export default function StatisticsPage() {
   const { locale, t } = useI18n();
   const { user } = useAuth();
   const [period, setPeriod] = useState<StatsPeriod>("30d");
+  const [section, setSection] = useState<"overview" | "rankings">("overview");
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [visibleWidgets, setVisibleWidgets] = useState<Set<WidgetId>>(loadVisibleWidgets);
   const { data, error, isLoading, isError, refetch } = usePrintStatistics(period);
@@ -666,11 +705,6 @@ export default function StatisticsPage() {
         )}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Segmented
-              options={PERIODS.map((p) => ({ id: p.value, label: p.label }))}
-              value={period}
-              onChange={setPeriod}
-            />
             <DropdownMenu
               portal
               open={customizeOpen}
@@ -713,6 +747,22 @@ export default function StatisticsPage() {
         }
       />
 
+      <TabBar
+        tabs={[
+          { key: "overview", label: t("Overview") },
+          { key: "rankings", label: t("Rankings") },
+        ]}
+        active={section}
+        onChange={setSection}
+        className="gap-6 border-b border-border"
+        tabClassName="px-0 py-3 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        activeTabClassName="font-semibold text-foreground"
+      />
+
+      {(!data || data.total_prints === 0 || section === "rankings") && (
+        <PeriodSelector period={period} onChange={setPeriod} />
+      )}
+
       {user?.is_superuser && config.isError && (
         <div role="alert" className="flex items-center gap-2 text-sm">
           <p>{t("settings.configLoadFailed")}</p>
@@ -737,7 +787,14 @@ export default function StatisticsPage() {
         </Card>
       )}
       {data && !denied && (
-        <StatsContent stats={data} currency={currency} visibleWidgets={visibleWidgets} />
+        <StatsContent
+          stats={data}
+          currency={currency}
+          visibleWidgets={visibleWidgets}
+          section={section}
+          period={period}
+          onPeriodChange={setPeriod}
+        />
       )}
     </PageContainer>
   );

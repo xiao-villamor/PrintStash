@@ -13,7 +13,7 @@ import {
   clickModelAction,
   completedJob,
   gcodeFor,
-  modelCard,
+  openModelPage,
   uploadGcodeModel,
 } from "./util";
 
@@ -59,7 +59,7 @@ test.describe("backup recovery", () => {
 
       // ── Remove the catalog row and owned bytes ──────────────────────────────
       await page.goto("/");
-      await modelCard(page, name).click();
+      await openModelPage(page, name);
       await clickModelAction(page, "Delete model");
       await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
       await page.goto("/settings?section=trash");

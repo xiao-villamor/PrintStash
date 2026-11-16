@@ -1,0 +1,114 @@
+.printer-reference-surface {
+  border: 1px solid var(--border);
+  background: var(--card);
+  padding: 20px;
+}
+.printer-materials-nozzle {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  align-items: center;
+  gap: 24px;
+  padding: 14px 0 24px;
+}
+.printer-reference-row {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+.printer-reference-row > div:first-child {
+  min-width: 0;
+  flex: 1;
+}
+.printer-reference-row h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.printer-reference-row p {
+  margin: 3px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.printer-reference-row:last-child {
+  border-bottom: 0;
+}
+.printer-reference-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.printer-reference-actions button,
+.printer-reference-actions a {
+  min-height: 34px;
+  height: 34px;
+  font-size: 13px;
+}
+.printer-reference-facts {
+  display: grid;
+  gap: 12px;
+  font-size: 13px;
+}
+.printer-reference-facts > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.4fr) minmax(0, 1fr);
+  gap: 20px;
+}
+.printer-reference-facts dt {
+  color: var(--muted-foreground);
+}
+.printer-reference-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.printer-reference-note {
+  border: 1px solid var(--border);
+  background: var(--accent);
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.printer-reference-footnote {
+  margin-top: 18px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.6;
+}
+@media (max-width: 767px) {
+  .printer-reference-surface {
+    padding: 16px;
+  }
+  .printer-materials-nozzle {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding-top: 0;
+  }
+  .printer-reference-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px 0;
+  }
+  .printer-reference-actions {
+    justify-content: flex-start;
+  }
+  .printer-reference-facts > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+.printer-maintenance-reference .fleet-plain-row {
+  padding: 16px 0;
+  gap: 24px;
+}
+.printer-maintenance-reference .fleet-plain-row h3 {
+  font-size: 13px;
+  font-weight: 700;
+}

@@ -129,7 +129,7 @@ test.describe("role-based access", () => {
     try {
       await v.page.goto(modelUrl);
       await expect(v.page.getByRole("heading", { name: model })).toBeVisible();
-      await v.page.getByRole("button", { name: "Model actions" }).click();
+      await v.page.getByRole("heading", { level: 1 }).click({ button: "right" });
       await expect(modelActionItem(v.page, "Edit details")).toBeDisabled();
       await expect(modelActionItem(v.page, "Delete model")).toBeDisabled();
     } finally {

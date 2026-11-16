@@ -23,7 +23,8 @@ describe("PageContainer", () => {
   it("uses the full page width by default", () => {
     render(<PageContainer>Body</PageContainer>);
 
-    expect(screen.getByText("Body")).toHaveClass("max-w-screen-2xl");
+    expect(screen.getByText("Body")).toHaveClass("w-full");
+    expect(screen.getByText("Body")).not.toHaveClass("max-w-screen-2xl");
   });
 
   it("narrows to a reading measure for prose", () => {

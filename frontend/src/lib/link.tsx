@@ -1,19 +1,29 @@
 "use client";
 
-/**
- * Internal links use React Router history. Navigation hooks live separately
- * in the component-free navigation module.
- */
-
-import { Link as RouterLink } from "react-router-dom";
+/** Internal anchors retain native gestures while TanStack owns same-tab history. */
+import { Link as RouterLink, type HistoryState } from "@tanstack/react-router";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
+import { parseAppSearch } from "@/lib/router-search";
 
-type LinkProps = {
+export type LinkProps = {
   href: string;
-  children: ReactNode;
+  children?: ReactNode;
   replace?: boolean;
+  state?: HistoryState;
 } & Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href">;
 
-export function Link({ href, replace, ...rest }: LinkProps) {
-  return <RouterLink to={href} replace={replace} {...rest} />;
+export function Link({ href, replace, state, ...rest }: LinkProps) {
+  const target = new URL(href, window.location.origin);
+  if (target.origin !== window.location.origin) return <a href={href} {...rest} />;
+  return (
+    <RouterLink
+      to={target.pathname}
+      search={parseAppSearch(target.search)}
+      hash={target.hash.slice(1)}
+      replace={replace}
+      state={state}
+      preload={false}
+      {...rest}
+    />
+  );
 }

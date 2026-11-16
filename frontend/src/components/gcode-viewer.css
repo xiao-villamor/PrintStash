@@ -1,0 +1,12 @@
+/* The toolpath view picker sits inside the viewer's own toolbar frame. Hosts
+   that style every form select (the library inspector) must not give it a
+   second border or full width. */
+.toolpath-view-select.toolpath-view-select {
+  width: auto;
+  min-height: 28px;
+  height: 28px;
+  border: 0;
+  padding: 0 6px;
+  background: transparent;
+  font-size: 12px;
+}

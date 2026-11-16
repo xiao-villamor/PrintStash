@@ -5,10 +5,8 @@
  *
  * `formatGrams(null)` rendering "0 g" tells a user their print used no filament,
  * which is a fact they might act on; the em dash tells them PrintStash does not
- * know, which is the truth. That distinction is why the zero cases are split
- * per formatter rather than parametrized: percent and temperature have a
- * meaningful zero (0% complete, 0 °C), and grams, millimetres and cost do not —
- * a 0 there only ever comes from a field nothing filled in.
+ * know. Recorded zero values remain numbers: a free print, no measured filament,
+ * or zero elapsed seconds must stay distinct from an absent measurement.
  *
  * The unit-scaling and duration cases exist because a wrong boundary is silently
  * plausible: 1023 bytes shown as "1.0 KB" or 59 minutes as "0h 59m" both read as
@@ -53,10 +51,15 @@ describe("formatBytes", () => {
 });
 
 describe("formatDuration", () => {
-  it("renders an em dash for zero or negative", () => {
-    expect(formatDuration(0)).toBe("—");
+  it("renders an em dash for missing or negative duration", () => {
     expect(formatDuration(-5)).toBe("—");
     expect(formatDuration(null)).toBe("—");
+    expect(formatDuration(undefined)).toBe("—");
+    expect(formatDuration(NaN)).toBe("—");
+  });
+
+  it("preserves a recorded zero duration", () => {
+    expect(formatDuration(0)).toBe("0s");
   });
 
   it("uses h+m above an hour", () => {
@@ -79,6 +82,11 @@ describe("formatPercent, formatTemperature, formatGrams, formatMillimeters, form
     expect(formatPercent(null)).toBe("—");
     expect(formatGrams(null)).toBe("—");
     expect(formatTemperature(undefined)).toBe("—");
+    expect(formatCost(null)).toBe("—");
+    expect(formatCost(undefined)).toBe("—");
+    expect(formatMillimeters(NaN)).toBe("—");
+    expect(formatGrams(NaN)).toBe("—");
+    expect(formatCost(NaN)).toBe("—");
   });
 
   it("apply their unit suffix to real values", () => {
@@ -98,10 +106,17 @@ describe("formatPercent, formatTemperature, formatGrams, formatMillimeters, form
     expect(formatTemperature(0)).toBe("0°C");
   });
 
-  it("treat a zero as missing for grams/mm/cost (0 there means no data)", () => {
-    expect(formatGrams(0)).toBe("—");
-    expect(formatMillimeters(0)).toBe("—");
-    expect(formatCost(0)).toBe("—");
+  it("preserves recorded zero weight", () => {
+    expect(formatGrams(0)).toBe("0g");
+  });
+
+  it("preserves recorded zero length", () => {
+    expect(formatMillimeters(0)).toBe("0mm");
+  });
+
+  it("preserves recorded zero cost", () => {
+    expect(formatCost(0)).toBe("0.00");
+    expect(formatCost(0, "es")).toBe("0,00");
   });
 });
 

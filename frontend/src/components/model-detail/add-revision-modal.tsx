@@ -5,15 +5,16 @@ import { userMessage } from "@/lib/errors";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent, FormEvent } from "react";
-import { FileCode2, Plus, Star, Upload, X } from "lucide-react";
+import { FileCode2, Upload, X } from "lucide-react";
 
 import { addGcodeRevision } from "@/lib/api";
 import { createTask, updateTask } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
 import { formatBytes } from "@/lib/format";
 import { ModelRead } from "@/types";
+import { ChoiceField } from "./choice-field";
 import { Button } from "@/components/ui/button";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
@@ -23,14 +24,19 @@ import { GCODE_ACCEPT, isGcodeFile } from "@/lib/bulk-upload";
 
 export function AddGcodeRevisionModal({
   modelId,
+  modelName,
+  currentRecommendedRevision,
   onClose,
   onUploaded,
 }: {
   modelId: number;
+  modelName?: string;
+  currentRecommendedRevision?: number;
   onClose: () => void;
   onUploaded: (model: ModelRead) => void;
 }) {
   useUiLocale();
+  const formId = useId();
   const [file, setFile] = useState<File | null>(null);
   const [label, setLabel] = useState("");
   const [notes, setNotes] = useState("");
@@ -106,14 +112,33 @@ export function AddGcodeRevisionModal({
           if (!submitting) onClose();
         }}
         title={uiText("Add G-code revision")}
-        className="max-w-lg"
+        description={uiText(
+          "Add a file produced by your slicer. Earlier Revisions and their print history remain available.",
+        )}
+        footer={
+          <>
+            <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
+              {uiText("Cancel")}
+            </Button>
+            <Button type="submit" form={formId} loading={submitting} disabled={!file}>
+              {submitting ? uiText("Adding revision…") : uiText("Add revision")}
+            </Button>
+          </>
+        }
       >
-        <form onSubmit={submit} className="space-y-5">
-          <p className="-mt-2 text-sm leading-relaxed text-muted-foreground">
-            {uiText(
-              "Upload another slice while keeping earlier settings and print history available.",
-            )}
-          </p>
+        <form id={formId} onSubmit={submit} className="space-y-4">
+          {modelName && (
+            <dl className="grid grid-cols-[1fr_2fr] gap-x-4 gap-y-2 bg-plate p-4 text-[13px]">
+              <dt className="text-muted-foreground">{uiText("Model")}</dt>
+              <dd className="break-words">{modelName}</dd>
+              <dt className="text-muted-foreground">{uiText("Current recommended Revision")}</dt>
+              <dd>
+                {currentRecommendedRevision != null
+                  ? `${uiText("Rev ")}${currentRecommendedRevision}`
+                  : uiText("None")}
+              </dd>
+            </dl>
+          )}
 
           <input
             ref={fileInputRef}
@@ -170,9 +195,7 @@ export function AddGcodeRevisionModal({
                 </Button>
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
+              <div
                 onDragEnter={(event) => {
                   event.preventDefault();
                   setDragActive(true);
@@ -181,22 +204,34 @@ export function AddGcodeRevisionModal({
                 onDragLeave={() => setDragActive(false)}
                 onDrop={onDrop}
                 className={cn(
-                  "flex w-full flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 px-6 py-7 text-center transition-[background-color,border-color,transform] duration-press active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  dragActive
-                    ? "border-primary bg-primary-soft"
-                    : "hover:border-primary/60 hover:bg-muted/60",
+                  "flex items-start gap-3 border border-dashed border-input bg-plate p-3",
+                  dragActive && "border-primary bg-accent",
                 )}
               >
-                <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-accent text-accent-foreground">
-                  <Upload className="h-5 w-5" />
-                </span>
-                <span className="text-sm font-medium text-foreground">
-                  {uiText("Choose G-code or drop it here")}
-                </span>
-                <span className="mt-1 text-xs text-muted-foreground">
-                  {uiText(".gcode, .g, .gco, or .bgcode")}
-                </span>
-              </button>
+                <Upload className="mt-2 h-5 w-5 shrink-0 text-muted-foreground" />
+                <div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      {uiText("Choose file")}
+                    </Button>
+                    <span className="text-xs text-muted-foreground">
+                      {uiText("or drop files here")}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                    {uiText(
+                      "Select a sliced file. PrintStash stores it as a Revision; it does not slice or validate G-code.",
+                    )}
+                  </p>
+                </div>
+              </div>
+            )}
+            {!file && (
+              <p className="pt-1 text-xs text-muted-foreground">{uiText("No files selected")}</p>
             )}
           </div>
 
@@ -233,41 +268,31 @@ export function AddGcodeRevisionModal({
             </label>
           </div>
 
-          <div
-            className={cn(
-              "flex items-start gap-3 rounded-lg border p-3 transition-[background-color,border-color] duration-press",
-              recommended ? "border-primary bg-primary-soft" : "border-border bg-background",
-            )}
-          >
-            <button
-              type="button"
-              role="checkbox"
-              aria-checked={recommended}
-              aria-label={uiText("Mark as recommended")}
-              disabled={submitting}
-              onClick={() => setRecommended(!recommended)}
-              className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-[color,transform] duration-press hover:text-primary active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-50"
-            >
-              <Star className={cn("h-5 w-5", recommended && "fill-current text-primary")} />
-            </button>
-            <div>
-              <p className="text-sm font-medium text-foreground">{uiText("Mark as recommended")}</p>
-              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                {uiText(
-                  "Makes this default revision for downloads and printer sends. Current recommendation will be replaced.",
-                )}
-              </p>
-            </div>
-          </div>
-
-          <div className="-mx-6 -mb-6 flex justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
-            <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
-              {uiText("Cancel")}
-            </Button>
-            <Button type="submit" loading={submitting} disabled={!file}>
-              {!submitting && <Plus className="h-4 w-4" />}
-              {submitting ? uiText("Adding revision…") : uiText("Add revision")}
-            </Button>
+          <ChoiceField<"keep" | "replace">
+            label={uiText("Recommendation")}
+            value={recommended ? "replace" : "keep"}
+            onChange={(value) => setRecommended(value === "replace")}
+            inline
+            disabled={submitting}
+            options={[
+              {
+                value: "keep",
+                label:
+                  currentRecommendedRevision != null
+                    ? uiText("Keep Rev {value1} recommended", {
+                        value1: currentRecommendedRevision,
+                      })
+                    : uiText("Keep current recommendation"),
+              },
+              { value: "replace", label: uiText("Make this Revision recommended") },
+            ]}
+          />
+          <p className="text-xs text-muted-foreground">
+            {uiText("Making this Revision recommended is an explicit choice.")}
+          </p>
+          <div className="flex items-center justify-between gap-4 border-t border-border pt-4 text-[13px]">
+            <span>{uiText("New Revision status")}</span>
+            <span className="text-xs text-warning">{uiText("Needs test")}</span>
           </div>
         </form>
       </Modal>

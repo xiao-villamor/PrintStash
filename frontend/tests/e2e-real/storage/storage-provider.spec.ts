@@ -93,14 +93,14 @@ test.describe("storage provider setup", () => {
 
     await page.getByRole("button", { name: /Nextcloud and WebDAV/ }).click();
     await page.getByLabel("Provider").selectOption("webdav");
-    await expect(page.getByText("Support: Beta")).toBeVisible();
-    await expect(page.getByText("Expected: Guarded")).toBeVisible();
+    await expect(page.getByText(/Support for this connection is in beta\./)).toBeVisible();
+    await expect(page.getByText("Expected: Guarded")).toHaveCount(0);
     await page.getByLabel("Server URL").fill(`http://127.0.0.1:${webdavPort}`);
     await page.getByLabel("Username").fill("webdav-user");
     await page.getByLabel("Password").fill("webdav-password");
     await page.getByLabel("Root").fill("vault-data");
     await page.getByRole("button", { name: "Check storage" }).click();
-    await page.getByRole("button", { name: "Create my account and continue" }).click();
+    await page.getByRole("button", { name: "Create account" }).click();
     await expect(page).toHaveURL(/\/getting-started$/);
     await page.getByRole("button", { name: "I'll do this later" }).click();
 

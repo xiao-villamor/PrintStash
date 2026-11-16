@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 
 import { uiText, type MessageKey } from "@/lib/locale";
-import { setupErrorMessage, setupStorageBody } from "@/lib/setup-storage";
+import { setupErrorFields, setupErrorMessage, setupStorageBody } from "@/lib/setup-storage";
 
 describe("setupStorageBody", () => {
   it("names the provider in both places the server reads it", () => {
@@ -58,5 +58,23 @@ describe("setupErrorMessage", () => {
 
   it("falls back to the generic failure for an unknown code", () => {
     expect(setupErrorMessage(new Error("[500] 500"), english)).toBe(uiText("setup.failed"));
+  });
+});
+
+describe("setupErrorFields", () => {
+  it("marks only the folder the failure names", () => {
+    expect(setupErrorFields(new Error("thumb_dir_not_writable"))).toEqual(["thumb_dir"]);
+  });
+
+  it("marks both folders for a path failure that names neither", () => {
+    expect(setupErrorFields(new Error("storage_paths_overlap"))).toEqual(["data_dir", "thumb_dir"]);
+  });
+
+  it("marks no folder for a session failure", () => {
+    expect(setupErrorFields(new Error("setup_session_expired"))).toEqual([]);
+  });
+
+  it("marks no folder for a remote storage failure", () => {
+    expect(setupErrorFields(new Error("setup_remote_storage_unreachable"))).toEqual([]);
   });
 });

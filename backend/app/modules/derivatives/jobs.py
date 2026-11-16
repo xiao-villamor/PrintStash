@@ -102,12 +102,20 @@ def _hooks(derivative_group: DerivativeGroup):
         file_row = session.get(File, file_id_of(subject_key))
         if file_row is None:
             return
-        records.fail_in_flight(
+        recipes = derivative_group.recipes_for(file_row.file_type)
+        if reason == SkipReason.DERIVATIVE_GROUP_DISABLED:
+            # Settle started work without spending attempts on outputs that
+            # were never started. Re-enabling the group can discover them.
+            records.fail_in_flight(
+                session, file_id_of(subject_key), reason, now=utcnow(), kinds=recipes
+            )
+            return
+        records.fail_unfinished(
             session,
-            file_id_of(subject_key),
+            file_row,
             reason,
             now=utcnow(),
-            kinds=derivative_group.recipes_for(file_row.file_type),
+            kinds=recipes,
         )
 
     def retry(session: Session, subject_key: str) -> bool:

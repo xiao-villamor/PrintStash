@@ -35,12 +35,18 @@ import type { PlateRegion } from "@/types";
 
 export type ViewerDisplayMode = "solid" | "xray" | "wireframe";
 
-export interface STLViewerControls {
+export type ViewerCameraPreset = "isometric" | "front" | "top";
+
+export interface ViewerControls {
+  setView: (preset: ViewerCameraPreset) => void;
   zoomIn: () => void;
   zoomOut: () => void;
   resetView: () => void;
   fit: () => void;
   screenshot: () => Promise<void>;
+}
+
+export interface STLViewerControls extends ViewerControls {
   captureImage: () => Promise<Blob>;
 }
 
@@ -270,6 +276,17 @@ function Scene({
   const floorY = -modelSize.y / 2;
 
   const controlsApi: STLViewerControls = {
+    setView: (preset) => {
+      controlsApi.fit();
+      const cam = cameraRef.current;
+      if (!cam || preset === "isometric") return;
+      const distance = cam.position.length();
+      cam.up.set(0, preset === "top" ? 0 : 1, preset === "top" ? -1 : 0);
+      cam.position.set(0, preset === "top" ? distance : 0, preset === "front" ? distance : 0);
+      cam.lookAt(0, 0, 0);
+      orbitRef.current?.update();
+      invalidate();
+    },
     zoomIn: () => {
       if (cameraRef.current) {
         cameraRef.current.position.multiplyScalar(ZOOM_FACTOR);
@@ -302,6 +319,7 @@ function Scene({
           )
         : fitCameraToBounds(sizeRef.current, aspect, cam.fov).position;
       orbitRef.current?.target?.set(0, 0, 0);
+      cam.up.set(0, 1, 0);
       cam.position.copy(position);
       cam.lookAt(0, 0, 0);
       orbitRef.current?.update();

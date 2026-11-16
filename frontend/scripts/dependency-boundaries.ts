@@ -58,8 +58,10 @@ export const FEATURE_PUBLIC_MODULES = new Set([
     "authority",
     "batch-edits",
     "browse",
+    "card-detail",
     "builds",
     "collection-navigation",
+    "collection-overview",
     "filters",
     "model-detail",
     "moves",
@@ -138,6 +140,7 @@ export function readDependencyProject(root: string): DependencyProject {
     }
   };
   ROOTS.forEach(visit);
+  files.set("package.json", "");
   const config: { compilerOptions: { paths: Record<string, string[]> } } = JSON.parse(
     readFileSync(join(root, "tsconfig.json"), "utf8"),
   );

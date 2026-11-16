@@ -273,7 +273,12 @@ def visual_views(
             if visual is None:
                 raise GeometryError("embedding_view_failed")
             encoded = mesh_render.render_prepared_thumbnail(
-                visual, "", width=640, height=480, output_format="WEBP"
+                visual,
+                "",
+                width=640,
+                height=480,
+                output_format="WEBP",
+                reference_thumbnail=True,
             )
             if encoded is None:
                 raise GeometryError("embedding_view_failed")

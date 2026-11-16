@@ -86,7 +86,10 @@ class TestPhaseStats:
         assert phases["fingerprint"].outcome.value == "completed"
         assert "render" not in phases
 
-    def test_embedded_preview_retains_extraction_cost(self, tmp_path: Path) -> None:
+    def test_embedded_preview_retains_extraction_cost(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "prefer_rendered_3mf_preview", False)
         source = tmp_path / "embedded.3mf"
         source.write_bytes(three_mf(extras={"Metadata/thumbnail.png": content.png()}))
 
@@ -945,7 +948,10 @@ class TestBoundedVolumeAuthority:
 
 
 class TestCoverage:
-    def test_embedded_preview_does_not_certify_unread_source(self, tmp_path):
+    def test_embedded_preview_does_not_certify_unread_source(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setitem(_overlay, "prefer_rendered_3mf_preview", False)
         source = tmp_path / "embedded.3mf"
         source.write_bytes(three_mf(extras={"Metadata/thumbnail.png": content.png()}))
 

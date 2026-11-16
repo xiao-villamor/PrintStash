@@ -132,7 +132,7 @@ describe("StorageProviderPicker", () => {
     expect(onProviderChange).toHaveBeenCalledWith(expect.objectContaining({ id: "s3" }));
   });
 
-  it("shows the expected tier before provider fields", () => {
+  it("states the storage consequence before provider fields", () => {
     render(
       <StorageProviderPicker
         providers={providers}
@@ -143,12 +143,14 @@ describe("StorageProviderPicker", () => {
       />,
     );
 
-    const tier = screen.getByText(/Expected:\s*Verified/);
+    const consequence = screen.getByText(/Permanent removal needs confirmation\./);
     const field = screen.getByLabelText("Data directory");
-    expect(tier.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      consequence.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
-  it("shows support maturity separately from storage safety", () => {
+  it("leaves storage tier names out of the choice", () => {
     render(
       <StorageProviderPicker
         providers={providers}
@@ -159,11 +161,11 @@ describe("StorageProviderPicker", () => {
       />,
     );
 
-    expect(screen.getByText("Support: Stable")).toBeInTheDocument();
-    expect(screen.getByText("Expected: Guarded")).toBeInTheDocument();
+    expect(screen.queryByText(/Support:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Expected:/)).not.toBeInTheDocument();
   });
 
-  it("labels beta support without changing the expected tier", () => {
+  it("says plainly when a connection is in beta", () => {
     render(
       <StorageProviderPicker
         providers={providers.map((item) =>
@@ -176,8 +178,7 @@ describe("StorageProviderPicker", () => {
       />,
     );
 
-    expect(screen.getByText("Support: Beta")).toBeInTheDocument();
-    expect(screen.getByText("Expected: Guarded")).toBeInTheDocument();
+    expect(screen.getByText(/Support for this connection is in beta\./)).toBeInTheDocument();
   });
 
   it("disables unavailable providers with an actionable reason", async () => {
@@ -267,10 +268,11 @@ describe("StorageProviderPicker", () => {
       />,
     );
 
-    expect(screen.getByText(/Expected:\s*Guarded/)).toBeVisible();
-    expect(screen.getByText("Guarded storage consequences")).toBeVisible();
-    expect(screen.getByText(/confirmed catalog removal retains stored bytes/i)).toBeVisible();
-    expect(screen.getByText(/automatic physical deletion is unavailable/i)).toBeVisible();
+    expect(
+      screen.getByText(/Removing a model from the library keeps its stored files here\./),
+    ).toBeVisible();
+    expect(screen.getByText(/PrintStash does not delete files here automatically\./)).toBeVisible();
+    expect(screen.queryByText("Guarded storage consequences")).not.toBeInTheDocument();
   });
 
   it("reports the required SFTP host key field", async () => {

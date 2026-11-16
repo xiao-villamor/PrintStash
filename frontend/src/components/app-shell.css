@@ -1,0 +1,103 @@
+/* Shared OpenDesign workbench chrome. Feature panes keep their data and commands. */
+.desktop-workspace-popover {
+  left: 54px !important;
+  top: auto !important;
+  bottom: 10px;
+  transform-origin: bottom left !important;
+}
+.collections-sidebar .collection-tree-row {
+  height: 30px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.collections-sidebar [data-outliner-collection] {
+  font-size: 13px;
+  font-weight: 400;
+}
+.collections-sidebar [data-outliner-collection][aria-selected="true"] {
+  font-weight: 500;
+}
+.collections-sidebar [data-tree-count] {
+  padding: 0;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+}
+.collections-sidebar [data-outliner-entry] {
+  min-height: 30px;
+  font-size: 13px;
+}
+@media (max-width: 767px) {
+  .shell-topbar {
+    gap: 8px;
+    padding: 0 8px;
+  }
+  .workspace-menu {
+    width: 100%;
+    max-width: none;
+  }
+  .mobile-workspace-popover {
+    left: 8px !important;
+    top: auto !important;
+    right: 8px !important;
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    max-width: none !important;
+  }
+}
+.keyboard-help {
+  box-shadow: 0 24px 60px var(--dialog-shadow);
+}
+.keyboard-help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  column-gap: 28px;
+}
+.shell-route-viewport {
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+}
+@media (min-width: 768px) {
+  .shell-route-viewport {
+    padding-bottom: 0;
+  }
+}
+
+/* The dock relinquishes space continuously; the outliner itself never squeezes. */
+.collections-pane-shell {
+  position: relative;
+  min-width: 0;
+  overflow: clip;
+  background: var(--sidebar-bg);
+}
+.collections-pane-shell::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
+}
+.collections-pane-content {
+  width: var(--workbench-sidebar-width);
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+}
+.collections-pane-shell[data-open="false"] {
+  pointer-events: none;
+}
+
+.workbench-section-content,
+.workbench-main-content {
+  transform-origin: center top;
+}
+/* The motion wrapper must keep handing its height to the page, so a page's own
+   `flex-1 overflow-y-auto` region stays the scroll container. */
+.workbench-main-content {
+  display: flex;
+  flex-direction: column;
+}
+.workbench-main-content > * {
+  min-height: 0;
+}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
 import { ancestorPaths } from "@/lib/collection-tree";
 import { useOutlinerRestore } from "@/lib/queries";
 import type { OutlinerParams } from "@/types/outliner";
@@ -46,7 +46,7 @@ export function useOutlinerRestoration(
 ) {
   const location = useLocation();
   const snapshot = () => ({
-    entry: location.key,
+    entry: location.state.__TSR_key,
     expanded_paths: [
       ...new Set([
         ...(expanded ?? readExpandedPaths() ?? []),
@@ -58,7 +58,7 @@ export function useOutlinerRestoration(
     selected_path: selectedCollection,
   });
   const [target, setTarget] = useState(snapshot);
-  if (target.entry !== location.key) setTarget(snapshot());
+  if (target.entry !== location.state.__TSR_key) setTarget(snapshot());
   const { entry: _entry, ...restoreParams } = target;
   const restoreEnabled = enabled && restoreParams.expanded_paths.length > 0;
   const restore = useOutlinerRestore({ ...params, ...restoreParams }, restoreEnabled);

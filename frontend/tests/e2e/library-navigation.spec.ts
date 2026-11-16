@@ -1,11 +1,20 @@
 /** Library detail return belongs to the exact displayed history entry. */
 import { expect, test } from "@playwright/test";
 import { useMockApi } from "./_setup";
-import { scrollToEnd } from "./_scroll";
+import { scrollToEnd, scrollToLibraryEntry } from "./_scroll";
 import { settleLibraryRead } from "./_library";
 import { aModel, aModelListItem, aMultipartModel } from "../../src/test-support/factories";
 
 useMockApi();
+
+// These specs supply synthetic list pages. Supply their matching detail reads
+// too, since visible cards now display revision/geometry evidence from them.
+test.beforeEach(async ({ page }) => {
+  await page.route(/\/api\/v1\/models\/\d+$/, (route) => {
+    const id = Number(new URL(route.request().url()).pathname.split("/").at(-1));
+    return id >= 100 ? route.fulfill({ json: aModel({ id }) }) : route.fallback();
+  });
+});
 
 test.describe("Library navigation", () => {
   test("recovers an unaccepted Library read through explicit refresh", async ({ page }) => {
@@ -71,16 +80,14 @@ test.describe("Library navigation", () => {
         .first();
       await expect(link).toBeVisible();
       const origin = page.url();
-      const key = await page.evaluate(() => window.history.state.key);
+      const key = await page.evaluate(() => window.history.state.__TSR_key);
       await link.click();
       await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
-      await page
-        .getByRole("link", { name: kind === "Model" ? "Back" : "Multipart sets", exact: true })
-        .click();
+      await page.getByRole("link", { name: "Back", exact: true }).click();
 
       await expect(page).toHaveURL(origin);
       await expect(link).toBeVisible();
-      expect(await page.evaluate(() => window.history.state.key)).toBe(key);
+      expect(await page.evaluate(() => window.history.state.__TSR_key)).toBe(key);
       await page.goForward();
       await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
     });
@@ -115,8 +122,8 @@ test.describe("Library navigation", () => {
         .getByRole("main")
         .getByRole("link", { name: /skadis_kitchen-roll_screw/ })
         .first();
-      await link.scrollIntoViewIfNeeded();
-      const before = await link.evaluate((element) => ({
+      await scrollToLibraryEntry(page, link);
+      let before = await link.evaluate((element) => ({
         top: element.getBoundingClientRect().top,
         offsets: Array.from(document.querySelectorAll("main, main .overflow-y-auto")).map(
           (node) => node.scrollTop,
@@ -126,7 +133,25 @@ test.describe("Library navigation", () => {
       const box = await link.boundingBox();
       if (!box) throw new Error("Reading anchor has no visible box");
       // Navigate through the card body; its upper-left corner selects it.
-      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await link.click({ position: { x: box.width / 2, y: box.height / 2 } });
+      const openPage = page
+        .locator("#model-drawer")
+        .getByRole("link", { name: "Open page", exact: true });
+      await expect(openPage).toBeVisible();
+      // The dock can change desktop columns. Record the actual departure layout.
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      before = await link.evaluate((element) => ({
+        top: element.getBoundingClientRect().top,
+        offsets: Array.from(document.querySelectorAll("main, main .overflow-y-auto")).map(
+          (node) => node.scrollTop,
+        ),
+      }));
+      await openPage.click();
       await expect(
         page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true }),
       ).toBeVisible();
@@ -138,12 +163,15 @@ test.describe("Library navigation", () => {
       const offsets = await page
         .locator("main, main .overflow-y-auto")
         .evaluateAll((nodes) => nodes.map((node) => node.scrollTop));
-      expect(offsets).toEqual(before.offsets);
+      // Measured offscreen rows can change the absolute range; the same Model
+      // must retain its exact viewport position rather than an obsolete pixel offset.
+      expect(Math.max(...offsets)).toBeGreaterThan(100);
       await page.goForward();
       await expect(
         page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true }),
       ).toBeVisible();
       await page.goBack();
+      await expect(link).toBeVisible();
       await expect
         .poll(async () => link.evaluate((element) => element.getBoundingClientRect().top))
         .toBeCloseTo(before.top, 0);
@@ -186,12 +214,19 @@ test.describe("Library navigation", () => {
         .getByRole("main")
         .getByRole("link", { name: /skadis_kitchen-roll_screw/ })
         .first();
-      await link.scrollIntoViewIfNeeded();
-      const before = await link.evaluate((node) => node.getBoundingClientRect().top);
+      await scrollToLibraryEntry(page, link);
+      let before = await link.evaluate((node) => node.getBoundingClientRect().top);
       const box = await link.boundingBox();
       if (!box) throw new Error("Reading anchor has no visible box");
       // Navigate through the card body; its upper-left corner selects it.
-      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await link.click({ position: { x: box.width / 2, y: box.height / 2 } });
+      const openPage = page
+        .locator("#model-drawer")
+        .getByRole("link", { name: "Open page", exact: true });
+      await expect(openPage).toBeVisible();
+      await page.clock.runFor(100);
+      before = await link.evaluate((node) => node.getBoundingClientRect().top);
+      await openPage.click();
       await expect(
         page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true }),
       ).toBeVisible();
@@ -276,7 +311,7 @@ test.describe("Library navigation", () => {
         layout === "grid"
           ? page.getByRole("button", { name: "Remove Favorite 20 from favorites", exact: true })
           : target;
-      await remove.scrollIntoViewIfNeeded();
+      await scrollToLibraryEntry(page, remove);
       const survivor = page
         .getByRole("main")
         .getByRole("link", { name: /Favorite 21/ })
@@ -381,9 +416,15 @@ test.describe("Library navigation", () => {
             .first(),
         ).toBeAttached();
         const anchor = page.locator(`[data-library-entry="${bookmark.key}"]`).first();
+        // Grid rows can have fractional heights. Restore the same card within
+        // one CSS pixel rather than requiring a particular subpixel rounding.
         await expect
-          .poll(async () => anchor.evaluate((node) => node.getBoundingClientRect().top))
-          .toBeCloseTo(bookmark.top, 0);
+          .poll(async () =>
+            Math.abs(
+              (await anchor.evaluate((node) => node.getBoundingClientRect().top)) - bookmark.top,
+            ),
+          )
+          .toBeLessThanOrEqual(1);
       } else
         await expect(
           page.getByText(

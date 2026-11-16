@@ -1,7 +1,6 @@
 "use client";
 
 import { forwardRef } from "react";
-import { Check } from "lucide-react";
 
 import { cn } from "../lib/utils";
 
@@ -33,12 +32,12 @@ export const Checkbox = forwardRef<
       className={cn(
         "flex h-5 w-5 items-center justify-center rounded border transition-[color,background-color,border-color,transform] duration-press active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-50",
         checked
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-border bg-background/80 text-transparent hover:border-primary",
+          ? "border-primary bg-card text-primary"
+          : "border-input bg-card text-transparent hover:border-primary",
         className,
       )}
     >
-      <Check className="h-3.5 w-3.5" strokeWidth={3} />
+      <span aria-hidden className="h-2.5 w-2.5 bg-current" />
     </button>
   );
 });

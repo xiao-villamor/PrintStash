@@ -6,7 +6,7 @@ from alembic.migration import MigrationContext
 from alembic.operations.ops import UpgradeOps
 from sqlalchemy import create_engine, text
 
-from app.db import library_authorization_v2, library_browse_v2
+from app.db import library_authorization_v2, library_browse_v2, library_browse_v3
 from app.db.library_contracts_autogen import compare_library_contracts
 
 
@@ -20,16 +20,22 @@ class TestCompareLibraryContracts:
                     ("library_contracts_v1", True),
                     ("library_authorization_v2", True),
                     ("library_browse_v2", True),
+                    ("library_browse_v3", True),
                 ],
             ),
             (
                 ("v1",),
-                [("library_authorization_v2", True), ("library_browse_v2", True)],
+                [
+                    ("library_authorization_v2", True),
+                    ("library_browse_v2", True),
+                    ("library_browse_v3", True),
+                ],
             ),
-            (("v1", "v2"), [("library_browse_v2", True)]),
-            (("v1", "v2", "browse"), []),
+            (("v1", "v2"), [("library_browse_v2", True), ("library_browse_v3", True)]),
+            (("v1", "v2", "browse"), [("library_browse_v3", True)]),
+            (("v1", "v2", "browse", "browse-v3"), []),
         ],
-        ids=["absent", "v1-only", "authorization-only", "installed"],
+        ids=["absent", "v1-only", "authorization-only", "browse-v2", "installed"],
     )
     def test_generates_only_the_absent_contracts(
         self, installed: tuple[str, ...], expected: list
@@ -48,10 +54,16 @@ class TestCompareLibraryContracts:
                             "AFTER DELETE ON library_revision BEGIN SELECT 1; END"
                         )
                     )
-                if "browse" in installed:
+                markers = {
+                    "browse": library_browse_v2.MARKER,
+                    "browse-v3": library_browse_v3.MARKER,
+                }
+                for version, marker in markers.items():
+                    if version not in installed:
+                        continue
                     connection.execute(
                         text(
-                            f"CREATE TRIGGER {library_browse_v2.MARKER} "
+                            f"CREATE TRIGGER {marker} "
                             "AFTER DELETE ON library_revision BEGIN SELECT 1; END"
                         )
                     )

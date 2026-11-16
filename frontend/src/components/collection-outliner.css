@@ -1,0 +1,26 @@
+/* A compact navigator: indentation describes ancestry, while the selected
+   row remains legible at every pane width. */
+.collections-sidebar .collection-tree-root {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: 0;
+}
+
+.collections-sidebar .collection-tree-children {
+  margin-left: 12px;
+  padding-left: 4px;
+}
+
+.collections-sidebar .collection-tree-row {
+  height: 32px;
+  padding-left: 4px;
+  padding-right: 6px;
+}
+
+.collections-sidebar .collection-tree-row[data-current] [data-outliner-collection] {
+  font-weight: 600;
+}
+
+.collections-sidebar .collection-tree-row[data-current] [data-tree-count] {
+  color: var(--foreground);
+}

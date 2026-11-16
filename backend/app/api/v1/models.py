@@ -131,6 +131,8 @@ from app.schemas.library_browse import (
     BrowseRevisionRead,
     BrowseThumbnailQuery,
     BrowseThumbnailsRead,
+    CollectionPreviewQuery,
+    CollectionPreviewRead,
 )
 from app.schemas.models import (
     ArtifactOutcomeRead,
@@ -377,6 +379,19 @@ def browse_thumbnails(
     session: Session = Depends(get_session),
 ) -> BrowseThumbnailsRead:
     return models_browse.thumbnail_items(session, current_user, query.model_id)
+
+
+@router.get(
+    "/browse/collection-preview",
+    response_model=CollectionPreviewRead,
+    summary="Read four authorized collection cover references without card metadata",
+)
+def collection_preview(
+    query: Annotated[CollectionPreviewQuery, Query()],
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> CollectionPreviewRead:
+    return models_browse.collection_preview(session, current_user, query.collection)
 
 
 @router.get(

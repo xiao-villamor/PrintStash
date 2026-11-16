@@ -75,7 +75,7 @@ function renderBulk(over: Partial<BulkFilesProps> = {}) {
 
 /** The drop target wrapping the hint text; every drop test aims at it. */
 function dropZone(): HTMLElement {
-  const zone = screen.getByText(/drop 3d models or a folder here/i).closest("div");
+  const zone = screen.getByText(/or drop files here/i).closest("div");
   if (zone === null) throw new Error("drop zone not rendered");
   return zone;
 }
@@ -83,9 +83,9 @@ function dropZone(): HTMLElement {
 describe("BulkFiles", () => {
   it("shows the drop-zone hint and a folder-select action when empty", () => {
     renderBulk();
-    expect(screen.getByText(/drop 3d models or a folder here/i)).toBeInTheDocument();
+    expect(screen.getByText(/or drop files here/i)).toBeInTheDocument();
     expect(screen.getByText(/subfolders become nested collections/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /select a folder/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /choose folder/i })).toBeInTheDocument();
   });
 
   it("queues files picked through the file input", async () => {
@@ -116,7 +116,7 @@ describe("BulkFiles", () => {
     const fileClick = vi.spyOn(fileInput, "click");
     const folderClick = vi.spyOn(folderInput, "click");
 
-    await userEvent.click(screen.getByRole("button", { name: /select a folder/i }));
+    await userEvent.click(screen.getByRole("button", { name: /choose folder/i }));
 
     expect(folderClick).toHaveBeenCalledOnce();
     expect(fileClick).not.toHaveBeenCalled();
@@ -170,7 +170,7 @@ describe("BulkFiles", () => {
     await userEvent.click(screen.getByRole("button", { name: /remove a.stl/i }));
     expect(onRemove).toHaveBeenCalledWith(0);
 
-    await userEvent.click(screen.getByRole("button", { name: /^clear$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^clear all$/i }));
     expect(onClear).toHaveBeenCalledTimes(1);
   });
 });

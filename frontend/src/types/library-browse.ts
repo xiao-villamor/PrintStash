@@ -12,6 +12,8 @@ export interface LibraryAuthority {
 }
 
 export interface LibraryBrowsePage extends LibraryAuthority {
+  /** Absent on servers predating automatic folder scope. */
+  effective_direct?: boolean;
   items: LibraryBrowseEntry[];
   next_cursor: string | null;
   /** Combined card count, not the number of Models. */
@@ -19,6 +21,7 @@ export interface LibraryBrowsePage extends LibraryAuthority {
 }
 
 export interface LibraryBrowseParams extends Omit<ListModelsParams, "offset" | "limit"> {
+  auto_scope?: boolean;
   view: LibraryViewMode;
   sort: ModelSort;
   limit: number;
@@ -26,5 +29,16 @@ export interface LibraryBrowseParams extends Omit<ListModelsParams, "offset" | "
 
 export interface LibraryThumbnailProjection {
   items: { model_id: number; thumbnail_url: string | null; previews: ModelPreviews }[];
+  authorization_revision: string;
+}
+
+export interface LibraryPreviewItem {
+  kind: "model" | "multipart";
+  id: number;
+  thumbnail_url: string | null;
+}
+
+export interface LibraryCollectionPreview {
+  items: LibraryPreviewItem[];
   authorization_revision: string;
 }

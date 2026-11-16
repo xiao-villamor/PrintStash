@@ -82,6 +82,17 @@ afterEach(() => {
 });
 
 describe("StatisticsPage", () => {
+  it("retains the chart choice after visiting Rankings", async () => {
+    const user = userEvent.setup();
+    renderStatistics();
+    await screen.findByText("Most printed models");
+    await user.click(screen.getByRole("button", { name: "Line" }));
+    await user.click(screen.getByRole("tab", { name: "Rankings" }));
+    expect(screen.getByText("Most printed models")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Line" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Overview" }));
+    expect(screen.getByRole("button", { name: "Line" })).toHaveAttribute("aria-pressed", "true");
+  });
   describe("read recovery", () => {
     it.each([
       [403, false],
@@ -160,9 +171,9 @@ describe("StatisticsPage", () => {
       // answers, and neither is wrong — so this is the control that matters.
       const user = userEvent.setup();
       const { requests } = renderStatistics();
-      await screen.findByText("Statistics");
+      await screen.findByText("Total cost");
 
-      await user.click(screen.getByRole("button", { name: "7 days" }));
+      await user.selectOptions(screen.getByRole("combobox", { name: "Period" }), "7d");
 
       await waitFor(() =>
         expect(requests().some((call) => call.url.includes("period=7d"))).toBe(true),
@@ -189,7 +200,7 @@ describe("StatisticsPage", () => {
       });
       await waitFor(() => expect(signal).toBeDefined());
 
-      await user.click(screen.getByRole("button", { name: "7 days" }));
+      await user.selectOptions(screen.getByRole("combobox", { name: "Period" }), "7d");
       expect(await screen.findByText("77.00", { exact: false })).toBeInTheDocument();
       expect(signal?.aborted).toBe(true);
       await act(async () => {
@@ -204,9 +215,9 @@ describe("StatisticsPage", () => {
     it("asks for everything when the user picks all time", async () => {
       const user = userEvent.setup();
       const { requests } = renderStatistics();
-      await screen.findByText("Statistics");
+      await screen.findByText("Total cost");
 
-      await user.click(screen.getByRole("button", { name: "All time" }));
+      await user.selectOptions(screen.getByRole("combobox", { name: "Period" }), "all");
 
       await waitFor(() =>
         expect(requests().some((call) => call.url.includes("period=all"))).toBe(true),
@@ -220,13 +231,10 @@ describe("StatisticsPage", () => {
       renderStatistics();
       await screen.findByText("Total cost");
 
-      await user.click(screen.getByRole("button", { name: "Filament" }));
+      await user.selectOptions(screen.getByRole("combobox", { name: "Metric" }), "filament");
 
       expect(await screen.findByText("Filament over time")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Filament" })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
+      expect(screen.getByRole("combobox", { name: "Metric" })).toHaveValue("filament");
     });
 
     it("plots print counts when the prints metric is selected", async () => {
@@ -234,13 +242,11 @@ describe("StatisticsPage", () => {
       renderStatistics();
       await screen.findByText("Total cost");
 
-      await user.click(screen.getByRole("button", { name: "Prints" }));
+      await user.selectOptions(screen.getByRole("combobox", { name: "Metric" }), "filament");
+      await user.selectOptions(screen.getByRole("combobox", { name: "Metric" }), "prints");
 
-      expect(await screen.findByText("Prints over time")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Prints" })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
+      expect(await screen.findByText("Completed jobs in selected period")).toBeInTheDocument();
+      expect(screen.getByRole("combobox", { name: "Metric" })).toHaveValue("prints");
     });
 
     it("renders a line chart when the line chart type is selected", async () => {
@@ -286,12 +292,9 @@ describe("StatisticsPage", () => {
       });
       await screen.findByText("Total cost");
 
-      await user.click(screen.getByRole("button", { name: "Filament" }));
+      await user.selectOptions(screen.getByRole("combobox", { name: "Metric" }), "filament");
 
-      expect(screen.getByRole("button", { name: "Filament" })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
+      expect(screen.getByRole("combobox", { name: "Metric" })).toHaveValue("filament");
     });
   });
 
@@ -410,6 +413,7 @@ describe("Statistics authoritative currency", () => {
       "Configuration could not be loaded.",
     );
     expect(screen.getByText("Filament used", { exact: true })).toBeVisible();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Metric" }), "cost");
     expect(screen.getAllByText("Cost unavailable").length).toBe(2);
     expect(screen.queryByText(/\$34\.50/)).toBeNull();
     app.route({ "GET /api/v1/config": json(aVaultConfig({ currency: "EUR" })) });

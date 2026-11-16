@@ -14,13 +14,16 @@ test.describe("tags", () => {
     const model = `e2e-quick-tagged-${Date.now()}`;
 
     await uploadModel(page, model);
-    await page.getByRole("button", { name: `Add tags to ${model}` }).click();
+    await modelCard(page, model).click({ button: "right" });
+    await page.getByRole("menuitem", { name: `Add tags to ${model}` }).click();
     const dialog = page.getByRole("dialog", { name: "Model tags" });
     await dialog.getByLabel("Search or create a tag").fill(tag);
     await dialog.getByRole("option", { name: /Create tag/ }).click();
     await dialog.getByRole("button", { name: "Save tags" }).click();
 
-    await expect(modelCard(page, model)).toContainText(tag);
+    await modelCard(page, model).click({ button: "right" });
+    await page.getByRole("menuitem", { name: `Edit tags for ${model}` }).click();
+    await expect(dialog.getByRole("button", { name: `Remove ${tag}` })).toBeVisible();
   });
 
   test("reviews a conflicting quick-tag draft before replacing current tags", async ({ page }) => {
@@ -34,7 +37,8 @@ test.describe("tags", () => {
     const id = Number(href?.match(/^\/models\/(\d+)/)?.[1]);
     expect(Number.isSafeInteger(id)).toBe(true);
     try {
-      await page.getByRole("button", { name: `Add tags to ${name}` }).click();
+      await modelCard(page, name).click({ button: "right" });
+      await page.getByRole("menuitem", { name: `Add tags to ${name}` }).click();
       const dialog = page.getByRole("dialog", { name: "Model tags" });
       await dialog.getByLabel("Search or create a tag").fill(draftTag);
       await dialog.getByRole("option", { name: /Create tag/ }).click();

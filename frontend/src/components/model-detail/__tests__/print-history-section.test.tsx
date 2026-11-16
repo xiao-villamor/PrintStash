@@ -79,12 +79,18 @@ function aPrintJob(over: Partial<ModelPrintJobRead> = {}): ModelPrintJobRead {
   };
 }
 
-function renderHistory(options: RenderAppOptions & { jobs?: ModelPrintJobRead[] } = {}) {
-  const { jobs = [aPrintJob()], seed = [], routes = {}, ...rest } = options;
+function renderHistory(
+  options: RenderAppOptions & {
+    jobs?: ModelPrintJobRead[];
+    initialEntry?: { fileId: number; state: "completed" | "failed" };
+  } = {},
+) {
+  const { jobs = [aPrintJob()], initialEntry, seed = [], routes = {}, ...rest } = options;
   const onJobCreated = vi.fn<(job: ModelPrintJobRead) => void>();
   const result = renderApp(
     <PrintHistorySection
       jobs={jobs}
+      initialEntry={initialEntry}
       modelId={1}
       gcodeFiles={[aGcode()]}
       onJobCreated={onJobCreated}
@@ -110,7 +116,7 @@ function renderHistory(options: RenderAppOptions & { jobs?: ModelPrintJobRead[] 
 
 /** Open the add-a-print form. */
 async function openForm(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole("button", { name: /Add|Log/i }));
+  await user.click(await screen.findByRole("button", { name: "Add record" }));
 }
 
 beforeEach(() => {
@@ -143,17 +149,15 @@ describe("PrintHistorySection", () => {
 
       await openForm(user);
 
-      expect(screen.getByRole("button", { name: "Manual Entry" })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "Add print record" })).toBeInTheDocument();
     });
 
     it("offers importing from a printer instead", async () => {
       const user = userEvent.setup();
       renderHistory();
-      await openForm(user);
+      await user.click(screen.getByRole("button", { name: "Import from printer" }));
 
-      await user.click(screen.getByRole("button", { name: "Auto from Printer" }));
-
-      expect(screen.getByRole("button", { name: "Auto from Printer" })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "Import from printer" })).toBeInTheDocument();
     });
   });
 
@@ -164,9 +168,9 @@ describe("PrintHistorySection", () => {
         routes: { "POST /api/v1/models/1/print-jobs": json(aPrintJob({ id: 31 })) },
       });
       await openForm(user);
-      await user.selectOptions(screen.getAllByRole("combobox")[0], "4");
+      await user.click(screen.getByRole("radio", { name: "Voron" }));
 
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save record" }));
 
       await waitFor(() =>
         expect(requestsWithMethod("POST").some((call) => call.url.includes("print-jobs"))).toBe(
@@ -183,11 +187,59 @@ describe("PrintHistorySection", () => {
         routes: { "POST /api/v1/models/1/print-jobs": json(aPrintJob({ id: 31 })) },
       });
       await openForm(user);
-      await user.selectOptions(screen.getAllByRole("combobox")[0], "4");
+      await user.click(screen.getByRole("radio", { name: "Voron" }));
 
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save record" }));
 
       await waitFor(() => expect(onJobCreated).toHaveBeenCalled());
+    });
+  });
+
+  describe("failure note keyboard submission", () => {
+    it("focuses the failure note from a revision shortcut", async () => {
+      renderHistory({ initialEntry: { fileId: 20, state: "failed" } });
+
+      expect(await screen.findByRole("textbox", { name: "Error (opt.)" })).toHaveFocus();
+      expect(screen.getByRole("radio", { name: "Failed" })).toBeChecked();
+    });
+
+    it("saves the selected revision failure note with Control Enter", async () => {
+      const user = userEvent.setup();
+      const view = renderHistory({
+        initialEntry: { fileId: 20, state: "failed" },
+        routes: {
+          "POST /api/v1/models/1/print-jobs": json(
+            aPrintJob({ id: 31, state: "failed", error: "Corner lifted" }),
+          ),
+        },
+      });
+      await user.click(await screen.findByRole("radio", { name: "Voron" }));
+      await user.type(screen.getByRole("textbox", { name: "Error (opt.)" }), "Corner lifted");
+
+      await user.keyboard("{Control>}{Enter}{/Control}");
+
+      await waitFor(() => expect(view.requestsWithMethod("POST")).toHaveLength(1));
+      expect(JSON.parse(view.requestsWithMethod("POST")[0].body ?? "{}")).toMatchObject({
+        printer_id: 4,
+        file_id: 20,
+        state: "failed",
+        error: "Corner lifted",
+      });
+    });
+
+    it("keeps an incomplete failure note as a draft", async () => {
+      const user = userEvent.setup();
+      const view = renderHistory({ initialEntry: { fileId: 20, state: "failed" } });
+      await user.type(
+        await screen.findByRole("textbox", { name: "Error (opt.)" }),
+        "Corner lifted",
+      );
+
+      await user.keyboard("{Control>}{Enter}{/Control}");
+
+      expect(view.requestsWithMethod("POST")).toEqual([]);
+      expect(screen.getByRole("textbox", { name: "Error (opt.)" })).toHaveValue("Corner lifted");
+      expect(screen.getByRole("button", { name: "Save record" })).toBeDisabled();
     });
   });
 
@@ -201,9 +253,8 @@ describe("PrintHistorySection", () => {
           ]),
         },
       });
-      await openForm(user);
-      await user.click(screen.getByRole("button", { name: "Auto from Printer" }));
-      await user.selectOptions(await screen.findByRole("combobox"), "4");
+      await user.click(screen.getByRole("button", { name: "Import from printer" }));
+      await user.click(await screen.findByRole("radio", { name: "Voron" }));
 
       await user.click(screen.getByRole("button", { name: /Fetch & Import/i }));
 
@@ -218,9 +269,7 @@ describe("PrintHistorySection", () => {
       // The import is scoped to one machine, so "which printer?" has no default.
       const user = userEvent.setup();
       renderHistory();
-      await openForm(user);
-
-      await user.click(screen.getByRole("button", { name: "Auto from Printer" }));
+      await user.click(screen.getByRole("button", { name: "Import from printer" }));
 
       expect(screen.getByRole("button", { name: /Fetch & Import/i })).toBeDisabled();
     });
@@ -232,9 +281,8 @@ describe("PrintHistorySection", () => {
       renderHistory({
         routes: { "POST /api/v1/models/1/print-jobs/import-printer/4": json([]) },
       });
-      await openForm(user);
-      await user.click(screen.getByRole("button", { name: "Auto from Printer" }));
-      await user.selectOptions(await screen.findByRole("combobox"), "4");
+      await user.click(screen.getByRole("button", { name: "Import from printer" }));
+      await user.click(await screen.findByRole("radio", { name: "Voron" }));
 
       await user.click(screen.getByRole("button", { name: /Fetch & Import/i }));
 

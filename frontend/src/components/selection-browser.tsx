@@ -31,10 +31,14 @@ export function SelectionBrowserToolbar({
 }) {
   return (
     <>
-      <div className="flex items-center gap-2">
-        <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+      <div className="relative">
+        <Search
+          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+          aria-hidden
+        />
         <Input
           autoFocus
+          className="pl-9"
           aria-label={searchLabel}
           placeholder={searchLabel}
           value={query}
@@ -173,12 +177,12 @@ export function SelectionFolderCard({
   return (
     <div
       className={cn(
-        "flex h-28 flex-col justify-between gap-2 rounded-lg border p-3",
+        "flex h-28 flex-col justify-between gap-2 rounded-lg border border-border p-3",
         selection?.selected
-          ? "border-primary bg-accent text-accent-foreground"
+          ? "bg-accent text-accent-foreground"
           : selection?.partial
-            ? "border-border bg-accent/50 text-accent-foreground"
-            : "border-border bg-card text-card-foreground",
+            ? "bg-accent/50 text-accent-foreground"
+            : "bg-card text-card-foreground",
       )}
     >
       <div className="flex min-w-0 items-start gap-2">
@@ -245,10 +249,10 @@ export function SelectionItemCard({
       disabled={disabled}
       onClick={onToggle}
       className={cn(
-        "flex h-28 w-full flex-col justify-between gap-2 rounded-lg border p-3 text-left transition-transform duration-press active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-disabled disabled:opacity-50",
+        "flex h-28 w-full flex-col justify-between gap-2 rounded-lg border border-border p-3 text-left transition-transform duration-press active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-disabled disabled:opacity-50",
         selected
-          ? "border-primary bg-accent text-accent-foreground"
-          : "border-border bg-card text-card-foreground hover:bg-muted",
+          ? "bg-accent text-accent-foreground"
+          : "bg-card text-card-foreground hover:bg-muted",
       )}
     >
       <span className="flex w-full items-start justify-between gap-2">

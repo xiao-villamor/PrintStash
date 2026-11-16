@@ -1,23 +1,25 @@
 /** Internal links preserve Router push/replace history and their complete destination. */
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
+import { TestRouter } from "@/test-support/router";
+import { useRouter } from "@/lib/navigation";
 import { describe, expect, it } from "vitest";
 import { Link } from "@/lib/link";
 
 function Navigation({ replace }: { replace: boolean }) {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigation = useRouter();
   return (
     <>
       <Link href="/models/7?tab=files#preview" replace={replace}>
         Open model
       </Link>
-      <button onClick={() => void navigate(-1)}>Back</button>
+      <button onClick={() => void navigation.back()}>Back</button>
       <output aria-label="Location">
         {location.pathname}
-        {location.search}
-        {location.hash}
+        {location.searchStr}
+        {location.hash ? `#${location.hash}` : ""}
       </output>
     </>
   );
@@ -34,9 +36,9 @@ describe("Link", () => {
   ])("$behaviour", async ({ replace, back }) => {
     const user = userEvent.setup();
     render(
-      <MemoryRouter initialEntries={["/earlier", "/library"]}>
+      <TestRouter initialEntries={["/earlier", "/library"]}>
         <Navigation replace={replace} />
-      </MemoryRouter>,
+      </TestRouter>,
     );
     expect(screen.getByRole("link", { name: "Open model" })).toHaveAttribute(
       "href",

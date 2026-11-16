@@ -47,6 +47,8 @@ from app.schemas.library_browse import (
     BrowseRevisionRead,
     BrowseThumbnail,
     BrowseThumbnailsRead,
+    CollectionPreviewRead,
+    LibraryPreviewItem,
     LibraryView,
 )
 from app.schemas.models import ModelFilters, ModelSort
@@ -65,6 +67,8 @@ class Cursor(BaseModel):
     revision: str
     offset: int = Field(gt=0, le=2**63 - 1)
     total: int = Field(ge=0)
+    # Older cursors carry only the explicitly requested scope.
+    direct: bool | None = None
 
 
 def revision(session: Session) -> BrowseRevisionRead:
@@ -90,6 +94,8 @@ def _revision(session: Session) -> str:
 
 def _key(user: User, query: BrowseQuery) -> str:
     inputs = query.model_dump(mode="json", exclude={"cursor"})
+    if not query.auto_scope:
+        inputs.pop("auto_scope")
     for field, value in inputs.items():
         if isinstance(value, list):
             inputs[field] = sorted(set(value))
@@ -158,8 +164,7 @@ def _live_folder_scope(entity, visible, user):
     )
 
 
-def _multipart_statement(session: Session, user: User, filters: ModelFilters):
-    visible = _visible_collections(session, user)
+def _multipart_statement(session: Session, user: User, filters: ModelFilters, visible):
     stmt = select(MultipartModel).where(
         live(MultipartModel), _live_folder_scope(MultipartModel, visible, user)
     )
@@ -223,7 +228,9 @@ def _multipart_statement(session: Session, user: User, filters: ModelFilters):
         }
     )
     if member_filters != ModelFilters():
-        members, _rank = filtered_with_rank(session, user, member_filters)
+        members, _rank = filtered_with_rank(
+            session, user, member_filters, visible=visible
+        )
         members = members.where(_live_folder_scope(Model, visible, user))
         stmt = stmt.where(
             col(MultipartModel.id).in_(
@@ -245,10 +252,9 @@ def _multipart_statement(session: Session, user: User, filters: ModelFilters):
 
 def _source(session: Session, user: User, query: BrowseQuery):
     filters = query.filters()
-    models, rank = filtered_with_rank(session, user, filters)
-    models = models.where(
-        _live_folder_scope(Model, _visible_collections(session, user), user)
-    )
+    visible = _visible_collections(session, user)
+    models, rank = filtered_with_rank(session, user, filters, visible=visible)
+    models = models.where(_live_folder_scope(Model, visible, user))
     if query.view is LibraryView.MULTIPART:
         models = models.where(literal(False))
     models, value = _sort_value_and_statement(models, query.sort, rank)
@@ -268,7 +274,7 @@ def _source(session: Session, user: User, query: BrowseQuery):
         literal(BrowseKind.MODEL.value).label("kind"),
         value.label("value"),
     )
-    groups = _multipart_statement(session, user, filters).with_only_columns(
+    groups = _multipart_statement(session, user, filters, visible).with_only_columns(
         col(MultipartModel.id).label("id"),
         literal(BrowseKind.MULTIPART.value).label("kind"),
         group_value.label("value"),
@@ -293,12 +299,23 @@ def page_items(session: Session, user: User, query: BrowseQuery) -> BrowsePage:
     cursor = _decode(query.cursor, key) if query.cursor is not None else None
     if cursor is not None and cursor.revision != browse_revision:
         raise OperationError("browse_refresh_required", kind=ErrorKind.CONFLICT)
-    source = _source(session, user, query)
+    effective_direct = (
+        cursor.direct
+        if cursor is not None and cursor.direct is not None
+        else query.direct
+    )
+    source = _source(
+        session, user, query.model_copy(update={"direct": effective_direct})
+    )
     total = (
         cursor.total
         if cursor is not None
         else session.execute(select(func.count()).select_from(source)).scalar_one()
     )
+    if cursor is None and query.auto_scope and effective_direct and total == 0:
+        effective_direct = False
+        source = _source(session, user, query.model_copy(update={"direct": False}))
+        total = session.execute(select(func.count()).select_from(source)).scalar_one()
     descending = query.sort in {
         ModelSort.DATE_DESC,
         ModelSort.NAME_DESC,
@@ -345,6 +362,7 @@ def page_items(session: Session, user: User, query: BrowseQuery) -> BrowsePage:
                 revision=browse_revision,
                 offset=offset + len(rows),
                 total=total,
+                direct=effective_direct,
             )
         )
         if has_more
@@ -356,6 +374,7 @@ def page_items(session: Session, user: User, query: BrowseQuery) -> BrowsePage:
         total=total,
         browse_revision=browse_revision,
         authorization_revision=authority.authorization_revision,
+        effective_direct=effective_direct,
     )
 
 
@@ -418,4 +437,56 @@ def thumbnail_items(
         raise OperationError("browse_refresh_required", kind=ErrorKind.CONFLICT)
     return BrowseThumbnailsRead(
         items=items, authorization_revision=authority.authorization_revision
+    )
+
+
+def collection_preview(
+    session: Session, user: User, collection: str
+) -> CollectionPreviewRead:
+    """Four cover references in browse order, without full card hydration/counts."""
+    authenticated_version = user.auth_version
+    authority = revision(session)
+    session.refresh(user)
+    if not user.is_active or user.auth_version != authenticated_version:
+        raise OperationError("collection_permission_denied", kind=ErrorKind.FORBIDDEN)
+    source = _source(session, user, BrowseQuery(collection=collection))
+    rows = list(
+        session.execute(
+            select(source)
+            .order_by(source.c.value.desc(), source.c.kind.asc(), source.c.id.asc())
+            .limit(4)
+        )
+    )
+    model_ids = [row.id for row in rows if row.kind == BrowseKind.MODEL.value]
+    group_ids = [row.id for row in rows if row.kind == BrowseKind.MULTIPART.value]
+    models = (
+        {
+            model.id: thumb_url(model)
+            for model in session.scalars(
+                select(Model)
+                .options(lazyload(Model.tags), lazyload(Model.collection_rel))
+                .where(col(Model.id).in_(model_ids))
+            )
+        }
+        if model_ids
+        else {}
+    )
+    groups = {
+        item.id: item.cover_thumbnail_url
+        for item in multipart_models.read_items_by_ids(session, user, group_ids)
+    }
+    if revision(session) != authority:
+        raise OperationError("browse_refresh_required", kind=ErrorKind.CONFLICT)
+    return CollectionPreviewRead(
+        items=[
+            LibraryPreviewItem(
+                kind=row.kind,
+                id=row.id,
+                thumbnail_url=(
+                    models if row.kind == BrowseKind.MODEL.value else groups
+                )[row.id],
+            )
+            for row in rows
+        ],
+        authorization_revision=authority.authorization_revision,
     )

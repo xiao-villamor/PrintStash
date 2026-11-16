@@ -51,10 +51,10 @@ export function GettingStartedReminder() {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Button variant="outline" onClick={() => router.push("/getting-started")}>
+      <Button size="sm" variant="outline" onClick={() => router.push("/getting-started")}>
         {t("setup.resume")}
       </Button>
-      <Button variant="ghost" onClick={dismiss}>
+      <Button size="sm" variant="ghost" onClick={dismiss}>
         {t("setup.dismissReminder")}
       </Button>
     </div>

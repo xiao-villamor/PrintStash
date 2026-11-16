@@ -16,7 +16,7 @@ import {
 } from "@/lib/artifact-upload";
 
 import { CheckCircle2, ChevronDown, Loader2, XCircle, MinusCircle } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link } from "@/lib/link";
 import { useAuth } from "@/lib/auth-context";
 
 import type { TaskItem } from "@/lib/task-center";
@@ -130,7 +130,7 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
                 )}
               </p>
               <Link
-                to={`/models/${task.uploadedModel.id}`}
+                href={`/models/${task.uploadedModel.id}`}
                 onClick={onNavigate}
                 className="inline-flex rounded px-2 py-1 font-medium text-primary underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
@@ -261,7 +261,7 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
           )}
           {task.similarityRunId !== undefined && (
             <Link
-              to="/library/similar"
+              href="/library/similar"
               className="mt-2 inline-block text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {uiText("similarity.viewAnalysis")}
@@ -271,7 +271,7 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
             task.status === "completed" &&
             user?.is_superuser && (
               <Link
-                to="/settings?section=work"
+                href="/settings?section=work"
                 className="mt-2 inline-block text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {uiText("View preview activity")}

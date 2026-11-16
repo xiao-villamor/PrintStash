@@ -1,15 +1,15 @@
 {
-  "version": 4,
+  "version": 5,
   "aspectRatio": [4, 3],
   "background": "transparent",
   "upAxis": "z",
   "hero": {
     "azimuthDegrees": -35,
-    "elevationDegrees": 18
+    "elevationDegrees": 30
   },
   "flat": {
     "tiltDegrees": 25,
-    "thicknessRatio": 0.35
+    "thicknessRatio": 0.15
   },
   "marginFraction": 0.1,
   "material": {

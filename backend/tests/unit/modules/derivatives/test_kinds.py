@@ -31,6 +31,19 @@ def _file(file_type: FileType, name: str = "part", sha: str = "a" * 64) -> File:
 
 class TestRecipesFor:
     @pytest.mark.parametrize(
+        "file_type,previous,metadata",
+        [(FileType.STL, 16, 12), (FileType.THREE_MF, 18, 13), (FileType.STEP, 17, 13)],
+        ids=["stl", "3mf", "step"],
+    )
+    def test_refreshes_previews_without_reprocessing_geometry(
+        self, file_type, previous, metadata
+    ) -> None:
+        recipes = kinds.recipes_for(_file(file_type))
+
+        assert recipes[THUMBNAIL] > previous
+        assert recipes[METADATA] == metadata
+
+    @pytest.mark.parametrize(
         "file_type",
         [
             FileType.STL,

@@ -1,8 +1,9 @@
 import { type MouseEvent, type PointerEvent, type ReactNode, type Ref } from "react";
-import { ChevronLeft, ChevronRight, FileText, Images } from "lucide-react";
+import { Box, ChevronLeft, ChevronRight, FileText, Images } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
+import { LibraryPreviewPlaceholder } from "@/components/library-card-placeholder";
 import { previewTransferPolicy } from "@/lib/use-model-previews";
 import { useModelPreviewCard, type PreviewCard } from "@/lib/use-model-preview-card";
 import { uiText } from "@/lib/locale";
@@ -31,36 +32,41 @@ function stop(event: MouseEvent) {
 function PreviewImage({
   name,
   state,
-  expanded,
+  imageClassName,
+  placeholder = (
+    <div className="flex h-full w-full items-center justify-center">
+      <FileText className="h-10 w-10 text-muted-foreground/40" />
+    </div>
+  ),
+  loadingPlaceholder,
 }: {
   name: string;
   state: PreviewCard;
-  expanded: boolean;
+  imageClassName: string;
+  placeholder?: ReactNode;
+  loadingPlaceholder?: ReactNode;
 }) {
+  const frameClass = "flex h-full w-full items-center justify-center";
   return state.view ? (
-    <div className="h-full w-full" data-library-thumbnail="ready">
+    <div className={frameClass} data-library-thumbnail="ready">
       <img
         src={state.view.url}
         alt={name}
         data-preview-view={state.view.id}
         draggable={false}
-        className="h-full w-full object-contain"
+        className={imageClassName}
       />
     </div>
   ) : (
-    // The cover keeps the library's reveal, cached reuse and readiness contract.
     <ProtectedThumbnail
       path={state.cover}
       alt={name}
       fade
       previewView="cover"
-      className="h-full w-full"
-      imageClassName={expanded ? "h-full w-full object-contain" : "h-full w-full object-cover"}
-      placeholder={
-        <div className="flex h-full w-full items-center justify-center">
-          <FileText className="h-10 w-10 text-muted-foreground/40" />
-        </div>
-      }
+      className={frameClass}
+      imageClassName={imageClassName}
+      placeholder={placeholder}
+      loadingPlaceholder={loadingPlaceholder}
     />
   );
 }
@@ -95,24 +101,39 @@ export function ModelPreviewFrame({
   name,
   state,
   admission,
+  favorites,
   children,
 }: {
   name: string;
   state: PreviewCard;
   /** Viewport admission for this card's primary image. */
   admission: Ref<HTMLDivElement>;
+  favorites: boolean;
   children?: ReactNode;
 }) {
   useUiLocale();
   return (
     <div
       ref={admission}
-      className="relative h-48 shrink-0 overflow-hidden border-b border-border bg-muted"
+      className="library-preview relative h-36 shrink-0 overflow-hidden"
       data-model-preview={name}
       onPointerEnter={state.enter}
       onPointerLeave={state.leave}
     >
-      <PreviewImage name={name} state={state} expanded={false} />
+      <PreviewImage
+        name={name}
+        state={state}
+        imageClassName={favorites ? "w-full h-full object-contain" : "library-card-thumbnail"}
+        loadingPlaceholder={<LibraryPreviewPlaceholder />}
+        placeholder={
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center">
+            <Box className="h-6 w-6 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">
+              {uiText("library.previewMissing")}
+            </span>
+          </div>
+        }
+      />
       {children}
       <ViewIndicator state={state} />
     </div>
@@ -140,7 +161,7 @@ export function ModelPreviewControls({ name, state }: { name: string; state: Pre
       <div
         data-model-preview-controls={name}
         className={cn(
-          "pointer-events-none absolute inset-x-0 top-0 z-10 h-48 transition-opacity duration-fast ease-out focus-within:opacity-100",
+          "library-preview-controls pointer-events-none absolute inset-x-0 top-0 z-10 transition-opacity duration-fast ease-out focus-within:opacity-100",
           state.hovered ? "opacity-100" : "opacity-100 [@media(hover:hover)]:opacity-0",
         )}
       >
@@ -200,7 +221,7 @@ export function ModelPreviewControls({ name, state }: { name: string; state: Pre
           <Button
             {...keepOffCard}
             variant="secondary"
-            className="pointer-events-auto absolute left-1 top-1 h-11"
+            className="pointer-events-auto absolute right-1 top-1 h-11"
             onClick={(event) => {
               stop(event);
               preview.retry();
@@ -241,7 +262,7 @@ export function ModelPreviewGallery({
         onPointerEnter={state.enter}
         onPointerLeave={state.leave}
       >
-        <PreviewImage name={name} state={state} expanded />
+        <PreviewImage name={name} state={state} imageClassName="h-full w-full object-contain" />
         <ViewIndicator state={state} />
         {preview.failed && (
           <Button

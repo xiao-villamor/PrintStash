@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from urllib.parse import quote
 
@@ -27,6 +28,7 @@ from app.db.models import CollectionRole, DerivativeKind, File, FileType, Model,
 from app.db.scopes import live
 from app.db.session import get_session
 from app.modules.identity import auth, rbac
+from app.modules.library.model_views.thumbnails import thumbnail_version
 from app.modules.media.three_mf_preview import (
     EmbeddedGcodeError,
     list_embedded_gcode_plates,
@@ -371,7 +373,14 @@ def file_thumbnail(
     session: Session = Depends(get_session),
 ):
     file_row = _accessible_file(session, file_id, current_user)
-    return thumbnail_response(file_id, request, thumbnail_path=file_row.thumbnail_path)
+    version = thumbnail_version(file_id, file_row.thumbnail_path)
+    return thumbnail_response(
+        file_id,
+        request,
+        thumbnail_path=file_row.thumbnail_path,
+        # Only the URL of the current content may be kept without revalidation.
+        immutable=version is not None and request.query_params.get("v") == version,
+    )
 
 
 def thumbnail_response(
@@ -380,6 +389,7 @@ def thumbnail_response(
     *,
     thumbnail_path: str | None = None,
     purpose: DeliveryPurpose = DeliveryPurpose.THUMBNAIL,
+    immutable: bool = False,
 ):
     """Serve a file's thumbnail. No access checks — authorise the caller first."""
     backend = get_backend()
@@ -400,7 +410,10 @@ def thumbnail_response(
         plan_stored_representation(
             backend,
             thumb_key,
-            delivery_request(request, filename, media_type, purpose),
+            replace(
+                delivery_request(request, filename, media_type, purpose),
+                immutable=immutable,
+            ),
             info=info,
         )
     )

@@ -49,18 +49,56 @@ const CATEGORIES: Array<{
   },
 ];
 
+const ONBOARDING_CATEGORIES = {
+  this_machine: {
+    get title() {
+      return uiText("Local folder");
+    },
+    get description() {
+      return uiText("On this server");
+    },
+  },
+  s3_compatible: {
+    get title() {
+      return uiText("S3-compatible");
+    },
+    get description() {
+      return uiText("Bucket on MinIO, Garage, R2 or AWS");
+    },
+  },
+  nextcloud_webdav: {
+    get title() {
+      return uiText("WebDAV / Nextcloud");
+    },
+    get description() {
+      return uiText("A folder on your Nextcloud");
+    },
+  },
+  nas_sftp: {
+    get title() {
+      return uiText("SFTP");
+    },
+    get description() {
+      return uiText("A folder on your NAS over SSH");
+    },
+  },
+} as const;
+
 export type ProviderValues = StorageProviderConfigValues;
 
 export function defaultProviderValues(provider: StorageProvider): ProviderValues {
   return providerDefaults(provider);
 }
 
-function tierLabel(tier: string): string {
-  return knownUiText(tier);
-}
-
-function supportLabel(level: string | undefined): string {
-  return knownUiText(level ?? "stable");
+/**
+ * How a chosen provider is named back to the person who chose it. A local
+ * provider is named by the choice they picked ("Local folder") rather than the
+ * catalogue's provider label, so setup's review repeats what they clicked.
+ */
+export function storageChoiceLabel(provider: StorageProvider): string {
+  return provider.category === "this_machine"
+    ? ONBOARDING_CATEGORIES.this_machine.title
+    : knownUiText(provider.label);
 }
 
 function providerConsequences(
@@ -77,15 +115,12 @@ function providerConsequences(
   );
 }
 
-export function StorageProviderSummary({
-  provider,
-  activeTier,
-  context = "selection",
-}: {
-  provider: StorageProvider;
-  activeTier?: string;
-  context?: "current" | "selection";
-}) {
+/**
+ * What choosing this storage means, in plain words. Tier names and support
+ * levels are operator detail shown elsewhere in Settings; here the visitor
+ * only needs the consequence for their files.
+ */
+export function StorageProviderSummary({ provider }: { provider: StorageProvider }) {
   useUiLocale();
   const i18n = useOptionalI18n();
   const consequences = providerConsequences(
@@ -93,62 +128,15 @@ export function StorageProviderSummary({
     i18n?.t("storage.guardedCatalog") ?? uiText("storage.guardedCatalog"),
     i18n?.t("storage.guardedRetention") ?? uiText("storage.guardedRetention"),
   );
-
-  if (context === "current") {
-    if (provider.expected_tier !== "guarded") return null;
-    return (
-      <div className="mt-3 space-y-2 text-xs">
-        <p className="text-foreground">{knownUiText(provider.expected_tier_note)}</p>
-        <p className="font-medium text-foreground">{uiText("Guarded storage consequences")}</p>
-        {consequences.length > 0 && (
-          <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
-            {consequences.map((consequence) => (
-              <li key={consequence}>{knownUiText(consequence)}</li>
-            ))}
-          </ul>
-        )}
-      </div>
-    );
-  }
-
+  const beta = provider.support_level === "beta";
+  if (consequences.length === 0 && !beta) return null;
   return (
-    <div className="space-y-3">
-      <div className="grid gap-2 border-y border-border py-3 text-xs sm:grid-cols-3 sm:gap-4">
-        <p className="text-on-surface-variant">
-          {i18n?.t("settings.storageSupport", {
-            level: supportLabel(provider.support_level),
-          }) ??
-            uiText("Support: {value1}", {
-              value1: String(supportLabel(provider.support_level)),
-            })}
-        </p>
-        <p className="text-on-surface-variant">
-          {uiText("Expected: {value1}", {
-            value1: String(tierLabel(provider.expected_tier) ?? ""),
-          })}
-        </p>
-        {activeTier && (
-          <p className="font-medium text-on-surface">
-            {uiText("Active: {value1}", {
-              value1: String(tierLabel(activeTier) ?? ""),
-            })}
-          </p>
-        )}
-      </div>
-      <p className="text-sm text-on-surface">{knownUiText(provider.expected_tier_note)}</p>
-      {provider.expected_tier === "guarded" && (
-        <p className="text-xs font-medium text-on-surface">
-          {uiText("Guarded storage consequences")}
-        </p>
-      )}
-      {consequences.length > 0 && (
-        <ul className="list-disc space-y-1 pl-5 text-xs text-on-surface-variant">
-          {consequences.map((consequence) => (
-            <li key={consequence}>{knownUiText(consequence)}</li>
-          ))}
-        </ul>
-      )}
-    </div>
+    <p className="text-xs leading-relaxed text-on-surface-variant">
+      {[
+        ...(beta ? [i18n?.t("storage.betaNote") ?? uiText("storage.betaNote")] : []),
+        ...consequences.map((consequence) => knownUiText(consequence)),
+      ].join(" ")}
+    </p>
   );
 }
 
@@ -159,8 +147,9 @@ export function StorageProviderPicker(props: {
   onProviderChange: (provider: StorageProvider) => void;
   onValueChange: (name: string, value: string | number) => void;
   disabled?: boolean;
-  activeTier?: string;
   onboarding?: boolean;
+  /** Fields the last storage check named as the problem. */
+  invalidFields?: readonly string[];
 }) {
   useUiLocale();
   const i18n = useOptionalI18n();
@@ -178,32 +167,28 @@ export function StorageProviderPicker(props: {
     <div className="space-y-5">
       <fieldset className="space-y-2">
         <legend
-          className={
-            props.onboarding
-              ? "sr-only"
-              : "text-xs font-mono uppercase tracking-wider text-on-surface-variant"
-          }
+          className={props.onboarding ? "sr-only" : "text-[13px] font-medium text-foreground"}
         >
           {props.onboarding ? uiText("setup.storageChoice") : uiText("Storage category")}
         </legend>
-        <div className={props.onboarding ? "grid grid-cols-3 gap-2" : "grid gap-2 sm:grid-cols-2"}>
+        <div className={props.onboarding ? "grid grid-cols-2 gap-2" : "grid gap-2 sm:grid-cols-2"}>
           {CATEGORIES.map((category) => {
             const Icon = category.icon;
             const hasProviders = props.providers.some(
-              (provider) => provider.category === category.id,
+              (provider) =>
+                provider.category === category.id && (!props.onboarding || provider.selectable),
             );
             const active = selectedCategory === category.id;
             return (
               <Button
+                size="sm"
                 key={category.id}
                 type="button"
-                variant={props.onboarding && category.id !== "this_machine" ? "ghost" : "outline"}
+                variant="outline"
                 disabled={props.disabled || !hasProviders}
                 aria-pressed={active}
                 aria-label={
-                  props.onboarding && category.id === "this_machine"
-                    ? uiText("setup.serverStorage")
-                    : category.label
+                  props.onboarding ? ONBOARDING_CATEGORIES[category.id].title : category.label
                 }
                 onClick={() => {
                   const choices = props.providers.filter(
@@ -217,22 +202,48 @@ export function StorageProviderPicker(props: {
                 }}
                 className={cn(
                   "h-auto justify-start gap-2 whitespace-normal px-3 py-3 text-left",
-                  props.onboarding &&
-                    (category.id === "this_machine"
-                      ? "col-span-3 min-h-12"
-                      : "min-h-11 flex-col justify-center px-1 py-2 text-center text-xs sm:flex-row"),
-                  active && "border-transparent bg-accent text-accent-foreground hover:bg-accent",
+                  props.onboarding && "min-h-16 items-start",
+                  active &&
+                    (props.onboarding
+                      ? "border-primary bg-accent text-accent-foreground hover:bg-accent"
+                      : "border-transparent bg-accent text-accent-foreground hover:bg-accent"),
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                {props.onboarding ? uiText(`setup.category.${category.id}`) : category.label}
-                {props.onboarding && category.id === "this_machine" && (
-                  <span className="ml-auto text-xs font-normal">{uiText("setup.recommended")}</span>
+                {props.onboarding ? (
+                  <span className="min-w-0">
+                    <span className="block text-xs font-medium">
+                      {ONBOARDING_CATEGORIES[category.id].title}
+                    </span>
+                    <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                      {category.id === "this_machine" && props.values.data_dir
+                        ? `${String(props.values.data_dir)} · `
+                        : ""}
+                      {ONBOARDING_CATEGORIES[category.id].description}
+                    </span>
+                  </span>
+                ) : (
+                  category.label
                 )}
               </Button>
             );
           })}
         </div>
+        {props.onboarding &&
+          props.providers
+            .filter(
+              (provider) =>
+                !provider.selectable && (provider.uses?.vault?.reason ?? provider.disabled_reason),
+            )
+            .map((provider) => (
+              <p key={provider.id} className="text-xs text-muted-foreground">
+                {knownUiText(provider.label)}:{" "}
+                {storageOperationMessage(
+                  provider.uses?.vault?.reason ?? provider.disabled_reason ?? "",
+                  i18n?.t,
+                )}
+              </p>
+            ))}
       </fieldset>
 
       {!(
@@ -242,7 +253,7 @@ export function StorageProviderPicker(props: {
       ) &&
         (props.onboarding ? (
           <div className="space-y-2">
-            <label className="block space-y-2 text-xs font-mono uppercase tracking-wider text-on-surface-variant">
+            <label className="block space-y-2 text-[13px] font-medium text-foreground">
               {uiText("Provider")}
               <select
                 className={cn(
@@ -281,12 +292,13 @@ export function StorageProviderPicker(props: {
           </div>
         ) : (
           <fieldset className="space-y-2">
-            <legend className="text-xs font-mono uppercase tracking-wider text-on-surface-variant">
+            <legend className="text-[13px] font-medium text-foreground">
               {uiText("Provider")}
             </legend>
             <div className="grid gap-2 sm:grid-cols-2">
               {categoryProviders.map((provider) => (
                 <Button
+                  size="sm"
                   key={provider.id}
                   type="button"
                   variant="outline"
@@ -330,7 +342,7 @@ export function StorageProviderPicker(props: {
           className={
             props.onboarding && selected.id === "local"
               ? "space-y-3"
-              : "space-y-4 rounded-lg border border-outline-variant bg-surface-container-low p-4"
+              : "space-y-4 border-t border-border pt-4"
           }
         >
           {props.onboarding && selected.id === "local" ? (
@@ -338,7 +350,7 @@ export function StorageProviderPicker(props: {
               {uiText("setup.serverPaths")}
             </p>
           ) : (
-            <StorageProviderSummary provider={selected} activeTier={props.activeTier} />
+            <StorageProviderSummary provider={selected} />
           )}
 
           <StorageProviderFields
@@ -348,6 +360,7 @@ export function StorageProviderPicker(props: {
             disabled={props.disabled}
             storedSecrets={[...secretFieldsSet]}
             omitFields={props.onboarding && selected.id === "local" ? ["root"] : undefined}
+            invalidFields={props.invalidFields}
           />
         </section>
       )}

@@ -158,6 +158,13 @@ export function modelCard(page: Page, name: string) {
   return page.getByRole("main").locator('a[href^="/models/"]').filter({ hasText: name });
 }
 
+/** Open the full Model page through the Library inspector's explicit link. */
+export async function openModelPage(page: Page, name: string): Promise<void> {
+  await modelCard(page, name).click();
+  await page.locator("#model-drawer").getByRole("link", { name: "Open page", exact: true }).click();
+  await expect(page).toHaveURL(/\/models\/\d+(?:\?|$)/);
+}
+
 // Share/Edit details/Delete model live behind the "Model actions" dropdown on
 // the model detail page. Opens it and returns the named menu item locator
 // (still closed/disabled-checkable — call .click() to also close the menu).
@@ -169,7 +176,7 @@ export async function clickModelAction(
   page: Page,
   name: "Share" | "Edit details" | "Delete model",
 ): Promise<void> {
-  await page.getByRole("button", { name: "Model actions" }).click();
+  await page.getByRole("heading", { level: 1 }).click({ button: "right" });
   await modelActionItem(page, name).click();
 }
 
@@ -279,7 +286,14 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
   const view = collection ? `/?c=${encodeURIComponent(collection)}` : "/";
   await page.goto(view);
   await settleLibraryRead(page, modelCard(page, name));
-  if (tag) await expect(modelCard(page, name)).toContainText(tag);
+  if (tag) {
+    const href = await modelCard(page, name).getAttribute("href");
+    expect(href).toMatch(/^\/models\/\d+/);
+    const modelId = href!.match(/^\/models\/(\d+)/)![1];
+    const detail = await page.request.get(`/api/v1/models/${modelId}`);
+    expect(detail.ok()).toBe(true);
+    expect((await detail.json()).tags).toEqual(expect.arrayContaining([tag]));
+  }
 }
 
 export function uploadGcodeModel(page: Page, name: string): Promise<void> {

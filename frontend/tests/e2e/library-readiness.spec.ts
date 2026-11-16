@@ -55,6 +55,24 @@ async function phases(page: Page, phase: string) {
 }
 
 test.describe("Library readiness", () => {
+  test("opens the mobile collection tree from the shared header", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/?c=maraio");
+    await expect(page.getByRole("heading", { name: "maraio", exact: true })).toBeVisible();
+    const toggle = page
+      .locator("header")
+      .getByRole("button", { name: "Toggle sidebar", exact: true });
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect((await toggle.boundingBox())!.x).toBe(8);
+    await toggle.click();
+    const tree = page.getByRole("dialog", { name: "Collections", exact: true });
+    await expect(tree.getByRole("treeitem", { name: "maraio", exact: true })).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Escape");
+    await expect(tree).toBeHidden();
+    await expect(toggle).toBeFocused();
+  });
+
   test("opens only an immediately usable mobile tree control", async ({ page }) => {
     await page.setContent(`<main>
       <button style="display:none">Filters</button>
@@ -70,13 +88,36 @@ test.describe("Library readiness", () => {
     await expect(page.locator("button").first()).not.toHaveAttribute("data-clicked", "yes");
   });
 
+  test("does not substitute model filters for an unavailable collection toggle", async ({
+    page,
+  }) => {
+    await page.setContent(
+      `<header><button aria-label="Toggle sidebar" disabled onclick="this.dataset.clicked='yes'">Collections</button></header><main><button onclick="this.dataset.clicked='yes'">Filters</button></main>`,
+    );
+    expect(await page.evaluate(openAvailableLibraryTree)).toBe(false);
+    await expect(page.getByRole("button", { name: "Filters", exact: true })).not.toHaveAttribute(
+      "data-clicked",
+      "yes",
+    );
+    await page
+      .getByRole("button", { name: "Toggle sidebar", exact: true })
+      .evaluate((button: HTMLButtonElement) => {
+        button.disabled = false;
+      });
+    expect(await page.evaluate(openAvailableLibraryTree)).toBe(true);
+    await expect(page.getByRole("button", { name: "Toggle sidebar", exact: true })).toHaveAttribute(
+      "data-clicked",
+      "yes",
+    );
+  });
+
   test("selects committed navigation instead of preparation order", async ({ page }) => {
     await page.route("**/", (route) =>
       route.fulfill({ contentType: "text/html", body: "<main>Ready</main>" }),
     );
     await page.goto("/");
     await page.evaluate(() => {
-      history.replaceState({ key: "destination" }, "");
+      history.replaceState({ __TSR_key: "destination" }, "");
       performance.mark("printstash:navigation:3:start");
       performance.mark("printstash:navigation:4:start");
       performance.mark("printstash:navigation:current", {
@@ -89,10 +130,10 @@ test.describe("Library readiness", () => {
     expect(await page.evaluate(`(${currentNavigationStart.toString()})()?.name`)).toBe(
       "printstash:navigation:3:start",
     );
-    await page.evaluate(() => history.replaceState({ key: "next" }, ""));
+    await page.evaluate(() => history.replaceState({ __TSR_key: "next" }, ""));
     expect(await page.evaluate(currentNavigationStart)).toBeNull();
     await page.evaluate(() => {
-      history.replaceState({ key: "destination" }, "");
+      history.replaceState({ __TSR_key: "destination" }, "");
       performance.mark("printstash:navigation:current", {
         detail: { navigation: 3, historyKey: "destination", active: false },
       });
@@ -103,14 +144,25 @@ test.describe("Library readiness", () => {
   test("completes the committed mobile search destination", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/?c=maraio");
-    await page.getByRole("button", { name: "Filters", exact: true }).click();
+    await page
+      .locator("header")
+      .getByRole("button", { name: "Toggle sidebar", exact: true })
+      .click();
     await expect.poll(() => phases(page, "complete")).toHaveLength(1);
     await page.keyboard.press("Escape");
-    await page.getByRole("dialog", { name: "Filters", exact: true }).waitFor({ state: "hidden" });
-    await page.locator("[data-model-search]").fill("skadis");
+    await page
+      .getByRole("dialog", { name: "Collections", exact: true })
+      .waitFor({ state: "hidden" });
+    await page.keyboard.press("/");
+    await page.locator("header").getByRole("searchbox", { name: "Search library" }).fill("skadis");
     await expect(page).toHaveURL(/q=skadis/);
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Filters", exact: true }).click();
+    // The compact search owns the full header while focused, as in the reference.
+    await page.getByRole("main").getByRole("heading", { name: "maraio", exact: true }).click();
+    await page
+      .locator("header")
+      .getByRole("button", { name: "Toggle sidebar", exact: true })
+      .click();
     await expect
       .poll(async () => {
         const name = await page.evaluate<string | null>(
@@ -141,7 +193,7 @@ test.describe("Library readiness", () => {
       const released = await page.evaluate(() => performance.now());
       gate.resolve();
       await expect(
-        page.locator('aside [role="button"][title="skadis_kitchen-roll_screw"]'),
+        page.locator('aside [role="treeitem"][title="skadis_kitchen-roll_screw"]'),
       ).toBeVisible();
       await expect.poll(() => phases(page, "complete")).toHaveLength(1);
       expect((await phases(page, "complete"))[0]).toBeGreaterThan(released);
@@ -150,9 +202,7 @@ test.describe("Library readiness", () => {
     }
   });
 
-  test("prioritizes the mobile tree until the filter section enters the viewport", async ({
-    page,
-  }) => {
+  test("defers filter catalogs until the separate filter dialog opens", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.addInitScript(() => {
       sessionStorage.setItem("ps-filter-expanded", "[]");
@@ -193,9 +243,12 @@ test.describe("Library readiness", () => {
     });
     try {
       await page.goto("/?c=maraio", { waitUntil: "domcontentloaded" });
-      await page.getByRole("button", { name: "Filters", exact: true }).click();
-      const drawer = page.getByRole("dialog", { name: "Filters", exact: true });
-      await expect(drawer.getByRole("region", { name: "Filters", exact: true })).toBeVisible();
+      await page
+        .locator("header")
+        .getByRole("button", { name: "Toggle sidebar", exact: true })
+        .click();
+      const drawer = page.getByRole("dialog", { name: "Collections", exact: true });
+      await expect(drawer.getByRole("heading", { name: "Collections", exact: true })).toBeVisible();
       await page.evaluate(
         () =>
           new Promise<void>((resolve) =>
@@ -204,11 +257,13 @@ test.describe("Library readiness", () => {
       );
       expect(catalogs).toEqual([]);
       rootsGate.resolve();
-      await expect(drawer.getByRole("button", { name: "Folder 0", exact: true })).toBeVisible();
+      await expect(drawer.getByRole("treeitem", { name: "Folder 0", exact: true })).toBeVisible();
       await expect.poll(() => phases(page, "tree")).toHaveLength(1);
       expect(await phases(page, "complete")).toEqual([]);
       expect(catalogs).toEqual([]);
-      await drawer.getByRole("region", { name: "Filters", exact: true }).scrollIntoViewIfNeeded();
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Filters", exact: true }).click();
+      await expect(page.getByRole("dialog", { name: "Filter Models", exact: true })).toBeVisible();
       await expect.poll(() => catalogs.length).toBe(3);
     } finally {
       rootsGate.resolve();
@@ -216,9 +271,7 @@ test.describe("Library readiness", () => {
     }
   });
 
-  test("prioritizes an explicitly focused filter while the mobile tree is pending", async ({
-    page,
-  }) => {
+  test("admits an explicit filter request while the mobile tree is pending", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.addInitScript(() => {
       sessionStorage.setItem("ps-filter-expanded", "[]");
@@ -259,9 +312,12 @@ test.describe("Library readiness", () => {
     });
     try {
       await page.goto("/?c=maraio", { waitUntil: "domcontentloaded" });
-      await page.getByRole("button", { name: "Filters", exact: true }).click();
-      const drawer = page.getByRole("dialog", { name: "Filters", exact: true });
-      await expect(drawer.getByRole("region", { name: "Filters", exact: true })).toBeVisible();
+      await page
+        .locator("header")
+        .getByRole("button", { name: "Toggle sidebar", exact: true })
+        .click();
+      const drawer = page.getByRole("dialog", { name: "Collections", exact: true });
+      await expect(drawer.getByRole("heading", { name: "Collections", exact: true })).toBeVisible();
       await page.evaluate(
         () =>
           new Promise<void>((resolve) =>
@@ -269,15 +325,9 @@ test.describe("Library readiness", () => {
           ),
       );
       expect(catalogs).toEqual([]);
-      // An inactive document can change activeElement without dispatching focusin.
-      await page.bringToFront();
-      await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
-      const filter = drawer.getByRole("button", { name: "Any location", exact: true });
-      await expect(filter).toBeEnabled();
-      await expect(async () => {
-        await filter.focus();
-        await expect(filter).toBeFocused();
-      }).toPass();
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Filters", exact: true }).click();
+      await expect(page.getByRole("dialog", { name: "Filter Models", exact: true })).toBeVisible();
       await expect.poll(() => catalogs.length).toBe(3);
       expect(await phases(page, "complete")).toEqual([]);
     } finally {
@@ -402,7 +452,7 @@ test.describe("Library readiness", () => {
             .some((entry) => /^printstash:navigation:\d+:complete$/.test(entry.name))
         )
           return;
-        const drawer = document.querySelector('[role="dialog"][aria-label="Filters"]');
+        const drawer = document.querySelector('[role="dialog"][aria-label="Collections"]');
         if (drawer)
           window.completedDrawer = {
             left: drawer.getBoundingClientRect().left,
@@ -416,9 +466,12 @@ test.describe("Library readiness", () => {
     await restored;
     await expect.poll(() => phases(page, "media")).toHaveLength(1);
     expect(await phases(page, "complete")).toEqual([]);
-    await page.getByRole("button", { name: "Filters", exact: true }).click();
+    await page
+      .locator("header")
+      .getByRole("button", { name: "Toggle sidebar", exact: true })
+      .click();
     await expect(
-      page.locator('[role="dialog"] [role="button"][title="skadis_kitchen-roll_screw"]'),
+      page.locator('[role="dialog"] [role="treeitem"][title="skadis_kitchen-roll_screw"]'),
     ).toBeVisible();
     await expect.poll(() => phases(page, "complete")).toHaveLength(1);
     expect(await page.evaluate(() => window.completedDrawer)).toEqual({ left: 0, running: 0 });
@@ -493,11 +546,15 @@ test.describe("Library readiness", () => {
       // The selected branch always restores its ancestors; unrelated remembered
       // branches are deliberately bounded to six by the startup contract.
       await page.goto(`/?c=${encodeURIComponent(nodes[7].path)}`);
-      if (width === 390) await page.getByRole("button", { name: "Filters", exact: true }).click();
+      if (width === 390)
+        await page
+          .locator("header")
+          .getByRole("button", { name: "Toggle sidebar", exact: true })
+          .click();
       const tree = page.locator(width === 390 ? '[role="dialog"]' : "aside");
       const positions: number[] = [];
       for (const node of nodes) {
-        const row = tree.getByRole("button", { name: node.name, exact: true });
+        const row = tree.getByRole("treeitem", { name: node.name, exact: true });
         await expect(row).toBeVisible();
         positions.push((await row.boundingBox())!.x);
       }
@@ -505,15 +562,17 @@ test.describe("Library readiness", () => {
         // Every level must remain visibly nested, including levels beyond two.
         expect(positions[index] - positions[index - 1]).toBeGreaterThanOrEqual(8);
       }
-      const leaf = tree.getByRole("button", { name: "Nested Model", exact: true });
+      const leaf = tree.getByRole("treeitem", { name: "Nested Model", exact: true });
       await expect(leaf).toBeVisible();
-      const parentIcon = tree.getByRole("button", { name: "Nested 8", exact: true }).locator("svg");
+      const parentIcon = tree
+        .getByRole("treeitem", { name: "Nested 8", exact: true })
+        .locator("svg");
       expect(
         (await leaf.locator("svg").boundingBox())!.x - (await parentIcon.boundingBox())!.x,
       ).toBeGreaterThanOrEqual(8);
       const target = page
         .locator(width === 390 ? '[role="dialog"]' : "aside")
-        .getByRole("button", { name: "Nested 8", exact: true });
+        .getByRole("treeitem", { name: "Nested 8", exact: true });
       await target.scrollIntoViewIfNeeded();
       expect((await target.boundingBox())!.width).toBeGreaterThan(40);
       await target.click();
@@ -704,18 +763,17 @@ test.describe("Library readiness", () => {
     );
     await page.goto("/");
     const tree = page.locator("aside");
-    await expect(tree.getByRole("button", { name: "Parts", exact: true })).toHaveAttribute(
+    await expect(tree.getByRole("treeitem", { name: "Parts", exact: true })).toHaveAttribute(
       "data-outliner-collection",
       "parts",
     );
-    await expect(tree.locator('[role="button"][title="Repeated"]')).toHaveAttribute(
+    await expect(tree.locator('[role="treeitem"][title="Repeated"]')).toHaveAttribute(
       "data-outliner-entry",
       "/models/11",
     );
-    await expect(tree.locator('[role="button"][title="Repeated · Multipart set"]')).toHaveAttribute(
-      "data-outliner-entry",
-      "/multipart-models/12",
-    );
+    await expect(
+      tree.locator('[role="treeitem"][title="Repeated · Multipart set"]'),
+    ).toHaveAttribute("data-outliner-entry", "/multipart-models/12");
   });
 
   test("keeps the measurement clock across a document restart", async ({ page }) => {

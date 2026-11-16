@@ -23,6 +23,14 @@ only when the user explicitly asks for subagents in the current request. Task
 size, cross-stack scope, and repository profiles are not authorization to
 delegate.
 
+## Prototype-driven UI
+
+For UI implementation or a reported visual mismatch, follow
+[prototype fidelity](.agents/skills/printstash/references/frontend.md#prototype-fidelity)
+before editing. Completion requires checking the actual user-facing preview,
+including interactive states and persisted writes; isolated screenshots alone
+are insufficient evidence.
+
 ## Task completion
 
 For every task that changes repository files, do not stop or declare the task

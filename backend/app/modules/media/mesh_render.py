@@ -42,8 +42,8 @@ RGBBackground = _core.RGBBackground
 _rasterise_triangles = _core._rasterise_triangles
 
 
-def _select_view_rotation(verts: Any, _np: Any) -> Any:
-    return _core._select_view_rotation(verts)
+def _select_view_rotation(verts: Any, _np: Any, *, reference: bool = False) -> Any:
+    return _core._select_view_rotation(verts, reference=reference)
 
 
 def _front_rotation_for_thin_axis(thin_axis: int, _np: Any) -> Any:
@@ -150,11 +150,16 @@ def render_prepared_thumbnail(
     output_format: Literal["PNG", "WEBP"] = "PNG",
     view_rotation: NDArray[np.float64] | None = None,
     matte: bool = False,
+    reference_thumbnail: bool = False,
 ) -> bytes | None:
     """Render encoded output from shared preparation with application policy."""
     from .compute_render import render
 
-    accelerated = render(prepared, width, height, (view_rotation,), matte)
+    accelerated = (
+        None
+        if reference_thumbnail
+        else render(prepared, width, height, (view_rotation,), matte)
+    )
     if accelerated is not None:
         return _core.encode_rendered_pixels(accelerated[0], output_format=output_format)
     return _core.render_prepared_thumbnail(
@@ -170,6 +175,7 @@ def render_prepared_thumbnail(
         output_format=output_format,
         view_rotation=view_rotation,
         matte=matte,
+        reference_thumbnail=reference_thumbnail,
     )
 
 

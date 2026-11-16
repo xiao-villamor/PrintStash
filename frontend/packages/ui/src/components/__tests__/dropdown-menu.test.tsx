@@ -16,7 +16,7 @@
 
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { createRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DURATION } from "../../lib/overlay";
@@ -274,6 +274,48 @@ describe("DropdownMenu", () => {
       fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
 
       expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+
+    it("lets Escape close a dialog opened from a closed menu's trigger", () => {
+      const closeDialog = vi.fn<() => void>();
+      const changeMenu = vi.fn<(open: boolean) => void>();
+      openMenu(
+        <DropdownMenu
+          open={false}
+          onOpenChange={changeMenu}
+          trigger={
+            <Modal open onClose={closeDialog} title="Print revision" closeLabel="Close">
+              <button type="button">Printer options</button>
+            </Modal>
+          }
+        >
+          <MenuItems />
+        </DropdownMenu>,
+      );
+      fireEvent.keyDown(screen.getByRole("button", { name: "Printer options" }), { key: "Escape" });
+      expect(closeDialog).toHaveBeenCalledOnce();
+      expect(changeMenu).not.toHaveBeenCalled();
+    });
+
+    it("returns a contextual menu to its captured opener", () => {
+      const opener = createRef<HTMLButtonElement>();
+      openMenu(
+        <DropdownMenu
+          open
+          onOpenChange={() => {}}
+          returnFocusRef={opener}
+          trigger={
+            <>
+              <button data-menu-trigger>Other toolbar action</button>
+              <button ref={opener}>Filters</button>
+            </>
+          }
+        >
+          <MenuItems />
+        </DropdownMenu>,
+      );
+      fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+      expect(screen.getByRole("button", { name: "Filters" })).toHaveFocus();
     });
 
     it("returns focus to the trigger on Escape", () => {

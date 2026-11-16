@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { acquireAssetUrl, onCachedAssetInvalidation, peekCachedAssetUrl } from "@/lib/asset-cache";
+import {
+  acquireAssetUrl,
+  onCachedAssetInvalidation,
+  peekCachedAssetUrl,
+  type AssetPriority,
+} from "@/lib/asset-cache";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
 
@@ -13,6 +18,7 @@ export type AuthenticatedAsset =
 export function useAuthenticatedAsset(
   path: string | null | undefined,
   admitted = true,
+  priority: AssetPriority = "primary",
 ): AuthenticatedAsset {
   const version = useSyncExternalStore(onAuthChange, getSessionVersion, () => 0);
   const [, refresh] = useState(0);
@@ -30,7 +36,7 @@ export function useAuthenticatedAsset(
     if (!path || !admitted) return;
     let alive = true;
     // Even a synchronous cache hit needs a lease, so eviction knows it is displayed.
-    const lease = acquireAssetUrl(path);
+    const lease = acquireAssetUrl(path, undefined, priority);
     lease.url.then(
       () => {
         if (alive) refresh((value) => value + 1);
@@ -43,7 +49,7 @@ export function useAuthenticatedAsset(
       alive = false;
       lease.release();
     };
-  }, [path, admitted, version, invalidated]);
+  }, [path, admitted, version, invalidated, priority]);
 
   if (!path || !admitted) return { status: "idle", url: null };
   const url = peekCachedAssetUrl(path);

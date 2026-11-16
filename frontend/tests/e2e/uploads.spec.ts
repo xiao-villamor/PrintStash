@@ -70,7 +70,7 @@ test.describe("upload and capture", () => {
     await expect(page.getByRole("button", { name: "Retry failed files" })).toBeVisible();
 
     await page.getByRole("link", { name: "Open model" }).click();
-    await page.getByRole("tab", { name: "Source" }).click();
+    await page.getByRole("tab", { name: "Source info", exact: true }).click();
     await expect(page.getByText("Fixture maker")).toBeVisible();
     await expect(page.getByText("CC BY 4.0")).toBeVisible();
     await expect(page.getByText("Print with supports.")).toBeVisible();
@@ -82,7 +82,7 @@ test.describe("upload and capture", () => {
     const editCreator = page.getByRole("button", { name: "Edit Creator", exact: true });
     await editCreator.click();
     await page.getByLabel("Creator override").fill("Corrected maker");
-    await page.getByRole("button", { name: "Save" }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Corrected maker")).toBeVisible();
     await expect(page.getByText("Edited")).toBeVisible();
     await editCreator.click();
@@ -91,7 +91,9 @@ test.describe("upload and capture", () => {
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Restore" }).click();
     await expect(page.getByText("Fixture maker")).toBeVisible();
-    await expect(page.getByText("Source").last()).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Source information", exact: true }),
+    ).toBeVisible();
 
     expect(problems).toEqual([]);
   });

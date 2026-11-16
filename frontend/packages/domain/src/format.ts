@@ -3,6 +3,33 @@
  * across model detail, grids, printer pages, and upload flows.
  */
 
+// Intl objects cost tens of microseconds to construct and a microsecond to
+// reuse; cards render many values each. One immutable instance per locale and
+// options shape serves every caller.
+const numberFormats = new Map<string, Intl.NumberFormat>();
+export function numberFormat(
+  locale: string,
+  options: Intl.NumberFormatOptions = {},
+): Intl.NumberFormat {
+  const key = `${locale}|${JSON.stringify(options)}`;
+  let format = numberFormats.get(key);
+  if (!format) {
+    format = new Intl.NumberFormat(locale, options);
+    numberFormats.set(key, format);
+  }
+  return format;
+}
+
+const pluralRuleSets = new Map<string, Intl.PluralRules>();
+export function pluralRules(locale: string): Intl.PluralRules {
+  let rules = pluralRuleSets.get(locale);
+  if (!rules) {
+    rules = new Intl.PluralRules(locale);
+    pluralRuleSets.set(locale, rules);
+  }
+  return rules;
+}
+
 export function formatBytes(bytes: number | null | undefined, locale = "en"): string {
   if (bytes == null) return "—";
   if (bytes === 0) return "0 B";
@@ -10,30 +37,28 @@ export function formatBytes(bytes: number | null | undefined, locale = "en"): st
   const sizes = ["B", "KB", "MB", "GB", "TB"];
   const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
   return (
-    new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(bytes / Math.pow(k, i)) +
+    numberFormat(locale, { maximumFractionDigits: 1 }).format(bytes / Math.pow(k, i)) +
     " " +
     sizes[i]
   );
 }
 
 export function formatDuration(seconds: number | null | undefined, locale = "en"): string {
-  if (!seconds || seconds <= 0) return "—";
+  if (seconds == null || Number.isNaN(seconds) || seconds < 0) return "—";
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
   const unit = (value: number, name: string) =>
-    new Intl.NumberFormat(locale, { style: "unit", unit: name, unitDisplay: "narrow" }).format(
-      value,
-    );
+    numberFormat(locale, { style: "unit", unit: name, unitDisplay: "narrow" }).format(value);
   if (h > 0) return `${unit(h, "hour")} ${unit(m, "minute")}`;
   if (m > 0) return `${unit(m, "minute")} ${unit(s, "second")}`;
   return unit(s, "second");
 }
 
 export function formatMillimeters(value: number | null | undefined, locale = "en"): string {
-  return value
-    ? `${new Intl.NumberFormat(locale, { maximumFractionDigits: 3 }).format(value)}mm`
-    : "—";
+  return value == null || Number.isNaN(value)
+    ? "—"
+    : `${numberFormat(locale, { maximumFractionDigits: 3 }).format(value)}mm`;
 }
 
 export function formatPercent(value: number | null | undefined, locale = "en"): string {
@@ -41,11 +66,11 @@ export function formatPercent(value: number | null | undefined, locale = "en"): 
 }
 
 export function formatGrams(value: number | null | undefined, locale = "en"): string {
-  return value ? `${formatDecimal(value, locale)}g` : "—";
+  return value == null || Number.isNaN(value) ? "—" : `${formatDecimal(value, locale)}g`;
 }
 
 function formatDecimal(value: number, locale: string): string {
-  return new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value);
+  return numberFormat(locale, { maximumFractionDigits: 1 }).format(value);
 }
 
 export function formatTemperature(value: number | null | undefined, locale = "en"): string {
@@ -53,13 +78,13 @@ export function formatTemperature(value: number | null | undefined, locale = "en
 }
 
 export function formatCost(value: number | null | undefined, locale = "en"): string {
-  return value
-    ? new Intl.NumberFormat(locale, {
+  return value == null || Number.isNaN(value)
+    ? "—"
+    : numberFormat(locale, {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
         useGrouping: false,
-      }).format(value)
-    : "—";
+      }).format(value);
 }
 
 // Locale formatters are expensive to construct for every visible card. Keep
@@ -77,6 +102,11 @@ let dateFormatters: ReturnType<typeof createDateFormatters> | undefined;
 function dateFormats(locale: string) {
   if (dateFormatters?.locale !== locale) dateFormatters = createDateFormatters(locale);
   return dateFormatters;
+}
+
+/** "Nov 11": a card's short date, from the cached calendar formatter. */
+export function formatCalendarDate(dateStr: string, locale = "en"): string {
+  return calendarDate(dateStr, locale);
 }
 
 function calendarDate(dateStr: string, locale: string): string {

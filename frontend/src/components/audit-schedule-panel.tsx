@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CalendarClock, History } from "lucide-react";
+import { SettingsCard } from "@/components/settings-card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -195,7 +196,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                   <Button
                     type="button"
                     variant="link"
-                    size="xs"
+                    size="sm"
                     onClick={() => setPolicy({ ...policy, timezone: localTimezone })}
                   >
                     {t("auditSchedule.useLocalTimezone")} ({localTimezone})
@@ -386,6 +387,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
           <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-4">
             {hasChanges && (
               <Button
+                size="sm"
                 type="submit"
                 className="w-full sm:w-auto"
                 disabled={busy || review.phase !== "idle"}
@@ -395,6 +397,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
             )}
             {policy.enabled && initial.next_due_at && (
               <Button
+                size="sm"
                 type="button"
                 variant="outline"
                 disabled={busy || review.phase !== "idle"}
@@ -414,6 +417,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
             )}
           </p>
           <Button
+            size="sm"
             type="button"
             disabled={commands.busy || review.phase === "loading"}
             onClick={() => void reviewCurrent()}
@@ -426,6 +430,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                 {t("auditSchedule.timezone")}: {review.policy.timezone} · {review.policy.start_time}
               </p>
               <Button
+                size="sm"
                 type="button"
                 onClick={() => {
                   setPolicy(review.policy);
@@ -456,16 +461,16 @@ export function AuditSchedulePanel() {
   if (commands.retired) return null;
   return (
     <>
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("auditSchedule.title")}</CardTitle>
-          <CardDescription>{t("auditSchedule.description")}</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4 lg:grid-cols-2">
+      <SettingsCard
+        icon={CalendarClock}
+        title={t("auditSchedule.title")}
+        description={t("auditSchedule.description")}
+      >
+        <div className="settings-section-body grid gap-4 lg:grid-cols-2">
           {error && policies && !denied && (
             <div role="alert">
               <p>{t("auditSchedule.loadFailed")}</p>
-              <Button onClick={() => void policiesQuery.refetch()}>
+              <Button size="sm" onClick={() => void policiesQuery.refetch()}>
                 {t("auditSchedule.retry")}
               </Button>
             </div>
@@ -473,7 +478,7 @@ export function AuditSchedulePanel() {
           {(error && !policies) || denied ? (
             <div role="alert" className="space-y-3">
               <p>{t("auditSchedule.loadFailed")}</p>
-              <Button variant="outline" onClick={() => void policiesQuery.refetch()}>
+              <Button size="sm" variant="outline" onClick={() => void policiesQuery.refetch()}>
                 {t("auditSchedule.retry")}
               </Button>
             </div>
@@ -484,14 +489,11 @@ export function AuditSchedulePanel() {
               <PolicyForm key={policy.mode} initial={policy} blocked={error} />
             ))
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </SettingsCard>
       {(historyError || history.length > 0) && (
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("auditSchedule.recent")}</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <SettingsCard icon={History} title={t("auditSchedule.recent")}>
+          <div className="settings-section-body">
             {historyError ? (
               <p role="alert" className="text-sm">
                 {t("auditSchedule.historyLoadFailed")}
@@ -525,7 +527,7 @@ export function AuditSchedulePanel() {
                             : t("auditSchedule.manual")}
                         </p>
                       </div>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="settings-status">
                         {issueCount
                           ? t("auditSchedule.issuesFound", { count: issueCount })
                           : t("auditSchedule.noIssues")}
@@ -535,8 +537,8 @@ export function AuditSchedulePanel() {
                 })}
               </ul>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </SettingsCard>
       )}
     </>
   );

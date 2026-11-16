@@ -28,11 +28,12 @@ paths or choose a remote provider. Use separate empty directories for managed
 local storage. An existing folder of models belongs in **Library sources** in the
 next step, rather than becoming the managed upload directory.
 
-**Check storage** checks the selected destination's access. For local storage it
+**Continue** checks the selected destination's access before moving on, and
+**Check storage** runs the same check without leaving the step. For local storage it
 also reports available space when measurable. Remote checks use temporary probe
 objects to verify the required access. A successful check is current evidence of
 access, not a backup or a recovery guarantee. Review the account and destination,
-then choose **Create my account and continue**.
+then choose **Create account**.
 
 The account and installation marker are committed together. If subsequent storage
 preparation fails, the account remains usable. Sign in and return to the guide to
@@ -52,6 +53,13 @@ unavailable. Open a resulting Model or your library. You can postpone this step
 and resume it from Settings or an empty library. Printer connection and backups
 are optional next steps. Passwords stay in memory; only non-sensitive preferences
 and guide progress are saved in the browser.
+
+## Forgotten password
+
+PrintStash does not send password-reset emails. Another administrator can set a
+new password for any account under **Settings → Users**. If you are the only
+administrator there is no reset from the sign-in page, so keep the password in a
+password manager and consider adding a second administrator after setup.
 
 ## An administrator from the deployment
 

@@ -1,11 +1,9 @@
 import { useMemo, useState } from "react";
 import {
-  CalendarDays,
   CheckCircle2,
   CircleAlert,
   Clock3,
   FileCheck2,
-  Files,
   Inbox,
   RefreshCw,
   Trash2,
@@ -28,6 +26,8 @@ import {
   retryPendingImport,
 } from "@/lib/api";
 import { inboxApi, useInboxSnapshot, useInboxCommands } from "@/lib/queries/inbox";
+import { timeAgo } from "@/lib/format";
+import { uiText } from "@/lib/locale";
 import { userMessage } from "@/lib/errors";
 import { Link } from "@/lib/link";
 import { useI18n } from "@/lib/i18n";
@@ -80,46 +80,40 @@ function ImportList({
         return (
           <li
             key={item.id}
-            className="animate-card-in grid min-w-0 gap-3 px-4 py-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-4 sm:px-5"
+            className="flex min-w-0 flex-wrap items-center justify-between gap-3 px-5 py-4"
           >
-            <div className="flex min-w-0 items-start gap-3 sm:contents">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted">
+            <div className="flex min-w-0 flex-1 basis-64 items-start gap-3">
+              <span className="sr-only">
                 <StateIcon className={stateIconClass(item)} aria-hidden="true" />
               </span>
               <div className="min-w-0 flex-1">
-                <h3 className="line-clamp-2 break-words text-sm font-semibold leading-5 text-foreground">
+                <h3 className="line-clamp-2 break-words text-sm font-medium leading-5 text-foreground">
                   {title}
                 </h3>
                 <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground/80">{provider}</span>
+                  <span className="text-muted-foreground">{provider}</span>
                   <span className="inline-flex items-center gap-1">
-                    <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
-                    {new Date(item.completed_at || item.created_at).toLocaleDateString(locale)}
+                    ·{" "}
+                    <time
+                      dateTime={item.completed_at || item.created_at}
+                      title={new Date(item.completed_at || item.created_at).toLocaleString(locale)}
+                    >
+                      {timeAgo(item.completed_at || item.created_at)}
+                    </time>
                   </span>
                   {fileCount > 0 && (
                     <span className="inline-flex items-center gap-1">
-                      <Files className="h-3.5 w-3.5" aria-hidden="true" />
-                      {t("inbox.fileSummary", { count: String(fileCount) })}
+                      · {t("inbox.fileSummary", { count: String(fileCount) })}
                     </span>
                   )}
                   {item.results.length > 0 && (
                     <span>{t("inbox.resultSummary", { count: String(item.results.length) })}</span>
                   )}
+                  <span className="text-xs text-muted-foreground">· {statusLabel(item, t)}</span>
                 </div>
               </div>
             </div>
             <div className="flex min-w-0 shrink-0 items-center justify-between gap-3 border-t border-border pt-3 sm:justify-end sm:border-0 sm:pt-0">
-              <Badge
-                variant={
-                  item.state === "completed"
-                    ? "success"
-                    : item.state === "failed"
-                      ? "destructive"
-                      : "secondary"
-                }
-              >
-                {statusLabel(item, t)}
-              </Badge>
               <div className="flex flex-wrap justify-end gap-2">
                 {item.state === "failed" && item.retryable && (
                   <Button
@@ -146,7 +140,7 @@ function ImportList({
                     <Link href={`/models/${item.resulting_model_id}`}>{t("inbox.openModel")}</Link>
                   </Button>
                 ) : (
-                  <Button size="xs" asChild>
+                  <Button size="xs" variant="outline" asChild>
                     <Link href={`/inbox/${item.id}`}>
                       {item.state === "review" ? t("inbox.review") : t("inbox.view")}
                     </Link>
@@ -155,15 +149,15 @@ function ImportList({
                 {item.state !== "importing" && item.state !== "resolving" && (
                   <Button
                     type="button"
-                    size="icon-sm"
-                    variant="ghost"
+                    size="xs"
+                    variant="outline"
                     aria-label={t("inbox.delete")}
                     title={t("inbox.delete")}
                     loading={deletingId === item.id}
                     onClick={() => onDelete(item)}
                     className="text-muted-foreground hover:text-destructive"
                   >
-                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    {uiText("Dismiss…")}
                   </Button>
                 )}
               </div>
@@ -303,35 +297,44 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
 
   const visibleItems = activeTab === "queue" ? groups.queue : groups.done;
   const tabClass =
-    "flex min-w-32 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-muted-foreground transition-[background-color,color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+    "flex items-center justify-center gap-1 border-b-2 border-transparent pb-3 pt-4 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   return (
     <PageContainer>
       <PageHeader
         title={t("inbox.title")}
-        description={
-          <>
-            {t("inbox.description")}
-            <span className="block">{t("inbox.startHelp")}</span>
-          </>
-        }
+        description={t("inbox.description")}
         actions={
-          <Button asChild>
-            <Link href="/?upload=1">{t("inbox.openImport")}</Link>
-          </Button>
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              loading={snapshot.isFetching}
+              onClick={() => void snapshot.refetch()}
+            >
+              {uiText("Refresh")}
+            </Button>
+            <Button asChild size="sm">
+              <Link href="/?upload=1">{t("inbox.openImport")}</Link>
+            </Button>
+          </>
         }
       />
       <Card className="overflow-hidden">
-        <div className="flex flex-col gap-3 border-b bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-b border-border px-5 sm:flex-row sm:items-center sm:justify-between">
           <TabBar
             tabs={[
               {
                 key: "queue",
                 label: (
                   <>
-                    <Inbox className="h-4 w-4" aria-hidden="true" />
-                    {t("inbox.queue")}
-                    <Badge variant="secondary">{groups.queue.length}</Badge>
+                    {t("inbox.queue")} ·
+                    <Badge
+                      variant="secondary"
+                      className="border-0 bg-transparent px-0 text-muted-foreground"
+                    >
+                      {groups.queue.length}
+                    </Badge>
                   </>
                 ),
               },
@@ -339,9 +342,13 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
                 key: "completed",
                 label: (
                   <>
-                    <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                    {t("inbox.completed")}
-                    <Badge variant="secondary">{groups.done.length}</Badge>
+                    {t("inbox.completed")} ·
+                    <Badge
+                      variant="secondary"
+                      className="border-0 bg-transparent px-0 text-muted-foreground"
+                    >
+                      {groups.done.length}
+                    </Badge>
                   </>
                 ),
               },
@@ -349,11 +356,11 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             active={activeTab}
             onChange={setActiveTab}
             showIndicator={false}
-            className="gap-1 rounded-lg bg-background p-1 shadow-sm ring-1 ring-border"
+            className="gap-6"
             tabClassName={tabClass}
-            activeTabClassName="bg-accent text-accent-foreground"
+            activeTabClassName="border-foreground font-semibold"
           />
-          {groups.done.length > 0 && (
+          {groups.done.length > 0 && activeTab === "completed" && (
             <Button
               type="button"
               size="xs"
@@ -365,61 +372,56 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             </Button>
           )}
         </div>
-        <div className="flex items-start gap-3 border-b px-4 py-4 sm:px-5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-            {activeTab === "queue" ? (
-              <Inbox className="h-4 w-4" aria-hidden="true" />
-            ) : (
-              <FileCheck2 className="h-4 w-4" aria-hidden="true" />
-            )}
-          </span>
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-foreground">
-              {activeTab === "queue" ? t("inbox.queueTitle") : t("inbox.completed")}
-            </h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {activeTab === "queue"
-                ? t("inbox.queueDescription")
-                : t("inbox.completedDescription")}
-            </p>
+        <>
+          <div className="px-5 pb-2 pt-5">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-foreground">
+                {activeTab === "queue" ? t("inbox.queueTitle") : t("inbox.completed")}
+              </h2>
+            </div>
           </div>
-        </div>
-        {snapshot.isError ? (
-          <div role="alert" className="p-5 text-sm text-destructive">
-            <p>{userMessage(snapshot.error)}</p>
-            <Button variant="outline" onClick={() => void snapshot.refetch()}>
-              {t("inbox.retry")}
-            </Button>
-          </div>
-        ) : loading ? (
-          <div aria-label={t("inbox.loading")} className="space-y-3 p-5">
-            <Skeleton className="h-14 w-full" />
-            <Skeleton className="h-14 w-full" />
-          </div>
-        ) : visibleItems.length ? (
-          <ImportList
-            label={activeTab === "queue" ? t("inbox.queueTitle") : t("inbox.completed")}
-            items={visibleItems}
-            locale={locale}
-            t={t}
-            retry={(id) => commands.retry.mutateAsync({ id, session: getSessionVersion() })}
-            deletingId={deletingId}
-            onDelete={setDeleteTarget}
-          />
-        ) : (
-          <EmptyState
-            className="min-h-56 rounded-none border-0 shadow-none"
-            icon={activeTab === "queue" ? Inbox : FileCheck2}
-            title={
-              activeTab === "queue" ? t("inbox.emptyQueueTitle") : t("inbox.emptyCompletedTitle")
-            }
-            description={
-              activeTab === "queue"
-                ? t("inbox.emptyQueueDescription")
-                : t("inbox.emptyCompletedDescription")
-            }
-          />
-        )}
+          {snapshot.isError ? (
+            <div role="alert" className="p-5 text-sm text-destructive">
+              <p>{userMessage(snapshot.error)}</p>
+              <Button variant="outline" onClick={() => void snapshot.refetch()}>
+                {t("inbox.retry")}
+              </Button>
+            </div>
+          ) : loading ? (
+            <div aria-label={t("inbox.loading")} className="space-y-3 p-5">
+              <Skeleton className="h-14 w-full" />
+              <Skeleton className="h-14 w-full" />
+            </div>
+          ) : visibleItems.length ? (
+            <ImportList
+              label={activeTab === "queue" ? t("inbox.queueTitle") : t("inbox.completed")}
+              items={visibleItems}
+              locale={locale}
+              t={t}
+              retry={(id) => commands.retry.mutateAsync({ id, session: getSessionVersion() })}
+              deletingId={deletingId}
+              onDelete={setDeleteTarget}
+            />
+          ) : (
+            <EmptyState
+              className="min-h-56 rounded-none border-0 shadow-none"
+              icon={activeTab === "queue" ? Inbox : FileCheck2}
+              title={
+                activeTab === "queue" ? t("inbox.emptyQueueTitle") : t("inbox.emptyCompletedTitle")
+              }
+              description={
+                activeTab === "queue"
+                  ? t("inbox.emptyQueueDescription")
+                  : t("inbox.emptyCompletedDescription")
+              }
+            />
+          )}
+        </>
+        <p className="border-t border-border px-5 py-4 text-xs text-muted-foreground">
+          {uiText(
+            "Captures stay in the Inbox until you choose their destination. Removing a capture does not delete Models already imported into your Library.",
+          )}
+        </p>
       </Card>
       <ConfirmModal
         open={deleteTarget !== null}

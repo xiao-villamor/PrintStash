@@ -24,7 +24,7 @@ export interface TabBarProps<K extends string> {
   showIndicator?: boolean;
 }
 
-/** ARIA tablist with roving tabindex and a sliding active underline. */
+/** ARIA tablist with roving tabindex and a measured active underline. */
 export function TabBar<K extends string>({
   tabs,
   active,
@@ -102,7 +102,7 @@ export function TabBar<K extends string>({
       {showIndicator && indicator && (
         <span
           aria-hidden
-          className="absolute bottom-0 left-0 h-0.5 w-px origin-left rounded-full bg-primary transition-transform duration-fast ease-in-out motion-reduce:transition-none"
+          className="absolute bottom-0 left-0 h-0.5 w-px origin-left bg-foreground"
           style={{
             transform: `translateX(${indicator.left + indicatorInset}px) scaleX(${Math.max(0, indicator.width - indicatorInset * 2)})`,
           }}

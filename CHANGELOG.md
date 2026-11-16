@@ -4,10 +4,34 @@
 
 ### Changed
 
+- Library filters open beside the toolbar in a searchable picker. Search by category or value, combine selections, and see results immediately; resetting the picker preserves the current folder and search. Card context menus show the Model name once with concise actions for opening its page, showing details, Favorites and tags.
+
+- Collection rows expand and collapse continuously as folders change, keeping the Model grid attached to their movement. Settings sections, Model detail tabs, Upload modes and main destinations use a stationary reveal instead of a zoom; interrupted selections continue from their current appearance.
+
+- Nested folders read their Model page alongside child-folder listings. The measured first row starts downloading its authorized previews as soon as the page arrives, sharing those bytes with the cards. These thumbnails take priority over folder mosaics and revision details, while the first batch still fills the viewport. Shared application-shell code loads together with fewer startup requests, and the matched route's scripts load alongside its language catalog.
+- Decoded Library previews and their card details appear immediately, without a second loading interval for placeholder and image fades. Shared framework code loads together to reduce startup requests while optional features stay deferred.
+- Library cards reveal as soon as their own previews are ready. Release notes, Documents, bulk-selection tools and inspector editing controls load when opened, keeping the initial gallery smaller; the inspector header and close action remain available while its content loads.
+- Library grids and tables size the first batch to fill the visible page and load subsequent pages as the reader scrolls, including scrollbar and assistive scrolling. Pagination shows a retry action only when a page fails.
+- Search-index worker leases and progress no longer invalidate Library pagination. Catalog edits and search-generation activation still retire stale cursors.
+- Collection mosaics read four authorized thumbnail references without loading full Model cards or counting the subtree. Secondary Library reads wait for visible collection previews to resolve.
+- Library loading reuses eligible folder preview data, starts previews without waiting for card fades, and loads descriptions and dialogs on demand. Automatic folder scope resolves empty direct listings in one response while preserving bounded pagination.
+- The Collections sidebar opens with a gentler ease and changes tools without zooming its contents.
+- Search opens the sidebar and updates the global Library results; on phones the field appears above those same results. Favorites is a reversible filter that preserves the query, sidebar, toolbar and card layout. Explicit AI and image-search tools remain available.
+- Workbench sections share one sidebar width and preserve its position when navigating to Settings. Settings navigation uses the same sidebar, and section, tab and card transitions follow a shared motion pattern with reduced-motion support.
+- The frontend adopts the OpenDesign workbench: a compact navigation rail, neutral surfaces, square controls, technical library cards, and a wider model inspector. Model facts remain beside the preview while tabs change; inspecting another G-code revision changes the displayed settings and send selection without changing the stored recommendation. Source hashes are available in Files.
+- Settings follows one compact layout in every section: each setting shows its label and help on the left with the control on the right, statuses are plain text, and buttons carry no decorative icons. Single sign-on, About, Imports, Backups, Maintenance and Background work use the same grouped sections. Automatic backups and SSO options are switches, model card metrics are three dropdowns, and paired browsers are renamed through an explicit Rename action.
+- Trash shows its retention as one line above the deleted items, so it stays in reach with a long list; Save becomes available only after a change. Rows show their files, size and dates as plain text, and Delete uses the same outline button as other destructive actions.
+- Settings controls come from one shared set: every button has the same size and weight, destructive actions use one outline style with a red label, toggles are one square switch, statuses are plain text, and notices are neutral panels instead of tinted boxes. Library sources list each source like other Settings lists with Scan now, Edit source and Remove….
+- Dropdowns open one consistent menu across the app, matching the Sort and Display menus: a square popover with compact rows and a check on the chosen value. Browsers without customizable select keep their native list.
+- Client navigation uses TanStack Router with the existing URLs, authentication, and Query cache. Larger loaded library grids use TanStack Virtual to limit mounted cards while retaining cursor pagination, selection, and return-position restoration.
+- Sign-in and first-run setup share one frame and one field style. On the Storage step, Continue runs the storage check itself and moves on when it passes; Check storage remains for checking without leaving the step. The Account step reports every invalid field at once, Review labels Email plainly, lists the previews folder and offers Edit account and Edit storage, and the final button reads Create account. A refused sign-in no longer marks both fields invalid, and the sign-in page explains that another administrator resets a forgotten password in Settings → Users.
+- Storage folders use one name everywhere: "Your files" and "Previews" in setup, its review and Settings, with a note that Docker installs enter the path inside the container. A failed storage check shows "Needs attention" like a passed one shows "Storage ready" and marks the folder it names. Remote providers explain their deletion behaviour in one plain sentence instead of tier names, and beta connections say so. Setup marks completed steps clearly, and the sign-in recovery hint sits below single sign-on.
+- Library motion flows instead of cutting: the details panel eases in from its edge and leaves the same way, pointing it at another Model swaps its contents in place, opening the collections pane eases it in, and a filter, sort, layout or pane change settles the results in place. Cards no longer slide in again when the grid reflows or scrolls them back into view. Opening a folder from the tree, a breadcrumb or a folder card resolves it in one lookup instead of two.
 - The background engine uses DBOS 3.5.0 (was 3.3.0). Its first start adds indexes, a column and a table to the disposable engine database; queued Jobs resume. Stop every API and worker process and restart them together on the same image. DBOS 3.3.0 is not guaranteed to read the migrated engine database: to roll back, stop every process and discard the engine state (the `-dbos` SQLite sibling with its `-wal` and `-shm` files, or the PostgreSQL `dbos` schema) before starting the previous image; Jobs are recorded in the application database and are submitted again.
 
 ### Added
 
+- Custom recovery pages distinguish missing content, restricted access and connection failures, with retry and return actions that match the workbench.
 - Model cards offer lightweight multi-angle previews with deliberate arrows and an expanded gallery, including Top/Bottom and shape-aware planar views. Visible-image admission, intent-based prefetching and bounded background generation preserve primary covers and avoid hover-triggered geometry downloads. Generation has its own Background work control (`VAULT_DERIVATIVES_PREVIEWS_ENABLED`). See [preview behavior and limits](docs/model-previews.md).
 
 - Model covers can use an uploaded PNG/JPEG/WebP, the current 3D view, or an available source image. Chosen covers survive thumbnail regeneration and source-image changes; Reset to automatic restores the latest generated thumbnail. Cover edits support conflict review and are included in backup, storage migration, and purge.
@@ -31,6 +55,21 @@
 
 ### Fixed
 
+- Model previews use a raised three-quarter camera and more directional studio lighting to reveal cavities and surface depth. Tall and narrow parts retain their upright view instead of being mistaken for flat plates.
+
+- Real Library cards now reveal after they mount on both first load and cached returns, including development effect replays. Loading placeholders can no longer consume the entrance before the real cards appear. Search and Pending sidebar changes keep their stationary handoff; Favorites filters the cards without fading the whole page.
+
+- Collection navigation no longer inserts a temporary subcollection gap above existing Model cards. Settings stays reachable from the rail and restores its section sidebar; Collections correctly exits Favorites.
+
+- Library navigation uses one calm, interruptible reveal for cached folder visits, Back/Forward, and filters. New previews and loading covers fade into place instead of popping; cached images remain visible.
+
+- Library cards and results appear at their final size with a brief fade instead of shrinking and growing when a folder opens.
+
+- The API prepares route and validation metadata and collects initialization objects before accepting traffic, avoiding synchronous initialization and early full-collection pauses across concurrent first requests.
+- Derivative Jobs that fail before claiming an output now record the failure with the normal backoff and attempt limit, preventing immediate rediscovery loops while retaining completed outputs.
+- Library preview updates no longer flash a refresh banner or hide the details-panel toggle. The displayed list and open inspector stay in place during background refreshes; explicit refreshes and failures keep their feedback.
+- ZIP and model selection searches keep the search icon inside the field. Selected entries use neutral highlighting, and the ZIP destination picker and import actions stay visible in the dialog footer on narrow screens.
+- G-code preview views stay where you put them: choosing Front or Top, fitting, or changing layers no longer snaps the camera back, and orbiting still works after the top view. Layers are browsed like a slicer: a vertical layer rail with step buttons, the layer number and its height, plus a This layer toggle that shows only the current layer. A compact bar holds the view menu, fit, travel and bed; scrolling zooms.
 - Mesh processing logs which 3MF reader read each file and, when the XML reader stood in for lib3mf, why (`mesh_phases`, `printstash_mesh_3mf_reads_total`).
 - 7z archives with more than one folder (non-solid, appended or split into blocks) import instead of failing as invalid.
 - Uploads interrupted by a crash or restart before they were recorded no longer stay in staging forever: on startup the API removes unrecorded uploads older than a day.

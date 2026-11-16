@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { localizationAssets } from "./scripts/localization-assets.ts";
@@ -9,6 +10,7 @@ const API_TARGET = process.env.VITE_API_URL || "http://localhost:8000";
 // the built `dist/` is served behind the same reverse proxy as the API.
 export default defineConfig(({ mode }) => ({
   plugins: [
+    tanstackRouter({ target: "react", autoCodeSplitting: true }),
     localizationAssets(),
     tailwindcss(),
     // Only measured tree components opt in with "use memo". Broad compilation
@@ -49,6 +51,49 @@ export default defineConfig(({ mode }) => ({
   },
   build: {
     outDir: "dist",
+    rolldownOptions: {
+      output: {
+        // Route splitting left ~95 sub-2 KB chunks on the Library's first load
+        // (one per icon or helper); over HTTP/1.1's six connections they queued
+        // for ~300 ms. The icons (most of them, ~200 bytes each) share one chunk.
+        codeSplitting: {
+          groups: [
+            {
+              // Every private route mounts this shell. Keep its existing static
+              // dependency graph together instead of requesting dozens of tiny
+              // shared chunks. Owning the whole graph before the vendor groups
+              // also prevents initialization cycles between shell and UI code.
+              // Dynamic feature imports remain separate.
+              name: "shell",
+              test: /src[\\/]root-layout\.tsx$/,
+              priority: 10,
+              includeDependenciesRecursively: true,
+            },
+            {
+              name: "icons",
+              test: /node_modules[\\/].*lucide-react/,
+              includeDependenciesRecursively: false,
+            },
+            {
+              // The app re-exports these primitives from its UI package. Keep
+              // the wrappers with their implementation instead of fetching a
+              // separate, often empty module for each button/input/dialog.
+              name: "ui",
+              test: /(?:src[\\/]components[\\/]ui[\\/]|packages[\\/]ui[\\/]src[\\/])/,
+              includeDependenciesRecursively: false,
+            },
+            {
+              // The gallery needs React, routing and queries together. Keep
+              // their runtime dependencies in the same chunk so small shared
+              // framework modules do not queue behind one another at startup.
+              name: "runtime",
+              test: /[\\/]node_modules[\\/](?:react|react-dom|scheduler|use-sync-external-store|@tanstack[\\/](?:react-router|router-core|history|react-query|query-core))[\\/]/,
+              includeDependenciesRecursively: true,
+            },
+          ],
+        },
+      },
+    },
   },
   test: {
     // Unit tests run in jsdom (localStorage, window) and exclude the Playwright

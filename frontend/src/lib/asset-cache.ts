@@ -1,11 +1,17 @@
 import { getAuthenticatedBlob } from "@/lib/api";
 import { onAuthChange } from "@/lib/auth-store";
 
-const MAX_DOWNLOADS = 2;
+// Match HTTP/1.1's per-origin connection pool. Viewport admission bounds the
+// work; primary cards still take every queued slot before background mosaics.
+const MAX_DOWNLOADS = 6;
 const MAX_INACTIVE_ENTRIES = 400;
 const MAX_INACTIVE_BYTES = 32 * 1024 * 1024;
 
 type AssetStatus = "queued" | "loading" | "ready" | "retired";
+// Explicit preview intent takes the next slot. Visible covers and mosaics can
+// fill the rest before hover-initiated work takes its single speculative slot.
+const priorityOrder = { intent: 0, primary: 1, background: 2, speculative: 3 } as const;
+export type AssetPriority = keyof typeof priorityOrder;
 interface AssetData {
   url: string;
   bytes: number;
@@ -17,10 +23,10 @@ class AssetEntry {
   readonly resolve: (url: string) => void;
   readonly reject: (reason: Error) => void;
   status: AssetStatus = "queued";
+  priority: AssetPriority = "background";
   data: AssetData | null = null;
   references = 0;
   counted = false;
-  priority: "display" | "intent" | "speculative" = "display";
 
   constructor(readonly path: string) {
     let resolve!: (url: string) => void;
@@ -83,12 +89,14 @@ function evictInactive(): void {
 function pump(): void {
   if (disposing) return;
   while (downloads < MAX_DOWNLOADS && queue.length > 0) {
-    const preferred = queue.findIndex((entry) => entry.priority !== "speculative");
-    const speculativeRunning = [...entries.values()].some(
-      (entry) => entry.status === "loading" && entry.priority === "speculative",
-    );
-    if (preferred === -1 && speculativeRunning) break;
-    const [entry] = queue.splice(preferred === -1 ? 0 : preferred, 1);
+    if (
+      queue[0].priority === "speculative" &&
+      Array.from(entries.values()).some(
+        (entry) => entry.status === "loading" && entry.priority === "speculative",
+      )
+    )
+      break;
+    const entry = queue.shift()!;
     if (entry.status !== "queued") continue;
     entry.status = "loading";
     downloads += 1;
@@ -113,15 +121,38 @@ function pump(): void {
   }
 }
 
-function getEntry(path: string): AssetEntry {
+function enqueue(entry: AssetEntry): void {
+  if (entry.priority === "intent") {
+    queue.unshift(entry);
+    return;
+  }
+  const next = queue.findIndex(
+    (queued) => priorityOrder[queued.priority] > priorityOrder[entry.priority],
+  );
+  if (next === -1) queue.push(entry);
+  else queue.splice(next, 0, entry);
+}
+
+function promote(entry: AssetEntry, priority: AssetPriority): void {
+  if (priorityOrder[priority] >= priorityOrder[entry.priority]) return;
+  entry.priority = priority;
+  const index = queue.indexOf(entry);
+  if (index === -1) return;
+  queue.splice(index, 1);
+  enqueue(entry);
+}
+
+function getEntry(path: string, priority: AssetPriority): AssetEntry {
   const cached = entries.get(path);
   if (cached) {
     touch(cached);
+    promote(cached, priority);
     return cached;
   }
   const entry = new AssetEntry(path);
+  entry.priority = priority;
   entries.set(path, entry);
-  queue.push(entry);
+  enqueue(entry);
   return entry;
 }
 
@@ -147,19 +178,10 @@ export interface AssetLease {
 export function acquireAssetUrl(
   path: string,
   signal?: AbortSignal,
-  priority: "display" | "intent" | "speculative" = "display",
+  priority: AssetPriority = "primary",
 ): AssetLease {
   if (signal?.aborted) return { url: Promise.reject(signal.reason), release() {} };
-  const existed = entries.has(path);
-  const entry = getEntry(path);
-  if (!existed || priority !== "speculative") entry.priority = priority;
-  if (priority === "intent" && entry.status === "queued") {
-    const index = queue.indexOf(entry);
-    if (index >= 0) {
-      queue.splice(index, 1);
-      queue.unshift(entry);
-    }
-  }
+  const entry = getEntry(path, priority);
   entry.references += 1;
   let active = true;
   let reject!: (reason: Error) => void;
@@ -184,12 +206,7 @@ export function acquireAssetUrl(
 export function prioritizeCachedAsset(path: string): void {
   const entry = entries.get(path);
   if (!entry) return;
-  entry.priority = "intent";
-  const index = queue.indexOf(entry);
-  if (index >= 0) {
-    queue.splice(index, 1);
-    queue.unshift(entry);
-  }
+  promote(entry, "intent");
   pump();
 }
 

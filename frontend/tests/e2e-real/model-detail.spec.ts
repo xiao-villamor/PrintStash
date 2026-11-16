@@ -156,7 +156,7 @@ test.describe("model detail", () => {
     const tagInput = page.getByPlaceholder("Search or create — press Enter");
 
     // Cancel discards: inline-create a tag in edit mode, then cancel.
-    await page.getByRole("button", { name: "Model actions" }).click();
+    await page.getByRole("heading", { level: 1 }).click({ button: "right" });
     await page.getByRole("menuitem", { name: "Edit details" }).click();
     await tagInput.fill(dropTag);
     await tagInput.press("Enter");
@@ -164,7 +164,7 @@ test.describe("model detail", () => {
     await expect(page.getByText(dropTag, { exact: true })).toHaveCount(0);
 
     // Save persists: inline-create a different tag and save — it shows as a chip.
-    await page.getByRole("button", { name: "Model actions" }).click();
+    await page.getByRole("heading", { level: 1 }).click({ button: "right" });
     await page.getByRole("menuitem", { name: "Edit details" }).click();
     await tagInput.fill(keepTag);
     await tagInput.press("Enter");
