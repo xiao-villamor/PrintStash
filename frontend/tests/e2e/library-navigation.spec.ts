@@ -17,6 +17,68 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe("Library navigation", () => {
+  test("recovers when an import invalidates an automatic library refresh", async ({ page }) => {
+    let importing = false;
+    let rejected = 0;
+    let revisionReads = 0;
+    await page.route("**/api/v1/models/browse/revision", (route) => {
+      revisionReads++;
+      return route.fulfill({
+        json: { browse_revision: importing ? "r2" : "r1", authorization_revision: "a1" },
+      });
+    });
+    await page.route("**/api/v1/models/browse?**", (route) => {
+      if (importing && rejected < 2) {
+        rejected++;
+        return route.fulfill({ status: 409, json: { detail: "browse_refresh_required" } });
+      }
+      return route.fulfill({
+        json: {
+          items: [
+            {
+              kind: "model",
+              model: aModelListItem({
+                id: 101,
+                name: importing ? "Newly imported bracket" : "Original bracket",
+                thumbnail_url: null,
+              }),
+            },
+          ],
+          total: 1,
+          next_cursor: null,
+          browse_revision: importing ? "r2" : "r1",
+          authorization_revision: "a1",
+        },
+      });
+    });
+    await page.goto("/");
+    await expect(
+      page.getByRole("heading", { name: "Original bracket", exact: true }),
+    ).toBeVisible();
+    await expect.poll(() => revisionReads).toBeGreaterThan(0);
+    importing = true;
+    const authorityRead = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/v1/models/browse/revision",
+    );
+    await page.evaluate(() =>
+      document.dispatchEvent(new Event("visibilitychange", { bubbles: true })),
+    );
+    await authorityRead;
+    await expect.poll(() => rejected).toBe(2);
+    await expect(
+      page.getByRole("heading", { name: "Newly imported bracket", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("This request could not be completed. Try again.", { exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByText(
+        "Your previous reading position could not be restored. Showing the start of this view.",
+        { exact: true },
+      ),
+    ).toHaveCount(0);
+  });
+
   test("recovers an unaccepted Library read through explicit refresh", async ({ page }) => {
     const model = aModelListItem({ id: 1, name: "Recovered initial read" });
     let reads = 0;

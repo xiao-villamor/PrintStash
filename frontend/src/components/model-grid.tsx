@@ -678,7 +678,7 @@ function canWriteCollection(collection: CollectionRead | null | undefined): bool
 }
 
 type LibraryRefreshState = { entry: LibraryEntry } & (
-  | { status: "pending"; feedback: "visible" | "silent" }
+  | { status: "pending" | "stale"; feedback: "visible" | "silent" }
   | { status: "failed" | "denied"; error: string }
 );
 
@@ -1458,7 +1458,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     }
   }
   const error =
-    (currentRefresh && currentRefresh.status !== "pending" ? currentRefresh.error : null) ??
+    (currentRefresh?.status === "failed" || currentRefresh?.status === "denied"
+      ? currentRefresh.error
+      : null) ??
     (modelQuery.refreshRequired ? null : modelQuery.error?.message) ??
     (selectedCollection !== null ? selectedLookup.error?.message : null) ??
     folderPages.error?.message ??
@@ -1553,9 +1555,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // counts. Deeper in the list the notice stays, since reloading every page
   // read so far on each change would move the place being read.
   const settlesByItself =
-    authority.refreshRequired &&
-    !modelQuery.refreshRequired &&
-    currentRefresh === null &&
+    ((authority.refreshRequired && !modelQuery.refreshRequired && currentRefresh === null) ||
+      (currentRefresh?.status === "stale" && currentRefresh.feedback === "silent")) &&
     !selectMode &&
     (snapshot?.modelPages ?? 0) <= 1 &&
     (snapshot?.folderPages ?? 0) <= 1;
@@ -1602,7 +1603,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         count: snapshot?.modelPages ?? 0,
         more: modelQuery.hasNextPage ?? false,
         pending: modelQuery.isFetching,
-        failed: modelQuery.isError,
+        failed:
+          modelQuery.isError &&
+          currentRefresh?.status !== "pending" &&
+          currentRefresh?.status !== "stale",
         next: () => void modelQuery.loadMore(),
       },
       folders: {
@@ -1716,7 +1720,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       if (isCurrent()) setRefreshState(null);
     } catch (error) {
       if (!isCurrent()) return;
-      const denied = lookupPending && parseApiError(error).status === 404;
+      const failure = parseApiError(error);
+      if (failure.status === 409 && failure.code === "browse_refresh_required") {
+        // An import may advance the catalog through both first-page attempts.
+        // Keep the displayed snapshot and its reading anchor while a silent
+        // refresh retries through the same throttled settling timer.
+        setRefreshState({ entry, status: "stale", feedback });
+        return;
+      }
+      const denied = lookupPending && failure.status === 404;
       if (denied) setSettledSnapshot(null);
       setRefreshState({ entry, status: denied ? "denied" : "failed", error: userMessage(error) });
     }
