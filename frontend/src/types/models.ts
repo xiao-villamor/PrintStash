@@ -493,6 +493,7 @@ export type JobKind =
   | "derivatives.mesh"
   | "derivatives.previews"
   | "derivatives.plates"
+  | "derivatives.project_profile"
   | "derivatives.toolpath"
   | "derivatives.viewer_stl"
   | "identity.retention"
@@ -546,6 +547,7 @@ export type LaneName =
 export type DerivativeKind =
   | "metadata"
   | "plates"
+  | "project_profile"
   | "previews"
   | "thumbnail"
   | "toolpath"

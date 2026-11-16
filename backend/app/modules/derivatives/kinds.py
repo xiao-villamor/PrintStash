@@ -50,6 +50,7 @@ GCODE_THUMBNAIL_RECIPE = 3
 TOOLPATH_RECIPE = 1
 VIEWER_STL_RECIPE = 3
 PLATES_RECIPE = 1
+PROJECT_PROFILE_RECIPE = 1
 PREVIEWS_RECIPE = 1
 VIEWER_TYPES = (
     FileType.THREE_MF,
@@ -139,6 +140,15 @@ def _is_binary_gcode(file: File) -> bool:
 
 
 GROUPS: tuple[DerivativeGroup, ...] = (
+    DerivativeGroup(
+        definition=JobKind.DERIVATIVES_PROJECT_PROFILE,
+        recipes={DerivativeKind.PROJECT_PROFILE: PROJECT_PROFILE_RECIPE},
+        label="3MF project settings",
+        applies=lambda: and_(_real(), col(File.file_type) == FileType.THREE_MF),
+        applies_to=lambda file: (
+            file.sha256 != SENTINEL_FILE_HASH and file.file_type == FileType.THREE_MF
+        ),
+    ),
     DerivativeGroup(
         definition=JobKind.DERIVATIVES_PREVIEWS,
         recipes={DerivativeKind.PREVIEWS: PREVIEWS_RECIPE},

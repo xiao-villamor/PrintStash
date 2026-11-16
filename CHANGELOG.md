@@ -31,6 +31,7 @@
 
 ### Added
 
+- 3MF projects show bounded saved printer, material, nozzle, layer, wall and infill settings, with per-plate estimates when present. File estimates remain separate from provider estimates and measured print results; original project bytes are unchanged.
 - Opt-in corner import panels for MakerWorld, Printables, Thingiverse, MyMiniFactory, Cults, Thangs, Creality Cloud and MakerOnline publications, with per-file transfer recovery, owner-scoped capture history and direct links to Pending Imports review. MakerWorld profiles retain allowlisted provider estimates and link related, accessible Models without merging them.
 - Advisory geometry checks, an import-readiness summary, and source/license summaries expose existing evidence without certifying printability or interpreting license terms.
 

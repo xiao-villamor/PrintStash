@@ -1,3 +1,4 @@
+import { ProjectProfile } from "./project-profile";
 import { RelatedProfiles } from "./related-profiles";
 import { GeometryReport } from "./geometry-report";
 import { ModelSourceSummary } from "./source-summary";
@@ -107,6 +108,9 @@ export function ModelInformation({
         </dl>
         <ModelSourceSummary modelId={model.id} />
         <RelatedProfiles modelId={model.id} />
+        {sourceFile?.file_type === "3mf" && (
+          <ProjectProfile modelId={model.id} fileId={sourceFile.id} />
+        )}
       </div>
       <div className="model-information-geometry">
         <h2 className="text-sm font-semibold">{uiText("Geometry")}</h2>

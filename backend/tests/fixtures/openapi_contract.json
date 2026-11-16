@@ -5281,6 +5281,7 @@
         "enum": [
           "metadata",
           "plates",
+          "project_profile",
           "previews",
           "thumbnail",
           "toolpath",
@@ -6483,6 +6484,41 @@
           "plates"
         ],
         "title": "FilePlatesRead",
+        "type": "object"
+      },
+      "FileProjectProfileRead": {
+        "properties": {
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/DerivativeStatus"
+          }
+        },
+        "required": [
+          "state",
+          "profile",
+          "failure_reason"
+        ],
+        "title": "FileProjectProfileRead",
         "type": "object"
       },
       "FileRead": {
@@ -8221,6 +8257,7 @@
           "derivatives.mesh",
           "derivatives.previews",
           "derivatives.plates",
+          "derivatives.project_profile",
           "derivatives.toolpath",
           "derivatives.viewer_stl",
           "identity.retention",
@@ -15006,6 +15043,43 @@
         "title": "PlanRequest",
         "type": "object"
       },
+      "PlateEstimate": {
+        "properties": {
+          "estimated_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Seconds"
+          },
+          "filament_grams": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filament Grams"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "number",
+          "estimated_seconds",
+          "filament_grams"
+        ],
+        "title": "PlateEstimate",
+        "type": "object"
+      },
       "PlateRegionRead": {
         "description": "A plate's rectangle of the build, in the package's millimetres.",
         "properties": {
@@ -17711,6 +17785,98 @@
         ],
         "title": "ProfileSettingsKind",
         "type": "string"
+      },
+      "ProjectProfile": {
+        "properties": {
+          "infill_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Infill Percent"
+          },
+          "layer_height_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layer Height Mm"
+          },
+          "materials": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Materials",
+            "type": "array"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "nozzle_diameters_mm": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Nozzle Diameters Mm",
+            "type": "array"
+          },
+          "plates": {
+            "items": {
+              "$ref": "#/components/schemas/PlateEstimate"
+            },
+            "title": "Plates",
+            "type": "array"
+          },
+          "printer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer"
+          },
+          "wall_loops": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Loops"
+          }
+        },
+        "required": [
+          "name",
+          "printer",
+          "materials",
+          "nozzle_diameters_mm",
+          "layer_height_mm",
+          "wall_loops",
+          "infill_percent",
+          "plates"
+        ],
+        "title": "ProjectProfile",
+        "type": "object"
       },
       "ProvenanceCaptureSummaryRead": {
         "properties": {
@@ -29877,6 +30043,53 @@
           }
         ],
         "summary": "The preview a slicer saved for one plate of a 3MF",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/v1/files/{file_id}/project-profile": {
+      "get": {
+        "operationId": "file_project_profile_api_v1_files__file_id__project_profile_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileProjectProfileRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Saved settings and per-plate estimates of a 3MF project",
         "tags": [
           "files"
         ]

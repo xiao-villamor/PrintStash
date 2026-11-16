@@ -1,6 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { getJson } from "@/lib/api/request";
-import { queryKeys } from "@/lib/query-client";
+import {
+  derivativeEvidenceKey,
+  useDerivativeEvidenceUpdates,
+} from "@/lib/queries/derivative-evidence";
 import { derivativeFailureCause, derivativeFailureMessage } from "@/lib/derivative-failures";
 import type { DerivativeRead } from "@/types";
 import { uiText } from "@/lib/locale";
@@ -21,12 +24,13 @@ export function GeometryReport({
   useUiLocale();
   const checks = geometryChecks(volume);
   const query = useQuery({
-    queryKey: [...queryKeys.model(modelId), "geometry-report", fileId],
+    queryKey: derivativeEvidenceKey(fileId, "metadata"),
     queryFn: ({ signal }) =>
       getJson<DerivativeRead[]>(`/api/v1/files/${fileId}/derivatives`, { signal }),
     enabled: fileId !== null,
     retry: false,
   });
+  useDerivativeEvidenceUpdates(modelId, fileId, "metadata");
   const derivative = query.data?.find((item) => item.kind === "metadata") ?? null;
   const analysis = geometryAnalysis(derivative);
   const explanation = geometryExplanation(volume);

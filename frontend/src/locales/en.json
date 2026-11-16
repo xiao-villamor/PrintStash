@@ -5292,5 +5292,13 @@
   "Geometry evidence is not available.": "Geometry evidence is not available.",
   "Topology was not evaluated within the analysis limits.": "Topology was not evaluated within the analysis limits.",
   "Analysis was not completed because this format, feature or resource requirement is not supported.": "Analysis was not completed because this format, feature or resource requirement is not supported.",
-  "Analysis status could not be loaded.": "Analysis status could not be loaded."
+  "Analysis status could not be loaded.": "Analysis status could not be loaded.",
+  "3MF project settings": "3MF project settings",
+  "Not available in this file": "Not available in this file",
+  "Saved project settings; individual objects may override them. Estimates are not measured print results or a compatibility guarantee.": "Saved project settings; individual objects may override them. Estimates are not measured print results or a compatibility guarantee.",
+  "Project settings could not be loaded.": "Project settings could not be loaded.",
+  "Project settings could not be read. The original file is unchanged.": "Project settings could not be read. The original file is unchanged.",
+  "This file has no supported project settings.": "This file has no supported project settings.",
+  "Project settings have not been checked.": "Project settings have not been checked.",
+  "Reading project settings…": "Reading project settings…"
 }

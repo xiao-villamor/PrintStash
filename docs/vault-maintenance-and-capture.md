@@ -34,7 +34,7 @@ credentials.
 
 ## Browser extension and supported sources
 
-The Chrome/Firefox importer lives in `browser-extension/`. Build and load it,
+The Chrome/Edge/Firefox importer lives in `browser-extension/`. Build and load it,
 then create a one-time pairing code in **Settings → Imports** and enter it with
 the Vault URL and a device name. It verifies the PrintStash service and
 authenticated user before exchanging the code for a browser-only credential,
@@ -48,8 +48,11 @@ in Pending Imports before ingestion.
 | Printables | Server resolution can request the limited fields and file choices exposed by Printables. It cannot promise every field visible in a signed-in or changing page; the extension can provide richer visible-page capture when needed. |
 | MakerWorld | Browser transfer only. The signed-in browser downloads the selected package and uploads its bytes to PrintStash; source-site cookies and credentials are not sent to PrintStash. |
 | Thingiverse | Browser/manual file capture only. The server does not resolve Thingiverse downloads; the extension can list and transfer selected individual files from the active page, with manual attachment as the fallback. |
-| MyMiniFactory | An official OAuth connection can obtain supported metadata and files through the provider API. |
-| Cults | A credential connection is used for supported metadata only. PrintStash does not automatically acquire Cults files. |
+| MyMiniFactory | The OAuth connection supports metadata and files. The browser panel also selects native file downloads; the observed `dl4.myminifactory.com` CDN is allowed. |
+| Cults | The browser panel resolves native free-download forms and transfers the selected archive. It does not submit paid checkout. The server credential connection remains metadata-only. |
+| Thangs | The signed-in browser transfers the selected native archive; supported meshes are reviewed before import. |
+| Creality Cloud | The browser selects print-profile packages from the observed USA download region. Other download regions are not yet validated. |
+| MakerOnline | The browser selects a profile package. Complete any source-site slider or verification manually; PrintStash does not solve it. |
 | Direct files and safe archives | Normal URL/archive capture remains available where the resolver can safely obtain the file. |
 
 The browser helper is not a general-purpose scraper. It captures only the
@@ -72,11 +75,31 @@ all results and file-specific errors. Retry retains successful results; expired
 staging instead requires returning to the source for fresh bytes. Collection
 selection organizes Models, while browser captures use managed Vault storage.
 
-MakerWorld profiles can carry explicit provider estimates and creator/printer
+Provider profiles can carry explicit provider estimates and creator/printer
 information. Review and Model details distinguish their source from measured
 print outcomes. **Profiles from this publication** links only readable Models and
 the exact original Artifact. Original source terms and user corrections remain
 separate in the Source tab and portable provenance.
+
+### Settings saved inside a 3MF
+
+The Model overview shows **3MF project settings** for the selected Artifact.
+A background derivative reads a bounded set of Bambu/Orca-style project fields:
+profile name, printer model, materials, nozzle diameters, layer height, walls and
+infill. These describe the saved project; individual objects can override them.
+The existing plate viewer continues to own plate selection and preview geometry.
+
+When the file contains slice metadata, its time and filament estimates are shown
+per plate under **Estimate included in the file**. Missing values stay unavailable.
+This evidence stays separate from **Provider estimate**, print history and
+Recommended Print. Importing a profile never makes it tested or recommended.
+Unsupported dialects retain the original file and explain that no supported
+settings were found. Analysis does not convert, repair or rewrite the original.
+
+The reader follows the named metadata fields in the
+[OrcaSlicer 3MF implementation](https://github.com/OrcaSlicer/OrcaSlicer/blob/main/src/libslic3r/Format/bbs_3mf.cpp).
+A matching field does not establish that the project is compatible with a printer
+or safe to print. Use the slicer to inspect the complete project before printing.
 
 ## Provider connections and browser pairing
 

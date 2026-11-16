@@ -1,7 +1,8 @@
 # PrintStash
 
-This Manifest V3 Chrome, Edge and Firefox extension recognizes MakerWorld, Printables, and
-Thingiverse model pages, Printables collections, and direct model/archive file
+This Manifest V3 Chrome, Edge and Firefox extension recognizes individual MakerWorld, Printables, Thingiverse, MyMiniFactory,
+Cults, Thangs, Creality Cloud and MakerOnline publications, Printables collections,
+and direct model/archive file
 URLs, then sends them to the Pending Imports inbox of a self-hosted PrintStash
 instance.
 
@@ -34,8 +35,8 @@ for the store's privacy-policy URL; the site also provides a Spanish version.
    `pnpm zip:firefox` and load the local XPI temporarily from
    `about:debugging`.
 3. Open a supported source: an individual MakerWorld model (while signed in),
-   a Printables model or collection, a Thingiverse model, or a direct model or
-   archive file URL. Click the extension, enter the PrintStash URL and pairing
+   a publication from another provider listed above, a Printables collection,
+   or a direct model or archive file URL. Click the extension, enter the PrintStash URL and pairing
    code, then choose **Pair browser**.
 4. Confirm that the popup shows **Connected** with the expected vault hostname
    and username, then choose **Send to Pending Imports**.

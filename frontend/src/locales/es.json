@@ -5292,5 +5292,13 @@
   "Geometry evidence is not available.": "No hay evidencias geométricas disponibles.",
   "Topology was not evaluated within the analysis limits.": "No se evaluó la topología dentro de los límites del análisis.",
   "Analysis was not completed because this format, feature or resource requirement is not supported.": "No se completó el análisis porque no se admite este formato, característica o requisito de recursos.",
-  "Analysis status could not be loaded.": "No se pudo cargar el estado del análisis."
+  "Analysis status could not be loaded.": "No se pudo cargar el estado del análisis.",
+  "3MF project settings": "Ajustes del proyecto 3MF",
+  "Not available in this file": "No disponible en este archivo",
+  "Saved project settings; individual objects may override them. Estimates are not measured print results or a compatibility guarantee.": "Ajustes guardados del proyecto; cada objeto puede tener ajustes propios. Las estimaciones no son resultados medidos ni una garantía de compatibilidad.",
+  "Project settings could not be loaded.": "No se pudieron cargar los ajustes del proyecto.",
+  "Project settings could not be read. The original file is unchanged.": "No se pudieron leer los ajustes del proyecto. El archivo original no ha cambiado.",
+  "This file has no supported project settings.": "Este archivo no contiene ajustes de proyecto compatibles.",
+  "Project settings have not been checked.": "Los ajustes del proyecto no se han comprobado.",
+  "Reading project settings…": "Leyendo ajustes del proyecto…"
 }

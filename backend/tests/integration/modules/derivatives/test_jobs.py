@@ -512,6 +512,7 @@ class TestProducerAdmission:
                 JobKind.DERIVATIVES_TOOLPATH: "part.bgcode",
                 JobKind.DERIVATIVES_VIEWER_STL: "part.3mf",
                 JobKind.DERIVATIVES_PLATES: "part.3mf",
+                JobKind.DERIVATIVES_PROJECT_PROFILE: "part.3mf",
             }[definition],
             viewer_requested_at=utcnow()
             if definition is JobKind.DERIVATIVES_VIEWER_STL
