@@ -41,9 +41,11 @@ from app.db.models import FileType
 from app.modules.media.three_mf_preview import (
     EmbeddedGcodeError,
     extract_embedded_gcode,
+    list_embedded_gcode_plates,
     read_embedded_gcode,
 )
 from app.modules.printing.printer_jobs import reproducibility_payload
+from tests.fixtures.three_mf_projects import build_sliced_project
 
 
 def _archive(path: Path, entries: dict[str, bytes]) -> Path:
@@ -692,3 +694,73 @@ class TestError:
             read_embedded_gcode(RemoteBackend(), "remote.3mf")  # type: ignore[arg-type]
         assert closed is True
         assert temporary.exists() is False
+
+
+class TestListEmbeddedGcodePlates:
+    def test_lists_sparse_plates_in_numeric_order(self, tmp_path):
+        path = _archive(
+            tmp_path / "sliced.3mf",
+            {
+                "Metadata/plate_10.gcode": b"ten",
+                "Metadata/plate_2.gcode": b"two",
+            },
+        )
+
+        assert list_embedded_gcode_plates(path) == (2, 10)
+
+    def test_returns_no_plates_for_an_unsliced_archive(self, tmp_path):
+        path = _archive(tmp_path / "unsliced.3mf", {"3D/3dmodel.model": b"mesh"})
+
+        assert list_embedded_gcode_plates(path) == ()
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "../Metadata/plate_1.gcode",
+            "/Metadata/plate_1.gcode",
+            "Metadata/../Metadata/plate_1.gcode",
+            "Metadata/plate_01.gcode",
+            "metadata/plate_1.gcode",
+            "Metadata/plate_1.GCODE",
+            "Metadata/plate_1.gcode/",
+            "Metadata\\plate_1.gcode",
+        ],
+        ids=[
+            "traversal",
+            "absolute",
+            "nested-traversal",
+            "leading-zero",
+            "directory-case",
+            "suffix-case",
+            "directory",
+            "backslash",
+        ],
+    )
+    def test_ignores_noncanonical_members(self, tmp_path, name):
+        path = _archive(tmp_path / "sliced.3mf", {name: b"G28"})
+
+        assert list_embedded_gcode_plates(path) == ()
+
+    def test_refuses_duplicate_plate_names(self, tmp_path):
+        path = _archive(tmp_path / "sliced.3mf", {"Metadata/plate_2.gcode": b"one"})
+        with (
+            zipfile.ZipFile(path, "a") as archive,
+            pytest.warns(UserWarning, match="Duplicate name"),
+        ):
+            archive.writestr("Metadata/plate_2.gcode", b"two")
+
+        with pytest.raises(EmbeddedGcodeError, match="embedded_gcode_ambiguous"):
+            list_embedded_gcode_plates(path)
+
+    def test_accepts_the_plate_count_limit(self, tmp_path):
+        path = tmp_path / "sliced.3mf"
+        path.write_bytes(build_sliced_project(plate_numbers=tuple(range(1, 65))))
+
+        assert list_embedded_gcode_plates(path) == tuple(range(1, 65))
+
+    def test_refuses_more_than_the_plate_count_limit(self, tmp_path):
+        path = tmp_path / "sliced.3mf"
+        path.write_bytes(build_sliced_project(plate_numbers=tuple(range(1, 66))))
+
+        with pytest.raises(EmbeddedGcodeError, match="embedded_gcode_too_many_plates"):
+            list_embedded_gcode_plates(path)

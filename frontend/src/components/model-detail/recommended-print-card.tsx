@@ -96,7 +96,7 @@ export function RecommendedPrintCard({
                     "No revision is marked as recommended yet. Mark a known-good G-code as recommended.",
                   )
                 : uiText(
-                    "No sliced G-code yet. Add a revision to capture the settings that worked.",
+                    "No G-code revision yet. Add a revision to capture the settings that worked.",
                   )}
             </p>
             <button

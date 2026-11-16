@@ -29,6 +29,7 @@ from app.db.session import get_session
 from app.modules.identity import auth, rbac
 from app.modules.media.three_mf_preview import (
     EmbeddedGcodeError,
+    list_embedded_gcode_plates,
     read_embedded_gcode_path,
 )
 from app.modules.storage.artifact_content import (
@@ -45,7 +46,7 @@ from app.modules.storage.artifact_delivery import (
 from app.modules.storage.delivery_contracts import content_disposition
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.schemas.jobs import DerivativeRead
-from app.schemas.plates import FilePlatesRead
+from app.schemas.plates import FilePlatesRead, GcodePlatesRead
 
 logger = get_logger(__name__)
 
@@ -138,6 +139,55 @@ def download_file(
     return _serve_download(session, file_id, slicer_token, current_user, request)
 
 
+def _embedded_gcode_error(exc: EmbeddedGcodeError) -> HTTPException:
+    status_code = (
+        413
+        if exc.code
+        in {
+            "embedded_gcode_too_large",
+            "embedded_gcode_bomb",
+            "embedded_gcode_archive_too_large",
+            "embedded_gcode_too_many_entries",
+            "embedded_gcode_too_many_plates",
+            "embedded_gcode_central_directory_too_large",
+        }
+        else 429
+        if exc.code == "embedded_gcode_busy"
+        else 404
+    )
+    return HTTPException(status_code=status_code, detail=exc.code)
+
+
+@router.get(
+    "/{file_id}/gcode-plates",
+    response_model=GcodePlatesRead,
+    summary="List sliced plates in a 3MF archive",
+    description=(
+        "Lists up to 64 actual Metadata/plate_<N>.gcode members in numeric order. "
+        "No mesh or slicer layout metadata is required; an unsliced project returns "
+        "an empty list. Archive metadata and transfer limits apply."
+    ),
+)
+def gcode_plates(
+    file_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> GcodePlatesRead:
+    artifact = _accessible_file(session, file_id, current_user)
+    if artifact.file_type != FileType.THREE_MF:
+        raise HTTPException(status_code=404, detail="embedded_gcode_not_supported")
+    if artifact.size_bytes > settings.three_mf_preview_max_archive_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="embedded_gcode_archive_too_large")
+    try:
+        with resolve(artifact).materialize() as path:
+            numbers = list_embedded_gcode_plates(path)
+    except EmbeddedGcodeError as exc:
+        raise _embedded_gcode_error(exc) from exc
+    except (FileNotFoundError, ArtifactContentError) as exc:
+        raise HTTPException(status_code=410, detail="file_blob_missing") from exc
+    return GcodePlatesRead(plates=list(numbers))
+
+
 @router.get(
     "/{file_id}/embedded-gcode",
     response_class=PlainTextResponse,
@@ -174,21 +224,7 @@ def embedded_gcode(
         with resolve(artifact).materialize() as path:
             embedded = read_embedded_gcode_path(path, plate_index=plate_index)
     except EmbeddedGcodeError as exc:
-        status_code = (
-            413
-            if exc.code
-            in {
-                "embedded_gcode_too_large",
-                "embedded_gcode_bomb",
-                "embedded_gcode_archive_too_large",
-                "embedded_gcode_too_many_entries",
-                "embedded_gcode_central_directory_too_large",
-            }
-            else 429
-            if exc.code == "embedded_gcode_busy"
-            else 404
-        )
-        raise HTTPException(status_code=status_code, detail=exc.code) from exc
+        raise _embedded_gcode_error(exc) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=410, detail="file_blob_missing") from exc
     except ArtifactContentError as exc:

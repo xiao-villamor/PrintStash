@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { queryOptions, skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getFilePlates } from "@/lib/api/plates";
+import { getFilePlates, getGcodePlates } from "@/lib/api/plates";
 import { followModel } from "@/lib/events";
 import { getSessionVersion } from "@/lib/session-transport";
 import type { DerivativeState, FilePlates } from "@/types";
@@ -45,4 +45,12 @@ export function useFilePlates(modelId: number, fileId: number | null): FilePlate
     });
   }, [client, modelId, fileId]);
   return fileId === null ? null : (query.data ?? null);
+}
+
+/** Only read archive metadata when a 3MF is selected for toolpath viewing. */
+export function gcodePlatesOptions(fileId: number | null) {
+  return queryOptions({
+    queryKey: ["gcode-plates", fileId] as const,
+    queryFn: fileId === null ? skipToken : ({ signal }) => getGcodePlates(fileId, signal),
+  });
 }

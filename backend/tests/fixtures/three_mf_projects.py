@@ -204,3 +204,22 @@ def build_multi_plate_project(
                     f"Metadata/plate_{index + 1}.png", png(width=4 + index, height=4)
                 )
     return archive.getvalue()
+
+
+def build_sliced_project(
+    *,
+    plate_numbers: tuple[int, ...] = (1, 2),
+    marker: str = "sliced-plates",
+    with_mesh: bool = False,
+) -> bytes:
+    """A sliced export with distinct toolpaths; source meshes are optional."""
+    stream = io.BytesIO(build_multi_plate_project() if with_mesh else b"")
+    with zipfile.ZipFile(stream, "a", compression=zipfile.ZIP_DEFLATED) as archive:
+        for number in plate_numbers:
+            archive.writestr(
+                f"Metadata/plate_{number}.gcode",
+                f"; {marker} plate {number}\nG90\nM82\n"
+                f"G1 X0 Y0 Z0.2\nG1 X{number * 10} Y0 E1\n"
+                f"G1 X{number * 10} Y10 E2\nG1 Z0.4\nG1 X0 Y10 E3\n",
+            )
+    return stream.getvalue()
