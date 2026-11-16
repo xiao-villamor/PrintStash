@@ -29,7 +29,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryStartupProvider } from "@/lib/library-startup-provider";
 import { ModelBrowser } from "@/components/model-grid";
 import { MODEL_DND_MIME, captureModelDrag } from "@/lib/model-dnd";
-import { queryKeys } from "@/lib/query-client";
+import { queryKeys, refreshVaultAfterIngest } from "@/lib/query-client";
 import { clearLogin } from "@/lib/auth-store";
 import type {
   CollectionRead,
@@ -3787,6 +3787,86 @@ describe("ModelBrowser", () => {
       pending.resolve(modelPage("Current model"));
       expect(await within(screen.getByRole("main")).findByText("Current model")).toBeVisible();
     });
+
+    it.each([
+      { label: "a fresh replacement", conflicts: 0 },
+      { label: "a conflicting replacement", conflicts: 2 },
+    ])(
+      "recovers an interrupted import refresh with $label",
+      async ({ conflicts }) => {
+        const pending = Promise.withResolvers<Response>();
+        const app = renderVault({
+          routes: { "GET /api/v1/models/browse/revision": changedRevision },
+        });
+        await changeNoticed(app);
+        app.route({ "GET /api/v1/models/browse": () => pending.promise });
+        await refreshStarted(app);
+        let reads = 0;
+        app.route({
+          "GET /api/v1/models/browse": () =>
+            reads++ < conflicts
+              ? json({ detail: "browse_refresh_required" }, 409)
+              : modelPage("Imported bracket"),
+        });
+
+        await act(async () => {
+          await refreshVaultAfterIngest();
+          pending.resolve(modelPage("Outdated bracket"));
+        });
+
+        expect(
+          await within(screen.getByRole("main")).findByText(
+            "Imported bracket",
+            {},
+            { timeout: 6000 },
+          ),
+        ).toBeVisible();
+        expect(mainHas("Outdated bracket")).not.toBeInTheDocument();
+        expect(screen.queryByText("This request could not be completed. Try again.")).toBeNull();
+        expect(
+          screen.queryByText(
+            "Your previous reading position could not be restored. Showing the start of this view.",
+          ),
+        ).toBeNull();
+        expect(screen.queryByRole("button", { name: "Refresh library" })).toBeNull();
+      },
+      10_000,
+    );
+
+    it("recovers when archive completion interrupts a folder refresh", async () => {
+      const pending = Promise.withResolvers<Response>();
+      const app = renderVault({
+        models: [aModelListItem({ name: "Original model" })],
+        routes: { "GET /api/v1/models/browse/revision": changedRevision },
+      });
+      await changeNoticed(app);
+      app.route({
+        "GET /api/v1/models/browse": modelPage("Imported bracket"),
+        "GET /api/v1/collections/children": () => pending.promise,
+      });
+      await waitFor(() =>
+        expect(
+          app.requests().filter((call) => call.url.includes("/collections/children")),
+        ).toHaveLength(2),
+      );
+      app.route({ "GET /api/v1/collections/children": folderPage("Imported folder") });
+
+      await act(async () => {
+        await refreshVaultAfterIngest();
+        pending.resolve(folderPage("Outdated folder"));
+      });
+
+      expect(
+        await within(screen.getByRole("main")).findByText(
+          "Imported bracket",
+          {},
+          { timeout: 6000 },
+        ),
+      ).toBeVisible();
+      expect(mainHas("Imported folder")).toBeVisible();
+      expect(mainHas("Outdated folder")).not.toBeInTheDocument();
+      expect(screen.queryByText("This request could not be completed. Try again.")).toBeNull();
+    }, 10_000);
 
     it("shows progress for an explicit refresh", async () => {
       const user = userEvent.setup();

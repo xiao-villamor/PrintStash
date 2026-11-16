@@ -89,7 +89,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { isCancelledError, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import {
   CollectionNodeRead,
@@ -1720,12 +1720,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       if (isCurrent()) setRefreshState(null);
     } catch (error) {
       if (!isCurrent()) return;
+      const interrupted = isCancelledError(error);
       const failure = parseApiError(error);
-      if (failure.status === 409 && failure.code === "browse_refresh_required") {
-        // An import may advance the catalog through both first-page attempts.
-        // Keep the displayed snapshot and its reading anchor while a silent
-        // refresh retries through the same throttled settling timer.
-        setRefreshState({ entry, status: "stale", feedback });
+      if (interrupted || (failure.status === 409 && failure.code === "browse_refresh_required")) {
+        // Ingest completion replaces ongoing reads; further catalog writes can
+        // also reject both first-page attempts. Preserve the displayed snapshot
+        // and reading anchor, then settle replaced reads through the same timer.
+        setRefreshState({ entry, status: "stale", feedback: interrupted ? "silent" : feedback });
         return;
       }
       const denied = lookupPending && failure.status === 404;
