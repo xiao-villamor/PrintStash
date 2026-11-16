@@ -64,9 +64,7 @@ class TestOwesInteractive:
 
         assert MESH.owes_interactive(db_session, now=utcnow()) is True
 
-    def test_an_old_artifact_is_backfill_and_not_owed(
-        self, db_session: Session, mesh
-    ) -> None:
+    def test_an_old_artifact_is_backfill_work(self, db_session: Session, mesh) -> None:
         mesh(uploaded_at=utcnow() - timedelta(days=30))
 
         assert MESH.owes_interactive(db_session, now=utcnow()) is False

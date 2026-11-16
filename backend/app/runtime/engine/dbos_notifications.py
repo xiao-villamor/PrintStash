@@ -137,6 +137,8 @@ class QueueSignals:
 def verify_patch() -> None:
     """Refuse absent, partially installed or drifted SDK patches on opt-in."""
     sdk = importlib.import_module("dbos")
+    if sdk.__file__ is None:
+        raise RuntimeError("dbos_notification_patch_missing_or_incompatible")
     root = Path(sdk.__file__).resolve().parent
     try:
         manifest = json.loads((root / MANIFEST).read_text())
@@ -149,8 +151,10 @@ def verify_patch() -> None:
         )
         for name in PATCH_FILES:
             loaded = importlib.import_module("dbos." + name.removesuffix(".py"))
+            source = loaded.__file__
             valid = valid and (
-                Path(loaded.__file__).resolve() == root / name
+                source is not None
+                and Path(source).resolve() == root / name
                 and loaded.PRINTSTASH_NOTIFICATION_PATCH == PATCH_VERSION
                 and hashlib.sha256((root / name).read_bytes()).hexdigest()
                 == manifest["files"][name]

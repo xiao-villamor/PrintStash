@@ -487,25 +487,30 @@ class TestDiscover:
             begin(session, immediate=immediate)
 
         monkeypatch.setattr(reconciler_module, "begin_write", counted)
-        PROBE.items = _items("a", "b", "c")
+        # The probe lane (concurrency 1, FIFO) has room for two pending Jobs.
+        PROBE.items = _items("a", "b")
 
         result = run_pass(SOURCED)
 
-        assert sorted(job.subject_key for job in _jobs(db_session)) == ["a", "b", "c"]
+        assert sorted(job.subject_key for job in _jobs(db_session)) == ["a", "b"]
         assert writes == [True]
-        assert result.submitted == 3
+        assert result.submitted == 2
 
     def test_one_active_subject_does_not_undo_the_rest_of_its_batch(
         self, engine: InlineJobEngine, db_session: Session, make_job
     ) -> None:
-        make_job(kind=SOURCED, subject="b")
-        PROBE.items = _items("a", "b", "c")
+        # Running, so it holds no pending slot of the two the probe lane has.
+        make_job(kind=SOURCED, subject="a", state=JobState.RUNNING, attempts=1)
+        PROBE.items = _items("a", "b")
 
-        result = run_pass(SOURCED)
+        # One discovery: a full batch that made progress makes run_pass look
+        # again, and that second look finds both subjects active.
+        result = reconciler_module.PassResult()
+        reconciler_module._discover(_definition(SOURCED), now=utcnow(), result=result)
 
-        assert sorted(job.subject_key for job in _jobs(db_session)) == ["a", "b", "c"]
+        assert sorted(job.subject_key for job in _jobs(db_session)) == ["a", "b"]
         assert result.outcomes.get("already_active") == 1
-        assert result.submitted == 2
+        assert result.submitted == 1
 
     def test_records_the_latest_occurrence_of_a_batch(
         self, engine: InlineJobEngine, db_session: Session
@@ -1252,15 +1257,15 @@ class TestPriorityDiscovery:
         self.source(engine)
         PROBE.items = _items("a/i", "b/i", priority=WorkPriority.INTERACTIVE)
         # Discovery saw room for two; by the write transaction one was taken.
-        budgets = iter(
-            [
-                reconciler.DiscoveryBudget(total=2, interactive=2, backfill=0),
-                reconciler.DiscoveryBudget(total=1, interactive=1, backfill=0),
-            ]
-        )
-        monkeypatch.setattr(
-            reconciler, "_discovery_budget", lambda _session, _definition: next(budgets)
-        )
+        reads = []
+
+        def budget(_session, _definition):
+            reads.append(None)
+            if len(reads) == 1:
+                return reconciler.DiscoveryBudget(total=2, interactive=2, backfill=0)
+            return reconciler.DiscoveryBudget(total=1, interactive=1, backfill=0)
+
+        monkeypatch.setattr(reconciler, "_discovery_budget", budget)
 
         result = run_pass(SOURCED)
 

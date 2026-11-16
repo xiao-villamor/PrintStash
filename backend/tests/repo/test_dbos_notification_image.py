@@ -34,38 +34,43 @@ def _patch_constants() -> tuple[dict[str, str], str]:
     return expected, version
 
 
-def test_the_runtime_stage_builds_the_patch_and_enables_it_from_one_argument():
-    runtime = DOCKERFILE.read_text().split(" AS runtime\n", 1)[1]
+class TestRuntimeImage:
+    def test_the_flag_follows_the_patch_build_argument(self):
+        runtime = DOCKERFILE.read_text().split(" AS runtime\n", 1)[1]
 
-    assert "ARG PRINTSTASH_DBOS_NOTIFICATIONS=true\n" in runtime
-    patch_at = runtime.index("scripts/experimental_dbos_notifications.py \\")
-    enable_at = runtime.index(
-        "ENV VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS=${PRINTSTASH_DBOS_NOTIFICATIONS}\n"
-    )
-    assert patch_at < enable_at
-
-
-def test_advanced_compose_keeps_the_image_default():
-    compose = yaml.safe_load((REPO_ROOT / "docker-compose.advanced.yml").read_text())
-    values = [
-        service.get("environment", {}).get("VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS")
-        for service in compose["services"].values()
-        if isinstance(service.get("environment"), dict)
-    ]
-
-    assert "${VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS:-true}" in values
-    assert "${VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS:-false}" not in values
+        assert "ARG PRINTSTASH_DBOS_NOTIFICATIONS=true\n" in runtime
+        patch_at = runtime.index("scripts/experimental_dbos_notifications.py \\")
+        enable_at = runtime.index(
+            "ENV VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS=${PRINTSTASH_DBOS_NOTIFICATIONS}\n"
+        )
+        assert patch_at < enable_at
 
 
-def test_the_patch_targets_the_locked_and_installed_sdk():
-    expected, version = _patch_constants()
-    spec = importlib.util.find_spec("dbos")
-    assert spec is not None and spec.submodule_search_locations
-    installed = Path(next(iter(spec.submodule_search_locations)))
+class TestAdvancedCompose:
+    def test_keeps_the_image_default(self):
+        compose = yaml.safe_load(
+            (REPO_ROOT / "docker-compose.advanced.yml").read_text()
+        )
+        values = [
+            service.get("environment", {}).get("VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS")
+            for service in compose["services"].values()
+            if isinstance(service.get("environment"), dict)
+        ]
 
-    assert set(expected) == dbos_notifications.PATCH_FILES
-    assert version == _locked_dbos_version()
-    assert {
-        name: hashlib.sha256((installed / name).read_bytes()).hexdigest()
-        for name in expected
-    } == expected
+        assert "${VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS:-true}" in values
+        assert "${VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS:-false}" not in values
+
+
+class TestNotificationPatch:
+    def test_matches_the_locked_sdk_as_installed(self):
+        expected, version = _patch_constants()
+        spec = importlib.util.find_spec("dbos")
+        assert spec is not None and spec.submodule_search_locations
+        installed = Path(next(iter(spec.submodule_search_locations)))
+
+        assert set(expected) == dbos_notifications.PATCH_FILES
+        assert version == _locked_dbos_version()
+        assert {
+            name: hashlib.sha256((installed / name).read_bytes()).hexdigest()
+            for name in expected
+        } == expected

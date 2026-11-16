@@ -76,7 +76,7 @@ class TestRecordPhases:
         assert payload["stages"][0]["output_bytes"] is None
         assert payload["stages"][0]["triangle_count"] == 4
 
-    def test_logs_and_counts_the_3mf_reader(
+    def test_reports_the_3mf_reader(
         self, supervision: SupervisionStats, caplog: pytest.LogCaptureFixture
     ) -> None:
         from app.modules.media.mesh_telemetry import (

@@ -35,39 +35,41 @@ def _sdk_patched() -> bool:
 PATCHED = _sdk_patched()
 
 
-@pytest.mark.skipif(PATCHED, reason="already running under the patched SDK")
-def test_dispatch_contract_under_a_disposable_patched_sdk(tmp_path):
-    import importlib.util
-    import os
-    import shutil
-    from pathlib import Path
+class TestDispatchUnderAPatchedSdk:
+    """The shared environment never carries the patch: patch a disposable copy."""
 
-    spec = importlib.util.find_spec("dbos")
-    assert spec is not None and spec.submodule_search_locations
-    copy = tmp_path / "sdk" / "dbos"
-    shutil.copytree(Path(next(iter(spec.submodule_search_locations))), copy)
-    subprocess.run(
-        [sys.executable, "scripts/experimental_dbos_notifications.py", str(copy)],
-        cwd=BACKEND_DIR,
-        check=True,
-        capture_output=True,
-        timeout=60,
-    )
-    env = {
-        **os.environ,
-        "PYTHONPATH": os.pathsep.join([str(copy.parent), str(BACKEND_DIR)]),
-    }
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", __file__, "-q", "-p", "no:cacheprovider"],
-        cwd=BACKEND_DIR,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
+    def test_runs_every_dispatch_case_on_a_disposable_patched_copy(self, tmp_path):
+        import importlib.util
+        import os
+        import shutil
+        from pathlib import Path
 
-    assert result.returncode == 0, result.stdout[-6000:] + result.stderr[-2000:]
-    assert " passed" in result.stdout and " failed" not in result.stdout
+        spec = importlib.util.find_spec("dbos")
+        assert spec is not None and spec.submodule_search_locations
+        copy = tmp_path / "sdk" / "dbos"
+        shutil.copytree(Path(next(iter(spec.submodule_search_locations))), copy)
+        subprocess.run(
+            [sys.executable, "scripts/experimental_dbos_notifications.py", str(copy)],
+            cwd=BACKEND_DIR,
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )
+        env = {
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join([str(copy.parent), str(BACKEND_DIR)]),
+        }
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", __file__, "-q", "-p", "no:cacheprovider"],
+            cwd=BACKEND_DIR,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+        assert result.returncode == 0, result.stdout[-6000:] + result.stderr[-2000:]
+        assert " passed" in result.stdout and " failed" not in result.stdout
 
 
 class Runtime:
@@ -146,7 +148,6 @@ def runtime(tmp_path):
         runtime.close()
 
 
-@pytest.mark.skipif(not PATCHED, reason="runs in the patched-SDK subprocess")
 class TestNotificationDispatch:
     def test_committed_enqueue_wakes_the_dispatcher(self, runtime):
         handle = runtime.enqueue("ready")
@@ -243,6 +244,10 @@ class TestNotificationDispatch:
     def test_rate_limited_work_remains_bounded(self, runtime):
         runtime.queue.set_polling_interval_sec(0.05)
         runtime.queue.set_limiter({"limit": 1, "period": 1.0})
+        # A dispatcher pass that reloaded its config just before the limiter
+        # committed would claim the first workflow unlimited, outside the
+        # window. Limited queues keep timed checks: let one load the limiter.
+        time.sleep(0.2)
         runtime.enqueue("limited-first")
         assert runtime.started["limited-first"].wait(5)
 
@@ -277,3 +282,11 @@ client.destroy()
             )
             == "external"
         )
+
+
+# Generate only the cases that apply to this interpreter: the dispatch cases
+# under the patched SDK, otherwise the one test that runs them under a copy.
+if PATCHED:
+    del TestDispatchUnderAPatchedSdk
+else:
+    del TestNotificationDispatch
