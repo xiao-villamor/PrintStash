@@ -97,6 +97,18 @@ class TestOwesInteractive:
 
 
 class TestPending:
+    def test_rederives_gcode_metadata_without_plate_selection(
+        self, db_session, make_model, make_file, make_derivative
+    ) -> None:
+        artifact = make_file(
+            make_model(), filename="supertack.gcode", file_type=FileType.GCODE
+        )
+        make_derivative(artifact, DerivativeKind.METADATA, recipe_version=6)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL)
+        source = DerivativeSource(group(JobKind.DERIVATIVES_GCODE))
+
+        assert _subjects(db_session, source=source) == [subject_key(artifact.id)]
+
     @pytest.mark.parametrize(
         ("kind", "old_recipe", "other_kind"),
         [
