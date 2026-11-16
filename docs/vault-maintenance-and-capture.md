@@ -150,13 +150,24 @@ contract, so old views continue to load and new views restore all active filters
 
 ## Archive review
 
-Before importing an archive, review its file selection and destination collection.
-Each selected model file creates or reuses a Model; subfolders become collections.
-The omitted-files section lists images, PDF and text documents, and unsupported
-entries. Those auxiliary files are not imported by the model selection. Keep the
-original archive if you want to add guides through Documents or select a cover
-later. Archive path, size and ownership checks also apply to auxiliary entries.
+Before importing an archive, review its structure and destination collection.
+Choose separate Models or a Multipart Model with editable piece names. Each
+piece creates or reuses a Model; the Multipart references those Models. It is
+created only after every required piece and selected guide has imported.
 
-An incomplete import retains its staged input until the lease expires. Retry the
-Job to recover failed items while preserving committed Models. Changing the
-collection changes organization, not the location of original source files.
+Select PDF, Markdown, text files or images to preserve as Documents. In Multipart
+mode they become its guides; in separate mode they remain Documents in the
+archive's collection. Unselected and unsupported files are shown as omitted.
+Retries reuse committed pieces and guides; they do not restore deleted guides
+or reassign a guide that you attached elsewhere. Tasks links to saved results.
+
+Folder selection in Bulk retains auxiliary files and defaults to the same review.
+The browser prepares a lossless archive, up to 256 MiB and 2,000 files. For larger
+folders, prepare an archive locally or choose direct separate Models, which shows
+that auxiliaries will be omitted. Folder review uses managed storage. Direct
+uploads retain their existing mounted-source destination controls. Neither flow
+moves or rewrites the original files. Archive path, size and ownership checks
+also apply to auxiliary entries. Multipart review can select a JPEG, PNG or WebP
+cover, normalized through the existing image checks. If its publication fails,
+Tasks retains the completed Multipart and offers retry; a later user edit prevents
+a stale retry from overwriting that decision.

@@ -206,6 +206,18 @@ const ERROR_MESSAGES = {
     "An Artifact changed or failed its integrity check. Run a Vault audit, then try again.",
   archive_unsafe_entry: "The archive contains an unsafe file path.",
   archive_format_unavailable: "This archive is compressed in a way this server can't extract.",
+  document_import_result_missing:
+    "A saved guide was removed. Review or restore it before retrying.",
+  document_import_intent_mismatch:
+    "A saved guide was moved or assigned elsewhere. Review that change before retrying.",
+  multipart_model_slug_exists:
+    "A Multipart with this name already exists. Rename it or review a new import with another name.",
+  source_cover_invalid:
+    "The selected cover is not a valid JPEG, PNG or WebP image within the size limits.",
+  archive_document_missing:
+    "A selected guide is missing from the archive. Prepare and review the archive again.",
+  archive_cover_missing:
+    "The selected cover is missing from the archive. Prepare and review the archive again.",
   // Collection import
   collection_import_failed:
     "None of the collection's models could be imported. Check that the source is reachable, and for MakerWorld that the account is connected under Settings → Imports.",

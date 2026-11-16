@@ -74,6 +74,8 @@ export interface TaskItem {
   createdAt: number;
   updatedAt: number;
   uploadedModel?: UploadedModelResult;
+  multipartModelId?: number;
+  importedDocuments?: { name: string; document_id: number }[];
   jobId?: string;
   jobKind?: JobStatus["kind"];
   jobIds?: string[];
@@ -637,6 +639,8 @@ function applyJob(
       : taskStatusOf(job.state);
   const patch = {
     uploadedModel: uploadedModelForJobs([job]),
+    multipartModelId: job.result?.multipart_model_id,
+    importedDocuments: job.result?.documents,
     jobId: job.job_id,
     jobKind: job.kind,
     status,

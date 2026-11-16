@@ -120,6 +120,28 @@
         "title": "ApiKeyRead",
         "type": "object"
       },
+      "ArchivePart": {
+        "additionalProperties": false,
+        "properties": {
+          "entry_name": {
+            "minLength": 1,
+            "title": "Entry Name",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_name",
+          "name"
+        ],
+        "title": "ArchivePart",
+        "type": "object"
+      },
       "ArchiveSelectRequest": {
         "description": "Body for POST /ingest/archive/{archive_id}/select.",
         "properties": {
@@ -141,6 +163,31 @@
             },
             "title": "Entry Ids",
             "type": "array"
+          },
+          "intake": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "multipart": "#/components/schemas/MultipartIntake",
+                    "separate": "#/components/schemas/SeparateIntake"
+                  },
+                  "propertyName": "mode"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/SeparateIntake"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MultipartIntake"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intake"
           },
           "names": {
             "default": [],
@@ -12703,6 +12750,57 @@
         "title": "MultipartChoiceWrite",
         "type": "object"
       },
+      "MultipartIntake": {
+        "additionalProperties": false,
+        "properties": {
+          "cover": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover"
+          },
+          "documents": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Documents",
+            "type": "array"
+          },
+          "mode": {
+            "const": "multipart",
+            "title": "Mode",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/ArchivePart"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Parts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "name",
+          "parts"
+        ],
+        "title": "MultipartIntake",
+        "type": "object"
+      },
       "MultipartMemberRead": {
         "description": "A live readable member or a deliberately redacted unavailable member.",
         "properties": {
@@ -19586,6 +19684,29 @@
           "file_id"
         ],
         "title": "SendToPrinter",
+        "type": "object"
+      },
+      "SeparateIntake": {
+        "additionalProperties": false,
+        "properties": {
+          "documents": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Documents",
+            "type": "array"
+          },
+          "mode": {
+            "const": "separate",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "SeparateIntake",
         "type": "object"
       },
       "SetTemperature": {

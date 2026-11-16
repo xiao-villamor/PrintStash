@@ -257,6 +257,7 @@ describe("ArchiveReviewDialog", () => {
     const selection = requestsWithMethod("POST").find((request) => request.url.endsWith("/select"));
     expect(JSON.parse(selection?.body ?? "{}")).toEqual({
       names: ["Animals/dog.stl"],
+      intake: { mode: "separate", documents: [] },
       collection: "My Parts",
       tags: "favorite",
     });
@@ -389,6 +390,7 @@ describe("ArchiveReviewDialog", () => {
     await waitFor(() => expect(requestsWithMethod("POST")).toHaveLength(1));
     expect(JSON.parse(requestsWithMethod("POST")[0].body)).toEqual({
       names: manyFiles.map((entry) => entry.name),
+      intake: { mode: "separate", documents: [] },
       tags: "favorite",
     });
   });
@@ -396,7 +398,6 @@ describe("ArchiveReviewDialog", () => {
 
 describe("Archive auxiliary preview", () => {
   it("explains the files omitted from model selection", async () => {
-    const user = userEvent.setup();
     openReview({
       entries: [
         entries[0],
@@ -405,12 +406,74 @@ describe("Archive auxiliary preview", () => {
         { name: "unknown.exe", size_bytes: 30, file_type: null, is_image: false },
       ],
     });
-    const summary = await screen.findByText("Files omitted from this model selection (3)");
-    await user.click(summary);
+    await screen.findByText("Documents and omitted files");
     expect(screen.getByText("photo.jpg")).toBeVisible();
     expect(screen.getByText("manual.pdf")).toBeVisible();
     expect(screen.getByText("unknown.exe")).toBeVisible();
     expect(screen.getByText(/Each selected model file creates or reuses a Model/)).toBeVisible();
-    expect(screen.queryByRole("checkbox", { name: /manual.pdf/ })).toBeNull();
+    expect(screen.getByRole("checkbox", { name: /manual.pdf/ })).not.toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: /unknown.exe/ })).toBeNull();
+  });
+});
+
+describe("Archive grouping", () => {
+  it("submits the explicitly selected Multipart cover", async () => {
+    const app = openReview({
+      entries: [entries[0], { name: "photo.png", size_bytes: 82, file_type: null, is_image: true }],
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Select all 1 ZIP files" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Multipart Model" }));
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Multipart cover" }),
+      "photo.png",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Import 1 selected" }));
+    await waitFor(() => expect(app.onClose).toHaveBeenCalledOnce());
+    expect(JSON.parse(app.requestsWithMethod("POST")[0].body).intake.cover).toBe("photo.png");
+  });
+  it("submits reviewed piece names with selected guides", async () => {
+    const app = openReview({
+      entries: [
+        entries[0],
+        entries[1],
+        { name: "manual.pdf", size_bytes: 20, file_type: null, is_image: false, is_document: true },
+      ],
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Select all 2 ZIP files" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Multipart Model" }));
+    await userEvent.clear(screen.getByLabelText("Multipart name"));
+    await userEvent.type(screen.getByLabelText("Multipart name"), "Animal set");
+    await userEvent.clear(screen.getByLabelText("Piece name: Animals/cat.stl"));
+    await userEvent.type(screen.getByLabelText("Piece name: Animals/cat.stl"), "Cat body");
+    await userEvent.click(screen.getByRole("checkbox", { name: "manual.pdf" }));
+    await userEvent.click(screen.getByRole("button", { name: "Import 2 selected" }));
+    await waitFor(() => expect(app.onClose).toHaveBeenCalledOnce());
+    expect(JSON.parse(app.requestsWithMethod("POST")[0].body).intake).toEqual({
+      mode: "multipart",
+      cover: null,
+      name: "Animal set",
+      documents: ["manual.pdf"],
+      parts: [
+        { entry_name: "Animals/cat.stl", name: "Cat body" },
+        { entry_name: "Animals/dog.stl", name: "dog" },
+      ],
+    });
+  });
+  it("requires a nonblank Multipart name", async () => {
+    openReview();
+    await userEvent.click(await screen.findByRole("button", { name: "Select all 3 ZIP files" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Multipart Model" }));
+    await userEvent.clear(screen.getByLabelText("Multipart name"));
+    expect(screen.getByRole("button", { name: "Import 3 selected" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toBeVisible();
+  });
+  it("retains edited piece names when browsing folders", async () => {
+    openReview();
+    await userEvent.click(await screen.findByRole("button", { name: "Select folder Animals" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Multipart Model" }));
+    await userEvent.clear(screen.getByLabelText("Piece name: Animals/cat.stl"));
+    await userEvent.type(screen.getByLabelText("Piece name: Animals/cat.stl"), "Edited cat");
+    await userEvent.click(screen.getByRole("button", { name: "Open folder Animals" }));
+    expect(screen.getByLabelText("Piece name: Animals/cat.stl")).toHaveValue("Edited cat");
   });
 });
