@@ -220,7 +220,6 @@ function ArchiveReview({
       onClose={onClose}
       title={uiText("Choose ZIP files")}
       className="flex max-h-[90dvh] max-w-5xl flex-col"
-      bodyClassName="flex min-h-0 flex-col"
       footer={
         manifest && (
           <div className="flex w-full flex-wrap items-end justify-between gap-3">
@@ -293,7 +292,7 @@ function ArchiveReview({
         )
       }
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <div className="flex flex-col gap-4">
         <p className="break-words text-sm text-muted-foreground">
           {manifest
             ? uiText(
@@ -324,6 +323,45 @@ function ArchiveReview({
         )}
         {manifest && (
           <>
+            <p className="text-sm text-muted-foreground">
+              {uiText(
+                "Each selected model file creates or reuses a Model. Subfolders become collections; changing the collection does not move source files.",
+              )}
+            </p>
+            {manifest.entries.some((entry) => entry.file_type === null) && (
+              <details className="rounded border border-border p-3 text-sm">
+                <summary className="cursor-pointer font-medium">
+                  {uiText("Files omitted from this model selection ({value1})", {
+                    value1: String(
+                      manifest.entries.filter((entry) => entry.file_type === null).length,
+                    ),
+                  })}
+                </summary>
+                <p className="mt-2 text-muted-foreground">
+                  {uiText(
+                    "These files are not imported by the model selection below. Keep the originals to add them as Documents or choose a cover later.",
+                  )}
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {manifest.entries
+                    .filter((entry) => entry.file_type === null)
+                    .map((entry) => (
+                      <li key={entry.name} className="flex flex-wrap justify-between gap-2">
+                        <span className="break-all">{entry.name}</span>
+                        <span className="text-muted-foreground">
+                          {entry.is_image
+                            ? uiText("Image")
+                            : entry.is_document
+                              ? uiText("Document")
+                              : uiText("Unsupported file")}
+                          {" · "}
+                          {formatBytes(entry.size_bytes)}
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              </details>
+            )}
             <SelectionBrowserToolbar
               query={query}
               onQueryChange={setQuery}

@@ -105,6 +105,48 @@ class TestInspectArchive:
         # it in the picker would invite a user to import it.
         assert [entry.name for entry in _inspect(path)] == ["a.stl"]
 
+    def test_lists_documents_when_the_caller_accepts_them(self, tmp_path: Path) -> None:
+        path = _archive(
+            tmp_path / "bundle.zip", {"manual.pdf": b"pdf", "README.md": b"# Assembly"}
+        )
+        entries = inspect_archive(
+            path,
+            limits=_limits(),
+            file_types=FILE_TYPES,
+            image_suffixes=IMAGES,
+            document_suffixes={".pdf", ".md"},
+        )
+        assert [
+            (entry.name, entry.is_document, entry.file_type) for entry in entries
+        ] == [("manual.pdf", True, None), ("README.md", True, None)]
+        assert len({entry.entry_id for entry in entries}) == 2
+
+    def test_lists_omitted_entries_for_explicit_review(self, tmp_path: Path) -> None:
+        path = _archive(tmp_path / "bundle.zip", {"ignored.exe": b"data"})
+        entries = inspect_archive(
+            path,
+            limits=_limits(),
+            file_types=FILE_TYPES,
+            image_suffixes=IMAGES,
+            include_unsupported=True,
+        )
+        assert [
+            (entry.name, entry.file_type, entry.is_image, entry.is_document)
+            for entry in entries
+        ] == [("ignored.exe", None, False, False)]
+
+    def test_refuses_traversal_in_a_document(self, tmp_path: Path) -> None:
+        path = _archive(tmp_path / "bundle.zip", {"../manual.pdf": b"pdf"})
+        with pytest.raises(ArchivePolicyError, match="archive_unsafe_entry"):
+            inspect_archive(
+                path,
+                limits=_limits(),
+                file_types=FILE_TYPES,
+                image_suffixes=IMAGES,
+                document_suffixes={".pdf"},
+                include_unsupported=True,
+            )
+
     def test_gives_each_entry_a_stable_identifier(self, tmp_path: Path) -> None:
         path = _archive(tmp_path / "bundle.zip", {"parts/a.stl": b"a"})
 

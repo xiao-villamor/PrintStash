@@ -37,6 +37,7 @@ class ArchiveEntryRead(BaseModel):
     size_bytes: int
     file_type: Optional[str] = None  # FileType value if importable, else None
     is_image: bool = False
+    is_document: bool = False
 
 
 class ArchiveManifest(BaseModel):

@@ -5300,5 +5300,13 @@
   "Project settings could not be read. The original file is unchanged.": "No se pudieron leer los ajustes del proyecto. El archivo original no ha cambiado.",
   "This file has no supported project settings.": "Este archivo no contiene ajustes de proyecto compatibles.",
   "Project settings have not been checked.": "Los ajustes del proyecto no se han comprobado.",
-  "Reading project settings…": "Leyendo ajustes del proyecto…"
+  "Reading project settings…": "Leyendo ajustes del proyecto…",
+  "{value1} min": "{value1} min",
+  "{value1} g": "{value1} g",
+  "Each selected model file creates or reuses a Model. Subfolders become collections; changing the collection does not move source files.": "Cada archivo de modelo seleccionado crea o reutiliza un Model. Las subcarpetas se convierten en colecciones; cambiar la colección no mueve los archivos de origen.",
+  "Files omitted from this model selection ({value1})": "Archivos omitidos en esta selección de modelos ({value1})",
+  "These files are not imported by the model selection below. Keep the originals to add them as Documents or choose a cover later.": "Los archivos siguientes no se importan con la selección de modelos. Conserva los originales para añadirlos como Documents o elegir una portada más adelante.",
+  "Unsupported file": "Archivo no compatible",
+  "Image": "Imagen",
+  "Document": "Documento"
 }

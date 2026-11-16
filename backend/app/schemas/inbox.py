@@ -28,7 +28,14 @@ class CaptureSourceDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: Literal[
-        "makerworld", "printables", "thingiverse", "myminifactory", "cults", "thangs", "crealitycloud", "makeronline"
+        "makerworld",
+        "printables",
+        "thingiverse",
+        "myminifactory",
+        "cults",
+        "thangs",
+        "crealitycloud",
+        "makeronline",
     ]
     canonical_url: str = Field(min_length=1, max_length=2048)
     source_item_id: str | None = Field(default=None, max_length=255)

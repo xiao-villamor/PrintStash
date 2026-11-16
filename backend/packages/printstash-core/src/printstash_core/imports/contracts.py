@@ -184,8 +184,11 @@ def _path_segments(path: str, *, encoded_names: bool = False) -> tuple[list[str]
             if (
                 not name
                 or name in {".", ".."}
-                or any(character in name for character in "/\\%?#<>\"")
-                or any(unicodedata.category(character).startswith("C") for character in name)
+                or any(character in name for character in '/\\%?#<>"')
+                or any(
+                    unicodedata.category(character).startswith("C")
+                    for character in name
+                )
             ):
                 raise CaptureContractError("canonical_url path is invalid")
         return segments, trailing_slash
@@ -260,7 +263,8 @@ def canonicalize_provider_url(
     ):
         raise CaptureContractError("canonical_url host does not match provider")
     segments, trailing_slash = _path_segments(
-        split.path, encoded_names=provider_name in {"thangs", "crealitycloud", "makeronline"}
+        split.path,
+        encoded_names=provider_name in {"thangs", "crealitycloud", "makeronline"},
     )
     normalized_segments = list(segments)
 
@@ -347,13 +351,21 @@ def canonicalize_provider_url(
         if match is None or (source_item_id is not None and match[1] != source_item_id):
             raise CaptureContractError("canonical_url item does not match source")
     elif provider_name == "crealitycloud":
-        route = segments[1:] if len(segments) == 3 and _CULTS_LOCALE.fullmatch(segments[0]) else segments
+        route = (
+            segments[1:]
+            if len(segments) == 3 and _CULTS_LOCALE.fullmatch(segments[0])
+            else segments
+        )
         if len(route) != 2 or route[0] != "model-detail":
             raise CaptureContractError("canonical_url path does not match provider")
         if source_item_id is not None and route[1] != source_item_id:
             raise CaptureContractError("canonical_url item does not match source")
     elif provider_name == "makeronline":
-        route = segments[1:] if len(segments) == 4 and _CULTS_LOCALE.fullmatch(segments[0]) else segments
+        route = (
+            segments[1:]
+            if len(segments) == 4 and _CULTS_LOCALE.fullmatch(segments[0])
+            else segments
+        )
         if len(route) != 3 or route[0] != "model":
             raise CaptureContractError("canonical_url path does not match provider")
         match = re.fullmatch(r"(\d+)\.html", route[2])
@@ -672,7 +684,11 @@ class CaptureProfile:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        value = {"id": self.id, "name": self.name, "origin": self.origin}
+        value: dict[str, Any] = {
+            "id": self.id,
+            "name": self.name,
+            "origin": self.origin,
+        }
         for key in (
             "author",
             "creator_relationship",

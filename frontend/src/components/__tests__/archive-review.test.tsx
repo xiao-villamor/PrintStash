@@ -393,3 +393,24 @@ describe("ArchiveReviewDialog", () => {
     });
   });
 });
+
+describe("Archive auxiliary preview", () => {
+  it("explains the files omitted from model selection", async () => {
+    const user = userEvent.setup();
+    openReview({
+      entries: [
+        entries[0],
+        { name: "photo.jpg", size_bytes: 10, file_type: null, is_image: true },
+        { name: "manual.pdf", size_bytes: 20, file_type: null, is_image: false, is_document: true },
+        { name: "unknown.exe", size_bytes: 30, file_type: null, is_image: false },
+      ],
+    });
+    const summary = await screen.findByText("Files omitted from this model selection (3)");
+    await user.click(summary);
+    expect(screen.getByText("photo.jpg")).toBeVisible();
+    expect(screen.getByText("manual.pdf")).toBeVisible();
+    expect(screen.getByText("unknown.exe")).toBeVisible();
+    expect(screen.getByText(/Each selected model file creates or reuses a Model/)).toBeVisible();
+    expect(screen.queryByRole("checkbox", { name: /manual.pdf/ })).toBeNull();
+  });
+});

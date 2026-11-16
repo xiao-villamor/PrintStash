@@ -764,6 +764,8 @@ export interface IngestJobResult {
 }
 
 export interface ArchiveEntry {
+  /** Older persisted review manifests predate document classification. */
+  is_document?: boolean;
   name: string;
   size_bytes: number;
   file_type: string | null; // FileType value if importable, else null

@@ -146,3 +146,17 @@ slicer, printer model, Revision status, printed state, print outcome, vault or
 external storage, and upload date. Values within one group use OR; different
 groups use AND; repeated tags retain AND behavior. Saved Views store the same
 contract, so old views continue to load and new views restore all active filters.
+
+
+## Archive review
+
+Before importing an archive, review its file selection and destination collection.
+Each selected model file creates or reuses a Model; subfolders become collections.
+The omitted-files section lists images, PDF and text documents, and unsupported
+entries. Those auxiliary files are not imported by the model selection. Keep the
+original archive if you want to add guides through Documents or select a cover
+later. Archive path, size and ownership checks also apply to auxiliary entries.
+
+An incomplete import retains its staged input until the lease expires. Retry the
+Job to recover failed items while preserving committed Models. Changing the
+collection changes organization, not the location of original source files.

@@ -350,6 +350,7 @@ def archive_manifest(
                 size_bytes=e.size_bytes,
                 file_type=e.file_type,
                 is_image=e.is_image,
+                is_document=e.is_document,
             )
             for e in entries
         ],

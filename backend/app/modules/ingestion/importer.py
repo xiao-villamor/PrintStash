@@ -289,11 +289,6 @@ def archive_format(path: Path, filename: str) -> ArchiveFormat | None:
     return archive_formats.sniff_format(path)
 
 
-def _kept_in_review(name: str) -> bool:
-    suffix = Path(name).suffix.lower()
-    return suffix in _IMPORTABLE_SUFFIXES or suffix in _IMAGE_SUFFIXES
-
-
 @contextmanager
 def zip_view(
     path: Path,
@@ -306,7 +301,8 @@ def zip_view(
 
     A ZIP is itself. Any other archive is planned under the archive limits,
     then rewritten into a scratch window sized for exactly that plan, which is
-    released when the caller leaves. Only models and preview images are kept.
+    released when the caller leaves. All bounded regular entries stay visible
+    so review can explain which entries will be omitted.
     """
     if archive is ArchiveFormat.ZIP:
         yield path
@@ -315,7 +311,7 @@ def zip_view(
     limits = _archive_limits()
     try:
         planned = archive_formats.planned_zip_bytes(
-            path, archive, limits=limits, keep=_kept_in_review, on_chunk=checkpoint
+            path, archive, limits=limits, keep=lambda _name: True, on_chunk=checkpoint
         )
         with scratch_windows.open_window(
             kind=scratch_windows.WindowKind.ARCHIVE_TRANSCODE,
@@ -329,7 +325,7 @@ def zip_view(
                 archive,
                 target,
                 limits=limits,
-                keep=_kept_in_review,
+                keep=lambda _name: True,
                 on_chunk=checkpoint,
             )
             yield target
@@ -350,7 +346,7 @@ def inspect_archive_as_zip(
 
 
 def inspect_archive(path: Path) -> list[ArchiveEntry]:
-    """List archive entries, enforcing zip-bomb caps. Importable + image only."""
+    """List review entries, including explicitly classified auxiliaries and omissions."""
     try:
         return inspect_archive_entries(
             path,
@@ -360,6 +356,8 @@ def inspect_archive(path: Path) -> list[ArchiveEntry]:
                 for suffix, file_type in SUFFIX_TO_FILE_TYPE.items()
             },
             image_suffixes=_IMAGE_SUFFIXES,
+            document_suffixes={".pdf", ".md", ".markdown", ".txt"},
+            include_unsupported=True,
         )
     except ArchivePolicyError as exc:
         raise ImportError_(exc.code) from exc

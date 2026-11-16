@@ -1,6 +1,6 @@
-import { renderApp, json } from "@/test-support/render";
 /* Model facts belong to the source file. Missing geometry stays unknown, zero
  * stays zero, and untrusted legacy source URLs never become executable links. */
+import { renderApp, json } from "@/test-support/render";
 import "@testing-library/jest-dom/vitest";
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";

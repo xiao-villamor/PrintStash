@@ -5300,5 +5300,13 @@
   "Project settings could not be read. The original file is unchanged.": "Project settings could not be read. The original file is unchanged.",
   "This file has no supported project settings.": "This file has no supported project settings.",
   "Project settings have not been checked.": "Project settings have not been checked.",
-  "Reading project settings…": "Reading project settings…"
+  "Reading project settings…": "Reading project settings…",
+  "{value1} min": "{value1} min",
+  "{value1} g": "{value1} g",
+  "Each selected model file creates or reuses a Model. Subfolders become collections; changing the collection does not move source files.": "Each selected model file creates or reuses a Model. Subfolders become collections; changing the collection does not move source files.",
+  "Files omitted from this model selection ({value1})": "Files omitted from this model selection ({value1})",
+  "These files are not imported by the model selection below. Keep the originals to add them as Documents or choose a cover later.": "These files are not imported by the model selection below. Keep the originals to add them as Documents or choose a cover later.",
+  "Unsupported file": "Unsupported file",
+  "Image": "Image",
+  "Document": "Document"
 }

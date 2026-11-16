@@ -628,11 +628,15 @@ def invalidate(session: Session, file: File, kinds: list[DerivativeKind]) -> int
 
 
 def read(
-    session: Session, file: File, *, now: datetime | None = None
+    session: Session,
+    file: File,
+    *,
+    now: datetime | None = None,
+    current_rows: dict[DerivativeKind, ArtifactDerivative] | None = None,
 ) -> list[DerivativeRead]:
     """Every applicable kind of ``file`` at its current recipe, pending included."""
     now = now or utcnow()
-    current = rows_for(session, file)
+    current = rows_for(session, file) if current_rows is None else current_rows
     regen = regenerations(session, definitions=[g.definition for g in groups_for(file)])
     controls = policy.resolve(session)
     enabled = {

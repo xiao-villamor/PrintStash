@@ -22,10 +22,16 @@ export function ProfileFacts({ profile }: { profile: CaptureProfile }) {
         <dd>
           {profile.estimated_seconds == null
             ? unknown
-            : `${Math.round(profile.estimated_seconds / 60)} min`}
+            : uiText("{value1} min", {
+                value1: String(Math.round(profile.estimated_seconds / 60)),
+              })}
         </dd>
         <dt>{uiText("Filament")}</dt>
-        <dd>{profile.filament_grams == null ? unknown : `${profile.filament_grams} g`}</dd>
+        <dd>
+          {profile.filament_grams == null
+            ? unknown
+            : uiText("{value1} g", { value1: String(profile.filament_grams) })}
+        </dd>
         <dt>{uiText("Material")}</dt>
         <dd>{profile.materials?.length ? profile.materials.join(", ") : unknown}</dd>
         <dt>{uiText("Plates")}</dt>

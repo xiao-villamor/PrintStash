@@ -59,6 +59,33 @@ class TestFileProjectProfile:
             },
         }
 
+    def test_reads_profile_from_the_same_snapshot_as_its_status(
+        self, client, auth_headers, project, db_session, monkeypatch
+    ):
+        artifact = project()
+        producers.derive_project_profile(artifact.id)
+        read = records.read
+
+        def regenerate_after_status(*args, **kwargs):
+            status = read(*args, **kwargs)
+            row = db_session.exec(
+                select(ArtifactDerivative).where(
+                    ArtifactDerivative.file_id == artifact.id,
+                    ArtifactDerivative.kind == DerivativeKind.PROJECT_PROFILE,
+                )
+            ).one()
+            db_session.delete(row)
+            db_session.commit()
+            return status
+
+        monkeypatch.setattr(records, "read", regenerate_after_status)
+        response = client.get(
+            f"/api/v1/files/{artifact.id}/project-profile", headers=auth_headers
+        )
+        assert response.status_code == 200
+        assert response.json()["state"] == "ready"
+        assert response.json()["profile"]["printer"] == "P1S"
+
     def test_reports_pending_without_parsing(self, client, auth_headers, project):
         artifact = project(b"not a zip")
         result = client.get(

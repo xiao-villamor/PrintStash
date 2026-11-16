@@ -28,7 +28,7 @@ describe("profile fact origins", () => {
       screen.getByText("Imported profile; not a measured or tested print result."),
     ).toBeVisible();
   });
-  it("labels file estimates and leaves missing facts unknown", () => {
+  it("leaves missing file estimates unknown", () => {
     render(<ProfileFacts profile={{ id: "two", name: "Second profile", origin: "file" }} />);
     expect(screen.getByText("Estimate included in the file")).toBeVisible();
     expect(screen.getAllByText("Not captured")).toHaveLength(6);

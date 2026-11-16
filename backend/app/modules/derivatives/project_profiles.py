@@ -12,14 +12,15 @@ from . import records
 
 
 def read(session: Session, file: File) -> FileProjectProfileRead:
+    current = records.rows_for(session, file)
     status = next(
         value
-        for value in records.read(session, file)
+        for value in records.read(session, file, current_rows=current)
         if value.kind is DerivativeKind.PROJECT_PROFILE
     )
     profile = None
     if status.state is DerivativeStatus.READY:
-        row = records.rows_for(session, file)[DerivativeKind.PROJECT_PROFILE]
+        row = current[DerivativeKind.PROJECT_PROFILE]
         profile = json.loads(row.output_json)
     return FileProjectProfileRead(
         state=status.state, profile=profile, failure_reason=status.failure_reason

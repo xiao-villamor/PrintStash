@@ -15,6 +15,9 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
         mesh = "solid " + model + "\\nfacet normal 0 0 1\\nouter loop\\nvertex 0 0 0\\nvertex 1 0 0\\nvertex 0 1 0\\nendloop\\nendfacet\\nendsolid " + model + "\\n"
         archive.writestr(folder + "/" + model + ".stl", mesh)
     archive.writestr("notes.txt", "Do not import this note")
+    archive.writestr("manual.pdf", "%PDF-1.4 assembly instructions")
+    archive.writestr("photo.jpg", "image placeholder")
+    archive.writestr("unrecognized.bin", "omitted")
 sys.stdout.buffer.write(out.getvalue())
 `;
   return execFileSync("python3", ["-c", source, name]);
@@ -26,7 +29,7 @@ test.describe("ZIP upload", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
     const upload = page.getByRole("dialog", { name: "Upload model" });
-    await upload.getByRole("button", { name: "From archive" }).click();
+    await upload.getByRole("tab", { name: "From archive" }).click();
     await upload.locator('input[accept*=".zip"]').setInputFiles({
       name: `${name}.zip`,
       mimeType: "application/zip",
@@ -58,11 +61,19 @@ test.describe("ZIP upload", () => {
     await page.getByRole("dialog").getByRole("button", { name: "Choose ZIP files" }).click();
 
     const review = page.getByRole("dialog", { name: "Choose ZIP files" });
+    await review.getByText("Files omitted from this model selection (4)").click();
+    for (const auxiliary of ["notes.txt", "manual.pdf", "photo.jpg", "unrecognized.bin"]) {
+      await expect(review.getByText(auxiliary, { exact: true })).toBeVisible();
+    }
+    await expect(
+      review.getByText(/Each selected model file creates or reuses a Model/),
+    ).toBeVisible();
     await review.getByRole("button", { name: "Select all 2 ZIP files" }).click();
     await expect(review.getByRole("status")).toHaveText("2 of 2 files selected");
     await review.getByRole("button", { name: "Clear selection" }).click();
     await review.getByRole("button", { name: "Select folder Animals" }).click();
     await expect(review.getByRole("status")).toHaveText("1 of 2 files selected");
+    await page.screenshot({ path: test.info().outputPath("archive-review.png") });
     await review.getByRole("button", { name: "Import 1 selected" }).click();
     await expect(review).toHaveCount(0);
     await page.goto(`/?c=${encodeURIComponent(`${name}/animals`)}`);
@@ -81,7 +92,7 @@ test.describe("ZIP upload", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
     const upload = page.getByRole("dialog", { name: "Upload model" });
-    await upload.getByRole("button", { name: "From archive" }).click();
+    await upload.getByRole("tab", { name: "From archive" }).click();
     await upload.locator('input[accept*=".zip"]').setInputFiles({
       name: `${name}.zip`,
       mimeType: "application/zip",
