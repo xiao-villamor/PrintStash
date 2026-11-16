@@ -1295,7 +1295,7 @@ describe("ModelBrowser", () => {
 
       await screen.findByRole("heading", { name: "Brackets" });
       const reads = requestsFor(requests, "/api/v1/models/browse", "parts/brackets");
-      expect(reads, reads.map(({ url }) => url).join("\n")).toHaveLength(1);
+      expect(reads).toHaveLength(1);
       expect(requestsFor(requests, "/api/v1/multipart-models", "parts/brackets")).toHaveLength(0);
     });
 
@@ -1363,7 +1363,7 @@ describe("ModelBrowser", () => {
       await screen.findByRole("heading", { name: "Parts" });
       await waitFor(() => {
         const reads = requestsFor(requests, "/api/v1/models/browse", "parts");
-        expect(reads, reads.map(({ url }) => url).join("\n")).toHaveLength(1);
+        expect(reads).toHaveLength(1);
       });
       // Past production's staleTime, a prefetch of this folder would refetch it.
       client.setDefaultOptions({ queries: { retry: false, staleTime: 0 } });
