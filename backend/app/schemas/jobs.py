@@ -173,6 +173,16 @@ class ExecutorRead(BaseModel):
     stale: bool
 
 
+class PreviewActivity(BaseModel):
+    """Enabled cover and multi-angle tasks at their current recipes across the library."""
+
+    total: int = Field(ge=0)
+    completed: int = Field(ge=0)
+    remaining: int = Field(ge=0)
+    skipped: int = Field(ge=0)
+    failed: int = Field(ge=0)
+
+
 class WorkOverview(BaseModel):
     lanes: list[LaneRead]
     definitions: list[DefinitionRead]

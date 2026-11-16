@@ -60,6 +60,7 @@ export type {
   WorkDefinition,
   WorkExecutor,
   WorkOverview,
+  PreviewActivity,
   IngestJobResult,
   ArchiveIntake,
   ArchiveEntry,

@@ -25,12 +25,12 @@ export function AuthFrame({
 }) {
   const { t } = useI18n();
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-background px-4 py-6 sm:py-10">
+    <main className="grid min-h-dvh grid-rows-[1fr_auto_1fr] justify-items-center bg-background px-4 py-6 sm:py-10">
       <Card
         role={label ? "region" : undefined}
         aria-label={label}
         className={cn(
-          "w-full overflow-hidden border-border bg-card",
+          "row-start-2 w-full overflow-hidden border-border bg-card",
           wide ? "max-w-[560px]" : "max-w-[400px]",
         )}
       >
@@ -50,7 +50,7 @@ export function AuthFrame({
         </header>
         <div className="min-w-0 px-6 pb-8 pt-6 sm:px-8">{children}</div>
       </Card>
-      <p className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">
+      <p className="row-start-3 pt-5 font-mono text-2xs uppercase tracking-wider text-muted-foreground">
         {t("auth.tagline")}
       </p>
     </main>

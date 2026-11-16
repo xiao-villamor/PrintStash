@@ -1,4 +1,8 @@
 {
+  "Multi-angle previews": "Multi-angle previews",
+  "Multi-angle preview setting saved.": "Multi-angle preview setting saved.",
+  "Generate extra views for each Model. Turn off to save preparation time; cover images and existing views stay available.": "Generate extra views for each Model. Turn off to save preparation time; cover images and existing views stay available.",
+  "{total} preview tasks · {completed} done · {remaining} remaining · {skipped} skipped · {failed} failed": "{total} preview tasks · {completed} done · {remaining} remaining · {skipped} skipped · {failed} failed",
   "All": "All",
   "library.collectionOverview.previewLoading": "Loading previews",
   "library.collectionOverview.previewError": "Could not load previews",
@@ -5151,7 +5155,7 @@
   "modelCover.saveFailed": "The cover could not be saved. Check your image and editing permissions.",
   "modelCover.reviewFailed": "The latest Model could not be loaded.",
   "modelCover.applyReviewed": "Apply my cover to this version",
-  "modelPreview.cover": "Cover · camera unknown",
+  "modelPreview.cover": "Cover",
   "modelPreview.orbit0": "Orbit 1 · −35°",
   "modelPreview.orbit1": "Orbit 2 · 55°",
   "modelPreview.orbit2": "Orbit 3 · 145°",

@@ -64,6 +64,7 @@ import type {
   TagRead,
   VaultStatsRead,
   WorkOverview,
+  PreviewActivity,
 } from "@/types";
 
 /** A fixed instant. Every builder's timestamps derive from this one. */
@@ -1179,4 +1180,9 @@ export function aProjectProfile(
     plates: [],
     ...override,
   };
+}
+
+/** A settled image preparation census, including enabled producers only. */
+export function aPreviewActivity(override?: Partial<PreviewActivity>): PreviewActivity {
+  return { total: 0, completed: 0, remaining: 0, skipped: 0, failed: 0, ...override };
 }

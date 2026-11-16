@@ -2127,6 +2127,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     drainRequest(req, () => sendJson(res, { cancelled: 4 }));
     return;
   }
+  if (url.pathname === "/api/v1/admin/work/preview-activity") {
+    sendJson(res, { total: 0, completed: 0, remaining: 0, skipped: 0, failed: 0 });
+    return;
+  }
   if (url.pathname === "/api/v1/admin/work") {
     sendJson(res, workOverview());
     return;

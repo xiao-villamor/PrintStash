@@ -7,6 +7,9 @@
 - Browser captures can suggest an editable collection and tags, include a selected cover for every resulting Model, and show download and upload byte progress. Recovering an interrupted capture retains its original suggestions and verified files; a pending local cover must be selected again.
 
 - Archive review identifies omitted images, documents and unsupported entries before importing Models, and explains how selected files and subfolders become Models and collections.
+- Flat-model previews now support arrow navigation through all five views and back to the cover. Single-cover and multi-angle cards share a larger image area, and the expanded gallery uses more room on large screens while fitting narrow displays.
+
+- Preview settings now include the vault-wide multi-angle generation switch. Preview activity reports total, completed, remaining, skipped and failed image tasks across the library, including work waiting to enter the queue. Multi-angle orbits use the shared cover camera elevation; enabled generators refresh older view sets in the background.
 
 - Library filters open beside the toolbar in a searchable picker. Search by category or value, combine selections, and see results immediately; resetting the picker preserves the current folder and search. Card context menus show the Model name once with concise actions for opening its page, showing details, Favorites and tags.
 
@@ -68,6 +71,14 @@
 
 - Partial imports show every file result and its failure reason. Expired browser staging prompts a fresh capture, and collection selection is distinguished from physical storage.
 - Slicer handoff remembers the current user's browser preference, retains a download fallback for the selected Artifact and distinguishes a requested launch from a confirmed opening.
+- Library refreshes recover automatically when an ongoing ZIP import changes the catalog during a read, keeping the displayed Models and reading position instead of showing a stuck request error.
+
+- Model card arrows return to the cover in both directions and skip the repeated default camera angle. The expanded gallery keeps every generated view available.
+- The login card is centered in the viewport, with scrolling preserved on short screens.
+
+- Multi-angle preview controls stay readable in light and dark themes. The view count remains visible beside a separate angle label, arrow hover respects reduced motion, and the gallery uses the app's normal closing transition.
+
+- G-code print settings use the selected build plate's bed temperature, including Supertack and textured plates, instead of always reading the hot-plate preset. Existing G-code metadata refreshes automatically in the background (#606).
 
 - Model previews use a raised three-quarter camera and more directional studio lighting to reveal cavities and surface depth. Tall and narrow parts retain their upright view instead of being mistaken for flat plates.
 

@@ -699,6 +699,15 @@ export interface WorkExecutor {
   stale: boolean;
 }
 
+/** Each task produces one cover image or one multi-angle set for an Artifact. */
+export interface PreviewActivity {
+  total: number;
+  completed: number;
+  remaining: number;
+  skipped: number;
+  failed: number;
+}
+
 /** `GET /api/v1/admin/work`: the Background work settings page. */
 export interface WorkOverview {
   lanes: WorkLane[];

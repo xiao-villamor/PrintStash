@@ -1,7 +1,7 @@
 /*
  * An administrator sees the previews the server is preparing on its own as one
- * Task, so an import that leaves many behind is not silent. It follows the live
- * queue, finishes when the queue empties, and is never kept across a reload.
+ * Task, so an import that leaves many behind is not silent. It follows the full
+ * backlog, finishes when generation settles, and is never kept across a reload.
  * Everyone else never reads the queue.
  */
 import { render, waitFor } from "@testing-library/react";
@@ -9,9 +9,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PreviewActivityTracker } from "@/components/preview-activity-tracker";
-import * as jobsApi from "@/lib/api/jobs";
+import * as workApi from "@/lib/api/work";
 import * as taskCenter from "@/lib/task-center";
-import { aJob } from "@/test-support/factories";
+import { aPreviewActivity } from "@/test-support/factories";
 import { LibraryStartupContext } from "@/lib/library-startup-context";
 
 function mount(enabled: boolean, activityAllowed = true) {
@@ -46,11 +46,9 @@ afterEach(() => {
 
 describe("PreviewActivityTracker", () => {
   it("shows waiting previews as a running Task with its progress", async () => {
-    vi.spyOn(jobsApi, "listWorkJobs").mockResolvedValue([
-      aJob({ kind: "derivatives.mesh", state: "queued" }),
-      aJob({ kind: "derivatives.mesh", state: "running" }),
-      aJob({ kind: "ingestion.artifact_upload", state: "running" }),
-    ]);
+    vi.spyOn(workApi, "getPreviewActivity").mockResolvedValue(
+      aPreviewActivity({ total: 100, completed: 40, remaining: 60 }),
+    );
 
     mount(true);
 
@@ -58,28 +56,68 @@ describe("PreviewActivityTracker", () => {
     expect(taskCenter.listTasks()[0]).toMatchObject({
       title: "Preparing previews",
       status: "running",
-      total: 2,
-      processed: 0,
+      total: 100,
+      processed: 40,
+      detail: "100 preview tasks · 40 done · 60 remaining · 0 skipped · 0 failed",
       ambient: true,
     });
   });
 
-  it("completes the Task when the queue empties", async () => {
+  it("completes the Task with the final counts", async () => {
     const list = vi
-      .spyOn(jobsApi, "listWorkJobs")
-      .mockResolvedValueOnce([aJob({ kind: "derivatives.mesh", state: "running" })])
-      .mockResolvedValue([aJob({ kind: "derivatives.mesh", state: "completed" })]);
+      .spyOn(workApi, "getPreviewActivity")
+      .mockResolvedValueOnce(aPreviewActivity({ total: 2, remaining: 2 }))
+      .mockResolvedValue(aPreviewActivity({ total: 2, completed: 2 }));
     const { client } = mount(true);
     await waitFor(() => expect(taskCenter.listTasks()).toHaveLength(1));
 
     await client.invalidateQueries({ queryKey: ["work", "preview-activity"] });
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
 
-    await waitFor(() => expect(taskCenter.listTasks()[0].status).toBe("completed"));
+    await waitFor(() =>
+      expect(taskCenter.listTasks()[0]).toMatchObject({
+        status: "completed",
+        total: 2,
+        processed: 2,
+        succeeded: 2,
+        detail: "2 preview tasks · 2 done · 0 remaining · 0 skipped · 0 failed",
+      }),
+    );
+  });
+
+  it("reports failed generation instead of declaring previews ready", async () => {
+    vi.spyOn(workApi, "getPreviewActivity")
+      .mockResolvedValueOnce(aPreviewActivity({ total: 2, remaining: 2 }))
+      .mockResolvedValue(aPreviewActivity({ total: 2, completed: 1, failed: 1 }));
+    const { client } = mount(true);
+    await waitFor(() => expect(taskCenter.listTasks()).toHaveLength(1));
+
+    await client.invalidateQueries({ queryKey: ["work", "preview-activity"] });
+
+    await waitFor(() =>
+      expect(taskCenter.listTasks()[0]).toMatchObject({
+        status: "failed",
+        succeeded: 1,
+        failed: 1,
+        detail: "2 preview tasks · 1 done · 0 remaining · 0 skipped · 1 failed",
+      }),
+    );
+  });
+
+  it("keeps the last counts when polling fails", async () => {
+    vi.spyOn(workApi, "getPreviewActivity")
+      .mockResolvedValueOnce(aPreviewActivity({ total: 2, remaining: 2 }))
+      .mockRejectedValue(new Error("offline"));
+    const { client } = mount(true);
+    await waitFor(() => expect(taskCenter.listTasks()).toHaveLength(1));
+
+    await client.invalidateQueries({ queryKey: ["work", "preview-activity"] });
+
+    expect(taskCenter.listTasks()[0]).toMatchObject({ status: "running", total: 2, processed: 0 });
   });
 
   it("defers preview activity while Library startup is pending", () => {
-    const list = vi.spyOn(jobsApi, "listWorkJobs").mockResolvedValue([]);
+    const list = vi.spyOn(workApi, "getPreviewActivity").mockResolvedValue(aPreviewActivity());
 
     mount(true, false);
 
@@ -87,9 +125,9 @@ describe("PreviewActivityTracker", () => {
   });
 
   it("loads preview activity when startup admits the read", async () => {
-    vi.spyOn(jobsApi, "listWorkJobs").mockResolvedValue([
-      aJob({ kind: "derivatives.mesh", state: "running" }),
-    ]);
+    vi.spyOn(workApi, "getPreviewActivity").mockResolvedValue(
+      aPreviewActivity({ total: 1, remaining: 1 }),
+    );
     const { allowActivity } = mount(true, false);
 
     allowActivity();
@@ -104,7 +142,7 @@ describe("PreviewActivityTracker", () => {
   });
 
   it("reads nothing for someone who is not an administrator", () => {
-    const list = vi.spyOn(jobsApi, "listWorkJobs").mockResolvedValue([]);
+    const list = vi.spyOn(workApi, "getPreviewActivity").mockResolvedValue(aPreviewActivity());
 
     mount(false);
 

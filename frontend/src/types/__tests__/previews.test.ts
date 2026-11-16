@@ -36,7 +36,7 @@ describe("model previews", () => {
     expect(previewArtifact(running)).toBe(7);
   });
 
-  it.each(["failed", "cancelled", "unsupported", "ready"] as const)(
+  it.each(["disabled", "failed", "cancelled", "unsupported", "ready"] as const)(
     "stops following a settled %s set",
     (state) => expect(previewsInFlight({ ...published, state })).toBe(false),
   );

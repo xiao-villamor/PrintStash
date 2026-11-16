@@ -10,18 +10,29 @@ pause: withdrawing work is a cancel, and a cancel withdraws its intent.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import Session
 
 from app.core.security import require_auth, require_superuser
 from app.db.models import DerivativeKind, LaneName, User
+from app.db.session import get_session
+from app.modules.derivatives.activity import preview_activity
 from app.modules.work import service as work_service
 from app.schemas.jobs import (
     CancelQueued,
     DerivativeRegenerate,
     LaneUpdate,
+    PreviewActivity,
     WorkOverview,
 )
 
 router = APIRouter(prefix="/admin/work", tags=["jobs"])
+
+
+@router.get("/preview-activity", response_model=PreviewActivity)
+def get_preview_activity(
+    _user: User = Depends(require_superuser), session: Session = Depends(get_session)
+) -> PreviewActivity:
+    return preview_activity(session)
 
 
 @router.get("", response_model=WorkOverview, summary="Background work overview")

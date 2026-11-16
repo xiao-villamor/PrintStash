@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 import trimesh
+from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 
 from app.modules.media.preview_views import candidates, render_views
 
@@ -11,6 +12,16 @@ LIMIT = 2_000_000
 
 
 class TestCandidates:
+    def test_orbits_share_the_cover_camera_elevation(self):
+        _, views = candidates(trimesh.creation.box(), max_faces=LIMIT)
+
+        assert [view.elevation_degrees for view in views[:4]] == [
+            PREVIEW_PROFILE.hero_elevation_degrees
+        ] * 4
+        assert np.asarray(views[0].rotation)[2, 2] == pytest.approx(
+            -np.sin(np.radians(PREVIEW_PROFILE.hero_elevation_degrees))
+        )
+
     def test_preserves_orbit_order(self):
         mesh = trimesh.creation.box(extents=(10, 12, 14))
         profile, views = candidates(mesh, max_faces=LIMIT)
