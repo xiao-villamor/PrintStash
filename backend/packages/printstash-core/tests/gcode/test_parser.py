@@ -99,6 +99,153 @@ class TestParseDuration:
 
 
 class TestParse:
+    @pytest.mark.parametrize(
+        ("plate", "expected"),
+        [
+            pytest.param("Cool Plate", 35, id="cool"),
+            pytest.param("Engineering Plate", 0, id="engineering"),
+            pytest.param("High Temp Plate", 60, id="high-temp"),
+            pytest.param("Hot Plate", 60, id="hot-alias"),
+            pytest.param("Supertack Plate", 45, id="supertack"),
+            pytest.param("Textured Cool Plate", 40, id="textured-cool"),
+            pytest.param("Textured PEI Plate", 55, id="textured-pei"),
+        ],
+    )
+    def test_reads_the_selected_plate_temperature(
+        self, tmp_path: Path, plate: str, expected: float
+    ) -> None:
+        # Each plate has a different preset, as in issue #606. Generic and hot
+        # plate values must not take precedence over the selected plate.
+        path = tmp_path / "plates.gcode"
+        path.write_text(
+            "; bed_temperature = 90\n"
+            "; cool_plate_temp = 35,35,35,35\n"
+            "; eng_plate_temp = 0,0,0,0\n"
+            "; hot_plate_temp = 60,60,60,60\n"
+            "; supertack_plate_temp = 45,45,45,45\n"
+            "; textured_cool_plate_temp = 40,40,40,40\n"
+            "; textured_plate_temp = 55,55,55,55\n"
+            f"; curr_bed_type = {plate}\n",
+            encoding="utf-8",
+        )
+
+        assert parse(path).bed_temperature_c == expected
+
+    @pytest.mark.parametrize("plate_first", [True, False], ids=["first", "last"])
+    def test_accepts_plate_comment_formatting(
+        self, tmp_path: Path, plate_first: bool
+    ) -> None:
+        plate = "  ; CURR_BED_TYPE =   supertack plate  \r\n"
+        temps = "; hot_plate_temp = 55\r\n  ; SUPERTACK_PLATE_TEMP = 45\r\n"
+        path = tmp_path / "formatted.gcode"
+        path.write_bytes((plate + temps if plate_first else temps + plate).encode())
+
+        assert parse(path).bed_temperature_c == 45
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            pytest.param("45", 45, id="scalar"),
+            pytest.param("45,55,60,65", 45, id="comma-list"),
+            pytest.param("45;55;60;65", 45, id="semicolon-list"),
+            pytest.param("0,45", 0, id="unheated"),
+            pytest.param(" 45.5 , 55 ", 45.5, id="decimal"),
+        ],
+    )
+    def test_reads_the_first_selected_plate_temperature(
+        self, tmp_path: Path, value: str, expected: float
+    ) -> None:
+        path = tmp_path / "temperatures.gcode"
+        path.write_text(
+            "; curr_bed_type = Supertack Plate\n"
+            f"; supertack_plate_temp = {value}\n",
+            encoding="utf-8",
+        )
+
+        assert parse(path).bed_temperature_c == expected
+
+    def test_selected_plate_uses_regular_temperature(self, tmp_path: Path) -> None:
+        path = tmp_path / "initial-layer.gcode"
+        path.write_text(
+            "; curr_bed_type = Supertack Plate\n"
+            "; supertack_plate_temp_initial_layer = 50\n"
+            "; supertack_plate_temp = 45\n",
+            encoding="utf-8",
+        )
+
+        assert parse(path).bed_temperature_c == 45
+
+    @pytest.mark.parametrize(
+        "setting",
+        [
+            pytest.param("bed_temperature = 60", id="prusa"),
+            pytest.param("hot_plate_temp = 60", id="legacy-orca"),
+            pytest.param("filament_bed_temperature = 60", id="filament"),
+            pytest.param("bed temperature: 60", id="comment"),
+            pytest.param("print_bed_temperature = 60", id="cura"),
+        ],
+    )
+    def test_preserves_bed_temperature_without_a_plate(
+        self, tmp_path: Path, setting: str
+    ) -> None:
+        path = tmp_path / "legacy.gcode"
+        path.write_text(f"; {setting}\n", encoding="utf-8")
+
+        assert parse(path).bed_temperature_c == 60
+
+    @pytest.mark.parametrize("plate", ["Future Plate", ""], ids=["unknown", "empty"])
+    def test_unknown_plate_has_no_temperature(
+        self, tmp_path: Path, plate: str
+    ) -> None:
+        path = tmp_path / "unknown.gcode"
+        path.write_text(
+            f"; curr_bed_type = {plate}\n"
+            "; hot_plate_temp = 55\n; bed_temperature = 60\n",
+            encoding="utf-8",
+        )
+
+        assert parse(path).bed_temperature_c is None
+
+    def test_missing_selected_plate_temperature_stays_unknown(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "missing.gcode"
+        path.write_text(
+            "; curr_bed_type = Supertack Plate\n"
+            "; supertack_plate_temp_initial_layer = 50\n"
+            "; hot_plate_temp = 55\n",
+            encoding="utf-8",
+        )
+
+        assert parse(path).bed_temperature_c is None
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("", id="empty"),
+            pytest.param("invalid", id="text"),
+            pytest.param("bad45", id="embedded-number"),
+            pytest.param("45oops", id="trailing-text"),
+            pytest.param(",45", id="missing-first-slot"),
+            pytest.param("-1", id="negative"),
+            pytest.param("nan", id="nan"),
+            pytest.param("inf", id="infinity"),
+            pytest.param("9" * 400, id="overflow"),
+        ],
+    )
+    def test_malformed_selected_plate_temperature_stays_unknown(
+        self, tmp_path: Path, value: str
+    ) -> None:
+        path = tmp_path / "invalid.gcode"
+        path.write_text(
+            "; curr_bed_type = Supertack Plate\n"
+            f"; supertack_plate_temp = {value}\n"
+            "; hot_plate_temp = 55\n",
+            encoding="utf-8",
+        )
+
+        assert parse(path).bed_temperature_c is None
+
     def test_keeps_one_material_entry_per_tool(self, tmp_path: Path) -> None:
         path = tmp_path / "multi.gcode"
         path.write_text(

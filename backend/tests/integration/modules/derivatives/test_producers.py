@@ -1020,6 +1020,24 @@ class TestDeriveMesh:
 
 
 class TestDeriveGcode:
+    def test_persists_the_selected_plate_temperature(
+        self, db_session: Session, stored
+    ) -> None:
+        artifact = stored(
+            "supertack.gcode",
+            b"; curr_bed_type = Supertack Plate\n"
+            b"; supertack_plate_temp = 45,45,45,45\n"
+            b"; textured_plate_temp = 55,55,55,55\n"
+            b"; hot_plate_temp = 55,55,55,55\n",
+        )
+
+        producers.derive_gcode(artifact.id)
+
+        metadata = db_session.exec(
+            select(Metadata).where(Metadata.file_id == artifact.id)
+        ).one()
+        assert metadata.bed_temperature_c == 45
+
     def test_persists_captured_slicer_settings(
         self, db_session: Session, stored
     ) -> None:
