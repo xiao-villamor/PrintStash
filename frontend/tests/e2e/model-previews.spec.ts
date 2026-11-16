@@ -2,6 +2,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { aModelListItem } from "../../src/test-support/factories";
 import type { ArtifactPreviews, ModelPreviews } from "../../src/types/previews";
+import { NO_PREVIEWS } from "../../src/types/previews";
 import { useMockApi } from "./_setup";
 
 declare global {
@@ -34,10 +35,24 @@ const views = {
   },
 } satisfies ArtifactPreviews;
 const published = views.published;
+const planar = {
+  ...views,
+  published: {
+    profile: "planar",
+    manifest_url: published.manifest_url,
+    views: [
+      { id: "face", role: "face", url: "/api/v1/models/1/previews/generation/face" },
+      { id: "reverse", role: "reverse", url: "/api/v1/models/1/previews/generation/reverse" },
+      { id: "edge", role: "edge", url: "/api/v1/models/1/previews/generation/edge" },
+      { id: "top", role: "top", url: "/api/v1/models/1/previews/generation/top" },
+      { id: "bottom", role: "bottom", url: "/api/v1/models/1/previews/generation/bottom" },
+    ],
+  },
+} satisfies ArtifactPreviews;
 async function fulfillImage(route: Route) {
   await route.fulfill({ contentType: "image/svg+xml", body: image });
 }
-async function library(page: Page, previews: ModelPreviews = views, count = 1) {
+async function library(page: Page, previews: ModelPreviews = views, count = 1, href = "/") {
   const transferred: string[] = [];
   page.on("request", (request) => {
     if (/\/previews\/|\/thumbnail|\/stl/.test(new URL(request.url()).pathname))
@@ -64,7 +79,7 @@ async function library(page: Page, previews: ModelPreviews = views, count = 1) {
   );
   await page.route("**/api/v1/files/*/thumbnail", fulfillImage);
   await page.route("**/api/v1/models/*/previews/**", fulfillImage);
-  await page.goto("/");
+  await page.goto(href);
   // Controls sit beside the card's link, over its image: scope to the card.
   const card = page
     .locator("main article")
@@ -81,6 +96,81 @@ function secondaries(paths: string[]) {
 }
 
 test.describe("Model preview browsing", () => {
+  test("browses all five flat-model views from the card", async ({ page }) => {
+    const { card, next } = await library(page, planar);
+    await card.hover();
+    await expect(next).toBeVisible();
+    for (const id of ["face", "reverse", "edge", "top", "bottom", "cover"]) {
+      await next.click();
+      await expect(card.locator("img")).toHaveAttribute("data-preview-view", id);
+    }
+    await card.getByRole("button", { name: "Previous preview", exact: true }).click();
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "bottom");
+  });
+
+  for (const [layout, href] of [
+    ["Library", "/"],
+    ["Favorites", "/?favorites=true"],
+  ] as const) {
+    test(`keeps ${layout} cover sizing consistent when angle previews are available`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 2560, height: 1440 });
+      const multiple = await library(page, views, 1, href);
+      const multiImage = await multiple.card.locator("img").boundingBox();
+      const multiTitle = await multiple.card
+        .getByRole("heading", { name: "Bracket 1" })
+        .boundingBox();
+      const single = await library(page, NO_PREVIEWS, 1, href);
+      const singleImage = await single.card.locator("img").boundingBox();
+      const singleTitle = await single.card
+        .getByRole("heading", { name: "Bracket 1" })
+        .boundingBox();
+      expect(multiImage).not.toBeNull();
+      expect(singleImage).not.toBeNull();
+      expect(Math.abs(multiImage!.height - singleImage!.height)).toBeLessThan(1);
+      expect(Math.abs(multiImage!.width - singleImage!.width)).toBeLessThan(1);
+      expect(Math.abs(multiTitle!.y - singleTitle!.y)).toBeLessThan(1);
+    });
+  }
+
+  test("gives card images more room on a 2K display", async ({ page }) => {
+    await page.setViewportSize({ width: 2560, height: 1440 });
+    const { card } = await library(page);
+    const frame = await card.locator("[data-model-preview]").boundingBox();
+    const picture = await card.locator("img").boundingBox();
+    expect(picture!.height).toBeGreaterThan(frame!.width / 2);
+  });
+
+  test("opens a large preview gallery on a 2K display", async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 2560, height: 1440 });
+    const { card } = await library(page);
+    await card.getByRole("button", { name: "Model views", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Model views" });
+    const frame = await dialog.locator("[data-model-preview]").boundingBox();
+    expect(frame!.width).toBeGreaterThanOrEqual(1000);
+    expect(frame!.height).toBeGreaterThanOrEqual(700);
+    await expect(dialog.getByRole("button", { name: "Bottom", exact: true })).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath("gallery-2k.png") });
+  });
+
+  test("keeps the enlarged gallery usable on a narrow screen", async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const { card } = await library(page, planar);
+    await card.getByRole("button", { name: "Model views", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Model views" });
+    const bounds = await dialog.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+    await dialog.getByRole("button", { name: "Bottom", exact: true }).click();
+    await expect(dialog.locator("img[data-preview-view]")).toHaveAttribute(
+      "data-preview-view",
+      "bottom",
+    );
+    await expect(dialog.getByRole("button", { name: "Close", exact: true })).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath("gallery-mobile.png") });
+  });
+
   test("cycles the card through the cover in both directions", async ({ page }) => {
     const { card, next } = await library(page);
     for (const id of ["orbit-1", "orbit-2", "orbit-3", "cover"]) {
@@ -403,20 +493,7 @@ test.describe("Model preview browsing", () => {
   });
 
   test("keeps planar views in a named gallery", async ({ page }) => {
-    const planar: ModelPreviews = {
-      ...views,
-      published: {
-        profile: "planar",
-        manifest_url: "/api/v1/models/1/previews/generation",
-        views: [
-          { id: "face", role: "face", url: "/api/v1/models/1/previews/generation/face" },
-          { id: "reverse", role: "reverse", url: "/api/v1/models/1/previews/generation/reverse" },
-          { id: "edge", role: "edge", url: "/api/v1/models/1/previews/generation/edge" },
-        ],
-      },
-    };
     const { card } = await library(page, planar);
-    await expect(card.getByRole("button", { name: "Next preview" })).toHaveCount(0);
     await card.getByRole("button", { name: "Model views", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Model views" });
     await dialog.getByRole("button", { name: "Reverse face", exact: true }).click();

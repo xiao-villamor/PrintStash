@@ -14,7 +14,7 @@
   background-color: var(--plate);
 }
 
-/* The view count stays discoverable; only the orbit arrows reveal on intent. */
+/* The view count stays discoverable; only the arrows reveal on intent. */
 .library-preview-navigation {
   opacity: 1;
   transition: opacity var(--duration-press) var(--ease-out);
@@ -66,7 +66,7 @@
   min-height: 128px;
 }
 .library-model-card[data-favorites] :is(.library-preview, .library-preview-controls) {
-  height: 156px;
+  height: 200px;
 }
 
 .library-model-card[data-favorites] [data-library-card-tags] {
@@ -85,7 +85,7 @@
 
 .library-model-card:not([data-favorites]) :is(.library-preview, .library-preview-controls) {
   height: auto;
-  aspect-ratio: 8 / 5;
+  aspect-ratio: 4 / 3;
 }
 .library-card-standard {
   display: flex;
@@ -274,9 +274,15 @@
   justify-content: center;
 }
 .library-card-thumbnail {
-  width: 80%;
-  height: 80%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+}
+
+.model-preview-gallery-stage {
+  aspect-ratio: 4 / 3;
+  min-height: 10rem;
+  max-height: calc(100dvh - 18rem);
 }
 
 /* Preview shape and type stay consistent as the shared track grows. */

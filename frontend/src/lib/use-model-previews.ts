@@ -72,10 +72,14 @@ export function useModelPreviews(cover: string | null, views: PreviewImage[], ad
   // The card uses its cover as the default face. Keep the generated first
   // face in the gallery, where it is useful for custom/source-image covers.
   const generatedOrbit = views.filter((view) => view.role === "orbit");
-  const orbit: PreviewDestination[] =
-    cover && generatedOrbit.length > 0
-      ? [{ id: "cover", url: cover }, ...generatedOrbit.filter((view) => view.id !== "orbit-0")]
-      : generatedOrbit;
+  const generatedNavigation = generatedOrbit.length > 0 ? generatedOrbit : views;
+  const navigationViews: PreviewDestination[] =
+    cover && generatedNavigation.length > 0
+      ? [
+          { id: "cover", url: cover },
+          ...generatedNavigation.filter((view) => view.id !== "orbit-0"),
+        ]
+      : generatedNavigation;
 
   useEffect(() => {
     if (!active || !admitted || !path) return;
@@ -156,12 +160,16 @@ export function useModelPreviews(cover: string | null, views: PreviewImage[], ad
     setAttempt((value) => value + 1);
     // A deliberate interaction may warm one neighbor, including on touch.
     if (!previewTransferPolicy().neighbor || id === "cover") return;
-    if (orbit.some((view) => view.id === id)) warm(destination(1, id));
+    if (navigationViews.some((view) => view.id === id)) warm(destination(1, id));
   }
   function destination(delta: -1 | 1, from: PreviewSelection = selected) {
-    const index = orbit.findIndex((view) => view.id === from);
-    return orbit[
-      index < 0 ? (delta < 0 ? orbit.length - 1 : 0) : (index + delta + orbit.length) % orbit.length
+    const index = navigationViews.findIndex((view) => view.id === from);
+    return navigationViews[
+      index < 0
+        ? delta < 0
+          ? navigationViews.length - 1
+          : 0
+        : (index + delta + navigationViews.length) % navigationViews.length
     ];
   }
   function hover() {
@@ -176,7 +184,7 @@ export function useModelPreviews(cover: string | null, views: PreviewImage[], ad
     if (previewTransferPolicy().hover) warm(view, "intent");
   }
   return {
-    orbit,
+    navigationViews,
     selected,
     displayed: active && displayed?.session === session ? displayed : null,
     failed: failure !== null && failure.path === path && failure.attempt === attempt,

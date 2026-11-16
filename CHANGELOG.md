@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Flat-model previews now support arrow navigation through all five views and back to the cover. Single-cover and multi-angle cards share a larger image area, and the expanded gallery uses more room on large screens while fitting narrow displays.
+
 - Preview settings now include the vault-wide multi-angle generation switch. Preview activity reports total, completed, remaining, skipped and failed image tasks across the library, including work waiting to enter the queue. Multi-angle orbits use the shared cover camera elevation; enabled generators refresh older view sets in the background.
 
 - Library filters open beside the toolbar in a searchable picker. Search by category or value, combine selections, and see results immediately; resetting the picker preserves the current folder and search. Card context menus show the Model name once with concise actions for opening its page, showing details, Favorites and tags.

@@ -17,6 +17,9 @@ const views: PreviewImage[] = [
   })),
   { id: "top", role: "top", url: "/hook-previews/top" },
 ];
+const planar: PreviewImage[] = (["face", "reverse", "edge", "top", "bottom"] as const).map(
+  (id) => ({ id, role: id, url: `/hook-previews/${id}` }),
+);
 
 let responses: Map<string, PromiseWithResolvers<Response>>;
 let requested: string[];
@@ -169,10 +172,35 @@ describe("useModelPreviews", () => {
     await waitFor(() => expect(requested).toEqual(["/hook-previews/orbit-3"]));
   });
 
-  it("keeps the cover out of planar navigation", () => {
-    const hook = renderHook(() => useModelPreviews("/cover", [views[4]], true));
+  it("has no navigation without generated views", () => {
+    const hook = renderHook(() => useModelPreviews("/cover", [], true));
     expect(hook.result.current.destination(1)).toBeUndefined();
     expect(hook.result.current.destination(-1)).toBeUndefined();
+  });
+
+  it("includes all planar views in the cover cycle", () => {
+    const hook = renderHook(() => useModelPreviews("/cover", planar, true));
+    expect(hook.result.current.destination(-1)?.id).toBe("bottom");
+    for (const id of ["face", "reverse", "edge", "top", "bottom", "cover"] as const) {
+      expect(hook.result.current.destination(1)?.id).toBe(id);
+      act(() => hook.result.current.select(id));
+    }
+    expect(hook.result.current.selected).toBe("cover");
+  });
+
+  it("wraps planar navigation without a cover", () => {
+    const hook = renderHook(() => useModelPreviews(null, planar, true));
+    expect(hook.result.current.selected).toBe("face");
+    expect(hook.result.current.destination(-1)?.id).toBe("bottom");
+    act(() => hook.result.current.select("bottom"));
+    expect(hook.result.current.destination(1)?.id).toBe("face");
+  });
+
+  it("fetches only the selected planar view while saving data", async () => {
+    stubPolicy({ hover: true, saveData: true });
+    const hook = renderHook(() => useModelPreviews("/cover", planar, true));
+    act(() => hook.result.current.select("edge"));
+    await waitFor(() => expect(requested).toEqual(["/hook-previews/edge"]));
   });
 
   it("warms both orbit neighbors after a sustained hover", async () => {

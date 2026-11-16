@@ -1,10 +1,14 @@
 # Model covers and multi-angle previews
 
-Library cards keep one large cover. Use the arrows to walk around a solid Model,
+Library cards keep one large cover. Use the arrows to browse a Model's views,
 or **Model views** to open a selectable thumbnail strip. Top and Bottom are named
 choices in that gallery; they are outside the horizontal orbit. Planar objects
-use named Face, Reverse and Oblique edge choices instead of horizontal arrows.
+cycle through Cover, Face, Reverse, Oblique edge, Top and Bottom with the same arrows.
 There is no autoplay or pointer-position scrubbing.
+
+Single-cover and multi-angle cards reserve the same image area and control row.
+The expanded gallery grows with the screen, up to 1152 px wide, while its image
+height stays within the viewport and its thumbnail strip scrolls on narrow screens.
 
 On cards, the cover occupies the default face in the arrow cycle: Cover → 55° →
 145° → 235° → Cover (or the reverse). This avoids repeating the automatic cover's
@@ -20,7 +24,7 @@ as covers, separately from generated viewpoints.
 ## Fetching and access
 
 Primary image requests start only inside the viewport preload range. A 350 ms
-sustained fine-pointer hover warms the adjacent published orbit views. Arrow
+sustained fine-pointer hover warms the adjacent published views. Arrow
 hover/focus promotes its destination; clicking fetches immediately. The current
 decoded image remains visible until the latest selection has downloaded and
 decoded. Failed replacements are retryable.
@@ -35,7 +39,7 @@ A deliberate expanded gallery may fetch its directly selectable thumbnails.
 Native buttons have names, keyboard focus, and 44 px targets; dots are indicators,
 not extra tab stops. Preview buttons do not activate, select, or drag the card.
 The view-count button stays visible beside the current angle. On pointer devices,
-orbit arrows fade in on preview hover; keyboard focus and reduced motion reveal
+arrows fade in on preview hover; keyboard focus and reduced motion reveal
 them immediately. Touch keeps the arrows visible. Controls use the same outlined
 surfaces as the rest of the app, and the gallery retains its normal exit transition.
 Session changes retire private cached bytes and suppress stale decoded results.
