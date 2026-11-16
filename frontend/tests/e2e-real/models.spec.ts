@@ -74,7 +74,9 @@ test.describe("model library", () => {
       const trash = page.getByRole("group", { name: "Deleted models and multipart sets" });
       const trashedModel = trash.getByText(renamed, { exact: true });
       await expect(trashedModel).toBeVisible();
-      const trashRow = trashedModel.locator("../../..");
+      const trashRow = trash
+        .getByRole("checkbox", { name: `Select deleted model ${renamed}`, exact: true })
+        .locator("..");
       await trashRow.getByRole("button", { name: "Restore", exact: true }).click();
       await expect(trashedModel).toHaveCount(0);
 

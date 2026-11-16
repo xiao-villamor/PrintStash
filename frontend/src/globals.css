@@ -247,7 +247,7 @@
       align-items: center;
       gap: 8px;
       min-width: 0;
-      cursor: pointer;
+      cursor: var(--_control-cursor, var(--cursor-action));
     }
 
     select:not([multiple]):not([size]):disabled {

@@ -26,6 +26,13 @@ from app.modules.work.submission import submit
 from app.schemas.jobs import RegenerateMode
 
 
+@pytest.fixture(autouse=True)
+def enabled_preview_default(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings.frozen, "derivatives_previews_enabled", True)
+
+
 @pytest.fixture(params=GROUPS, ids=lambda item: item.definition.value)
 def producer_group(request):
     return request.param

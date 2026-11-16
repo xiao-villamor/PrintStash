@@ -7,11 +7,11 @@
  * undone after the fact.
  */
 import { test, expect } from "./helpers";
-import { clickModelAction, modelCard, uploadGcodeModel } from "./util";
+import { openModelPage, clickModelAction, uploadGcodeModel } from "./util";
 
 async function openShareDialog(page: import("@playwright/test").Page, name: string) {
   await page.goto("/"); // may be coming back from a public /share page
-  await modelCard(page, name).click();
+  await openModelPage(page, name);
   await expect(page.getByRole("heading", { name })).toBeVisible();
   await clickModelAction(page, "Share");
   await expect(page.getByRole("dialog")).toBeVisible();
@@ -67,7 +67,10 @@ test.describe("share links", () => {
 
     // Now a downloadable link.
     await openShareDialog(page, name);
-    await page.getByText("Allow file download").click();
+    await page
+      .getByRole("group", { name: "Allow file download" })
+      .getByRole("radio", { name: "On", exact: true })
+      .check();
     const downloadUrl = await createLinkAndGetUrl(page);
 
     await page.goto(downloadUrl);

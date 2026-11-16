@@ -3,11 +3,12 @@
 from collections.abc import Iterator
 
 import pytest
-from sqlalchemy import Engine, text, update
+from sqlalchemy import Engine, MetaData, event, text, update
 from sqlmodel import Session, create_engine
 
+from app.db import config_edit_contracts_v2 as legacy_contract
 from app.db.migrate import run_migrations
-from app.db.models import SystemConfig
+from app.db.models import SystemConfig, User
 from app.db.url import normalize_database_url
 from tests.containers import fresh_postgres_database
 from tests.factories import build_system_config
@@ -112,6 +113,7 @@ class TestConfigurationEditVersion:
                     "derivatives_gcode_enabled",
                     "derivatives_toolpath_enabled",
                     "derivatives_previews_enabled",
+                    "derivatives_previews_include_poles",
                 )
             ],
             *[
@@ -217,3 +219,42 @@ class TestConfigurationEditVersion:
             session.commit()
         with Session(config_db) as session:
             assert _version(session) == before
+
+
+class TestLegacyFreshContract:
+    def test_legacy_fresh_schema_counts_a_config_edit_once(self, tmp_path) -> None:
+        # Frozen v2 remains usable when an older installation creates its schema.
+        # Use private metadata so current v3 registration is never changed.
+        metadata = MetaData()
+        User.__table__.to_metadata(metadata)
+        SystemConfig.__table__.to_metadata(metadata)
+        event.listen(metadata, "after_create", legacy_contract._fresh_contract)
+        engine = create_engine(f"sqlite:///{tmp_path / 'legacy-config.sqlite'}")
+        try:
+            metadata.create_all(engine)
+            with Session(engine) as session:
+                build_system_config(session, currency="USD")
+                before = _version(session)
+                session.execute(
+                    text("UPDATE system_config SET currency='EUR' WHERE id=1")
+                )
+                session.commit()
+                assert _version(session) == before + 1
+        finally:
+            engine.dispose()
+
+    def test_legacy_partial_schema_omits_the_config_trigger(self, tmp_path) -> None:
+        metadata = MetaData()
+        event.listen(metadata, "after_create", legacy_contract._fresh_contract)
+        engine = create_engine(f"sqlite:///{tmp_path / 'partial-config.sqlite'}")
+        try:
+            metadata.create_all(engine)
+            with engine.connect() as connection:
+                assert (
+                    connection.execute(
+                        text("SELECT name FROM sqlite_master WHERE type='trigger'")
+                    ).all()
+                    == []
+                )
+        finally:
+            engine.dispose()

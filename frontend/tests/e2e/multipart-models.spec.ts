@@ -111,15 +111,14 @@ test.describe("multipart models", () => {
   }
 
   for (const width of [1280, 1440]) {
-    for (const { label, name, lines } of [
-      { label: "short", name: "Audit Benchy", lines: 1 },
+    for (const { label, name } of [
+      { label: "short", name: "Audit Benchy" },
       {
         label: "two-line",
         name: "An unusually long accessory bracket for the workshop",
-        lines: 2,
       },
     ]) {
-      test(`keeps a ${label} member title readable beside wrapped badges at ${width}px`, async ({
+      test(`keeps a ${label} member name readable with revision metadata at ${width}px`, async ({
         page,
       }) => {
         await page.setViewportSize({ width, height: 1000 });
@@ -139,19 +138,20 @@ test.describe("multipart models", () => {
           }),
         );
         await page.goto("/multipart-models/90");
-        const title = page.getByRole("heading", { name, level: 3, exact: true });
+        const member = page
+          .getByRole("region", { name: "Pieces to print" })
+          .getByRole("link", { name: `${name} 1 source file · 1 G-code revision`, exact: true });
+        const title = member.getByText(name, { exact: true });
         await expect(title).toBeVisible();
-        const dimensions = await title.evaluate((element) => ({
-          height: element.clientHeight,
-          lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
-        }));
-
-        expect(dimensions.height).toBeGreaterThanOrEqual(dimensions.lineHeight * lines);
-        const card = title.locator("xpath=ancestor::article");
-        const box = await card.boundingBox();
-        const metadata = await card.getByText("1 G-code revision", { exact: true }).boundingBox();
+        expect(await title.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+          true,
+        );
+        const box = await member.boundingBox();
+        const metadata = await member
+          .getByText("1 source file · 1 G-code revision", { exact: true })
+          .boundingBox();
         expect(metadata!.y + metadata!.height).toBeLessThanOrEqual(box!.y + box!.height);
-        expect(Math.abs(box!.width - box!.height)).toBeLessThanOrEqual(1);
+        expect(box!.x + box!.width).toBeLessThanOrEqual(width);
       });
     }
   }
@@ -248,7 +248,10 @@ test.describe("multipart models", () => {
     expect((await saveChanges.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect(saveBox).not.toBeNull();
     expect(guidesBox).not.toBeNull();
-    expect(saveBox!.y).toBeGreaterThanOrEqual(guidesBox!.y + guidesBox!.height);
+    // Save stays above the long editor; scrolling back reaches the same control.
+    expect(saveBox!.y).toBeLessThan(guidesBox!.y);
+    await saveChanges.scrollIntoViewIfNeeded();
+    await expect(saveChanges).toBeInViewport();
   });
 
   test("preserves Models while creating fixed parts with alternatives", async ({ page }) => {
@@ -388,8 +391,9 @@ test.describe("multipart models", () => {
     });
 
     await page.goto("/");
-    await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
-    await page.getByRole("button", { name: "New multipart set" }).first().click();
+    await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
+    await page.getByRole("main").getByRole("button", { name: "More", exact: true }).click();
+    await page.getByRole("menuitem", { name: "New multipart set", exact: true }).click();
     await page.getByLabel("Name", { exact: true }).fill("Desk organiser");
     await page.getByLabel("Description").fill("A complete desk organiser");
     await page.getByRole("button", { name: "Collection", exact: true }).click();
@@ -397,7 +401,7 @@ test.describe("multipart models", () => {
     await page.getByRole("button", { name: "Create multipart set" }).click();
 
     await expect(page.getByRole("heading", { name: "Desk organiser" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Edit multipart set" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add a part", exact: true })).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
     const horizontalOverflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -448,17 +452,15 @@ test.describe("multipart models", () => {
       const bounds = card.getBoundingClientRect();
       return { height: bounds.height, width: bounds.width };
     });
-    expect(Math.abs(cardDimensions.width - cardDimensions.height)).toBeLessThanOrEqual(1);
-    expect(cardDimensions.width).toBeLessThanOrEqual(288);
+    expect(cardDimensions.height).toBeGreaterThanOrEqual(44);
+    expect(cardDimensions.width).toBeLessThanOrEqual(390);
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.getByRole("button", { name: "Edit multipart set" })).toBeVisible();
     await expect(page.getByRole("link", { name: /Desk base/ })).toBeVisible();
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/?c=maraio&type=multipart");
     await expect(page.getByRole("heading", { name: "maraio" })).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Multipart sets only", exact: true }).first(),
-    ).toHaveAttribute("aria-pressed", "true");
+    await expect(page).toHaveURL((url) => url.searchParams.get("type") === "multipart");
     await expect(page.getByRole("link", { name: /Desk organiser/ })).toBeVisible();
     const setCardDimensions = await page
       .getByRole("link", { name: /Desk organiser/ })
@@ -466,18 +468,19 @@ test.describe("multipart models", () => {
         const bounds = card.getBoundingClientRect();
         return { height: bounds.height, width: bounds.width };
       });
-    expect(Math.abs(setCardDimensions.width - setCardDimensions.height)).toBeLessThanOrEqual(1);
+    expect(setCardDimensions.height).toBeGreaterThan(100);
     expect(setCardDimensions.width).toBeLessThanOrEqual(340);
-    await page.getByRole("button", { name: "Everything", exact: true }).first().click();
-    await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
+    await page.goto("/?c=maraio&type=all");
+    await expect(
+      page.getByRole("main").getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true }),
+    ).toBeVisible();
 
     await page.goto("/multipart-models/90");
-    await page.getByRole("button", { name: "Edit multipart set" }).click();
-    await page.getByRole("button", { name: "Delete multipart set" }).click();
+    await page.getByRole("button", { name: "Move to Trash", exact: true }).click();
     await expect(page.getByRole("dialog")).toContainText(
       "models, files, revisions and guides stay",
     );
-    await page.getByRole("button", { name: "Move to Trash" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Move to Trash" }).click();
     await expect(page).toHaveURL(
       (url) =>
         url.pathname === "/" &&
@@ -486,6 +489,8 @@ test.describe("multipart models", () => {
         url.searchParams.get("type") === "all" &&
         url.searchParams.get("sort") === "date-desc",
     );
-    await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
+    await expect(
+      page.getByRole("main").getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true }),
+    ).toBeVisible();
   });
 });

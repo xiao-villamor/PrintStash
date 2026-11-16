@@ -154,7 +154,7 @@ test.describe("Library responsive layout", () => {
   test("keeps collection tag entry in the metadata band", async ({ page }) => {
     await page.setViewportSize({ width: 824, height: 1000 });
     await page.goto("/?c=maraio");
-    const tags = page.getByRole("button", { name: "+ Add tag", exact: true });
+    const tags = page.getByRole("button", { name: "Add tag", exact: true });
     const description = page.getByRole("button", {
       name: "Add a description for this collection",
       exact: true,
@@ -238,8 +238,10 @@ test.describe("Library responsive layout", () => {
       const actions = page.getByRole("main").getByRole("group", { name: "Library tools" });
       const toolbar = actions.locator("..");
       await expect(toolbar.getByRole("button", { name: "Filters", exact: true })).toBeVisible();
-      await expect(actions.getByRole("link", { name: "Similar models" })).toBeVisible();
-      await expect(actions.getByRole("button", { name: "New collection" })).toBeVisible();
+      await expect(toolbar.getByRole("button", { name: "More", exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("main").getByRole("button", { name: "New collection", exact: true }),
+      ).toBeVisible();
       await expect(actions.getByRole("button", { name: "Select", exact: true })).toBeVisible();
       await expect(
         page.getByRole("checkbox", { name: "Select Responsive bracket 1", exact: true }),
@@ -261,8 +263,8 @@ test.describe("Library responsive layout", () => {
     const filters = actions.locator("..").getByRole("button", { name: "Filters", exact: true });
     const boxes = await Promise.all([
       filters.boundingBox(),
-      actions.getByRole("link", { name: "Similar models" }).boundingBox(),
-      actions.getByRole("button", { name: "New collection" }).boundingBox(),
+      actions.locator("..").getByRole("button", { name: "More", exact: true }).boundingBox(),
+      actions.getByRole("button", { name: "Select", exact: true }).boundingBox(),
     ]);
     expect(boxes.every((box) => box !== null)).toBe(true);
     expect(new Set(boxes.map((box) => Math.round(box!.y))).size).toBe(1);
@@ -283,10 +285,12 @@ test.describe("Library responsive layout", () => {
     await expect(main.getByRole("button", { name: "Sort models", exact: true })).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(main.getByRole("button", { name: "More", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("menuitem", { name: "Similar models", exact: true })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(main.getByRole("button", { name: "More", exact: true })).toBeFocused();
     await page.keyboard.press("Tab");
-    await expect(main.getByRole("link", { name: "Similar models", exact: true })).toBeFocused();
-    await page.keyboard.press("Tab");
-    await expect(main.getByRole("button", { name: "New collection", exact: true })).toBeFocused();
+    await expect(main.getByRole("button", { name: "Select", exact: true })).toBeFocused();
   });
 
   test("selects directly from a card using the keyboard on a phone", async ({ page }, testInfo) => {
@@ -316,7 +320,7 @@ test.describe("Library responsive layout", () => {
     await page.goto("/");
 
     await page
-      .getByRole("group", { name: "Library tools" })
+      .getByRole("main")
       .getByRole("button", { name: "New collection", exact: true })
       .click();
 
@@ -331,10 +335,8 @@ test.describe("Library responsive layout", () => {
     await page.setViewportSize({ width: 390, height: 900 });
     await page.goto("/");
 
-    await page
-      .getByRole("group", { name: "Library tools" })
-      .getByRole("link", { name: "Similar models", exact: true })
-      .click();
+    await page.getByRole("main").getByRole("button", { name: "More", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Similar models", exact: true }).click();
 
     await expect(page).toHaveURL(/\/library\/similar$/);
   });
@@ -353,7 +355,7 @@ test.describe("Library responsive layout", () => {
         .getByRole("status", { name: "Loading...", exact: true });
       await expect(loading).toBeVisible();
       const reserved = await loading.evaluate(
-        (element) => element.firstElementChild!.firstElementChild!.getBoundingClientRect().width,
+        (element) => element.querySelector(".library-model-card")!.getBoundingClientRect().width,
       );
       pending.resolve();
       await expect(page.getByRole("article")).toHaveCount(8);
@@ -421,7 +423,7 @@ test.describe("Collection header", () => {
     const header = page.locator(".library-collection-header");
     await expect(header.getByText("Base in PETG for UV resistance.")).toBeVisible();
     expect((await header.locator(".collection-header-tag").first().boundingBox())!.height).toBe(28);
-    await header.getByRole("button", { name: "+ Add tag", exact: true }).click();
+    await header.getByRole("button", { name: "Add tag", exact: true }).click();
     await header.getByRole("textbox", { name: "New tag" }).fill("outdoor");
     await header.getByRole("textbox", { name: "New tag" }).press("Enter");
     await expect(header.getByRole("button", { name: "Remove tag outdoor" })).toBeVisible();
@@ -439,9 +441,9 @@ test.describe("Collection header", () => {
     const filters = toolbar.getByRole("button", { name: /^Filters(?: \d+)?$/ });
     const status = toolbar.getByRole("radiogroup", { name: "Filter models by status" });
     await expect(filters).toBeVisible();
-    await expect(filters.locator("svg")).toHaveCount(0);
-    await expect(status.getByRole("radio", { name: "No G-code" })).toBeDisabled();
-    await expect(toolbar.getByRole("button", { name: "More", exact: true })).toBeHidden();
+    await expect(filters.locator("svg")).toHaveCount(1);
+    await expect(status.getByRole("radio", { name: /^Needs test/ })).toBeEnabled();
+    await expect(toolbar.getByRole("button", { name: "More", exact: true })).toBeVisible();
     const boxes = await Promise.all(
       [
         toolbar.getByRole("heading", { name: "Models" }),

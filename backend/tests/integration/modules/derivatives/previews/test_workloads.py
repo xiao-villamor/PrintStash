@@ -14,6 +14,13 @@ from tests.factories.geometry import three_mf
 from tests.paths import BACKEND_DIR
 
 
+@pytest.fixture(autouse=True)
+def enabled_preview_default(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings.frozen, "derivatives_previews_enabled", True)
+
+
 @pytest.fixture(params=["stl-20480", "stl-81920", "stl-327680", "step", "3mf"])
 def workload(request):
     if request.param == "step":
@@ -50,7 +57,7 @@ class TestPreviewWorkloads:
             row.failure_reason
         )
         manifest = PreviewManifest.model_validate_json(row.output_json)
-        assert len(manifest.views) >= 5
+        assert len(manifest.views) == 4
         print(
             "PREVIEW_COST="
             + json.dumps(

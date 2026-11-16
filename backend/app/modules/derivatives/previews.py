@@ -41,7 +41,7 @@ from app.modules.storage.storage_ownership import adopt_publication, prepare_str
 from app.modules.work.contracts import JobExecution
 from app.runtime.native_admission import AdmissionTooLarge
 
-from . import records
+from . import policy, records
 from .producers import Outcome, _announced, _begin, _fail
 
 
@@ -56,6 +56,8 @@ def _derive(
         return Outcome({})
     file, attempts = begun
     attempt = attempts[DerivativeKind.PREVIEWS]
+    with get_session_factory().scoped_session() as session:
+        include_poles = policy.preview_poles(session)
     # VAULT_MESH_MAX_LOAD_MB: the same source-size ceiling as every mesh path.
     if file.size_bytes > settings.mesh_max_load_mb * 1024 * 1024:
         _fail(attempt, "resource_limit", deterministic=True)
@@ -111,6 +113,7 @@ def _derive(
                     "file_type": file.file_type.value,
                     "expected_sha256": file.sha256,
                     "recipe": attempt.recipe,
+                    "include_poles": include_poles,
                 },
                 workspace=prepared.directory,
                 sources=(MeshSource(source, file.file_type.value),),

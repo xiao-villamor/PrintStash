@@ -11,6 +11,13 @@ BEFORE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 AFTER = datetime(2026, 1, 2, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def enabled_preview_default(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings.frozen, "derivatives_previews_enabled", True)
+
+
 class TestPreviewActivity:
     def test_counts_work_before_jobs_exist(self, db_session, make_model, make_file):
         make_file(make_model(), filename="part.stl")
@@ -126,9 +133,7 @@ class TestPreviewActivity:
 
         assert preview_activity(db_session).remaining == 2
 
-    def test_excludes_ineligible_files(
-        self, db_session, make_model, make_file
-    ):
+    def test_excludes_ineligible_files(self, db_session, make_model, make_file):
         make_file(make_model(), filename="part.stl", trashed=True)
         make_file(make_model(), filename="part.stl", sha256=SENTINEL_FILE_HASH)
 

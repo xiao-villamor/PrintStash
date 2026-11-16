@@ -5156,10 +5156,10 @@
   "modelCover.reviewFailed": "The latest Model could not be loaded.",
   "modelCover.applyReviewed": "Apply my cover to this version",
   "modelPreview.cover": "Cover",
-  "modelPreview.orbit0": "Orbit 1 · −35°",
-  "modelPreview.orbit1": "Orbit 2 · 55°",
-  "modelPreview.orbit2": "Orbit 3 · 145°",
-  "modelPreview.orbit3": "Orbit 4 · 235°",
+  "modelPreview.orbit0": "Oblique 1",
+  "modelPreview.orbit1": "Oblique 2",
+  "modelPreview.orbit2": "Oblique 3",
+  "modelPreview.orbit3": "Oblique 4",
   "modelPreview.top": "Top",
   "modelPreview.bottom": "Bottom",
   "modelPreview.face": "Broad face",
@@ -5235,5 +5235,9 @@
   "library.filters.noValues": "No values in this collection.",
   "library.filters.instant": "Changes apply immediately",
   "library.menu.addFavorite": "Add to favorites",
-  "library.menu.removeFavorite": "Remove from favorites"
+  "library.menu.removeFavorite": "Remove from favorites",
+  "One thumbnail": "One thumbnail",
+  "Oblique views": "Oblique views",
+  "Oblique views + top and bottom": "Oblique views + top and bottom",
+  "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background."
 }

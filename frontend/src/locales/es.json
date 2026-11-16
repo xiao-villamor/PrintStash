@@ -5156,10 +5156,10 @@
   "modelCover.reviewFailed": "No se pudo cargar la versión más reciente del modelo.",
   "modelCover.applyReviewed": "Aplicar mi portada a esta versión",
   "modelPreview.cover": "Portada",
-  "modelPreview.orbit0": "Órbita 1 · −35°",
-  "modelPreview.orbit1": "Órbita 2 · 55°",
-  "modelPreview.orbit2": "Órbita 3 · 145°",
-  "modelPreview.orbit3": "Órbita 4 · 235°",
+  "modelPreview.orbit0": "Oblicua 1",
+  "modelPreview.orbit1": "Oblicua 2",
+  "modelPreview.orbit2": "Oblicua 3",
+  "modelPreview.orbit3": "Oblicua 4",
   "modelPreview.top": "Superior",
   "modelPreview.bottom": "Inferior",
   "modelPreview.face": "Cara amplia",
@@ -5235,5 +5235,9 @@
   "library.filters.noValues": "No hay valores en esta colección.",
   "library.filters.instant": "Los cambios se aplican al instante",
   "library.menu.addFavorite": "Añadir a favoritos",
-  "library.menu.removeFavorite": "Quitar de favoritos"
+  "library.menu.removeFavorite": "Quitar de favoritos",
+  "One thumbnail": "Una miniatura",
+  "Oblique views": "Vistas oblicuas",
+  "Oblique views + top and bottom": "Vistas oblicuas + superior e inferior",
+  "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Empieza con una miniatura para importar más rápido. Activa cuatro vistas oblicuas y, opcionalmente, las vistas superior e inferior. Los modelos existentes se actualizan en segundo plano."
 }

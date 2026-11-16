@@ -1,4 +1,4 @@
-"""Camera selection is surface weighted, source relative, and deterministic."""
+"""Every shape uses the same source-relative oblique cameras; poles are optional."""
 
 import numpy as np
 import pytest
@@ -27,16 +27,30 @@ class TestCandidates:
         profile, views = candidates(mesh, max_faces=LIMIT)
         assert profile == "orbit"
         assert [v.azimuth_degrees for v in views[:4]] == [-35, 55, 145, 235]
-        assert [v.role for v in views] == ["orbit"] * 4 + ["top", "bottom"]
+        assert [v.role for v in views] == ["orbit"] * 4
 
     def test_frames_a_rotated_plate(self):
         mesh = trimesh.creation.box(extents=(30, 20, 1))
         rotation = trimesh.transformations.rotation_matrix(0.8, (1, 2, 3))
         mesh.apply_transform(rotation)
         profile, views = candidates(mesh, max_faces=LIMIT)
-        assert profile == "planar"
-        normal = rotation[:3, 2]
-        assert abs(np.dot(np.asarray(views[0].rotation)[2], normal)) > 0.9
+        assert profile == "orbit"
+        assert [v.id for v in views] == [f"orbit-{i}" for i in range(4)]
+
+    @pytest.mark.parametrize("extents", [(30, 20, 1), (10, 12, 14)])
+    def test_adds_poles_only_when_requested(self, extents):
+        profile, views = candidates(
+            trimesh.creation.box(extents=extents), max_faces=LIMIT, include_poles=True
+        )
+        assert profile == "orbit"
+        assert [view.id for view in views] == [
+            "orbit-0",
+            "orbit-1",
+            "orbit-2",
+            "orbit-3",
+            "top",
+            "bottom",
+        ]
 
     def test_distinguishes_a_rod(self):
         profile, _ = candidates(
@@ -54,7 +68,7 @@ class TestCandidates:
         _, views = candidates(
             trimesh.creation.box(extents=(20, 20, 1)), max_faces=LIMIT
         )
-        assert [v.role for v in views] == ["face", "reverse", "edge", "top", "bottom"]
+        assert [v.role for v in views] == ["orbit"] * 4
 
 
 class TestRenderViews:
@@ -74,7 +88,7 @@ class TestRenderViews:
         manifest, images = render_views(mesh, source_sha256="a" * 64, max_faces=LIMIT)
         assert manifest.source_sha256 == "a" * 64
         assert manifest.center == (10, 20, 30)
-        assert len(images) == len(manifest.views) == 6
+        assert len(images) == len(manifest.views) == 4
         for view, image in zip(manifest.views, images, strict=True):
             assert view.width == 480
             assert view.height == 360

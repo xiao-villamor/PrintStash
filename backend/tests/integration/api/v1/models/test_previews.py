@@ -12,12 +12,20 @@ from app.modules.media.preview_views import render_views
 from app.modules.storage.storage_backend.runtime import get_backend
 
 
+@pytest.fixture(autouse=True)
+def enabled_preview_default(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings.frozen, "derivatives_previews_enabled", True)
+
+
 @pytest.fixture(scope="module")
 def rendered():
     return render_views(
         trimesh.creation.box(extents=(10, 12, 14)),
         source_sha256="a" * 64,
         max_faces=2_000_000,
+        recipe=3,
     )
 
 

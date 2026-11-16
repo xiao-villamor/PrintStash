@@ -287,6 +287,21 @@ describe("useOverlayBehavior", () => {
     expect(document.body.style.overflow).toBe("");
   });
 
+  it("returns from an initially focused field to the opener", () => {
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    opener.focus();
+    const view = render(
+      <Overlay open onClose={() => {}}>
+        <input aria-label="Profile name" data-autofocus />
+      </Overlay>,
+    );
+    expect(screen.getByRole("textbox", { name: "Profile name" })).toHaveFocus();
+    view.rerender(<Overlay open={false} onClose={() => {}} />);
+    expect(opener).toHaveFocus();
+    opener.remove();
+  });
+
   it("returns focus to whatever opened it", () => {
     render(<button type="button">Opener</button>);
     const opener = screen.getByRole("button", { name: "Opener" });
@@ -373,6 +388,22 @@ describe("useOverlayBehavior", () => {
 
     expect(event.defaultPrevented).toBe(false);
     expect(middle).toHaveFocus();
+  });
+
+  it.each([false, true])("recaptures escaped focus when Shift is %s", (shiftKey) => {
+    render(
+      <>
+        <button type="button">Outside</button>
+        <Overlay open onClose={() => {}}>
+          <button type="button">First</button>
+          <button type="button">Last</button>
+        </Overlay>
+      </>,
+    );
+    screen.getByRole("button", { name: "Outside" }).focus();
+    const event = press("Tab", { shiftKey });
+    expect(event.defaultPrevented).toBe(true);
+    expect(screen.getByRole("button", { name: shiftKey ? "Last" : "First" })).toHaveFocus();
   });
 
   it("swallows Tab when the panel has nothing focusable", () => {

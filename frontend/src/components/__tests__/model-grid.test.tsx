@@ -29,7 +29,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryStartupProvider } from "@/lib/library-startup-provider";
 import { ModelBrowser } from "@/components/model-grid";
 import { MODEL_DND_MIME, captureModelDrag } from "@/lib/model-dnd";
-import { queryKeys } from "@/lib/query-client";
+import { queryKeys, refreshVaultAfterIngest } from "@/lib/query-client";
 import { clearLogin } from "@/lib/auth-store";
 import type {
   CollectionRead,
@@ -2581,7 +2581,8 @@ describe("ModelBrowser", () => {
         await screen.findByRole("button", { name: "Rename Parts" }, { timeout: 3000 }),
       );
       await user.clear(screen.getByRole("textbox", { name: "Collection name" }));
-      await user.type(screen.getByRole("textbox", { name: "Collection name" }), "Spares{Enter}");
+      await user.paste("Spares");
+      await user.keyboard("{Enter}");
       await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
       await user.click(screen.getByRole("button", { name: "Open multipart location" }));
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -2595,7 +2596,8 @@ describe("ModelBrowser", () => {
       expect(name).toBeEnabled();
       expect(name).toHaveValue("Parts");
       await user.clear(name);
-      await user.type(name, "New draft{Enter}");
+      await user.paste("New draft");
+      await user.keyboard("{Enter}");
       await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(2));
       await act(async () => {
         pending.resolve(json({ detail: "collection_already_exists" }, 409));
@@ -2928,7 +2930,7 @@ describe("ModelBrowser", () => {
       });
       await selectOneModel(user);
 
-      await user.click(screen.getByRole("button", { name: "Tag" }));
+      await user.click(await screen.findByRole("button", { name: "Tag" }));
       const dialog = await screen.findByRole("dialog");
       await user.type(within(dialog).getAllByRole("combobox")[0], "functional{Enter}");
       await user.click(within(dialog).getByRole("button", { name: /Apply/ }));
@@ -3734,7 +3736,7 @@ describe("ModelBrowser", () => {
     }
 
     it.each(["first visit", "new destination"] as const)(
-      "recovers a rejected first page through explicit refresh (%s)",
+      "recovers a rejected first page automatically (%s)",
       async (visit) => {
         const user = userEvent.setup();
         const rejected = () => json({ detail: "browse_refresh_required" }, 409);
@@ -3756,12 +3758,18 @@ describe("ModelBrowser", () => {
             }),
           );
         }
-        const refresh = await screen.findByRole("button", { name: "Refresh library" });
-        expect(refresh).toBeEnabled();
+        await waitFor(() =>
+          expect(
+            app
+              .requests()
+              .filter(
+                (call) => new URL(call.url, "http://test").pathname === "/api/v1/models/browse",
+              ).length,
+          ).toBeGreaterThanOrEqual(moving ? 3 : 2),
+        );
+        expect(screen.queryByRole("button", { name: "Refresh library" })).toBeNull();
         expect(mainHas("Current first page")).not.toBeInTheDocument();
         app.route({ "GET /api/v1/models/browse": modelPage("Current first page") });
-
-        await user.click(refresh);
 
         expect(
           await within(screen.getByRole("main")).findByText("Current first page"),
@@ -3788,24 +3796,85 @@ describe("ModelBrowser", () => {
       expect(await within(screen.getByRole("main")).findByText("Current model")).toBeVisible();
     });
 
-    it("shows progress for an explicit refresh", async () => {
-      const user = userEvent.setup();
+    it.each([
+      { label: "a fresh replacement", conflicts: 0 },
+      { label: "a conflicting replacement", conflicts: 2 },
+    ])(
+      "recovers an interrupted import refresh with $label",
+      async ({ conflicts }) => {
+        const pending = Promise.withResolvers<Response>();
+        const app = renderVault({
+          routes: { "GET /api/v1/models/browse/revision": changedRevision },
+        });
+        await changeNoticed(app);
+        app.route({ "GET /api/v1/models/browse": () => pending.promise });
+        await refreshStarted(app);
+        let reads = 0;
+        app.route({
+          "GET /api/v1/models/browse": () =>
+            reads++ < conflicts
+              ? json({ detail: "browse_refresh_required" }, 409)
+              : modelPage("Imported bracket"),
+        });
+
+        await act(async () => {
+          await refreshVaultAfterIngest();
+          pending.resolve(modelPage("Outdated bracket"));
+        });
+
+        expect(
+          await within(screen.getByRole("main")).findByText(
+            "Imported bracket",
+            {},
+            { timeout: 6000 },
+          ),
+        ).toBeVisible();
+        expect(mainHas("Outdated bracket")).not.toBeInTheDocument();
+        expect(screen.queryByText("This request could not be completed. Try again.")).toBeNull();
+        expect(
+          screen.queryByText(
+            "Your previous reading position could not be restored. Showing the start of this view.",
+          ),
+        ).toBeNull();
+        expect(screen.queryByRole("button", { name: "Refresh library" })).toBeNull();
+      },
+      10_000,
+    );
+
+    it("recovers when archive completion interrupts a folder refresh", async () => {
       const pending = Promise.withResolvers<Response>();
       const app = renderVault({
-        routes: {
-          "GET /api/v1/models/browse": () => json({ detail: "browse_refresh_required" }, 409),
-          "GET /api/v1/models/browse/revision": changedRevision,
-        },
+        models: [aModelListItem({ name: "Original model" })],
+        routes: { "GET /api/v1/models/browse/revision": changedRevision },
       });
-      const refresh = await screen.findByRole("button", { name: "Refresh library" });
-      app.route({ "GET /api/v1/models/browse": () => pending.promise });
+      await changeNoticed(app);
+      app.route({
+        "GET /api/v1/models/browse": modelPage("Imported bracket"),
+        "GET /api/v1/collections/children": () => pending.promise,
+      });
+      await waitFor(() =>
+        expect(
+          app.requests().filter((call) => call.url.includes("/collections/children")),
+        ).toHaveLength(2),
+      );
+      app.route({ "GET /api/v1/collections/children": folderPage("Imported folder") });
 
-      await user.click(refresh);
+      await act(async () => {
+        await refreshVaultAfterIngest();
+        pending.resolve(folderPage("Outdated folder"));
+      });
 
-      expect(screen.getByRole("button", { name: "Refresh library" })).toBeDisabled();
-      pending.resolve(modelPage("Current model"));
-      expect(await within(screen.getByRole("main")).findByText("Current model")).toBeVisible();
-    });
+      expect(
+        await within(screen.getByRole("main")).findByText(
+          "Imported bracket",
+          {},
+          { timeout: 6000 },
+        ),
+      ).toBeVisible();
+      expect(mainHas("Imported folder")).toBeVisible();
+      expect(mainHas("Outdated folder")).not.toBeInTheDocument();
+      expect(screen.queryByText("This request could not be completed. Try again.")).toBeNull();
+    }, 10_000);
 
     it("waits for refreshed folders before replacing models", async () => {
       const pending = Promise.withResolvers<Response>();
@@ -3959,13 +4028,19 @@ describe("ModelBrowser", () => {
         "GET /api/v1/models/browse": modelPage("Current model"),
         "GET /api/v1/collections/search": folderPage("Gear current"),
       });
-      expect(await within(screen.getByRole("main")).findByText("Gear current")).toBeVisible();
+      expect(await within(screen.getByRole("main")).findByText("Current model")).toBeVisible();
+      // Search keeps the collection strip hidden, but its active query must
+      // still refresh with the Models instead of retaining stale folder data.
+      await waitFor(() =>
+        expect(app.client.getQueryData(queryKeys.collectionSearch("gear", "view"))).toMatchObject({
+          pages: [{ items: [{ name: "Gear current" }] }],
+        }),
+      );
       expect(mainHas("Gear original")).not.toBeInTheDocument();
     });
 
-    it("restarts refreshed folder pagination", async () => {
+    it("restarts refreshed folder pagination automatically", async () => {
       const nextPage = observePagination();
-      const user = userEvent.setup();
       const app = renderVault({
         models: [aModelListItem({ name: "Original model" })],
         routes: {
@@ -3989,8 +4064,8 @@ describe("ModelBrowser", () => {
         "GET /api/v1/models/browse": modelPage("Current model"),
         "GET /api/v1/collections/children": folderPage("Fresh first"),
       });
-      await user.click(screen.getByRole("button", { name: "Refresh library" }));
       expect(await within(screen.getByRole("main")).findByText("Fresh first")).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Refresh library" })).toBeNull();
       expect(mainHas("Second folder")).not.toBeInTheDocument();
       const childrenReads = app
         .requests()
@@ -4205,6 +4280,62 @@ describe("ModelBrowser", () => {
   });
 
   describe("Library authority", () => {
+    it.each([0, 1])(
+      "refreshes a paged Model view automatically (%s conflicts)",
+      async (conflicts) => {
+        const nextPage = observePagination();
+        const revision = Promise.withResolvers<Response>();
+        let changed = false;
+        let remainingConflicts = conflicts;
+        renderVault({
+          routes: {
+            "GET /api/v1/models/browse/revision": () => revision.promise,
+            "GET /api/v1/models/browse": (url) => {
+              const continuation = url.includes("cursor=");
+              if (changed && continuation && remainingConflicts > 0) {
+                remainingConflicts--;
+                return json({ detail: "browse_refresh_required" }, 409);
+              }
+              return json({
+                items: [
+                  {
+                    kind: "model",
+                    model: aModelListItem({
+                      id: continuation ? 2 : 1,
+                      name: `${changed ? "Current" : "Original"} ${continuation ? "second" : "first"}`,
+                    }),
+                  },
+                ],
+                next_cursor: continuation ? null : changed ? "new" : "old",
+                total: 2,
+                browse_revision: changed ? "r2" : "r1",
+                authorization_revision: "a1",
+              });
+            },
+          },
+        });
+        await screen.findByText("Original first");
+        await nextPage();
+        await screen.findByText("Original second");
+
+        changed = true;
+        await act(async () => {
+          revision.resolve(json({ browse_revision: "r2", authorization_revision: "a1" }));
+        });
+
+        expect(await screen.findByText("Current second", {}, { timeout: 7000 })).toBeVisible();
+        expect(screen.getByText("Current first")).toBeVisible();
+        expect(screen.queryByText("Original second")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Refresh library" })).toBeNull();
+        expect(
+          screen.queryByText(
+            "Your previous reading position could not be restored. Showing the start of this view.",
+          ),
+        ).toBeNull();
+      },
+      10_000,
+    );
+
     it("keeps displayed rows until a change settles on its own", async () => {
       const app = renderVault({
         models: [aModelListItem({ name: "Original bracket" })],
@@ -4243,34 +4374,14 @@ describe("ModelBrowser", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("keeps manual refresh available after a conflict", async () => {
+    it("defers automatic refresh until selection ends", async () => {
       const user = userEvent.setup();
+      const revision = Promise.withResolvers<Response>();
       const app = renderVault({
         models: [aModelListItem({ name: "Original bracket" })],
-        routes: {
-          "GET /api/v1/models/browse/revision": json({
-            browse_revision: "r2",
-            authorization_revision: "a1",
-          }),
-        },
+        routes: { "GET /api/v1/models/browse/revision": () => revision.promise },
       });
       await user.click(await screen.findByRole("checkbox", { name: "Select Original bracket" }));
-      app.route({
-        "GET /api/v1/models/browse": json({ detail: "browse_refresh_required" }, 409),
-      });
-
-      await user.click(await screen.findByRole("button", { name: "Refresh library" }));
-
-      await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Refresh library" })).toBeEnabled(),
-      );
-      expect(screen.getByText("Original bracket")).toBeVisible();
-      expect(screen.queryByText("This request could not be completed. Try again.")).toBeNull();
-      expect(
-        screen.queryByText(
-          "Your previous reading position could not be restored. Showing the start of this view.",
-        ),
-      ).toBeNull();
       app.route({
         "GET /api/v1/models/browse": json({
           items: [{ kind: "model", model: aModelListItem({ name: "Current bracket" }) }],
@@ -4280,8 +4391,20 @@ describe("ModelBrowser", () => {
           authorization_revision: "a1",
         }),
       });
-      await user.click(screen.getByRole("button", { name: "Refresh library" }));
+      await act(async () => {
+        revision.resolve(json({ browse_revision: "r2", authorization_revision: "a1" }));
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      });
+      expect(screen.getByRole("checkbox", { name: "Select Original bracket" })).toBeChecked();
+      expect(screen.queryByText("Current bracket")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Refresh library" })).toBeNull();
+
+      await user.click(screen.getByRole("checkbox", { name: "Select Original bracket" }));
+
       expect(await screen.findByText("Current bracket")).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Refresh library" })).toBeNull();
     });
 
     it("retries a failed library refresh", async () => {
@@ -4295,14 +4418,12 @@ describe("ModelBrowser", () => {
           }),
         },
       });
-      await user.click(await screen.findByRole("checkbox", { name: "Select Original bracket" }));
+      await screen.findByText("Original bracket");
       app.route({
         "GET /api/v1/models/browse": json({ detail: "unavailable" }, 503),
       });
 
-      await user.click(await screen.findByRole("button", { name: "Refresh library" }));
-
-      expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();
+      expect(await screen.findByRole("button", { name: "Retry" }, { timeout: 3000 })).toBeVisible();
       expect(screen.getByText("Original bracket")).toBeVisible();
       app.route({
         "GET /api/v1/models/browse": json({
@@ -4316,11 +4437,10 @@ describe("ModelBrowser", () => {
       await user.click(screen.getByRole("button", { name: "Retry" }));
       expect(await screen.findByText("Current bracket")).toBeVisible();
       expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-    });
+    }, 10_000);
 
-    it("restarts a rejected continuation from the first page", async () => {
+    it("restarts a rejected continuation automatically", async () => {
       const nextPage = observePagination();
-      const user = userEvent.setup();
       const app = renderVault({
         routes: {
           "GET /api/v1/models/browse": (url) =>
@@ -4336,7 +4456,7 @@ describe("ModelBrowser", () => {
         },
       });
       await nextPage();
-      await screen.findByText("The library has changed. Refresh before loading more results.");
+      expect(screen.queryByRole("button", { name: "Refresh library" })).toBeNull();
       expect(screen.getByText("Original bracket")).toBeVisible();
       app.route({
         "GET /api/v1/models/browse": json({
@@ -4347,8 +4467,6 @@ describe("ModelBrowser", () => {
           authorization_revision: "a1",
         }),
       });
-
-      await user.click(screen.getByRole("button", { name: "Refresh library" }));
 
       expect(await screen.findByText("Current bracket")).toBeVisible();
       const reads = app
@@ -4489,7 +4607,7 @@ describe("ModelBrowser", () => {
       await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
-      await user.click(screen.getByRole("button", { name: "Tag" }));
+      await user.click(await screen.findByRole("button", { name: "Tag" }));
       const editor = await screen.findByRole("dialog");
       await user.type(within(editor).getAllByRole("combobox")[0], "functional{Enter}");
 
@@ -4529,7 +4647,7 @@ describe("ModelBrowser", () => {
       await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
-      await user.click(screen.getByRole("button", { name: "Tag" }));
+      await user.click(await screen.findByRole("button", { name: "Tag" }));
       const dialog = await screen.findByRole("dialog");
       await user.type(within(dialog).getAllByRole("combobox")[0], "functional{Enter}");
 
@@ -4557,7 +4675,7 @@ describe("ModelBrowser", () => {
       await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
-      await user.click(screen.getByRole("button", { name: "Tag" }));
+      await user.click(await screen.findByRole("button", { name: "Tag" }));
       const dialog = await screen.findByRole("dialog");
       await user.type(within(dialog).getAllByRole("combobox")[0], "functional{Enter}");
       await user.click(within(dialog).getByRole("button", { name: /Apply/ }));

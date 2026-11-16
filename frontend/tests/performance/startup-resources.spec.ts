@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
-import { scrollToEnd } from "../e2e/_scroll";
+import { assertBoundedFirstRender, visitDenseModels } from "./_dense-library";
 
 declare global {
   interface Window {
@@ -100,7 +100,7 @@ test.describe("instrumented startup resources", () => {
       };
     }
     await page.goto("/?c=collection-01");
-    await expect(page.locator("main article")).toHaveCount(24);
+    await assertBoundedFirstRender(page);
     await page.waitForFunction(() => {
       const images = [...document.querySelectorAll("main article img")].filter((image) => {
         const bounds = image.getBoundingClientRect();
@@ -127,12 +127,7 @@ test.describe("instrumented startup resources", () => {
     expect(first.commits).toBeGreaterThan(0);
     expect(first.cpu.ScriptDuration).toBeGreaterThan(0);
     expect(first.blobBytes).toBeGreaterThan(0);
-    while (await page.locator("[data-load-more-sentinel]").count()) {
-      const count = await page.locator("main article").count();
-      await scrollToEnd(page);
-      await expect.poll(() => page.locator("main article").count()).toBeGreaterThan(count);
-    }
-    await expect(page.locator("main article")).toHaveCount(90);
+    await visitDenseModels(page);
     await page.waitForLoadState("networkidle");
     const expanded = await snapshot();
     await page.getByRole("button", { name: "My workspace", exact: true }).click();

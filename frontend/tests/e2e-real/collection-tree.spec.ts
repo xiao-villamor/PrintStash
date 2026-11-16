@@ -41,11 +41,12 @@ test.describe("collection tree", () => {
       });
       await page.goto("/");
       const sidebar = page.locator("aside");
-      const parentRow = sidebar.getByRole("button", { name: parent, exact: true });
-      const childRow = sidebar.getByRole("button", { name: child, exact: true });
+      const parentRow = sidebar.getByRole("treeitem", { name: parent, exact: true });
+      const childRow = sidebar.getByRole("treeitem", { name: child, exact: true });
       await expect(parentRow).toBeVisible();
       await expect(childRow).toHaveCount(0);
-      await parentRow.locator("xpath=preceding-sibling::button[@aria-label='Expand']").click();
+      await parentRow.focus();
+      await parentRow.press("ArrowRight");
       await expect(childRow).toBeVisible();
 
       await openLibraryTools(page);

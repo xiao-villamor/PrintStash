@@ -33,7 +33,10 @@ from tests.fakes.job_engine_process import (
 
 
 def _upload_disabled(client):
-    response = client.put("/api/v1/config", json={"derivatives_mesh_enabled": False})
+    response = client.put(
+        "/api/v1/config",
+        json={"derivatives_mesh_enabled": False, "derivatives_previews_enabled": True},
+    )
     assert response.status_code == 200, response.text
     uploaded = client.post(
         "/api/v1/ingest/model", files={"file": ("policy.stl", _STL, "application/sla")}

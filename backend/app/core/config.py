@@ -268,7 +268,8 @@ class Settings(BaseSettings):
     derivatives_gcode_enabled: bool = True
     derivatives_toolpath_enabled: bool = True
     # Optional multi-angle card views; they follow the primary cover.
-    derivatives_previews_enabled: bool = True
+    derivatives_previews_enabled: bool = False
+    derivatives_previews_include_poles: bool = False
 
     derivative_max_attempts: int = Field(default=5, ge=1, le=100)
     derivative_backoff_seconds: int = Field(default=30, ge=1, le=86400)

@@ -154,7 +154,7 @@ test.describe("Library readiness", () => {
       .getByRole("dialog", { name: "Collections", exact: true })
       .waitFor({ state: "hidden" });
     await page.keyboard.press("/");
-    await page.locator("header").getByRole("searchbox", { name: "Search library" }).fill("skadis");
+    await page.getByRole("searchbox", { name: "Search library" }).fill("skadis");
     await expect(page).toHaveURL(/q=skadis/);
     await page.keyboard.press("Escape");
     // The compact search owns the full header while focused, as in the reference.
@@ -413,8 +413,8 @@ test.describe("Library readiness", () => {
     });
     try {
       await page.goto("/?c=maraio", { waitUntil: "domcontentloaded" });
-      await expect.poll(() => requests.length).toBe(2);
-      const visible = await page.locator("main article").evaluateAll((cards) =>
+      await expect.poll(() => requests.length).toBe(6);
+      const visible = await page.locator("main .library-model-card").evaluateAll((cards) =>
         cards
           .filter((card) => {
             const rect = card.querySelector("[data-library-thumbnail]")?.getBoundingClientRect();

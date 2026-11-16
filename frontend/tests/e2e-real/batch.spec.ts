@@ -8,7 +8,7 @@
  * leave a library in a state nobody asked for and no way to tell which half went.
  */
 import { test, expect, authBundleFor, authedContext } from "./helpers";
-import { createCollectionViaVault, modelCard, uploadModel } from "./util";
+import { openModelPage, createCollectionViaVault, modelCard, uploadModel } from "./util";
 
 // Batch move/tag/delete (new in 0.8.0). Models live in their own collection so
 // "Select all on screen" is scoped to just them — the shared serial DB is never
@@ -31,7 +31,10 @@ test.describe("batch actions", () => {
     await expect(modelCard(page, m2)).toBeVisible();
 
     // The first card starts selection directly, without a separate mode control.
-    await expect(page.getByRole("button", { name: "Select", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Select", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
     await expect(page.getByRole("button", { name: "Done", exact: true })).toHaveCount(0);
     const firstChoice = page.getByRole("checkbox", { name: `Select ${m1}`, exact: true });
     await page.mouse.move(0, 0);
@@ -44,7 +47,7 @@ test.describe("batch actions", () => {
     // Both the grid header and the floating toolbar say "2 selected" — either proves it.
     await expect(page.getByText("2 selected").first()).toBeVisible();
 
-    // Batch tag → the chip shows up on the cards. exact: true — the shared
+    // Batch tag → both Models persist the tag. exact: true — the shared
     // serial DB can carry tag chips from earlier tests whose accessible names
     // contain "Tag" as a substring (e.g. "e2e-view-tag-..."), which a
     // non-exact match here would collide with.
@@ -55,7 +58,17 @@ test.describe("batch actions", () => {
     await page.getByRole("button", { name: "Apply" }).click();
 
     await page.goto(`/?c=${col}`);
-    await expect(modelCard(page, m1).getByText(tag, { exact: false })).toBeVisible();
+    for (const name of [m1, m2]) {
+      const href = await modelCard(page, name).getAttribute("href");
+      const path = new URL(href!, page.url()).pathname;
+      await expect
+        .poll(async () => {
+          const response = await page.request.get(`/api/v1${path}`);
+          expect(response.ok()).toBeTruthy();
+          return (await response.json()).tags;
+        })
+        .toContain(tag);
+    }
 
     // Batch delete → both move to trash, collection empties.
     await modelCard(page, m1).hover();
@@ -112,13 +125,13 @@ test.describe("batch actions", () => {
     // `page.goto` is a hard navigation that would unmount the undo toast — use
     // the sidebar (client-side routing) to check the destination instead, so
     // the toast (and its "Undo" action) survives to be clicked below.
-    await page.locator("aside").getByRole("button", { name: dest, exact: true }).click();
+    await page.locator("aside").getByRole("treeitem", { name: dest, exact: true }).click();
     await expect(modelCard(page, model)).toBeVisible();
 
     // Undo restores it to the source collection.
     await page.getByRole("button", { name: "Undo" }).click();
     await expect(modelCard(page, model)).toHaveCount(0);
-    await page.locator("aside").getByRole("button", { name: source, exact: true }).click();
+    await page.locator("aside").getByRole("treeitem", { name: source, exact: true }).click();
     await expect(modelCard(page, model)).toBeVisible();
   });
 
@@ -127,18 +140,21 @@ test.describe("batch actions", () => {
     const label = `verified-${Date.now()}`;
 
     await uploadModel(page, name);
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await page.getByRole("tab", { name: /Revisions/ }).click();
     await expect(page.getByText("Rev 1", { exact: true }).first()).toBeVisible();
 
-    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await page.getByRole("button", { name: "Add revision", exact: true }).click();
     await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
       name: "rev2.gcode",
       mimeType: "text/plain",
       buffer: Buffer.from(`; second revision for ${name}\nG28\n`),
     });
-    await page.getByRole("button", { name: "Add revision" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Add revision", exact: true })
+      .click();
     await expect(page.getByText("Rev 2", { exact: true }).first()).toBeVisible();
 
     await page.getByRole("button", { name: "Edit labels" }).click();
@@ -148,7 +164,7 @@ test.describe("batch actions", () => {
     await page.getByPlaceholder("Label (blank clears)").fill(label);
     await page.getByRole("button", { name: "Apply label" }).click();
 
-    await expect(page.getByText(label)).toHaveCount(2);
+    await expect(page.getByRole("table").getByText(label, { exact: true })).toHaveCount(2);
   });
 
   test("a batch delete from a viewer-role user is rejected by the backend preflight, leaving the model in place", async ({
@@ -166,9 +182,10 @@ test.describe("batch actions", () => {
 
     await page.goto("/settings");
     await page.getByRole("button", { name: "Users & Access" }).click();
+    await page.getByRole("button", { name: "Create user", exact: true }).click();
     await page.getByLabel("Username").fill(viewer);
     await page.getByLabel("Initial password").fill(password);
-    await page.getByRole("button", { name: "Create" }).click();
+    await page.getByRole("button", { name: "Create", exact: true }).click();
     await expect(page.getByRole("paragraph").filter({ hasText: viewer })).toBeVisible();
 
     await page.goto("/settings?section=access");

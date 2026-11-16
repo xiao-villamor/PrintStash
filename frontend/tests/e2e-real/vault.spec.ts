@@ -15,7 +15,7 @@ test.describe("vault", () => {
     await uploadGcodeModel(page, name);
 
     // Search narrows the grid to the matching model and reflects in the URL.
-    await page.getByRole("searchbox", { name: "Search library" }).fill(name);
+    await page.getByRole("searchbox", { name: "Search models" }).fill(name);
     await expect(page).toHaveURL(/[?&]q=/);
     await expect(modelCard(page, name)).toBeVisible();
 
@@ -98,7 +98,7 @@ test.describe("vault", () => {
   test("an unmatched search term yields the empty state", async ({ page }) => {
     await uploadGcodeModel(page, `e2e-model-${Date.now()}`);
     await page.goto("/");
-    await page.getByRole("searchbox", { name: "Search library" }).fill(`unmatched${Date.now()}`);
+    await page.getByRole("searchbox", { name: "Search models" }).fill(`unmatched${Date.now()}`);
     await expect(page).toHaveURL(/[?&]q=/);
     await expect(page.getByText("No models found", { exact: true })).toBeVisible();
     await expect(page.locator('a[href^="/models/"]')).toHaveCount(0);

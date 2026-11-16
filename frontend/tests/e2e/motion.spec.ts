@@ -11,7 +11,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { useMockApi } from "./_setup";
-import { animationStarts, forgetAnimationStarts, recordAnimationStarts } from "./_animations";
+import { animationStarts, recordAnimationStarts } from "./_animations";
 import { aCollectionNode, aModelListItem, aMultipartModel } from "../../src/test-support/factories";
 
 useMockApi();
@@ -27,7 +27,27 @@ declare global {
       transform: string;
     }[];
     descriptionHeights: number[];
+    panelMotions: { widths: number[]; transforms: string[]; duration: number }[];
   }
+}
+
+async function recordPanelMotion(page: Page, id: string) {
+  await page.addInitScript((panelId) => {
+    window.panelMotions = [];
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (...args) {
+      const animation = animate.apply(this, args);
+      if (this.id === panelId && animation.effect instanceof KeyframeEffect) {
+        const frames = animation.effect.getKeyframes();
+        window.panelMotions.push({
+          widths: frames.map((frame) => parseFloat(String(frame.width))),
+          transforms: frames.map((frame) => String(frame.transform ?? "none")),
+          duration: Number(animation.effect.getTiming().duration),
+        });
+      }
+      return animation;
+    };
+  }, id);
 }
 
 async function folderWithDescription(page: Page) {
@@ -402,29 +422,35 @@ test.describe("motion and layering", () => {
     expect(downloads).toHaveLength(1);
   });
 
-  for (const [reducedMotion, animation] of [
-    ["no-preference", "pane-in"],
-    ["reduce", "fade-in"],
-  ] as const) {
-    test(`opening the collections pane eases it in with ${reducedMotion}`, async ({ page }) => {
+  for (const reducedMotion of ["no-preference", "reduce"] as const) {
+    test(`opening the collections pane respects ${reducedMotion}`, async ({ page }) => {
       await page.emulateMedia({ reducedMotion });
+      await recordPanelMotion(page, "collections-pane");
       await page.goto("/");
       const toggle = page
         .locator("header")
         .getByRole("button", { name: "Toggle sidebar", exact: true });
+      const pane = page.locator("#collections-pane");
       await toggle.click();
-      await expect(toggle).toHaveAttribute("aria-expanded", "false");
-      await forgetAnimationStarts(page);
-
+      await expect(pane).toHaveCSS("width", "0px");
+      await page.evaluate(() => {
+        window.panelMotions = [];
+      });
       await toggle.click();
-
-      await expect
-        .poll(async () =>
-          (await animationStarts(page))
-            .filter((start) => start.target.split(" ").includes("pane-in"))
-            .map((start) => start.name),
-        )
-        .toEqual([animation]);
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      await expect(page.getByRole("tree", { name: "Collections", exact: true })).toBeVisible();
+      const motions = await page.evaluate(() => window.panelMotions);
+      expect(motions).toHaveLength(reducedMotion === "reduce" ? 0 : 1);
+      if (reducedMotion === "no-preference") {
+        expect(motions[0].widths[0]).toBe(0);
+        expect(motions[0].widths.at(-1)).toBeGreaterThan(0);
+        expect(motions[0].duration).toBeLessThanOrEqual(300);
+        expect(
+          motions[0].widths.every(
+            (width, index, widths) => index === 0 || width >= widths[index - 1],
+          ),
+        ).toBe(true);
+      }
     });
   }
 
@@ -445,6 +471,7 @@ test.describe("motion and layering", () => {
       page,
     }) => {
       await page.emulateMedia({ reducedMotion });
+      await recordPanelMotion(page, "model-drawer");
       await page.goto("/?c=maraio&type=all");
       await page
         .getByRole("main")
@@ -453,11 +480,19 @@ test.describe("motion and layering", () => {
       const drawer = page.locator("#model-drawer");
       await expect(drawer).toHaveAttribute("data-state", "open");
 
+      await expect(drawer).toHaveCSS("--inspector-displacement", "0");
+      await page.evaluate(() => {
+        window.panelMotions = [];
+      });
       await drawer.getByRole("button", { name: "Close details", exact: true }).click();
 
       await expect(drawer).toBeHidden();
-      const transform = await drawer.evaluate((node) => getComputedStyle(node).transform);
-      expect(transform !== "none").toBe(moves);
+      const motions = await page.evaluate(() => window.panelMotions);
+      expect(motions.length > 0).toBe(moves);
+      if (moves) {
+        expect(motions[0].transforms[0]).not.toBe(motions[0].transforms.at(-1));
+        expect(motions[0].duration).toBeLessThanOrEqual(300);
+      }
     });
   }
 
@@ -467,12 +502,14 @@ test.describe("motion and layering", () => {
     );
     await page.goto("/");
 
-    const headerZ = await page
-      .locator("header")
-      .evaluate((element) => Number(getComputedStyle(element).zIndex));
-    const stickyZ = await page
-      .locator(".sticky.top-0")
-      .evaluate((element) => Number(getComputedStyle(element).zIndex));
+    const headerZ = await page.locator("header").evaluate((element) => {
+      const layer = getComputedStyle(element).zIndex;
+      return layer === "auto" ? 0 : Number(layer);
+    });
+    const stickyZ = await page.getByRole("main").evaluate((element) => {
+      const layer = getComputedStyle(element).zIndex;
+      return layer === "auto" ? 0 : Number(layer);
+    });
     expect(headerZ).toBeGreaterThan(stickyZ);
 
     await page.getByRole("button", { name: "Recent" }).click();

@@ -83,6 +83,7 @@ const model = {
   edit_version: 1,
   id: 1,
   name: "skadis_kitchen-roll_screw",
+  starred: false,
   slug: "skadis-kitchen-roll-screw",
   hash: "59b3ca0dd226918a7e65c4417a6c2ea2314f821b77bed988fa9eb7fec86d3f30",
   collection: "maraio",
@@ -250,6 +251,7 @@ const modelList = [
     edit_epoch: model.edit_epoch,
     edit_version: model.edit_version,
     name: model.name,
+    starred: model.starred,
     slug: model.slug,
     collection: model.collection,
     collection_id: model.collection_id,
@@ -2221,6 +2223,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
           derivatives_gcode_enabled,
           derivatives_toolpath_enabled,
           derivatives_previews_enabled,
+          derivatives_previews_include_poles,
           ...publicFields
         } = update;
         configuration = {
@@ -2242,7 +2245,11 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
           derivatives_previews_enabled:
             derivatives_previews_enabled === undefined
               ? configuration.derivatives_previews_enabled
-              : (derivatives_previews_enabled ?? true),
+              : (derivatives_previews_enabled ?? false),
+          derivatives_previews_include_poles:
+            derivatives_previews_include_poles === undefined
+              ? configuration.derivatives_previews_include_poles
+              : (derivatives_previews_include_poles ?? false),
           has_oidc_client_secret:
             oidc_client_secret === undefined
               ? configuration.has_oidc_client_secret

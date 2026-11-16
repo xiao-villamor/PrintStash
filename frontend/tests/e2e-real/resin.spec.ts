@@ -1,7 +1,7 @@
 /** Resin originals, embedded previews and print facts through the real app. */
 import { readFile } from "node:fs/promises";
 import { test, expect } from "./helpers";
-import { modelCard, uploadModel } from "./util";
+import { openModelPage, uploadModel } from "./util";
 
 for (const extension of ["ctb", "goo"]) {
   test(`uploads a ${extension.toUpperCase()} slice with embedded print facts`, async ({ page }) => {
@@ -17,7 +17,7 @@ for (const extension of ["ctb", "goo"]) {
         buffer: payload,
       },
     });
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page).toHaveURL(/\/models\/\d+(?:\?.*)?$/);
     const modelId = Number(new URL(page.url()).pathname.split("/").pop());
     try {

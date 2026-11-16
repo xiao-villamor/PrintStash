@@ -950,8 +950,10 @@ class TestIngestModel:
         client: TestClient,
         db_session: Session,
         auth_headers: dict[str, str],
+        make_system_config,
     ) -> None:
         use_local_storage(tmp_path)
+        make_system_config(derivatives_previews_enabled=True)
 
         payload = completed_job(
             client,
