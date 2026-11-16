@@ -502,12 +502,14 @@ test.describe("motion and layering", () => {
     );
     await page.goto("/");
 
-    const headerZ = await page
-      .locator("header")
-      .evaluate((element) => Number(getComputedStyle(element).zIndex));
-    const stickyZ = await page
-      .getByRole("main")
-      .evaluate((element) => Number(getComputedStyle(element).zIndex));
+    const headerZ = await page.locator("header").evaluate((element) => {
+      const layer = getComputedStyle(element).zIndex;
+      return layer === "auto" ? 0 : Number(layer);
+    });
+    const stickyZ = await page.getByRole("main").evaluate((element) => {
+      const layer = getComputedStyle(element).zIndex;
+      return layer === "auto" ? 0 : Number(layer);
+    });
     expect(headerZ).toBeGreaterThan(stickyZ);
 
     await page.getByRole("button", { name: "Recent" }).click();

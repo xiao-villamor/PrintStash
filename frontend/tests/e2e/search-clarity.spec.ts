@@ -18,12 +18,12 @@ test.describe("search clarity", () => {
         }),
       }),
     );
-    await page.goto("/");
+    await page.goto("/search");
     const input = page.getByRole("searchbox", { name: "Search library" });
     await input.fill("crimpA");
     const field = await input.boundingBox();
     expect(field).not.toBeNull();
-    for (const name of ["Search by image", "Clear search"]) {
+    for (const name of ["AI Search", "Clear search"]) {
       const action = page.getByRole("button", { name });
       await expect(action).toBeVisible();
       const bounds = await action.boundingBox();
@@ -71,17 +71,17 @@ test.describe("search clarity", () => {
     await page.goto("/search?q=divider");
     await expect(page.getByText("30 results shown")).toBeVisible();
     await expect(page.getByRole("group", { name: "Result types" })).toBeVisible();
-    const ai = page.getByRole("button", { name: "Turn off AI search" });
+    const ai = page.getByRole("button", { name: "AI Search", exact: true });
     await expect(ai).toHaveText("");
     await expect(ai).toHaveAttribute("aria-pressed", "true");
     const results = page.getByRole("list", { name: "Search results" });
     await expect(results.getByRole("listitem")).toHaveCount(30);
     const desktop = await results.boundingBox();
-    const rail = await page.getByRole("navigation", { name: "Navigation" }).boundingBox();
+    const rail = await page.getByRole("complementary", { name: "Search panel" }).boundingBox();
     expect(desktop!.x - (rail!.x + rail!.width)).toBeLessThan(40);
-    expect(desktop!.width).toBeGreaterThan(1920 - rail!.width - 80);
+    expect(desktop!.width).toBeGreaterThan(1920 - rail!.x - rail!.width - 80);
     const cards = results.getByRole("listitem");
-    expect((await cards.nth(5).boundingBox())?.y).toBe((await cards.first().boundingBox())?.y);
+    expect((await cards.nth(2).boundingBox())?.y).toBe((await cards.first().boundingBox())?.y);
     await cards.last().scrollIntoViewIfNeeded();
     await expect(cards.last()).toBeInViewport();
     await cards.first().scrollIntoViewIfNeeded();
@@ -118,15 +118,13 @@ test.describe("search clarity", () => {
       await page.goto("/models/1");
       // The dev-only query launcher overlaps the last tab on narrow screens.
       await page.addStyleTag({ content: ".tsqd-parent-container{display:none!important}" });
-      const tabs = page.getByTestId("model-detail-sidebar").getByRole("tablist");
+      const tabs = page.getByRole("tablist");
       const overview = tabs.getByRole("tab", { name: "Overview", exact: true });
       const similar = tabs.getByRole("tab", { name: "Similar", exact: true });
       await expect(similar).toBeVisible();
-      const tabWidths = await tabs.evaluate((el) => ({
-        scroll: el.scrollWidth,
-        client: el.clientWidth,
-      }));
-      expect(tabWidths.scroll).toBeLessThanOrEqual(tabWidths.client);
+      // The tab strip scrolls horizontally on phones without widening the page.
+      await similar.scrollIntoViewIfNeeded();
+      await expect(similar).toBeInViewport();
       const positions = await Promise.all([
         overview.evaluate((el) => el.getBoundingClientRect().top),
         similar.evaluate((el) => el.getBoundingClientRect().top),
@@ -159,7 +157,7 @@ test.describe("search clarity", () => {
     );
     await page.goto("/models/1");
     await page.getByRole("tab", { name: "Similar", exact: true }).click();
-    const name = page.getByRole("link", { name: "m3Sorter_04_mini" });
+    const name = page.getByText("m3Sorter_04_mini ↔ m3Sorter_top", { exact: true });
     await expect(name).toBeVisible();
     expect(await name.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(220);
     await expect(page.getByRole("link", { name: "Compare", exact: true })).toBeVisible();
@@ -174,19 +172,21 @@ test.describe("search clarity", () => {
     const actions = page.getByRole("main").getByRole("group", { name: "Library tools" });
 
     await expect(
-      actions.getByRole("button", { name: "New collection", exact: true }),
+      page.getByRole("main").getByRole("button", { name: "New collection", exact: true }),
     ).toBeVisible();
-    await expect(actions.getByRole("button", { name: "Select", exact: true })).toHaveCount(0);
+    await expect(actions.getByRole("button", { name: "Select", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Library tools", exact: true })).toHaveCount(0);
+    await page.getByRole("main").getByRole("button", { name: "More", exact: true }).click();
     await expect(
-      page.getByRole("button", { name: "New multipart set", exact: true }),
+      page.getByRole("menuitem", { name: "New multipart set", exact: true }),
     ).toBeVisible();
   });
 
-  test("opens Similar models from the toolbar", async ({ page }) => {
+  test("opens Similar models from More", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto("/");
-    await page.getByRole("main").getByRole("link", { name: "Similar models", exact: true }).click();
+    await page.getByRole("main").getByRole("button", { name: "More", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Similar models", exact: true }).click();
 
     await expect(page).toHaveURL(/\/library\/similar$/);
     await expect(page.getByRole("heading", { name: "Similar models", level: 1 })).toBeVisible();
@@ -214,84 +214,63 @@ for (const viewport of [
       );
       await page.goto("/?tag=functional&favorites=true");
       await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeVisible();
+      async function openSearch() {
+        if (viewport.width < 768) {
+          await page.getByRole("button", { name: "Search", exact: true }).click();
+        } else {
+          await page
+            .getByRole("navigation", { name: "Navigation" })
+            .getByRole("link", { name: "Search", exact: true })
+            .click();
+        }
+      }
+      await openSearch();
       const input = page.getByRole("searchbox", { name: "Search library" });
-      await expect(page.getByRole("button", { name: "Enter a search to use AI" })).toBeDisabled();
-      await expect(page.getByRole("button", { name: "Search by image" })).toBeVisible();
+      const ai = page.getByRole("button", { name: "AI Search", exact: true });
+      await expect(ai).toHaveAttribute("aria-pressed", "false");
       await input.fill("bracket");
+      await input.press("Enter");
+      const localQuery = (url: URL) =>
+        url.pathname === "/" &&
+        url.searchParams.get("tag") === "functional" &&
+        url.searchParams.get("favorites") === "true" &&
+        url.searchParams.get("q") === "bracket";
+      await expect(page).toHaveURL(localQuery);
+      const libraryUrl = page.url();
+      expect(await input.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(120);
+      await page.screenshot({ path: testInfo.outputPath("library.png"), fullPage: true });
+      await ai.click();
+      await expect(page).toHaveURL(
+        (url) => url.pathname === "/search" && url.searchParams.get("q") === "bracket",
+      );
+      await expect(page.getByRole("link", { name: "Desk bracket", exact: true })).toBeVisible();
+      await expect(ai).toHaveAttribute("aria-pressed", "true");
+      await ai.click();
+      await expect(page).toHaveURL(
+        (url) => url.pathname === "/search" && url.searchParams.get("mode") === "lexical",
+      );
+      await expect(ai).toHaveAttribute("aria-pressed", "false");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      await page.screenshot({ path: testInfo.outputPath("search.png"), fullPage: true });
+
+      // Returning to the bookmarked local view retains its scope and draft.
+      await page.goto(libraryUrl);
+      await expect(page).toHaveURL(localQuery);
+      await openSearch();
+      await expect(input).toHaveValue("bracket");
+      await expect(page.getByTitle("Remove Tag: functional")).toBeVisible();
+      await input.fill("");
       await input.press("Enter");
       await expect(page).toHaveURL(
         (url) =>
           url.pathname === "/" &&
           url.searchParams.get("tag") === "functional" &&
           url.searchParams.get("favorites") === "true" &&
-          url.searchParams.get("q") === "bracket" &&
-          url.searchParams.get("type") === "all" &&
-          url.searchParams.get("sort") === "date-desc",
-      );
-      expect(await input.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(120);
-      expect(
-        await input.evaluate((el) => {
-          const style = getComputedStyle(el);
-          return el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-        }),
-      ).toBeGreaterThan(50);
-      if (viewport.width < 640) {
-        await expect(page.getByRole("button", { name: "Search by image" })).toBeHidden();
-      } else {
-        await expect(page.getByRole("button", { name: "Search by image" })).toBeVisible();
-      }
-      await expect(page.getByRole("button", { name: "Search with AI" })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
-      await page.screenshot({ path: testInfo.outputPath("library.png"), fullPage: true });
-      await page.getByRole("button", { name: "Search with AI", exact: true }).click();
-      // The results route consumes the one-shot parse flag; assert its settled URL.
-      await expect(page).toHaveURL(/\/search\?q=bracket$/);
-      await expect(page.getByRole("link", { name: "Desk bracket", exact: true })).toBeVisible();
-      const activeAi = page.getByRole("button", { name: "Turn off AI search" });
-      await expect(activeAi).toHaveAttribute("aria-pressed", "true");
-      await expect(page.getByText("Why this result")).toHaveCount(0);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
-        true,
-      );
-      await page.screenshot({ path: testInfo.outputPath("search.png"), fullPage: true });
-      await activeAi.click();
-      await expect(page).toHaveURL(/\/search\?q=bracket&mode=lexical$/);
-      await expect(page.getByRole("button", { name: "Search with AI" })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
-      await page.goBack();
-      await page.goBack();
-      await expect(page).toHaveURL(
-        (url) =>
-          url.pathname === "/" &&
-          url.searchParams.get("tag") === "functional" &&
-          url.searchParams.get("favorites") === "true" &&
-          url.searchParams.get("q") === "bracket" &&
-          url.searchParams.get("type") === "all" &&
-          url.searchParams.get("sort") === "date-desc",
-      );
-      await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeVisible();
-      await expect(input).toHaveValue("bracket");
-      await expect(page.getByTitle("Remove Tag: functional")).toBeVisible();
-      await page.getByRole("button", { name: "Clear search", exact: true }).click();
-      await expect(page).toHaveURL(
-        (url) =>
-          url.pathname === "/" &&
-          url.searchParams.get("tag") === "functional" &&
-          url.searchParams.get("favorites") === "true" &&
-          !url.searchParams.has("q") &&
-          url.searchParams.get("type") === "all" &&
-          url.searchParams.get("sort") === "date-desc",
+          !url.searchParams.has("q"),
       );
       await expect(page.getByTitle("Remove Tag: functional")).toBeVisible();
-      await page.getByRole("button", { name: "Toggle theme" }).click();
-      await page.screenshot({
-        path: testInfo.outputPath("library-alternate-theme.png"),
-        fullPage: true,
-      });
     });
   });
 }

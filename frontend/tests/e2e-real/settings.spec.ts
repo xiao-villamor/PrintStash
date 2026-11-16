@@ -272,12 +272,10 @@ test.describe("settings", () => {
       .getByRole("heading", { name: "Storage insights" })
       .locator('xpath=ancestor::*[contains(@class,"overflow-hidden")][1]');
     await page.getByRole("button", { name: "Plan migration" }).click();
-    await expect(page.getByRole("button", { name: "Move storage" })).toBeVisible({
+    await expect(move).toBeVisible({
       timeout: 45_000,
     });
-    await expect(
-      page.getByRole("region", { name: "Storage connection details" }).locator("dd"),
-    ).toHaveCount(2);
+    await expect(page.locator(".settings-storage-summary dd")).toHaveCount(4);
     await expect(move.getByRole("heading", { name: "Destination storage" })).toBeVisible();
     await page.getByRole("tab", { name: "Usage", exact: true }).click();
     await expect(page.getByText("Files stored here")).toBeVisible({ timeout: 45_000 });
@@ -301,7 +299,7 @@ test.describe("settings", () => {
         fullPage: true,
       });
       await page
-        .getByRole("region", { name: "Storage connection details" })
+        .getByRole("heading", { name: "Current storage", exact: true })
         .scrollIntoViewIfNeeded();
       await page.screenshot({ path: testInfo.outputPath(`storage-connection-${width}.png`) });
 
@@ -671,9 +669,7 @@ test.describe("settings", () => {
       expect(policyStatuses, "audit policy API responses").toContain(200);
       await expect(form).toBeVisible({ timeout: 45_000 });
       await expect(full).toBeVisible({ timeout: 45_000 });
-      const backupCard = page
-        .getByRole("heading", { name: "Check a backup" })
-        .locator("xpath=../..");
+      const backupCard = page.getByRole("group", { name: "Check a backup", exact: true });
       await expect(backupCard.getByRole("button", { name: "Verify" })).toBeVisible();
       await expect(page.getByRole("heading", { name: "Similar models" })).toHaveCount(0);
       await page.getByRole("heading", { name: "Check your files now" }).scrollIntoViewIfNeeded();
@@ -771,27 +767,25 @@ test.describe("settings", () => {
         await page.setViewportSize({ width, height: 1000 });
         await openAiSearchSettings(page);
         await page.getByRole("button", { name: /^(Start|Change) setup$/ }).click();
-        await expect(
-          page.getByRole("heading", { name: "Where should AI Search run?" }),
-        ).toBeVisible({ timeout: 45_000 });
+        const setup = page.getByRole("dialog", { name: "AI Search setup", exact: true });
+        const location = setup.getByRole("combobox", { name: "Location", exact: true });
+        await expect(location).toBeVisible();
         await page.evaluate(
           (dark) => document.documentElement.classList.toggle("dark", dark),
           theme === "dark",
         );
-        await expect(page.getByRole("combobox")).toHaveCount(0);
         await page.screenshot({
           path: testInfo.outputPath(`ai-${theme}-${width}.png`),
           fullPage: true,
           animations: "disabled",
         });
-        await page.getByRole("button", { name: "Use this machine" }).click();
-        await expect(page.getByRole("button", { name: "Change location" })).toBeVisible();
+        await location.selectOption("local");
+        await expect(setup.getByText(/Your library text stays here/)).toBeVisible();
         expect(
           await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
         ).toBeLessThanOrEqual(0);
-        await page.getByRole("button", { name: "Change location" }).click();
-        await page.getByRole("button", { name: "Connect another server" }).click();
-        await expect(page.getByRole("form", { name: "Inference server" })).toBeVisible();
+        await location.selectOption("server");
+        await expect(setup.getByRole("form", { name: "Inference server" })).toBeVisible();
         await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
         await page.getByRole("button", { name: "Technical settings", exact: true }).click();
         await expect(
@@ -799,9 +793,7 @@ test.describe("settings", () => {
         ).toBeVisible();
         await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
         await page.getByRole("button", { name: /^(Start|Change) setup$/ }).click();
-        await expect(
-          page.getByRole("heading", { name: "Where should AI Search run?" }),
-        ).toBeVisible();
+        await expect(setup.getByRole("combobox", { name: "Location", exact: true })).toBeVisible();
       }
     }
   });
@@ -852,7 +844,10 @@ test.describe("settings", () => {
       await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
       await page.getByRole("button", { name: "Manage servers", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Connect an AI server" })).toBeVisible();
-      await page.getByRole("button", { name: "Add a server" }).click();
+      await page
+        .getByRole("dialog", { name: "AI servers", exact: true })
+        .getByRole("button", { name: "Add a server", exact: true })
+        .click();
       await expect(page.getByRole("form", { name: "Inference server" })).toBeVisible();
       await page.getByRole("textbox", { name: "Server URL" }).scrollIntoViewIfNeeded();
       await page.screenshot({
@@ -888,9 +883,11 @@ test.describe("settings", () => {
       });
       await back.click();
       await page.getByRole("button", { name: /^(Start|Change) setup$/ }).click();
-      await expect(
-        page.getByRole("heading", { name: "Where should AI Search run?" }),
-      ).toBeInViewport();
+      const locationHeading = page
+        .getByRole("dialog", { name: "AI Search setup", exact: true })
+        .getByRole("combobox", { name: "Location", exact: true });
+      await locationHeading.scrollIntoViewIfNeeded();
+      await expect(locationHeading).toBeInViewport();
       await page.screenshot({
         path: testInfo.outputPath(`guided-return-${width}.png`),
         animations: "disabled",
@@ -957,8 +954,7 @@ test.describe("settings", () => {
   });
 
   test("create a manual backup", async ({ page }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Backups", exact: true }).click();
+    await page.goto("/settings?section=backup");
 
     const [created] = await Promise.all([
       page.waitForResponse(
@@ -1283,10 +1279,16 @@ test.describe("settings", () => {
     await expect(page.getByText("Database", { exact: true })).toBeVisible();
     await expect(page.getByText("Connected", { exact: true })).toBeVisible();
     await expect(page.getByText("Storage backend", { exact: true })).toBeVisible();
-    await expect(page.getByText("LOCAL", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("group", { name: "System", exact: true }).getByText("Local", { exact: true }),
+    ).toBeVisible();
     // Stat cards render counts.
     await expect(page.getByText("Models", { exact: true })).toBeVisible();
-    await expect(page.getByText("Collections", { exact: true })).toBeVisible();
+    await expect(
+      page
+        .getByRole("group", { name: "System", exact: true })
+        .getByText("Collections", { exact: true }),
+    ).toBeVisible();
   });
 
   test("restart returns the supervised API to a healthy state", async ({ page }) => {
@@ -1372,16 +1374,15 @@ test.describe("settings", () => {
 
   test("add and delete a webhook notification channel", async ({ page }) => {
     const chName = `e2e-hook-${Date.now()}`;
-    await page.goto("/settings");
-    // Scope to main: the top bar also has an aria-label="Notifications" button.
-    await page.getByRole("main").getByRole("button", { name: "Notifications" }).click();
+    await page.goto("/settings?section=notifications");
 
     // Enable notifications if they aren't already (channel UI is gated on it).
     // The toggle round-trips to the backend before flipping, so click + poll
     // rather than check(), which expects an immediate state change.
-    const enable = page.getByRole("checkbox").first();
+    const enable = page.getByRole("checkbox", { name: /^Notifications Turn every channel/ });
+    const toggle = page.locator("label").filter({ has: enable });
     if (!(await enable.isChecked())) {
-      await enable.click();
+      await toggle.click();
       await expect(enable).toBeChecked();
     }
 
@@ -1396,7 +1397,7 @@ test.describe("settings", () => {
     await expect(page.getByText(chName)).toHaveCount(0);
 
     // Leave notifications disabled again so the shared DB doesn't drift.
-    await enable.click();
+    await toggle.click();
     await expect(enable).not.toBeChecked();
   });
 

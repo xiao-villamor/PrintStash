@@ -344,7 +344,7 @@ function MemberRow({ model }: { model: MultipartModelCandidate }) {
       <span className="min-w-0">
         <span
           className={cn(
-            "block truncate text-sm font-medium",
+            "block break-words text-sm font-medium",
             !model.available && "text-muted-foreground",
           )}
         >
@@ -413,6 +413,11 @@ function MultipartOverview({
 
   return (
     <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-5 pb-24 sm:px-6 md:pb-6">
+      {model.description && (
+        <p className="mb-5 whitespace-pre-wrap break-words text-sm text-muted-foreground">
+          {model.description}
+        </p>
+      )}
       <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <section
           className="min-w-0 overflow-hidden border border-border bg-card"
@@ -739,7 +744,13 @@ function PartEditorRow({
         ))}
       </div>
       <div className="px-5 pb-3 pl-13">
-        <Button type="button" variant="outline" size="sm" onClick={onOpenPicker}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onOpenPicker}
+          className="h-11 sm:h-9"
+        >
           {t("multipart.addVariant")}
         </Button>
       </div>
@@ -1337,6 +1348,7 @@ function MultipartDetail({ id }: { id: number }) {
               type="button"
               size="sm"
               onClick={() => void save()}
+              className="h-11 sm:h-9"
               loading={busy}
               disabled={!canEdit || coverBusy || !model.name.trim() || editProblem !== null}
             >

@@ -2930,7 +2930,7 @@ describe("ModelBrowser", () => {
       });
       await selectOneModel(user);
 
-      await user.click(screen.getByRole("button", { name: "Tag" }));
+      await user.click(await screen.findByRole("button", { name: "Tag" }));
       const dialog = await screen.findByRole("dialog");
       await user.type(within(dialog).getAllByRole("combobox")[0], "functional{Enter}");
       await user.click(within(dialog).getByRole("button", { name: /Apply/ }));
@@ -4028,7 +4028,14 @@ describe("ModelBrowser", () => {
         "GET /api/v1/models/browse": modelPage("Current model"),
         "GET /api/v1/collections/search": folderPage("Gear current"),
       });
-      expect(await within(screen.getByRole("main")).findByText("Gear current")).toBeVisible();
+      expect(await within(screen.getByRole("main")).findByText("Current model")).toBeVisible();
+      // Search keeps the collection strip hidden, but its active query must
+      // still refresh with the Models instead of retaining stale folder data.
+      await waitFor(() =>
+        expect(app.client.getQueryData(queryKeys.collectionSearch("gear", "view"))).toMatchObject({
+          pages: [{ items: [{ name: "Gear current" }] }],
+        }),
+      );
       expect(mainHas("Gear original")).not.toBeInTheDocument();
     });
 
@@ -4600,7 +4607,7 @@ describe("ModelBrowser", () => {
       await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
-      await user.click(screen.getByRole("button", { name: "Tag" }));
+      await user.click(await screen.findByRole("button", { name: "Tag" }));
       const editor = await screen.findByRole("dialog");
       await user.type(within(editor).getAllByRole("combobox")[0], "functional{Enter}");
 
@@ -4640,7 +4647,7 @@ describe("ModelBrowser", () => {
       await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
-      await user.click(screen.getByRole("button", { name: "Tag" }));
+      await user.click(await screen.findByRole("button", { name: "Tag" }));
       const dialog = await screen.findByRole("dialog");
       await user.type(within(dialog).getAllByRole("combobox")[0], "functional{Enter}");
 
@@ -4668,7 +4675,7 @@ describe("ModelBrowser", () => {
       await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
-      await user.click(screen.getByRole("button", { name: "Tag" }));
+      await user.click(await screen.findByRole("button", { name: "Tag" }));
       const dialog = await screen.findByRole("dialog");
       await user.type(within(dialog).getAllByRole("combobox")[0], "functional{Enter}");
       await user.click(within(dialog).getByRole("button", { name: /Apply/ }));

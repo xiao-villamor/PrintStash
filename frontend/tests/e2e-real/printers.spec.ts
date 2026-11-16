@@ -30,8 +30,12 @@ test.describe("printers", () => {
     await page.reload();
     await expect(page.getByRole("link", { name: new RegExp(name) })).toBeVisible();
 
-    // Remove through the card action and shared confirmation dialog.
-    await card.locator("xpath=ancestor::article").getByRole("button", { name: "Remove" }).click();
+    // Remove through connection settings and the shared confirmation dialog.
+    await card.locator("xpath=ancestor::article").getByRole("button", { name: "Settings" }).click();
+    await page
+      .getByRole("dialog", { name: "Edit printer connection" })
+      .getByRole("button", { name: "Remove printer", exact: true })
+      .click();
     await page.getByRole("dialog").getByRole("button", { name: "Remove" }).click();
     await expect(page.getByRole("link", { name: new RegExp(name) })).toHaveCount(0);
   });
@@ -81,7 +85,7 @@ test.describe("printer settings conflict recovery", () => {
       );
       await second
         .locator("form")
-        .filter({ has: page.getByLabel("Name", { exact: true }) })
+        .filter({ has: second.getByLabel("Name", { exact: true }) })
         .getByRole("button", { name: "Save changes", exact: true })
         .click();
       expect((await staleSave).status()).toBe(412);

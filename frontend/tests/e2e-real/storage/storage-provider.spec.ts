@@ -128,7 +128,13 @@ test.describe("storage provider setup", () => {
 
     await page.goto("/settings?section=storage");
     await expect(page.getByRole("heading", { name: "Current storage", exact: true })).toBeVisible();
-    await expect(page.getByText("Storage safety: Guarded")).toBeVisible();
+    await expect(
+      page
+        .getByRole("term")
+        .filter({ hasText: /^Storage safety$/ })
+        .locator("..")
+        .getByRole("definition"),
+    ).toHaveText("Guarded");
     await expect(page.getByPlaceholder("Stored — leave blank to keep")).toBeVisible();
 
     // A concurrent configuration command cannot silently authorize this draft.

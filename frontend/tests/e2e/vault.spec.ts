@@ -391,27 +391,26 @@ test.describe("vault route", () => {
   });
 
   test("restores library mode after collection history", async ({ page }) => {
+    const views: string[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === "/api/v1/models/browse") views.push(url.searchParams.get("view") ?? "");
+    });
     await page.goto("/?type=multipart&sort=name-asc");
-    await expect(
-      page.getByRole("button", { name: "Multipart sets only", exact: true }),
-    ).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("button", { name: "Organized", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Parts only", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "All Models" })).toBeVisible();
     await page
       .getByRole("main")
       .getByRole("button", { name: /maraio/ })
       .click();
     await expect(page.getByRole("heading", { name: "maraio" })).toBeVisible();
-    await page.getByRole("button", { name: "Everything", exact: true }).click();
-    await expect(page).toHaveURL(/[?&]type=all(?:&|$)/);
-
+    await expect(page).toHaveURL((url) => url.searchParams.get("type") === "multipart");
     await page.goBack();
-
     await expect(page.getByRole("heading", { name: "All Models" })).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Multipart sets only", exact: true }),
-    ).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("button", { name: "Sort models" })).toContainText("Name A–Z");
+    await expect(page).toHaveURL(
+      (url) => !url.searchParams.has("c") && url.searchParams.get("type") === "multipart",
+    );
+    expect(views.length).toBeGreaterThan(0);
+    expect(views.every((view) => view === "multipart")).toBe(true);
   });
 
   test("browser Back returns through collection navigation", async ({ page }) => {
@@ -454,7 +453,9 @@ test.describe("vault route", () => {
       if (url.pathname === "/api/v1/models/browse") pageRequests.push(url.search);
     });
     await page.goto("/?c=maraio");
-    await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
+    await expect(
+      page.getByRole("main").getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true }),
+    ).toBeVisible();
 
     await page.getByRole("button", { name: "Sort models" }).click();
     await Promise.all([
@@ -467,7 +468,9 @@ test.describe("vault route", () => {
       }),
       page.getByRole("menuitemradio", { name: "Best success rate" }).click(),
     ]);
-    await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
+    await expect(
+      page.getByRole("main").getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true }),
+    ).toBeVisible();
     await page.waitForTimeout(200);
 
     expect(

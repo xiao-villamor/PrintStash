@@ -61,6 +61,8 @@
 
 ### Fixed
 
+- Saved multipart descriptions stay visible in the overview. Multipart member names wrap without clipping, and the mobile composition editor keeps Add variant and Save changes at the shared touch-target size.
+
 - Captured-source conflict recovery stays inside the edit dialog, keeping review and retry controls reachable. Keyboard focus remains on its card when a growing Library switches to virtual rows.
 
 - Profile conflict reviews remain accessible inside the edit dialog, and cancelling a new profile returns keyboard focus to its creation button. Native dropdowns follow the app’s shared cursor preference.
