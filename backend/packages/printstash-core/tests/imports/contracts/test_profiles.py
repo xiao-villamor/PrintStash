@@ -1,8 +1,16 @@
 """Profiles retain provider/file estimates without widening the V2 boundary."""
 
+import json
+
 import pytest
 
-from printstash_core.imports.contracts import CaptureContractError, CaptureManifestV2
+from printstash_core.imports.contracts import (
+    MAX_MANIFEST_BYTES,
+    CaptureContractError,
+    CaptureManifestV2,
+    CaptureManifestV3,
+    CaptureProfile,
+)
 
 from .test_manifest import manifest_dict
 
@@ -71,3 +79,79 @@ class TestCaptureProfiles:
         raw["profiles"]["unknown"] = raw["profiles"].pop("source-file-id")
         with pytest.raises(CaptureContractError):
             parse_capture_manifest(raw)
+
+    def test_preserves_file_profile_metadata(self):
+        raw = {
+            "id": "project-1",
+            "name": "Draft",
+            "origin": "file",
+            "printer": "Example printer",
+            "creator_relationship": "other",
+            "materials": ["PLA", "PETG"],
+        }
+
+        profile = CaptureProfile.from_dict(raw)
+
+        assert profile.to_dict() == raw
+
+    def test_leaves_unavailable_profile_facts_absent(self):
+        raw = {"id": "project-1", "name": "Draft", "origin": "provider"}
+
+        profile = CaptureProfile.from_dict(raw)
+
+        assert profile.to_dict() == raw
+
+    @pytest.mark.parametrize(
+        "materials",
+        [pytest.param("PLA", id="scalar"), pytest.param(["PLA"] * 65, id="too-many")],
+    )
+    def test_refuses_malformed_materials(self, materials):
+        raw = {
+            "id": "project-1",
+            "name": "Draft",
+            "origin": "file",
+            "materials": materials,
+        }
+
+        with pytest.raises(CaptureContractError, match="invalid profile.materials"):
+            CaptureProfile.from_dict(raw)
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            pytest.param(manifest_dict(), id="version-two"),
+            pytest.param(manifest_dict(schema_version=3), id="missing-profiles"),
+        ],
+    )
+    def test_requires_the_v3_envelope(self, raw):
+        with pytest.raises(CaptureContractError, match="version 3 capture"):
+            CaptureManifestV3.from_dict(raw)
+
+    def test_bounds_the_entire_profile_manifest(self):
+        files = [
+            {
+                "id": str(index),
+                "name": f"part-{index}.3mf",
+                "file_type": "3mf",
+                "size": 100,
+            }
+            for index in range(40)
+        ]
+        raw = manifest_dict(
+            schema_version=3,
+            files=files,
+            selected_ids=[file["id"] for file in files],
+            profiles={
+                file["id"]: {
+                    "id": file["id"],
+                    "name": "Draft",
+                    "origin": "provider",
+                    "materials": ["A" * 128] * 64,
+                }
+                for file in files
+            },
+        )
+        assert len(json.dumps(raw).encode()) > MAX_MANIFEST_BYTES
+
+        with pytest.raises(CaptureContractError, match="manifest exceeds maximum size"):
+            CaptureManifestV3.from_dict(raw)

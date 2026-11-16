@@ -140,10 +140,13 @@ describe("AppShell", () => {
     await screen.findByText("at /");
     toast.error("Keep this unrelated message.");
     window.dispatchEvent(new CustomEvent("printstash:import-job-terminal", { detail: job }));
-    expect(await screen.findByRole("button", { name: "Choose files" })).toBeVisible();
+    // AppShell and renderApp each mount the real Toaster; both receive the notice.
+    expect((await screen.findAllByRole("button", { name: "Choose files" })).length).toBeGreaterThan(
+      0,
+    );
     requestArchiveReview(job.job_id);
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Choose files" })).not.toBeInTheDocument(),
+      expect(screen.queryAllByRole("button", { name: "Choose files" })).toHaveLength(0),
     );
     for (const notice of screen.getAllByText("Keep this unrelated message."))
       expect(notice).toBeVisible();
