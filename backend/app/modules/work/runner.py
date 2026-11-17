@@ -21,7 +21,7 @@ from typing import Any
 from sqlalchemy import bindparam
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
-from sqlmodel import col, select
+from sqlmodel import Session, col, select
 
 from app.core.cancellation import OperationCancelled, cancellation_scope
 from app.core.config import settings
@@ -172,28 +172,45 @@ class ExecutionContext:
         """
         from .submission import queue_stamped, stamp
 
-        definition = catalog_module.get_catalog().definition(self.definition)
+        catalog = catalog_module.get_catalog()
+        definition = catalog.definition(self.definition)
         passes: list[JobKind] = []
 
-        def stamp_completion(session: Any) -> None:
+        def stamp_completion(session: Session) -> None:
             now = utcnow()
-            sources = set(definition.completion_nudges)
-            # A pass over this definition finds the next subject, or submits a
-            # Job the engine has not taken yet. Request-originated work has no
-            # subjects to find, so with nothing waiting to be submitted the
-            # pass would only read; the tick still repairs what a crash left.
-            if definition.source is not None or jobs.awaits_submission(
-                session, definition.name, besides=self.job_id
-            ):
+            sources = {
+                source
+                for source in definition.completion_nudges
+                if catalog.definition(source).admission(session) is None
+            }
+            if definition.source is None:
+                # A requested Job only has siblings for the pass to submit.
+                refill = jobs.awaits_submission(
+                    session, definition.name, besides=self.job_id
+                )
+            else:
+                # Claim refills prioritized interactive queues. When a
+                # successful settlement still has a submitted successor, let
+                # that claim discover the next batch. Keep failure, the tail,
+                # and backfill settlement as their own wakeups.
+                refill = not (
+                    outcome is JobOutcome.COMPLETED
+                    and self.priority is WorkPriority.INTERACTIVE
+                    and isinstance(definition.source, PrioritizedWorkSource)
+                    and jobs.has_submitted_interactive_queue(session, definition.name)
+                )
+            if refill:
                 sources.add(definition.name)
-            catalog = catalog_module.get_catalog()
-            adding = jobs.any_active(session, catalog.additions, besides=self.job_id)
+            paced = catalog.paced_during_additions
+            adding = (
+                definition.adds_to_library or not sources.isdisjoint(paced)
+            ) and jobs.any_active(session, catalog.additions, besides=self.job_id)
             if definition.adds_to_library and not adding:
                 # The last addition to end releases the work that held back.
                 sources.update(catalog.held_by_additions)
             if adding:
                 # Paced work looks again on its own while additions go on.
-                sources.difference_update(catalog.paced_during_additions)
+                sources.difference_update(paced)
             yielding = catalog.yielding_to(definition.name)
             if (
                 yielding

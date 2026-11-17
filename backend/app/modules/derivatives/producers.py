@@ -155,8 +155,7 @@ def _begin(
     with get_session_factory().scoped_session() as session:
         if execution is not None:
             records.require_execution(session, execution)
-        policy.lock(session)
-        policy.require_enabled(session, definition)
+        policy.lock_enabled(session, definition)
         try:
             file_row = _live_file(session, file_id)
         except ArtifactGone:

@@ -277,8 +277,8 @@ def require_context(session: Session, attempt: DerivativeAttempt) -> File:
         if attempt.execution is not None:
             require_execution(session, attempt.execution)
         policy.lock_generation(session)
-        model = session.exec(
-            select(Model)
+        model_id = session.exec(
+            select(Model.id)
             .where(Model.id == attempt.source.model_id, live(Model))
             .with_for_update()
         ).first()
@@ -288,7 +288,11 @@ def require_context(session: Session, attempt: DerivativeAttempt) -> File:
             .with_for_update()
             .execution_options(populate_existing=True)
         ).first()
-        if model is None or file is None or ArtifactSource.of(file) != attempt.source:
+        if (
+            model_id is None
+            or file is None
+            or ArtifactSource.of(file) != attempt.source
+        ):
             raise AttemptSuperseded()
         regen = regenerations(
             session, definitions=[g.definition for g in groups_for(file)]

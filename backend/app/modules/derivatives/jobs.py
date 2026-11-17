@@ -119,8 +119,7 @@ def _hooks(derivative_group: DerivativeGroup):
         )
 
     def retry(session: Session, subject_key: str) -> bool:
-        policy.lock(session)
-        policy.require_enabled(session, derivative_group.definition)
+        policy.lock_enabled(session, derivative_group.definition)
         file_row = _file(session, subject_key)
         if file_row is None:
             return False

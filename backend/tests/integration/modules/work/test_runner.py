@@ -569,6 +569,37 @@ class TestExecutionContext:
 
         assert DISCOVERED in _stamped(db_session) & _nudged(engine)
 
+    @pytest.mark.parametrize(
+        ("submitted_epoch", "settlement_nudge"),
+        [
+            pytest.param("current", False, id="engine-accepted"),
+            pytest.param("retired", True, id="retired-epoch"),
+            pytest.param(None, True, id="not-submitted"),
+        ],
+    )
+    def test_prioritized_settlement_defers_refill_to_an_accepted_successor(
+        self, engine, make_job, db_session, submitted_epoch, settlement_nudge
+    ) -> None:
+        definition = engine.catalog.definition(DISCOVERED)
+        engine.catalog.definitions[DISCOVERED] = replace(
+            definition, source=_PrioritizedNothingPending()
+        )
+        next_job = make_job(
+            kind=DISCOVERED,
+            attempts=1,
+            execution_epoch="current",
+            submitted_epoch=submitted_epoch,
+        )
+        job = make_job(kind=DISCOVERED, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        expected = {DISCOVERED} if settlement_nudge else set()
+        assert (_stamped(db_session), _nudged(engine)) == (expected, expected)
+        if not settlement_nudge:
+            assert _begin(next_job.id, 1, "current") is not None
+            assert _nudged(engine) == {DISCOVERED}
+
     def test_finish_leaves_the_settled_cleanup_to_the_end_of_the_attempt(
         self, engine: InlineJobEngine, make_job
     ) -> None:

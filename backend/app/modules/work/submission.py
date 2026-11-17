@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import event, update
+from sqlalchemy import ColumnElement, and_, event, or_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlmodel import Session, col, select
@@ -248,16 +248,28 @@ def stamp(
     Written as plain statements so a caller's session keeps no cursor object.
     """
     table = getattr(ReconcileCursor, "__table__")  # noqa: B009
-    # Mark a live owner dirty atomically with its release. It will consume
-    # this nudge before releasing; no extra engine workflow is needed merely
-    # to lose the same single-flight claim.
+    # A live owner will consume the nudge before release. A recent queued
+    # pass at sufficient priority will also consume it. Dirty either in one
+    # statement without re-reading and rewriting its queue marker.
+    recent_queue: ColumnElement[bool] = col(
+        ReconcileCursor.pass_queued_at
+    ) > now - timedelta(seconds=settings.jobs_submit_grace_seconds)
+    if priority is WorkPriority.INTERACTIVE:
+        recent_queue = and_(
+            recent_queue, col(ReconcileCursor.pass_priority) == WorkPriority.INTERACTIVE
+        )
     if affected(
         session,
         update(ReconcileCursor)
         .where(
             col(ReconcileCursor.source) == source,
-            col(ReconcileCursor.holder).is_not(None),
-            col(ReconcileCursor.holder_expires_at) > now,
+            or_(
+                and_(
+                    col(ReconcileCursor.holder).is_not(None),
+                    col(ReconcileCursor.holder_expires_at) > now,
+                ),
+                recent_queue,
+            ),
         )
         .values(nudged_at=now)
         .execution_options(synchronize_session=False),
