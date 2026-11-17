@@ -1070,6 +1070,8 @@ def _views(*images: bytes) -> ViewsReady:
                 rotation=_IDENTITY,
                 azimuth_degrees=0.0,
                 elevation_degrees=30.0,
+                width=640,
+                height=480,
                 view_center=(0.0, 0.0),
                 pixels_per_unit=1.0,
                 offset=offset,
@@ -1093,7 +1095,9 @@ def _views(*images: bytes) -> ViewsReady:
 def views_request():
     return ThumbnailRequest(
         Path("mesh.stl"),
-        views=ViewsRequest(recipe=3, include_poles=False, source_sha256="a" * 64),
+        views=ViewsRequest(
+            recipe=3, include_poles=False, source_sha256="a" * 64, width=640
+        ),
     )
 
 

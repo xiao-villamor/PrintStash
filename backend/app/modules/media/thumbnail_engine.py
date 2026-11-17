@@ -1046,6 +1046,7 @@ class _Generation:
                     center=scene_center(scene),
                     source_sha256=views.source_sha256,
                     max_faces=limit,
+                    width=views.width,
                     recipe=views.recipe,
                     include_poles=views.include_poles,
                 )
@@ -1069,6 +1070,7 @@ class _Generation:
                     mesh,
                     source_sha256=views.source_sha256,
                     max_faces=limit,
+                    width=views.width,
                     recipe=views.recipe,
                     include_poles=views.include_poles,
                 )

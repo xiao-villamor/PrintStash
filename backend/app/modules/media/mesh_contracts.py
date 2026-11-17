@@ -160,6 +160,8 @@ class ViewsRequest:
     recipe: int
     include_poles: bool
     source_sha256: str
+    # The Model image quality setting at claim time; the height is its 4:3.
+    width: int
 
 
 @dataclass(frozen=True)

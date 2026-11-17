@@ -355,7 +355,6 @@ def _derive_mesh(
     """Publish each fenced basic output before optional fingerprint completion."""
     from app.modules.ingestion.extensions import extraction_options
     from app.modules.media.fingerprints import ALGORITHM_VERSION
-    from app.modules.media.mesh_contracts import ViewsRequest
     from app.modules.media.mesh_facts import FingerprintFailureCode
     from app.modules.media.mesh_protocol import (
         BasicOutput,
@@ -367,6 +366,7 @@ def _derive_mesh(
 
     from . import mesh_continuations
     from .mesh_continuation_values import FingerprintPlan
+    from .previews import PassClaim
 
     with phases.phase("options"):
         options = extraction_options(get_session_factory())
@@ -378,7 +378,7 @@ def _derive_mesh(
         else None
     )
     pending: mesh_continuations.MeshContinuation | None = None
-    views: tuple[records.DerivativeAttempt, ViewsRequest] | None = None
+    views: PassClaim | None = None
 
     def resume(
         session: Session,
@@ -391,10 +391,11 @@ def _derive_mesh(
         pending = mesh_continuations.resume(
             session, claimed_file, plan, execution=execution
         )
-        if claimed_kinds:
-            # This pass loads the mesh anyway: its views share that load.
-            from . import previews
+        from . import previews
 
+        # This pass loads the mesh anyway: its views share that load. A replay
+        # whose basics already landed still finishes the views it stranded.
+        if claimed_kinds or previews.stranded(session, claimed_file.id):
             views = previews.claim_for_pass(session, claimed_file, execution=execution)
 
     with phases.phase("claim"):
@@ -405,7 +406,7 @@ def _derive_mesh(
         return Outcome({})
     file_row, attempts = begun
     outcome: dict[DerivativeKind, DerivativeState] = {}
-    if not attempts and pending is None:
+    if not attempts and pending is None and views is None:
         return Outcome(outcome)
 
     def published(kind: DerivativeKind, state: DerivativeState) -> None:
@@ -432,7 +433,7 @@ def _derive_mesh(
             views_settled = True
             with phases.phase("publish_views"):
                 state = previews.publish_pass(
-                    file_row, views[0], frame, started=views_started
+                    file_row, views.attempt, frame, started=views_started
                 )
             if state is not None:
                 published(DerivativeKind.PREVIEWS, state)
@@ -515,178 +516,195 @@ def _derive_mesh(
             raise TypeError("unknown_mesh_basic_output")
 
     try:
-        with ExitStack() as stack:
-            from app.modules.media import thumbnail_handoff
-            from app.modules.media.thumbnail_packet import MAX_PACKET_BYTES
+        try:
+            with ExitStack() as stack:
+                from app.modules.media import thumbnail_handoff
+                from app.modules.media.thumbnail_packet import MAX_PACKET_BYTES
 
-            width = int(settings.model_thumbnail_width)
-            handoff_plan = (
-                thumbnail_handoff.plan(width, round(width * 3 / 4), file_row.size_bytes)
-                if DerivativeKind.THUMBNAIL in attempts and plan is None
-                else None
-            )
-            output_bytes = MAX_PACKET_BYTES if handoff_plan is not None else 0
-            reserve_started = time.monotonic_ns()
-            prepared = stack.enter_context(
-                reserve_sources((resolve(file_row),), output_bytes=output_bytes)
-            )
-            phases.ns["reserve_prepared"] = time.monotonic_ns() - reserve_started
-            reserve_started = time.monotonic_ns()
-            claim = CapacityManager(get_session_factory()).reserve(
-                f"derive:mesh:{file_id}:{time.monotonic_ns()}",
-                [
-                    CapacityResource.for_path(
-                        prepared.directory,
-                        file_row.size_bytes * 2 + output_bytes,
-                        role="mesh source preparation",
-                    ),
-                    CapacityResource.for_path(
-                        Path(tempfile.gettempdir()),
-                        file_row.size_bytes * 3 + 16 * 1024**2,
-                        role="thumbnail rendering",
-                    ),
-                ],
-                transient=True,
-            )
-            phases.ns["reserve_capacity"] = time.monotonic_ns() - reserve_started
-            stack.callback(claim.release)
-            with phases.phase("materialize"):
-                (source,) = stack.enter_context(
-                    prepared.materialize(capacity_claimed=True)
+                width = int(settings.model_thumbnail_width)
+                handoff_plan = (
+                    thumbnail_handoff.plan(
+                        width, round(width * 3 / 4), file_row.size_bytes
+                    )
+                    if DerivativeKind.THUMBNAIL in attempts and plan is None
+                    else None
                 )
-            request = ThumbnailRequest(
-                path=source,
-                file_type=file_row.file_type.value,
-                include_geometry=DerivativeKind.METADATA in attempts,
-                include_thumbnail=DerivativeKind.THUMBNAIL in attempts,
-                reason="derivative",
-                output_format="WEBP",
-                include_fingerprint=plan is not None
-                and (DerivativeKind.METADATA in attempts or pending is not None),
-                triangle_cap=plan.triangle_cap
-                if plan is not None
-                else MAX_ANALYSIS_FACES,
-                views=views[1] if views is not None else None,
-            )
-            result = None
-            try:
-                # Decode once under one native admission. Independent output
-                # consumers share source arrays; the GPU handoff starts after
-                # clean worker exit releases its native memory reservation.
-                with phases.phase("generate"):
-                    if handoff_plan is not None:
-                        handoff = stack.enter_context(
-                            thumbnail_handoff.reserve(handoff_plan, prepared.directory)
-                        )
-                        result = mesh_isolation.generate(
-                            request, on_output=publish, handoff=handoff
-                        )
-                    else:
-                        result = mesh_isolation.generate(request, on_output=publish)
-                if result is not None and result.fingerprint_result is not None:
-                    if pending is None:
-                        raise RuntimeError(
-                            "fingerprint_completion_without_pending_input"
-                        )
-                    try:
-                        with get_session_factory().scoped_session() as session:
-                            mesh_continuations.complete(
-                                session, pending, result.fingerprint_result
+                output_bytes = MAX_PACKET_BYTES if handoff_plan is not None else 0
+                reserve_started = time.monotonic_ns()
+                prepared = stack.enter_context(
+                    reserve_sources((resolve(file_row),), output_bytes=output_bytes)
+                )
+                phases.ns["reserve_prepared"] = time.monotonic_ns() - reserve_started
+                reserve_started = time.monotonic_ns()
+                claim = CapacityManager(get_session_factory()).reserve(
+                    f"derive:mesh:{file_id}:{time.monotonic_ns()}",
+                    [
+                        CapacityResource.for_path(
+                            prepared.directory,
+                            file_row.size_bytes * 2 + output_bytes,
+                            role="mesh source preparation",
+                        ),
+                        CapacityResource.for_path(
+                            Path(tempfile.gettempdir()),
+                            file_row.size_bytes * 3 + 16 * 1024**2,
+                            role="thumbnail rendering",
+                        ),
+                    ],
+                    transient=True,
+                )
+                phases.ns["reserve_capacity"] = time.monotonic_ns() - reserve_started
+                stack.callback(claim.release)
+                with phases.phase("materialize"):
+                    (source,) = stack.enter_context(
+                        prepared.materialize(capacity_claimed=True)
+                    )
+                request = ThumbnailRequest(
+                    path=source,
+                    file_type=file_row.file_type.value,
+                    include_geometry=DerivativeKind.METADATA in attempts,
+                    include_thumbnail=DerivativeKind.THUMBNAIL in attempts,
+                    reason="derivative",
+                    output_format="WEBP",
+                    include_fingerprint=plan is not None
+                    and (DerivativeKind.METADATA in attempts or pending is not None),
+                    triangle_cap=plan.triangle_cap
+                    if plan is not None
+                    else MAX_ANALYSIS_FACES,
+                    views=views.request if views is not None else None,
+                )
+                result = None
+                try:
+                    # Decode once under one native admission. Independent output
+                    # consumers share source arrays; the GPU handoff starts after
+                    # clean worker exit releases its native memory reservation.
+                    with phases.phase("generate"):
+                        if handoff_plan is not None:
+                            handoff = stack.enter_context(
+                                thumbnail_handoff.reserve(
+                                    handoff_plan, prepared.directory
+                                )
                             )
-                            session.commit()
-                    except records.AttemptSuperseded:
-                        raise
-                    except Exception:  # noqa: BLE001 - basics are already durable
-                        logger.exception(
-                            "fingerprint publication failed", extra={"file_id": file_id}
-                        )
-                        with get_session_factory().scoped_session() as session:
-                            mesh_continuations.defer(
-                                session, pending, FingerprintFailureCode.WORKER_FAILED
+                            result = mesh_isolation.generate(
+                                request, on_output=publish, handoff=handoff
                             )
-                            session.commit()
-            finally:
-                # Clear active-frame ownership before the host reservation exits,
-                # including publication and continuation failures.
-                del result
+                        else:
+                            result = mesh_isolation.generate(request, on_output=publish)
+                    if result is not None and result.fingerprint_result is not None:
+                        if pending is None:
+                            raise RuntimeError(
+                                "fingerprint_completion_without_pending_input"
+                            )
+                        try:
+                            with get_session_factory().scoped_session() as session:
+                                mesh_continuations.complete(
+                                    session, pending, result.fingerprint_result
+                                )
+                                session.commit()
+                        except records.AttemptSuperseded:
+                            raise
+                        except Exception:  # noqa: BLE001 - basics are already durable
+                            logger.exception(
+                                "fingerprint publication failed",
+                                extra={"file_id": file_id},
+                            )
+                            with get_session_factory().scoped_session() as session:
+                                mesh_continuations.defer(
+                                    session,
+                                    pending,
+                                    FingerprintFailureCode.WORKER_FAILED,
+                                )
+                                session.commit()
+                finally:
+                    # Clear active-frame ownership before the host reservation exits,
+                    # including publication and continuation failures.
+                    del result
 
-    except records.AttemptSuperseded:
+        except records.AttemptSuperseded:
+            return Outcome(outcome)
+        except (
+            ArtifactContentError,
+            MeshWorkerError,
+            AdmissionTooLarge,
+            TimeoutError,
+        ) as exc:
+            reason = (
+                ThumbnailFailureReason.TIMEOUT.value
+                if isinstance(exc, TimeoutError)
+                else ThumbnailFailureReason.RESOURCE_LIMIT.value
+                if isinstance(exc, AdmissionTooLarge)
+                else exc.reason.value
+                if isinstance(exc, MeshWorkerError)
+                else "invalid_source"
+            )
+            logger.warning(
+                "mesh derivation failed in its worker",
+                extra={"file_id": file_id, "reason": reason},
+            )
+            if (
+                DerivativeKind.THUMBNAIL in attempts
+                and DerivativeKind.THUMBNAIL not in outcome
+                and file_row.file_type is FileType.THREE_MF
+                and settings.prefer_rendered_3mf_preview
+            ):
+                # A preferred render is attempted before the slicer's picture is
+                # published, so a worker that dies while reading the mesh would
+                # otherwise leave the Model without a cover. The picture is a
+                # bounded archive read, done here as G-code's embedded image is.
+                try:
+                    state = _publish_embedded_3mf_cover(
+                        file_row, attempts[DerivativeKind.THUMBNAIL]
+                    )
+                except records.AttemptSuperseded:
+                    return Outcome(outcome)
+                if state is not None:
+                    outcome[DerivativeKind.THUMBNAIL] = state
+                    published(DerivativeKind.THUMBNAIL, state)
+            if views is not None and not views_settled:
+                from . import previews
+
+                views_settled = True
+                state = previews.fail_pass(views.attempt, reason)
+                if state is not None:
+                    published(DerivativeKind.PREVIEWS, state)
+            for kind, authority in attempts.items():
+                if kind in outcome:
+                    continue
+                try:
+                    _fail(
+                        authority,
+                        reason,
+                        deterministic=isinstance(
+                            exc, MeshWorkerError | AdmissionTooLarge
+                        )
+                        and reason in _DETERMINISTIC,
+                    )
+                except records.AttemptSuperseded:
+                    break
+                published(kind, DerivativeState.FAILED)
+            if pending is not None:
+                failure_code = (
+                    FingerprintFailureCode.TIMEOUT
+                    if reason == ThumbnailFailureReason.TIMEOUT.value
+                    else FingerprintFailureCode.RESOURCE_LIMIT
+                    if reason == ThumbnailFailureReason.RESOURCE_LIMIT.value
+                    else FingerprintFailureCode.SOURCE_UNAVAILABLE
+                    if isinstance(exc, ArtifactContentError)
+                    else FingerprintFailureCode.WORKER_FAILED
+                )
+                try:
+                    with get_session_factory().scoped_session() as session:
+                        mesh_continuations.defer(session, pending, failure_code)
+                        session.commit()
+                except records.AttemptSuperseded:
+                    pass
         return Outcome(outcome)
-    except (
-        ArtifactContentError,
-        MeshWorkerError,
-        AdmissionTooLarge,
-        TimeoutError,
-    ) as exc:
-        reason = (
-            ThumbnailFailureReason.TIMEOUT.value
-            if isinstance(exc, TimeoutError)
-            else ThumbnailFailureReason.RESOURCE_LIMIT.value
-            if isinstance(exc, AdmissionTooLarge)
-            else exc.reason.value
-            if isinstance(exc, MeshWorkerError)
-            else "invalid_source"
-        )
-        logger.warning(
-            "mesh derivation failed in its worker",
-            extra={"file_id": file_id, "reason": reason},
-        )
-        if (
-            DerivativeKind.THUMBNAIL in attempts
-            and DerivativeKind.THUMBNAIL not in outcome
-            and file_row.file_type is FileType.THREE_MF
-            and settings.prefer_rendered_3mf_preview
-        ):
-            # A preferred render is attempted before the slicer's picture is
-            # published, so a worker that dies while reading the mesh would
-            # otherwise leave the Model without a cover. The picture is a
-            # bounded archive read, done here as G-code's embedded image is.
-            try:
-                state = _publish_embedded_3mf_cover(
-                    file_row, attempts[DerivativeKind.THUMBNAIL]
-                )
-            except records.AttemptSuperseded:
-                return Outcome(outcome)
-            if state is not None:
-                outcome[DerivativeKind.THUMBNAIL] = state
-                published(DerivativeKind.THUMBNAIL, state)
+    finally:
+        # Any exit that did not settle the claimed views (a crash, a superseded
+        # cover) gives them back untouched, so the batch renders them at once.
         if views is not None and not views_settled:
             from . import previews
 
-            views_settled = True
-            state = previews.fail_pass(views[0], reason)
-            if state is not None:
-                published(DerivativeKind.PREVIEWS, state)
-        for kind, authority in attempts.items():
-            if kind in outcome:
-                continue
-            try:
-                _fail(
-                    authority,
-                    reason,
-                    deterministic=isinstance(exc, MeshWorkerError | AdmissionTooLarge)
-                    and reason in _DETERMINISTIC,
-                )
-            except records.AttemptSuperseded:
-                break
-            published(kind, DerivativeState.FAILED)
-        if pending is not None:
-            failure_code = (
-                FingerprintFailureCode.TIMEOUT
-                if reason == ThumbnailFailureReason.TIMEOUT.value
-                else FingerprintFailureCode.RESOURCE_LIMIT
-                if reason == ThumbnailFailureReason.RESOURCE_LIMIT.value
-                else FingerprintFailureCode.SOURCE_UNAVAILABLE
-                if isinstance(exc, ArtifactContentError)
-                else FingerprintFailureCode.WORKER_FAILED
-            )
-            try:
-                with get_session_factory().scoped_session() as session:
-                    mesh_continuations.defer(session, pending, failure_code)
-                    session.commit()
-            except records.AttemptSuperseded:
-                pass
-    return Outcome(outcome)
+            previews.release_pass(views)
 
 
 def _replace_material_requirements(

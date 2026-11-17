@@ -31,6 +31,7 @@ def produce(
     directory: Path,
     progress: Callable[[int, int], None] | None = None,
     *,
+    width: int,
     recipe: int = 1,
     include_poles: bool = False,
 ) -> bytes:
@@ -59,6 +60,7 @@ def produce(
             prepared.whole_mesh,
             source_sha256=source_sha256,
             max_faces=limit,
+            width=width,
             progress=progress,
             recipe=recipe,
             include_poles=include_poles,
@@ -95,6 +97,7 @@ def main(argv: list[str]) -> int:
             spec["expected_sha256"],
             Path(spec["output_directory"]),
             progress=lambda done, total: output.write(f"P:{done}:{total}\n".encode()),
+            width=spec["width"],
             recipe=spec["recipe"],
             include_poles=spec["include_poles"],
         )

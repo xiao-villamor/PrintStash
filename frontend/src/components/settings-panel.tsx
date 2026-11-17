@@ -1065,6 +1065,9 @@ export function SettingsPanel() {
     setPreviewBusy("rebuild");
     try {
       // Every current preview stays visible until its replacement is ready.
+      // Views follow Model image quality too. Marking them first lets each
+      // cover pass render them from the same load instead of a second one.
+      if (selectedPreviewMode !== "single") await regenerateDerivatives("previews", "all");
       await regenerateDerivatives("thumbnail", "all");
       toast.success(uiText("Model preview recreation queued. Follow it in Background work."));
     } catch (e) {

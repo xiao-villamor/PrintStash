@@ -1718,6 +1718,7 @@ class TestViews:
                     recipe=3,
                     include_poles=include_poles,
                     source_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                    width=640,
                 ),
             ),
             on_output=outputs.append,
@@ -1764,6 +1765,7 @@ class TestViews:
             "3mf",
             views.manifest.source_sha256,
             batch,
+            width=640,
             recipe=3,
             include_poles=True,
         )

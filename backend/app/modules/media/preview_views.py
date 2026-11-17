@@ -21,9 +21,7 @@ from app.core.cancellation import checkpoint
 from app.modules.media import thumbnail
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.preview_contracts import (
-    HEIGHT,
     MAX_IMAGE_BYTES,
-    WIDTH,
     CameraView,
     Matrix,
     PreviewLimitError,
@@ -32,6 +30,7 @@ from app.modules.media.preview_contracts import (
     ViewId,
     ViewProfile,
     ViewRole,
+    height_for,
 )
 
 if TYPE_CHECKING:
@@ -115,6 +114,7 @@ def render_views(
     *,
     source_sha256: str,
     max_faces: int,
+    width: int,
     recipe: int = 1,
     include_poles: bool = False,
     progress: Callable[[int, int], None] | None = None,
@@ -130,6 +130,7 @@ def render_views(
         center=(used.min(axis=0) + used.max(axis=0)) * 0.5,
         source_sha256=source_sha256,
         max_faces=max_faces,
+        width=width,
         recipe=recipe,
         include_poles=include_poles,
         progress=progress,
@@ -142,6 +143,7 @@ def render_prepared_views(
     center,
     source_sha256: str,
     max_faces: int,
+    width: int,
     recipe: int,
     include_poles: bool,
     progress: Callable[[int, int], None] | None = None,
@@ -156,6 +158,7 @@ def render_prepared_views(
     profile, views = _cameras(
         geometry.face_count, max_faces=max_faces, include_poles=include_poles
     )
+    height = height_for(width)
     prepared = prepare_normals(geometry)
     images: list[bytes] = []
     published: list[PublishedView] = []
@@ -165,8 +168,8 @@ def render_prepared_views(
         encoded = render_prepared_thumbnail(
             prepared,
             view.id,
-            WIDTH,
-            HEIGHT,
+            width,
+            height,
             view_rotation=np.asarray(view.rotation),
             output_format="WEBP",
         )
@@ -176,7 +179,7 @@ def render_prepared_views(
         try:
             encoded = thumbnail.to_webp(
                 encoded,
-                width=WIDTH,
+                width=width,
                 normalize=False,
                 preserve_frame=True,
                 renderer_encoded=True,
@@ -196,12 +199,14 @@ def render_prepared_views(
         minimum, maximum = points[:, :2].min(axis=0), points[:, :2].max(axis=0)
         extent = np.maximum(maximum - minimum, 1e-6)
         scale = min(
-            WIDTH * (1 - 2 * PREVIEW_PROFILE.margin_fraction) / extent[0],
-            HEIGHT * (1 - 2 * PREVIEW_PROFILE.margin_fraction) / extent[1],
+            width * (1 - 2 * PREVIEW_PROFILE.margin_fraction) / extent[0],
+            height * (1 - 2 * PREVIEW_PROFILE.margin_fraction) / extent[1],
         )
         published.append(
             PublishedView(
                 **view.model_dump(),
+                width=width,
+                height=height,
                 view_center=tuple((minimum + maximum) * 0.5),
                 pixels_per_unit=float(scale),
                 offset=offset,

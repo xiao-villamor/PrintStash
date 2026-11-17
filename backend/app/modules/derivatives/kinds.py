@@ -50,7 +50,8 @@ GCODE_THUMBNAIL_RECIPE = 3
 TOOLPATH_RECIPE = 1
 VIEWER_STL_RECIPE = 3
 PLATES_RECIPE = 1
-PREVIEWS_RECIPE = 3
+# 4: views follow the Model image quality setting instead of a fixed 480 x 360.
+PREVIEWS_RECIPE = 4
 VIEWER_TYPES = (
     FileType.THREE_MF,
     FileType.OBJ,

@@ -1,5 +1,7 @@
 """Every shape uses the same source-relative oblique cameras; poles are optional."""
 
+import io
+
 import numpy as np
 import pytest
 import trimesh
@@ -9,6 +11,8 @@ from app.modules.media.preview_views import candidates, render_views
 
 # The shared default, VAULT_MESH_MAX_RENDER_TRIANGLES.
 LIMIT = 2_000_000
+# The Model image quality default (VAULT_MODEL_THUMBNAIL_WIDTH).
+VIEW_WIDTH = 640
 
 
 class TestCandidates:
@@ -79,19 +83,24 @@ class TestRenderViews:
         )
         with pytest.raises(ValueError, match="thumbnail"):
             render_views(
-                trimesh.creation.box(), source_sha256="a" * 64, max_faces=LIMIT
+                trimesh.creation.box(),
+                source_sha256="a" * 64,
+                max_faces=LIMIT,
+                width=VIEW_WIDTH,
             )
 
     def test_records_source_relative_projection(self):
         mesh = trimesh.creation.box()
         mesh.apply_translation([10, 20, 30])
-        manifest, images = render_views(mesh, source_sha256="a" * 64, max_faces=LIMIT)
+        manifest, images = render_views(
+            mesh, source_sha256="a" * 64, max_faces=LIMIT, width=VIEW_WIDTH
+        )
         assert manifest.source_sha256 == "a" * 64
         assert manifest.center == (10, 20, 30)
         assert len(images) == len(manifest.views) == 4
         for view, image in zip(manifest.views, images, strict=True):
-            assert view.width == 480
-            assert view.height == 360
+            assert view.width == VIEW_WIDTH
+            assert view.height == 480
             assert view.size == len(image)
             assert view.projection == "orthographic"
             assert view.pixels_per_unit > 0
@@ -110,19 +119,23 @@ class TestLimits:
         monkeypatch.setattr("app.modules.media.preview_views.MAX_IMAGE_BYTES", 10)
         with pytest.raises(PreviewLimitError):
             render_views(
-                trimesh.creation.box(), source_sha256="a" * 64, max_faces=LIMIT
+                trimesh.creation.box(),
+                source_sha256="a" * 64,
+                max_faces=LIMIT,
+                width=VIEW_WIDTH,
             )
 
 
 class TestDegenerateViews:
     # A plate standing on edge: looking straight down sees less than a pixel.
-    PLATE = (10, 0.01, 10)
+    PLATE = (10, 0.001, 10)
 
     def test_omits_a_pole_that_sees_only_an_edge(self):
         manifest, images = render_views(
             trimesh.creation.box(extents=self.PLATE),
             source_sha256="a" * 64,
             max_faces=LIMIT,
+            width=VIEW_WIDTH,
             include_poles=True,
         )
         assert [view.id for view in manifest.views] == [
@@ -139,6 +152,7 @@ class TestDegenerateViews:
             trimesh.creation.box(extents=self.PLATE),
             source_sha256="a" * 64,
             max_faces=LIMIT,
+            width=VIEW_WIDTH,
             include_poles=True,
             progress=lambda done, total: reported.append((done, total)),
         )
@@ -153,5 +167,26 @@ class TestDegenerateViews:
         monkeypatch.setattr(thumbnail, "to_webp", empty)
         with pytest.raises(thumbnail.EmptyThumbnailError):
             render_views(
-                trimesh.creation.box(), source_sha256="a" * 64, max_faces=LIMIT
+                trimesh.creation.box(),
+                source_sha256="a" * 64,
+                max_faces=LIMIT,
+                width=VIEW_WIDTH,
             )
+
+
+class TestResolution:
+    @pytest.mark.parametrize(
+        ("width", "height"), [(320, 240), (640, 480), (1280, 960)], ids=str
+    )
+    def test_follows_the_model_image_quality(self, width, height):
+        from PIL import Image
+
+        manifest, images = render_views(
+            trimesh.creation.box(), source_sha256="a" * 64, max_faces=LIMIT, width=width
+        )
+        assert {(view.width, view.height) for view in manifest.views} == {
+            (width, height)
+        }
+        assert {Image.open(io.BytesIO(image)).size for image in images} == {
+            (width, height)
+        }

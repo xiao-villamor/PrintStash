@@ -11,6 +11,7 @@ from app.core.errors import OperationError
 from app.core.time import utcnow
 from app.db.models import File, JobKind, LaneName
 from app.db.scopes import live
+from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.work.contracts import (
     DuringAdditions,
     JobContext,
@@ -87,9 +88,16 @@ def _hooks(derivative_group: DerivativeGroup):
         file_row = _file(session, subject_key)
         if file_row is not None:
             if derivative_group.definition is JobKind.DERIVATIVES_MESH:
+                from . import previews
                 from .mesh_continuations import withdraw_current_job
 
                 withdraw_current_job(session, file_id_of(subject_key))
+                # The pass ended before its views: a retry, never a verdict.
+                previews.settle_stranded(
+                    session,
+                    file_id_of(subject_key),
+                    ThumbnailFailureReason.WORKER_FAILED.value,
+                )
             records.cancel(
                 session,
                 file_row,
@@ -103,6 +111,12 @@ def _hooks(derivative_group: DerivativeGroup):
         if file_row is None:
             return
         recipes = derivative_group.recipes_for(file_row.file_type)
+        if derivative_group.definition is JobKind.DERIVATIVES_MESH:
+            # Views a dead cover pass claimed would otherwise wait out the
+            # stale window; as a retry, the batch renders them.
+            from . import previews
+
+            previews.settle_stranded(session, file_row.id, reason)
         if reason == SkipReason.DERIVATIVE_GROUP_DISABLED:
             # Settle started work without spending attempts on outputs that
             # were never started. Re-enabling the group can discover them.

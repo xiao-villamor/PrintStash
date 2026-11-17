@@ -11,7 +11,13 @@ import trimesh
 from sqlmodel import select
 
 from app.core.time import utcnow
-from app.db.models import ArtifactDerivative, DerivativeKind, DerivativeState, JobKind
+from app.db.models import (
+    ArtifactDerivative,
+    DerivativeKind,
+    DerivativeState,
+    JobKind,
+    JobState,
+)
 from app.db.session import get_session_factory
 from app.modules.derivatives import policy, previews, producers, records
 from app.modules.derivatives.kinds import PREVIEWS_RECIPE, group
@@ -815,3 +821,136 @@ class TestCoverPassViews:
         assert outcome.kinds[DerivativeKind.THUMBNAIL] is DerivativeState.READY
         row = _views_row(db_session, artifact)
         assert (row.state, row.storage_key) == (DerivativeState.RUNNING, None)
+
+    @pytest.mark.parametrize("width", [320, 1280], ids=str)
+    def test_follows_the_model_image_quality(
+        self, db_session, artifact, monkeypatch, width
+    ):
+        from app.core.config import _overlay
+
+        # What saving "Model image quality" in Settings leaves in effect.
+        monkeypatch.setitem(_overlay, "model_thumbnail_width", width)
+
+        producers.derive_mesh(artifact.id)
+
+        manifest = json.loads(_views_row(db_session, artifact).output_json)
+        assert {(v["width"], v["height"]) for v in manifest["views"]} == {
+            (width, width * 3 // 4)
+        }
+
+
+class TestCoverPassRecovery:
+    """Views a cover pass claimed never wait out the stale window."""
+
+    def test_gives_new_views_back_when_the_cover_pass_crashes(
+        self, db_session, artifact, monkeypatch
+    ):
+        from app.modules.media import mesh_isolation
+
+        working = mesh_isolation.generate
+
+        def crash(*args, **kwargs):
+            raise RuntimeError("renderer segfaulted")
+
+        monkeypatch.setattr(mesh_isolation, "generate", crash)
+
+        with pytest.raises(RuntimeError):
+            producers.derive_mesh(artifact.id)
+
+        assert _views_row(db_session, artifact) is None
+        monkeypatch.setattr(mesh_isolation, "generate", working)
+        assert previews.derive(artifact.id).kinds == {
+            DerivativeKind.PREVIEWS: DerivativeState.READY
+        }
+
+    def test_restores_the_row_a_crashed_cover_pass_replaced(
+        self, db_session, artifact, make_derivative, monkeypatch
+    ):
+        from app.modules.media import mesh_isolation
+
+        retry_at = utcnow() - timedelta(minutes=1)
+        make_derivative(
+            artifact,
+            DerivativeKind.PREVIEWS,
+            state=DerivativeState.FAILED,
+            failure_reason="timeout",
+            next_attempt_at=retry_at,
+        )
+
+        def crash(*args, **kwargs):
+            raise RuntimeError("renderer segfaulted")
+
+        monkeypatch.setattr(mesh_isolation, "generate", crash)
+
+        with pytest.raises(RuntimeError):
+            producers.derive_mesh(artifact.id)
+
+        row = _views_row(db_session, artifact)
+        assert (row.state, row.attempts, row.failure_reason) == (
+            DerivativeState.FAILED,
+            1,
+            "timeout",
+        )
+        assert row.next_attempt_at.replace(tzinfo=None) == retry_at.replace(tzinfo=None)
+
+    def test_finishes_views_a_dead_cover_pass_stranded(
+        self, db_session, artifact, make_derivative
+    ):
+        policy.update(db_session, {policy.SettingName.PREVIEWS: False}, commit=False)
+        db_session.commit()
+        producers.derive_mesh(artifact.id)
+        policy.update(db_session, {policy.SettingName.PREVIEWS: True}, commit=False)
+        db_session.commit()
+        # The previous cover pass claimed the views, then its process died.
+        make_derivative(
+            artifact, DerivativeKind.PREVIEWS, state=DerivativeState.RUNNING
+        )
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds == {DerivativeKind.PREVIEWS: DerivativeState.READY}
+
+    def test_leaves_views_the_batch_is_rendering(
+        self, db_session, artifact, make_derivative, make_job
+    ):
+        claimed = make_derivative(
+            artifact, DerivativeKind.PREVIEWS, state=DerivativeState.RUNNING
+        )
+        make_job(
+            kind=JobKind.DERIVATIVES_PREVIEWS,
+            state=JobState.RUNNING,
+            subject=f"file/{artifact.id}",
+        )
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert DerivativeKind.PREVIEWS not in outcome.kinds
+        row = _views_row(db_session, artifact)
+        assert (row.state, row.attempt_token) == (
+            DerivativeState.RUNNING,
+            claimed.attempt_token,
+        )
+
+    @pytest.mark.parametrize("hook", ["on_failure", "cancel"])
+    def test_cover_job_hooks_turn_stranded_views_into_a_retry(
+        self, db_session, artifact, make_derivative, hook
+    ):
+        from app.modules.derivatives.jobs import definitions
+
+        make_derivative(
+            artifact, DerivativeKind.PREVIEWS, state=DerivativeState.RUNNING
+        )
+        (cover,) = [d for d in definitions() if d.name is JobKind.DERIVATIVES_MESH]
+
+        if hook == "on_failure":
+            cover.on_failure(db_session, f"file/{artifact.id}", "worker_failed")
+        else:
+            cover.cancel(db_session, f"file/{artifact.id}")
+        db_session.commit()
+
+        row = _views_row(db_session, artifact)
+        assert (row.state, row.failure_reason) == (
+            DerivativeState.FAILED,
+            "worker_failed",
+        )
+        assert row.next_attempt_at is not None

@@ -11,6 +11,7 @@ import hashlib
 import io
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 from typing import BinaryIO
 
@@ -28,11 +29,10 @@ from app.modules.media.mesh_isolation import MeshWorkerError
 from app.modules.media.mesh_protocol import ViewsReady, ViewsRefused
 from app.modules.media.native_budget import MeshSource, RasterCodec, RasterWork
 from app.modules.media.preview_contracts import (
-    HEIGHT,
     MAX_BUNDLE_BYTES,
     MAX_MANIFEST_BYTES,
-    WIDTH,
     PreviewManifest,
+    height_for,
 )
 from app.modules.media.source_preparation import reserve_sources
 from app.modules.media.stl_isolation import (
@@ -82,7 +82,7 @@ def _publish(
             raise ValueError("preview_digest_mismatch")
         canonical = thumbnail.to_webp(
             image,
-            width=WIDTH,
+            width=view.width,
             normalize=False,
             preserve_frame=True,
             renderer_encoded=True,
@@ -149,9 +149,18 @@ def _reason(exc: Exception) -> str:
     )
 
 
+@dataclass(frozen=True)
+class PassClaim:
+    """Views a cover pass owns: its attempt, its request, and what it replaced."""
+
+    attempt: records.DerivativeAttempt
+    request: ViewsRequest
+    prior: records.PriorClaim | None
+
+
 def claim_for_pass(
     session: Session, file: File, *, execution: JobExecution | None
-) -> tuple[records.DerivativeAttempt, ViewsRequest] | None:
+) -> PassClaim | None:
     """Claim this Artifact's views for a cover pass that is about to load it.
 
     Runs inside the cover Job's claim transaction. A RUNNING row is satisfied
@@ -162,17 +171,81 @@ def claim_for_pass(
     if file.size_bytes > settings.mesh_max_load_mb * 1024 * 1024:
         return None
     kinds = {DerivativeKind.PREVIEWS: PREVIEWS_RECIPE}
-    if not records.needed(session, file, kinds, now=utcnow()):
+    if not records.needed(session, file, kinds, now=utcnow()) and not stranded(
+        session, file.id
+    ):
         return None
-    row = records.begin(
+    row, prior = records.begin_reversible(
         session, file, DerivativeKind.PREVIEWS, PREVIEWS_RECIPE, now=utcnow()
     )
     attempt = records.attempt(session, file, row, execution=execution)
-    return attempt, ViewsRequest(
-        recipe=attempt.recipe,
-        include_poles=policy.preview_poles(session),
-        source_sha256=file.sha256,
+    return PassClaim(
+        attempt,
+        ViewsRequest(
+            recipe=attempt.recipe,
+            include_poles=policy.preview_poles(session),
+            source_sha256=file.sha256,
+            width=int(settings.model_thumbnail_width),
+        ),
+        prior,
     )
+
+
+def stranded(session: Session, file_id: int) -> bool:
+    """A RUNNING views row no batch Job owns: a dead cover pass claimed it.
+
+    Only the batch and the subject's one active cover Job claim views, so the
+    cover Job that asks (a replay or a retry) is that pass's successor.
+    """
+    from sqlmodel import col, select
+
+    from app.db.models import ArtifactDerivative, Job
+    from app.modules.work.jobs import active_job_predicate
+
+    from .source import subject_key
+
+    running = session.exec(
+        select(ArtifactDerivative.id).where(
+            ArtifactDerivative.file_id == file_id,
+            ArtifactDerivative.kind == DerivativeKind.PREVIEWS,
+            ArtifactDerivative.recipe_version == PREVIEWS_RECIPE,
+            ArtifactDerivative.state == DerivativeState.RUNNING,
+        )
+    ).first()
+    if running is None:
+        return False
+    return (
+        session.exec(
+            select(Job.id).where(
+                col(Job.kind) == JobKind.DERIVATIVES_PREVIEWS,
+                col(Job.subject_key) == subject_key(file_id),
+                active_job_predicate(),
+            )
+        ).first()
+        is None
+    )
+
+
+def settle_stranded(session: Session, file_id: int, reason: str) -> None:
+    """The cover Job ended for good: its stranded views become a retry."""
+    if stranded(session, file_id):
+        records.fail_in_flight(
+            session,
+            file_id,
+            reason,
+            now=utcnow(),
+            kinds={DerivativeKind.PREVIEWS: PREVIEWS_RECIPE},
+        )
+
+
+def release_pass(claim: PassClaim) -> None:
+    """Give views back to the batch when the cover pass ended without them."""
+    try:
+        with get_session_factory().scoped_session() as session:
+            records.release(session, claim.attempt, claim.prior)
+            session.commit()
+    except records.AttemptSuperseded:
+        pass
 
 
 def publish_pass(
@@ -240,6 +313,8 @@ def _derive(
     attempt = attempts[DerivativeKind.PREVIEWS]
     with get_session_factory().scoped_session() as session:
         include_poles = policy.preview_poles(session)
+    # Model image quality: the views match the cover's resolution.
+    width = int(settings.model_thumbnail_width)
     # VAULT_MESH_MAX_LOAD_MB: the same source-size ceiling as every mesh path.
     if file.size_bytes > settings.mesh_max_load_mb * 1024 * 1024:
         _fail(attempt, "resource_limit", deterministic=True)
@@ -296,11 +371,12 @@ def _derive(
                     "expected_sha256": file.sha256,
                     "recipe": attempt.recipe,
                     "include_poles": include_poles,
+                    "width": width,
                 },
                 workspace=prepared.directory,
                 sources=(MeshSource(source, file.file_type.value),),
                 # Images are encoded sequentially; one live raster, six bounded WebPs.
-                work=RasterWork(WIDTH, HEIGHT, 1, RasterCodec.WEBP),
+                work=RasterWork(width, height_for(width), 1, RasterCodec.WEBP),
                 reply_limit=MAX_MANIFEST_BYTES,
                 on_chunk=receive,
             ) as (reply, directory):

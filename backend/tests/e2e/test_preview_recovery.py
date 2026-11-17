@@ -1,4 +1,8 @@
-"""A dead preview worker is reconciled on restart without losing the cover."""
+"""A cover pass killed while rendering its views converges on restart.
+
+The cover it already published survives untouched; the views it claimed are
+rendered again rather than waiting out the stale window.
+"""
 
 import json
 import os

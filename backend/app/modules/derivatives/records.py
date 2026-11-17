@@ -174,6 +174,66 @@ def begin(
 
 
 @dataclass(frozen=True)
+class PriorClaim:
+    """What ``begin`` overwrote on an existing row, so a claim can be undone."""
+
+    state: DerivativeState
+    attempt_token: str | None
+    attempts: int
+    next_attempt_at: datetime | None
+    failure_reason: str | None
+    updated_at: datetime
+
+
+def begin_reversible(
+    session: Session, file: File, kind: DerivativeKind, recipe: int, *, now: datetime
+) -> tuple[ArtifactDerivative, PriorClaim | None]:
+    """``begin``, keeping what it replaced; None when the row is new."""
+    assert file.id is not None
+    existing = session.exec(
+        select(ArtifactDerivative).where(
+            ArtifactDerivative.file_id == file.id,
+            ArtifactDerivative.kind == kind,
+            ArtifactDerivative.recipe_version == recipe,
+        )
+    ).first()
+    prior = (
+        None
+        if existing is None
+        else PriorClaim(
+            existing.state,
+            existing.attempt_token,
+            existing.attempts,
+            existing.next_attempt_at,
+            existing.failure_reason,
+            existing.updated_at,
+        )
+    )
+    return begin(session, file, kind, recipe, now=now), prior
+
+
+def release(
+    session: Session, attempt: "DerivativeAttempt", prior: PriorClaim | None
+) -> None:
+    """Undo a claim that never started its work, exactly as it found the row.
+
+    The owner gives the output back to whoever finds it next, without spending
+    an attempt or waiting out a retry backoff.
+    """
+    _, row = claim_running(session, attempt)
+    if prior is None:
+        session.delete(row)
+        return
+    row.state = prior.state
+    row.attempt_token = prior.attempt_token
+    row.attempts = prior.attempts
+    row.next_attempt_at = prior.next_attempt_at
+    row.failure_reason = prior.failure_reason
+    row.updated_at = prior.updated_at
+    session.add(row)
+
+
+@dataclass(frozen=True)
 class ArtifactSource:
     sha256: str
     file_type: FileType

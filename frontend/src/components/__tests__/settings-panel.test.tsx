@@ -3299,6 +3299,45 @@ describe("SettingsPanel", () => {
         );
         expect(rebuild?.body).toBe(JSON.stringify({ mode: "all" }));
       });
+      // Single-cover mode owns no views to rebuild.
+      expect(
+        requestsWithMethod("POST").some((call) =>
+          call.url.endsWith("/derivatives/previews/regenerate"),
+        ),
+      ).toBe(false);
+    });
+
+    it("rebuilds multi-angle views at the new quality before the covers", async () => {
+      // Views follow Model image quality. Queued first, they are due when
+      // each cover pass starts, so one mesh load renders the cover and views.
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=previews",
+        routes: {
+          "GET /api/v1/config": json({ ...VAULT_CONFIG, derivatives_previews_enabled: true }),
+          "POST /api/v1/admin/work/derivatives/previews/regenerate": json({
+            kind: "previews",
+            mode: "all",
+          }),
+          "POST /api/v1/admin/work/derivatives/thumbnail/regenerate": json({
+            kind: "thumbnail",
+            mode: "all",
+          }),
+        },
+      });
+
+      await user.click(await screen.findByRole("button", { name: /Recreate all images/ }));
+
+      await waitFor(() =>
+        expect(
+          requestsWithMethod("POST")
+            .map((call) => call.url)
+            .filter((url) => url.endsWith("/regenerate")),
+        ).toEqual([
+          expect.stringMatching(/\/derivatives\/previews\/regenerate$/),
+          expect.stringMatching(/\/derivatives\/thumbnail\/regenerate$/),
+        ]),
+      );
     });
 
     it("remembers the viewer quality in this browser", async () => {
