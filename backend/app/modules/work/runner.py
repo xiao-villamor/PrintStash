@@ -448,6 +448,7 @@ def _begin(job_id: str, attempt: int, execution_epoch: str) -> dict[str, str] | 
             record_queue_wait(
                 row.kind.value, (now - ensure_utc(row.created_at)).total_seconds()
             )
+        starting = row.state is not JobState.RUNNING
         row.attempts = max(row.attempts, attempt)
         row.submitted_epoch = execution_epoch
         row.state = JobState.RUNNING
@@ -462,14 +463,23 @@ def _begin(job_id: str, attempt: int, execution_epoch: str) -> dict[str, str] | 
         }
         session.add(row)
         if row.priority is WorkPriority.INTERACTIVE:
-            definition = catalog_module.get_catalog().definition(row.kind)
-            if isinstance(definition.source, PrioritizedWorkSource):
-                from .submission import nudge_after_commit
+            from .submission import nudge_after_commit
 
+            catalog = catalog_module.get_catalog()
+            definition = catalog.definition(row.kind)
+            if isinstance(definition.source, PrioritizedWorkSource):
                 # Running interactive work frees a pending slot. Let the source
                 # fill that existing allowance while this attempt runs; its
                 # priority quotas and admission checks still bound discovery.
                 nudge_after_commit(session, definition.name)
+            yielding = catalog.yielding_to(definition.name)
+            if (
+                starting
+                and yielding
+                and not catalog.interactive_waiting(session, definition.name, now=now)
+            ):
+                for source in yielding:
+                    nudge_after_commit(session, source)
         session.commit()
         return claim
 

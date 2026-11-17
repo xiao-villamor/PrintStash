@@ -9,20 +9,30 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
+from datetime import datetime
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.core.config import settings
-from app.db.models import JobKind, LaneName, WorkLaneOverride
+from app.db.models import (
+    Job,
+    JobKind,
+    JobState,
+    LaneName,
+    WorkLaneOverride,
+    WorkPriority,
+)
 
 from .contracts import (
     DuringAdditions,
+    InteractiveBacklogSource,
     JobDefinition,
     JobEngine,
     Lane,
     LaneOrder,
     LanePace,
 )
+from .jobs import active_job_predicate
 
 # How many reconcile passes run at once, deployment-wide.
 RECONCILE_CONCURRENCY = 4
@@ -162,11 +172,30 @@ class WorkCatalog:
         )
 
     def yielding_to(self, name: JobKind) -> tuple[JobKind, ...]:
-        """Definitions whose discovery waits behind interactive Jobs of ``name``."""
+        """Definitions whose discovery waits for interactive work of ``name`` to start."""
         return tuple(
-            other
-            for other, item in self.definitions.items()
-            if name in item.yields_to
+            other for other, item in self.definitions.items() if name in item.yields_to
+        )
+
+    def interactive_waiting(
+        self, session: Session, name: JobKind, *, now: datetime
+    ) -> bool:
+        """Whether interactive work still needs a lane slot or a Job."""
+        waiting = session.exec(
+            select(Job.id)
+            .where(
+                col(Job.kind) == name,
+                active_job_predicate(),
+                col(Job.priority) == WorkPriority.INTERACTIVE,
+                col(Job.state).in_((JobState.QUEUED, JobState.INTERRUPTED)),
+            )
+            .limit(1)
+        ).first()
+        if waiting is not None:
+            return True
+        source = self.definition(name).source
+        return isinstance(source, InteractiveBacklogSource) and source.owes_interactive(
+            session, now=now
         )
 
     @property

@@ -2049,32 +2049,32 @@ class TestDiscoveryWaitsForAdditions:
 class TestDiscoveryYieldsToInteractiveWork:
     """``yields_to``: discovery holds back while a person waits on other work."""
 
-    def test_holds_back_while_an_interactive_job_is_active(
+    def test_runs_beside_running_interactive_work(
         self, yielding_engine, make_job, db_session: Session
     ) -> None:
-        from app.modules.work.reconciler import PassNote
-
         from .conftest import INTERACTIVE_WORK, YIELDING
 
         make_job(kind=INTERACTIVE_WORK, state=JobState.RUNNING, attempts=1)
+
+        run_pass(YIELDING)
+
+        assert len(TestDiscoveryWaitsForAdditions._created(db_session, YIELDING)) == 1
+
+    @pytest.mark.parametrize("state", [JobState.QUEUED, JobState.INTERRUPTED])
+    def test_holds_back_while_interactive_work_waits_for_a_slot(
+        self, yielding_engine, make_job, db_session: Session, state: JobState
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        make_job(kind=INTERACTIVE_WORK, state=JobState.RUNNING, subject="artifact/2")
+        make_job(kind=INTERACTIVE_WORK, state=state)
 
         result = run_pass(YIELDING)
 
         assert (
             TestDiscoveryWaitsForAdditions._created(db_session, YIELDING),
             result.outcomes,
-        ) == ([], {PassNote.YIELDING_TO_INTERACTIVE.value: 1})
-
-    def test_holds_back_while_an_interactive_job_is_queued(
-        self, yielding_engine, make_job, db_session: Session
-    ) -> None:
-        from .conftest import INTERACTIVE_WORK, YIELDING
-
-        make_job(kind=INTERACTIVE_WORK, state=JobState.QUEUED)
-
-        run_pass(YIELDING)
-
-        assert TestDiscoveryWaitsForAdditions._created(db_session, YIELDING) == []
+        ) == ([], {reconciler_module.PassNote.YIELDING_TO_INTERACTIVE.value: 1})
 
     def test_runs_beside_backfill_jobs(
         self, yielding_engine, make_job, db_session: Session

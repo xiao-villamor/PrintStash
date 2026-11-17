@@ -1659,7 +1659,20 @@ class TestAdditionsRelease:
 
 
 class TestInteractiveRelease:
-    """The last interactive Job to settle releases the work that yielded to it."""
+    """Starting the last waiting interactive Job releases work that yielded."""
+
+    def test_claim_nudges_only_after_the_last_waiting_job_starts(
+        self, yielding_engine, make_job
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        first = make_job(kind=INTERACTIVE_WORK, subject="artifact/first")
+        last = make_job(kind=INTERACTIVE_WORK, subject="artifact/last")
+
+        assert _begin(first.id, 1, first.execution_epoch) is not None
+        assert YIELDING not in _nudged(yielding_engine)
+        assert _begin(last.id, 1, last.execution_epoch) is not None
+        assert YIELDING in _nudged(yielding_engine)
 
     def test_the_last_interactive_job_to_end_nudges_the_yielding_work(
         self, yielding_engine, make_job, db_session: Session

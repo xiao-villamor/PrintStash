@@ -361,10 +361,10 @@ class JobDefinition:
     # What discovery does while the library is still being added to. The last
     # addition to settle nudges every definition that held back.
     during_additions: DuringAdditions = DuringAdditions.RUNS
-    # Definitions whose interactive Jobs this one's discovery waits behind:
-    # background writes that would otherwise hold the database writer while a
-    # person waits on that work. The last such Job to settle nudges it. An
-    # InteractiveBacklogSource of theirs also holds it while it owes such work.
+    # Hold discovery for these definitions' queued or interrupted interactive
+    # Jobs, and for unpublished intent their InteractiveBacklogSource owes.
+    # Running Jobs can overlap discovery. The start that clears the wait
+    # nudges this definition, with a final settlement nudge for recovery.
     yields_to: tuple[JobKind, ...] = ()
     # Whether each step is admitted as a write-capable operation (drained by a
     # restore, deferred while one holds the fence). Only work that itself takes
