@@ -9,10 +9,17 @@ from typing import TYPE_CHECKING
 import numpy as np
 from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 from printstash_core.mesh.rasterizer import render_prepared_thumbnail
-from printstash_core.mesh.render_geometry import prepare_mesh, prepare_normals
+from printstash_core.mesh.render_geometry import (
+    PreparedRenderGeometry,
+    prepare_mesh,
+    prepare_normals,
+)
+from printstash_core.mesh.similarity import GeometryError
+from printstash_core.mesh.similarity.components import ExpandedScene
 
 from app.core.cancellation import checkpoint
 from app.modules.media import thumbnail
+from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.preview_contracts import (
     HEIGHT,
     MAX_IMAGE_BYTES,
@@ -65,7 +72,13 @@ def _orbit(azimuth: float) -> Matrix:
 def candidates(
     mesh: Trimesh, *, max_faces: int, include_poles: bool = False
 ) -> tuple[ViewProfile, tuple[CameraView, ...]]:
-    if not 0 < len(mesh.faces) <= max_faces:
+    return _cameras(len(mesh.faces), max_faces=max_faces, include_poles=include_poles)
+
+
+def _cameras(
+    face_count: int, *, max_faces: int, include_poles: bool
+) -> tuple[ViewProfile, tuple[CameraView, ...]]:
+    if not 0 < face_count <= max_faces:
         raise PreviewLimitError
     views: list[CameraView] = []
     for index in range(4):
@@ -106,13 +119,44 @@ def render_views(
     include_poles: bool = False,
     progress: Callable[[int, int], None] | None = None,
 ) -> tuple[PreviewManifest, list[bytes]]:
-    profile, views = candidates(mesh, max_faces=max_faces, include_poles=include_poles)
+    if not 0 < len(mesh.faces) <= max_faces:
+        raise PreviewLimitError
     geometry = prepare_mesh(mesh)
     if geometry is None:
         raise ValueError("preview_no_geometry")
-    prepared = prepare_normals(geometry)
     used = np.asarray(mesh.vertices)[np.unique(mesh.faces)]
-    center = (used.min(axis=0) + used.max(axis=0)) * 0.5
+    return render_prepared_views(
+        geometry,
+        center=(used.min(axis=0) + used.max(axis=0)) * 0.5,
+        source_sha256=source_sha256,
+        max_faces=max_faces,
+        recipe=recipe,
+        include_poles=include_poles,
+        progress=progress,
+    )
+
+
+def render_prepared_views(
+    geometry: PreparedRenderGeometry,
+    *,
+    center,
+    source_sha256: str,
+    max_faces: int,
+    recipe: int,
+    include_poles: bool,
+    progress: Callable[[int, int], None] | None = None,
+) -> tuple[PreviewManifest, list[bytes]]:
+    """Render the view set from geometry the caller already holds.
+
+    ``geometry`` is centred on its referenced bounding box, as both
+    ``prepare_mesh`` and ``prepare_scene`` produce it; ``center`` is that box's
+    centre in source coordinates. The cover pass and the standalone batch both
+    end here, so one mesh load can serve the cover and every view.
+    """
+    profile, views = _cameras(
+        geometry.face_count, max_faces=max_faces, include_poles=include_poles
+    )
+    prepared = prepare_normals(geometry)
     images: list[bytes] = []
     published: list[PublishedView] = []
     offset = 0
@@ -163,7 +207,52 @@ def render_views(
         source_sha256=source_sha256,
         recipe=recipe,
         profile=profile,
-        center=tuple(center),
+        center=tuple(float(value) for value in center),
         views=tuple(published),
         size=offset,
     ), images
+
+
+def scene_center(scene: ExpandedScene):
+    """The placed bounding-box centre ``prepare_scene`` frames a scene around."""
+    minimum = np.full(3, np.inf)
+    maximum = np.full(3, -np.inf)
+    by_id = {resource.resource_id: resource for resource in scene.resources}
+    for instance in scene.instances:
+        resource = by_id[instance.resource_id]
+        source = resource.vertices[np.unique(resource.faces)]
+        placed = source @ instance.transform[:3, :3].T + instance.transform[:3, 3]
+        minimum = np.minimum(minimum, placed.min(axis=0))
+        maximum = np.maximum(maximum, placed.max(axis=0))
+    return (minimum + maximum) * 0.5
+
+
+_RESOURCE_CODES = frozenset(
+    {
+        "geometry_work_limit",
+        "resource_limit",
+        "scene_resource_limit",
+        "archive_resource_limit",
+    }
+)
+
+
+# GeometryError is a ValueError. Anything else is a bug for the supervisor.
+RENDER_FAILURES = (PreviewLimitError, ImportError, ValueError)
+
+
+def failure_reason(exc: Exception) -> ThumbnailFailureReason:
+    """The closed reason reported for one of ``RENDER_FAILURES``."""
+    if isinstance(exc, PreviewLimitError):
+        return ThumbnailFailureReason.RESOURCE_LIMIT
+    if isinstance(exc, GeometryError):
+        if exc.code in _RESOURCE_CODES:
+            return ThumbnailFailureReason.RESOURCE_LIMIT
+        if exc.code in {"unsupported_geometry", "step_unavailable"}:
+            return ThumbnailFailureReason.UNSUPPORTED_CAPABILITY
+        return ThumbnailFailureReason.INVALID_SOURCE
+    if isinstance(exc, ImportError):
+        return ThumbnailFailureReason.UNSUPPORTED_CAPABILITY
+    if isinstance(exc, ValueError):
+        return ThumbnailFailureReason.INVALID_SOURCE
+    raise TypeError(f"unexpected_preview_failure:{type(exc).__name__}") from exc

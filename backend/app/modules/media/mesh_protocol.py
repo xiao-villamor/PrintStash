@@ -54,6 +54,10 @@ from app.modules.media.mesh_telemetry import (
     encode_phase_stats,
 )
 from app.modules.media.mesh_wire_values import pack_value, unpack_value
+from app.modules.media.preview_contracts import (
+    MAX_BUNDLE_BYTES,
+    PreviewManifest,
+)
 from app.modules.media.thumbnail_packet import PacketDescriptor
 
 FRAME_MAGIC = b"MSH2"
@@ -75,6 +79,7 @@ class FrameKind(IntEnum):
     THUMBNAIL = 2
     FINAL = 3
     PREPARED_THUMBNAIL = 4
+    VIEWS = 5
 
 
 class MeshProtocolError(ValueError):
@@ -244,7 +249,44 @@ class FingerprintFinal:
                 raise MeshProtocolError("partial_fingerprint_requires_matching_sample")
 
 
-BasicOutput: TypeAlias = GeometryOutput | ThumbnailOutput | PreparedThumbnailOutput
+@dataclass(frozen=True)
+class ViewsReady:
+    """Every requested view, rendered from the mesh the cover pass loaded."""
+
+    manifest: PreviewManifest
+    bundle: bytes
+    duration_ms: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.manifest, PreviewManifest):
+            raise MeshProtocolError("invalid_views_manifest")
+        if (
+            type(self.bundle) is not bytes
+            or not self.bundle
+            or len(self.bundle) != self.manifest.size
+            or len(self.bundle) > MAX_BUNDLE_BYTES
+        ):
+            raise MeshProtocolError("invalid_views_bundle")
+        _counter(self.duration_ms)
+
+
+@dataclass(frozen=True)
+class ViewsRefused:
+    """The pass could not render views; ``reason`` is the closed cause."""
+
+    reason: ThumbnailFailureReason
+    duration_ms: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.reason, ThumbnailFailureReason):
+            raise MeshProtocolError("invalid_views_refusal")
+        _counter(self.duration_ms)
+
+
+ViewsOutput: TypeAlias = ViewsReady | ViewsRefused
+BasicOutput: TypeAlias = (
+    GeometryOutput | ThumbnailOutput | PreparedThumbnailOutput | ViewsOutput
+)
 OutputFrame: TypeAlias = BasicOutput | FingerprintFinal
 OutputSink: TypeAlias = Callable[[BasicOutput], None]
 
@@ -321,7 +363,7 @@ def _encode_fingerprint(result: FingerprintResult | None) -> dict[str, Any] | No
 
 def encode_frame(frame: OutputFrame, *, sequence: int) -> bytes:
     _counter(sequence)
-    if sequence > 2:
+    if sequence > 3:
         raise MeshProtocolError("invalid_output_sequence")
     image = b""
     if isinstance(frame, GeometryOutput):
@@ -359,6 +401,23 @@ def encode_frame(frame: OutputFrame, *, sequence: int) -> bytes:
             "coverage": encode_coverage(frame.coverage),
             "duration_ms": frame.duration_ms,
             "peak_rss_bytes": frame.peak_rss_bytes,
+        }
+    elif isinstance(frame, ViewsReady):
+        kind = FrameKind.VIEWS
+        image = frame.bundle
+        header = {
+            "manifest": frame.manifest.model_dump(mode="json"),
+            "failure_reason": None,
+            "bundle_length": len(image),
+            "duration_ms": frame.duration_ms,
+        }
+    elif isinstance(frame, ViewsRefused):
+        kind = FrameKind.VIEWS
+        header = {
+            "manifest": None,
+            "failure_reason": frame.reason.value,
+            "bundle_length": 0,
+            "duration_ms": frame.duration_ms,
         }
     elif isinstance(frame, FingerprintFinal):
         kind = FrameKind.FINAL
@@ -457,6 +516,25 @@ def _decode(kind: FrameKind, payload: bytes, image: bytes) -> OutputFrame:
             raw["duration_ms"],
             raw["peak_rss_bytes"],
         )
+    if kind is FrameKind.VIEWS:
+        raw = _fields(
+            raw, {"manifest", "failure_reason", "bundle_length", "duration_ms"}
+        )
+        if _counter(raw["bundle_length"]) != len(image):
+            raise MeshProtocolError("invalid_output_image_length")
+        if raw["manifest"] is None:
+            if image or raw["failure_reason"] is None:
+                raise MeshProtocolError("invalid_views_refusal")
+            return ViewsRefused(
+                ThumbnailFailureReason(raw["failure_reason"]), raw["duration_ms"]
+            )
+        if raw["failure_reason"] is not None:
+            raise MeshProtocolError("invalid_views_output")
+        return ViewsReady(
+            PreviewManifest.model_validate(raw["manifest"]),
+            image,
+            raw["duration_ms"],
+        )
     raw = _fields(
         raw, {"fingerprint", "phase_stats", "duration_ms", "peak_rss_bytes", "coverage"}
     )
@@ -486,6 +564,8 @@ class FrameDecoder:
         self._pending = [
             *((FrameKind.GEOMETRY,) if request.include_geometry else ()),
             *((FrameKind.THUMBNAIL,) if request.include_thumbnail else ()),
+            # Views follow every other basic output of the same load.
+            *((FrameKind.VIEWS,) if request.views is not None else ()),
         ]
         self._frames = len(self._pending) + 1
         self._fingerprint_requested = request.include_fingerprint
@@ -533,7 +613,7 @@ class FrameDecoder:
                     not header_size
                     or header_size > limit
                     or size > MAX_STREAM_BYTES
-                    or kind is not FrameKind.THUMBNAIL
+                    or kind not in (FrameKind.THUMBNAIL, FrameKind.VIEWS)
                     and image_size
                 ):
                     raise MeshProtocolError("invalid_output_length")

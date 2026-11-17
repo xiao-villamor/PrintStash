@@ -69,6 +69,8 @@ from app.modules.media.mesh_protocol import (
     OutputSink,
     PreparedThumbnailOutput,
     ThumbnailOutput,
+    ViewsReady,
+    ViewsRefused,
 )
 from app.modules.media.mesh_telemetry import (
     SupervisedReply,
@@ -887,6 +889,11 @@ def read_spec(argv: list[str]) -> dict[str, Any]:
 
 def _work_profile(request: ThumbnailRequest) -> WorkProfile:
     raster: RasterWork | None = None
+    if request.views is not None and not request.include_thumbnail:
+        from app.modules.media.preview_contracts import HEIGHT, WIDTH
+
+        # Views are encoded one at a time: one live raster, like the batch.
+        raster = RasterWork(WIDTH, HEIGHT, 1, RasterCodec.WEBP)
     if request.include_thumbnail:
         width = int(request.width or settings.model_thumbnail_width)
         height = int(request.height or round(width * 3 / 4))
@@ -998,7 +1005,7 @@ def _generate_once(
             elif isinstance(output, PreparedThumbnailOutput):
                 prepared_output = output
                 continue
-            else:
+            elif not isinstance(output, ViewsReady | ViewsRefused):
                 continue
             if on_output is not None:
                 checkpoint(force=True)
@@ -1015,6 +1022,13 @@ def _generate_once(
         "triangle_cap": request.triangle_cap,
         "output_format": request.output_format,
         "reason": request.reason,
+        "views": None
+        if request.views is None
+        else {
+            "recipe": request.views.recipe,
+            "include_poles": request.views.include_poles,
+            "source_sha256": request.views.source_sha256,
+        },
     }
     work = _work_profile(request)
     with ExitStack() as resources:

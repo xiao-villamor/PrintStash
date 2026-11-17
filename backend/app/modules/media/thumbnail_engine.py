@@ -22,6 +22,7 @@ from printstash_core.mesh.measurements import (
     validate_geometry_extents,
     volume_value,
 )
+from printstash_core.mesh.render_geometry import prepare_scene
 from printstash_core.mesh.similarity import GeometryError
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 
@@ -71,6 +72,9 @@ from app.modules.media.mesh_protocol import (
     OutputSink,
     PreparedThumbnailOutput,
     ThumbnailOutput,
+    ViewsOutput,
+    ViewsReady,
+    ViewsRefused,
 )
 from app.modules.media.mesh_resources import (
     DetachedSceneMesh,
@@ -84,6 +88,16 @@ from app.modules.media.mesh_telemetry import (
     PhaseOutcome,
     PhaseRecorder,
     ReaderChoice,
+)
+from app.modules.media.preview_contracts import PreviewLimitError
+from app.modules.media.preview_views import (
+    RENDER_FAILURES,
+    render_prepared_views,
+    render_views,
+    scene_center,
+)
+from app.modules.media.preview_views import (
+    failure_reason as preview_failure_reason,
 )
 from app.modules.media.stl_reader import (
     InvalidSTL,
@@ -239,6 +253,7 @@ class _Generation:
         self.sample_buffers_pending = False
         self.geometry_emitted = False
         self.thumbnail_emitted = False
+        self.views_emitted = False
         self.reload_mesh_for_fingerprint = False
         self.stl_measurements: STLMeasurements | None = None
         self.embedded = None
@@ -326,6 +341,7 @@ class _Generation:
                     and self._embedded_is_final()
                     and not self.request.include_geometry
                     and not self.request.include_fingerprint
+                    and self.request.views is None
                 ):
                     self.image = self.embedded
                     self.strategy = ThumbnailStrategy.EMBEDDED
@@ -335,6 +351,7 @@ class _Generation:
                         self._parse()
                     self._measure()
                     self._render()
+                    self._views()
                     self._fingerprint()
         except _OutputDeliveryError as exc:
             raise exc.error from None
@@ -992,6 +1009,67 @@ class _Generation:
                 )
         self.emit_thumbnail()
 
+    def emit_views(self, output: ViewsOutput) -> None:
+        if self.request.views is None or self.views_emitted:
+            return
+        self.views_emitted = True
+        self.deliver(output)
+
+    def _views(self) -> None:
+        """Render the requested views from what the cover pass already loaded.
+
+        Runs after the cover is published, so a Model's first picture never
+        waits on its views; it shares the load, admission and source copy.
+        """
+        views = self.request.views
+        if views is None or self.views_emitted:
+            return
+        started = time.monotonic()
+
+        def elapsed() -> int:
+            return max(round((time.monotonic() - started) * 1000), 0)
+
+        limit = min(int(settings.mesh_max_render_triangles), MAX_ANALYSIS_FACES)
+        self.report("rendering_views")
+        try:
+            if self.source_scene is not None:
+                scene = self.source_scene.scene
+                if self.source_scene.triangle_count > limit:
+                    raise PreviewLimitError
+                manifest, images = render_prepared_views(
+                    prepare_scene(scene),
+                    center=scene_center(scene),
+                    source_sha256=views.source_sha256,
+                    max_faces=limit,
+                    recipe=views.recipe,
+                    include_poles=views.include_poles,
+                )
+            else:
+                mesh = self.visual_mesh if self.visual_mesh is not None else self.mesh
+                if mesh is None:
+                    # Nothing loaded survives: an over-cap source streamed its
+                    # cover, or loading failed. The batch decides on its own.
+                    self.emit_views(
+                        ViewsRefused(
+                            ThumbnailFailureReason.RESOURCE_LIMIT
+                            if self.over_cap
+                            else self.failure or ThumbnailFailureReason.WORKER_FAILED,
+                            elapsed(),
+                        )
+                    )
+                    return
+                manifest, images = render_views(
+                    mesh,
+                    source_sha256=views.source_sha256,
+                    max_faces=limit,
+                    recipe=views.recipe,
+                    include_poles=views.include_poles,
+                )
+        except RENDER_FAILURES as exc:
+            self.emit_views(ViewsRefused(preview_failure_reason(exc), elapsed()))
+            return
+        self.emit_views(ViewsReady(manifest, b"".join(images), elapsed()))
+
     def _fingerprint(self) -> None:
         """Extract the similarity fingerprint from the geometry already in hand."""
         if self.request.include_fingerprint and self.fingerprint_result is None:
@@ -1096,6 +1174,12 @@ class _Generation:
         try:
             self.emit_geometry()
             self.emit_thumbnail()
+            if not self.views_emitted:
+                self.emit_views(
+                    ViewsRefused(
+                        self.failure or ThumbnailFailureReason.WORKER_FAILED, 0
+                    )
+                )
         except _OutputDeliveryError as exc:
             raise exc.error from None
         if (

@@ -136,7 +136,10 @@ def _begin(
     definition: JobKind,
     *,
     execution: JobExecution | None = None,
-    claimed: Callable[[Session, File], None] | None = None,
+    claimed: Callable[
+        [Session, File, dict[DerivativeKind, records.DerivativeAttempt]], None
+    ]
+    | None = None,
 ) -> tuple[File, dict[DerivativeKind, records.DerivativeAttempt]] | None:
     """Claim the kinds this Artifact still needs, in one transaction.
 
@@ -174,7 +177,7 @@ def _begin(
                 session, file_row, row, execution=execution
             )
         if claimed is not None:
-            claimed(session, file_row)
+            claimed(session, file_row, attempts)
         # Load what the caller reads while this transaction is still open: a
         # refresh after the commit is a second transaction.
         session.flush()
@@ -352,11 +355,14 @@ def _derive_mesh(
     """Publish each fenced basic output before optional fingerprint completion."""
     from app.modules.ingestion.extensions import extraction_options
     from app.modules.media.fingerprints import ALGORITHM_VERSION
+    from app.modules.media.mesh_contracts import ViewsRequest
     from app.modules.media.mesh_facts import FingerprintFailureCode
     from app.modules.media.mesh_protocol import (
         BasicOutput,
         GeometryOutput,
         ThumbnailOutput,
+        ViewsReady,
+        ViewsRefused,
     )
 
     from . import mesh_continuations
@@ -372,14 +378,24 @@ def _derive_mesh(
         else None
     )
     pending: mesh_continuations.MeshContinuation | None = None
+    views: tuple[records.DerivativeAttempt, ViewsRequest] | None = None
 
-    def resume(session: Session, claimed_file: File) -> None:
+    def resume(
+        session: Session,
+        claimed_file: File,
+        claimed_kinds: dict[DerivativeKind, records.DerivativeAttempt],
+    ) -> None:
         # The claim already holds the Job, the generation and this Artifact:
         # durable fingerprint intent is resumed under those same locks.
-        nonlocal pending
+        nonlocal pending, views
         pending = mesh_continuations.resume(
             session, claimed_file, plan, execution=execution
         )
+        if claimed_kinds:
+            # This pass loads the mesh anyway: its views share that load.
+            from . import previews
+
+            views = previews.claim_for_pass(session, claimed_file, execution=execution)
 
     with phases.phase("claim"):
         begun = _begin(
@@ -403,8 +419,24 @@ def _derive_mesh(
                 "mesh output notice failed", extra={"file_id": file_id, "kind": kind}
             )
 
+    views_started = time.monotonic()
+    views_settled = False
+
     def publish(frame: BasicOutput) -> None:
-        nonlocal pending
+        nonlocal pending, views_settled
+        if isinstance(frame, ViewsReady | ViewsRefused):
+            from . import previews
+
+            if views is None or views_settled:
+                raise ValueError("unexpected_mesh_views_output")
+            views_settled = True
+            with phases.phase("publish_views"):
+                state = previews.publish_pass(
+                    file_row, views[0], frame, started=views_started
+                )
+            if state is not None:
+                published(DerivativeKind.PREVIEWS, state)
+            return
         if isinstance(frame, GeometryOutput):
             kind = DerivativeKind.METADATA
             if kind not in attempts or kind in outcome:
@@ -469,7 +501,10 @@ def _derive_mesh(
                         strategy=frame.strategy.value,
                         renderer_encoded=frame.strategy is ThumbnailStrategy.FULL,
                         complete=frame.coverage.preview
-                        in (PreviewCoverage.COMPLETE, PreviewCoverage.DOCUMENT_SUPPLIED),
+                        in (
+                            PreviewCoverage.COMPLETE,
+                            PreviewCoverage.DOCUMENT_SUPPLIED,
+                        ),
                         duration_ms=frame.duration_ms,
                         peak_rss_bytes=frame.peak_rss_bytes,
                         abort_on_failure=True,
@@ -531,6 +566,7 @@ def _derive_mesh(
                 triangle_cap=plan.triangle_cap
                 if plan is not None
                 else MAX_ANALYSIS_FACES,
+                views=views[1] if views is not None else None,
             )
             result = None
             try:
@@ -614,6 +650,13 @@ def _derive_mesh(
             if state is not None:
                 outcome[DerivativeKind.THUMBNAIL] = state
                 published(DerivativeKind.THUMBNAIL, state)
+        if views is not None and not views_settled:
+            from . import previews
+
+            views_settled = True
+            state = previews.fail_pass(views[0], reason)
+            if state is not None:
+                published(DerivativeKind.PREVIEWS, state)
         for kind, authority in attempts.items():
             if kind in outcome:
                 continue

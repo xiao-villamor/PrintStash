@@ -7,16 +7,14 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from printstash_core.mesh.similarity import GeometryError
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 
 from app.core.config import settings
-from app.modules.media import mesh_policy
+from app.modules.media import mesh_policy, preview_views
 from app.modules.media.geometry_analysis import _load
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_isolation import MeshWorkerError, read_spec
 from app.modules.media.mesh_resources import load_3mf_within_ram
-from app.modules.media.preview_contracts import PreviewLimitError
 from app.modules.media.preview_views import render_views
 from app.modules.media.stl_isolation import FileIdentity, manifest_for
 
@@ -75,37 +73,14 @@ def produce(
     return manifest.model_dump_json().encode()
 
 
-_RESOURCE_CODES = frozenset(
-    {
-        "geometry_work_limit",
-        "resource_limit",
-        "scene_resource_limit",
-        "archive_resource_limit",
-    }
-)
-
-
-# GeometryError is a ValueError. Anything else is a bug for the supervisor.
-EXPECTED_FAILURES = (MeshWorkerError, PreviewLimitError, ImportError, ValueError)
+EXPECTED_FAILURES = (MeshWorkerError, *preview_views.RENDER_FAILURES)
 
 
 def failure_reason(exc: Exception) -> ThumbnailFailureReason:
     """The closed reason reported for one of ``EXPECTED_FAILURES``."""
     if isinstance(exc, MeshWorkerError):
         return exc.reason
-    if isinstance(exc, PreviewLimitError):
-        return ThumbnailFailureReason.RESOURCE_LIMIT
-    if isinstance(exc, GeometryError):
-        if exc.code in _RESOURCE_CODES:
-            return ThumbnailFailureReason.RESOURCE_LIMIT
-        if exc.code in {"unsupported_geometry", "step_unavailable"}:
-            return ThumbnailFailureReason.UNSUPPORTED_CAPABILITY
-        return ThumbnailFailureReason.INVALID_SOURCE
-    if isinstance(exc, ImportError):
-        return ThumbnailFailureReason.UNSUPPORTED_CAPABILITY
-    if isinstance(exc, ValueError):
-        return ThumbnailFailureReason.INVALID_SOURCE
-    raise TypeError(f"unexpected_preview_failure:{type(exc).__name__}") from exc
+    return preview_views.failure_reason(exc)
 
 
 def main(argv: list[str]) -> int:
