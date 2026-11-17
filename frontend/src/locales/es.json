@@ -5255,5 +5255,18 @@
   "Oblique views + top and bottom": "Vistas oblicuas + superior e inferior",
   "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Empieza con una miniatura para importar más rápido. Activa cuatro vistas oblicuas y, opcionalmente, las vistas superior e inferior. Los modelos existentes se actualizan en segundo plano.",
   "Toolpath controls": "Controles de trayectoria",
-  "Layer number": "Número de capa"
+  "Layer number": "Número de capa",
+  "{value1} g": "{value1} g",
+  "mm": "mm",
+  "Queue Rev {value1}": "Poner Rev {value1} en cola",
+  "Choose how this print job will be routed.": "Elige cómo se asignará este trabajo de impresión.",
+  "This job can wait in the queue for an eligible printer.": "El trabajo puede esperar en la cola hasta que haya una impresora compatible.",
+  "Loading printers…": "Cargando impresoras…",
+  "Couldn’t load printers.": "No se pudieron cargar las impresoras.",
+  "No Moonraker printer is available to import history.": "No hay ninguna impresora Moonraker disponible para importar el historial.",
+  "Add record manually": "Añadir registro manualmente",
+  "Couldn’t load source information.": "No se pudo cargar la información de origen.",
+  "Preview G-code": "Vista previa de G-code",
+  "Per plate": "Por placa",
+  "More model actions": "Más acciones del modelo"
 }

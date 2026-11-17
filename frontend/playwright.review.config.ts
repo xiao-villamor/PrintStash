@@ -5,7 +5,8 @@ import { DESKTOP_CHROMIUM } from "./tests/playwright-desktop";
 export default defineConfig({
   testDir: "./tests/e2e-real/review",
   outputDir: "../reports/model-detail-review",
-  timeout: 120_000,
+  // Full-resolution screenshots and software-rendered real toolpaths can take several minutes.
+  timeout: 480_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,
   workers: 1,

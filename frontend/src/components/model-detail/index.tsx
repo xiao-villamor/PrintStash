@@ -32,7 +32,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import { useLocation } from "@tanstack/react-router";
-import { FileText, Link2, Loader2, Pencil, Star, Trash2, Wifi } from "lucide-react";
+import { FileText, Link2, Loader2, MoreHorizontal, Pencil, Star, Trash2, Wifi } from "lucide-react";
 
 import type {
   STLViewerControls,
@@ -55,7 +55,7 @@ import { toast } from "@/lib/toast";
 import { useAuth } from "@/lib/auth-context";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { modalOverlayOpen } from "@/lib/keyboard-commands";
+import { keyboardOverlayOpen, modalOverlayOpen } from "@/lib/keyboard-commands";
 import { ModelPrinterFileRead, ModelRead, TagRead } from "@/types";
 
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -293,6 +293,17 @@ function ModelDetailPresentation({
     window.addEventListener("keydown", toggleDetails);
     return () => window.removeEventListener("keydown", toggleDetails);
   }, []);
+  useEffect(() => {
+    if (!previewExpanded) return;
+    function collapse(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented || keyboardOverlayOpen()) return;
+      event.preventDefault();
+      setPreviewExpanded(false);
+      detailLayout.current?.querySelector<HTMLButtonElement>("[data-preview-expand]")?.focus();
+    }
+    window.addEventListener("keydown", collapse, true);
+    return () => window.removeEventListener("keydown", collapse, true);
+  }, [previewExpanded]);
   // The plate chosen for one 3MF; another mesh file shows its whole build.
   const [chosenPlate, setChosenPlate] = useState<{ fileId: number; number: number } | null>(null);
   const [plateDimensions, setPlateDimensions] = useState<{
@@ -1118,6 +1129,19 @@ function ModelDetailPresentation({
                   >
                     {uiText("Share")}
                   </Button>
+                  <Button
+                    data-menu-trigger
+                    variant="outline"
+                    size="sm"
+                    aria-label={uiText("More model actions")}
+                    title={uiText("Model actions")}
+                    aria-haspopup="menu"
+                    aria-expanded={actionsOpen}
+                    onClick={() => setActionsOpen(!actionsOpen)}
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                    {uiText("nav.more")}
+                  </Button>
                 </>
               </div>
             </header>
@@ -1167,33 +1191,6 @@ function ModelDetailPresentation({
             {uiText(" Delete model")}
           </button>
         </DropdownMenu>
-
-        {/* Segmented tab navigation */}
-        <TabBar
-          tabs={visibleTabs.map((tab) => ({
-            key: tab.key,
-            label: (
-              <>
-                {tab.label}
-                {tab.key === "revisions" && gcodeFiles.length > 0 && (
-                  <span className="model-detail-tab-count">{gcodeFiles.length}</span>
-                )}
-                {tab.key === "files" && sourceFiles.length > 0 && (
-                  <span className="model-detail-tab-count">{sourceFiles.length}</span>
-                )}
-                {tab.key === "history" && printJobs.length > 0 && (
-                  <span className="model-detail-tab-count">{printJobs.length}</span>
-                )}
-              </>
-            ),
-          }))}
-          active={activeTab}
-          onChange={selectTab}
-          showIndicator={false}
-          className="model-detail-tabs shrink-0 overflow-x-auto border-b"
-          tabClassName="relative inline-flex items-center gap-1.5 h-10 min-w-max whitespace-nowrap px-0 py-0 text-sm font-medium text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          activeTabClassName="text-foreground"
-        />
 
         {/* Two-Column Layout. On mobile the panels stack and the whole area
           scrolls; on desktop each pane keeps its own fixed height. */}
@@ -1339,17 +1336,6 @@ function ModelDetailPresentation({
                     </div>
                   )}
               </div>
-              <div className="contents" ref={setPlateContainer} />
-              {pickerShown && meshFile && (
-                <PlatePicker
-                  plates={plates}
-                  allowAll={viewerMode === "model"}
-                  selected={shownPlate?.number ?? null}
-                  onSelect={(number) =>
-                    setChosenPlate(number === null ? null : { fileId: meshFile.id, number })
-                  }
-                />
-              )}
               {(meshFile || hasToolpathPreview) && (
                 <div className="contents">
                   <ViewerToolbar
@@ -1376,11 +1362,24 @@ function ModelDetailPresentation({
                   />
                 </div>
               )}
+              <div className="contents" ref={setPlateContainer} />
+              {pickerShown && meshFile && (
+                <PlatePicker
+                  plates={plates}
+                  allowAll={viewerMode === "model"}
+                  selected={shownPlate?.number ?? null}
+                  onSelect={(number) =>
+                    setChosenPlate(number === null ? null : { fileId: meshFile.id, number })
+                  }
+                />
+              )}
             </div>
 
             <ModelInformation
               model={model}
               sourceFile={meshFile ?? null}
+              onFiles={() => selectTab("files")}
+              onRevisions={() => selectTab("revisions")}
               canEdit={canEditModel}
               onEdit={() => enterEdit("details")}
               onTags={() => {
@@ -1424,10 +1423,36 @@ function ModelDetailPresentation({
               <span className="absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-border transition-colors duration-press group-hover:bg-primary group-focus-visible:bg-primary" />
             </div>
 
+            <TabBar
+              tabs={visibleTabs.map((tab) => ({
+                key: tab.key,
+                label: (
+                  <>
+                    {tab.label}
+                    {tab.key === "revisions" && gcodeFiles.length > 0 && (
+                      <span className="model-detail-tab-count">{gcodeFiles.length}</span>
+                    )}
+                    {tab.key === "files" && sourceFiles.length > 0 && (
+                      <span className="model-detail-tab-count">{sourceFiles.length}</span>
+                    )}
+                    {tab.key === "history" && printJobs.length > 0 && (
+                      <span className="model-detail-tab-count">{printJobs.length}</span>
+                    )}
+                  </>
+                ),
+              }))}
+              active={activeTab}
+              onChange={selectTab}
+              showIndicator={false}
+              className="model-detail-tabs shrink-0 overflow-x-auto border-b"
+              tabClassName="relative inline-flex items-center gap-1.5 h-10 min-w-max whitespace-nowrap px-0 py-0 text-sm font-medium text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              activeTabClassName="text-foreground"
+            />
             <div
               role="tabpanel"
+              tabIndex={0}
               aria-label={visibleTabs.find((tab) => tab.key === activeTab)?.label}
-              className="model-detail-content flex-1 min-h-0 overflow-y-auto p-4"
+              className="model-detail-content focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring flex-1 min-h-0 overflow-y-auto p-4"
             >
               <div ref={detailTabBody} className="model-detail-tab-body space-y-4">
                 {activeTab === "overview" && (
@@ -1549,6 +1574,12 @@ function ModelDetailPresentation({
                 )}
                 {activeTab === "revisions" && (
                   <RevisionsTab
+                    plateEstimates={slicedEstimates}
+                    selectedPlate={selectedEstimatePlate}
+                    onPreview={(fileId) => {
+                      selectToolpathSource(fileId);
+                      setViewerMode("gcode");
+                    }}
                     inspectedFileId={inspectedGcode?.id}
                     onInspect={(fileId) => setRevisionSelection({ modelId: model.id, fileId })}
                     startComparing={compareRequested}

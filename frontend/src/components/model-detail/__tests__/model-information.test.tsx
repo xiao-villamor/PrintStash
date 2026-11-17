@@ -19,6 +19,8 @@ function show(
       canEdit={canEdit}
       onEdit={() => {}}
       onTags={() => {}}
+      onFiles={() => {}}
+      onRevisions={() => {}}
     />,
   );
 }
@@ -60,7 +62,7 @@ describe("ModelInformation", () => {
         }),
       }),
     );
-    expect(screen.getByText("0mm × 12mm × 30mm")).toBeInTheDocument();
+    expect(screen.getByText("0 × 12 × 30 mm")).toBeInTheDocument();
     expect(screen.getByText("0 cm³")).toBeInTheDocument();
     expect(screen.queryByText("Not recorded")).not.toBeInTheDocument();
   });

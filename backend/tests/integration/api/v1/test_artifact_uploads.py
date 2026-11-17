@@ -771,7 +771,7 @@ class TestArtifactUploads:
         assert artifact.revision_label == "Resumable"
         assert artifact.revision_status == FileRevisionStatus.NEEDS_TEST
 
-    def test_sliced_archive_revision_is_uploaded_and_enriched(
+    def test_sliced_archive_upload_persists_embedded_settings(
         self, client, auth_headers, db_session, make_model, tmp_path
     ) -> None:
         from app.db.models import Metadata

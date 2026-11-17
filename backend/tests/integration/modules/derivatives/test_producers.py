@@ -1048,7 +1048,7 @@ class TestDeriveGcode:
         assert metadata.slicer_name == "OrcaSlicer"
         assert metadata.estimated_time_s is not None
 
-    def test_preserves_each_plate_metadata_and_only_common_revision_settings(
+    def test_keeps_plate_specific_fields_out_of_shared_settings(
         self, db_session, stored, make_derivative
     ):
         package = io.BytesIO()

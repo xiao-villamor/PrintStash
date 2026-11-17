@@ -14,12 +14,16 @@ export function ModelInformation({
   canEdit,
   onEdit,
   onTags,
+  onFiles,
+  onRevisions,
 }: {
   model: ModelRead;
   sourceFile: FileRead | null;
   canEdit: boolean;
   onEdit: () => void;
   onTags: () => void;
+  onFiles: () => void;
+  onRevisions: () => void;
 }) {
   useUiLocale();
   const sourceUrl = model.source_url ? safeHttpUrl(model.source_url) : null;
@@ -30,7 +34,11 @@ export function ModelInformation({
     geometry.bbox_x_mm !== null &&
     geometry.bbox_y_mm !== null &&
     geometry.bbox_z_mm !== null
-      ? `${formatNumber(geometry.bbox_x_mm)}mm × ${formatNumber(geometry.bbox_y_mm)}mm × ${formatNumber(geometry.bbox_z_mm)}mm`
+      ? uiText("{value1} mm", {
+          value1: [geometry.bbox_x_mm, geometry.bbox_y_mm, geometry.bbox_z_mm]
+            .map((value) => formatNumber(value))
+            .join(" × "),
+        })
       : uiText("Not recorded");
   return (
     <section className="model-information" aria-label={uiText("About this model")}>
@@ -71,6 +79,7 @@ export function ModelInformation({
           )}
           <dt>{uiText("Tags")}</dt>
           <dd className="flex flex-wrap items-center gap-1">
+            {!canEdit && model.tags.length === 0 && uiText("None")}
             {model.tags.map((tag) => (
               <span className="bg-muted px-1.5 py-0.5 text-xs" key={tag}>
                 {tag}
@@ -78,8 +87,8 @@ export function ModelInformation({
             ))}
             {canEdit && (
               <Button
-                size="sm"
-                variant="ghost"
+                size="xs"
+                variant="outline"
                 aria-label={
                   model.tags.length
                     ? uiText("Edit tags for {value1}", { value1: model.name })
@@ -92,12 +101,13 @@ export function ModelInformation({
             )}
           </dd>
           <dt>{uiText("Files")}</dt>
-          <dd>
-            {uiText("{total} total · {sources} source · {revisions} G-code", {
-              total: String(model.files.length),
-              sources: String(model.files.length - gcodeCount),
-              revisions: String(gcodeCount),
-            })}
+          <dd className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <button type="button" className="detail-file-link" onClick={onFiles}>
+              {uiText("Source files")} ({model.files.length - gcodeCount})
+            </button>
+            <button type="button" className="detail-file-link" onClick={onRevisions}>
+              {uiText("G-code revisions")} ({gcodeCount})
+            </button>
           </dd>
           <dt>{uiText("Created")}</dt>
           <dd>{new Date(model.created_at).toLocaleDateString(currentLocale())}</dd>

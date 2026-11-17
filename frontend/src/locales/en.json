@@ -5255,5 +5255,18 @@
   "Oblique views + top and bottom": "Oblique views + top and bottom",
   "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.",
   "Toolpath controls": "Toolpath controls",
-  "Layer number": "Layer number"
+  "Layer number": "Layer number",
+  "{value1} g": "{value1} g",
+  "mm": "mm",
+  "Queue Rev {value1}": "Queue Rev {value1}",
+  "Choose how this print job will be routed.": "Choose how this print job will be routed.",
+  "This job can wait in the queue for an eligible printer.": "This job can wait in the queue for an eligible printer.",
+  "Loading printers…": "Loading printers…",
+  "Couldn’t load printers.": "Couldn’t load printers.",
+  "No Moonraker printer is available to import history.": "No Moonraker printer is available to import history.",
+  "Add record manually": "Add record manually",
+  "Couldn’t load source information.": "Couldn’t load source information.",
+  "Preview G-code": "Preview G-code",
+  "Per plate": "Per plate",
+  "More model actions": "More model actions"
 }

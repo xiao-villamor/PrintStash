@@ -86,7 +86,11 @@ export function detailReviewRecorder(page: Page, info: TestInfo) {
           ),
       );
       const stem = `${String(states.length + 1).padStart(2, "0")}-${name}`;
-      await page.screenshot({ path: info.outputPath(`${stem}.png`), animations: "disabled" });
+      await page.screenshot({
+        path: info.outputPath(`${stem}.png`),
+        animations: "disabled",
+        timeout: 90_000,
+      });
       const evidence = await page.evaluate(() => {
         // Model detail currently has no <main> landmark. Start from the body
         // so a missing landmark cannot silently produce an empty inventory.

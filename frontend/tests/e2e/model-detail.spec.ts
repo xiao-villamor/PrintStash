@@ -218,7 +218,7 @@ test.describe("model detail route", () => {
   test("opens the focused revision failure note from the keyboard", async ({ page }) => {
     await page.goto("/models/1");
     await page.getByRole("tab", { name: /^Revisions/ }).click();
-    await page.getByRole("button", { name: "Rev 1", exact: true }).focus();
+    await page.getByRole("heading", { name: /^Rev 1\b/ }).focus();
 
     await page.keyboard.press("2");
 
@@ -1083,7 +1083,7 @@ test.describe("model detail route", () => {
   test("saves a revision failure note with Control Enter", async ({ page }) => {
     await page.goto("/models/1");
     await page.getByRole("tab", { name: /^Revisions/ }).click();
-    await page.getByRole("button", { name: "Rev 1", exact: true }).focus();
+    await page.getByRole("heading", { name: /^Rev 1\b/ }).focus();
     await page.keyboard.press("2");
     const dialog = page.getByRole("dialog", { name: "Add print record", exact: true });
     await expect(dialog.getByRole("radio", { name: "Failed", exact: true })).toBeChecked();
@@ -1184,9 +1184,10 @@ test.describe("model detail route", () => {
       const tabs = (await page.getByRole("tablist").boundingBox())!;
       const viewer = (await preview.boundingBox())!;
       const inspector = (await page.getByTestId("model-detail-sidebar").boundingBox())!;
-      expect(tabs.y + tabs.height).toBeLessThanOrEqual(viewer.y);
+      expect(tabs.x).toBeGreaterThanOrEqual(inspector.x);
+      expect(tabs.x + tabs.width).toBeLessThanOrEqual(inspector.x + inspector.width);
       if (viewport.width > 767) {
-        expect(tabs.width).toBeGreaterThan(viewer.width + inspector.width);
+        expect(viewer.x + viewer.width).toBeLessThanOrEqual(inspector.x);
         expect(inspector.y + inspector.height).toBeLessThanOrEqual(viewport.height);
       }
       expect(

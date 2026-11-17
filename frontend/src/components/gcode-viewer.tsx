@@ -207,7 +207,7 @@ function GcodeScene({
       {showTravel && data.travelPositions.length > 0 && <primitive object={travelLines} />}
 
       {/* Bed platform (only in bed-fit mode) */}
-      {showGrid && showBed && bedGeo && bedEdgesGeo && printerBedMm && (
+      {showBed && bedGeo && bedEdgesGeo && printerBedMm && (
         <group position={[0, floorY - 0.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
           <mesh geometry={bedGeo}>
             <meshStandardMaterial
@@ -220,10 +220,12 @@ function GcodeScene({
           <lineSegments geometry={bedEdgesGeo}>
             <lineBasicMaterial color="#3b82f6" transparent opacity={0.8} />
           </lineSegments>
-          <gridHelper
-            args={[Math.max(printerBedMm.x, printerBedMm.y), 10, "#1e40af", "#1e3a5f"]}
-            rotation={[Math.PI / 2, 0, 0]}
-          />
+          {showGrid && (
+            <gridHelper
+              args={[Math.max(printerBedMm.x, printerBedMm.y), 10, "#1e40af", "#1e3a5f"]}
+              rotation={[Math.PI / 2, 0, 0]}
+            />
+          )}
         </group>
       )}
 
@@ -741,7 +743,7 @@ export function GcodeViewer({
         <section className="toolpath-section" aria-label={uiText("Toolpath bounds")}>
           <div className="toolpath-bounds-heading">
             <h3 className="toolpath-section-title">{uiText("Toolpath bounds")}</h3>
-            <span className="toolpath-bounds-unit">mm</span>
+            <span className="toolpath-bounds-unit">{uiText("mm")}</span>
           </div>
           <dl className="toolpath-bounds-grid">
             {(

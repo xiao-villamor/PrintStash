@@ -76,7 +76,7 @@ export function ViewerToolbar({
             }}
           >
             <Camera className="h-3.5 w-3.5" />
-            {uiText("Capture")}
+            {uiText("Screenshot")}
           </Button>
           {onExpand && (
             <Button

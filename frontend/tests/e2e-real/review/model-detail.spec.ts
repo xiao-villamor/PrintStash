@@ -31,6 +31,7 @@ test.describe("Existing Model review", () => {
         ).json();
         const slicedPlates: {
           plates: number[];
+          identities: { number: number; name: string }[];
           plate_metadata: { number: number; metadata: MetadataRead }[];
         } = await (await page.request.get(`/api/v1/files/${sliced!.id}/gcode-plates`)).json();
         expect(sourcePlates.plates.length).toBeGreaterThan(1);
@@ -132,9 +133,37 @@ test.describe("Existing Model review", () => {
             await review.capture("source-file-tags-editor");
             await dismiss();
             await tab("Revisions");
-            await inspector
-              .getByRole("button", { name: new RegExp(`^Rev ${sliced!.gcode_revision_number}\\b`) })
-              .click();
+            const revisionButton = inspector.getByRole("button", {
+              name: new RegExp(`^Rev ${sliced!.gcode_revision_number}\\b`),
+            });
+            if (revisions.length > 1) await revisionButton.click();
+            const revisionTab = page.getByRole("tab", { name: /^Revisions/ });
+            await revisionTab.focus();
+            await page.keyboard.press("Tab");
+            await expect(inspector).toBeFocused();
+            const revisionEstimates = inspector.getByRole("region", { name: "Plate estimates" });
+            if (slicedPlates.plates.length > 1) {
+              await expect(revisionEstimates).toBeVisible();
+              for (const plate of slicedPlates.identities) {
+                await expect(
+                  revisionEstimates
+                    .getByRole("region", { name: `Plate ${String(plate.number).padStart(2, "0")}` })
+                    .getByText(plate.name, { exact: true }),
+                ).toBeVisible();
+              }
+            }
+            await inspector.getByRole("button", { name: "More", exact: true }).click();
+            await expect(page.getByRole("menuitem", { name: "Move to trash" })).toBeVisible();
+            await review.capture("revision-actions");
+            await page.keyboard.press("Escape");
+            await inspector.getByRole("button", { name: "Preview G-code" }).click();
+            await waitForPreview();
+            await expect(
+              preview.getByRole("button", { name: "G-code", exact: true }),
+            ).toHaveAttribute("aria-pressed", "true");
+            await review.capture("revision-toolpath");
+            await preview.getByRole("button", { name: "3D model", exact: true }).click();
+            await waitForPreview();
             const [download] = await Promise.all([
               page.waitForEvent("download"),
               inspector.getByRole("button", { name: "Download", exact: true }).click(),
@@ -233,10 +262,19 @@ test.describe("Existing Model review", () => {
             await inspector.getByRole("button", { name: "Add revision", exact: true }).click();
             await review.capture("add-revision-dialog");
             await dismiss();
-            await inspector.getByRole("button", { name: "Edit labels", exact: true }).click();
-            await review.capture("revision-label-selection");
-            await inspector.getByRole("button", { name: "Cancel selection", exact: true }).click();
+            if (revisions.length > 1) {
+              await inspector.getByRole("button", { name: "Edit labels", exact: true }).click();
+              await review.capture("revision-label-selection");
+              await inspector
+                .getByRole("button", { name: "Cancel selection", exact: true })
+                .click();
+            }
             await inspector.getByRole("button", { name: "Compare", exact: true }).click();
+            if (revisions.length === 1 && model.files.length > 1) {
+              await expect(
+                inspector.getByRole("heading", { name: "Compare files", exact: true }),
+              ).toBeFocused();
+            }
             for (const label of ["G-code revisions", "Source files", "All files"]) {
               await inspector
                 .getByRole("group", { name: "Comparison type", exact: true })
@@ -248,7 +286,7 @@ test.describe("Existing Model review", () => {
 
             // ── Inspect dialogs without saving, uploading, sharing or starting prints ──
             await tab("Overview");
-            await page.getByRole("heading", { level: 1 }).click({ button: "right" });
+            await page.getByRole("button", { name: "More model actions", exact: true }).click();
             await review.capture("model-actions-menu");
             await page.getByRole("menuitem", { name: "Edit details" }).click();
             await review.capture("model-details-editor");
@@ -279,6 +317,7 @@ test.describe("Existing Model review", () => {
               .selectOption(String(slicedPlates.plates[1]));
             await review.capture("send-plate-selected");
             await send.getByRole("radio", { name: "Add to queue", exact: true }).check();
+            await expect(send.getByRole("heading", { name: /^Queue Rev / })).toBeVisible();
             await review.capture("queue-plate-selected");
             await dismiss();
             await tab("History");
@@ -368,6 +407,10 @@ test.describe("Existing Model review", () => {
                 .click();
               await expect(preview.getByText(/^Selected plate mesh bounds:/)).toBeVisible();
               await review.capture(`mesh-plate-${plate.number}`);
+              await preview.getByRole("button", { name: "Expand", exact: true }).click();
+              await assertDockAlignment();
+              await review.capture(`mesh-plate-${plate.number}-expanded`);
+              await preview.getByRole("button", { name: "Collapse preview", exact: true }).click();
               await preview.getByRole("button", { name: "Fit to view", exact: true }).click();
             }
             for (const mode of ["X-Ray", "Wireframe", "Solid"]) {
@@ -383,7 +426,10 @@ test.describe("Existing Model review", () => {
             await assertDockAlignment();
             const expandedSourcePlateBox = await plates.boundingBox();
             await review.capture("mesh-expanded");
-            await preview.getByRole("button", { name: "Collapse preview", exact: true }).click();
+            await page.keyboard.press("Escape");
+            await expect(
+              preview.getByRole("button", { name: "Expand", exact: true }),
+            ).toBeFocused();
             await expect(page.getByTestId("model-detail-sidebar")).toBeVisible();
             await waitForPreview();
             // Shared overlays and camera presets retain their state and location across modes.
@@ -546,6 +592,12 @@ test.describe("Existing Model review", () => {
               await layer.fill(middle);
               await layer.press("Enter");
               await expect(layer).toHaveValue(middle);
+              await review.capture(`toolpath-plate-${plate}-middle`);
+              await preview.getByRole("button", { name: "Expand", exact: true }).click();
+              await assertDockAlignment();
+              await expect(layer).toHaveValue(middle);
+              await review.capture(`toolpath-plate-${plate}-expanded`);
+              await preview.getByRole("button", { name: "Collapse preview", exact: true }).click();
             }
             await controls.getByRole("tab", { name: "View", exact: true }).click();
             if (sliced!.metadata?.printer_model === "Bambu Lab P1S") {

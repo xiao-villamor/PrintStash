@@ -38,7 +38,7 @@
   background: var(--card);
 }
 .model-plate-choice[aria-pressed="true"] {
-  border-color: var(--primary);
+  border-color: var(--foreground);
   background: var(--card);
   color: var(--foreground);
 }
@@ -84,14 +84,14 @@
   font-weight: 500;
 }
 .model-plate-check {
-  color: var(--primary);
+  color: var(--foreground);
   opacity: 0;
 }
 [aria-pressed="true"] > .model-plate-check {
   opacity: 1;
 }
 .model-plate-all[aria-pressed="true"] {
-  color: var(--primary);
+  color: var(--foreground);
   background: transparent;
 }
 @media (max-width: 399px) {

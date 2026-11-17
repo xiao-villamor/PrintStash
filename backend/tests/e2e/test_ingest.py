@@ -1147,7 +1147,8 @@ class TestSlicedPlates:
         original = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
 
         assert listing.status_code == 200, listing.text
-        assert listing.json() == {"plates": [2, 10]}
+        assert listing.json()["plates"] == [2, 10]
+        assert listing.json()["identities"] == []
         assert first.status_code == 200, first.text
         assert second.status_code == 200, second.text
         assert "plate 2\n" in first.text

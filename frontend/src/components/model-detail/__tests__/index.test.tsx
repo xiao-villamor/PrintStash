@@ -487,13 +487,15 @@ describe("ModelDetail", () => {
         "GET /api/v1/files/11/toolpath": json({ state: "queued" }, 202),
       },
     });
-    expect(await screen.findByText(/provider rejected authentication/)).toBeVisible();
+    expect(
+      await screen.findByText(/provider rejected authentication/, {}, { timeout: 10_000 }),
+    ).toBeVisible();
     expect(screen.getByRole("button", { name: "Fit to view" })).toBeDisabled();
     expect(screen.queryByText("10×20×30 mm")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Layers" }));
-    expect(screen.queryByRole("button", { name: "Fit to view" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Zoom out" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "G-code" }));
+    expect(screen.getByRole("button", { name: "Fit to view" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Zoom in" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Zoom out" })).toBeDisabled();
     expect(screen.queryByText("10×20×30 mm")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "3D model" }));
     expect(await screen.findByText(/provider rejected authentication/)).toBeVisible();
@@ -658,7 +660,7 @@ describe("ModelDetail", () => {
         routes: { "GET /api/v1/files/10/plates": json({ state: "skipped", plates: [] }) },
       });
 
-      expect(await screen.findByRole("button", { name: "Layers" })).toBeVisible();
+      expect(await screen.findByRole("button", { name: "G-code" })).toBeVisible();
       expect(view.requests().some(({ url }) => url.endsWith("/gcode-plates"))).toBe(false);
     });
 

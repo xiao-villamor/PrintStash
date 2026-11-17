@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Model details now show the selected G-code revision’s print setup and named plate estimates alongside preview and delivery actions. Inspector tabs lead directly into their content, and file comparisons open on an available pair.
+
+
 ### Changed
 
 - Model-detail reviews have a repeatable desktop Playwright flow using existing Models and their actual files, covering tabs, preview modes, plates, revisions and dialogs with private screenshot, layout and metadata evidence for follow-up design audits.

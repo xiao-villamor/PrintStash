@@ -32,22 +32,26 @@ export function PlateEstimates({
       .join(" ");
   };
   return (
-    <section className="space-y-2" aria-label={uiText("Plate estimates")}>
+    <section className="@container/estimates space-y-2" aria-label={uiText("Plate estimates")}>
       <h3 className="text-sm font-semibold">{uiText("Plate estimates")}</h3>
       {data.plates.map((number) => {
         const metadata = data.plate_metadata?.find((entry) => entry.number === number)?.metadata;
         const name = uiText("Plate {value1}", { value1: String(number).padStart(2, "0") });
+        const plateName = data.identities?.find((plate) => plate.number === number)?.name;
         return (
-          <section key={number} aria-label={name} className="border-b border-border pb-2">
-            <h4 className="text-sm font-medium">
-              {name}
-              {selected === number && (
-                <span className="ml-2 text-xs text-muted-foreground">
-                  {uiText("Selected plate")}
-                </span>
-              )}
-            </h4>
-            <dl className="detail-overview-facts">
+          <section key={number} aria-label={name} className="detail-plate-estimate">
+            <div className="min-w-0">
+              <h4 className="text-sm font-medium">
+                {name}
+                {selected === number && (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {uiText("Selected plate")}
+                  </span>
+                )}
+              </h4>
+              {plateName && <p className="mt-0.5 wrap-anywhere text-sm">{plateName}</p>}
+            </div>
+            <dl>
               {showTime && (
                 <div>
                   <dt>{uiText("Estimated time")}</dt>
@@ -60,7 +64,11 @@ export function PlateEstimates({
                   <dd>
                     {metadata?.filament_weight_g == null
                       ? uiText("Not recorded")
-                      : `${formatNumber(metadata.filament_weight_g, { maximumFractionDigits: 2 })} g`}
+                      : uiText("{value1} g", {
+                          value1: formatNumber(metadata.filament_weight_g, {
+                            maximumFractionDigits: 2,
+                          }),
+                        })}
                   </dd>
                 </div>
               )}

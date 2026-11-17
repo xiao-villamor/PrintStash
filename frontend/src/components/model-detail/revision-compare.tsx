@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useFilePlates } from "@/lib/queries/file-plates";
+import { HashValue } from "./file-hashes";
 import { Button } from "@/components/ui/button";
 import { Localized } from "@/components/ui/localized";
 import {
@@ -83,7 +84,16 @@ function ComparisonTable({
                     key={index}
                     className="break-words px-2 py-2 align-top tabular-nums [overflow-wrap:anywhere]"
                   >
-                    {different ? (
+                    {value &&
+                    (row.labelKey === "SHA-256" ||
+                      row.labelKey === "File SHA-256" ||
+                      row.labelKey === "Geometry SHA-256") ? (
+                      <HashValue
+                        sha={value}
+                        label={row.labelKey === "SHA-256" ? row.labelKey : uiText(row.labelKey)}
+                        filename={index === 0 ? left.original_filename : right.original_filename}
+                      />
+                    ) : different ? (
                       <mark className="bg-transparent text-accent-foreground">{value}</mark>
                     ) : (
                       <span className={value === null ? "text-muted-foreground" : ""}>
@@ -126,6 +136,10 @@ export function RevisionCompare({
   onModeChange?: (mode: ComparisonMode) => void;
 }) {
   useUiLocale();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
   const [localMode, setLocalMode] = useState<ComparisonMode>(
     initialMode ??
       (left.file_type === "gcode" && right.file_type === "gcode"
@@ -291,12 +305,22 @@ export function RevisionCompare({
               ),
               row("Filament cost", (file) => numeric(file.metadata?.filament_cost, formatCost)),
               row("LAYERS", (file) => numeric(file.metadata?.layer_count, formatNumber)),
-              row("EXPOSURE", (file) =>
-                numeric(file.metadata?.exposure_time_s, (value) => `${formatNumber(value)} s`),
-              ),
-              row("RESIN VOLUME", (file) =>
-                numeric(file.metadata?.resin_volume_ml, (value) => `${formatNumber(value)} ml`),
-              ),
+              ...(selectedLeft.file_type === "resin" || selectedRight.file_type === "resin"
+                ? [
+                    row("EXPOSURE", (file) =>
+                      numeric(
+                        file.metadata?.exposure_time_s,
+                        (value) => `${formatNumber(value)} s`,
+                      ),
+                    ),
+                    row("RESIN VOLUME", (file) =>
+                      numeric(
+                        file.metadata?.resin_volume_ml,
+                        (value) => `${formatNumber(value)} ml`,
+                      ),
+                    ),
+                  ]
+                : []),
               row("Slicer / version", (file) =>
                 string(
                   [file.metadata?.slicer_name, file.metadata?.slicer_version]
@@ -317,7 +341,9 @@ export function RevisionCompare({
     <Localized>
       <section className="@container/comparison space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-base font-semibold">{uiText(heading)}</h2>
+          <h2 ref={headingRef} tabIndex={-1} className="text-base font-semibold">
+            {uiText(heading)}
+          </h2>
           <div role="group" aria-label={uiText("Comparison type")} className="flex flex-wrap gap-1">
             {(
               [

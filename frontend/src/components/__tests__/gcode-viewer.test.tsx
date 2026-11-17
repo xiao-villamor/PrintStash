@@ -275,7 +275,7 @@ describe("GcodeViewer", () => {
     await act(async () => pending.resolve({ ready: false, state: "running" }));
   });
 
-  it("exposes an accessible layer slider and pressed states for travel/bed toggles", async () => {
+  it("exposes toolpath control states to assistive technology", async () => {
     const user = userEvent.setup();
     fetchMock.mockResolvedValue(textResponse(TOOLPATH));
 

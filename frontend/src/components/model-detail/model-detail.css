@@ -26,7 +26,7 @@
 }
 .model-information {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
   gap: 1rem;
   padding: 1rem;
   border: 1px solid var(--border);
@@ -872,4 +872,51 @@
 .detail-tab-placeholder .animate-pulse {
   animation: none;
   border-radius: 2px;
+}
+
+.detail-file-link {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 0.2em;
+}
+.detail-file-link:hover,
+.detail-file-link:focus-visible {
+  text-decoration-color: currentColor;
+}
+.model-information-geometry dd {
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.detail-plate-estimate {
+  border-top: 1px solid var(--border);
+  padding-block: 0.625rem;
+}
+.detail-plate-estimate dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-top: 0.5rem;
+}
+.detail-plate-estimate dt {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+.detail-plate-estimate dd {
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+@container estimates (min-width: 35rem) {
+  .detail-plate-estimate {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+    align-items: center;
+    gap: 1rem;
+  }
+  .detail-plate-estimate dl {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(5rem, 1fr));
+    margin: 0;
+  }
 }

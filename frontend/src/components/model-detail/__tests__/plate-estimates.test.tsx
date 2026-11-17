@@ -7,7 +7,7 @@ import type { GcodePlates } from "@/lib/api/plates";
 
 const plates: GcodePlates = {
   plates: [1, 2],
-  identities: [],
+  identities: [{ number: 2, name: "Wall mount", object_count: 1 }],
   plate_metadata: [
     {
       number: 1,
@@ -27,6 +27,8 @@ describe("PlateEstimates", () => {
     const second = screen.getByRole("region", { name: "Plate 02" });
     expect(within(first).getByText("7h 44m 22s")).toBeVisible();
     expect(within(first).getByText("419.18 g")).toBeVisible();
+    expect(within(second).getByText("Wall mount")).toBeVisible();
+    expect(within(first).queryByText("Wall mount")).not.toBeInTheDocument();
     expect(within(second).getByText("41m 5s")).toBeVisible();
     expect(within(second).getByText("13.03 g")).toBeVisible();
     expect(within(second).getByText("Selected plate")).toBeVisible();
