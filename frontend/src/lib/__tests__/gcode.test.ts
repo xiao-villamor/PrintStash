@@ -36,6 +36,15 @@ describe("Toolpath geometry", () => {
 
       expect(result.extrudePositions).toHaveLength((count + 1) * 6);
       expect(result.travelPositions).toHaveLength((count + 1) * 6);
+      expect(Array.from(result.extrudePositions.filter((_, index) => index % 6 === 0))).toEqual(
+        Array.from({ length: count + 1 }, (_, index) => index - (count + 1) / 2),
+      );
+      expect(Array.from(result.travelPositions.filter((_, index) => index % 6 === 0))).toEqual(
+        Array.from(
+          { length: count + 1 },
+          (_, index) => Math.min(index + 1, count) - (count + 1) / 2,
+        ),
+      );
       expect(Array.from(result.extrudePositions.slice(-6))).toEqual([
         (count - 1) / 2,
         0.5,
