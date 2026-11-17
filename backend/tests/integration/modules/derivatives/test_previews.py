@@ -474,6 +474,21 @@ class TestPreviewAdmission:
         source = PreviewSource(group(JobKind.DERIVATIVES_PREVIEWS))
         assert source.pending(db_session, now=utcnow(), limit=20) == []
 
+    def test_waits_for_a_cover_due_for_regeneration(
+        self, db_session, artifact, make_derivative, make_derivative_group_regeneration
+    ):
+        make_derivative(
+            artifact,
+            DerivativeKind.THUMBNAIL,
+            updated_at=utcnow() - timedelta(minutes=5),
+        )
+        # "Recreate all images": the cover pass owes this Model again.
+        make_derivative_group_regeneration(
+            JobKind.DERIVATIVES_MESH, DerivativeKind.THUMBNAIL, requested_at=utcnow()
+        )
+        source = PreviewSource(group(JobKind.DERIVATIVES_PREVIEWS))
+        assert source.pending(db_session, now=utcnow(), limit=20) == []
+
     def test_admits_only_one_secondary_batch(
         self, db_session, artifact, make_derivative, make_job
     ):
@@ -821,6 +836,24 @@ class TestCoverPassViews:
         assert outcome.kinds[DerivativeKind.THUMBNAIL] is DerivativeState.READY
         row = _views_row(db_session, artifact)
         assert (row.state, row.storage_key) == (DerivativeState.RUNNING, None)
+
+    def test_rebuilds_views_with_a_regenerated_cover(
+        self, db_session, artifact, ready, make_derivative_group_regeneration
+    ):
+        attempts, published = ready.attempts, ready.storage_key
+        requested = utcnow()
+        for definition, kind in (
+            (JobKind.DERIVATIVES_PREVIEWS, DerivativeKind.PREVIEWS),
+            (JobKind.DERIVATIVES_MESH, DerivativeKind.THUMBNAIL),
+        ):
+            make_derivative_group_regeneration(definition, kind, requested_at=requested)
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds[DerivativeKind.PREVIEWS] is DerivativeState.READY
+        row = _views_row(db_session, artifact)
+        assert row.attempts == attempts + 1
+        assert row.storage_key != published
 
     @pytest.mark.parametrize("width", [320, 1280], ids=str)
     def test_follows_the_model_image_quality(

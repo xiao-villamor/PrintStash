@@ -156,9 +156,7 @@ class DerivativeSource:
         """The timestamp that orders this group's work, and the interactive test."""
         if self.group.definition is JobKind.DERIVATIVES_VIEWER_STL:
             timestamp = col(File.viewer_requested_at)
-            return timestamp, (
-                timestamp.is_not(None) if self.interactive else false()
-            )
+            return timestamp, (timestamp.is_not(None) if self.interactive else false())
         timestamp = col(File.uploaded_at)
         if not self.interactive:
             return timestamp, false()
@@ -204,7 +202,7 @@ class DerivativeSource:
     # Whether a fresh upload's gap is discovered at INTERACTIVE priority.
     interactive = True
 
-    def prerequisite(self) -> ColumnElement[bool]:
+    def prerequisite(self, session: Session) -> ColumnElement[bool]:
         """A File predicate that must hold before this group's gap is owed."""
         return true()
 
@@ -227,7 +225,7 @@ class DerivativeSource:
                 pending_predicate(self.group, session, now=now), not_(active)
             )
 
-            predicate = and_(predicate, self.prerequisite())
+            predicate = and_(predicate, self.prerequisite(session))
 
             def eligible(
                 ids: list[int],
