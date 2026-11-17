@@ -36,6 +36,7 @@ function TestCanvas(_props: { children: React.ReactNode }) {
 }
 
 const TOOLPATH = "G90\nM82\nG1 Z0.2\nG1 X10 Y0 E0.1\nG1 X20 Y0 E0.2\n";
+const THREE_LAYERS = "G1 Z0.2\nG1 X10 E1\nG1 Z0.4\nG1 X20 E2\nG1 Z0.6\nG1 X30 E3";
 
 function textResponse(text: string, status = 200): Response {
   return new Response(text, { status });
@@ -54,6 +55,86 @@ beforeEach(() => {
 });
 
 describe("GcodeViewer", () => {
+  it("jumps directly to a printable layer", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(THREE_LAYERS));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    const entry = await screen.findByRole("spinbutton", { name: "Layer number" });
+
+    await user.clear(entry);
+    await user.type(entry, "2{Enter}");
+
+    expect(entry).toHaveValue(2);
+    expect(screen.getByRole("slider", { name: "Current layer" })).toHaveAttribute(
+      "aria-valuetext",
+      "Layer 2 / 3",
+    );
+    expect(screen.getByText("0.4 mm")).toBeVisible();
+  });
+
+  it.each(["0", "4", "1.5", ""])("rejects out-of-range layer entries (%s)", async (value) => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(THREE_LAYERS));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    const entry = await screen.findByRole("spinbutton", { name: "Layer number" });
+
+    entry.focus();
+    fireEvent.change(entry, { target: { value } });
+    await user.click(screen.getByRole("heading", { name: "Layers" }));
+
+    expect(entry).toHaveValue(3);
+    expect(screen.getByRole("slider", { name: "Current layer" })).toHaveValue("2");
+  });
+
+  it("discards an unfinished layer entry on Escape", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(THREE_LAYERS));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    const entry = await screen.findByRole("spinbutton", { name: "Layer number" });
+
+    await user.clear(entry);
+    await user.type(entry, "1{Escape}");
+
+    expect(entry).toHaveValue(3);
+    expect(screen.getByRole("slider", { name: "Current layer" })).toHaveValue("2");
+  });
+
+  it("toggles dimensions in the side panel", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(TOOLPATH));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    const toggle = await screen.findByRole("button", { name: "Dimensions" });
+    expect(screen.getByText("20 × 0 × 0 mm")).toBeVisible();
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByText("20 × 0 × 0 mm")).not.toBeInTheDocument();
+  });
   it("keeps a public Gcode viewer outside private events", async () => {
     storeLogin("", { id: 1, username: "owner", email: null, is_superuser: true });
     const factory = vi.fn<EventSocketFactory>(async () => ({

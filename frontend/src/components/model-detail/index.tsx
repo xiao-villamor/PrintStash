@@ -1206,6 +1206,8 @@ function ModelDetailPresentation({
                         screenshotName: model.slug || model.name,
                         showGrid,
                         showDimensions,
+                        onShowGridChange: setShowGrid,
+                        onShowDimensionsChange: setShowDimensions,
                         onControlsReady: connectToolpathControls,
                       }}
                     />

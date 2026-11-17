@@ -143,6 +143,15 @@ describe("ViewerToolbar screenshot", () => {
 });
 
 describe("ViewerToolbar selection", () => {
+  it("keeps mesh display controls out of the toolpath preview", () => {
+    renderToolbar(true, undefined, { hasGcode: true, viewerMode: "gcode" });
+
+    expect(screen.queryByRole("button", { name: "Solid" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "X-Ray" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Wireframe" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Build plate grid" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Screenshot" })).toBeEnabled();
+  });
   it("announces the active preview mode", () => {
     renderToolbar(true, undefined, { hasGcode: true, viewerMode: "gcode" });
 

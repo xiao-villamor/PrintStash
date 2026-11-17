@@ -1,9 +1,46 @@
 /** Inline revision outcomes persist through the real manual-print owner and a fresh Library read. */
 import { test, expect } from "./helpers";
-import { modelCard, uploadModel } from "./util";
+import { gcodeFor, modelCard, uploadModel } from "./util";
 import type { ModelPrintJobRead, ModelRead } from "../../src/types";
 
 test.describe("Library inline inspector", () => {
+  test("keeps toolpath controls reachable in the narrow inspector", async ({ page }) => {
+    const name = `e2e-inspector-toolpath-${Date.now()}`;
+    await uploadModel(page, name, {
+      gcode: true,
+      gcodeFile: {
+        name: `${name}.gcode`,
+        mimeType: "text/plain",
+        buffer: Buffer.from(`${gcodeFor(name)}\nG1 X10 Y10 E1\nG1 Z0.4\nG1 X20 Y10 E2`),
+      },
+    });
+    const card = modelCard(page, name);
+    const href = await card.getAttribute("href");
+    const match = href?.match(/^\/models\/(\d+)/);
+    if (!match) throw new Error("Uploaded Model card has no model route");
+    const modelId = Number(match[1]);
+    try {
+      await card.click();
+      const drawer = page.locator("#model-drawer");
+      await drawer.getByRole("radio", { name: "G-code", exact: true }).click();
+      const panel = drawer.getByRole("complementary", { name: "Toolpath controls" });
+      await expect(panel.getByRole("slider")).toBeVisible();
+      await panel.getByRole("combobox", { name: "Camera view" }).selectOption("top");
+      await panel.getByRole("button", { name: "Travel", exact: true }).click();
+      await expect(panel.getByRole("button", { name: "Travel", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await panel.getByRole("button", { name: "Fit to view" }).click();
+      await expect(panel.getByRole("combobox", { name: "Camera view" })).toHaveValue("isometric");
+      await drawer.locator("canvas").scrollIntoViewIfNeeded();
+      await expect(drawer.locator("canvas")).toBeVisible();
+      await page.screenshot({ path: test.info().outputPath("inspector-toolpath.png") });
+    } finally {
+      expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
+    }
+  });
+
   test("persists a failed revision outcome from inline inspection", async ({ page }) => {
     const stamp = Date.now();
     const name = `e2e-inspector-${stamp}`;

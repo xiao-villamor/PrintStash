@@ -4,6 +4,8 @@
 
 ### Changed
 
+- G-code previews use a slicer-style side panel with plate cards, direct layer entry, camera and display controls. Narrow screens place the panel below the canvas; plate choices stay available while loading or retrying a preview.
+
 - New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.
 
 - Flat-model previews now support arrow navigation through all five views and back to the cover. Single-cover and multi-angle cards share a larger image area, and the expanded gallery uses more room on large screens while fitting narrow displays.
@@ -62,6 +64,8 @@
 - The default number of simultaneous mesh jobs is now one per usable CPU (it was one more). With admission no longer stalling, the extra job only competed for the CPU: on a 3-CPU, 8 GB install a 60-file archive's thumbnails finish in 38.7 s instead of 44.9 s, at the same CPU cost. `VAULT_MAX_RENDER_JOBS` and *Models processed at once* still override it.
 
 ### Fixed
+
+- Large sliced plates no longer hit the former one-million-segment preview limit. Arc rendering uses bounded curve error, and typed geometry storage supports up to four million segments without dropping layers.
 
 - Saved multipart descriptions stay visible in the overview. Multipart member names wrap without clipping, and the mobile composition editor keeps Add variant and Save changes at the shared touch-target size.
 

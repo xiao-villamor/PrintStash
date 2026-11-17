@@ -114,7 +114,7 @@ export function ViewerToolbar({
             </div>
           </div>
         )}
-        {
+        {viewerMode === "model" && (
           <>
             <div className="detail-viewer-control-group">
               <span>{uiText("Display")}</span>
@@ -167,7 +167,7 @@ export function ViewerToolbar({
               </div>
             </div>
           </>
-        }
+        )}
       </div>
       {viewerMode === "model" && (
         <div className="detail-viewer-dock">

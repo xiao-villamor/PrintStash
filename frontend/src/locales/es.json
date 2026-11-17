@@ -1819,7 +1819,7 @@
   "viewer.converterBusy": "Se están preparando otros recorridos. Vuelve a intentarlo en un momento.",
   "viewer.invalidToolpath": "No se pudo validar este archivo como un recorrido compatible. El original sigue disponible.",
   "viewer.retry": "Volver a intentar la vista previa",
-  "viewer.segmentLimit": "Este recorrido supera el límite de un millón de segmentos. Descarga el original para inspeccionarlo en tu laminador.",
+  "viewer.segmentLimit": "Este recorrido supera la capacidad de la vista previa. Descarga el original para inspeccionarlo en tu laminador.",
   "viewer.binaryUnsupported": "El G-code binario (.bgcode) no se puede previsualizar en el navegador; descárgalo para abrirlo en un laminador.",
   "viewer.loadFailed": "No se pudo cargar la vista previa de la trayectoria.",
   "viewer.noToolpathData": "No hay datos de trayectoria",
@@ -5242,5 +5242,7 @@
   "One thumbnail": "Una miniatura",
   "Oblique views": "Vistas oblicuas",
   "Oblique views + top and bottom": "Vistas oblicuas + superior e inferior",
-  "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Empieza con una miniatura para importar más rápido. Activa cuatro vistas oblicuas y, opcionalmente, las vistas superior e inferior. Los modelos existentes se actualizan en segundo plano."
+  "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Empieza con una miniatura para importar más rápido. Activa cuatro vistas oblicuas y, opcionalmente, las vistas superior e inferior. Los modelos existentes se actualizan en segundo plano.",
+  "Toolpath controls": "Controles de trayectoria",
+  "Layer number": "Número de capa"
 }

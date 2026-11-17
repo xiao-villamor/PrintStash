@@ -19,21 +19,118 @@ async function hasRenderedPixels(canvas: Locator): Promise<boolean> {
   });
 }
 
-function slicedArchive(name: string, withMesh = false): Buffer {
+function slicedArchive(name: string, withMesh = false, dense = false): Buffer {
   const backend = resolve("../backend");
   return execFileSync(
     resolve(backend, ".venv/bin/python"),
     [
       "-c",
-      "import sys; from tests.fixtures.three_mf_projects import build_sliced_project; sys.stdout.buffer.write(build_sliced_project(marker=sys.argv[1], with_mesh=sys.argv[2] == 'true'))",
+      `import io, sys, zipfile
+from tests.fixtures.three_mf_projects import build_sliced_project
+original = build_sliced_project(marker=sys.argv[1], with_mesh=sys.argv[2] == 'true')
+if sys.argv[3] == 'true':
+    result = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(original)) as source, zipfile.ZipFile(result, 'w', compression=zipfile.ZIP_DEFLATED) as target:
+        for member in source.namelist():
+            content = source.read(member)
+            if member == 'Metadata/plate_1.gcode':
+                content = ('; ' + sys.argv[1] + '\\nG1 X100\\nM83\\n' + '\\n'.join(f'G1 Z{(i+1)*0.2}\\nG2 I-100 E1\\nG2 I-100 E1' for i in range(750))).encode()
+            target.writestr(member, content)
+    original = result.getvalue()
+sys.stdout.buffer.write(original)`,
       name,
       String(withMesh),
+      String(dense),
     ],
     { cwd: backend },
   );
 }
 
 test.describe("Sliced G-code plates", () => {
+  test("previews a dense multiplate revision with side panel controls", async ({ page }) => {
+    const name = `e2e-dense-plates-${Date.now()}`;
+    const upload = await page.request.post("/api/v1/ingest/model", {
+      multipart: {
+        file: {
+          name: `${name}.gcode.3mf`,
+          mimeType: "model/3mf",
+          buffer: slicedArchive(name, false, true),
+        },
+        model_name: name,
+      },
+    });
+    expect(upload.status()).toBe(202);
+    const jobId = (await upload.json()).job_id;
+    let modelId = 0;
+    await expect
+      .poll(
+        async () => {
+          const job = await (await page.request.get(`/api/v1/jobs/${jobId}`)).json();
+          modelId = job.model_id;
+          return job.state;
+        },
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    try {
+      await page.goto(`/models/${modelId}`);
+      await page.getByRole("button", { name: "Layers", exact: true }).click();
+      const panel = page.getByRole("complementary", { name: "Toolpath controls" });
+      const entry = panel.getByRole("spinbutton", { name: "Layer number" });
+      await expect(entry).toHaveValue("750");
+      await expect.poll(() => hasRenderedPixels(page.locator("canvas"))).toBe(true);
+      const desktopCanvas = await page.locator("canvas").boundingBox();
+      const desktopPanel = await panel.boundingBox();
+      expect(desktopPanel?.y).toBe(desktopCanvas?.y);
+      expect(desktopPanel!.x).toBeGreaterThan(desktopCanvas!.x);
+      expect(desktopPanel?.height).toBe(desktopCanvas?.height);
+      await entry.fill("375");
+      await entry.press("Enter");
+      await expect(panel.getByRole("slider")).toHaveAttribute("aria-valuetext", "Layer 375 / 750");
+      await panel.getByRole("button", { name: "This layer" }).click();
+      await expect(panel.getByRole("button", { name: "This layer" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await panel.getByRole("combobox", { name: "Camera view" }).selectOption("top");
+      await panel.getByRole("button", { name: "Build plate grid" }).click();
+      await expect(panel.getByRole("button", { name: "Build plate grid" })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+      await expect(page.getByRole("button", { name: "Solid", exact: true })).toHaveCount(0);
+      await page.getByRole("button", { name: "Expand", exact: true }).scrollIntoViewIfNeeded();
+      await page.screenshot({ path: test.info().outputPath("dense-sidebar.png") });
+
+      const second = panel.getByRole("button", { name: "Plate 02", exact: true });
+      await second.focus();
+      await second.press("Enter");
+      await expect(second).toBeFocused();
+      await expect(entry).toHaveValue("2");
+      await expect.poll(() => hasRenderedPixels(page.locator("canvas"))).toBe(true);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await panel.getByRole("button", { name: "Plate 01", exact: true }).click();
+      await expect(entry).toHaveValue("750");
+      await panel.getByRole("button", { name: "Fit to view" }).click();
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+        .toBe(true);
+      await expect.poll(() => hasRenderedPixels(page.locator("canvas"))).toBe(true);
+      const mobileCanvas = await page.locator("canvas").boundingBox();
+      const mobilePanel = await panel.boundingBox();
+      expect(mobilePanel!.y).toBeGreaterThanOrEqual(mobileCanvas!.y + mobileCanvas!.height);
+      expect(mobilePanel!.height).toBeLessThanOrEqual(352);
+      await page.getByRole("button", { name: "Expand", exact: true }).scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: test.info().outputPath("dense-sidebar-mobile.png"),
+        fullPage: true,
+      });
+      await expect(page.getByRole("alert")).toHaveCount(0);
+    } finally {
+      expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
+    }
+  });
+
   test("prints the selected plate of an attached revision", async ({ page }) => {
     const name = `e2e-sliced-revision-${Date.now()}`;
     await uploadGcodeModel(page, name);

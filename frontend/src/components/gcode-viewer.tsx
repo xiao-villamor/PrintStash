@@ -1,19 +1,31 @@
 import { uiText } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
 import { ApiError } from "@/lib/errors";
+import { createPortal } from "react-dom";
+import { Input } from "@/components/ui/input";
+import { ToolpathLayout } from "@/components/toolpath-layout";
 import { Button } from "@/components/ui/button";
 
 import React, { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
-import { AlertTriangle, ChevronDown, ChevronUp, Layers, Loader2, Maximize2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import {
+  AlertTriangle,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Layers,
+  Loader2,
+  Minus,
+  Plus,
+} from "lucide-react";
 import "./gcode-viewer.css";
 import { getDerivedText } from "@/lib/api/request";
 import { subscribeEvents } from "@/lib/events";
 import { useOptionalI18n, type MessageKey } from "@/lib/i18n";
 import { previewPixelRatio, usePreviewPreferences } from "@/lib/preview-preferences";
+import { fitCameraToBounds } from "@/lib/thumbnail-camera";
 import type { ToolpathData } from "@/lib/gcode";
 import { parseGcodeInWorker, ToolpathParseError } from "@/lib/gcode-worker-client";
 
@@ -81,6 +93,30 @@ function GcodeScene({
   }, [printerBedMm]);
   const bedEdgesGeo = useMemo(() => (bedGeo ? new THREE.EdgesGeometry(bedGeo) : null), [bedGeo]);
 
+  // R3F does not own <primitive> resources. Release the previous plate's GPU
+  // buffers when switching plates, including when the next preview fails.
+  useEffect(
+    () => () => {
+      extrudeGeo.dispose();
+      travelGeo.dispose();
+    },
+    [extrudeGeo, travelGeo],
+  );
+  useEffect(
+    () => () => {
+      extrudeMat.dispose();
+      travelMat.dispose();
+    },
+    [extrudeMat, travelMat],
+  );
+  useEffect(
+    () => () => {
+      bedGeo?.dispose();
+      bedEdgesGeo?.dispose();
+    },
+    [bedGeo, bedEdgesGeo],
+  );
+
   // Update drawRange directly on the stable geometry — no ref gymnastics needed
   useEffect(() => {
     const count = data.cumulativeVertices[currentLayer + 1] ?? data.extrudePositions.length / 3;
@@ -97,14 +133,24 @@ function GcodeScene({
   );
 
   useEffect(() => {
-    const distance = Math.max(data.bounds.maxDim, 1);
     function setView(preset: ViewerCameraPreset) {
       // OrbitControls keeps the world up axis it started with; the top view
       // looks straight down by sitting a hair off the axis instead of rolling it.
       camera.up.set(0, 1, 0);
-      if (preset === "front") camera.position.set(0, 0, distance * 1.8);
-      else if (preset === "top") camera.position.set(0, distance * 1.8, distance * 0.001);
-      else camera.position.set(distance * 0.8, distance * 0.9, distance * 1.2);
+      const direction =
+        preset === "front"
+          ? new THREE.Vector3(0, 0, 1)
+          : preset === "top"
+            ? new THREE.Vector3(0, 1, 0.001)
+            : new THREE.Vector3(0.8, 0.9, 1.2);
+      const aspect = gl.domElement.clientWidth / Math.max(gl.domElement.clientHeight, 1);
+      const fit = fitCameraToBounds(
+        new THREE.Vector3(data.bounds.sizeX, data.bounds.sizeZ, data.bounds.sizeY),
+        aspect,
+        45,
+        direction,
+      );
+      camera.position.copy(fit.position);
       orbitRef.current?.target.set(0, 0, 0);
       camera.lookAt(0, 0, 0);
       orbitRef.current?.update();
@@ -266,17 +312,16 @@ const CAMERA_PRESETS = [
   "front",
   "top",
 ] as const satisfies readonly ViewerCameraPreset[];
-const TOGGLE =
-  "h-7 px-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-40";
-const ICON_BUTTON =
-  "inline-flex h-7 w-7 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-40";
-
 export interface GcodeViewerProps {
   url: string;
   printerBedMm?: { x: number; y: number } | null;
   screenshotName?: string;
   showGrid?: boolean;
   showDimensions?: boolean;
+  onShowGridChange?: (visible: boolean) => void;
+  onShowDimensionsChange?: (visible: boolean) => void;
+  /** Render controls beside the parent-owned source picker without remounting it. */
+  controlsContainer?: HTMLElement | null;
   onControlsReady?: (controls: ViewerControls | null) => void;
   canvasRenderer?: ComponentType<CanvasRendererProps>;
   toolpathParser?: typeof parseGcodeInWorker;
@@ -288,8 +333,11 @@ export function GcodeViewer({
   url,
   printerBedMm = null,
   screenshotName = "toolpath",
-  showGrid = true,
-  showDimensions = true,
+  showGrid: externalGrid,
+  showDimensions: externalDimensions,
+  onShowGridChange,
+  onShowDimensionsChange,
+  controlsContainer,
   onControlsReady,
   canvasRenderer,
   toolpathParser = parseGcodeInWorker,
@@ -302,9 +350,14 @@ export function GcodeViewer({
   // One state for the fetch that has actually completed, tagged with its url,
   // so switching files derives "loading" during render instead of clearing the
   // previous file's toolpath from an effect.
+  const [grid, setGrid] = useState(externalGrid ?? true);
+  const [dimensions, setDimensions] = useState(externalDimensions ?? true);
+  const showGrid = externalGrid ?? grid;
+  const showDimensions = externalDimensions ?? dimensions;
   const [retry, setRetry] = useState(0);
   const [loaded, setLoaded] = useState<LoadedToolpath | null>(null);
   const [currentLayer, setCurrentLayer] = useState(0);
+  const [layerEntry, setLayerEntry] = useState<string | null>(null);
   const [onlyCurrentLayer, setOnlyCurrentLayer] = useState(false);
   const [showTravel, setShowTravel] = useState(false);
   const [showBed, setShowBed] = useState(true);
@@ -362,6 +415,7 @@ export function GcodeViewer({
         if (!live) return;
         setLoaded({ url, fetcher: toolpathFetcher, data: parsed, errorKind: null });
         setCurrentLayer(parsed.totalLayers - 1);
+        setLayerEntry(null);
       })
       .catch((cause: unknown) => {
         if (!live) return;
@@ -409,37 +463,38 @@ export function GcodeViewer({
   const noDataCopy = viewerCopy(i18n, "viewer.noToolpathData");
   const noToolpathCopy = viewerCopy(i18n, "viewer.noToolpathFound");
 
+  const layout = (canvas: React.ReactNode, controls?: React.ReactNode) =>
+    controlsContainer === undefined ? (
+      <ToolpathLayout sidebar={controls}>{canvas}</ToolpathLayout>
+    ) : (
+      <>
+        {canvas}
+        {controlsContainer && createPortal(controls, controlsContainer)}
+      </>
+    );
+
   if (loading || current?.preparing) {
-    return (
-      <div
-        role="status"
-        className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground"
-      >
+    return layout(
+      <div role="status" className="toolpath-notice">
         <Loader2 className="h-8 w-8 animate-spin" />
         <span className="font-mono text-xs">
           {current?.preparing ? viewerCopy(i18n, "viewer.preparingToolpath") : loadingCopy}
         </span>
-      </div>
+      </div>,
     );
   }
 
   if (errorKind === "disabled") {
-    return (
-      <div
-        role="status"
-        className="absolute inset-0 flex items-center justify-center text-muted-foreground"
-      >
+    return layout(
+      <div role="status" className="toolpath-notice">
         <span className="font-mono text-xs">{errorCopy}</span>
-      </div>
+      </div>,
     );
   }
 
   if (errorKind || !data) {
-    return (
-      <div
-        role="alert"
-        className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground"
-      >
+    return layout(
+      <div role="alert" className="toolpath-notice">
         <AlertTriangle className="h-8 w-8" />
         <span className="font-mono text-xs">{errorKind ? errorCopy : noDataCopy}</span>
         <Button
@@ -451,20 +506,46 @@ export function GcodeViewer({
         >
           {viewerCopy(i18n, "viewer.retry")}
         </Button>
-      </div>
+      </div>,
     );
   }
 
   if (data.totalLayers === 0) {
-    return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
+    return layout(
+      <div className="toolpath-notice">
         <Layers className="h-8 w-8 opacity-40" />
         <span className="font-mono text-xs">{noToolpathCopy}</span>
-      </div>
+      </div>,
     );
   }
 
-  return (
+  const selectLayer = (layer: number) => {
+    setCurrentLayer(layer);
+    setLayerEntry(null);
+  };
+  const commitLayer = () => {
+    if (layerEntry === null) return;
+    const number = Number(layerEntry);
+    if (Number.isInteger(number) && number >= 1 && number <= data.totalLayers) {
+      setCurrentLayer(number - 1);
+    }
+    setLayerEntry(null);
+  };
+  const toggle = (label: string, checked: boolean, change: (value: boolean) => void) => (
+    <Button
+      variant="ghost"
+      aria-pressed={checked}
+      onClick={() => change(!checked)}
+      className="toolpath-toggle"
+    >
+      <span>{label}</span>
+      <span className="toolpath-check" aria-hidden>
+        {checked && <Check className="h-3.5 w-3.5" />}
+      </span>
+    </Button>
+  );
+
+  return layout(
     <div className="relative h-full w-full">
       <GcodeErrorBoundary renderFailed={renderFailedCopy}>
         <CanvasRenderer
@@ -485,34 +566,64 @@ export function GcodeViewer({
           />
         </CanvasRenderer>
       </GcodeErrorBoundary>
-
-      {showDimensions && (
-        <div className="absolute bottom-12 left-2 bg-card px-2 py-1 font-mono text-2xs text-muted-foreground">
-          {formatNumber(data.bounds.sizeX, { maximumFractionDigits: 1 })} ×{" "}
-          {formatNumber(data.bounds.sizeY, { maximumFractionDigits: 1 })} ×{" "}
-          {uiText("{value1} mm", {
-            value1: formatNumber(data.bounds.sizeZ, { maximumFractionDigits: 1 }),
-          })}
+    </div>,
+    <>
+      <section className="toolpath-section" aria-label={uiText("Layers")}>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="toolpath-section-title">{uiText("Layers")}</h3>
+          <span className="font-mono text-xs text-muted-foreground">
+            {uiText("{value1} mm", {
+              value1: formatNumber(data.layerRanges[currentLayer]?.z ?? 0, {
+                maximumFractionDigits: 2,
+              }),
+            })}
+          </span>
         </div>
-      )}
-      <div
-        role="group"
-        aria-label={viewerCopy(i18n, "viewer.currentLayer")}
-        className="absolute bottom-2 right-2 top-2 z-10 flex w-14 flex-col items-center gap-1 border border-border bg-card py-1"
-      >
-        <span className="font-mono text-2xs tabular-nums text-foreground">
-          {currentLayer + 1}
-          <span className="text-muted-foreground">/{data.totalLayers}</span>
-        </span>
-        <button
-          type="button"
-          aria-label={uiText("Next layer")}
-          disabled={currentLayer >= data.totalLayers - 1}
-          onClick={() => setCurrentLayer((layer) => Math.min(layer + 1, data.totalLayers - 1))}
-          className={ICON_BUTTON}
-        >
-          <ChevronUp className="h-3.5 w-3.5" aria-hidden />
-        </button>
+        <div className="toolpath-layer-entry">
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label={uiText("Previous layer")}
+            disabled={currentLayer <= 0}
+            onClick={() => selectLayer(currentLayer - 1)}
+          >
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+          </Button>
+          <Input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={data.totalLayers}
+            step={1}
+            aria-label={uiText("Layer number")}
+            value={layerEntry ?? currentLayer + 1}
+            onChange={(event) => setLayerEntry(event.target.value)}
+            onBlur={commitLayer}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commitLayer();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setLayerEntry(null);
+              }
+            }}
+            className="min-w-0 font-mono text-center"
+          />
+          <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">
+            / {data.totalLayers}
+          </span>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label={uiText("Next layer")}
+            disabled={currentLayer >= data.totalLayers - 1}
+            onClick={() => selectLayer(currentLayer + 1)}
+          >
+            <ChevronRight className="h-4 w-4" aria-hidden />
+          </Button>
+        </div>
         <input
           aria-label={viewerCopy(i18n, "viewer.currentLayer")}
           aria-valuetext={viewerCopy(i18n, "viewer.layer", {
@@ -523,98 +634,91 @@ export function GcodeViewer({
           min={0}
           max={data.totalLayers - 1}
           value={currentLayer}
-          onChange={(event) => setCurrentLayer(Number(event.target.value))}
-          className="min-h-0 w-4 flex-1 accent-primary [direction:rtl] [writing-mode:vertical-lr]"
+          onChange={(event) => selectLayer(Number(event.target.value))}
+          className="toolpath-layer-slider"
         />
-        <button
-          type="button"
-          aria-label={uiText("Previous layer")}
-          disabled={currentLayer <= 0}
-          onClick={() => setCurrentLayer((layer) => Math.max(layer - 1, 0))}
-          className={ICON_BUTTON}
-        >
-          <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-        </button>
-        <span className="font-mono text-2xs tabular-nums text-muted-foreground">
-          {data.layerRanges[currentLayer]
-            ? uiText("{value1} mm", {
-                value1: formatNumber(data.layerRanges[currentLayer].z, {
-                  maximumFractionDigits: 2,
-                }),
-              })
-            : "–"}
-        </span>
-      </div>
-      <div
-        className="absolute bottom-2 left-2 right-18 z-10 flex justify-start"
-        title={uiText("Drag to orbit · Scroll to zoom")}
-      >
-        <div className="flex max-w-full flex-wrap items-center gap-0.5 border border-border bg-card p-0.5">
-          <label>
-            <span className="sr-only">{uiText("Camera view")}</span>
-            <select
-              value={cameraPreset}
-              onChange={(event) => {
-                const preset = CAMERA_PRESETS.find((item) => item === event.target.value);
-                if (!preset) return;
-                localControls.current?.setView(preset);
-                setCameraPreset(preset);
-              }}
-              className="toolpath-view-select h-7 border-0 bg-transparent px-1.5 text-xs text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
-            >
-              {CAMERA_PRESETS.map((preset) => (
-                <option key={preset} value={preset}>
-                  {uiText(
-                    preset === "isometric" ? "Isometric" : preset === "front" ? "Front" : "Top",
-                  )}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
+        {toggle(uiText("This layer"), onlyCurrentLayer, setOnlyCurrentLayer)}
+      </section>
+      <section className="toolpath-section" aria-label={uiText("Camera view")}>
+        <label className="toolpath-field">
+          <span className="toolpath-section-title">{uiText("Camera view")}</span>
+          <select
+            value={cameraPreset}
+            onChange={(event) => {
+              const preset = CAMERA_PRESETS.find((item) => item === event.target.value);
+              if (!preset) return;
+              localControls.current?.setView(preset);
+              setCameraPreset(preset);
+            }}
+          >
+            {CAMERA_PRESETS.map((preset) => (
+              <option key={preset} value={preset}>
+                {uiText(
+                  preset === "isometric" ? "Isometric" : preset === "front" ? "Front" : "Top",
+                )}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="toolpath-camera-actions">
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label={uiText("Zoom out")}
+            onClick={() => localControls.current?.zoomOut()}
+          >
+            <Minus className="h-4 w-4" aria-hidden />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             aria-label={uiText("Fit to view")}
-            title={uiText("Fit to view")}
             onClick={() => {
               localControls.current?.fit();
               setCameraPreset("isometric");
             }}
-            className={ICON_BUTTON}
           >
-            <Maximize2 className="h-3.5 w-3.5" aria-hidden />
-          </button>
-          <span className="mx-0.5 h-4 w-px bg-border" aria-hidden />
-          <button
-            type="button"
-            aria-pressed={onlyCurrentLayer}
-            onClick={() => setOnlyCurrentLayer((value) => !value)}
-            className={cn(TOGGLE, onlyCurrentLayer && "bg-accent text-foreground")}
+            {uiText("Fit")}
+          </Button>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label={uiText("Zoom in")}
+            onClick={() => localControls.current?.zoomIn()}
           >
-            {uiText("This layer")}
-          </button>
-          <button
-            type="button"
-            aria-pressed={showTravel}
-            onClick={() => setShowTravel((value) => !value)}
-            className={cn(TOGGLE, showTravel && "bg-accent text-foreground")}
-          >
-            {viewerCopy(i18n, "viewer.travel")}
-          </button>
-          {printerBedMm && (
-            <button
-              type="button"
-              aria-pressed={showBed}
-              onClick={() => setShowBed((value) => !value)}
-              className={cn(TOGGLE, showBed && "bg-accent text-foreground")}
-            >
-              {viewerCopy(i18n, "viewer.bed", {
+            <Plus className="h-4 w-4" aria-hidden />
+          </Button>
+        </div>
+        <p className="text-2xs text-muted-foreground">{uiText("Drag to orbit · Scroll to zoom")}</p>
+      </section>
+      <section className="toolpath-section" aria-label={uiText("Display")}>
+        <h3 className="toolpath-section-title">{uiText("Display")}</h3>
+        <div>
+          {toggle(viewerCopy(i18n, "viewer.travel"), showTravel, setShowTravel)}
+          {(externalGrid === undefined || onShowGridChange) &&
+            toggle(uiText("Build plate grid"), showGrid, onShowGridChange ?? setGrid)}
+          {printerBedMm &&
+            toggle(
+              viewerCopy(i18n, "viewer.bed", {
                 x: String(printerBedMm.x),
                 y: String(printerBedMm.y),
-              })}
-            </button>
-          )}
+              }),
+              showBed,
+              setShowBed,
+            )}
+          {(externalDimensions === undefined || onShowDimensionsChange) &&
+            toggle(uiText("Dimensions"), showDimensions, onShowDimensionsChange ?? setDimensions)}
         </div>
-      </div>
-    </div>
+        {showDimensions && (
+          <div className="border-t border-border pt-2 font-mono text-xs text-muted-foreground">
+            {formatNumber(data.bounds.sizeX, { maximumFractionDigits: 1 })} ×{" "}
+            {formatNumber(data.bounds.sizeY, { maximumFractionDigits: 1 })} ×{" "}
+            {uiText("{value1} mm", {
+              value1: formatNumber(data.bounds.sizeZ, { maximumFractionDigits: 1 }),
+            })}
+          </div>
+        )}
+      </section>
+    </>,
   );
 }

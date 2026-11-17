@@ -1819,7 +1819,7 @@
   "viewer.converterBusy": "Other previews are being prepared. Try again shortly.",
   "viewer.invalidToolpath": "This file could not be validated as a supported toolpath. The original remains available.",
   "viewer.retry": "Try preview again",
-  "viewer.segmentLimit": "This preview exceeds the one-million-segment limit. Download the original to inspect it in your slicer.",
+  "viewer.segmentLimit": "This toolpath is too large for the browser preview. Download the original to inspect it in your slicer.",
   "viewer.binaryUnsupported": "Binary G-code (.bgcode) can't be previewed in the browser — download the file to open it in a slicer.",
   "viewer.loadFailed": "Unable to load the toolpath preview.",
   "viewer.noToolpathData": "No toolpath data",
@@ -5242,5 +5242,7 @@
   "One thumbnail": "One thumbnail",
   "Oblique views": "Oblique views",
   "Oblique views + top and bottom": "Oblique views + top and bottom",
-  "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background."
+  "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.",
+  "Toolpath controls": "Toolpath controls",
+  "Layer number": "Layer number"
 }

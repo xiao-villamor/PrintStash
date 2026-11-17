@@ -328,6 +328,18 @@
   width: 100%;
   height: 100%;
 }
+/* A toolpath includes its controls; the small image aspect ratio would clip
+   the stacked panel in the narrow Library inspector. */
+.library-inspector-preview:has(.toolpath-layout) {
+  display: block;
+  aspect-ratio: auto;
+}
+.library-inspector-preview > div.toolpath-layout {
+  position: relative;
+  inset: auto;
+  height: auto;
+  padding-top: 2.5rem;
+}
 .library-inspector-preview > [role="radiogroup"] {
   position: absolute;
   top: 8px;
