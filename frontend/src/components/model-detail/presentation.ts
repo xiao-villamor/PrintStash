@@ -105,6 +105,13 @@ export function revisionStatusClass(status: FileRevisionStatus | null): string {
   }
 }
 
+export function slicerDisplayName(meta: MetadataRead | null | undefined) {
+  const name = meta?.slicer_name?.trim();
+  const version = meta?.slicer_version?.trim();
+  if (!name || !version) return name || version || null;
+  return version.toLowerCase().startsWith(name.toLowerCase()) ? version : `${name} ${version}`;
+}
+
 export function revisionStatusLabel(status: FileRevisionStatus | null): string {
   return knownUiText(status ? REVISION_STATUS_LABELS[status] : "Unmarked");
 }

@@ -21,7 +21,7 @@ import {
 import { uiText, currentLocale } from "@/lib/locale";
 import { useUiLocale, type MessageKey } from "@/lib/i18n";
 import type { ArtifactOutcomeRead, FileRead } from "@/types";
-import { revisionStatusLabel } from "./presentation";
+import { slicerDisplayName, revisionStatusLabel } from "./presentation";
 
 export type ComparisonMode = "gcode" | "source" | "all";
 type Value = string | null | { number: number; name?: string; value: string }[];
@@ -158,6 +158,7 @@ export function RevisionCompare({
   onSelectLeft,
   onSelectRight,
   onClose,
+  backLabel = "Back to revisions",
   initialMode,
   mode: controlledMode,
   onModeChange,
@@ -169,6 +170,7 @@ export function RevisionCompare({
   onSelectLeft?: (id: number) => void;
   onSelectRight?: (id: number) => void;
   onClose?: () => void;
+  backLabel?: MessageKey;
   initialMode?: ComparisonMode;
   mode?: ComparisonMode;
   onModeChange?: (mode: ComparisonMode) => void;
@@ -273,6 +275,9 @@ export function RevisionCompare({
     left: read(selectedLeft, leftOutcome),
     right: read(selectedRight, rightOutcome),
   });
+  const emptyHistory =
+    mode !== "source" && leftOutcome?.print_count === 0 && rightOutcome?.print_count === 0;
+  const summarizeHistory = emptyHistory && !showAllFields;
   const metadata = [
     row("Type", (file) => file.file_type.toUpperCase()),
     row("Version", (file) => String(file.version)),
@@ -305,20 +310,30 @@ export function RevisionCompare({
           {
             titleKey: "Printer results & file history",
             rows: [
-              row("Recorded printer results", (_file, outcome) =>
-                outcome
-                  ? `${uiText("Completed")}: ${outcome.completed_count} · ${uiText("Failed")}: ${outcome.failed_count}`
-                  : null,
-              ),
+              ...(summarizeHistory
+                ? []
+                : [
+                    row("Recorded printer results", (_file, outcome) =>
+                      outcome
+                        ? `${uiText("Completed")}: ${outcome.completed_count} · ${uiText("Failed")}: ${outcome.failed_count}`
+                        : null,
+                    ),
+                  ]),
               row("Manual label", (file) =>
                 file.revision_status === null ? null : revisionStatusLabel(file.revision_status),
               ),
-              row("Print count", (_file, outcome) => numeric(outcome?.print_count)),
-              row("Completed", (_file, outcome) => numeric(outcome?.completed_count)),
-              row("Failed", (_file, outcome) => numeric(outcome?.failed_count)),
-              row("Success rate · all printers", (_file, outcome) =>
-                outcome?.success_rate == null ? null : formatPercent(outcome.success_rate * 100),
-              ),
+              ...(summarizeHistory
+                ? []
+                : [
+                    row("Print count", (_file, outcome) => numeric(outcome?.print_count)),
+                    row("Completed", (_file, outcome) => numeric(outcome?.completed_count)),
+                    row("Failed", (_file, outcome) => numeric(outcome?.failed_count)),
+                    row("Success rate · all printers", (_file, outcome) =>
+                      outcome?.success_rate == null
+                        ? null
+                        : formatPercent(outcome.success_rate * 100),
+                    ),
+                  ]),
               ...metadata.filter(
                 (entry) =>
                   entry.labelKey !== "Version" &&
@@ -391,13 +406,7 @@ export function RevisionCompare({
                     ),
                   ]
                 : []),
-              row("Slicer / version", (file) =>
-                string(
-                  [file.metadata?.slicer_name, file.metadata?.slicer_version]
-                    .filter(Boolean)
-                    .join(" "),
-                ),
-              ),
+              row("Slicer / version", (file) => slicerDisplayName(file.metadata)),
             ],
           },
         ];
@@ -436,7 +445,7 @@ export function RevisionCompare({
           </div>
           {onClose && (
             <Button size="xs" variant="ghost" onClick={onClose}>
-              {uiText("Back to revisions")}
+              {uiText(backLabel)}
             </Button>
           )}
         </div>
@@ -489,7 +498,7 @@ export function RevisionCompare({
                 </p>
               ))}
             </div>
-            {mixedSourceAndRevision && (
+            {(mixedSourceAndRevision || emptyHistory) && (
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -498,6 +507,11 @@ export function RevisionCompare({
                 />
                 {uiText("Show all comparison fields")}
               </label>
+            )}
+            {summarizeHistory && (
+              <p className="text-sm text-muted-foreground">
+                {uiText("Neither file has recorded prints.")}
+              </p>
             )}
             <div className={`grid gap-5 ${mode === "source" ? "" : "@2xl/comparison:grid-cols-2"}`}>
               {groups.map((group) => (

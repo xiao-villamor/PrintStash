@@ -67,6 +67,39 @@ function Controlled({ files = [first, second, source, alternate] }: { files?: Fi
 }
 
 describe("RevisionCompare", () => {
+  it("condenses confirmed empty histories and retains all fields on request", async () => {
+    renderApp(
+      <RevisionCompare
+        left={first}
+        right={second}
+        outcomes={[
+          { ...recordedZero, file_id: first.id },
+          { ...recordedZero, file_id: second.id },
+        ]}
+      />,
+    );
+    expect(screen.getByText("Neither file has recorded prints.")).toBeVisible();
+    expect(screen.queryByRole("row", { name: /^Print count/ })).toBeNull();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Show all comparison fields" }));
+    expect(
+      within(screen.getByRole("row", { name: /^Print count/ })).getAllByText("0"),
+    ).toHaveLength(2);
+  });
+  it("formats slicer names already included in the version only once", () => {
+    renderApp(
+      <RevisionCompare
+        left={{
+          ...first,
+          metadata: aMetadata({
+            slicer_name: "BambuStudio",
+            slicer_version: "BambuStudio 02.08.02.61",
+          }),
+        }}
+        right={second}
+      />,
+    );
+    expect(screen.getByText("BambuStudio 02.08.02.61")).toBeVisible();
+  });
   it("highlights a changed pair of recorded values", () => {
     renderApp(<RevisionCompare left={first} right={second} />);
 

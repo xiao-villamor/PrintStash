@@ -1,4 +1,13 @@
 {
+  "Enter a whole number of copies, at least 1.": "Enter a whole number of copies, at least 1.",
+  "Queue details": "Queue details",
+  "Revision test status": "Revision test status",
+  "Estimated time per copy": "Estimated time per copy",
+  "Opens in a new tab": "Opens in a new tab",
+  "Neither file has recorded prints.": "Neither file has recorded prints.",
+  "Back to files": "Back to files",
+  "Back to overview": "Back to overview",
+  "Back to print settings": "Back to print settings",
   "Show all comparison fields": "Show all comparison fields",
   "Sliced plate": "Sliced plate",
   "Choose a plate": "Choose a plate",

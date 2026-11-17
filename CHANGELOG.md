@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Model details now show the selected G-code revision’s print setup and named plate estimates alongside preview and delivery actions. Inspector tabs lead directly into their content, and source-to-revision comparisons prioritize recorded values. Send and Queue carry the inspected plate into confirmation. Libraries without printers offer queueing and printer setup.
+- Model details now show the selected G-code revision’s print setup and named plate estimates alongside preview and delivery actions. Inspector tabs lead directly into their content, and source-to-revision comparisons prioritize recorded values. Send and Queue carry the inspected plate into confirmation. Queue shows its per-copy estimates and revision test status, validates whole-copy quantities, and keeps the draft open during printer setup. Compare returns to its originating tab and summarizes empty print histories. Libraries without printers offer queueing and printer setup.
 
 
 ### Changed

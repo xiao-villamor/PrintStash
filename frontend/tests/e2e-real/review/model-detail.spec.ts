@@ -317,6 +317,18 @@ test.describe("Existing Model review", () => {
             }
             await inspector.getByRole("button", { name: "Back to revisions", exact: true }).click();
 
+            for (const [origin, triggerName, backName] of [
+              ["Files", "Compare", "Back to files"],
+              ["Overview", "Compare revisions", "Back to overview"],
+            ] as const) {
+              await tab(origin);
+              const trigger = inspector.getByRole("button", { name: triggerName, exact: true });
+              await trigger.click();
+              await inspector.getByRole("button", { name: backName, exact: true }).click();
+              await expect(trigger).toBeFocused();
+              await review.capture("compare-return-" + origin.toLowerCase());
+            }
+
             // ── Inspect dialogs without saving, uploading, sharing or starting prints ──
             await page.getByRole("button", { name: /^Source files \(\d+\)$/ }).click();
             await expect(inspector).toBeFocused();
@@ -359,11 +371,59 @@ test.describe("Existing Model review", () => {
                 inspector.getByRole("button", { name: "Send to printer", exact: true }),
               ).toHaveCount(0);
             }
+            const printerless = await page.getByText("No printers", { exact: true }).isVisible();
+            const expectedEstimates = new Map<number, string[]>();
+            for (const number of slicedPlates.plates.slice(0, 2)) {
+              const plate = revisionEstimates.getByRole("region", {
+                name: "Plate " + String(number).padStart(2, "0"),
+              });
+              expectedEstimates.set(
+                number,
+                await Promise.all(
+                  ["Estimated time", "Filament weight"].map((field) =>
+                    plate.getByText(field, { exact: true }).locator("..").locator("dd").innerText(),
+                  ),
+                ),
+              );
+            }
             await queue.click();
             const send = page.getByRole("dialog");
             await expect(send.getByLabel("Sliced plate")).toHaveValue(
               String(slicedPlates.plates[1]),
             );
+            const copies = send.getByRole("spinbutton", { name: "Copies" });
+            const submitQueue = send.getByRole("button", { name: "Add to queue", exact: true });
+            const evidence = send.getByLabel("Queue details");
+            await expect(evidence.getByText("Revision test status")).toBeVisible();
+            if (sliced!.revision_status === "needs_test")
+              await expect(evidence.getByText("Needs test", { exact: true })).toBeVisible();
+            for (const number of slicedPlates.plates.slice(0, 2)) {
+              await send.getByLabel("Sliced plate").selectOption(String(number));
+              for (const value of expectedEstimates.get(number)!) {
+                await expect(evidence.getByText(value, { exact: true }).first()).toBeVisible();
+              }
+              await review.capture("queue-estimates-plate-" + number);
+            }
+            await copies.fill("1.5");
+            await expect(copies).toHaveAttribute("aria-invalid", "true");
+            await expect(submitQueue).toBeDisabled();
+            await review.capture("queue-invalid-copies");
+            await copies.fill("2");
+            await expect(submitQueue).toBeEnabled();
+            if (printerless) {
+              await send.getByRole("radio", { name: "Choose printer", exact: true }).check();
+              const setup = send.getByRole("link", { name: "Manage printers" });
+              await expect(submitQueue).toBeDisabled();
+              await review.capture("queue-manual-no-printers");
+              const [setupPage] = await Promise.all([page.waitForEvent("popup"), setup.click()]);
+              await expect(setupPage).toHaveURL(/\/printers(?:$|\?)/);
+              await setupPage.close();
+              await page.bringToFront();
+              await expect(copies).toHaveValue("2");
+              await expect(send.getByLabel("Sliced plate")).toHaveValue(
+                String(slicedPlates.plates[1]),
+              );
+            }
             await review.capture("queue-inspected-plate");
             await send.getByRole("radio", { name: "Send now", exact: true }).check();
             await expect(send.getByLabel("Sliced plate")).toHaveValue(

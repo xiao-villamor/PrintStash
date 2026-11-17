@@ -10,9 +10,9 @@ import { uiMessage } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "@/lib/link";
-import { Loader2, Printer as PrinterIcon, Send, WifiOff } from "lucide-react";
+import { ExternalLink, Loader2, Printer as PrinterIcon, Send, WifiOff } from "lucide-react";
 
 import {
   checkFleetCompatibility,
@@ -33,6 +33,8 @@ import {
   ModelPrinterFileRead,
   RoutingStrategy,
 } from "@/types";
+import { formatPlateEstimate } from "./format-plate-estimate";
+import { revisionStatusLabel } from "./presentation";
 import { ChoiceField } from "./choice-field";
 import { providerLabel } from "@/lib/printer-providers";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -87,6 +89,7 @@ export function SendToButtons({
     | "original_filename"
     | "version"
     | "gcode_revision_number"
+    | "revision_status"
     | "revision_label"
     | "is_recommended"
     | "metadata"
@@ -156,7 +159,13 @@ export function SendToButtons({
     if (showSend) setDeliveryMode(initialDeliveryMode);
   }, [showSend, initialDeliveryMode]);
   const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>("least_busy");
-  const [quantity, setQuantity] = useState(1);
+  const [copies, setCopies] = useState("1");
+  const quantity = Number(copies);
+  const validQuantity = Number.isSafeInteger(quantity) && quantity > 0;
+  const copiesErrorId = useId();
+  const estimate = sliced
+    ? platesQuery.data?.plate_metadata?.find((plate) => plate.number === plateIndex)?.metadata
+    : selectedFileDetails?.metadata;
   const [priority, setPriority] = useState<JobPriority>("normal");
   const [targetGroup, setTargetGroup] = useState("");
   const [compatibility, setCompatibility] = useState<CompatibilityRead | null>(null);
@@ -168,7 +177,7 @@ export function SendToButtons({
   const spoolmanEnabled = useSpoolmanStatus().data?.enabled ?? false;
   const spools = useSpools({ enabled: spoolmanEnabled }).data ?? [];
   const [selectedSpoolId, setSelectedSpoolId] = useState<number | "">("");
-  const printersQuery = usePrinters();
+  const printersQuery = usePrinters({ refetchOnWindowFocus: showSend ? "always" : true });
   // Stable ref so the default-select effect / memos below don't rerun each render.
   const printers = useMemo(() => printersQuery.data ?? [], [printersQuery.data]);
   const printersLoading = printersQuery.isLoading;
@@ -261,7 +270,7 @@ export function SendToButtons({
 
   async function send(allowMismatch = false) {
     const session = getSessionVersion();
-    if (!selectedFile || !plateReady) return;
+    if (!selectedFile || !plateReady || (deliveryMode === "queue" && !validQuantity)) return;
     const targetPrinterIds =
       deliveryMode === "send" || routingStrategy === "manual"
         ? selectedPrinters.map((printer) => printer.id)
@@ -645,7 +654,7 @@ export function SendToButtons({
                   !plateReady ||
                   (deliveryMode === "send"
                     ? selectedPrinters.length === 0 || (startPrint && !selectedPrintersCanStart)
-                    : quantity < 1 ||
+                    : !validQuantity ||
                       (routingStrategy === "manual" && selectedPrinters.length === 0))
                 }
               >
@@ -724,9 +733,18 @@ export function SendToButtons({
                         className={selectClassName}
                         type="number"
                         min={1}
-                        value={quantity || ""}
-                        onChange={(event) => setQuantity(Number(event.target.value))}
+                        step={1}
+                        value={copies}
+                        aria-label={uiText("Copies")}
+                        aria-invalid={!validQuantity}
+                        aria-describedby={!validQuantity ? copiesErrorId : undefined}
+                        onChange={(event) => setCopies(event.target.value)}
                       />
+                      {!validQuantity && (
+                        <span id={copiesErrorId} className="block text-xs text-destructive">
+                          {uiText("Enter a whole number of copies, at least 1.")}
+                        </span>
+                      )}
                     </label>
                     <ChoiceField<JobPriority>
                       label={uiText("Priority")}
@@ -855,11 +873,20 @@ export function SendToButtons({
                           ? "No printers configured"
                           : "None of the configured printers can receive this file.",
                     )}
-                    {printers.length === 0 && deliveryMode === "send" && (
-                      <Button asChild variant="outline" size="sm">
-                        <Link href="/printers">{uiText("Manage printers")}</Link>
-                      </Button>
-                    )}
+                    {printers.length === 0 &&
+                      (deliveryMode === "send" || routingStrategy === "manual") && (
+                        <Button asChild variant="outline" size="sm">
+                          <Link
+                            href="/printers"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={uiText("Opens in a new tab")}
+                          >
+                            {uiText("Manage printers")}
+                            <ExternalLink aria-hidden="true" className="size-3.5" />
+                          </Link>
+                        </Button>
+                      )}
                   </div>
                 )}
               </div>
@@ -874,7 +901,7 @@ export function SendToButtons({
                     }}
                     options={gcodeFiles.map((file) => ({
                       value: file.id,
-                      label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}${file.revision_label ? ` · ${file.revision_label}` : ""}${file.id === defaultFile?.id ? uiText(" · Recommended") : ""}`,
+                      label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}${file.revision_label ? ` · ${file.revision_label}` : ""}${file.is_recommended ? uiText(" · Recommended") : ""}`,
                       description:
                         [
                           file.metadata?.material_type,
@@ -940,6 +967,42 @@ export function SendToButtons({
                         </label>
                       )}
                     </div>
+                  )}
+                  {deliveryMode === "queue" && selectedFileDetails && (
+                    <dl
+                      aria-label={uiText("Queue details")}
+                      className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-3 text-sm"
+                    >
+                      <div className="col-span-2">
+                        <dt className="text-xs text-muted-foreground">
+                          {uiText("Revision test status")}
+                        </dt>
+                        <dd>{revisionStatusLabel(selectedFileDetails.revision_status)}</dd>
+                      </div>
+                      {(!sliced || plateIndex !== null) && (
+                        <>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              {uiText("Estimated time per copy")}
+                            </dt>
+                            <dd className="tabular-nums">
+                              {formatPlateEstimate("estimated_time_s", estimate?.estimated_time_s)}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              {uiText("Filament per copy")}
+                            </dt>
+                            <dd className="tabular-nums">
+                              {formatPlateEstimate(
+                                "filament_weight_g",
+                                estimate?.filament_weight_g,
+                              )}
+                            </dd>
+                          </div>
+                        </>
+                      )}
+                    </dl>
                   )}
                   {(deliveryMode === "send" || (spoolmanEnabled && spools.length > 0)) && (
                     <h3 className="border-t border-border pt-5 text-sm font-semibold">

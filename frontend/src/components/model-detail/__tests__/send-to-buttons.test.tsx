@@ -237,6 +237,7 @@ function renderPanel({
                   version: 1,
                   gcode_revision_number: 1,
                   revision_label: null,
+                  revision_status: "needs_test",
                   is_recommended: true,
                   metadata,
                 },
@@ -593,6 +594,24 @@ describe("SendToButtons sliced archives", () => {
         expect.objectContaining({ file_id: 42, plate_index: 10, start_print: false }),
       ),
     );
+  });
+
+  it("keeps invalid quantities out of the queue and allows correction", async () => {
+    renderPanel({ open: true, initialDeliveryMode: "queue" });
+    const copies = screen.getByRole("spinbutton", { name: "Copies" });
+    const submit = screen.getByRole("button", { name: "Add to queue" });
+    for (const value of ["", "0", "-1", "1.5"]) {
+      await userEvent.clear(copies);
+      if (value) await userEvent.type(copies, value);
+      expect(copies).toHaveAttribute("aria-invalid", "true");
+      expect(copies).toHaveAccessibleDescription("Enter a whole number of copies, at least 1.");
+      expect(submit).toBeDisabled();
+    }
+    expect(createFleetBatch).not.toHaveBeenCalled();
+    expect(enqueueFleetJob).not.toHaveBeenCalled();
+    await userEvent.clear(copies);
+    await userEvent.type(copies, "2");
+    expect(submit).toBeEnabled();
   });
 
   it("queues the chosen plate", async () => {

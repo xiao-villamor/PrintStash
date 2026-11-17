@@ -126,6 +126,7 @@ function renderDetail(
       routes: {
         "GET /api/v1/models/1": json(model),
         "GET /api/v1/models/1/print-jobs": json([]),
+        "GET /api/v1/models/1/artifact-outcomes": json([]),
         "GET /api/v1/models/1/printer-files": json([]),
         "GET /api/v1/models/1/provenance": json({ edit_version: 1, sources: [] }),
         "GET /api/v1/models/1/shares": json([]),
@@ -837,6 +838,36 @@ describe("ModelDetail", () => {
       expect(screen.queryByRole("tab", { name: /Similar/ })).not.toBeInTheDocument();
       expect(app.requests().some((request) => request.url.includes("similarity/candidates"))).toBe(
         false,
+      );
+    });
+
+    it("returns from a multi-revision comparison to the initiating print settings control", async () => {
+      const user = userEvent.setup();
+      renderDetail({
+        model: aModel({
+          files: [
+            aFile({
+              id: 21,
+              file_type: "gcode",
+              original_filename: "one.gcode",
+              gcode_revision_number: 1,
+            }),
+            aFile({
+              id: 22,
+              file_type: "gcode",
+              original_filename: "two.gcode",
+              gcode_revision_number: 2,
+            }),
+          ],
+        }),
+      });
+      await user.click(await screen.findByRole("tab", { name: /Print settings/ }));
+      await user.click(await screen.findByRole("button", { name: "Compare" }));
+      await user.click(await screen.findByRole("button", { name: "Back to print settings" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Compare" })).toHaveFocus());
+      expect(screen.getByRole("tab", { name: /Print settings/ })).toHaveAttribute(
+        "aria-selected",
+        "true",
       );
     });
 

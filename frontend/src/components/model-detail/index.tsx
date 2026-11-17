@@ -108,6 +108,12 @@ const GcodePreview = lazy(() =>
   import("./gcode-preview").then((m) => ({ default: m.GcodePreview })),
 );
 
+const compareBackLabel = {
+  files: "Back to files",
+  overview: "Back to overview",
+  settings: "Back to print settings",
+} as const;
+
 const ViewerFallback = <Loader2 className="h-8 w-8 animate-spin text-on-surface-variant" />;
 
 // The resizable sidebar publishes its width as a custom property so the
@@ -243,7 +249,7 @@ function ModelDetailPresentation({
     // A click back to the visible tab must still supersede a pending navigation.
     if (tab === activeTab && tabIntent.current === tab) return;
     tabIntent.current = tab;
-    if (tab !== "revisions") setCompareRequested(false);
+    if (tab !== "revisions") setCompareOrigin(null);
     if (tab !== "history") setHistoryDraft(null);
     const params = new URLSearchParams(searchParams);
     params.set("tab", tab);
@@ -335,8 +341,12 @@ function ModelDetailPresentation({
     dimensions: { x: number; y: number; z: number };
   } | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
-  const [compareRequested, setCompareRequested] = useState(false);
-  const [comparisonMode, setComparisonMode] = useState<"gcode" | "source" | "all">("gcode");
+  const [compareOrigin, setCompareOrigin] = useState<keyof typeof compareBackLabel | null>(null);
+  const compareFocus = useRef<TabKey | null>(null);
+  function openComparison(origin: keyof typeof compareBackLabel) {
+    setCompareOrigin(origin);
+    selectTab("revisions");
+  }
   const [deliveryMode, setDeliveryMode] = useState<"send" | "queue">("send");
   const [historyDraft, setHistoryDraft] = useState<{
     fileId: number;
@@ -399,6 +409,10 @@ function ModelDetailPresentation({
       ? "overview"
       : requestedTab;
   useLayoutEffect(() => {
+    if (compareFocus.current === activeTab) {
+      detailLayout.current?.querySelector<HTMLButtonElement>("[data-compare-origin]")?.focus();
+    }
+    compareFocus.current = null;
     if (focusTab.current === activeTab) focusInspector();
     focusTab.current = null;
   }, [activeTab]);
@@ -1505,16 +1519,12 @@ function ModelDetailPresentation({
                         printerless,
                         jobs: canViewPrinters && printJobQuery.isSuccess ? printJobs : null,
                         onRevisions: () => {
-                          setCompareRequested(false);
+                          setCompareOrigin(null);
                           selectTab("revisions");
                         },
                         onSettings: () => selectTab("settings"),
                         onHistory: () => selectTab("history"),
-                        onCompare: () => {
-                          setComparisonMode("gcode");
-                          setCompareRequested(true);
-                          selectTab("revisions");
-                        },
+                        onCompare: () => openComparison("overview"),
                         onInspect: (fileId) => setRevisionSelection({ modelId: model.id, fileId }),
                         onSend: (mode) => {
                           setDeliveryMode(mode);
@@ -1548,13 +1558,10 @@ function ModelDetailPresentation({
                     headerActions={
                       gcodeFiles.length > 1 ? (
                         <Button
+                          data-compare-origin
                           variant="ghost"
                           size="sm"
-                          onClick={() => {
-                            setComparisonMode("gcode");
-                            setCompareRequested(true);
-                            selectTab("revisions");
-                          }}
+                          onClick={() => openComparison("settings")}
                         >
                           {uiText("Compare")}
                         </Button>
@@ -1617,8 +1624,19 @@ function ModelDetailPresentation({
                     }}
                     inspectedFileId={inspectedGcode?.id}
                     onInspect={(fileId) => setRevisionSelection({ modelId: model.id, fileId })}
-                    startComparing={compareRequested}
-                    comparisonMode={comparisonMode}
+                    startComparing={compareOrigin !== null}
+                    backLabel={
+                      compareOrigin ? compareBackLabel[compareOrigin] : "Back to revisions"
+                    }
+                    onReturnToOrigin={
+                      compareOrigin
+                        ? () => {
+                            compareFocus.current = compareOrigin;
+                            selectTab(compareOrigin);
+                          }
+                        : undefined
+                    }
+                    comparisonMode={compareOrigin === "files" ? "source" : "gcode"}
                     jobs={canViewPrinters && printJobQuery.isSuccess ? printJobs : null}
                     onSend={
                       canViewPrinters
@@ -1651,11 +1669,7 @@ function ModelDetailPresentation({
                   <>
                     <FilesTab
                       modelId={model.id}
-                      onCompare={() => {
-                        setComparisonMode("source");
-                        setCompareRequested(true);
-                        selectTab("revisions");
-                      }}
+                      onCompare={() => openComparison("files")}
                       sourceFiles={sourceFiles}
                       previewFailure={
                         meshFile &&

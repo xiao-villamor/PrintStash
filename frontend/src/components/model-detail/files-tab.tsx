@@ -116,7 +116,7 @@ export function FilesTab({
             </span>
           </h2>
           {onCompare && (
-            <Button variant="ghost" size="xs" onClick={onCompare}>
+            <Button variant="ghost" size="xs" data-compare-origin onClick={onCompare}>
               {uiText("Compare")}
             </Button>
           )}

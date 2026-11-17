@@ -1,5 +1,6 @@
 "use client";
 
+import { slicerDisplayName } from "./presentation";
 import type { ReactNode } from "react";
 import {
   formatCost,
@@ -76,6 +77,7 @@ export function SettingsTab({
   selectedSlicedPlate?: number | null;
 }) {
   useUiLocale();
+  const slicer = slicerDisplayName(meta);
   const hasMeshGeometry = meta?.volume_mm3 != null || meta?.triangle_count != null;
   const hasEmbeddedSlicerMetadata = Boolean(
     meta &&
@@ -297,13 +299,8 @@ export function SettingsTab({
         {preferences.slicer_info && (
           <p className="text-xs text-muted-foreground">
             {uiText("Sliced with ")}
-            {meta?.slicer_name ? (
-              <strong className="font-medium text-foreground">
-                {meta.slicer_name}
-                {meta.slicer_version
-                  ? ` ${meta.slicer_version.toLowerCase().startsWith(meta.slicer_name.toLowerCase()) ? meta.slicer_version.slice(meta.slicer_name.length).trim() : meta.slicer_version}`
-                  : ""}
-              </strong>
+            {slicer ? (
+              <strong className="font-medium text-foreground">{slicer}</strong>
             ) : (
               uiText("Not recorded")
             )}

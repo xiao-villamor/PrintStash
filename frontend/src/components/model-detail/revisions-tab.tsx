@@ -95,6 +95,8 @@ export function RevisionsTab({
   onPreview,
   onInspect,
   startComparing = false,
+  backLabel = "Back to revisions",
+  onReturnToOrigin,
   comparisonMode = "gcode",
   printerless = false,
   onSend,
@@ -115,6 +117,8 @@ export function RevisionsTab({
   onPreview?: (fileId: number) => void;
   onInspect?: (id: number) => void;
   startComparing?: boolean;
+  backLabel?: "Back to revisions" | "Back to overview" | "Back to files" | "Back to print settings";
+  onReturnToOrigin?: () => void;
   comparisonMode?: ComparisonMode;
   printerless?: boolean;
   onSend?: (mode: "send" | "queue") => void;
@@ -132,6 +136,10 @@ export function RevisionsTab({
   const compareTrigger = useRef<HTMLButtonElement>(null);
   const returningFromCompare = useRef(false);
   function closeCompare() {
+    if (onReturnToOrigin) {
+      onReturnToOrigin();
+      return;
+    }
     returningFromCompare.current = true;
     setComparing(false);
   }
@@ -845,7 +853,7 @@ export function RevisionsTab({
           <div className="space-y-3">
             <p>{uiText("Add a second file to compare recorded information.")}</p>
             <Button variant="ghost" onClick={closeCompare}>
-              {uiText("Back to revisions")}
+              {uiText(backLabel)}
             </Button>
           </div>
         )}
@@ -857,6 +865,7 @@ export function RevisionsTab({
             files={allFiles}
             onSelectLeft={setCompareLeftId}
             onSelectRight={setCompareRightId}
+            backLabel={backLabel}
             onClose={closeCompare}
             mode={mode}
             onModeChange={(next) => setScope({ intent: comparisonMode, mode: next })}

@@ -246,7 +246,7 @@ export function InspectedPrintCard({
             {uiText("Download")}
           </Button>
         </div>
-        <Button size="sm" variant="ghost" onClick={onCompare}>
+        <Button size="sm" variant="ghost" data-compare-origin onClick={onCompare}>
           {uiText("Compare revisions")}
         </Button>
       </div>

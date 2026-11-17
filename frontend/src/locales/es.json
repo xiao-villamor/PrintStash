@@ -1,4 +1,13 @@
 {
+  "Enter a whole number of copies, at least 1.": "Introduce un número entero de copias, como mínimo 1.",
+  "Queue details": "Detalles de la cola",
+  "Revision test status": "Estado de prueba de la revisión",
+  "Estimated time per copy": "Tiempo estimado por copia",
+  "Opens in a new tab": "Se abre en una pestaña nueva",
+  "Neither file has recorded prints.": "Ninguno de los dos archivos tiene impresiones registradas.",
+  "Back to files": "Volver a los archivos",
+  "Back to overview": "Volver a la vista general",
+  "Back to print settings": "Volver a los ajustes de impresión",
   "Show all comparison fields": "Mostrar todos los campos de comparación",
   "Sliced plate": "Placa laminada",
   "Choose a plate": "Elige una placa",
