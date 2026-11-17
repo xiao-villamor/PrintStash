@@ -94,9 +94,11 @@ describe("RevisionCompare", () => {
         }),
       },
     });
-    const time = within(screen.getByRole("row", { name: /^Estimated time/ }));
+    const time = within(await screen.findByRole("row", { name: /^Estimated time/ }));
     expect(await time.findByText("1m 0s")).toBeVisible();
     expect(time.getByText("25s")).toBeVisible();
+    expect(time.queryByText("Not recorded")).toBeNull();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Show all comparison fields" }));
     expect(time.getByText("Not recorded")).toBeVisible();
     expect(time.queryAllByRole("mark")).toHaveLength(0);
     const weight = within(screen.getByRole("row", { name: /^Filament weight/ }));

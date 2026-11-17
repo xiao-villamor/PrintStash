@@ -43,13 +43,29 @@ function title(file: FileRead): string {
 
 function ComparisonTable({
   group,
+  compact,
   left,
   right,
 }: {
+  compact: boolean;
   group: ComparisonGroup;
   left: FileRead;
   right: FileRead;
 }) {
+  const columns = (["left", "right"] as const).filter(
+    (side) => !compact || group.rows.some((row) => row[side] !== null),
+  );
+  if (!columns.length) return null;
+  const files = { left, right };
+  const rows = compact
+    ? group.rows
+        .filter((row) => row.left !== null || row.right !== null)
+        .sort(
+          (a, b) =>
+            Number(b.left !== null && b.right !== null) -
+            Number(a.left !== null && a.right !== null),
+        )
+    : group.rows;
   return (
     <section className="min-w-0 space-y-2.5">
       <h3 className="text-sm font-semibold">{uiText(group.titleKey)}</h3>
@@ -59,16 +75,15 @@ function ComparisonTable({
             <th scope="col" className="w-2/5 px-2 py-2 font-medium">
               {uiText("Field")}
             </th>
-            <th scope="col" className="break-words px-2 py-2 font-medium">
-              {title(left)}
-            </th>
-            <th scope="col" className="break-words px-2 py-2 font-medium">
-              {title(right)}
-            </th>
+            {columns.map((side) => (
+              <th key={side} scope="col" className="break-words px-2 py-2 font-medium">
+                {title(files[side])}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {group.rows.map((row) => {
+          {rows.map((row) => {
             const different =
               row.left !== null &&
               !Array.isArray(row.left) &&
@@ -86,42 +101,45 @@ function ComparisonTable({
                 >
                   {row.labelKey === "SHA-256" ? row.labelKey : uiText(row.labelKey)}
                 </th>
-                {[row.left, row.right].map((value, index) => (
-                  <td
-                    key={index}
-                    className="break-words px-2 py-2 align-top tabular-nums [overflow-wrap:anywhere]"
-                  >
-                    {Array.isArray(value) ? (
-                      <dl className="space-y-2">
-                        {value.map((plate) => (
-                          <div key={plate.number}>
-                            <dt className="text-xs text-muted-foreground" title={plate.name}>
-                              {uiText("Plate {value1}", {
-                                value1: String(plate.number).padStart(2, "0"),
-                              })}
-                            </dt>
-                            <dd>{plate.value}</dd>
-                          </div>
-                        ))}
-                      </dl>
-                    ) : value &&
-                      (row.labelKey === "SHA-256" ||
-                        row.labelKey === "File SHA-256" ||
-                        row.labelKey === "Geometry SHA-256") ? (
-                      <HashValue
-                        sha={value}
-                        label={row.labelKey === "SHA-256" ? row.labelKey : uiText(row.labelKey)}
-                        filename={index === 0 ? left.original_filename : right.original_filename}
-                      />
-                    ) : different ? (
-                      <mark className="bg-transparent text-accent-foreground">{value}</mark>
-                    ) : (
-                      <span className={value === null ? "text-muted-foreground" : ""}>
-                        {value ?? uiText("Not recorded")}
-                      </span>
-                    )}
-                  </td>
-                ))}
+                {columns.map((side) => {
+                  const value = row[side];
+                  return (
+                    <td
+                      key={side}
+                      className="break-words px-2 py-2 align-top tabular-nums [overflow-wrap:anywhere]"
+                    >
+                      {Array.isArray(value) ? (
+                        <dl className="space-y-2">
+                          {value.map((plate) => (
+                            <div key={plate.number}>
+                              <dt className="text-xs text-muted-foreground" title={plate.name}>
+                                {uiText("Plate {value1}", {
+                                  value1: String(plate.number).padStart(2, "0"),
+                                })}
+                              </dt>
+                              <dd>{plate.value}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      ) : value &&
+                        (row.labelKey === "SHA-256" ||
+                          row.labelKey === "File SHA-256" ||
+                          row.labelKey === "Geometry SHA-256") ? (
+                        <HashValue
+                          sha={value}
+                          label={row.labelKey === "SHA-256" ? row.labelKey : uiText(row.labelKey)}
+                          filename={files[side].original_filename}
+                        />
+                      ) : different ? (
+                        <mark className="bg-transparent text-accent-foreground">{value}</mark>
+                      ) : (
+                        <span className={value === null ? "text-muted-foreground" : ""}>
+                          {value ?? uiText("Not recorded")}
+                        </span>
+                      )}
+                    </td>
+                  );
+                })}
               </tr>
             );
           })}
@@ -156,6 +174,7 @@ export function RevisionCompare({
   onModeChange?: (mode: ComparisonMode) => void;
 }) {
   useUiLocale();
+  const [showAllFields, setShowAllFields] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     headingRef.current?.focus();
@@ -211,6 +230,8 @@ export function RevisionCompare({
     file.original_filename.toLowerCase().endsWith(".3mf")
       ? file.id
       : null;
+  const mixedSourceAndRevision =
+    (selectedLeft.file_type === "gcode") !== (selectedRight.file_type === "gcode");
   const leftSliced = useGcodePlates(selectedLeft.model_id, slicedId(selectedLeft));
   const rightSliced = useGcodePlates(selectedRight.model_id, slicedId(selectedRight));
   function estimate(
@@ -468,11 +489,22 @@ export function RevisionCompare({
                 </p>
               ))}
             </div>
+            {mixedSourceAndRevision && (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={showAllFields}
+                  onChange={(event) => setShowAllFields(event.target.checked)}
+                />
+                {uiText("Show all comparison fields")}
+              </label>
+            )}
             <div className={`grid gap-5 ${mode === "source" ? "" : "@2xl/comparison:grid-cols-2"}`}>
               {groups.map((group) => (
                 <ComparisonTable
                   key={group.titleKey}
                   group={group}
+                  compact={!showAllFields && mixedSourceAndRevision}
                   left={selectedLeft}
                   right={selectedRight}
                 />

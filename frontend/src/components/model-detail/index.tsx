@@ -28,7 +28,16 @@ import { uiText } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import { useLocation } from "@tanstack/react-router";
@@ -49,7 +58,7 @@ import {
   getModel,
   updateModel,
 } from "@/lib/api";
-import { useTags } from "@/lib/queries";
+import { usePrinters, useTags } from "@/lib/queries";
 import { readMetadataPreferences } from "@/lib/metadata-preferences";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@/lib/auth-context";
@@ -244,6 +253,15 @@ function ModelDetailPresentation({
     });
   }
   const [displayMode, setDisplayMode] = useState<ViewerDisplayMode>("solid");
+  const focusTab = useRef<TabKey | null>(null);
+  function focusInspector() {
+    detailLayout.current?.querySelector<HTMLElement>('[role="tabpanel"]')?.focus();
+  }
+  function openInspectorTab(tab: TabKey) {
+    if (activeTab === tab) focusInspector();
+    else focusTab.current = tab;
+    selectTab(tab);
+  }
   const detailLayout = useRef<HTMLDivElement>(null);
   const [detailLayoutWidth, setDetailLayoutWidth] = useState(() =>
     isBrowser() ? window.innerWidth - 93 : 1827,
@@ -306,6 +324,10 @@ function ModelDetailPresentation({
     return () => window.removeEventListener("keydown", collapse, true);
   }, [previewExpanded]);
   // The plate chosen for one 3MF; another mesh file shows its whole build.
+  const [inspectedSlicedPlate, setInspectedSlicedPlate] = useState<{
+    fileId: number;
+    number: number;
+  } | null>(null);
   const [chosenPlate, setChosenPlate] = useState<{ fileId: number; number: number } | null>(null);
   const [plateDimensions, setPlateDimensions] = useState<{
     fileId: number;
@@ -359,6 +381,8 @@ function ModelDetailPresentation({
     setReviewing(false);
   }
   const canViewPrinters = !!user?.is_superuser;
+  const printers = usePrinters({ enabled: canViewPrinters });
+  const printerless = printers.isSuccess && printers.data.length === 0;
   const printerFileQuery = useQuery({
     ...modelPrinterFilesOptions(model.id),
     enabled: canViewPrinters,
@@ -374,6 +398,10 @@ function ModelDetailPresentation({
     (!canEditModel && requestedTab === "similar")
       ? "overview"
       : requestedTab;
+  useLayoutEffect(() => {
+    if (focusTab.current === activeTab) focusInspector();
+    focusTab.current = null;
+  }, [activeTab]);
   const detailTabBody = useContentReveal(activeTab, { scroll: "parent" });
   const visibleTabs = useMemo(
     () =>
@@ -476,7 +504,6 @@ function ModelDetailPresentation({
     setEditTags([...model.tags]);
     setTagInput("");
     setCatOpen(false);
-    if (mode === "details") selectTab("overview");
     setEditMode(mode);
   }
 
@@ -739,6 +766,11 @@ function ModelDetailPresentation({
     shownPlate && slicedEstimates
       ? (matchSlicedPlate(shownPlate, plates, slicedEstimates.identities ?? [])?.number ?? null)
       : null;
+  const dispatchPlate = inspectedSlicedPlate
+    ? inspectedSlicedPlate.fileId === inspectedGcode?.id
+      ? inspectedSlicedPlate.number
+      : null
+    : selectedEstimatePlate;
   const thumbUrl = useAuthenticatedAssetUrl(model.thumbnail_url);
   const printerFilesByFileId = useMemo(() => {
     const grouped = new Map<number, ModelPrinterFileRead[]>();
@@ -1211,6 +1243,9 @@ function ModelDetailPresentation({
                       bedSizeFor={(file) => getBedSize(file.metadata?.printer_model)}
                       selectedFileId={previewSource?.id}
                       onSelectFile={selectToolpathSource}
+                      onInspectSlicedPlate={(fileId, number) =>
+                        setInspectedSlicedPlate({ fileId, number })
+                      }
                       sourcePlates={plates}
                       plateContainer={plateContainer}
                       onPlatePickerReady={setSlicedPlatePickerReady}
@@ -1365,9 +1400,10 @@ function ModelDetailPresentation({
                   plates={plates}
                   allowAll={viewerMode === "model"}
                   selected={shownPlate?.number ?? null}
-                  onSelect={(number) =>
-                    setChosenPlate(number === null ? null : { fileId: meshFile.id, number })
-                  }
+                  onSelect={(number) => {
+                    setInspectedSlicedPlate(null);
+                    setChosenPlate(number === null ? null : { fileId: meshFile.id, number });
+                  }}
                 />
               )}
             </div>
@@ -1375,8 +1411,8 @@ function ModelDetailPresentation({
             <ModelInformation
               model={model}
               sourceFile={meshFile ?? null}
-              onFiles={() => selectTab("files")}
-              onRevisions={() => selectTab("revisions")}
+              onFiles={() => openInspectorTab("files")}
+              onRevisions={() => openInspectorTab("revisions")}
               canEdit={canEditModel}
               onEdit={() => enterEdit("details")}
               onTags={() => {
@@ -1466,6 +1502,7 @@ function ModelDetailPresentation({
                         revisionCount: gcodeFiles.length,
                         canEdit: canEditModel,
                         canSend: canViewPrinters,
+                        printerless,
                         jobs: canViewPrinters && printJobQuery.isSuccess ? printJobs : null,
                         onRevisions: () => {
                           setCompareRequested(false);
@@ -1571,6 +1608,7 @@ function ModelDetailPresentation({
                 )}
                 {activeTab === "revisions" && (
                   <RevisionsTab
+                    printerless={printerless}
                     plateEstimates={slicedEstimates}
                     selectedPlate={selectedEstimatePlate}
                     onPreview={(fileId) => {
@@ -1668,6 +1706,7 @@ function ModelDetailPresentation({
                   open={sendOpen}
                   onOpenChange={setSendOpen}
                   preselectFileId={inspectedGcode?.id}
+                  preselectPlate={dispatchPlate}
                   compact
                   initialDeliveryMode={deliveryMode}
                 />

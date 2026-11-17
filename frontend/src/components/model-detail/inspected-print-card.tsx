@@ -1,3 +1,4 @@
+import { RevisionDeliveryActions } from "./revision-delivery-actions";
 import { Check, Star, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { downloadAuthenticatedFile } from "@/lib/api";
@@ -23,6 +24,7 @@ type RecordedPrint = Pick<ModelPrintJobRead, "file_id" | "printer_name" | "state
 export function InspectedPrintCard({
   file,
   canEdit,
+  printerless = false,
   canSend,
   revisionCount,
   recommended,
@@ -40,6 +42,7 @@ export function InspectedPrintCard({
 }: {
   file: FileRead | null;
   canEdit: boolean;
+  printerless?: boolean;
   canSend: boolean;
   revisionCount: number;
   recommended: FileRead | null;
@@ -228,14 +231,7 @@ export function InspectedPrintCard({
       <div className="detail-revision-actions">
         <div className="flex flex-wrap gap-2">
           {canSend && (
-            <>
-              <Button size="sm" onClick={() => onSend("send")}>
-                {uiText("Send to printer")}
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => onSend("queue")}>
-                {uiText("Add to queue")}
-              </Button>
-            </>
+            <RevisionDeliveryActions printerless={printerless} onSend={onSend} size="sm" />
           )}
           <Button
             size="sm"

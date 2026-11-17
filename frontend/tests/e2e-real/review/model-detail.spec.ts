@@ -292,6 +292,16 @@ test.describe("Existing Model review", () => {
                 revisions.length === 1 &&
                 slicedPlates.plates.length > 1
               ) {
+                const allFields = inspector.getByRole("checkbox", {
+                  name: "Show all comparison fields",
+                });
+                await expect(allFields).not.toBeChecked();
+                const blanks = inspector.getByText("Not recorded", { exact: true });
+                const compactCount = await blanks.count();
+                await allFields.check();
+                expect(await blanks.count()).toBeGreaterThan(compactCount);
+                await review.capture("compare-full-fields");
+                await allFields.uncheck();
                 for (const metric of ["Estimated time", "Filament weight"]) {
                   const estimates = inspector.getByRole("row", { name: new RegExp("^" + metric) });
                   for (const number of slicedPlates.plates) {
@@ -308,12 +318,16 @@ test.describe("Existing Model review", () => {
             await inspector.getByRole("button", { name: "Back to revisions", exact: true }).click();
 
             // ── Inspect dialogs without saving, uploading, sharing or starting prints ──
-            await tab("Overview");
+            await page.getByRole("button", { name: /^Source files \(\d+\)$/ }).click();
+            await expect(inspector).toBeFocused();
+            await page.getByRole("button", { name: /^G-code revisions \(\d+\)$/ }).click();
+            await expect(inspector).toBeFocused();
             await page.getByRole("button", { name: "More model actions", exact: true }).click();
             await review.capture("model-actions-menu");
             await page.getByRole("menuitem", { name: "Edit details" }).click();
             await review.capture("model-details-editor");
             await dismiss();
+            await expect(revisionTab).toHaveAttribute("aria-selected", "true");
             await page
               .getByRole("button", {
                 name: `${model.tags.length ? "Edit" : "Add"} tags ${model.tags.length ? "for" : "to"} ${model.name}`,
@@ -329,12 +343,36 @@ test.describe("Existing Model review", () => {
             await review.capture("share-dialog");
             await dismiss();
             await tab("Revisions");
-            await inspector.getByRole("button", { name: "Send to printer", exact: true }).click();
+            await inspector.getByRole("button", { name: "Preview G-code" }).click();
+            const slicedPicker = page.getByRole("group", { name: "Sliced plates", exact: true });
+            await slicedPicker
+              .getByRole("button", {
+                name: new RegExp("^Plate " + String(slicedPlates.plates[1]).padStart(2, "0")),
+              })
+              .click();
+            const queue = inspector.getByRole("button", { name: "Add to queue", exact: true });
+            if (await page.getByText("No printers", { exact: true }).isVisible()) {
+              await expect(
+                inspector.getByRole("link", { name: "Manage printers" }),
+              ).toHaveAttribute("href", "/printers");
+              await expect(
+                inspector.getByRole("button", { name: "Send to printer", exact: true }),
+              ).toHaveCount(0);
+            }
+            await queue.click();
             const send = page.getByRole("dialog");
+            await expect(send.getByLabel("Sliced plate")).toHaveValue(
+              String(slicedPlates.plates[1]),
+            );
+            await review.capture("queue-inspected-plate");
+            await send.getByRole("radio", { name: "Send now", exact: true }).check();
+            await expect(send.getByLabel("Sliced plate")).toHaveValue(
+              String(slicedPlates.plates[1]),
+            );
             await expect(
               send.getByRole("button", { name: "Send to printer", exact: true }),
             ).toBeDisabled();
-            await review.capture("send-plate-required");
+            await review.capture("send-inspected-plate");
             await send
               .getByRole("combobox", { name: "Sliced plate", exact: true })
               .selectOption(String(slicedPlates.plates[1]));

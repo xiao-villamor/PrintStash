@@ -1,5 +1,7 @@
 "use client";
 
+import { RevisionDeliveryActions } from "./revision-delivery-actions";
+
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -94,6 +96,7 @@ export function RevisionsTab({
   onInspect,
   startComparing = false,
   comparisonMode = "gcode",
+  printerless = false,
   onSend,
   onSettings,
   onLogPrint,
@@ -113,6 +116,7 @@ export function RevisionsTab({
   onInspect?: (id: number) => void;
   startComparing?: boolean;
   comparisonMode?: ComparisonMode;
+  printerless?: boolean;
   onSend?: (mode: "send" | "queue") => void;
   onSettings?: () => void;
   onLogPrint?: (fileId: number, state: "completed" | "failed") => void;
@@ -653,14 +657,7 @@ export function RevisionsTab({
                       )}
                       <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
                         {onSend && (
-                          <>
-                            <Button onClick={() => onSend("send")}>
-                              {uiText("Send to printer")}
-                            </Button>
-                            <Button variant="outline" onClick={() => onSend("queue")}>
-                              {uiText("Add to queue")}
-                            </Button>
-                          </>
+                          <RevisionDeliveryActions printerless={printerless} onSend={onSend} />
                         )}
                         <div className="ml-auto flex flex-wrap items-center gap-2">
                           <Button

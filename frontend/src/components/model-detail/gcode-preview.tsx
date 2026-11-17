@@ -28,6 +28,7 @@ export function GcodePreview({
   sourcePlates = [],
   selectedSourcePlate = null,
   onSelectSourcePlate,
+  onInspectSlicedPlate,
   plateContainer,
   onPlatePickerReady,
   viewerProps,
@@ -39,6 +40,7 @@ export function GcodePreview({
   onSelectFile?: (fileId: number) => void;
   sourcePlates?: FilePlate[];
   selectedSourcePlate?: number | null;
+  onInspectSlicedPlate?: (fileId: number, number: number) => void;
   onSelectSourcePlate?: (number: number | null) => void;
   plateContainer?: HTMLElement | null;
   onPlatePickerReady?: (ready: boolean) => void;
@@ -121,6 +123,7 @@ export function GcodePreview({
         if (number === null) return;
         const match = mapped.find(({ sliced }) => sliced?.number === number);
         setSelectedPlate({ fileId: file.id, number });
+        onInspectSlicedPlate?.(file.id, number);
         onSelectSourcePlate?.(match?.source.number ?? null);
       }}
     />

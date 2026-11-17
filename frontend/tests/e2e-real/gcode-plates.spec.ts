@@ -298,7 +298,7 @@ test.describe("Sliced G-code plates", () => {
       );
       expect(revision.gcode_revision_number).toBe(2);
       expect(revision.is_recommended).toBe(true);
-      await page.getByRole("button", { name: "Layers", exact: true }).click();
+      await page.getByRole("button", { name: "Preview G-code", exact: true }).click();
       await page
         .getByRole("group", { name: "Sliced plates" })
         .getByRole("button", { name: "Plate 02" })
@@ -306,10 +306,9 @@ test.describe("Sliced G-code plates", () => {
       await expect(page.getByRole("slider")).toBeVisible();
       await page.getByRole("button", { name: "Send to printer", exact: true }).last().click();
       const send = page.getByRole("dialog", { name: "Send Rev 2 to printer" });
-      await expect(
-        send.getByRole("button", { name: "Send to printer", exact: true }),
-      ).toBeDisabled();
-      await send.getByRole("combobox", { name: "Sliced plate", exact: true }).selectOption("2");
+      await expect(send.getByRole("combobox", { name: "Sliced plate", exact: true })).toHaveValue(
+        "2",
+      );
       await send.getByRole("checkbox", { name: "Start print immediately" }).check();
       await page.screenshot({ path: test.info().outputPath("sliced-revision-send.png") });
       const sent = page.waitForResponse(

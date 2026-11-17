@@ -181,6 +181,7 @@ function spoolmanStatus(enabled: boolean): SpoolmanStatus {
 }
 
 interface PanelOptions {
+  preselectPlate?: number;
   initialDeliveryMode?: "send" | "queue";
   open?: boolean;
   preselectPrinterId?: number;
@@ -197,6 +198,7 @@ interface PanelOptions {
 // a cache seeded with fresh data, so nothing refetches and the panel sees the
 // same shapes the API returns.
 function renderPanel({
+  preselectPlate,
   metadata = null,
   spools,
   filename = "cube.gcode",
@@ -221,6 +223,8 @@ function renderPanel({
         <AuthContext.Provider value={adminAuth}>
           <SendToButtons
             commands={commands}
+            preselectFileId={preselectPlate === undefined ? undefined : 42}
+            preselectPlate={preselectPlate}
             initialDeliveryMode={initialDeliveryMode}
             open={open}
             preselectPrinterId={preselectPrinterId}
@@ -559,6 +563,18 @@ describe("SendToQueue", () => {
 });
 
 describe("SendToButtons sliced archives", () => {
+  it.each(["send", "queue"] as const)("carries the inspected plate into %s", async (mode) => {
+    renderPanel({
+      open: true,
+      preselectPlate: 10,
+      initialDeliveryMode: mode,
+      filename: "project.gcode.3mf",
+      plates: [2, 10],
+    });
+    expect(await screen.findByLabelText("Sliced plate")).toHaveValue("10");
+    await userEvent.selectOptions(screen.getByLabelText("Sliced plate"), "2");
+    expect(screen.getByLabelText("Sliced plate")).toHaveValue("2");
+  });
   it("requires a choice when several plates exist", async () => {
     renderPanel({ open: true, filename: "project.gcode.3mf", plates: [2, 10] });
     expect(await screen.findByLabelText("Sliced plate")).toHaveValue("");

@@ -74,6 +74,7 @@ export function SendToButtons({
   open,
   onOpenChange,
   preselectFileId,
+  preselectPlate,
   preselectPrinterId,
   commands = API_COMMANDS,
   compact = false,
@@ -93,6 +94,7 @@ export function SendToButtons({
   printerFiles: ModelPrinterFileRead[];
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  preselectPlate?: number | null;
   preselectFileId?: number;
   preselectPrinterId?: number;
   commands?: SendToCommands;
@@ -116,6 +118,14 @@ export function SendToButtons({
   const [plateSelection, setPlateSelection] = useState<{ fileId: number; index: number } | null>(
     null,
   );
+  useEffect(() => {
+    if (showSend)
+      setPlateSelection(
+        preselectFileId != null && preselectPlate != null
+          ? { fileId: preselectFileId, index: preselectPlate }
+          : null,
+      );
+  }, [showSend, preselectFileId, preselectPlate]);
   const plates = platesQuery.data?.plates ?? [];
   const plateIndex = sliced
     ? plateSelection?.fileId === selectedFile && plates.includes(plateSelection.index)
@@ -837,13 +847,18 @@ export function SendToButtons({
 
                 {printersLoading && <p role="status">{uiText("Loading printers…")}</p>}
                 {printersQuery.isSuccess && availablePrinters.length === 0 && (
-                  <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
                     {uiText(
                       deliveryMode === "queue" && routingStrategy !== "manual"
                         ? "This job can wait in the queue for an eligible printer."
                         : printers.length === 0
                           ? "No printers configured"
                           : "None of the configured printers can receive this file.",
+                    )}
+                    {printers.length === 0 && deliveryMode === "send" && (
+                      <Button asChild variant="outline" size="sm">
+                        <Link href="/printers">{uiText("Manage printers")}</Link>
+                      </Button>
                     )}
                   </div>
                 )}
@@ -853,7 +868,10 @@ export function SendToButtons({
                   <ChoiceField
                     label={uiText("G-code revision")}
                     value={selectedFile}
-                    onChange={setSelectedFile}
+                    onChange={(fileId) => {
+                      setSelectedFile(fileId);
+                      setPlateSelection(null);
+                    }}
                     options={gcodeFiles.map((file) => ({
                       value: file.id,
                       label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}${file.revision_label ? ` · ${file.revision_label}` : ""}${file.id === defaultFile?.id ? uiText(" · Recommended") : ""}`,
