@@ -266,6 +266,39 @@ class TestPreparePending:
         ((_subject, prepared),) = page.subjects
         assert prepared.projection.segments[0].content.title == "Bracket"
 
+    def test_loads_model_contributors_in_a_fixed_number_of_queries(
+        self,
+        db_session,
+        make_collection,
+        make_model,
+        make_file,
+        make_provenance_source,
+        make_tag,
+        tag_collection,
+        make_search_projection_request,
+        statements,
+    ):
+        from app.db.projections import ContentSource
+
+        root = make_collection("Root")
+        child = make_collection("Child", parent=root)
+        tag_collection(root, make_tag("Inherited"))
+        models = [make_model(f"Model {i}", collection=child) for i in range(20)]
+        for model in models:
+            make_file(model)
+            make_provenance_source(model, tags=["Imported"])
+        make_search_projection_request(ContentSource("collection", root.id))
+        statements.clear()
+
+        small = prepare_pending(db_session, limit=4)
+        small_reads = len(statements)
+        statements.clear()
+        large = prepare_pending(db_session, limit=32)
+
+        assert len(small.subjects) == 4
+        assert len(large.subjects) == 22
+        assert len(statements) <= small_reads
+
     def test_a_trashed_subject_projects_to_nothing(
         self, db_session, make_model, make_search_projection_request
     ):
@@ -322,6 +355,71 @@ class TestApplyPrepared:
             1,
             ["Title: Bracket"],
         )
+
+    def test_replays_unchanged_lexical_content_without_writes(
+        self, projection, db_session, make_model, statements
+    ):
+        from sqlalchemy import text
+
+        from app.modules.search.lexical_index import rebuild_partition
+
+        model = make_model("Bracket")
+        rebuild_partition(db_session)
+        content_changed(db_session, "model", [model.id])
+        _drain(db_session)
+        content_changed(db_session, "model", [model.id])
+        db_session.commit()
+        page = prepare_pending(db_session)
+        db_session.commit()
+        statements.clear()
+
+        apply_prepared(db_session, page)
+        writes = statements.count("INSERT")
+
+        assert writes == 0
+        assert (
+            db_session.execute(
+                text(
+                    "SELECT rowid FROM search_passages_fts WHERE search_passages_fts MATCH 'bracket'"
+                )
+            )
+            .scalars()
+            .all()
+            == db_session.exec(select(SearchPassage.id)).all()
+        )
+
+    def test_replaces_lexical_membership_when_a_page_promotes_a_recipe(
+        self, projection, db_session, make_model, make_system_config
+    ):
+        from app.db.models.search import SearchLexicalPosting, SearchLexicalState
+        from app.schemas.inference import SearchSettings
+
+        model = make_model("Bracket")
+        content_changed(db_session, "model", [model.id])
+        _drain(db_session)
+        make_system_config(
+            ai_search_settings_json=SearchSettings(
+                captions_enabled=True
+            ).model_dump_json()
+        )
+
+        content_changed(db_session, "model", [model.id])
+        _drain(db_session)
+
+        versions = db_session.exec(
+            select(SearchPassage.recipe_version, SearchPassage.token_count).order_by(
+                SearchPassage.recipe_version
+            )
+        ).all()
+        assert versions[0] == (1, 0)
+        assert versions[1][0] == 2
+        assert versions[1][1] > 0
+        assert db_session.get(SearchLexicalState, 1).document_count == 1
+        assert db_session.exec(
+            select(SearchLexicalPosting.term).where(
+                SearchLexicalPosting.term == "bracket"
+            )
+        ).all() == ["bracket"]
 
     def test_finishes_a_request_whose_last_page_it_wrote(
         self, db_session, make_model, make_search_projection_request
