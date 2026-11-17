@@ -30,6 +30,11 @@ def _recommend_missing() -> None:
                 ) AS position
                 FROM files f
                 WHERE f.file_type = 'GCODE' AND f.deleted_at IS NULL
+                AND EXISTS (
+                    SELECT 1 FROM files sliced WHERE sliced.model_id = f.model_id
+                    AND sliced.deleted_at IS NULL
+                    AND lower(sliced.original_filename) LIKE '%.gcode.3mf'
+                )
                 AND NOT EXISTS (
                     SELECT 1 FROM files r WHERE r.model_id = f.model_id
                     AND r.file_type = 'GCODE' AND r.deleted_at IS NULL

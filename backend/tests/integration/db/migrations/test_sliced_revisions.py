@@ -38,7 +38,7 @@ class TestSlicedRevisionsMigration:
             command.stamp(config, RELEASED_V0121_REVISION)
         command.upgrade(config, BEFORE)
         with engine.begin() as connection:
-            for number in (1, 2):
+            for number in (1, 2, 3):
                 seed_schema_row(
                     connection,
                     "models",
@@ -52,6 +52,7 @@ class TestSlicedRevisionsMigration:
                 (2, 1, "THREE_MF", "new.GCODE.3MF", False),
                 (3, 2, "THREE_MF", "first.gcode.3mf", False),
                 (4, 2, "THREE_MF", "second.gcode.3mf", False),
+                (5, 3, "GCODE", "unrecommended.gcode", False),
             ):
                 seed_schema_row(
                     connection,
@@ -72,7 +73,7 @@ class TestSlicedRevisionsMigration:
                     "SELECT id, file_type, is_recommended, path FROM files ORDER BY id"
                 )
             ).all()
-            assert [row.file_type for row in rows] == ["GCODE"] * 4
+            assert [row.file_type for row in rows] == ["GCODE"] * 5
             assert [row.id for row in rows if row.is_recommended] == [1, 4]
             assert rows[1].path == "original/new.GCODE.3MF"
         with engine.begin() as connection:
@@ -91,7 +92,7 @@ class TestSlicedRevisionsMigration:
                 == "THREE_MF"
             )
             assert (
-                connection.execute(text("SELECT count(*) FROM files")).scalar_one() == 4
+                connection.execute(text("SELECT count(*) FROM files")).scalar_one() == 5
             )
             assert connection.execute(
                 text("SELECT id FROM files WHERE is_recommended = true")
