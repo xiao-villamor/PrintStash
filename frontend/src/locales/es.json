@@ -1,4 +1,5 @@
 {
+  "G-code revision {number}": "Revisión de G-code {number}",
   "Enter a whole number of copies, at least 1.": "Introduce un número entero de copias, como mínimo 1.",
   "Queue details": "Detalles de la cola",
   "Revision test status": "Estado de prueba de la revisión",

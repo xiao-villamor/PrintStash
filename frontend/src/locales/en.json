@@ -1,4 +1,5 @@
 {
+  "G-code revision {number}": "G-code revision {number}",
   "Enter a whole number of copies, at least 1.": "Enter a whole number of copies, at least 1.",
   "Queue details": "Queue details",
   "Revision test status": "Revision test status",
