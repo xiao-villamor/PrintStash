@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Model-detail reviews have a repeatable desktop Playwright flow using existing Models and their actual files, covering tabs, preview modes, plates, revisions and dialogs with private screenshot, layout and metadata evidence for follow-up design audits.
 - G-code previews use a slicer-style side panel with Layers and View tabs for plate cards, direct layer entry, camera and display controls. Controls fit above the model information, and expanding the preview hides that information to give the viewer more room. Plate choices stay available while loading or retrying a preview.
 
 - New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.

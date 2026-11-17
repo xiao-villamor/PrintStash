@@ -17,6 +17,8 @@ export default defineConfig({
   // Storage-provider setup owns a separate throwaway backend and WebDAV
   // server; including it here would point it at this already-configured app.
   testIgnore: [
+    // Opt-in read-only review of an existing deployment; never seed its data.
+    "review/**/*.spec.ts",
     "ai-search/**/*.spec.ts",
     "storage/**/*.spec.ts",
     "storage-presets/**/*.spec.ts",

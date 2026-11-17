@@ -91,6 +91,55 @@ tests use unique (timestamped) names and clean up after themselves.
 
 Requires the backend dev venv (`backend/.venv`); falls back to `uv run`.
 
+## Model-detail review
+
+```bash
+# Supply an existing Model URL and account through the environment.
+# Keep credentials out of shell history, screenshots and committed files.
+pnpm review:model-detail
+```
+
+Requires `PRINTSTASH_REVIEW_URL` (an existing `/models/<id>` URL),
+`PRINTSTASH_REVIEW_USERNAME` and `PRINTSTASH_REVIEW_PASSWORD`, plus Python 3
+for reading the downloaded sliced archive. The opt-in `playwright.review.config.ts`
+connects to that deployment directly. It starts no servers, resets no database,
+and generates no Models or metadata. Ordinary real-backend CI excludes `review/`.
+
+Four journeys inspect **details and previews in light and dark**, always at
+**1920×1080, device scale 1**, with navigation collapsed. The target must have a
+source 3MF and a sliced-3MF Revision with multiple plates. All seven detail tabs,
+scrollable content, revision comparison, model/revision/cover/share/history/send
+and queue dialogs, plate selection, camera/layer/display controls and expanded
+views use the Model's actual data. Empty states remain empty; the flow never
+creates extra revisions or history just to fill a screenshot. It downloads the
+actual sliced archive, verifies its SHA-256 against the API, and records embedded
+settings verbatim beside the persisted metadata.
+
+The review opens forms without submitting them. Login and single-use events-stream
+authentication tickets are the only allowed POSTs. Browser API writes are blocked
+and fail the journey; the Model version and Artifacts must
+remain unchanged. A labelled browser-only 503 checks Source error/retry presentation
+before returning to the real response. No print, queue entry, share link, import,
+edit or history record is submitted. This is a read-only inspection, not a
+persistence or hardware test.
+
+Open each journey's `index.html` under `reports/model-detail-review/` at the
+repository root. The gallery links to viewport screenshots, ARIA snapshots,
+control coordinates and computed typography. `metadata.json` records real input
+evidence; `manifest.json` includes completion state and console/network diagnostics.
+Partial evidence survives failed journeys. Tracing is off to avoid recording login
+credentials; all artifacts contain private library data and must stay private.
+A later run replaces the output directory, so copy any baseline you want to retain.
+
+A passing journey is **not a clean design or accessibility audit**. Inspect every
+captured state, including the before/after-Fit pairs. Compare shared controls and
+plate context across modes; mesh-only shading does not imply an equivalent toolpath
+action. `clippedBy`, `outsideScrollport` and `coveredAtCenter` are candidates that
+need interpretation: scrolling, backdrops, disabled controls and custom input
+wrappers can be intentional. For a later Impeccable pass, supply the galleries,
+metadata and diagnostics with `DESIGN.md`; separate measured faults from hierarchy
+and consistency judgments. This command does not install or execute Impeccable.
+
 ## Coverage
 
 `library-inspector.spec.ts` uploads a real G-code Model, selects a loopback printer
