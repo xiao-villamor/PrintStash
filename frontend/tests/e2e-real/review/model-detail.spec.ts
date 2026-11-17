@@ -95,6 +95,29 @@ test.describe("Existing Model review", () => {
               await tab(label);
               await capturePanel(label.toLowerCase().replaceAll(" ", "-"));
             }
+            await inspector.getByRole("button", { name: "Filters", exact: true }).click();
+            await review.capture("similarity-filters");
+            await dismiss();
+            await tab("Files");
+            const sourceRow = inspector.getByRole("article", {
+              name: source!.original_filename,
+              exact: true,
+            });
+            await sourceRow
+              .getByRole("button", {
+                name: `Actions for ${source!.original_filename}`,
+                exact: true,
+              })
+              .click();
+            await review.capture("source-file-actions-menu");
+            await page.keyboard.press("Escape");
+            await expect(page.getByRole("menu")).toHaveCount(0);
+            await sourceRow.getByRole("button", { name: /^(Add|Edit) tags$/ }).click();
+            await expect(
+              page.getByRole("dialog").getByPlaceholder("Search or create a tag", { exact: true }),
+            ).toBeVisible();
+            await review.capture("source-file-tags-editor");
+            await dismiss();
             await tab("Revisions");
             await inspector
               .getByRole("button", { name: new RegExp(`^Rev ${sliced!.gcode_revision_number}\\b`) })
@@ -243,6 +266,7 @@ test.describe("Existing Model review", () => {
               .selectOption(String(sliced!.id));
             const layer = controls.getByRole("spinbutton", { name: "Layer number" });
             await expect(layer).toBeVisible({ timeout: 60_000 });
+            await expect(screenshot).toBeEnabled({ timeout: 60_000 });
             await review.capture("toolpath-entry-selected-plate");
             for (const plate of slicedPlates.plates) {
               await controls
@@ -252,6 +276,7 @@ test.describe("Existing Model review", () => {
                 })
                 .click();
               await expect(layer).toBeVisible({ timeout: 60_000 });
+              await expect(screenshot).toBeEnabled({ timeout: 60_000 });
               await review.capture(`toolpath-plate-${plate}-full`);
               const middle = String(
                 Math.max(1, Math.floor(Number(await layer.getAttribute("max")) / 2)),
