@@ -8,7 +8,7 @@ from sqlmodel import Session, create_engine
 
 from app.db import config_edit_contracts_v2 as legacy_contract
 from app.db.migrate import run_migrations
-from app.db.models import SystemConfig, User
+from app.db.models import AuditLog, SystemConfig, User
 from app.db.url import normalize_database_url
 from tests.containers import fresh_postgres_database
 from tests.factories import build_system_config
@@ -228,6 +228,8 @@ class TestLegacyFreshContract:
         metadata = MetaData()
         User.__table__.to_metadata(metadata)
         SystemConfig.__table__.to_metadata(metadata)
+        # ORM writes may be audited after another test starts the application.
+        AuditLog.__table__.to_metadata(metadata)
         event.listen(metadata, "after_create", legacy_contract._fresh_contract)
         engine = create_engine(f"sqlite:///{tmp_path / 'legacy-config.sqlite'}")
         try:
