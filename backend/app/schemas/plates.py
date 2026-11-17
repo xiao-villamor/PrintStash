@@ -46,7 +46,42 @@ class FilePlatesRead(BaseModel):
         return self
 
 
+class GcodePlateMetadata(BaseModel):
+    slicer_name: str | None = None
+    slicer_version: str | None = None
+    printer_model: str | None = None
+    nozzle_diameter_mm: float | None = None
+    layer_height_mm: float | None = None
+    first_layer_height_mm: float | None = None
+    infill_percent: float | None = None
+    wall_loops: int | None = None
+    top_shell_layers: int | None = None
+    bottom_shell_layers: int | None = None
+    support_material: bool | None = None
+    nozzle_temperature_c: float | None = None
+    bed_temperature_c: float | None = None
+    estimated_time_s: int | None = None
+    filament_weight_g: float | None = None
+    filament_length_mm: float | None = None
+    filament_cost: float | None = None
+    material_type: str | None = None
+    material_brand: str | None = None
+
+
+class GcodePlateMetadataRead(BaseModel):
+    number: int
+    metadata: GcodePlateMetadata
+
+
+class GcodePlateIdentityRead(BaseModel):
+    number: int
+    name: str
+    object_count: int
+
+
 class GcodePlatesRead(BaseModel):
     """Numbers of the sliced plates actually present in a 3MF archive."""
 
     plates: list[int]
+    plate_metadata: list[GcodePlateMetadataRead]
+    identities: list[GcodePlateIdentityRead]

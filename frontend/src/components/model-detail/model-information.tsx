@@ -104,7 +104,7 @@ export function ModelInformation({
         </dl>
       </div>
       <div className="model-information-geometry">
-        <h2 className="text-sm font-semibold">{uiText("Geometry")}</h2>
+        <h2 className="text-sm font-semibold">{uiText("Whole source geometry")}</h2>
         <dl className="model-information-facts">
           <dt>{uiText("Dimensions")}</dt>
           <dd>{dimensions}</dd>

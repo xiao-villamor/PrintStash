@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Camera, Minus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { uiText } from "@/lib/locale";
@@ -49,6 +49,9 @@ export function ViewerToolbar({
 }) {
   useUiLocale();
   const [camera, setCamera] = useState<ViewerCameraPreset>("isometric");
+  useEffect(() => {
+    if (viewerReady) controls.current?.setView(camera);
+  }, [viewerReady, viewerMode, camera, controls]);
   const buttonClass = (active: boolean) =>
     active ? "bg-accent text-accent-foreground" : "text-foreground";
   return (
@@ -109,11 +112,39 @@ export function ViewerToolbar({
                 className={buttonClass(viewerMode === "gcode")}
                 onClick={() => setViewerMode("gcode")}
               >
-                {uiText("Layers")}
+                {uiText("G-code")}
               </Button>
             </div>
           </div>
         )}
+        <div className="detail-viewer-control-group">
+          <span>{uiText("Overlays")}</span>
+          <div>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!viewerReady}
+              aria-label={uiText("Build plate grid")}
+              aria-pressed={showGrid}
+              className={buttonClass(showGrid)}
+              onClick={() => setShowGrid(!showGrid)}
+            >
+              {uiText("Grid")}
+            </Button>
+            {onDimensions && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!viewerReady}
+                aria-pressed={showDimensions}
+                className={buttonClass(showDimensions)}
+                onClick={() => onDimensions(!showDimensions)}
+              >
+                {uiText("Dimensions")}
+              </Button>
+            )}
+          </div>
+        </div>
         {viewerMode === "model" && (
           <>
             <div className="detail-viewer-control-group">
@@ -138,96 +169,66 @@ export function ViewerToolbar({
                 ))}
               </div>
             </div>
-            <div className="detail-viewer-control-group">
-              <span>{uiText("Overlays")}</span>
-              <div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={!viewerReady}
-                  aria-label={uiText("Build plate grid")}
-                  aria-pressed={showGrid}
-                  className={buttonClass(showGrid)}
-                  onClick={() => setShowGrid(!showGrid)}
-                >
-                  {uiText("Grid")}
-                </Button>
-                {onDimensions && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={!viewerReady}
-                    aria-pressed={showDimensions}
-                    className={buttonClass(showDimensions)}
-                    onClick={() => onDimensions(!showDimensions)}
-                  >
-                    {uiText("Dimensions")}
-                  </Button>
-                )}
-              </div>
-            </div>
           </>
         )}
       </div>
-      {viewerMode === "model" && (
-        <div className="detail-viewer-dock">
-          <div className="flex">
-            {CAMERA_PRESETS.map((preset) => (
-              <Button
-                key={preset}
-                size="sm"
-                variant="ghost"
-                disabled={!viewerReady}
-                aria-pressed={camera === preset}
-                className={buttonClass(camera === preset)}
-                onClick={() => {
-                  controls.current?.setView(preset);
-                  setCamera(preset);
-                }}
-              >
-                {preset === "isometric"
-                  ? uiText("Isometric")
-                  : preset === "front"
-                    ? uiText("Front")
-                    : uiText("Top")}
-              </Button>
-            ))}
-          </div>
-          <p>{uiText("Drag to orbit · Scroll to zoom")}</p>
-          <div className="flex">
+      <div className="detail-viewer-dock">
+        <div className="flex">
+          {CAMERA_PRESETS.map((preset) => (
             <Button
-              variant="ghost"
-              size="icon-sm"
-              disabled={!viewerReady}
-              aria-label={uiText("Zoom out")}
-              onClick={() => controls.current?.zoomOut()}
-            >
-              <Minus className="h-3 w-3" />
-            </Button>
-            <Button
+              key={preset}
               size="sm"
               variant="ghost"
               disabled={!viewerReady}
-              aria-label={uiText("Fit to view")}
+              aria-pressed={camera === preset}
+              className={buttonClass(camera === preset)}
               onClick={() => {
-                controls.current?.fit();
-                setCamera("isometric");
+                controls.current?.setView(preset);
+                setCamera(preset);
               }}
             >
-              {uiText("Fit")}
+              {preset === "isometric"
+                ? uiText("Isometric")
+                : preset === "front"
+                  ? uiText("Front")
+                  : uiText("Top")}
             </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              disabled={!viewerReady}
-              aria-label={uiText("Zoom in")}
-              onClick={() => controls.current?.zoomIn()}
-            >
-              <Plus className="h-3 w-3" />
-            </Button>
-          </div>
+          ))}
         </div>
-      )}
+        <p>{uiText("Drag to orbit · Scroll to zoom")}</p>
+        <div className="flex">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            disabled={!viewerReady}
+            aria-label={uiText("Zoom out")}
+            onClick={() => controls.current?.zoomOut()}
+          >
+            <Minus className="h-3 w-3" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={!viewerReady}
+            aria-label={uiText("Fit to view")}
+            onClick={() => {
+              controls.current?.fit();
+              setCamera("isometric");
+            }}
+          >
+            {uiText("Fit")}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            disabled={!viewerReady}
+            aria-label={uiText("Zoom in")}
+            onClick={() => controls.current?.zoomIn()}
+          >
+            <Plus className="h-3 w-3" />
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

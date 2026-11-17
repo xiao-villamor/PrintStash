@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { GcodeViewer, type GcodeViewerProps } from "@/components/gcode-viewer";
 import { ApiError } from "@/lib/errors";
-import { aMetadata, aRevision } from "@/test-support/factories";
+import { aFilePlate, aMetadata, aRevision } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
 import { GcodePreview } from "../gcode-preview";
 
@@ -36,6 +36,55 @@ function preview(files = [sliced]) {
 }
 
 describe("GcodePreview", () => {
+  it("opens the corresponding sliced plate using its declared identity", async () => {
+    const sources = [
+      aFilePlate({ number: 1, name: "Shelf", object_count: 5 }),
+      aFilePlate({ number: 2, name: "Wall mount", object_count: 1 }),
+    ];
+    renderApp(
+      <GcodePreview
+        files={[sliced]}
+        bedSizeFor={bedSizeFor}
+        ToolpathViewer={Toolpath}
+        sourcePlates={sources}
+        selectedSourcePlate={2}
+      />,
+      {
+        routes: {
+          "GET /api/v1/files/10/gcode-plates": json({
+            plates: [2, 10],
+            identities: [
+              { number: 10, name: "Wall mount", object_count: 1 },
+              { number: 2, name: "Shelf", object_count: 5 },
+            ],
+          }),
+        },
+      },
+    );
+    expect(await screen.findByRole("button", { name: /Plate 10 Wall mount/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("img", { name: "Toolpath" })).toHaveTextContent("plate_index=10");
+  });
+
+  it("explains when the selected source plate cannot be mapped", async () => {
+    const source = aFilePlate({ number: 2, name: "Wall mount", object_count: 1 });
+    renderApp(
+      <GcodePreview
+        files={[sliced]}
+        bedSizeFor={bedSizeFor}
+        ToolpathViewer={Toolpath}
+        sourcePlates={[source]}
+        selectedSourcePlate={2}
+      />,
+      { routes: platesRoute },
+    );
+    expect(
+      await screen.findByText("The selected source plate could not be matched to a sliced plate."),
+    ).toBeVisible();
+  });
+
   it("defaults to the first actual sliced plate", async () => {
     renderApp(preview(), { routes: platesRoute });
 

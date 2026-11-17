@@ -34,6 +34,30 @@ function show(overrides: Partial<ComponentProps<typeof InspectedPrintCard>> = {}
 }
 
 describe("InspectedPrintCard", () => {
+  it("shows the inspected revision's per-plate estimates", () => {
+    show({
+      plateEstimates: {
+        plates: [1, 2],
+        identities: [],
+        plate_metadata: [
+          {
+            number: 1,
+            metadata: { estimated_time_s: 27862, filament_weight_g: 419.18, filament_cost: null },
+          },
+          {
+            number: 2,
+            metadata: { estimated_time_s: 2465, filament_weight_g: 13.03, filament_cost: null },
+          },
+        ],
+      },
+      selectedSlicedPlate: 2,
+    });
+    const plate = screen.getByRole("region", { name: "Plate 02" });
+    expect(within(plate).getByText("41m 5s")).toBeVisible();
+    expect(within(plate).getByText("Selected plate")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Print estimate" })).not.toBeInTheDocument();
+  });
+
   it("groups only the inspected file's recorded results by printer", () => {
     show({
       jobs: [

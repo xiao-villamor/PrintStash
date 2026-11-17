@@ -16,6 +16,8 @@ import type { MetadataPreferences } from "@/lib/metadata-preferences";
 import type { MetadataRead } from "@/types";
 import type { PrintSettingRow } from "./presentation";
 import { Localized } from "@/components/ui/localized";
+import type { GcodePlates } from "@/lib/api/plates";
+import { PlateEstimates } from "./plate-estimates";
 
 interface SettingValue {
   labelKey: MessageKey;
@@ -39,9 +41,9 @@ function Group({ group }: { group: SettingGroup }) {
             key={row.labelKey}
             className="grid grid-cols-[minmax(0,.9fr)_minmax(0,1.1fr)] items-baseline gap-4 border-b border-border px-2.5 py-2 odd:bg-muted/40"
           >
-            <dt className="min-w-0 text-muted-foreground">{uiText(row.labelKey)}</dt>
+            <dt className="min-w-0 text-xs text-muted-foreground">{uiText(row.labelKey)}</dt>
             <dd
-              className={`min-w-0 break-words tabular-nums ${row.value === null ? "text-muted-foreground" : "text-foreground"}`}
+              className={`min-w-0 break-words tabular-nums ${row.value === null ? "text-muted-foreground" : "font-medium text-foreground"}`}
             >
               {row.value ?? uiText("Not recorded")}
             </dd>
@@ -59,6 +61,9 @@ export function SettingsTab({
   headerActions,
   revisionPicker,
   actions,
+  hasSlicedRevision = false,
+  plateEstimates,
+  selectedSlicedPlate = null,
 }: {
   meta: MetadataRead | null | undefined;
   printSettingRows: PrintSettingRow[];
@@ -66,6 +71,9 @@ export function SettingsTab({
   headerActions?: ReactNode;
   revisionPicker?: ReactNode;
   actions?: ReactNode;
+  hasSlicedRevision?: boolean;
+  plateEstimates?: GcodePlates | null;
+  selectedSlicedPlate?: number | null;
 }) {
   useUiLocale();
   const hasMeshGeometry = meta?.volume_mm3 != null || meta?.triangle_count != null;
@@ -96,7 +104,8 @@ export function SettingsTab({
       meta.filament_cost,
     ].some((value) => value !== null),
   );
-  const geometryOnly = hasMeshGeometry && !hasEmbeddedSlicerMetadata;
+  const geometryOnly = hasMeshGeometry && !hasEmbeddedSlicerMetadata && !hasSlicedRevision;
+  const multiPlate = (plateEstimates?.plates.length ?? 0) > 1;
   const resin = meta?.layer_count != null;
   const text = (value: string | null | undefined) =>
     value === null || value === undefined || value === "" ? null : value;
@@ -256,16 +265,29 @@ export function SettingsTab({
           <>
             {!hasEmbeddedSlicerMetadata && (
               <p className="text-sm text-muted-foreground">
-                {uiText(
-                  "No print settings recorded yet. Add a sliced G-code revision to capture them.",
-                )}
+                {hasSlicedRevision
+                  ? uiText("No print settings are available for this sliced revision.")
+                  : uiText(
+                      "No print settings recorded yet. Add a sliced G-code revision to capture them.",
+                    )}
               </p>
             )}
             <div className="grid gap-6 @2xl/settings:grid-cols-2">
               <div className="space-y-5">
-                {left.map((group) => (
-                  <Group key={group.titleKey} group={group} />
-                ))}
+                {left.map((group) =>
+                  group.titleKey === "Estimates" && multiPlate && plateEstimates ? (
+                    <PlateEstimates
+                      key={group.titleKey}
+                      data={plateEstimates}
+                      selected={selectedSlicedPlate}
+                      showTime={preferences.estimated_time}
+                      showWeight={preferences.filament_weight}
+                      showCost={preferences.filament_cost}
+                    />
+                  ) : (
+                    <Group key={group.titleKey} group={group} />
+                  ),
+                )}
               </div>
               <Group group={structure} />
             </div>

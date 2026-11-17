@@ -36,6 +36,8 @@
     --border-strong: #cdd3db;
     --overlay-scrim: rgb(16 24 40 / 0.28);
     --plate: #f8fafc;
+    /* Neutral backing for transparent slicer images, independent of theme. */
+    --preview-image-matte: #eef0f3;
     --dialog-shadow: rgb(16 24 40 / 0.12);
     --input: #8190a3;
     --ring: #4d6f9b;

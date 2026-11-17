@@ -149,9 +149,42 @@ describe("ViewerToolbar selection", () => {
     expect(screen.queryByRole("button", { name: "Solid" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "X-Ray" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Wireframe" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Build plate grid" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Build plate grid" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Fit to view" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Front" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Screenshot" })).toBeEnabled();
   });
+  it("restores the selected camera when switching preview modes", async () => {
+    const user = userEvent.setup();
+    const controls = createRef<STLViewerControls>();
+    const setView = vi.fn<STLViewerControls["setView"]>();
+    controls.current = {
+      setView,
+      zoomIn: () => {},
+      zoomOut: () => {},
+      resetView: () => {},
+      fit: () => {},
+      screenshot: async () => {},
+      captureImage: async () => new Blob(),
+    };
+    const props = {
+      displayMode: "solid" as const,
+      setDisplayMode: () => {},
+      showGrid: true,
+      setShowGrid: () => {},
+      controls,
+      setViewerMode: () => {},
+      hasGcode: true,
+      viewerReady: true,
+    };
+    const view = render(<ViewerToolbar {...props} viewerMode="model" />);
+    await user.click(screen.getByRole("button", { name: "Front" }));
+    setView.mockClear();
+    view.rerender(<ViewerToolbar {...props} viewerMode="gcode" />);
+    expect(setView).toHaveBeenCalledWith("front");
+    expect(screen.getByRole("button", { name: "Front" })).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("announces the active preview mode", () => {
     renderToolbar(true, undefined, { hasGcode: true, viewerMode: "gcode" });
 
@@ -159,7 +192,7 @@ describe("ViewerToolbar selection", () => {
       "aria-pressed",
       "false",
     );
-    expect(screen.getByRole("button", { name: "Layers" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "G-code" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("announces the active rendering style", () => {

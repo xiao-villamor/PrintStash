@@ -162,7 +162,11 @@ def _completed_idempotent_race(
 def _validate_purpose_file(request: ArtifactUploadCreate) -> None:
     suffix = Path(request.filename).suffix.lower()
     if request.purpose in {"gcode", "slicer", "revision"}:
-        allowed = suffix in ingest_background.GCODE_SUFFIXES
+        from app.modules.media.sliced_gcode import is_sliced_filename
+
+        allowed = suffix in ingest_background.GCODE_SUFFIXES or is_sliced_filename(
+            request.filename
+        )
     elif request.purpose in {"model", "external_writeback"}:
         allowed = suffix in ingest_background.SOURCE_SUFFIXES
     elif request.purpose == "archive":

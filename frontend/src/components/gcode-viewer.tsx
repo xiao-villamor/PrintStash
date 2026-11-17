@@ -54,8 +54,9 @@ function GcodeScene({
   onControlsReady: (controls: ViewerControls | null) => void;
   screenshotName: string;
 }) {
-  const { camera, gl, scene } = useThree();
+  const { camera, gl, scene, size } = useThree();
   const orbitRef = useRef<any>(null);
+  const presetRef = useRef<ViewerCameraPreset>("isometric");
 
   const extrudeGeo = useMemo(() => {
     const geo = new THREE.BufferGeometry();
@@ -134,6 +135,7 @@ function GcodeScene({
 
   useEffect(() => {
     function setView(preset: ViewerCameraPreset) {
+      presetRef.current = preset;
       // OrbitControls keeps the world up axis it started with; the top view
       // looks straight down by sitting a hair off the axis instead of rolling it.
       camera.up.set(0, 1, 0);
@@ -160,7 +162,7 @@ function GcodeScene({
       camera.position.sub(target).multiplyScalar(factor).add(target);
       orbitRef.current?.update();
     }
-    setView("isometric");
+    setView(presetRef.current);
     onControlsReady({
       setView,
       zoomIn: () => zoom(0.8),
@@ -186,7 +188,7 @@ function GcodeScene({
       },
     });
     return () => onControlsReady(null);
-  }, [data, camera, gl, scene, screenshotName, onControlsReady]);
+  }, [data, camera, gl, scene, screenshotName, onControlsReady, size.width, size.height]);
 
   const gridHalfSize =
     showBed && printerBedMm
@@ -320,6 +322,8 @@ export interface GcodeViewerProps {
   showDimensions?: boolean;
   onShowGridChange?: (visible: boolean) => void;
   onShowDimensionsChange?: (visible: boolean) => void;
+  /** The parent supplies camera and shared overlay controls. */
+  sharedControls?: boolean;
   /** Render controls beside the parent-owned source picker without remounting it. */
   controlsContainers?: ToolpathControlContainers;
   onControlsReady?: (controls: ViewerControls | null) => void;
@@ -337,6 +341,7 @@ export function GcodeViewer({
   showDimensions: externalDimensions,
   onShowGridChange,
   onShowDimensionsChange,
+  sharedControls = false,
   controlsContainers,
   onControlsReady,
   canvasRenderer,
@@ -366,7 +371,6 @@ export function GcodeViewer({
   const connectControls = React.useCallback(
     (controls: ViewerControls | null) => {
       localControls.current = controls;
-      if (controls) setCameraPreset("isometric");
       onControlsReady?.(controls);
     },
     [onControlsReady],
@@ -642,63 +646,68 @@ export function GcodeViewer({
       {toggle(uiText("This layer"), onlyCurrentLayer, setOnlyCurrentLayer)}
     </section>,
     <>
-      <section className="toolpath-section" aria-label={uiText("Camera view")}>
-        <label className="toolpath-field">
-          <span className="toolpath-section-title">{uiText("Camera view")}</span>
-          <select
-            value={cameraPreset}
-            onChange={(event) => {
-              const preset = CAMERA_PRESETS.find((item) => item === event.target.value);
-              if (!preset) return;
-              localControls.current?.setView(preset);
-              setCameraPreset(preset);
-            }}
-          >
-            {CAMERA_PRESETS.map((preset) => (
-              <option key={preset} value={preset}>
-                {uiText(
-                  preset === "isometric" ? "Isometric" : preset === "front" ? "Front" : "Top",
-                )}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="toolpath-camera-actions">
-          <Button
-            variant="outline"
-            size="icon-sm"
-            aria-label={uiText("Zoom out")}
-            onClick={() => localControls.current?.zoomOut()}
-          >
-            <Minus className="h-4 w-4" aria-hidden />
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            aria-label={uiText("Fit to view")}
-            onClick={() => {
-              localControls.current?.fit();
-              setCameraPreset("isometric");
-            }}
-          >
-            {uiText("Fit")}
-          </Button>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            aria-label={uiText("Zoom in")}
-            onClick={() => localControls.current?.zoomIn()}
-          >
-            <Plus className="h-4 w-4" aria-hidden />
-          </Button>
-        </div>
-      </section>
+      {!sharedControls && (
+        <section className="toolpath-section" aria-label={uiText("Camera view")}>
+          <label className="toolpath-field">
+            <span className="toolpath-section-title">{uiText("Camera view")}</span>
+            <select
+              value={cameraPreset}
+              onChange={(event) => {
+                const preset = CAMERA_PRESETS.find((item) => item === event.target.value);
+                if (!preset) return;
+                localControls.current?.setView(preset);
+                setCameraPreset(preset);
+              }}
+            >
+              {CAMERA_PRESETS.map((preset) => (
+                <option key={preset} value={preset}>
+                  {uiText(
+                    preset === "isometric" ? "Isometric" : preset === "front" ? "Front" : "Top",
+                  )}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="toolpath-camera-actions">
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label={uiText("Zoom out")}
+              onClick={() => localControls.current?.zoomOut()}
+            >
+              <Minus className="h-4 w-4" aria-hidden />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label={uiText("Fit to view")}
+              onClick={() => {
+                localControls.current?.fit();
+                setCameraPreset("isometric");
+              }}
+            >
+              {uiText("Fit")}
+            </Button>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label={uiText("Zoom in")}
+              onClick={() => localControls.current?.zoomIn()}
+            >
+              <Plus className="h-4 w-4" aria-hidden />
+            </Button>
+          </div>
+        </section>
+      )}
       <section className="toolpath-section" aria-label={uiText("Display")}>
         <h3 className="toolpath-section-title">{uiText("Display")}</h3>
         <div>
           {toggle(viewerCopy(i18n, "viewer.travel"), showTravel, setShowTravel)}
-          {(externalGrid === undefined || onShowGridChange) &&
+          {!sharedControls &&
+            (externalGrid === undefined || onShowGridChange) &&
             toggle(uiText("Build plate grid"), showGrid, onShowGridChange ?? setGrid)}
+          {!printerBedMm && <p>{uiText("Printer bed size unknown; grid is illustrative")}</p>}
+          {printerBedMm && <p>{uiText("Bed position is illustrative")}</p>}
           {printerBedMm &&
             toggle(
               viewerCopy(i18n, "viewer.bed", {
@@ -708,16 +717,20 @@ export function GcodeViewer({
               showBed,
               setShowBed,
             )}
-          {(externalDimensions === undefined || onShowDimensionsChange) &&
+          {!sharedControls &&
+            (externalDimensions === undefined || onShowDimensionsChange) &&
             toggle(uiText("Dimensions"), showDimensions, onShowDimensionsChange ?? setDimensions)}
         </div>
         {showDimensions && (
-          <div className="border-t border-border pt-2 font-mono text-xs text-muted-foreground">
-            {formatNumber(data.bounds.sizeX, { maximumFractionDigits: 1 })} ×{" "}
-            {formatNumber(data.bounds.sizeY, { maximumFractionDigits: 1 })} ×{" "}
-            {uiText("{value1} mm", {
-              value1: formatNumber(data.bounds.sizeZ, { maximumFractionDigits: 1 }),
-            })}
+          <div className="border-t border-border pt-2 text-xs text-muted-foreground">
+            <p>{uiText("Extrusion bounds (includes any purge; excludes travel)")}</p>
+            <p className="font-mono">
+              {formatNumber(data.bounds.sizeX, { maximumFractionDigits: 1 })} ×{" "}
+              {formatNumber(data.bounds.sizeY, { maximumFractionDigits: 1 })} ×{" "}
+              {uiText("{value1} mm", {
+                value1: formatNumber(data.bounds.sizeZ, { maximumFractionDigits: 1 }),
+              })}
+            </p>
           </div>
         )}
       </section>

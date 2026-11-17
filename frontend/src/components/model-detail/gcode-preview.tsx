@@ -4,13 +4,15 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, Layers, Loader2 } from "lucide-react";
 import type { ViewerControls } from "@/components/stl-viewer";
 import type { GcodeViewerProps } from "@/components/gcode-viewer";
+import { ProtectedThumbnail } from "@/components/protected-thumbnail";
+import { matchSlicedPlate } from "./plate-mapping";
 import { ToolpathLayout } from "@/components/toolpath-layout";
 import { Button } from "@/components/ui/button";
 import { Localized } from "@/components/ui/localized";
 import { gcodePlatesOptions } from "@/lib/queries/file-plates";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import type { FileRead } from "@/types";
+import type { FilePlate, FileRead } from "@/types";
 
 const GcodeViewer = lazy(() =>
   import("@/components/gcode-viewer").then((module) => ({ default: module.GcodeViewer })),
@@ -22,6 +24,9 @@ export function GcodePreview({
   ToolpathViewer = GcodeViewer,
   selectedFileId,
   onSelectFile,
+  sourcePlates = [],
+  selectedSourcePlate = null,
+  onSelectSourcePlate,
   viewerProps,
 }: {
   files: FileRead[];
@@ -29,6 +34,9 @@ export function GcodePreview({
   ToolpathViewer?: ComponentType<GcodeViewerProps>;
   selectedFileId?: number;
   onSelectFile?: (fileId: number) => void;
+  sourcePlates?: FilePlate[];
+  selectedSourcePlate?: number | null;
+  onSelectSourcePlate?: (number: number | null) => void;
   viewerProps?: Omit<GcodeViewerProps, "url" | "printerBedMm">;
 }) {
   useUiLocale();
@@ -57,10 +65,20 @@ export function GcodePreview({
   const query = useQuery(gcodePlatesOptions(embedded ? file.id : null));
   if (file === undefined) return null;
   const numbers = query.data?.plates ?? [];
+  const identities = query.data?.identities ?? [];
+  const mapped = sourcePlates.map((source) => ({
+    source,
+    sliced: matchSlicedPlate(source, sourcePlates, identities),
+  }));
+  const selectedMapping = mapped.find(
+    ({ source }) => source.number === selectedSourcePlate,
+  )?.sliced;
   const plate =
-    selectedPlate?.fileId === file.id && numbers.includes(selectedPlate.number)
-      ? selectedPlate.number
-      : numbers[0];
+    selectedMapping && numbers.includes(selectedMapping.number)
+      ? selectedMapping.number
+      : selectedPlate?.fileId === file.id && numbers.includes(selectedPlate.number)
+        ? selectedPlate.number
+        : numbers[0];
   const url = embedded
     ? plate === undefined
       ? null
@@ -95,24 +113,54 @@ export function GcodePreview({
               <span className="toolpath-section-title">{uiText("Sliced plates")}</span>
               <span className="font-mono text-xs text-muted-foreground">{numbers.length}</span>
             </div>
+            {selectedSourcePlate !== null && !selectedMapping && (
+              <p className="text-xs text-muted-foreground">
+                {uiText("The selected source plate could not be matched to a sliced plate.")}
+              </p>
+            )}
             <div className="toolpath-plate-list">
-              {numbers.map((number) => (
-                <Button
-                  key={number}
-                  variant="outline"
-                  aria-pressed={plate === number}
-                  onClick={() => setSelectedPlate({ fileId: file.id, number })}
-                  className="toolpath-plate-card"
-                >
-                  <span className="toolpath-plate-number" aria-hidden>
-                    <Layers className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0 flex-1 text-left">
-                    {uiText("Plate {value1}", { value1: String(number).padStart(2, "0") })}
-                  </span>
-                  {plate === number && <Check className="h-4 w-4 shrink-0" aria-hidden />}
-                </Button>
-              ))}
+              {numbers.map((number) => {
+                const match = mapped.find(({ sliced }) => sliced?.number === number);
+                const identity = identities.find((item) => item.number === number);
+                return (
+                  <Button
+                    key={number}
+                    variant="outline"
+                    aria-pressed={plate === number}
+                    onClick={() => {
+                      setSelectedPlate({ fileId: file.id, number });
+                      onSelectSourcePlate?.(match?.source.number ?? null);
+                    }}
+                    className="toolpath-plate-card"
+                  >
+                    {match?.source.image_url ? (
+                      <ProtectedThumbnail
+                        path={match.source.image_url}
+                        alt=""
+                        className="toolpath-plate-number h-10 w-10 shrink-0 overflow-hidden"
+                        imageClassName="h-full w-full object-contain"
+                        placeholder={<Layers className="h-4 w-4" aria-hidden />}
+                      />
+                    ) : (
+                      <span className="toolpath-plate-number" aria-hidden>
+                        <Layers className="h-4 w-4" />
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1 text-left">
+                      {uiText("Plate {value1}", { value1: String(number).padStart(2, "0") })}
+                      {identity && (
+                        <>
+                          {" "}
+                          <span className="block text-xs text-muted-foreground">
+                            {identity.name}
+                          </span>
+                        </>
+                      )}
+                    </span>
+                    {plate === number && <Check className="h-4 w-4 shrink-0" aria-hidden />}
+                  </Button>
+                );
+              })}
             </div>
           </div>
         )}

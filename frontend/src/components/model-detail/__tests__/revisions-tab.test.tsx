@@ -129,6 +129,13 @@ afterEach(() => {
 });
 
 describe("RevisionsTab", () => {
+  it("shows the selected revision filename once", async () => {
+    renderRevisions({ revisions: [aRevision()] });
+
+    expect(await screen.findByText("part_0.2mm.gcode")).toBeVisible();
+    expect(screen.getAllByText("part_0.2mm.gcode")).toHaveLength(1);
+  });
+
   describe("keyboard revision selection", () => {
     it("moves revision focus with the arrow selection", async () => {
       const user = userEvent.setup();

@@ -51,6 +51,9 @@
   overflow: hidden;
   background: var(--muted);
 }
+.model-plate-thumbnail[data-library-thumbnail="ready"] {
+  background: var(--preview-image-matte);
+}
 .model-plate-copy {
   flex: 1;
   min-width: 0;

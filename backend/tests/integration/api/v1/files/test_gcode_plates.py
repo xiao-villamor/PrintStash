@@ -6,6 +6,9 @@ as a project. Unsafe or unavailable originals never become an empty success.
 
 from __future__ import annotations
 
+import io
+import zipfile
+
 import pytest
 
 from app.core.config import _overlay
@@ -38,7 +41,50 @@ class TestGcodePlates:
         )
 
         assert response.status_code == 200, response.text
-        assert response.json() == {"plates": [2, 10]}
+        assert response.json() == {"plates": [2, 10], "plate_metadata": [], "identities": []}
+
+    def test_serves_persisted_per_plate_estimates_after_enrichment(
+        self, client, auth_headers, make_model, make_file
+    ):
+        from app.modules.derivatives.producers import derive_gcode
+
+        package = io.BytesIO()
+        with zipfile.ZipFile(package, "w") as archive:
+            for number, duration, grams in (
+                (1, "7h 44m 22s", "419.18"),
+                (2, "41m 5s", "13.03"),
+            ):
+                archive.writestr(
+                    f"Metadata/plate_{number}.gcode",
+                    f"; total estimated time: {duration}\n; total filament weight [g] : {grams}\n"
+                    "; printer_model = Bambu Lab P1S\n",
+                )
+        data = package.getvalue()
+        key = "sliced/enriched.gcode.3mf"
+        get_backend().write_bytes(data, key)
+        artifact = make_file(
+            make_model("enriched"),
+            filename="enriched.gcode.3mf",
+            ftype="gcode",
+            path=key,
+            size_bytes=len(data),
+        )
+        derive_gcode(artifact.id)
+
+        response = client.get(
+            f"/api/v1/files/{artifact.id}/gcode-plates", headers=auth_headers
+        )
+        assert response.status_code == 200, response.text
+        plates = response.json()["plate_metadata"]
+        assert [plate["number"] for plate in plates] == [1, 2]
+        assert [plate["metadata"]["estimated_time_s"] for plate in plates] == [
+            27862,
+            2465,
+        ]
+        assert [plate["metadata"]["filament_weight_g"] for plate in plates] == [
+            419.18,
+            13.03,
+        ]
 
     def test_refuses_unauthenticated_access(self, client, sliced_file):
         response = client.get(f"/api/v1/files/{sliced_file.id}/gcode-plates")

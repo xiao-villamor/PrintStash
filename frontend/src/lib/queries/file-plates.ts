@@ -47,10 +47,32 @@ export function useFilePlates(modelId: number, fileId: number | null): FilePlate
   return fileId === null ? null : (query.data ?? null);
 }
 
-/** Only read archive metadata when a 3MF is selected for toolpath viewing. */
+/** Read the actual sliced plates and their metadata from a 3MF. */
 export function gcodePlatesOptions(fileId: number | null) {
   return queryOptions({
     queryKey: ["gcode-plates", fileId] as const,
     queryFn: fileId === null ? skipToken : ({ signal }) => getGcodePlates(fileId, signal),
   });
+}
+
+/** Refresh estimates when enrichment of the selected revision settles. */
+export function useGcodePlates(modelId: number, fileId: number | null) {
+  const client = useQueryClient();
+  const query = useQuery(gcodePlatesOptions(fileId));
+  useEffect(() => {
+    if (fileId === null) return;
+    const session = getSessionVersion();
+    return followModel(modelId, (notice) => {
+      if (session !== getSessionVersion()) return;
+      if (
+        notice.type === "resync" ||
+        (notice.type === "derivative" &&
+          notice.kind === "metadata" &&
+          notice.file_id === fileId &&
+          SETTLED.has(notice.state))
+      )
+        void client.invalidateQueries({ queryKey: ["gcode-plates", fileId], exact: true });
+    });
+  }, [client, modelId, fileId]);
+  return fileId === null ? null : (query.data ?? null);
 }

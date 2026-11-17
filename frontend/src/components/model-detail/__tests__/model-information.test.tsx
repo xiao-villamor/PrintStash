@@ -38,6 +38,10 @@ describe("ModelInformation", () => {
       expect(screen.queryByRole("link", { name: "Source model" })).not.toBeInTheDocument();
     },
   );
+  it("labels the geometry as the whole source", () => {
+    show();
+    expect(screen.getByRole("heading", { name: "Whole source geometry" })).toBeInTheDocument();
+  });
   it("keeps unavailable geometry explicit", () => {
     show();
     expect(screen.getAllByText("Not recorded")).toHaveLength(3);

@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from sqlmodel import Session
+
 from app.core.errors import ErrorKind, OperationError
-from app.db.models import File, FileType
+from app.db.models import DerivativeKind, DerivativeState, File, FileType
+from app.modules.derivatives import records
 from app.modules.media.three_mf_preview import (
     EmbeddedGcodeError,
     list_embedded_gcode_plates,
     read_embedded_gcode_path,
 )
 from app.modules.storage.artifact_content import ArtifactContentError, resolve
+from app.schemas.plates import GcodePlateMetadataRead
 
 
 def is_sliced_filename(filename: str) -> bool:
@@ -57,3 +62,16 @@ def plate_toolpath(source: Path, plate_index: int) -> Iterator[Path]:
         path = Path(directory) / embedded.filename
         path.write_bytes(embedded.content)
         yield path
+
+
+def plate_metadata(session: Session, file: File) -> list[GcodePlateMetadataRead]:
+    """Return plate estimates from the current published metadata derivative."""
+    row = records.rows_for(session, file).get(DerivativeKind.METADATA)
+    if row is None or row.state is not DerivativeState.READY:
+        return []
+    output = json.loads(row.output_json)
+    # Pre-existing 3MF metadata producers may not publish sliced plate details.
+    return [
+        GcodePlateMetadataRead.model_validate(item)
+        for item in output.get("plate_metadata", [])
+    ]

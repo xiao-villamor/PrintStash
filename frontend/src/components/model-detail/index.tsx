@@ -86,7 +86,8 @@ import { useDerivativeRefresh } from "./use-derivative-refresh";
 import { ViewerToolbar } from "./viewer-toolbar";
 import { ModelCoverEditor } from "./cover-editor";
 import { PlatePicker } from "./plate-picker";
-import { useFilePlates } from "@/lib/queries/file-plates";
+import { useFilePlates, useGcodePlates } from "@/lib/queries/file-plates";
+import { matchSlicedPlate } from "./plate-mapping";
 import { Localized } from "@/components/ui/localized";
 import { ModelTagsDialog } from "@/components/model-tags-dialog";
 
@@ -116,8 +117,6 @@ interface BedSize {
   y: number;
 }
 
-const DEFAULT_BED_SIZE: BedSize = { x: 235, y: 235 };
-
 const DETAIL_SIDEBAR_STORAGE_KEY = "ps-model-detail-inspector-preferred-width";
 const DETAIL_SIDEBAR_MIN_WIDTH = 400;
 const DETAIL_SIDEBAR_MAX_WIDTH = 1100;
@@ -134,8 +133,8 @@ function clampDetailSidebarWidth(width: number, availableWidth?: number): number
   );
 }
 
-function getBedSize(printerModel: string | null | undefined): BedSize {
-  if (!printerModel) return DEFAULT_BED_SIZE;
+function getBedSize(printerModel: string | null | undefined): BedSize | null {
+  if (!printerModel) return null;
   const m = printerModel.toLowerCase();
   if (m.includes("a1 mini") || (m.includes("bambu") && m.includes("mini")))
     return { x: 180, y: 180 };
@@ -146,11 +145,11 @@ function getBedSize(printerModel: string | null | undefined): BedSize {
   if (m.includes("voron") || m.includes("v2.4")) {
     if (m.includes("350")) return { x: 350, y: 350 };
     if (m.includes("300")) return { x: 300, y: 300 };
-    return { x: 250, y: 250 };
+    return null;
   }
   if (m.includes("cr-10") || m.includes("cr10")) return { x: 300, y: 300 };
   if (m.includes("ender") || m.includes("k1")) return { x: 220, y: 220 };
-  return DEFAULT_BED_SIZE;
+  return null;
 }
 
 export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
@@ -296,6 +295,11 @@ function ModelDetailPresentation({
   }, []);
   // The plate chosen for one 3MF; another mesh file shows its whole build.
   const [chosenPlate, setChosenPlate] = useState<{ fileId: number; number: number } | null>(null);
+  const [plateDimensions, setPlateDimensions] = useState<{
+    fileId: number;
+    number: number;
+    dimensions: { x: number; y: number; z: number };
+  } | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
   const [compareRequested, setCompareRequested] = useState(false);
   const [comparisonMode, setComparisonMode] = useState<"gcode" | "source" | "all">("gcode");
@@ -684,6 +688,14 @@ function ModelDetailPresentation({
   const shownPlate =
     chosenPlate !== null && chosenPlate.fileId === meshFile?.id
       ? (plates.find((plate) => plate.number === chosenPlate.number) ?? null)
+      : null;
+  const slicedEstimates = useGcodePlates(
+    model.id,
+    inspectedGcode?.original_filename.toLowerCase().endsWith(".3mf") ? inspectedGcode.id : null,
+  );
+  const selectedEstimatePlate =
+    shownPlate && slicedEstimates
+      ? (matchSlicedPlate(shownPlate, plates, slicedEstimates.identities ?? [])?.number ?? null)
       : null;
   const thumbUrl = useAuthenticatedAssetUrl(model.thumbnail_url);
   const printerFilesByFileId = useMemo(() => {
@@ -1202,8 +1214,16 @@ function ModelDetailPresentation({
                       bedSizeFor={(file) => getBedSize(file.metadata?.printer_model)}
                       selectedFileId={previewSource?.id}
                       onSelectFile={selectToolpathSource}
+                      sourcePlates={plates}
+                      selectedSourcePlate={shownPlate?.number ?? null}
+                      onSelectSourcePlate={(number) =>
+                        setChosenPlate(
+                          number === null || !meshFile ? null : { fileId: meshFile.id, number },
+                        )
+                      }
                       viewerProps={{
                         screenshotName: model.slug || model.name,
+                        sharedControls: true,
                         showGrid,
                         showDimensions,
                         onShowGridChange: setShowGrid,
@@ -1230,6 +1250,15 @@ function ModelDetailPresentation({
                           : model.slug || model.name
                       }
                       plate={shownPlate?.region}
+                      onGeometryDimensions={(dimensions) => {
+                        if (shownPlate && meshFile && dimensions) {
+                          setPlateDimensions({
+                            fileId: meshFile.id,
+                            number: shownPlate.number,
+                            dimensions,
+                          });
+                        }
+                      }}
                     />
                   </Suspense>
                 ) : thumbUrl ? (
@@ -1250,8 +1279,33 @@ function ModelDetailPresentation({
                     )}
                   </div>
                 )}
-                {/* Dimensions overlay (bottom-left). They measure the whole build, so a
-                single plate does not claim them. */}
+                {/* Source plate bounds are measured from the shown mesh, separately from
+                    the whole-source metadata shown below the preview. */}
+                {viewerMode === "model" &&
+                  showDimensions &&
+                  viewerReady &&
+                  shownPlate &&
+                  plateDimensions !== null &&
+                  plateDimensions.fileId === meshFile?.id &&
+                  plateDimensions.number === shownPlate.number && (
+                    <div className="absolute bottom-4 left-4 z-10 bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-2 py-1 text-xs text-on-surface">
+                      <span>{uiText("Selected plate mesh bounds")}: </span>
+                      <span className="font-mono">
+                        {uiText("{value1}×{value2}×{value3} mm", {
+                          value1: formatNumber(plateDimensions.dimensions.x, {
+                            maximumFractionDigits: 1,
+                          }),
+                          value2: formatNumber(plateDimensions.dimensions.y, {
+                            maximumFractionDigits: 1,
+                          }),
+                          value3: formatNumber(plateDimensions.dimensions.z, {
+                            maximumFractionDigits: 1,
+                          }),
+                        })}
+                      </span>
+                    </div>
+                  )}
+                {/* Whole-source dimensions do not describe an individual plate. */}
                 {viewerMode === "model" &&
                   showDimensions &&
                   viewerReady &&
@@ -1262,6 +1316,7 @@ function ModelDetailPresentation({
                     <div className="absolute bottom-4 left-4 z-10">
                       <div className="bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-2 py-1 flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span>{uiText("Whole source geometry")}: </span>
                         <span className="font-mono text-[13px] text-on-surface">
                           {uiText("{value1}×{value2}×{value3} mm", {
                             value1: formatNumber(meshFile.metadata.bbox_x_mm, {
@@ -1376,6 +1431,8 @@ function ModelDetailPresentation({
                       editor={modelMetadataEditor}
                       revision={{
                         file: inspectedGcode,
+                        plateEstimates: slicedEstimates,
+                        selectedSlicedPlate: selectedEstimatePlate,
                         recommended: recommendedGcode,
                         revisionCount: gcodeFiles.length,
                         canEdit: canEditModel,
@@ -1419,6 +1476,9 @@ function ModelDetailPresentation({
                     meta={meta}
                     printSettingRows={printSettingRows}
                     preferences={metadataPreferences}
+                    hasSlicedRevision={gcodeFiles.length > 0}
+                    plateEstimates={slicedEstimates}
+                    selectedSlicedPlate={selectedEstimatePlate}
                     headerActions={
                       gcodeFiles.length > 1 ? (
                         <Button

@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { modelReviewTest as test, expect } from "../helpers";
 import { collapseNavigationSidebar, detailReviewRecorder, reviewArchiveSettings } from "../util";
-import type { FilePlates, ModelRead } from "../../../src/types";
+import type { FilePlates, MetadataRead, ModelRead } from "../../../src/types";
 
 test.describe("Existing Model review", () => {
   for (const theme of ["light", "dark"] as const) {
@@ -29,15 +29,21 @@ test.describe("Existing Model review", () => {
         const sourcePlates: FilePlates = await (
           await page.request.get(`/api/v1/files/${source!.id}/plates`)
         ).json();
-        const slicedPlates: { plates: number[] } = await (
-          await page.request.get(`/api/v1/files/${sliced!.id}/gcode-plates`)
-        ).json();
+        const slicedPlates: {
+          plates: number[];
+          plate_metadata: { number: number; metadata: MetadataRead }[];
+        } = await (await page.request.get(`/api/v1/files/${sliced!.id}/gcode-plates`)).json();
         expect(sourcePlates.plates.length).toBeGreaterThan(1);
         expect(slicedPlates.plates.length).toBeGreaterThan(1);
         const review = detailReviewRecorder(page, info);
         let completed = false;
         const inspector = page.getByTestId("model-detail-sidebar").getByRole("tabpanel");
         const capturePanel = async (state: string) => {
+          await expect(
+            page
+              .getByRole("region", { name: "Preview", exact: true })
+              .getByRole("button", { name: "Screenshot", exact: true }),
+          ).toBeEnabled({ timeout: 60_000 });
           await inspector.evaluate((el) => {
             el.scrollTop = 0;
           });
@@ -133,14 +139,86 @@ test.describe("Existing Model review", () => {
                 .update(await readFile(downloadedPath))
                 .digest("hex"),
             ).toBe(sliced!.sha256);
+            const embeddedSettings = await reviewArchiveSettings(downloadedPath);
             await review.save("metadata.json", {
               origin: target.origin,
               modelId,
               files: model.files,
               sourcePlates,
               slicedPlates,
-              embeddedSettings: await reviewArchiveSettings(downloadedPath),
+              embeddedSettings,
             });
+            // Compare persisted values to the downloaded original bytes, per plate.
+            // The test does not manufacture estimates or assume one plate represents the archive.
+            expect(slicedPlates.plate_metadata).toHaveLength(slicedPlates.plates.length);
+            for (const plate of slicedPlates.plate_metadata) {
+              const headers = embeddedSettings[`Metadata/plate_${plate.number}.gcode`];
+              expect(headers).toBeDefined();
+              const header = headers.join("\n");
+              const value = (pattern: RegExp) => {
+                const match = header.match(pattern);
+                expect(match).not.toBeNull();
+                return match![1].trim();
+              };
+              expect(plate.metadata.printer_model).toBe(value(/; printer_model = ([^\n]+)/));
+              expect(plate.metadata.material_type).toBe(value(/; filament_type = ([^\n]+)/));
+              expect(plate.metadata.layer_height_mm).toBe(
+                Number(value(/; layer_height = ([^\n]+)/)),
+              );
+              expect(plate.metadata.nozzle_diameter_mm).toBe(
+                Number(value(/; nozzle_diameter = ([^\n]+)/)),
+              );
+              expect(plate.metadata.nozzle_temperature_c).toBe(
+                Number(value(/; nozzle_temperature = ([^\n]+)/)),
+              );
+              expect(plate.metadata.infill_percent).toBe(
+                Number(value(/; sparse_infill_density = ([^%\n]+)/)),
+              );
+              expect(plate.metadata.wall_loops).toBe(Number(value(/; wall_loops = ([^\n]+)/)));
+              expect(plate.metadata.filament_weight_g).toBeCloseTo(
+                Number(value(/; total filament weight \[g\] : ([^\n]+)/)),
+                2,
+              );
+              const time = header.match(
+                /total estimated time:\s*(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?/,
+              );
+              expect(time).not.toBeNull();
+              expect(plate.metadata.estimated_time_s).toBe(
+                Number(time![1] ?? 0) * 3600 + Number(time![2] ?? 0) * 60 + Number(time![3] ?? 0),
+              );
+            }
+            await tab("Print settings");
+            await expect(
+              inspector.getByText("No print settings are available for this sliced revision."),
+            ).toHaveCount(0);
+            const estimates = inspector.getByRole("region", {
+              name: "Plate estimates",
+              exact: true,
+            });
+            await expect(estimates).toBeVisible();
+            for (const plate of slicedPlates.plate_metadata) {
+              const row = estimates.getByRole("region", {
+                name: `Plate ${String(plate.number).padStart(2, "0")}`,
+                exact: true,
+              });
+              const header = embeddedSettings[`Metadata/plate_${plate.number}.gcode`].join("\n");
+              const time = header.match(/total estimated time:\s*((?:(?:\d+h|\d+m|\d+s)\s*)+)/);
+              const weight = header.match(/; total filament weight \[g\] : ([^\n]+)/);
+              expect(time).not.toBeNull();
+              expect(weight).not.toBeNull();
+              await expect(row.getByText(time![1].trim(), { exact: true })).toBeVisible();
+              await expect(
+                row.getByText(
+                  `${Number(weight![1]).toLocaleString("en-US", { maximumFractionDigits: 2 })} g`,
+                  { exact: true },
+                ),
+              ).toBeVisible();
+            }
+            const shared = slicedPlates.plate_metadata[0].metadata;
+            await expect(inspector.getByText(shared.printer_model!, { exact: true })).toBeVisible();
+            await expect(inspector.getByText(shared.material_type!, { exact: true })).toBeVisible();
+            await capturePanel("print-settings-extracted-values");
+            await tab("Revisions");
             await review.capture("revision-original-download");
             await inspector.getByRole("button", { name: "Edit revision", exact: true }).click();
             await review.capture("revision-editor");
@@ -219,6 +297,7 @@ test.describe("Existing Model review", () => {
             await expect(
               inspector.getByRole("button", { name: "Retry", exact: true }),
             ).toBeVisible();
+            await expect(screenshot).toBeEnabled({ timeout: 60_000 });
             await review.capture("source-injected-error");
             await page.unroute(`**${path}/provenance`);
             const recovered = page.waitForResponse(
@@ -233,14 +312,36 @@ test.describe("Existing Model review", () => {
             await capturePanel("source-recovered");
           } else {
             // ── Source plates: capture before/after Fit instead of hiding framing faults ──
+            await expect(
+              page.getByRole("heading", { name: "Whole source geometry", exact: true }),
+            ).toBeVisible();
             await review.capture("mesh-all-plates");
             const plates = page.getByRole("group", { name: "Plates", exact: true });
+            const assertImageMatte = async (group: typeof plates) => {
+              for (const plate of sourcePlates.plates) {
+                expect(plate.name).toBeTruthy();
+                const thumbnail = group
+                  .getByRole("button", { name: plate.name! })
+                  .locator("[data-library-thumbnail]");
+                await expect(thumbnail).toHaveAttribute("data-library-thumbnail", "ready");
+                const color = await thumbnail.evaluate(
+                  (element) => getComputedStyle(element).backgroundColor,
+                );
+                const channels = color.match(/\d+/g)?.map(Number);
+                expect(
+                  channels?.slice(0, 3).every((channel) => channel >= 220),
+                  `thumbnail matte must remain light: ${color}`,
+                ).toBe(true);
+              }
+            };
+            await assertImageMatte(plates);
             for (const plate of sourcePlates.plates) {
               await plates
                 .getByRole("button", {
                   name: new RegExp(`^Plate ${String(plate.number).padStart(2, "0")}\\b`),
                 })
                 .click();
+              await expect(preview.getByText(/^Selected plate mesh bounds:/)).toBeVisible();
               await review.capture(`mesh-plate-${plate.number}`);
               await preview.getByRole("button", { name: "Fit to view", exact: true }).click();
               await review.capture(`mesh-plate-${plate.number}-fitted`);
@@ -250,29 +351,145 @@ test.describe("Existing Model review", () => {
               await expect(
                 preview.getByRole("button", { name: mode, exact: true }),
               ).toHaveAttribute("aria-pressed", "true");
-              await review.capture(`mesh-${mode.toLowerCase()}`);
             }
             for (const camera of ["Top", "Front", "Isometric"]) {
               await preview.getByRole("button", { name: camera, exact: true }).click();
-              await review.capture(`mesh-camera-${camera.toLowerCase()}`);
             }
             await preview.getByRole("button", { name: "Expand", exact: true }).click();
             await review.capture("mesh-expanded");
             await preview.getByRole("button", { name: "Collapse preview", exact: true }).click();
-            await preview.getByRole("button", { name: "Layers", exact: true }).click();
+            // Shared overlays and camera presets retain their state and location across modes.
+            const grid = preview.getByRole("button", { name: "Build plate grid", exact: true });
+            const dimensions = preview.getByRole("button", { name: "Dimensions", exact: true });
+            await grid.click();
+            await dimensions.click();
+            const gridState = await grid.getAttribute("aria-pressed");
+            const dimensionsState = await dimensions.getAttribute("aria-pressed");
+            const gridBox = await grid.boundingBox();
+            await preview.getByRole("button", { name: "G-code", exact: true }).click();
+            await expect(grid).toHaveAttribute("aria-pressed", gridState!);
+            await expect(dimensions).toHaveAttribute("aria-pressed", dimensionsState!);
+            const toolpathGridBox = await grid.boundingBox();
+            expect(gridBox).not.toBeNull();
+            expect(toolpathGridBox).not.toBeNull();
+            expect(Math.abs(gridBox!.x - toolpathGridBox!.x)).toBeLessThan(2);
+            expect(Math.abs(gridBox!.y - toolpathGridBox!.y)).toBeLessThan(2);
+            for (const action of [
+              "Isometric",
+              "Front",
+              "Top",
+              "Zoom in",
+              "Zoom out",
+              "Fit to view",
+            ]) {
+              await expect(
+                preview.getByRole("button", { name: action, exact: true }),
+              ).toBeVisible();
+            }
             const controls = page.getByRole("complementary", { name: "Toolpath controls" });
-            await controls
-              .getByRole("combobox", { name: "G-code file" })
-              .selectOption(String(sliced!.id));
+            const filePicker = controls.getByRole("combobox", { name: "G-code file" });
+            if (await filePicker.count()) await filePicker.selectOption(String(sliced!.id));
+            const slicedGroup = controls.getByRole("group", { name: "Sliced plates", exact: true });
+            const assertPlateCardsFit = async () => {
+              for (const sourcePlate of sourcePlates.plates) {
+                expect(sourcePlate.name).toBeTruthy();
+                const card = slicedGroup.getByRole("button", { name: sourcePlate.name! });
+                await card.scrollIntoViewIfNeeded();
+                const cardBox = await card.boundingBox();
+                const nameBox = await card
+                  .getByText(sourcePlate.name!, { exact: true })
+                  .boundingBox();
+                expect(cardBox).not.toBeNull();
+                expect(nameBox).not.toBeNull();
+                expect(nameBox!.x).toBeGreaterThanOrEqual(cardBox!.x);
+                expect(nameBox!.y).toBeGreaterThanOrEqual(cardBox!.y);
+                expect(nameBox!.x + nameBox!.width).toBeLessThanOrEqual(
+                  cardBox!.x + cardBox!.width,
+                );
+                expect(nameBox!.y + nameBox!.height).toBeLessThanOrEqual(
+                  cardBox!.y + cardBox!.height,
+                );
+              }
+              const boxes = await slicedGroup.getByRole("button").evaluateAll((cards) =>
+                cards.map((card) => {
+                  const box = card.getBoundingClientRect();
+                  return { top: box.top, bottom: box.bottom };
+                }),
+              );
+              for (let i = 1; i < boxes.length; i++)
+                expect(boxes[i].top).toBeGreaterThanOrEqual(boxes[i - 1].bottom);
+            };
             const layer = controls.getByRole("spinbutton", { name: "Layer number" });
             await expect(layer).toBeVisible({ timeout: 60_000 });
             await expect(screenshot).toBeEnabled({ timeout: 60_000 });
+            for (const action of [
+              "Build plate grid",
+              "Dimensions",
+              "Isometric",
+              "Front",
+              "Top",
+              "Zoom in",
+              "Zoom out",
+              "Fit to view",
+            ]) {
+              const control = preview.getByRole("button", { name: action, exact: true });
+              expect(
+                await control.evaluate((element) => {
+                  const box = element.getBoundingClientRect();
+                  const parent = element.closest('[role="region"][aria-label="Preview"]');
+                  if (!parent) return false;
+                  const bounds = parent.getBoundingClientRect();
+                  const hit = document.elementFromPoint(
+                    box.left + box.width / 2,
+                    box.top + box.height / 2,
+                  );
+                  return (
+                    box.left >= bounds.left &&
+                    box.right <= bounds.right &&
+                    box.top >= bounds.top &&
+                    box.bottom <= bounds.bottom &&
+                    hit !== null &&
+                    element.contains(hit)
+                  );
+                }),
+                `${action} must fit and be reachable in the preview`,
+              ).toBe(true);
+            }
+            await assertPlateCardsFit();
+            await assertImageMatte(slicedGroup);
+            // Match by the actual plate name, not by the order of either list.
+            // This review is for the supplied multi-plate artifacts with named plates.
+            const selectedSource = sourcePlates.plates.at(-1)!;
+            expect(selectedSource.name).toBeTruthy();
+            const selectedSliced = controls.getByRole("button", {
+              name: selectedSource.name!,
+            });
+            await expect(selectedSliced).toHaveAttribute("aria-pressed", "true", {
+              timeout: 60_000,
+            });
             await review.capture("toolpath-entry-selected-plate");
+            for (const sourcePlate of sourcePlates.plates) {
+              expect(sourcePlate.name).toBeTruthy();
+              const slicedCard = controls.getByRole("button", { name: sourcePlate.name! });
+              await expect(slicedCard).toHaveCount(1);
+              await slicedCard.focus();
+              await expect(slicedCard).toBeFocused();
+              await slicedCard.press("Enter");
+              await expect(slicedCard).toHaveAttribute("aria-pressed", "true");
+              await expect(screenshot).toBeEnabled({ timeout: 60_000 });
+              await preview.getByRole("button", { name: "3D model", exact: true }).click();
+              const sourceCard = plates.getByRole("button", { name: sourcePlate.name! });
+              await expect(sourceCard).toHaveAttribute("aria-pressed", "true", { timeout: 60_000 });
+              await expect(screenshot).toBeEnabled({ timeout: 60_000 });
+              await review.capture(`mesh-return-plate-${sourcePlate.number}`);
+              await preview.getByRole("button", { name: "G-code", exact: true }).click();
+              await expect(slicedCard).toHaveAttribute("aria-pressed", "true", { timeout: 60_000 });
+              await expect(screenshot).toBeEnabled({ timeout: 60_000 });
+            }
             for (const plate of slicedPlates.plates) {
               await controls
                 .getByRole("button", {
-                  name: `Plate ${String(plate).padStart(2, "0")}`,
-                  exact: true,
+                  name: new RegExp(`^Plate ${String(plate).padStart(2, "0")}\\b`),
                 })
                 .click();
               await expect(layer).toBeVisible({ timeout: 60_000 });
@@ -287,26 +504,38 @@ test.describe("Existing Model review", () => {
               await review.capture(`toolpath-plate-${plate}-middle`);
             }
             await controls.getByRole("tab", { name: "View", exact: true }).click();
+            if (sliced!.metadata?.printer_model === "Bambu Lab P1S") {
+              await expect(
+                controls.getByRole("button", { name: "Bed 256×256", exact: true }),
+              ).toBeVisible();
+            }
+            if (dimensionsState === "false") await dimensions.click();
+            await expect(
+              controls.getByText("Extrusion bounds (includes any purge; excludes travel)"),
+            ).toBeVisible();
             await review.capture("toolpath-view");
-            for (const camera of ["top", "front", "isometric"]) {
-              await controls
-                .getByRole("combobox", { name: "Camera view", exact: true })
-                .selectOption(camera);
-              await review.capture(`toolpath-camera-${camera}`);
+            if (dimensionsState === "false") await dimensions.click();
+            for (const camera of ["Top", "Front", "Isometric"]) {
+              const preset = preview.getByRole("button", { name: camera, exact: true });
+              await preset.click();
+              await expect(preset).toHaveAttribute("aria-pressed", "true");
             }
             await controls.getByRole("button", { name: "Travel", exact: true }).click();
             await expect(
               controls.getByRole("button", { name: "Travel", exact: true }),
             ).toHaveAttribute("aria-pressed", "true");
             for (const action of ["Zoom in", "Zoom out", "Fit to view"])
-              await controls.getByRole("button", { name: action, exact: true }).click();
+              await preview.getByRole("button", { name: action, exact: true }).click();
             await preview.getByRole("button", { name: "Expand", exact: true }).click();
             await review.capture("toolpath-expanded-view");
             await controls.getByRole("tab", { name: "Layers", exact: true }).click();
+            await assertPlateCardsFit();
             await review.capture("toolpath-expanded-layers");
             await preview.getByRole("button", { name: "Collapse preview", exact: true }).click();
             await preview.getByRole("button", { name: "3D model", exact: true }).click();
             await expect(screenshot).toBeEnabled({ timeout: 60_000 });
+            await expect(grid).toHaveAttribute("aria-pressed", gridState!);
+            await expect(dimensions).toHaveAttribute("aria-pressed", dimensionsState!);
             await review.capture("mesh-return-from-toolpath");
           }
           const after: ModelRead = await (await page.request.get(path)).json();

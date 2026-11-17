@@ -13,6 +13,8 @@ import { useUiLocale } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
 import type { FileRead, ModelPrintJobRead } from "@/types";
 import { HashValue } from "./file-hashes";
+import type { GcodePlates } from "@/lib/api/plates";
+import { PlateEstimates } from "./plate-estimates";
 import { PRINT_JOB_PRESENTATION, revisionStatusLabel } from "./presentation";
 
 type RecordedPrint = Pick<ModelPrintJobRead, "file_id" | "printer_name" | "state">;
@@ -33,6 +35,8 @@ export function InspectedPrintCard({
   onInspect,
   onAddRevision,
   onCompare,
+  plateEstimates,
+  selectedSlicedPlate = null,
 }: {
   file: FileRead | null;
   canEdit: boolean;
@@ -48,6 +52,8 @@ export function InspectedPrintCard({
   onInspect: (id: number) => void;
   onAddRevision: () => void;
   onCompare: () => void;
+  plateEstimates?: GcodePlates | null;
+  selectedSlicedPlate?: number | null;
 }) {
   useUiLocale();
   if (!file)
@@ -122,12 +128,18 @@ export function InspectedPrintCard({
             </dl>
           </section>
           <section className="detail-overview-secondary">
-            <h3>{uiText("Print estimate")}</h3>
-            <dl className="detail-overview-facts detail-estimates">
-              {fact(uiText("Time"), formatDuration(meta?.estimated_time_s ?? null))}
-              {fact(uiText("Filament per copy"), formatGrams(meta?.filament_weight_g))}
-              {fact(uiText("Cost"), formatCost(meta?.filament_cost))}
-            </dl>
+            {plateEstimates && plateEstimates.plates.length > 1 ? (
+              <PlateEstimates data={plateEstimates} selected={selectedSlicedPlate} />
+            ) : (
+              <>
+                <h3>{uiText("Print estimate")}</h3>
+                <dl className="detail-overview-facts detail-estimates">
+                  {fact(uiText("Time"), formatDuration(meta?.estimated_time_s ?? null))}
+                  {fact(uiText("Filament per copy"), formatGrams(meta?.filament_weight_g))}
+                  {fact(uiText("Cost"), formatCost(meta?.filament_cost))}
+                </dl>
+              </>
+            )}
           </section>
         </div>
         <div>

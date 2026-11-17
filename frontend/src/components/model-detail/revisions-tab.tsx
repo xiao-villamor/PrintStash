@@ -459,9 +459,11 @@ export function RevisionsTab({
                     </tr>
                     <tr>
                       <td colSpan={6} className="detail-revision-table-note">
-                        {file.revision_notes ?? file.original_filename}
+                        {file.revision_notes}
                         {file.revision_status && (
-                          <span className="ml-2">{revisionStatusLabel(file.revision_status)}</span>
+                          <span className={file.revision_notes ? "ml-2" : undefined}>
+                            {revisionStatusLabel(file.revision_status)}
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -495,7 +497,9 @@ export function RevisionsTab({
                             <span className="font-normal">{f.revision_label}</span>
                           )}
                         </h3>
-                        <p className="break-all text-sm">{f.original_filename}</p>
+                        <p className="break-all text-xs text-muted-foreground">
+                          {f.original_filename}
+                        </p>
                         <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                           <span>
                             {uiText("Added")} {timeAgo(f.uploaded_at)}

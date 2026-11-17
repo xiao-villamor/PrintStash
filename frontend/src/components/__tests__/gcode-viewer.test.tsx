@@ -117,6 +117,69 @@ describe("GcodeViewer", () => {
     expect(screen.getByRole("slider", { name: "Current layer" })).toHaveValue("2");
   });
 
+  it("labels the scope of the displayed toolpath bounds", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(TOOLPATH));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    await user.click(await screen.findByRole("tab", { name: "View" }));
+    expect(
+      screen.getByText("Extrusion bounds (includes any purge; excludes travel)"),
+    ).toBeVisible();
+  });
+
+  it("identifies the grid as illustrative when the printer bed is unknown", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(TOOLPATH));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    await user.click(await screen.findByRole("tab", { name: "View" }));
+    expect(screen.getByText("Printer bed size unknown; grid is illustrative")).toBeVisible();
+  });
+
+  it("identifies the placement of a recognized bed as illustrative", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(TOOLPATH));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        printerBedMm={{ x: 256, y: 256 }}
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    await user.click(await screen.findByRole("tab", { name: "View" }));
+    expect(screen.getByRole("button", { name: "Bed 256×256" })).toBeVisible();
+    expect(screen.getByText("Bed position is illustrative")).toBeVisible();
+  });
+
+  it("leaves shared controls to the parent toolbar", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(TOOLPATH));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        sharedControls
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    await user.click(await screen.findByRole("tab", { name: "View" }));
+    expect(screen.queryByRole("combobox", { name: "Camera view" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Dimensions" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Travel" })).toBeVisible();
+  });
+
   it("toggles dimensions in the side panel", async () => {
     const user = userEvent.setup();
     fetchMock.mockResolvedValue(textResponse(TOOLPATH));

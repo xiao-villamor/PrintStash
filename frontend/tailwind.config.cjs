@@ -53,6 +53,7 @@ const config = {
           DEFAULT: "var(--card)",
           foreground: "var(--card-foreground)",
         },
+        "preview-image-matte": "var(--preview-image-matte)",
         surface: {
           DEFAULT: "var(--surface)",
           container: "var(--surface-container)",
