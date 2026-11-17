@@ -44,6 +44,7 @@ import app.modules.library.model_views.exports as models_exports
 import app.modules.library.model_views.facets as models_facets
 import app.modules.library.model_views.listing as models_listing
 import app.modules.library.model_views.pagination as models_pagination
+import app.modules.library.model_views.profiles as models_profiles
 import app.modules.library.model_views.statistics as models_statistics
 import app.modules.library.model_views.trash as models_trash
 import app.modules.printing.costing as models_costing
@@ -167,6 +168,7 @@ from app.schemas.provenance import (
     ModelProvenancePatch,
     ModelProvenanceRead,
     ModelSourceCoverRead,
+    RelatedProfilesRead,
 )
 from app.schemas.saved_views import ModelStarRead
 from app.schemas.search import SearchResponse
@@ -1057,7 +1059,12 @@ def select_model_cover_source(
             session, current_user, model_id, CollectionRole.EDIT
         )
         model_covers.select_source(
-            session, current_user, model, payload.source_id, precondition
+            session,
+            current_user,
+            model,
+            payload.source_id,
+            precondition,
+            position=payload.position,
         )
         response.headers["ETag"] = etag(
             EditKind.MODEL, model_id, model.edit_version, model.edit_epoch
@@ -1092,6 +1099,16 @@ def reset_model_cover(
         if result is None:
             raise HTTPException(status_code=404, detail="model_not_found")
         return result
+
+
+@router.get("/{model_id}/related-profiles", response_model=RelatedProfilesRead)
+def get_related_profiles(
+    model_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> RelatedProfilesRead:
+    _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    return models_profiles.related_profiles(session, current_user, model_id)
 
 
 def _provenance_source_or_404(
@@ -1129,12 +1146,13 @@ def get_model_source_cover(
 def stream_model_source_cover(
     model_id: int,
     source_id: int,
+    position: int = Query(default=0, ge=0),
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> Response:
     _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
     _provenance_source_or_404(session, model_id, source_id)
-    cover = source_covers.get(session, source_id)
+    cover = source_covers.get(session, source_id, position=position)
     if cover is None:
         raise HTTPException(status_code=404, detail="source_cover_not_found")
     return Response(

@@ -20,6 +20,7 @@ from . import batch_store
 from .batch_contracts import (
     BatchCounts,
     BatchOwner,
+    BatchSupplement,
     Deduplicated,
     EntryRecord,
     EntrySpec,
@@ -313,7 +314,12 @@ class BatchSession:
             current_item=current_item,
         )
 
-    def finish(self, *, failure_code: str | None = None) -> None:
+    def finish(
+        self,
+        *,
+        failure_code: str | None = None,
+        supplement: BatchSupplement | None = None,
+    ) -> None:
         self._active()
         if failure_code is not None and (
             not isinstance(failure_code, str)
@@ -357,6 +363,21 @@ class BatchSession:
         }
         if self._grouped:
             result.update(kind="collection_import", collection=self._collection)
+        extra = supplement if supplement is not None else BatchSupplement()
+        items.extend(
+            {"name": item.name, "error": item.error_code} for item in extra.failures
+        )
+        if extra.documents:
+            result["documents"] = [
+                {"name": item.name, "document_id": item.document_id}
+                for item in extra.documents
+            ]
+        if extra.multipart_model_id is not None:
+            result["multipart_model_id"] = extra.multipart_model_id
+        succeeded = counts.succeeded + len(extra.documents)
+        failed = counts.failed + len(extra.failures)
+        total = counts.total + len(extra.documents) + len(extra.failures)
+        result["total"] = total
         errors = {record["error"] for record in items if "error" in record}
         error = None
         if not counts.succeeded:
@@ -373,19 +394,19 @@ class BatchSession:
             )
         checkpoint(force=True)
         self.context.finish(
-            JobOutcome.COMPLETED if counts.succeeded else JobOutcome.FAILED,
+            JobOutcome.COMPLETED if succeeded else JobOutcome.FAILED,
             model_id=next(
                 (item["model_id"] for item in items if "model_id" in item), None
             ),
             result=result,
-            processed=counts.processed,
-            total=counts.total,
-            succeeded=counts.succeeded,
+            processed=counts.processed + len(extra.documents) + len(extra.failures),
+            total=total,
+            succeeded=succeeded,
             deduplicated=counts.deduplicated,
             skipped=counts.skipped,
-            failed=counts.failed,
+            failed=failed,
             error=error,
-            retryable=bool(counts.failed),
+            retryable=bool(failed),
             failed_items=[
                 {"name": item["name"], "reason": item["error"], "retryable": True}
                 for item in items

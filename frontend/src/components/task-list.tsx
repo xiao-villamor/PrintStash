@@ -142,6 +142,25 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
               </Link>
             </div>
           )}
+          {task.status === "completed" && task.multipartModelId !== undefined && (
+            <Link
+              href={`/multipart-models/${task.multipartModelId}`}
+              onClick={onNavigate}
+              className="mt-2 inline-block text-xs text-primary underline underline-offset-2"
+            >
+              {uiText("Open Multipart Model")}
+            </Link>
+          )}
+          {task.importedDocuments?.map((document) => (
+            <Link
+              key={document.document_id}
+              href={`/documents/${document.document_id}`}
+              onClick={onNavigate}
+              className="mt-1 block break-words text-xs text-primary underline underline-offset-2"
+            >
+              {document.name}
+            </Link>
+          ))}
           {task.archiveUploading && task.archiveSizeBytes !== undefined && (
             <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
               <p>

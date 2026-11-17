@@ -469,7 +469,10 @@ def _derive_mesh(
                         strategy=frame.strategy.value,
                         renderer_encoded=frame.strategy is ThumbnailStrategy.FULL,
                         complete=frame.coverage.preview
-                        in (PreviewCoverage.COMPLETE, PreviewCoverage.DOCUMENT_SUPPLIED),
+                        in (
+                            PreviewCoverage.COMPLETE,
+                            PreviewCoverage.DOCUMENT_SUPPLIED,
+                        ),
                         duration_ms=frame.duration_ms,
                         peak_rss_bytes=frame.peak_rss_bytes,
                         abort_on_failure=True,
@@ -987,6 +990,44 @@ def _derive_plates(file_id: int, *, execution: JobExecution | None = None) -> Ou
     return Outcome({DerivativeKind.PLATES: state})
 
 
+def _derive_project_profile(
+    file_id: int, *, execution: JobExecution | None = None
+) -> Outcome:
+    from app.modules.media.three_mf_profile import ProfileError, read_profile
+
+    begun = _begin(file_id, JobKind.DERIVATIVES_PROJECT_PROFILE, execution=execution)
+    if begun is None or DerivativeKind.PROJECT_PROFILE not in begun[1]:
+        return Outcome({})
+    file_row, attempts = begun
+    attempt = attempts[DerivativeKind.PROJECT_PROFILE]
+    started = time.monotonic()
+    try:
+        with resolve(file_row).materialize() as source:
+            profile = read_profile(source)
+    except ArtifactContentError:
+        _fail(attempt, "invalid_source", deterministic=False)
+        return Outcome({DerivativeKind.PROJECT_PROFILE: DerivativeState.FAILED})
+    except ProfileError as exc:
+        _fail(attempt, exc.failure.value, deterministic=True)
+        return Outcome({DerivativeKind.PROJECT_PROFILE: DerivativeState.FAILED})
+    with get_session_factory().scoped_session() as session:
+        if profile is None:
+            records.mark_skipped(session, attempt, "no_project_settings", now=utcnow())
+            state = DerivativeState.SKIPPED
+        else:
+            records.mark_ready(
+                session,
+                attempt,
+                now=utcnow(),
+                output=asdict(profile),
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            state = DerivativeState.READY
+        session.commit()
+    return Outcome({DerivativeKind.PROJECT_PROFILE: state})
+
+
+derive_project_profile = _announced(_derive_project_profile)
 derive_gcode = _announced(_derive_gcode)
 derive_plates = _announced(_derive_plates)
 derive_toolpath = _announced(_derive_toolpath)

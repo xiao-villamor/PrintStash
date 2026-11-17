@@ -883,6 +883,7 @@ class TestThreeMFReader:
         } == {
             "metadata": ("ready", kinds.THREE_MF_GEOMETRY_RECIPE),
             "plates": ("skipped", kinds.PLATES_RECIPE),
+            "project_profile": ("skipped", kinds.PROJECT_PROFILE_RECIPE),
             "previews": ("ready", kinds.PREVIEWS_RECIPE),
             "thumbnail": ("ready", kinds.THREE_MF_THUMBNAIL_RECIPE),
         }

@@ -1,4 +1,53 @@
 import {
+  readSourceGalleryInMainWorld,
+  readPrintablesGallery,
+  sourceGallery,
+  downloadSourceImage,
+  type SourceGalleryImage,
+} from "./source-gallery.ts";
+import { captureTransferFetch, progressLabel, type ByteProgress } from "./transfer-progress.ts";
+import { captureDestinations, captureTags, selectedCaptureCover } from "./capture-preferences.ts";
+import {
+  requestCultsInMainWorld,
+  cultsCaptureFromPage,
+  downloadCultsCandidate,
+  CULTS_DOWNLOAD_ORIGINS,
+  type CultsPageResult,
+} from "./cults-capture.ts";
+import {
+  readMyMiniFactoryInMainWorld,
+  myMiniFactoryCaptureFromPage,
+  downloadMyMiniFactoryCandidate,
+  MYMINIFACTORY_DOWNLOAD_ORIGINS,
+  type MyMiniFactoryPageResult,
+} from "./myminifactory-capture.ts";
+import {
+  requestMakerOnlineInMainWorld,
+  makerOnlineCaptureFromPage,
+  downloadMakerOnlineCandidate,
+  type MakerOnlinePageResult,
+} from "./makeronline-capture.ts";
+import { profileSummary } from "./print-profile.ts";
+import {
+  requestCrealityCloudInMainWorld,
+  crealityCloudCaptureFromPage,
+  downloadCrealityCloudCandidate,
+  type CrealityCloudPageResult,
+} from "./crealitycloud-capture.ts";
+import { MarketplaceDownloadError } from "./marketplace-download.ts";
+import {
+  ThangsCaptureError,
+  requestThangsInMainWorld,
+  thangsCaptureFromPage,
+  downloadThangsCandidate,
+  type ThangsPageResult,
+} from "./thangs-capture.ts";
+import { type SourceProviderLabel } from "./source-providers.ts";
+import { marketplaceOrigin } from "./marketplace-panel.ts";
+import { captureSequentialFiles, CaptureRecoveryError } from "./sequential-capture.ts";
+import { captureReviewUrl } from "./capture-result.ts";
+import { previousCaptures, captureHistoryLabel } from "./source-history.ts";
+import {
   CaptureOperationOwner,
   CaptureRetiredError,
   runCaptureRequest,
@@ -90,7 +139,7 @@ const browser: BrowserProviderAdapter = createBrowserProviderAdapter(
   chrome as unknown as BrowserExtensionApi,
 );
 type Page = { id?: number; title?: string; url?: string };
-type Source = "Printables" | "MakerWorld" | "Thingiverse" | "Cults" | "Direct file" | null;
+type Source = SourceProviderLabel | "Direct file" | null;
 type Config = {
   vault: string;
   pairingCode?: string;
@@ -108,6 +157,7 @@ type VisibleCaptureResult = {
 
 const vaultInput = requiredElement("#vault", HTMLInputElement);
 const pairingCodeInput = requiredElement("#pairing-code", HTMLInputElement);
+const deviceNameInput = requiredElement("#device-name", HTMLInputElement);
 const usernameInput = requiredElement("#username", HTMLInputElement);
 const keyInput = requiredElement("#key", HTMLInputElement);
 const runtimeMarker = requiredElement("#runtime-marker", HTMLElement);
@@ -119,6 +169,13 @@ const statusTitle = requiredElement("#status-title", HTMLElement);
 const statusMessage = requiredElement("#status-message", HTMLElement);
 const statusDetails = requiredElement("#status-details", HTMLDetailsElement);
 const statusCode = requiredElement("#status-code", HTMLElement);
+const preferenceFields = requiredElement("#capture-preferences", HTMLFieldSetElement);
+const collectionQuery = requiredElement("#collection-query", HTMLInputElement);
+const collectionSelect = requiredElement("#capture-collection", HTMLSelectElement);
+const coverInput = requiredElement("#capture-cover", HTMLInputElement);
+const tagsInput = requiredElement("#capture-tags", HTMLInputElement);
+const findCollection = requiredElement("#find-collection", HTMLButtonElement);
+const suggestionOperations = new CaptureOperationOwner();
 const captureButton = requiredElement("#capture", HTMLButtonElement);
 const inboxButton = requiredElement("#open-inbox", HTMLButtonElement);
 const importPanel = requiredElement("#import-panel", HTMLElement);
@@ -166,7 +223,11 @@ const captureOperations = new CaptureOperationOwner();
 let pendingPrintablesCapture: BrowserCaptureMessage | null = null;
 let pendingMakerWorldCapture: BrowserCaptureMessage | null = null;
 let pendingThingiverseCapture: BrowserCaptureMessage | null = null;
+let pendingMarketplaceCapture: BrowserCaptureMessage | null = null;
 let pendingThingiverseLinks = new Map<string, string>();
+let pendingGallery: SourceGalleryImage[] = [];
+let galleryUnavailable = false;
+let gallerySelection: HTMLFieldSetElement | null = null;
 let pendingManualCapture: BrowserCaptureMessage | null = null;
 
 declare global {
@@ -220,11 +281,11 @@ class CaptureDiagnosticError extends Error {
 
 const DEFAULT_CAPTURE_TIMEOUT_MS = 10_000;
 
-function captureTimeoutMs() {
+function captureTimeoutMs(defaultMs = DEFAULT_CAPTURE_TIMEOUT_MS) {
   const configured = globalThis.__PRINTSTASH_CAPTURE_TIMEOUT_MS__;
   return typeof configured === "number" && Number.isFinite(configured) && configured > 0
     ? configured
-    : DEFAULT_CAPTURE_TIMEOUT_MS;
+    : defaultMs;
 }
 
 async function runCaptureStage<T>(
@@ -235,6 +296,7 @@ async function runCaptureStage<T>(
   provider?: DiagnosticProvider,
   fallbackCode?: DiagnosticFallbackCode,
   captureSignal?: AbortSignal,
+  timeoutMs = captureTimeoutMs(),
 ): Promise<T> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -244,7 +306,7 @@ async function runCaptureStage<T>(
       timer = setTimeout(() => {
         controller.abort();
         reject(new CaptureDiagnosticError(timeoutCode, safeMessage, provider, fallbackCode));
-      }, captureTimeoutMs());
+      }, timeoutMs);
       operationResult.then(resolve, reject);
     });
   } catch (error) {
@@ -290,6 +352,12 @@ function diagnosticStatus(error: unknown, fallbackMessage = "Capture could not b
 }
 
 function safeCaptureMessage(error: unknown) {
+  if (
+    error instanceof CaptureRecoveryError ||
+    error instanceof ThangsCaptureError ||
+    error instanceof MarketplaceDownloadError
+  )
+    return error.message;
   const message = messageFrom(error);
   if (message.startsWith("user_file_required:")) return message;
   if (message.startsWith("Choose a downloaded") || message.startsWith("Select at least one")) {
@@ -384,6 +452,12 @@ function showDiagnosticStatus(error: unknown, fallbackMessage?: string) {
 
 function retireCapture() {
   captureOperations.retire();
+  suggestionOperations.retire();
+  collectionQuery.value = "";
+  collectionSelect.replaceChildren(new Option("Choose in Pending Imports", ""));
+  tagsInput.value = "";
+  coverInput.value = "";
+  findCollection.disabled = false;
   importBusy = false;
   setButtonBusy(captureButton, false);
   clearCandidateSelection();
@@ -407,6 +481,11 @@ function clearInboxAction() {
 }
 
 function clearCandidateSelection() {
+  pendingGallery = [];
+  galleryUnavailable = false;
+  gallerySelection?.remove();
+  gallerySelection = null;
+  pendingMarketplaceCapture = null;
   pendingPrintablesCapture = null;
   pendingMakerWorldCapture = null;
   pendingThingiverseCapture = null;
@@ -447,6 +526,7 @@ function selectedManualFile(capture: BrowserCaptureMessage): BrowserCaptureFile 
 }
 
 function renderCandidateSelection(capture: BrowserCaptureMessage) {
+  pendingMarketplaceCapture = null;
   if (capture.source.provider === "makerworld") {
     pendingMakerWorldCapture = capture;
     pendingPrintablesCapture = null;
@@ -455,9 +535,15 @@ function renderCandidateSelection(capture: BrowserCaptureMessage) {
     pendingThingiverseCapture = capture;
     pendingMakerWorldCapture = null;
     pendingPrintablesCapture = null;
-  } else {
+  } else if (capture.source.provider === "printables") {
     pendingPrintablesCapture = capture;
     pendingMakerWorldCapture = null;
+    pendingThingiverseCapture = null;
+  }
+  if (!["makerworld", "printables", "thingiverse"].includes(capture.source.provider)) {
+    pendingMarketplaceCapture = capture;
+    pendingMakerWorldCapture = null;
+    pendingPrintablesCapture = null;
     pendingThingiverseCapture = null;
   }
   candidateLegend.textContent =
@@ -465,7 +551,7 @@ function renderCandidateSelection(capture: BrowserCaptureMessage) {
       ? "Select MakerWorld packages"
       : capture.source.provider === "thingiverse"
         ? "Select Thingiverse files"
-        : "Select Printables files";
+        : `Select ${activeSource} files`;
   candidateList.replaceChildren();
   capture.candidates.forEach((candidate, index) => {
     const label = document.createElement("label");
@@ -476,9 +562,37 @@ function renderCandidateSelection(capture: BrowserCaptureMessage) {
     input.dataset.candidateIndex = String(index);
     const filename = document.createElement("span");
     filename.textContent = candidate.filename;
+    if (candidate.profile) {
+      const facts = document.createElement("small");
+      facts.textContent = profileSummary(candidate.profile);
+      filename.append(document.createElement("br"), facts);
+    }
     label.append(input, filename);
     candidateList.append(label);
   });
+  gallerySelection?.remove();
+  gallerySelection = document.createElement("fieldset");
+  const legend = document.createElement("legend");
+  legend.textContent = `Publication gallery (${pendingGallery.length} images)`;
+  gallerySelection.append(legend);
+  for (const [index, image] of pendingGallery.entries()) {
+    const label = document.createElement("label");
+    label.className = "candidate-option";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = true;
+    input.dataset.imageId = image.id;
+    label.append(input, `Image ${index + 1}${index === 0 ? " · default cover" : ""}`);
+    gallerySelection.append(label);
+  }
+  const note = document.createElement("small");
+  note.textContent = galleryUnavailable
+    ? "The publication gallery could not be read. Reopen the page to retry, or continue with files only and add images later."
+    : pendingGallery.length
+      ? "Selected images are saved with the model. Choose another cover in PrintStash. GIF images are saved as a still image."
+      : "No publication images were captured. You can attach a cover below.";
+  gallerySelection.append(note);
+  candidatePanel.after(gallerySelection);
   candidatePanel.hidden = false;
   captureButton.textContent = "Confirm and upload selected files";
 }
@@ -514,7 +628,10 @@ function setConnectionFormBusy(busy: boolean) {
 function configFromForm() {
   const vault = normalizeVault(vaultInput.value);
   const pairingCode = pairingCodeInput.value.trim();
-  if (pairingCode) return { vault, pairingCode };
+  if (pairingCode) {
+    if (!deviceNameInput.value.trim()) throw new Error("Enter a name for this browser.");
+    return { vault, pairingCode };
+  }
   const username = usernameInput.value.trim();
   const apiKey = keyInput.value.trim();
   if (!username || !apiKey)
@@ -555,16 +672,21 @@ function renderImportAvailability() {
   const connected = connectionState === "connected" && connectedConfig;
   const readyConnection = connected && !editingConnection;
   importPanel.hidden = !readyConnection;
+  preferenceFields.disabled = importBusy || !readyConnection;
   captureButton.disabled = importBusy || !readyConnection || !activeSource;
   if (importBusy) {
     importHint.textContent =
-      "Sending to your review inbox… Keep this popup open until it finishes.";
+      new URL(location.href).searchParams.get("panel") === "1"
+        ? "Sending to your review inbox… You can hide this panel; keep the source tab open."
+        : "Sending to your review inbox… Keep this popup open until it finishes.";
   } else if (!connected) {
     importHint.textContent = "Connect PrintStash to enable importing.";
   } else if (!activeSource) {
     importHint.textContent = "Open a supported model page or direct model file first.";
+  } else if (pendingManualCapture) {
+    importHint.textContent = "Choose a downloaded file. Provider download has not been verified.";
   } else {
-    importHint.textContent = `${activeSource} is ready. Files will remain reviewable before import.`;
+    importHint.textContent = `${activeSource} page detected. Files will remain reviewable before import.`;
   }
 }
 
@@ -573,6 +695,10 @@ function renderConnection(
   { config, profile, detail }: { config?: Config; profile?: Profile | null; detail?: string } = {},
 ) {
   connectionState = state;
+  if (state !== "connected") {
+    captureHistory.replaceChildren();
+    captureHistory.hidden = true;
+  }
   connectionStatus.dataset.state = state;
 
   if (state === "connected") {
@@ -608,6 +734,10 @@ function renderActivePage() {
     classified === "MakerWorld" ||
     classified === "Thingiverse" ||
     classified === "Cults" ||
+    classified === "MyMiniFactory" ||
+    classified === "Thangs" ||
+    classified === "Creality Cloud" ||
+    classified === "MakerOnline" ||
     classified === "Direct file"
       ? classified
       : null;
@@ -616,7 +746,7 @@ function renderActivePage() {
     ? activeSource === "Direct file"
       ? "Direct model file detected"
       : `${activeSource} page detected`
-    : "Open a MakerWorld, Printables, Thingiverse, or Cults page, or a direct model file";
+    : "Open a supported marketplace model page, or a direct model file";
   sourceLabel.dataset.supported = activeSource ? "true" : "false";
   renderImportAvailability();
 }
@@ -668,7 +798,7 @@ async function establishConnection(
         fetchImpl,
         vault: config.vault,
         code: config.pairingCode,
-        name: "Browser extension",
+        name: deviceNameInput.value.trim(),
       });
       normalized = { vault: verified.base, deviceCredential: verified.deviceCredential };
     } else if (config.deviceCredential) {
@@ -722,6 +852,7 @@ async function establishConnection(
     disconnectButton.hidden = true;
     fillConnectionForm(normalized);
     renderConnection("connected", { config: normalized, profile: verifiedConnection.user });
+    if (new URL(location.href).searchParams.get("panel") === "1") void refreshCaptureHistory();
     return true;
   } catch (error) {
     let failedOrigin = null;
@@ -757,14 +888,32 @@ async function establishConnection(
 }
 
 async function ensureOriginPermission(origin: string) {
-  const granted = await browser.permissions.request({ origins: [origin] });
-  if (!granted) throw new Error("Permission to download the selected source file was not granted.");
+  if (await browser.permissions.contains({ origins: [origin] })) return;
+  try {
+    const granted = await browser.permissions.request({ origins: [origin] });
+    if (granted) return;
+  } catch {
+    throw new MarketplaceDownloadError(
+      "The browser could not request access to the download host. Click import again to grant access.",
+    );
+  }
+  throw new MarketplaceDownloadError(
+    "Permission to download the selected source file was not granted. Click import again to grant access.",
+  );
 }
 
 async function ensureOriginPermissions(origins: string[]) {
-  const granted = await browser.permissions.request({ origins });
-  if (!granted)
-    throw new Error("Permission to download the selected source files was not granted.");
+  if (await browser.permissions.contains({ origins })) return;
+  try {
+    if (await browser.permissions.request({ origins })) return;
+  } catch {
+    throw new MarketplaceDownloadError(
+      "The browser could not request file access. Click import again to grant access.",
+    );
+  }
+  throw new MarketplaceDownloadError(
+    "Permission to download the selected source files was not granted. Click import again to grant access.",
+  );
 }
 
 async function ensurePrintablesFilePermissions(
@@ -790,6 +939,7 @@ async function ensurePrintablesFilePermissions(
     "Printables",
     "cors_failure",
     captureSignal,
+    captureTimeoutMs(120_000),
   );
   if (!granted) {
     throw new CaptureDiagnosticError(
@@ -825,6 +975,7 @@ async function ensureMetadataPermission(
     provider,
     "cors_failure",
     captureSignal,
+    captureTimeoutMs(120_000),
   );
   if (!granted) {
     throw new CaptureDiagnosticError(
@@ -840,6 +991,7 @@ async function downloadPrintablesCandidate(
   candidate: BrowserCaptureMessage["candidates"][number],
   link: string,
   signal?: AbortSignal,
+  progress?: ByteProgress,
 ): Promise<BrowserCaptureFile> {
   if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
   const response = await fetch(link, {
@@ -864,7 +1016,7 @@ async function downloadPrintablesCandidate(
       );
     }
   }
-  const file = await readBoundedPrintablesResponse(response, candidate.sizeBytes, signal);
+  const file = await readBoundedPrintablesResponse(response, candidate.sizeBytes, signal, progress);
   return {
     id: candidate.id,
     file,
@@ -983,7 +1135,11 @@ function isRichProvider(source: Source): source is Exclude<Source, "Direct file"
     source === "Printables" ||
     source === "MakerWorld" ||
     source === "Thingiverse" ||
-    source === "Cults"
+    source === "Cults" ||
+    source === "MyMiniFactory" ||
+    source === "Thangs" ||
+    source === "Creality Cloud" ||
+    source === "MakerOnline"
   );
 }
 async function readVisibleCapture(
@@ -1161,6 +1317,66 @@ async function readVisibleCapture(
       });
       return thingiverseCapture;
     }
+    if (provider === "Cults") {
+      const publicationId = capture.source.source_item_id;
+      if (!publicationId) return capture;
+      const results = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: requestCultsInMainWorld,
+        args: [{ publicationId, operation: "metadata" }],
+      });
+      const result = results[0]?.result as CultsPageResult | undefined;
+      return result ? cultsCaptureFromPage(pageUrl, result) : capture;
+    }
+    if (provider === "MyMiniFactory") {
+      const publicationId = capture.source.source_item_id;
+      if (!publicationId) return capture;
+      const results = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: readMyMiniFactoryInMainWorld,
+        args: [{ publicationId }],
+      });
+      const result = results[0]?.result as MyMiniFactoryPageResult | undefined;
+      return result ? myMiniFactoryCaptureFromPage(pageUrl, result) : capture;
+    }
+    if (provider === "MakerOnline") {
+      const publicationId = capture.source.source_item_id;
+      if (!publicationId) return capture;
+      const results = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: requestMakerOnlineInMainWorld,
+        args: [{ publicationId, operation: "metadata" }],
+      });
+      const result = results[0]?.result as MakerOnlinePageResult | undefined;
+      return result ? makerOnlineCaptureFromPage(pageUrl, result) : capture;
+    }
+    if (provider === "Creality Cloud") {
+      const publicationId = capture.source.source_item_id;
+      if (!publicationId) return capture;
+      const results = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: requestCrealityCloudInMainWorld,
+        args: [{ publicationId, operation: "metadata" }],
+      });
+      const result = results[0]?.result as CrealityCloudPageResult | undefined;
+      return result ? crealityCloudCaptureFromPage(pageUrl, result) : capture;
+    }
+    if (provider === "Thangs") {
+      const modelId = capture.source.source_item_id;
+      if (!modelId) return capture;
+      const results = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: requestThangsInMainWorld,
+        args: [{ modelId, operation: "metadata" }],
+      });
+      const result = results[0]?.result as ThangsPageResult | undefined;
+      return result ? thangsCaptureFromPage(pageUrl, result) : capture;
+    }
     if (provider !== "Printables") return capture;
     if (visible.challengeDetected) {
       return {
@@ -1320,7 +1536,7 @@ connectionForm.addEventListener("submit", async (event) => {
   try {
     const config = configFromForm();
     if (await establishConnection(config, { requestPermission: true, persist: true })) {
-      showStatus("Connection verified. This browser is ready to import.", "success");
+      showStatus("Connection verified. This browser is ready to import.");
     }
   } catch (error) {
     if (connectionState === "connected") {
@@ -1418,6 +1634,40 @@ apiSettingsButton.addEventListener("click", () => {
   }
 });
 
+findCollection.addEventListener("click", async () => {
+  if (importBusy || !connectedConfig || connectionState !== "connected") return;
+  const authorization = accessToken || connectedConfig.deviceCredential;
+  if (!authorization) return;
+  suggestionOperations.retire();
+  const operation = suggestionOperations.begin(connectedConfig, authorization);
+  findCollection.disabled = true;
+  try {
+    const destinations = await operation.run((signal) =>
+      captureDestinations({
+        vault: operation.config.vault,
+        authorization,
+        query: collectionQuery.value,
+        signal,
+      }),
+    );
+    collectionSelect.replaceChildren(
+      new Option("Choose in Pending Imports", ""),
+      ...destinations.map((destination) => new Option(destination.label, String(destination.id))),
+    );
+    showStatus(
+      destinations.length
+        ? "Choose a collection suggestion for review."
+        : "No editable collections match this search.",
+    );
+  } catch (error) {
+    if (!suggestionOperations.isCurrent(operation)) return;
+    if (error instanceof CaptureAuthenticationError) recoverCaptureConnection();
+    else showStatus(messageFrom(error), "error");
+  } finally {
+    if (suggestionOperations.finish(operation)) findCollection.disabled = false;
+  }
+});
+
 captureButton.addEventListener("click", async () => {
   if (!connectedConfig || connectionState !== "connected") {
     showStatus("Connect PrintStash before importing.", "error");
@@ -1430,6 +1680,8 @@ captureButton.addEventListener("click", async () => {
     showStatus("The browser connection expired. Connect PrintStash again.", "error");
     return;
   }
+  suggestionOperations.retire();
+  findCollection.disabled = false;
   const capture = captureOperations.begin(config, authorization);
   const runStage = vaultStage(capture);
   importBusy = true;
@@ -1437,6 +1689,46 @@ captureButton.addEventListener("click", async () => {
   renderImportAvailability();
   showStatus();
   try {
+    const transferFetch = captureTransferFetch((loaded, total) => {
+      capture.assertCurrent();
+      showStatus(
+        `Transferring to PrintStash: ${progressLabel(loaded, total)}${total !== null && loaded === total ? " · awaiting confirmation" : ""}`,
+      );
+    });
+    const preferences = {
+      ...(collectionSelect.value ? { collectionId: Number(collectionSelect.value) } : {}),
+      tags: captureTags(tagsInput.value),
+      cover: selectedCaptureCover(coverInput.files?.[0]),
+    };
+    const selectedImages = pendingGallery.filter(
+      (image) =>
+        gallerySelection?.querySelector<HTMLInputElement>(`input[data-image-id="${image.id}"]`)
+          ?.checked,
+    );
+    const downloadOrigins = [
+      ...new Set(selectedImages.map((image) => `${new URL(image.url).origin}/*`)),
+    ];
+    if (pendingMarketplaceCapture?.source.provider === "cults")
+      downloadOrigins.push(...CULTS_DOWNLOAD_ORIGINS);
+    if (pendingMarketplaceCapture?.source.provider === "myminifactory")
+      downloadOrigins.push(...MYMINIFACTORY_DOWNLOAD_ORIGINS);
+    if (pendingMarketplaceCapture?.source.provider === "makeronline")
+      downloadOrigins.push("https://acop-prod-private.s3-accelerate.amazonaws.com/*");
+    if (downloadOrigins.length) await ensureOriginPermissions([...new Set(downloadOrigins)]);
+    capture.assertCurrent();
+    // Ask while the import click still carries user activation, before provider verification.
+    if (pendingMarketplaceCapture?.source.provider === "cults") {
+      await ensureOriginPermissions(CULTS_DOWNLOAD_ORIGINS);
+      capture.assertCurrent();
+    }
+    if (pendingMarketplaceCapture?.source.provider === "myminifactory") {
+      await ensureOriginPermissions(MYMINIFACTORY_DOWNLOAD_ORIGINS);
+      capture.assertCurrent();
+    }
+    if (pendingMarketplaceCapture?.source.provider === "makeronline") {
+      await ensureOriginPermission("https://acop-prod-private.s3-accelerate.amazonaws.com/*");
+      capture.assertCurrent();
+    }
     if (activeSource === "Printables" && !pendingPrintablesCapture && !pendingManualCapture) {
       try {
         await ensureMetadataPermission(
@@ -1460,8 +1752,10 @@ captureButton.addEventListener("click", async () => {
     if (pendingManualCapture) {
       const draft = pendingManualCapture;
       const file = selectedManualFile(draft);
-      await capture.run(() =>
+      const receipt = await capture.run(() =>
         captureRichFiles({
+          ...preferences,
+          fetchImpl: transferFetch,
           vault: capture.config.vault,
           authorization,
           sourceUrl: draft.source.canonical_url,
@@ -1471,163 +1765,214 @@ captureButton.addEventListener("click", async () => {
           runStage,
         }),
       );
-      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
+      const inboxUrl = captureReviewUrl(normalizeVault(capture.config.vault), receipt);
       clearManualFileSelection();
       inboxButton.hidden = false;
       inboxButton.dataset.url = inboxUrl;
       showStatus("Selected file and source metadata sent to Pending Imports.", "success");
       return;
     }
-    if (pendingPrintablesCapture) {
-      const draft = pendingPrintablesCapture;
+    const draft =
+      pendingPrintablesCapture ??
+      pendingMakerWorldCapture ??
+      pendingThingiverseCapture ??
+      pendingMarketplaceCapture;
+    if (draft) {
       const selected = selectedPrintablesCandidates(draft);
       if (selected.length === 0) {
-        showStatus("Select at least one Printables file to upload.", "error");
+        showStatus("Select at least one file to upload.", "error");
         return;
       }
-      const links = await resolvePrintablesLinks(draft, selected, capture.signal);
-      const linksById = new Map(links.map((link) => [link.id, link.url]));
-      const selectedLinks = selected.map((candidate) => {
-        const link = linksById.get(candidate.id);
-        if (!link) throw new Error("Printables link mapping changed.");
-        return { candidate, link };
-      });
-      await ensurePrintablesFilePermissions(
-        selectedLinks.map(({ link }) => link),
-        capture.signal,
-      );
-      const files = await Promise.all(
-        selectedLinks.map(({ candidate, link }) =>
-          runCaptureStage(
-            (signal) => downloadPrintablesCandidate(candidate, link, signal),
-            "capture_download_timeout",
-            "capture_download_failed",
-            "The selected Printables file could not be downloaded. Attach it manually in Pending Imports.",
-            "Printables",
-            "request_failed",
-            capture.signal,
-          ),
-        ),
-      );
-      await capture.run(() =>
-        captureRichFiles({
+      const receipt = await capture.run((signal) =>
+        captureSequentialFiles({
+          ...preferences,
+          fetchImpl: transferFetch,
           vault: capture.config.vault,
           authorization,
-          sourceUrl: draft.source.canonical_url,
+          source: draft.source,
           title: activePage?.title,
-          captureSource: draft.source,
-          files,
-          runStage,
-        }),
-      );
-      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
-      clearCandidateSelection();
-      inboxButton.hidden = false;
-      inboxButton.dataset.url = inboxUrl;
-      showStatus("Selected Printables files sent to Pending Imports.", "success");
-      return;
-    }
-    if (pendingMakerWorldCapture) {
-      const draft = pendingMakerWorldCapture;
-      const selected = selectedPrintablesCandidates(draft);
-      if (selected.length === 0) {
-        showStatus("Select at least one MakerWorld package to upload.", "error");
-        return;
-      }
-      const links = await resolveMakerWorldLinks(draft, selected, capture.signal);
-      const linksById = new Map(links.map((link) => [link.id, link.url]));
-      const files: BrowserCaptureFile[] = [];
-      let totalBytes = 0;
-      for (const candidate of selected) {
-        const link = linksById.get(candidate.id);
-        if (!link) throw new Error("MakerWorld link mapping changed.");
-        const file = await runCaptureStage(
-          (signal) =>
-            downloadMakerWorldCandidate({
-              candidate: {
-                id: candidate.id,
-                filename: candidate.filename,
-                fileType: "other",
-                ...(candidate.sizeBytes === undefined ? {} : { sizeBytes: candidate.sizeBytes }),
-              },
-              link,
-              totalBefore: totalBytes,
-              ensureOriginPermission,
-              signal,
-            }),
-          "capture_download_timeout",
-          "capture_download_failed",
-          "The selected MakerWorld package could not be downloaded. Attach it manually in Pending Imports.",
-          "MakerWorld",
-          "request_failed",
-          capture.signal,
-        );
-        totalBytes += file.file.size;
-        files.push(file);
-      }
-      await capture.run(() =>
-        captureRichFiles({
-          vault: capture.config.vault,
-          authorization,
-          sourceUrl: draft.source.canonical_url,
-          title: activePage?.title,
-          captureSource: draft.source,
-          files,
-          runStage,
-        }),
-      );
-      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
-      clearCandidateSelection();
-      inboxButton.hidden = false;
-      inboxButton.dataset.url = inboxUrl;
-      showStatus("Selected MakerWorld packages sent to Pending Imports.", "success");
-      return;
-    }
-    if (pendingThingiverseCapture) {
-      const draft = pendingThingiverseCapture;
-      const selected = selectedPrintablesCandidates(draft);
-      if (selected.length === 0) {
-        showStatus("Select at least one Thingiverse file to upload.", "error");
-        return;
-      }
-      const files: BrowserCaptureFile[] = [];
-      for (const candidate of selected) {
-        const link = pendingThingiverseLinks.get(candidate.id);
-        if (!link) throw new Error("Thingiverse file mapping changed.");
-        files.push(
-          await runCaptureStage(
-            (signal) =>
-              downloadThingiverseCandidate({
-                candidate,
+          candidates: selected,
+          gallery: selectedImages.map((image) => ({
+            id: image.id,
+            filename: image.filename,
+            download: (signal) => downloadSourceImage(image, signal),
+          })),
+          storage: browser.storage,
+          signal,
+          progress: (message) => {
+            capture.assertCurrent();
+            showStatus(message);
+          },
+          download: async (candidate, signal) => {
+            const progress: ByteProgress = (loaded, total) => {
+              capture.assertCurrent();
+              showStatus(`Downloading ${candidate.filename}: ${progressLabel(loaded, total)}`);
+            };
+            if (draft.source.provider === "printables") {
+              const links = await resolvePrintablesLinks(draft, [candidate], capture.signal);
+              const link = links.find((link) => link.id === candidate.id)?.url;
+              if (!link) throw new Error("Printables link mapping changed.");
+              await ensurePrintablesFilePermissions([link], capture.signal);
+              return downloadPrintablesCandidate(candidate, link, signal, progress);
+            }
+            if (draft.source.provider === "makerworld") {
+              const links = await resolveMakerWorldLinks(draft, [candidate], capture.signal);
+              const link = links.find((link) => link.id === candidate.id)?.url;
+              if (!link) throw new Error("MakerWorld link mapping changed.");
+              return downloadMakerWorldCandidate({
+                candidate: { ...candidate, fileType: "other" },
                 link,
+                totalBefore: 0,
+                ensureOriginPermission,
+                signal,
+                progress,
+              });
+            }
+            if (draft.source.provider === "cults") {
+              if (!activePage?.id || !draft.source.source_item_id)
+                throw new MarketplaceDownloadError("Reopen the Cults publication to continue.");
+              const results = await browser.scripting.executeScript({
+                target: { tabId: activePage.id },
+                world: "MAIN",
+                func: requestCultsInMainWorld,
+                args: [{ publicationId: draft.source.source_item_id, operation: "download" }],
+              });
+              const result = results[0]?.result as CultsPageResult | undefined;
+              if (!result)
+                throw new MarketplaceDownloadError("Cults download could not be checked.");
+              return downloadCultsCandidate({ candidate, result, signal, progress });
+            }
+            if (draft.source.provider === "myminifactory") {
+              if (!activePage?.id || !draft.source.source_item_id)
+                throw new MarketplaceDownloadError(
+                  "Reopen the MyMiniFactory publication to continue.",
+                );
+              const results = await browser.scripting.executeScript({
+                target: { tabId: activePage.id },
+                world: "MAIN",
+                func: readMyMiniFactoryInMainWorld,
+                args: [{ publicationId: draft.source.source_item_id }],
+              });
+              const result = results[0]?.result as MyMiniFactoryPageResult | undefined;
+              if (!result)
+                throw new MarketplaceDownloadError(
+                  "MyMiniFactory file selection could not be checked.",
+                );
+              return downloadMyMiniFactoryCandidate({
+                candidate,
+                result,
                 ensureOriginPermissions,
                 signal,
-              }),
-            "capture_download_timeout",
-            "capture_download_failed",
-            "The selected Thingiverse file could not be downloaded. Attach it manually in Pending Imports.",
-            undefined,
-            undefined,
-            capture.signal,
-          ),
-        );
-      }
-      await capture.run(() =>
-        captureRichFiles({
-          vault: capture.config.vault,
-          authorization,
-          sourceUrl: draft.source.canonical_url,
-          title: activePage?.title,
-          captureSource: draft.source,
-          files,
-          runStage,
+                progress,
+              });
+            }
+            if (draft.source.provider === "makeronline") {
+              if (!activePage?.id || !draft.source.source_item_id)
+                throw new MarketplaceDownloadError(
+                  "Reopen the MakerOnline model page to continue.",
+                );
+              showStatus(
+                "Requesting the MakerOnline download. If verification appears, hide this panel and complete it on the source page; the transfer will continue.",
+              );
+              const results = await browser.scripting.executeScript({
+                target: { tabId: activePage.id },
+                world: "MAIN",
+                func: requestMakerOnlineInMainWorld,
+                args: [
+                  {
+                    publicationId: draft.source.source_item_id,
+                    operation: "download",
+                    profileId: candidate.id,
+                  },
+                ],
+              });
+              const result = results[0]?.result as MakerOnlinePageResult | undefined;
+              if (!result)
+                throw new MarketplaceDownloadError(
+                  "MakerOnline did not return a download response.",
+                );
+              return downloadMakerOnlineCandidate({
+                candidate,
+                result,
+                ensureOriginPermission,
+                signal,
+                progress,
+              });
+            }
+            if (draft.source.provider === "crealitycloud") {
+              if (!activePage?.id || !draft.source.source_item_id)
+                throw new MarketplaceDownloadError(
+                  "Reopen the Creality Cloud model page to continue.",
+                );
+              const results = await browser.scripting.executeScript({
+                target: { tabId: activePage.id },
+                world: "MAIN",
+                func: requestCrealityCloudInMainWorld,
+                args: [
+                  {
+                    publicationId: draft.source.source_item_id,
+                    operation: "download",
+                    profileId: candidate.id,
+                  },
+                ],
+              });
+              const result = results[0]?.result as CrealityCloudPageResult | undefined;
+              if (!result)
+                throw new MarketplaceDownloadError(
+                  "Creality Cloud did not return a download response.",
+                );
+              return downloadCrealityCloudCandidate({
+                candidate,
+                result,
+                ensureOriginPermission,
+                signal,
+                progress,
+              });
+            }
+            if (draft.source.provider === "thangs") {
+              if (!activePage?.id || !draft.source.source_item_id)
+                throw new Error("Reopen the Thangs model page to continue.");
+              const results = await browser.scripting.executeScript({
+                target: { tabId: activePage.id },
+                world: "MAIN",
+                func: requestThangsInMainWorld,
+                args: [{ modelId: draft.source.source_item_id, operation: "download" }],
+              });
+              const result = results[0]?.result as ThangsPageResult | undefined;
+              if (!result) throw new Error("Thangs did not return a download response.");
+              return downloadThangsCandidate({
+                candidate,
+                result,
+                ensureOriginPermission,
+                signal,
+                progress,
+              });
+            }
+            const link = pendingThingiverseLinks.get(candidate.id);
+            if (!link) throw new Error("Thingiverse file mapping changed.");
+            return downloadThingiverseCandidate({
+              candidate,
+              link,
+              ensureOriginPermissions,
+              signal,
+              progress,
+            });
+          },
         }),
       );
-      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
       clearCandidateSelection();
       inboxButton.hidden = false;
-      inboxButton.dataset.url = inboxUrl;
-      showStatus("Selected Thingiverse files sent to Pending Imports.", "success");
+      inboxButton.dataset.url = captureReviewUrl(capture.config.vault, receipt);
+      showStatus(
+        draft.source.provider === "makerworld"
+          ? "Selected MakerWorld packages sent to Pending Imports. Review before importing."
+          : draft.source.provider === "printables"
+            ? "Selected Printables files sent to Pending Imports. Review before importing."
+            : draft.source.provider === "thingiverse"
+              ? "Selected Thingiverse files sent to Pending Imports. Review before importing."
+              : "Selected files sent to Pending Imports. Review before importing.",
+        "success",
+      );
       return;
     }
     const visibleCapture =
@@ -1645,6 +1990,35 @@ captureButton.addEventListener("click", async () => {
     }
     if (captureRoute === "candidate_confirmation") {
       if (!visibleCapture) throw new Error("The active tab has no normalized capture source.");
+      pendingGallery = [];
+      galleryUnavailable = false;
+      if (activePage?.id) {
+        const tabId = activePage.id;
+        try {
+          if (visibleCapture.source.provider === "printables") {
+            pendingGallery = await capture.run((signal) =>
+              readPrintablesGallery(visibleCapture.source.canonical_url, signal),
+            );
+          } else {
+            const results = await capture.run(() =>
+              browser.scripting.executeScript({
+                target: { tabId },
+                world: "MAIN",
+                func: readSourceGalleryInMainWorld,
+                args: [visibleCapture.source.provider],
+              }),
+            );
+            pendingGallery = await sourceGallery(
+              visibleCapture.source.canonical_url,
+              results[0]?.result ?? [],
+            );
+          }
+        } catch {
+          capture.assertCurrent();
+          galleryUnavailable = true;
+        }
+        capture.assertCurrent();
+      }
       runCaptureSyncStage(
         () => renderCandidateSelection(visibleCapture),
         "capture_candidate_render_failed",
@@ -1655,7 +2029,7 @@ captureButton.addEventListener("click", async () => {
           ? "Select MakerWorld packages, then confirm the upload."
           : visibleCapture.source.provider === "thingiverse"
             ? "Select Thingiverse files, then confirm the upload."
-            : "Review the selected Printables files, then confirm the upload.",
+            : "Review the selected files, then confirm the upload.",
       );
       return;
     }
@@ -1743,13 +2117,93 @@ inboxButton.addEventListener("click", () => {
   if (inboxButton.dataset.url) browser.tabs.create({ url: inboxButton.dataset.url });
 });
 
+const enablePanel = document.createElement("button");
+enablePanel.type = "button";
+enablePanel.textContent = "Enable panel on this site";
+enablePanel.className = "secondary";
+enablePanel.hidden = true;
+pageContext.append(enablePanel);
+const captureHistory = document.createElement("section");
+captureHistory.hidden = true;
+pageContext.append(captureHistory);
+async function refreshCaptureHistory() {
+  const config = connectedConfig;
+  const authorization = accessToken || config?.deviceCredential;
+  if (!config || !authorization || !activePage?.url || !marketplaceOrigin(activePage.url)) return;
+  captureHistory.hidden = false;
+  captureHistory.textContent = "Checking your previous captures…";
+  try {
+    const items = await previousCaptures(config.vault, authorization, activePage.url);
+    if (connectedConfig !== config) return;
+    captureHistory.replaceChildren();
+    const summary = document.createElement("p");
+    summary.textContent = items.length
+      ? "Your captures of this publication (not a file-identity check):"
+      : "No previous captures of this publication in your capture history.";
+    captureHistory.append(summary);
+    for (const item of items) {
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "secondary";
+      link.textContent = `${captureHistoryLabel(item)} · #${item.id}`;
+      link.addEventListener("click", () =>
+        browser.tabs.create({ url: captureReviewUrl(config.vault, item) }),
+      );
+      captureHistory.append(link);
+    }
+  } catch {
+    if (connectedConfig === config)
+      captureHistory.textContent =
+        "Previous captures could not be checked. You can still capture this model.";
+  }
+}
+enablePanel.addEventListener("click", async () => {
+  const origin = activePage?.url ? marketplaceOrigin(activePage.url) : null;
+  if (!origin) return;
+  if (!(await browser.permissions.request({ origins: [origin] }))) return;
+  const enabled = await browser.runtime.sendMessage({ type: "printstash-enable-panel", origin });
+  showStatus(
+    enabled
+      ? "Panel enabled. Open PrintStash on the page; hiding it keeps transfers running. Reloading the tab requires recovery."
+      : "The panel could not be enabled.",
+    enabled ? "" : "error",
+  );
+});
+
+async function captureTabs(): Promise<Page[]> {
+  if (new URL(location.href).searchParams.get("panel") !== "1")
+    return browser.tabs.query({ active: true, currentWindow: true });
+  const tab = await browser.runtime.sendMessage({ type: "printstash-panel-context" });
+  if (
+    typeof tab !== "object" ||
+    tab === null ||
+    !("id" in tab) ||
+    typeof tab.id !== "number" ||
+    !("url" in tab) ||
+    typeof tab.url !== "string" ||
+    !marketplaceOrigin(tab.url)
+  )
+    return [];
+  return [
+    {
+      id: tab.id,
+      url: tab.url,
+      title: "title" in tab && typeof tab.title === "string" ? tab.title : undefined,
+    },
+  ];
+}
+
 async function initialize() {
   lockConnection(true);
   const [stored, tabs] = await Promise.all([
     browser.storage.get(["vault", "username", "apiKey", "deviceCredential"]),
-    browser.tabs.query({ active: true, currentWindow: true }),
+    captureTabs(),
   ]);
   activePage = tabs[0] || null;
+  enablePanel.hidden =
+    !activePage?.url ||
+    !marketplaceOrigin(activePage.url) ||
+    new URL(location.href).searchParams.get("panel") === "1";
   renderActivePage();
   const prepared = await takePreparedSetup(activePage);
   if (prepared) {
@@ -1765,12 +2219,12 @@ async function initialize() {
     if (alreadyAllowed) {
       try {
         await establishConnection(prepared, { requestPermission: false, persist: true });
-        showStatus("Extension setup completed and connection verified.", "success");
+        showStatus("Extension setup completed and connection verified.");
       } catch {
         showStatus();
       }
     } else {
-      showStatus("Setup received. Choose Finish setup to approve access to this vault.", "success");
+      showStatus("Setup received. Choose Finish setup to approve access to this vault.");
     }
     return;
   }
@@ -1805,4 +2259,11 @@ initialize().catch((error) => {
   connectionPanel.hidden = false;
   renderConnection("error", { detail: messageFrom(error) });
   showStatus(messageFrom(error), "error");
+});
+
+// Escape hides the embedded panel; the transfer owner remains mounted.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || new URL(location.href).searchParams.get("panel") !== "1") return;
+  const origin = activePage?.url ? new URL(activePage.url).origin : null;
+  if (origin) window.parent.postMessage({ type: "printstash-hide-panel" }, origin);
 });

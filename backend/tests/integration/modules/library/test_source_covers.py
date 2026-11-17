@@ -1462,3 +1462,66 @@ class TestAbsentCoverRecovery:
             ).state
             is StorageObjectState.COMMITTED
         )
+
+
+class TestGalleryLookup:
+    def test_retains_every_source_image(
+        self, db_session, make_model, make_provenance_source, make_cover
+    ):
+        from sqlmodel import select
+
+        from app.db.models import ModelSourceCover
+        from app.modules.library import source_covers
+
+        source = make_provenance_source(make_model())
+        images = [
+            make_cover(source, position=index, storage_key=f"gallery-{index}.webp")
+            for index in range(3)
+        ]
+
+        stored = db_session.exec(
+            select(ModelSourceCover)
+            .where(ModelSourceCover.provenance_source_id == source.id)
+            .order_by(ModelSourceCover.position)
+        ).all()
+
+        assert [image.id for image in stored] == [image.id for image in images]
+        assert source_covers.get(db_session, source.id).id == images[0].id
+        assert source_covers.get(db_session, source.id, position=2).id == images[2].id
+
+
+class TestGalleryPublishing:
+    def test_publishes_every_normalized_image(
+        self, db_session, make_model, make_provenance_source
+    ):
+        import io
+
+        from PIL import Image
+
+        from app.modules.library import source_covers
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        source = make_provenance_source(make_model())
+        backend = get_backend()
+        keys = []
+        for position, color in enumerate(("red", "green", "blue")):
+            image = io.BytesIO()
+            Image.new("RGB", (16, 16), color).save(image, "PNG")
+            result = source_covers.put(
+                db_session,
+                backend,
+                provenance_source_id=source.id,
+                actor_id=None,
+                data=image.getvalue(),
+                content_type="image/png",
+                position=position,
+            )
+            db_session.commit()
+            keys.append(result.cover.storage_key)
+            with Image.open(io.BytesIO(backend.read_bytes(keys[-1]))) as stored:
+                assert stored.format == "WEBP"
+        assert len(set(keys)) == 3
+        assert [
+            source_covers.get(db_session, source.id, position=i).storage_key
+            for i in range(3)
+        ] == keys

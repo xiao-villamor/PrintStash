@@ -43,6 +43,7 @@ class ArchiveEntry:
     size_bytes: int
     file_type: str | None
     is_image: bool
+    is_document: bool = False
 
 
 def safe_entry_name(name: str) -> bool:
@@ -69,6 +70,8 @@ def inspect_archive(
     limits: ArchiveLimits,
     file_types: Mapping[str, str],
     image_suffixes: Set[str],
+    document_suffixes: Set[str] = frozenset(),
+    include_unsupported: bool = False,
 ) -> list[ArchiveEntry]:
     """List supported entries while enforcing ZIP bomb and path policies."""
     entries: list[ArchiveEntry] = []
@@ -109,7 +112,13 @@ def inspect_archive(
                 suffix = Path(info.filename).suffix.lower()
                 file_type = file_types.get(suffix)
                 is_image = suffix in image_suffixes
-                if file_type is None and not is_image:
+                is_document = suffix in document_suffixes
+                if (
+                    file_type is None
+                    and not is_image
+                    and not is_document
+                    and not include_unsupported
+                ):
                     continue
                 entries.append(
                     ArchiveEntry(
@@ -118,6 +127,7 @@ def inspect_archive(
                         size_bytes=info.file_size,
                         file_type=file_type,
                         is_image=is_image,
+                        is_document=is_document,
                     )
                 )
     except zipfile.BadZipFile as exc:

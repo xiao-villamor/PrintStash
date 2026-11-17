@@ -289,11 +289,6 @@ def archive_format(path: Path, filename: str) -> ArchiveFormat | None:
     return archive_formats.sniff_format(path)
 
 
-def _kept_in_review(name: str) -> bool:
-    suffix = Path(name).suffix.lower()
-    return suffix in _IMPORTABLE_SUFFIXES or suffix in _IMAGE_SUFFIXES
-
-
 @contextmanager
 def zip_view(
     path: Path,
@@ -306,7 +301,8 @@ def zip_view(
 
     A ZIP is itself. Any other archive is planned under the archive limits,
     then rewritten into a scratch window sized for exactly that plan, which is
-    released when the caller leaves. Only models and preview images are kept.
+    released when the caller leaves. All bounded regular entries stay visible
+    so review can explain which entries will be omitted.
     """
     if archive is ArchiveFormat.ZIP:
         yield path
@@ -315,7 +311,7 @@ def zip_view(
     limits = _archive_limits()
     try:
         planned = archive_formats.planned_zip_bytes(
-            path, archive, limits=limits, keep=_kept_in_review, on_chunk=checkpoint
+            path, archive, limits=limits, keep=lambda _name: True, on_chunk=checkpoint
         )
         with scratch_windows.open_window(
             kind=scratch_windows.WindowKind.ARCHIVE_TRANSCODE,
@@ -329,7 +325,7 @@ def zip_view(
                 archive,
                 target,
                 limits=limits,
-                keep=_kept_in_review,
+                keep=lambda _name: True,
                 on_chunk=checkpoint,
             )
             yield target
@@ -350,7 +346,7 @@ def inspect_archive_as_zip(
 
 
 def inspect_archive(path: Path) -> list[ArchiveEntry]:
-    """List archive entries, enforcing zip-bomb caps. Importable + image only."""
+    """List review entries, including explicitly classified auxiliaries and omissions."""
     try:
         return inspect_archive_entries(
             path,
@@ -360,6 +356,8 @@ def inspect_archive(path: Path) -> list[ArchiveEntry]:
                 for suffix, file_type in SUFFIX_TO_FILE_TYPE.items()
             },
             image_suffixes=_IMAGE_SUFFIXES,
+            document_suffixes={".pdf", ".md", ".markdown", ".txt"},
+            include_unsupported=True,
         )
     except ArchivePolicyError as exc:
         raise ImportError_(exc.code) from exc
@@ -425,16 +423,21 @@ def extract_selected(path: Path, names: list[str]) -> list[tuple[Path, str]]:
 
 
 def selected_archive_entries(
-    path: Path, names: Sequence[str]
+    path: Path, names: Sequence[str], *, auxiliary: bool = False
 ) -> tuple[ArchiveEntry, ...]:
     """Validate the complete directory before selecting disposable outputs."""
     checkpoint(force=True)
     wanted = set(names)
+    allowed = (
+        _IMAGE_SUFFIXES | {".pdf", ".md", ".markdown", ".txt"}
+        if auxiliary
+        else _IMPORTABLE_SUFFIXES
+    )
     entries = tuple(
         entry
         for entry in inspect_archive(path)
         if (entry.name in wanted or entry.entry_id in wanted)
-        and Path(entry.name).suffix.lower() in _IMPORTABLE_SUFFIXES
+        and Path(entry.name).suffix.lower() in allowed
     )
     cap = settings.ingestion_batch_max_mb * 1024 * 1024
     if any(entry.size_bytes > cap for entry in entries):
@@ -462,6 +465,7 @@ def iter_archive_entries(
     names: Sequence[str],
     *,
     skip_entry: Callable[[ArchiveEntry], bool] | None = None,
+    auxiliary: bool = False,
     owner: scratch_windows.WindowOwner | None = None,
     session_factory: SessionFactory | None = None,
 ) -> Generator[tuple[ArchiveEntry, tuple[Path, str]], None, None]:
@@ -471,7 +475,12 @@ def iter_archive_entries(
     transferred to disposable cleanup. Sequential one-entry windows satisfy
     both configured bounds without staging the rest of the selection.
     """
-    entries = selected_archive_entries(path, names)
+    entries = selected_archive_entries(path, names, auxiliary=auxiliary)
+    allowed = (
+        _IMAGE_SUFFIXES | {".pdf", ".md", ".markdown", ".txt"}
+        if auxiliary
+        else _IMPORTABLE_SUFFIXES
+    )
     for entry in entries:
         checkpoint(force=True)
         if skip_entry is not None and skip_entry(entry):
@@ -491,7 +500,7 @@ def iter_archive_entries(
                         [entry.name],
                         staging_dir=workspace.directory,
                         max_entry_bytes=entry.size_bytes,
-                        importable_suffixes=_IMPORTABLE_SUFFIXES,
+                        importable_suffixes=allowed,
                         on_chunk=checkpoint,
                         on_entry=lambda: checkpoint(force=True),
                     )

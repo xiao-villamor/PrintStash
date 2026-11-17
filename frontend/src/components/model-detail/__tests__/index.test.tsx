@@ -126,6 +126,7 @@ function renderDetail(
       routes: {
         "GET /api/v1/models/1": json(model),
         "GET /api/v1/models/1/print-jobs": json([]),
+        "GET /api/v1/models/1/related-profiles": json({ items: [], has_more: false }),
         "GET /api/v1/models/1/printer-files": json([]),
         "GET /api/v1/models/1/provenance": json({ edit_version: 1, sources: [] }),
         "GET /api/v1/models/1/shares": json([]),

@@ -336,6 +336,8 @@ class MakeInboxItem(Protocol):
         state: InboxItemState = ...,
         source_kind: InboxSourceKind = ...,
         manifest: dict[str, Any] | None = None,
+        capture_request_key: str | None = None,
+        source_identity_key: str | None = None,
         **overrides: Any,
     ) -> InboxItem: ...
 

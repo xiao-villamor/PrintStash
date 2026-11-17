@@ -10,7 +10,7 @@ import { publishedViews, type ModelPreviews } from "@/types/previews";
  */
 export function useModelPreviewCard(cover: string | null, previews: ModelPreviews) {
   const { ref, admitted } = useViewportAdmission();
-  const views = publishedViews(previews);
+  const views = [...(previews.source_images ?? []), ...publishedViews(previews)];
   const preview = useModelPreviews(cover, views, admitted);
   const [hovered, setHovered] = useState(false);
   const [open, setOpen] = useState(false);

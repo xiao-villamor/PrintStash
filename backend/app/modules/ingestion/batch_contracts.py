@@ -269,3 +269,34 @@ class BatchCommitReference:
 
     def __post_init__(self) -> None:
         _positive(self.entry_id, "entry_id")
+
+
+@dataclass(frozen=True)
+class ImportedDocument:
+    name: str
+    document_id: int
+
+    def __post_init__(self) -> None:
+        _text(self.name, "document_name")
+        _positive(self.document_id, "document_id")
+
+
+@dataclass(frozen=True)
+class FinalizationFailure:
+    name: str
+    error_code: str
+
+    def __post_init__(self) -> None:
+        _text(self.name, "finalization_name")
+        _text(self.error_code, "finalization_error")
+
+
+@dataclass(frozen=True)
+class BatchSupplement:
+    documents: tuple[ImportedDocument, ...] = ()
+    failures: tuple[FinalizationFailure, ...] = ()
+    multipart_model_id: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.multipart_model_id is not None:
+            _positive(self.multipart_model_id, "multipart_model_id")

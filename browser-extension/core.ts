@@ -1,3 +1,5 @@
+import { sourcePublication, SOURCE_PROVIDERS } from "./source-providers.ts";
+import { captureReviewUrl } from "./capture-result.ts";
 const SOURCE_RULES = [
   {
     source: "Printables",
@@ -41,7 +43,7 @@ const CAPTURE_SOURCE_FIELD_LIMITS = {
 
 import type { CaptureSourceDraft } from "./capture-adapter.ts";
 
-const CAPTURE_SOURCE_PROVIDERS = new Set(["printables", "makerworld", "thingiverse", "cults"]);
+const CAPTURE_SOURCE_PROVIDERS = new Set<string>(SOURCE_PROVIDERS.map((provider) => provider.code));
 
 export const BROWSER_EXTENSION_SETUP_STORAGE_KEY = "printstash.browser-extension-setup:v1";
 
@@ -173,6 +175,8 @@ export function classifyModelPage(value: string) {
     return null;
   }
   if (!["http:", "https:"].includes(parsed.protocol)) return null;
+  const publication = sourcePublication(value);
+  if (publication) return publication.label;
   const hostname = parsed.hostname.toLowerCase();
   const rule = SOURCE_RULES.find(
     (candidate) => candidate.host(hostname) && candidate.path.test(parsed.pathname),
@@ -516,5 +520,6 @@ export async function captureModelPage({
   if (!captured.ok) {
     throw new Error(await responseDetail(captured, `PrintStash returned ${captured.status}.`));
   }
-  return { source, item: await captured.json(), inboxUrl: `${base}/inbox` };
+  const item = await captured.json();
+  return { source, item, inboxUrl: captureReviewUrl(base, item) };
 }

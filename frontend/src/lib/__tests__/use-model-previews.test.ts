@@ -65,6 +65,25 @@ afterEach(() => {
 });
 
 describe("useModelPreviews", () => {
+  it("navigates saved source images", async () => {
+    const images = [0, 1, 2].map((position) => ({
+      id: `source-${position}` as const,
+      role: "source" as const,
+      source_id: 1,
+      position,
+      provider: "thingiverse",
+      url: `/gallery/${position}`,
+    }));
+    const hook = renderHook(() => useModelPreviews("/gallery/0", images, true));
+    act(() => hook.result.current.select("source-1"));
+    await waitFor(() => expect(requested).toContain("/gallery/1"));
+    act(() => respond("/gallery/1"));
+    await waitFor(() => expect(hook.result.current.displayed?.id).toBe("source-1"));
+    act(() => hook.result.current.select("source-2"));
+    await waitFor(() => expect(requested).toContain("/gallery/2"));
+    act(() => respond("/gallery/2"));
+    await waitFor(() => expect(hook.result.current.displayed?.id).toBe("source-2"));
+  });
   it("leaves the cover to its own thumbnail", () => {
     const hook = renderHook(() => useModelPreviews("/cover", views, true));
     expect(hook.result.current.selected).toBe("cover");

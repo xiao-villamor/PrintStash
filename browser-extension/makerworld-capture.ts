@@ -1,3 +1,5 @@
+import { downloadProgress, type ByteProgress } from "./transfer-progress.ts";
+import { validateCaptureProfile, type CaptureProfile } from "./print-profile.ts";
 /**
  * The bounded MakerWorld browser boundary.
  *
@@ -34,6 +36,7 @@ export type MakerWorldFailureCode =
   | "request_failed";
 
 export interface MakerWorldPackageFile {
+  profile?: CaptureProfile;
   id: string;
   filename: string;
   fileType: "other";
@@ -87,6 +90,7 @@ export function makerWorldCaptureFromMetadata(
   const candidates = metadata.files.map((file) => ({
     id: file.id,
     filename: file.filename,
+    ...(file.profile ? { profile: file.profile } : {}),
     fileType: "other" as const,
     ...(file.sizeBytes === undefined ? {} : { sizeBytes: file.sizeBytes }),
   }));
@@ -249,6 +253,43 @@ function filenameForInstance(instance: { [key: string]: unknown }, index: number
   return boundedFilename(filename) || `${index + 1}.3mf`;
 }
 
+function profileFromInstance(
+  instance: { [key: string]: unknown },
+  id: string,
+  name: string,
+): CaptureProfile {
+  const creator = record(instance.instanceCreator);
+  const info = record(record(instance.extention)?.modelInfo);
+  const printer = firstText(record(info?.compatibility) ?? {}, ["devProductName"], 512);
+  const author = firstText(creator ?? {}, ["name", "handle"], 512);
+  const profile: CaptureProfile = {
+    id,
+    name,
+    origin: "provider",
+    ...(author ? { author } : {}),
+    ...(printer ? { printer } : {}),
+  };
+  if (
+    typeof instance.prediction === "number" &&
+    instance.prediction > 0 &&
+    instance.prediction <= 31622400
+  )
+    profile.estimated_seconds = instance.prediction;
+  if (typeof instance.weight === "number" && instance.weight > 0 && instance.weight <= 1000000)
+    profile.filament_grams = instance.weight;
+  if (Array.isArray(info?.plates) && info.plates.length > 0 && info.plates.length <= 1000)
+    profile.plate_count = info.plates.length;
+  if (Array.isArray(instance.instanceFilaments) && instance.instanceFilaments.length <= 64)
+    profile.materials = [
+      ...new Set(
+        instance.instanceFilaments
+          .map((f) => firstText(record(f) ?? {}, ["type"], 128))
+          .filter((v): v is string => v !== undefined),
+      ),
+    ];
+  return validateCaptureProfile(profile, id);
+}
+
 function filesFromDesign(
   design: { [key: string]: unknown },
   sourceItemId: string,
@@ -282,6 +323,11 @@ function filesFromDesign(
     files.push({
       id,
       filename: filenameForInstance(instance, index),
+      profile: profileFromInstance(
+        instance,
+        id,
+        firstText(instance, ["title", "name"], 512) ?? filenameForInstance(instance, index),
+      ),
       fileType: "other",
       ...(sizeBytes === undefined ? {} : { sizeBytes }),
     });
@@ -400,6 +446,7 @@ export function validateMakerWorldMetadataDto(
     files.push({
       id,
       filename,
+      ...(item.profile === undefined ? {} : { profile: validateCaptureProfile(item.profile, id) }),
       fileType: "other",
       ...(sizeBytes === undefined ? {} : { sizeBytes }),
     });
@@ -462,6 +509,7 @@ export async function readBoundedMakerWorldResponse(
   expectedSize?: number,
   totalBefore = 0,
   signal?: AbortSignal,
+  progress?: ByteProgress,
 ): Promise<Blob> {
   if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
   if (
@@ -492,6 +540,7 @@ export async function readBoundedMakerWorldResponse(
   }
   if (!response.body)
     throw new Error("user_file_required: MakerWorld did not provide a file stream.");
+  const report = downloadProgress(response, progress);
   const reader = response.body.getReader();
   const chunks: ArrayBuffer[] = [];
   let total = 0;
@@ -521,6 +570,7 @@ export async function readBoundedMakerWorldResponse(
       const copy = new ArrayBuffer(next.value.byteLength);
       new Uint8Array(copy).set(next.value);
       chunks.push(copy);
+      report(total);
     }
   } finally {
     signal?.removeEventListener("abort", abortReader);
@@ -550,6 +600,7 @@ export async function downloadMakerWorldCandidate({
   totalBefore = 0,
   ensureOriginPermission = async () => {},
   signal,
+  progress,
 }: {
   fetchImpl?: typeof fetch;
   candidate: MakerWorldPackageFile;
@@ -557,6 +608,7 @@ export async function downloadMakerWorldCandidate({
   totalBefore?: number;
   ensureOriginPermission?: (origin: string) => Promise<void>;
   signal?: AbortSignal;
+  progress?: ByteProgress;
 }): Promise<BrowserCaptureFile> {
   if (!safeMakerWorldDownloadUrl(link)) {
     throw new Error(
@@ -585,6 +637,7 @@ export async function downloadMakerWorldCandidate({
     candidate.sizeBytes,
     totalBefore,
     signal,
+    progress,
   );
   return {
     id: candidate.id,
@@ -727,10 +780,46 @@ export async function requestMakerWorldMetadataInMainWorld(args: {
       const fileSize = size(rawSize);
       if (rawSize !== undefined && rawSize !== null && fileSize === undefined)
         return { ok: false, code: "contract_changed" };
+      const creator = asRecord(instance.instanceCreator);
+      const info = asRecord(asRecord(instance.extention)?.modelInfo);
+      const author = text(creator?.name ?? creator?.handle, 512);
+      const printer = text(asRecord(info?.compatibility)?.devProductName, 512);
+      const profile: CaptureProfile = {
+        id: instanceId,
+        name: text(instance.title ?? instance.name, 512) ?? fileName,
+        origin: "provider",
+        ...(author ? { author } : {}),
+        ...(printer ? { printer } : {}),
+      };
+      if (
+        typeof instance.prediction === "number" &&
+        Number.isFinite(instance.prediction) &&
+        instance.prediction > 0 &&
+        instance.prediction <= 31622400
+      )
+        profile.estimated_seconds = instance.prediction;
+      if (
+        typeof instance.weight === "number" &&
+        Number.isFinite(instance.weight) &&
+        instance.weight > 0 &&
+        instance.weight <= 1000000
+      )
+        profile.filament_grams = instance.weight;
+      if (Array.isArray(info?.plates) && info.plates.length > 0 && info.plates.length <= 1000)
+        profile.plate_count = info.plates.length;
+      if (Array.isArray(instance.instanceFilaments) && instance.instanceFilaments.length <= 64)
+        profile.materials = [
+          ...new Set(
+            instance.instanceFilaments
+              .map((f) => text(asRecord(f)?.type, 128))
+              .filter((v): v is string => v !== undefined),
+          ),
+        ];
       seen.add(instanceId);
       files.push({
         id: instanceId,
         filename: fileName,
+        profile,
         fileType: "other",
         ...(fileSize === undefined ? {} : { sizeBytes: fileSize }),
       });

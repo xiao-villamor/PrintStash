@@ -1166,6 +1166,23 @@ export function aModelFacets(override: Partial<ModelFacetsRead> = {}): ModelFace
   };
 }
 
+/** Saved project facts with no inferred print measurements. */
+export function aProjectProfile(
+  override?: Partial<import("@/lib/queries/project-profile").ProjectProfile>,
+): import("@/lib/queries/project-profile").ProjectProfile {
+  return {
+    name: null,
+    printer: null,
+    materials: [],
+    nozzle_diameters_mm: [],
+    layer_height_mm: null,
+    wall_loops: null,
+    infill_percent: null,
+    plates: [],
+    ...override,
+  };
+}
+
 /** A settled image preparation census, including enabled producers only. */
 export function aPreviewActivity(override?: Partial<PreviewActivity>): PreviewActivity {
   return { total: 0, completed: 0, remaining: 0, skipped: 0, failed: 0, ...override };

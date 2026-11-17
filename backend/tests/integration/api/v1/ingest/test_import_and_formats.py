@@ -432,3 +432,80 @@ class TestModel:
         assert payload["state"] == "completed", payload
         file_row = db_session.get(File, payload["file_id"])
         assert file_row is not None and file_row.file_type == FileType.THREE_MF
+
+
+class TestArchiveReviewIntake:
+    @pytest.mark.parametrize(
+        "documents", [["../outside.pdf"], ["part.stl"], ["missing.pdf"]]
+    )
+    def test_refuses_guides_absent_from_review(self, client, auth_headers, documents):
+        from tests.factories.content import binary_stl, zip_bytes
+
+        inspected = _completed(
+            client,
+            client.post(
+                "/api/v1/ingest/archive/inspect",
+                headers=auth_headers,
+                files={
+                    "file": (
+                        "review.zip",
+                        zip_bytes({"part.stl": binary_stl()}),
+                        "application/zip",
+                    )
+                },
+            ),
+            auth_headers,
+        )
+        response = client.post(
+            f"/api/v1/ingest/archive/{inspected['result']['archive_id']}/select",
+            headers=auth_headers,
+            json={
+                "names": ["part.stl"],
+                "intake": {"mode": "separate", "documents": documents},
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "archive_document_not_found"
+
+    def test_saves_guides_without_grouping_models(
+        self, client, auth_headers, db_session
+    ):
+        from app.db.models import Document, MultipartModel
+        from tests.factories.content import binary_stl, zip_bytes
+
+        inspected = _completed(
+            client,
+            client.post(
+                "/api/v1/ingest/archive/inspect",
+                headers=auth_headers,
+                files={
+                    "file": (
+                        "review.zip",
+                        zip_bytes(
+                            {"part.stl": binary_stl(), "README.md": b"# Assembly"}
+                        ),
+                        "application/zip",
+                    )
+                },
+            ),
+            auth_headers,
+        )
+        result = _completed(
+            client,
+            client.post(
+                f"/api/v1/ingest/archive/{inspected['result']['archive_id']}/select",
+                headers=auth_headers,
+                json={
+                    "names": ["part.stl"],
+                    "intake": {"mode": "separate", "documents": ["README.md"]},
+                },
+            ),
+            auth_headers,
+        )
+        assert result["failed"] == 0
+        guide = db_session.get(
+            Document, result["result"]["documents"][0]["document_id"]
+        )
+        assert guide.body == "# Assembly"
+        assert guide.multipart_model_id is None
+        assert db_session.exec(select(MultipartModel)).all() == []

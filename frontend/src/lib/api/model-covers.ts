@@ -5,7 +5,7 @@ import type { ModelRead } from "@/types";
 
 export type ModelCoverCommand =
   | { kind: "upload"; file: File }
-  | { kind: "source"; sourceId: number }
+  | { kind: "source"; sourceId: number; position?: number }
   | { kind: "reset" };
 
 export function saveModelCover(
@@ -24,7 +24,10 @@ export function saveModelCover(
         ? {
             method: "POST",
             headers: { ...jsonHeaders(), ...headers },
-            body: JSON.stringify({ source_id: command.sourceId }),
+            body: JSON.stringify({
+              source_id: command.sourceId,
+              position: command.position,
+            }),
           }
         : { method: "DELETE", headers: { ...authHeaders(), ...headers } };
   return requestApi(

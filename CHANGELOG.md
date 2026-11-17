@@ -4,8 +4,13 @@
 
 ### Changed
 
-- New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.
+- Model descriptions render Markdown in detail, inspection and shared views, with an edit preview. Browser capture can retain up to 64 publication photos, show them in the card gallery, and choose any captured image as the cover. Gallery transfers recover verified images, preserve source provenance, and remain included in Vault backups and portable exports.
 
+- Browser captures can suggest an editable collection and tags, include a selected cover for every resulting Model, and show download and upload byte progress. Recovering an interrupted capture retains its original suggestions and verified files; a pending local cover must be selected again.
+
+- Archive review identifies omitted images, documents and unsupported entries before importing Models, and explains how selected files and subfolders become Models and collections.
+
+- New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.
 - Flat-model previews now support arrow navigation through all five views and back to the cover. Single-cover and multi-angle cards share a larger image area, and the expanded gallery uses more room on large screens while fitting narrow displays.
 
 - Preview settings now include the vault-wide multi-angle generation switch. Preview activity reports total, completed, remaining, skipped and failed image tasks across the library, including work waiting to enter the queue. Multi-angle orbits use the shared cover camera elevation; enabled generators refresh older view sets in the background.
@@ -37,6 +42,13 @@
 
 ### Added
 
+- Review folders and archives as separate Models or a Multipart with named pieces. Preserve selected guides and images as Documents, retain completed results when retrying, and open saved results from Tasks. Folder review is bounded to 256 MiB and 2,000 files; original files remain unchanged.
+
+
+- 3MF projects show bounded saved printer, material, nozzle, layer, wall and infill settings, with per-plate estimates when present. File estimates remain separate from provider estimates and measured print results; original project bytes are unchanged.
+- Opt-in corner import panels for MakerWorld, Printables, Thingiverse, MyMiniFactory, Cults, Thangs, Creality Cloud and MakerOnline publications, with per-file transfer recovery, owner-scoped capture history and direct links to Pending Imports review. MakerWorld profiles retain allowlisted provider estimates and link related, accessible Models without merging them.
+- Advisory geometry checks, an import-readiness summary, and source/license summaries expose existing evidence without certifying printability or interpreting license terms.
+
 - Custom recovery pages distinguish missing content, restricted access and connection failures, with retry and return actions that match the workbench.
 - Model cards offer lightweight multi-angle previews with deliberate arrows and an expanded gallery, including Top/Bottom and shape-aware planar views. Visible-image admission, intent-based prefetching and bounded background generation preserve primary covers and avoid hover-triggered geometry downloads. Generation has its own Background work control (`VAULT_DERIVATIVES_PREVIEWS_ENABLED`). See [preview behavior and limits](docs/model-previews.md).
 
@@ -61,6 +73,9 @@
 
 ### Fixed
 
+- Partial imports show every file result and its failure reason. Expired browser staging prompts a fresh capture, and collection selection is distinguished from physical storage.
+- Slicer handoff remembers the current user's browser preference, retains a download fallback for the selected Artifact and distinguishes a requested launch from a confirmed opening.
+
 - Saved multipart descriptions stay visible in the overview. Multipart member names wrap without clipping, and the mobile composition editor keeps Add variant and Save changes at the shared touch-target size.
 
 - Captured-source conflict recovery stays inside the edit dialog, keeping review and retry controls reachable. Keyboard focus remains on its card when a growing Library switches to virtual rows.
@@ -72,7 +87,6 @@
 - The Library now refreshes automatically after catalog changes or expired browse cursors, including paged galleries. Updates preserve the reading position, wait until selection ends, and no longer require a Refresh library banner.
 
 - Completing a ZIP import no longer leaves the Library empty with a request error when it interrupts an in-progress refresh. Interrupted reads recover automatically while preserving the displayed Models and reading position.
-
 - Library refreshes recover automatically when an ongoing ZIP import changes the catalog during a read, keeping the displayed Models and reading position instead of showing a stuck request error.
 
 - Model card arrows return to the cover in both directions and skip the repeated default camera angle. The expanded gallery keeps every generated view available.

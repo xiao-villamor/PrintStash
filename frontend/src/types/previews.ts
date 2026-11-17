@@ -55,6 +55,15 @@ export interface PreviewImage {
   role: PreviewViewRole;
   url: string;
 }
+export interface SourceImage {
+  id: `source-${number}`;
+  role: "source";
+  source_id: number;
+  position: number;
+  provider: string;
+  url: string;
+}
+export type GalleryImage = PreviewImage | SourceImage;
 export interface PublishedPreviews {
   profile: "orbit" | "planar";
   manifest_url: string;
@@ -64,11 +73,15 @@ export interface PublishedPreviews {
 export interface NoPreviewSubject {
   kind: "none";
   cover_camera: "unknown";
+  /** Optional when reading a Vault predating provider galleries. */
+  source_images?: SourceImage[];
 }
 /** The view set of the one mesh Artifact selected for this Model. */
 export interface ArtifactPreviews {
   kind: "artifact";
   cover_camera: "unknown";
+  /** Optional when reading a Vault predating provider galleries. */
+  source_images?: SourceImage[];
   file_id: number;
   state: PreviewState;
   reason: string | null;
@@ -104,6 +117,22 @@ export function previewsInFlight(previews: ModelPreviews): boolean {
 export function isModelPreviews(wire: ModelPreviews): boolean {
   // oxlint-disable anti-slop/no-runtime-typeof -- Foreign HTTP JSON must establish its closed case, Artifact identity and view addresses before it can replace a displayed preview.
   if (wire?.cover_camera !== "unknown") return false;
+  if (
+    wire.source_images !== undefined &&
+    (!Array.isArray(wire.source_images) ||
+      wire.source_images.some(
+        (image) =>
+          !/^source-\d+$/.test(image?.id) ||
+          image.role !== "source" ||
+          !Number.isSafeInteger(image.source_id) ||
+          image.source_id <= 0 ||
+          !Number.isSafeInteger(image.position) ||
+          image.position < 0 ||
+          typeof image.provider !== "string" ||
+          typeof image.url !== "string",
+      ))
+  )
+    return false;
   if (wire.kind === "none") return true;
   if (wire.kind !== "artifact") return false;
   const published = wire.published;

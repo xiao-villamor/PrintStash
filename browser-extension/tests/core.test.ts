@@ -416,7 +416,7 @@ test("logs in with a named API key and captures the browser source", async () =>
 
   assert.equal(result.source, "Printables");
   assert.equal(result.item.id, 9);
-  assert.equal(result.inboxUrl, "https://prints.example.com/inbox");
+  assert.equal(result.inboxUrl, "https://prints.example.com/inbox/9");
   assert.deepEqual(itemAt(calls, 0).body, {
     username: "owner",
     api_key: "psk_secret",

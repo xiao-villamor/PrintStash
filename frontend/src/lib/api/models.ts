@@ -12,6 +12,7 @@ import {
   sendJson,
 } from "@/lib/api/request";
 import {
+  ArchiveIntake,
   ArtifactOutcomeRead,
   FileRevisionUpdate,
   ImportedPrintJobRead,
@@ -421,7 +422,7 @@ export function inspectArchive(
 
 export function selectArchiveEntries(
   archiveId: string,
-  payload: { names: string[]; collection?: string; tags?: string },
+  payload: { names: string[]; collection?: string; tags?: string; intake?: ArchiveIntake },
 ): Promise<JobAccepted> {
   return sendJson<JobAccepted>(`/api/v1/ingest/archive/${archiveId}/select`, "POST", payload);
 }

@@ -19,6 +19,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from printstash_core.imports.contracts import CaptureManifestV2
 from printstash_core.mesh.measurements import (
     VolumeLegacyUnassessed,
     VolumeMeasured,
@@ -758,7 +759,7 @@ class TestProvenance:
         )
 
         def manifest(title: str, revision: str):
-            return provenance.CaptureManifestV2.from_dict(
+            return CaptureManifestV2.from_dict(
                 {
                     "schema_version": 2,
                     "kind": "model_files",

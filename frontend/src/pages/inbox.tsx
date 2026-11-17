@@ -135,7 +135,10 @@ function ImportList({
                     {t("inbox.retry")}
                   </Button>
                 )}
-                {item.state === "completed" && item.resulting_model_id ? (
+                {item.state === "completed" &&
+                item.completion !== "partial" &&
+                item.results.length <= 1 &&
+                item.resulting_model_id ? (
                   <Button size="xs" variant="outline" asChild>
                     <Link href={`/models/${item.resulting_model_id}`}>{t("inbox.openModel")}</Link>
                   </Button>

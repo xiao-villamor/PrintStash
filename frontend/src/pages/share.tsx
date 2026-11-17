@@ -1,5 +1,6 @@
 "use client";
 
+import { MarkdownView } from "@/components/markdown-view";
 import { translate } from "@/lib/locale";
 import { revisionStatusLabel } from "@/components/model-detail/presentation";
 import { currentLocale } from "@/lib/locale";
@@ -188,7 +189,9 @@ function ShareContent({ token }: { token: string }) {
           </div>
         </div>
         {model.description && (
-          <p className="text-sm text-on-surface-variant mt-1 max-w-2xl">{model.description}</p>
+          <div className="text-sm text-on-surface-variant mt-1 max-w-2xl">
+            <MarkdownView source={model.description} />
+          </div>
         )}
       </header>
 

@@ -150,14 +150,15 @@ test.describe("Model cover controls", () => {
       expect(after.thumbnail_url).toBe(chosen.thumbnail_url);
       expect(await (await page.request.get(after.thumbnail_url!)).body()).toEqual(chosenBytes);
 
-      // ── Reset reveals the regenerated automatic thumbnail ──
+      // ── Automatic cover priority restores the captured provider photo ──
       await page.getByRole("button", { name: "Edit cover", exact: true }).click();
       await editor.getByRole("button", { name: "Reset to automatic" }).click();
       await expect(editor).toHaveCount(0);
       await page.reload();
       const reset: ModelRead = await (await page.request.get(path)).json();
       expect(reset.has_custom_cover).toBe(false);
-      expect(reset.thumbnail_url).toMatch(/^\/api\/v1\/files\/\d+\/thumbnail/);
+      expect(new URL(reset.thumbnail_url!, page.url()).pathname).toBe(sourcePath + "/content");
+      expect(await (await page.request.get(reset.thumbnail_url!)).body()).toEqual(sourceBytes);
     } finally {
       if (modelId !== null) await page.request.delete(`/api/v1/models/${modelId}`);
       await page.request.delete(`/api/v1/inbox/${itemId}`);

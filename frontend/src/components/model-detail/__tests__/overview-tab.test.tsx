@@ -100,6 +100,16 @@ describe("OverviewTab", () => {
       expect(screen.getByPlaceholderText("Optional description")).toBeInTheDocument();
     });
 
+    it("previews the description draft", () => {
+      renderEditing({ description: "## Assembly\n\n- Fit **both** clips." });
+      expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
+        "## Assembly\n\n- Fit **both** clips.",
+      );
+      fireEvent.click(screen.getByText("Preview", { exact: true }));
+      expect(screen.getByRole("heading", { name: "Assembly" })).toBeVisible();
+      expect(screen.getByText("both").tagName).toBe("STRONG");
+    });
+
     it("offers a source URL field", () => {
       renderEditing();
 

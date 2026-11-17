@@ -451,3 +451,38 @@ class TestSanitizeProviderCanonicalUrl:
         # rename, so it has to keep pointing at the same implementation rather
         # than at a copy that could drift.
         assert sanitize_provider_canonical_url is canonicalize_provider_url
+
+
+class TestCanonicalizeBrowserMarketplaces:
+    @pytest.mark.parametrize(
+        ("provider", "url", "item_id"),
+        [
+            pytest.param("thangs", "https://thangs.com/designer/Test%20Maker/3d-model/Test%20Cube-123", "123", id="thangs"),
+            pytest.param("crealitycloud", "https://www.crealitycloud.com/en/model-detail/test-cube", "test-cube", id="creality"),
+            pytest.param("makeronline", "https://www.makeronline.com/en/model/Test%20Cube/123.html", "123", id="makeronline"),
+        ],
+    )
+    def test_preserves_a_bound_publication(self, provider, url, item_id):
+        assert canonicalize_provider_url(provider, url, item_id) == url
+
+    @pytest.mark.parametrize("provider", ["thangs", "crealitycloud", "makeronline"])
+    def test_rejects_another_host(self, provider):
+        with pytest.raises(CaptureContractError):
+            canonicalize_provider_url(provider, "https://attacker.test/model/123", "123")
+
+    @pytest.mark.parametrize(
+        ("provider", "url"),
+        [
+            pytest.param("thangs", "https://thangs.com/designer/Test/3d-model/Cube-123", id="thangs"),
+            pytest.param("crealitycloud", "https://www.crealitycloud.com/model-detail/123", id="creality"),
+            pytest.param("makeronline", "https://www.makeronline.com/en/model/Cube/123.html", id="makeronline"),
+        ],
+    )
+    def test_rejects_a_different_publication_id(self, provider, url):
+        with pytest.raises(CaptureContractError):
+            canonicalize_provider_url(provider, url, "456")
+
+    @pytest.mark.parametrize("slug", ["%2e%2e", "one%2ftwo", "one%5ctwo", "%252e%252e", "%00", "%GG"])
+    def test_rejects_ambiguous_encoded_names(self, slug):
+        with pytest.raises(CaptureContractError):
+            canonicalize_provider_url("makeronline", f"https://www.makeronline.com/en/model/{slug}/123.html", "123")

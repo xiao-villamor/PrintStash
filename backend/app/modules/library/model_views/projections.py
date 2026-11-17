@@ -422,7 +422,12 @@ def _hydrate_list_rows(
                 source_url=model.source_url,
                 effective_role=roles.get(model.collection_id),
                 tags=sorted(tags_by_model.get(model.id, [])),
-                thumbnail_url=thumb_url(model),
+                thumbnail_url=thumb_url(
+                    model,
+                    source_image_url=previews[model.id].source_images[0].url
+                    if previews[model.id].source_images
+                    else None,
+                ),
                 file_count=int(file_counts.get(model.id, 0)),
                 gcode_file_count=gcode_counts.get(model.id, 0),
                 mesh_file_id=mesh_file_ids.get(model.id),

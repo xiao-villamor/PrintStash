@@ -1,4 +1,5 @@
 /** Defends the popup's user-visible states through real DOM events and browser boundary fakes. */
+import { UploadRequest } from "./support/upload-request.ts";
 import { readFile } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "@webext-core/fake-browser";
@@ -59,6 +60,8 @@ describe("popup browser adapters", () => {
 
   beforeEach(() => {
     vi.resetModules();
+    UploadRequest.instances = [];
+    vi.stubGlobal("XMLHttpRequest", UploadRequest);
     fakeBrowser.reset();
     document.documentElement.innerHTML = popupHtml;
     vi.stubGlobal("chrome", fakeBrowser);
@@ -78,6 +81,58 @@ describe("popup browser adapters", () => {
     fakeBrowser.runtime.getManifest = vi.fn().mockReturnValue({ version: extensionVersion });
   });
 
+  it("shows literal collection suggestions without persisting private labels", async () => {
+    await fakeBrowser.storage.local.set({
+      vault: "https://vault.test",
+      deviceCredential: "device-secret",
+    });
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.includes("/capture-destinations?"))
+        return response([{ id: 7, label: "Parts / <img src=x>" }]);
+      if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+      return response({});
+    });
+    await import("../popup.ts");
+    await settle();
+    requiredElement("#collection-query", HTMLInputElement).value = "Parts";
+    button("#find-collection").click();
+    await settle();
+    expect(requests).toContain("https://vault.test/api/v1/inbox/capture-destinations?q=Parts");
+    const select = requiredElement("#capture-collection", HTMLSelectElement);
+    expect([...select.options].map((option) => option.textContent)).toEqual([
+      "Choose in Pending Imports",
+      "Parts / <img src=x>",
+    ]);
+    expect(select.querySelector("img")).toBeNull();
+    expect(JSON.stringify(await fakeBrowser.storage.local.get(null))).not.toContain("Parts");
+  });
+
+  it("ignores suggestions returned after disconnecting", async () => {
+    await fakeBrowser.storage.local.set({
+      vault: "https://vault.test",
+      deviceCredential: "device-secret",
+    });
+    const pending = deferred<Response>();
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      if (String(input).includes("/capture-destinations?")) return pending.promise;
+      if (String(input).endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+      return response({});
+    });
+    await import("../popup.ts");
+    await settle();
+    button("#find-collection").click();
+    await settle();
+    button("#disconnect").click();
+    await settle();
+    pending.resolve(response([{ id: 7, label: "Old account" }]));
+    await settle();
+    expect(requiredElement("#capture-collection", HTMLSelectElement).options).toHaveLength(1);
+    expect(element("#connection-title").textContent).toBe("Not connected");
+  });
+
   it("shows the packaged release version in the popup header", async () => {
     await import("../popup.ts");
 
@@ -85,6 +140,26 @@ describe("popup browser adapters", () => {
     expect(element("#runtime-marker").hidden).toBe(false);
     expect(document.querySelector("header")?.textContent).not.toContain("protocol");
     expect(document.querySelector("header")?.textContent).not.toContain("diagnostics");
+  });
+
+  it("pairs a second browser with the chosen device name", async () => {
+    const requests: Array<{ name: string }> = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/browser-pairings/claim")) {
+        requests.push(JSON.parse(String(init?.body)));
+        return response({ credential: "second-device" });
+      }
+      return response({ status: "ok", name: "PrintStash" });
+    });
+    await import("../popup.ts");
+    await settle();
+    requiredElement("#vault", HTMLInputElement).value = "http://localhost:8000";
+    requiredElement("#pairing-code", HTMLInputElement).value = "new-code";
+    requiredElement("#device-name", HTMLInputElement).value = "MakerWorld validation";
+    button("#connect").click();
+    await settle();
+    expect(requests).toEqual([{ code: "new-code", name: "MakerWorld validation" }]);
+    expect(element("#connection-title").textContent).toBe("Connected");
   });
 
   it.each([
@@ -293,6 +368,7 @@ describe("popup browser adapters", () => {
         : Promise.resolve(true),
     );
     const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -314,6 +390,42 @@ describe("popup browser adapters", () => {
     expect(fakeBrowser.scripting.executeScript).not.toHaveBeenCalled();
   });
 
+  it("allows time to read the native provider permission prompt", async () => {
+    await fakeBrowser.storage.local.set({
+      vault: "https://prints.example.com",
+      username: "owner",
+      apiKey: "psk_test",
+    });
+    const permission = deferred<boolean>();
+    fakeBrowser.permissions.contains = vi.fn(
+      async ({ origins }: { origins: string[] }) => origins[0] !== "https://api.printables.com/*",
+    );
+    fakeBrowser.permissions.request = vi.fn(() => permission.promise);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+        if (url.endsWith("/login")) return response({ access_token: "test-jwt" });
+        if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
+        throw new Error("unexpected request");
+      }),
+    );
+    await import("../popup.ts");
+    await settle();
+    vi.useFakeTimers();
+    try {
+      button("#capture").click();
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(button("#capture").disabled).toBe(true);
+      expect(element("#status").textContent).not.toContain("timed out");
+      permission.resolve(false);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(button("#capture").disabled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reports a safe code when visible capture execution rejects or times out", async () => {
     vi.stubGlobal("__PRINTSTASH_CAPTURE_TIMEOUT_MS__", 5);
     await fakeBrowser.storage.local.set({
@@ -322,6 +434,7 @@ describe("popup browser adapters", () => {
       apiKey: "psk_vault_secret",
     });
     const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -352,6 +465,7 @@ describe("popup browser adapters", () => {
       apiKey: "psk_vault_secret",
     });
     const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -379,6 +493,7 @@ describe("popup browser adapters", () => {
       apiKey: "psk_vault_secret",
     });
     const printablesFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -413,6 +528,7 @@ describe("popup browser adapters", () => {
         { id: 42, title: "Calibration cube", url: "https://makerworld.com/en/models/1234-cube" },
       ]);
     const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -459,6 +575,7 @@ describe("popup browser adapters", () => {
       },
     };
     const fetchImpl = vi.fn(async (url: string, _options: RequestInit = {}) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -529,6 +646,7 @@ describe("popup browser adapters", () => {
     });
     const fetchImpl = vi.fn(async (url: string) => {
       events.push(`fetch:${url}`);
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -579,6 +697,7 @@ describe("popup browser adapters", () => {
     );
     fakeBrowser.permissions.request = vi.fn().mockResolvedValue(false);
     const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -615,6 +734,7 @@ describe("popup browser adapters", () => {
       },
     ]);
     const fetchImpl = vi.fn(async (url: string, _options: RequestInit = {}) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -706,6 +826,64 @@ describe("popup browser adapters", () => {
     ).toBe(false);
   });
 
+  it("requests MakerOnline download access before starting verification", async () => {
+    await fakeBrowser.storage.local.set({
+      vault: "https://prints.example.com",
+      username: "owner",
+      apiKey: "psk_test",
+    });
+    fakeBrowser.tabs.query = vi
+      .fn()
+      .mockResolvedValue([
+        { id: 42, title: "Clip", url: "https://www.makeronline.com/en/model/Clip/100.html" },
+      ]);
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
+      if (url.endsWith("/login")) return response({ access_token: "test-token" });
+      if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
+      return response({ status: "ok", name: "PrintStash" });
+    });
+    fakeBrowser.scripting.executeScript = vi
+      .fn()
+      .mockResolvedValueOnce([{ result: null }])
+      .mockResolvedValueOnce([{ result: { pageTitle: "Clip", jsonLd: [] } }])
+      .mockResolvedValueOnce([
+        {
+          result: {
+            ok: true,
+            kind: "metadata",
+            source: { title: "Clip" },
+            profiles: [
+              {
+                id: "200",
+                filename: "clip.3mf",
+                size: 1000,
+                profile: { id: "200", name: "Fine", origin: "provider" },
+              },
+            ],
+          },
+        },
+      ]);
+    await import("../popup.ts");
+    await settle();
+    button("#capture").click();
+    await vi.waitFor(() => expect(element("#candidate-panel").hidden).toBe(false));
+    requiredElement("#candidate-list input", HTMLInputElement).checked = true;
+    fakeBrowser.permissions.contains = vi.fn().mockResolvedValue(false);
+    fakeBrowser.permissions.request = vi.fn().mockResolvedValue(false);
+    vi.mocked(fakeBrowser.scripting.executeScript).mockClear();
+
+    button("#capture").click();
+    await vi.waitFor(() =>
+      expect(element("#status-message").textContent).toContain("Permission to download"),
+    );
+
+    expect(fakeBrowser.permissions.request).toHaveBeenCalledWith({
+      origins: ["https://acop-prod-private.s3-accelerate.amazonaws.com/*"],
+    });
+    expect(fakeBrowser.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
   it("keeps candidate checkboxes compact instead of inheriting text-input dimensions", () => {
     const checkboxStyles = cssBlock('.candidate-option input[type="checkbox"]');
     expect(checkboxStyles).toMatch(/width:\s*16px/);
@@ -722,6 +900,7 @@ describe("popup browser adapters", () => {
       apiKey: "psk_vault_secret",
     });
     const fetchImpl = vi.fn(async (url) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       return response({ username: "owner", is_superuser: false });
@@ -966,6 +1145,8 @@ describe("popup browser adapters", () => {
             : { vault: nextVault, username: "test-user", apiKey: "test-new-key" };
         expect(await fakeBrowser.storage.local.get()).toEqual(expected);
         vi.resetModules();
+        UploadRequest.instances = [];
+        vi.stubGlobal("XMLHttpRequest", UploadRequest);
         document.documentElement.innerHTML = popupHtml;
         await import("../popup.ts");
         await settle();
@@ -1090,6 +1271,7 @@ describe("popup browser adapters", () => {
       deviceCredential: "device-secret",
     });
     const fetchImpl = vi.fn(async (url) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       return response({}, 404);
     });
@@ -1228,6 +1410,7 @@ describe("popup browser adapters", () => {
             method: options.method ?? "GET",
             authorization: new Headers(options.headers).get("Authorization"),
           });
+          if (url.endsWith("/capture-capabilities")) return response({}, 404);
           if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
           if (url.endsWith("/claim")) return response({ credential: "test-credential-b" });
           if (url.includes("api.printables.com")) return response({}, 503);
@@ -1376,6 +1559,7 @@ describe("popup browser adapters", () => {
       apiKey: "psk_vault_secret",
     });
     const fetchImpl = vi.fn(async (url, options: RequestInit = {}) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -1481,6 +1665,7 @@ describe("popup browser adapters", () => {
       apiKey: "psk_vault_secret",
     });
     const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -1512,6 +1697,7 @@ describe("popup browser adapters", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.endsWith("/capture-capabilities")) return response({}, 404);
         if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
         if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
         if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -1590,6 +1776,7 @@ describe("popup browser adapters", () => {
       .mockResolvedValueOnce([{ result: { pageTitle: "3DBenchy", jsonLd: [] } }])
       .mockRejectedValueOnce(new TypeError("Failed to fetch"));
     const fetchImpl = vi.fn(async (url: string, options: RequestInit = {}) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -1616,6 +1803,7 @@ describe("popup browser adapters", () => {
           data: {
             print: {
               id: "3161",
+              images: [],
               name: "3DBenchy",
               description:
                 "<p>Live <strong>description</strong></p><p>Second paragraph</p><script>document.cookie = 'session-cookie'</script>",
@@ -1675,10 +1863,10 @@ describe("popup browser adapters", () => {
     expect(element("#candidate-panel").hidden).toBe(false);
     expect(element("#candidate-panel legend").textContent).toBe("Select Printables files");
     expect(button("#capture").textContent).toBe("Confirm and upload selected files");
-    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
     expect(
       fetchImpl.mock.calls.filter(([url]) => url === "https://api.printables.com/graphql/"),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     expect(
       vi.mocked(fakeBrowser.scripting.executeScript).mock.calls.filter(([details]) => {
         const args = details.args;
@@ -1703,8 +1891,8 @@ describe("popup browser adapters", () => {
     const linkCalls = fetchImpl.mock.calls.filter(
       ([url]) => url === "https://api.printables.com/graphql/",
     );
-    expect(linkCalls).toHaveLength(2);
-    const linkCall = linkCalls[1];
+    expect(linkCalls).toHaveLength(3);
+    const linkCall = linkCalls[2];
     if (!linkCall?.[1]) throw new Error("Missing extension-context Printables link request");
     expect(linkCall[1].credentials).toBe("omit");
     expect(linkCall[1].headers).not.toHaveProperty("Authorization");
@@ -1772,7 +1960,7 @@ describe("popup browser adapters", () => {
 
   it.each([
     {
-      name: "requests one file-host permission for concurrent Printables downloads",
+      name: "requests file-host permission before sequential Printables downloads",
       alreadyGranted: false,
       grant: true,
     },
@@ -1794,10 +1982,11 @@ describe("popup browser adapters", () => {
       .mockResolvedValueOnce([{ result: { pageTitle: "3DBenchy", jsonLd: [] } }])
       .mockRejectedValueOnce(new TypeError("Failed to fetch"));
     let permissionPending = false;
+    let hostGranted = alreadyGranted;
     const fileHostRequests: string[][] = [];
     fakeBrowser.permissions.contains = vi.fn(
       async ({ origins }: { origins: string[] }) =>
-        !origins.includes("https://files.printables.com/*") || alreadyGranted,
+        !origins.includes("https://files.printables.com/*") || hostGranted,
     );
     fakeBrowser.permissions.request = vi.fn(async ({ origins }: { origins: string[] }) => {
       if (!origins.includes("https://files.printables.com/*")) return true;
@@ -1806,9 +1995,11 @@ describe("popup browser adapters", () => {
       permissionPending = true;
       await new Promise((resolve) => setTimeout(resolve, 0));
       permissionPending = false;
+      hostGranted = grant;
       return grant;
     });
     const fetchImpl = vi.fn(async (url: string, options: RequestInit = {}) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -1822,7 +2013,11 @@ describe("popup browser adapters", () => {
                   files: [
                     { id: "first", link: "https://files.printables.com/first.3mf?token=secret" },
                     { id: "second", link: "https://files.printables.com/second.3mf?token=secret" },
-                  ],
+                  ].filter((file) =>
+                    JSON.stringify(JSON.parse(stringBody(options)).variables.files).includes(
+                      file.id,
+                    ),
+                  ),
                 },
               },
             },
@@ -1832,6 +2027,7 @@ describe("popup browser adapters", () => {
           data: {
             print: {
               id: "3161",
+              images: [],
               name: "3DBenchy",
               otherFiles: [
                 { id: "first", name: "first.3mf", fileSize: 4 },
@@ -1942,6 +2138,7 @@ describe("popup browser adapters", () => {
           },
         },
       ])
+      .mockResolvedValueOnce([{ result: [] }])
       .mockResolvedValueOnce([
         {
           result: {
@@ -1956,6 +2153,7 @@ describe("popup browser adapters", () => {
         },
       ]);
     const fetchImpl = vi.fn(async (url: string, options: RequestInit = {}) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -2060,6 +2258,7 @@ describe("popup browser adapters", () => {
       .mockResolvedValueOnce([{ result: { pageTitle: "Calibration cube", jsonLd: [] } }])
       .mockResolvedValueOnce([{ result: { ok: false, code: "auth_required" } }]);
     const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -2132,10 +2331,12 @@ describe("popup browser adapters", () => {
           },
         },
       ])
+      .mockResolvedValueOnce([{ result: [] }])
       .mockResolvedValueOnce([{ result: { ok: false, code: "challenge" } }]);
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.endsWith("/capture-capabilities")) return response({}, 404);
         if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
         if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
         if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -2181,6 +2382,7 @@ describe("popup browser adapters", () => {
       },
     ]);
     const fetchImpl = vi.fn(async (url: string) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -2246,6 +2448,7 @@ describe("popup browser adapters", () => {
       apiKey: "psk_vault_secret",
     });
     const fetchImpl = vi.fn(async (url: string, options: RequestInit = {}) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -2294,7 +2497,7 @@ describe("popup browser adapters", () => {
     button("#capture").click();
     for (let attempt = 0; attempt < 6; attempt += 1) await settle();
 
-    expect(fakeBrowser.scripting.executeScript).toHaveBeenCalledTimes(3);
+    expect(fakeBrowser.scripting.executeScript).toHaveBeenCalledTimes(4);
     expect(button("#capture").disabled).toBe(false);
     expect(element("#status").textContent).toContain("Select Thingiverse files");
     expect(fetchImpl).toHaveBeenCalledTimes(3);
@@ -2316,7 +2519,7 @@ describe("popup browser adapters", () => {
       capture_source: { provider: "thingiverse", source_item_id: "763622" },
       files: [{ id: "thingiverse:763622:file:991001", filename: "whistle.stl", size_bytes: 4 }],
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(7);
+    expect(fetchImpl).toHaveBeenCalledTimes(8);
     expect(fetchImpl).not.toHaveBeenCalledWith(
       "https://www.thingiverse.com/download:991002",
       expect.anything(),
@@ -2355,6 +2558,7 @@ describe("popup browser adapters", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.endsWith("/capture-capabilities")) return response({}, 404);
         if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
         if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
         if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -2371,6 +2575,9 @@ describe("popup browser adapters", () => {
     expect(fakeBrowser.scripting.executeScript).toHaveBeenCalledTimes(3);
     expect(button("#capture").disabled).toBe(false);
     expect(element("#manual-file-panel").hidden).toBe(false);
+    expect(element("#import-hint").textContent).toBe(
+      "Choose a downloaded file. Provider download has not been verified.",
+    );
     expect(element("#status").textContent).toContain(
       "Thingiverse returned file information PrintStash could not safely use",
     );
@@ -2413,6 +2620,7 @@ describe("popup browser adapters", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.endsWith("/capture-capabilities")) return response({}, 404);
         if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
         if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
         if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -2467,6 +2675,7 @@ describe("popup browser adapters", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.endsWith("/capture-capabilities")) return response({}, 404);
         if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
         if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
         if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -2518,6 +2727,7 @@ describe("popup browser adapters", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.endsWith("/capture-capabilities")) return response({}, 404);
         if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
         if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
         if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -2559,6 +2769,7 @@ describe("popup browser adapters", () => {
       apiKey: "psk_vault_secret",
     });
     const fetchImpl = vi.fn(async (url: string, options: RequestInit = {}) => {
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
@@ -2661,6 +2872,7 @@ describe("popup browser adapters", () => {
             releaseMetadata = () => resolve(response({}));
           });
         }
+        if (url.endsWith("/capture-capabilities")) return response({}, 404);
         if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
         if (url.endsWith("/browser-pairings/claim"))
           return response({ credential: "credential-b" });
@@ -2725,6 +2937,7 @@ describe("popup browser adapters", () => {
       [];
     const fetchImpl = vi.fn<typeof fetch>(async (input, options = {}) => {
       const url = String(input);
+      if (url.endsWith("/capture-capabilities")) return response({}, 404);
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/browser-pairings/claim")) return response({ credential: "credential-b" });
       if (url === "https://www.thingiverse.com/download:991001") {

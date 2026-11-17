@@ -943,3 +943,49 @@ class TestSelectionBoundaries:
         assert "private-provider-body" not in caplog.text
         assert "query-secret" not in caplog.text
         assert response.is_closed
+
+
+class TestPublicationIdentity:
+    @pytest.mark.parametrize(
+        ("url", "expected"),
+        [
+            ("https://thangs.com/designer/Test/3d-model/Cube-123", ("thangs", "123")),
+            ("https://www.thangs.com/designer/models/3d-model/123", ("thangs", "123")),
+            (
+                "https://www.crealitycloud.com/en/model-detail/cube",
+                ("crealitycloud", "cube"),
+            ),
+            (
+                "https://crealitycloud.com/model-detail/cube?profileId=one",
+                ("crealitycloud", "cube"),
+            ),
+            (
+                "https://www.makeronline.com/en/model/Cube/123.html",
+                ("makeronline", "123"),
+            ),
+            ("https://makeronline.com/es/model/Cubo/123.html", ("makeronline", "123")),
+        ],
+        ids=[
+            "thangs-name",
+            "thangs-short",
+            "creality-locale",
+            "creality-profile",
+            "makeronline-en",
+            "makeronline-es",
+        ],
+    )
+    def test_identifies_browser_publications(self, url, expected):
+        assert r.publication_identity(url) == expected
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://thangs.com.evil.test/designer/Test/3d-model/Cube-123",
+            "https://www.makeronline.com/en/model/%2f/123.html",
+            "https://www.crealitycloud.com:8443/model-detail/cube",
+            "https://www.crealitycloud.com/model-detail/cube/extra",
+        ],
+        ids=["lookalike", "encoded-separator", "port", "extra-route"],
+    )
+    def test_rejects_invalid_publications(self, url):
+        assert r.publication_identity(url) is None

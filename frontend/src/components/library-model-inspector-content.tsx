@@ -26,6 +26,7 @@ import { ApiError, userMessage } from "@/lib/errors";
 import { isTypingTarget, keyboardOverlayOpen } from "@/lib/keyboard-commands";
 import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
+import { MarkdownView } from "@/components/markdown-view";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { AddGcodeRevisionModal } from "@/components/model-detail/add-revision-modal";
 import { SendToButtons } from "@/components/model-detail/send-to-buttons";
@@ -928,7 +929,7 @@ export function InspectorContent({
             <textarea
               id="inspector-description"
               autoFocus
-              maxLength={500}
+              maxLength={4096}
               rows={3}
               value={descriptionIntent.text}
               disabled={descriptionBusy || descriptionReviewing || !canEdit || descriptionDenied}
@@ -960,7 +961,7 @@ export function InspectorContent({
             />
             <div className="flex items-center justify-end gap-2">
               <span className="mr-auto text-xs text-muted-foreground">
-                {descriptionIntent.text.length} /500
+                {descriptionIntent.text.length} /4096
               </span>
               <Button
                 size="xs"
@@ -986,12 +987,15 @@ export function InspectorContent({
             </div>
           </div>
         ) : (
-          <p
-            className={`library-inspector-description ${model.description ? "" : "text-muted-foreground"}`}
-          >
-            {model.description ??
-              uiText("No description yet. Add orientation, hardware or print notes.")}
-          </p>
+          <div className="library-inspector-description">
+            {model.description ? (
+              <MarkdownView source={model.description} />
+            ) : (
+              <p className="text-muted-foreground">
+                {uiText("No description yet. Add orientation, hardware or print notes.")}
+              </p>
+            )}
+          </div>
         )}
       </section>
       <details className="library-inspector-section">

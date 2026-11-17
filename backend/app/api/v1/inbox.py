@@ -30,6 +30,7 @@ from app.api.command_execution import bounded_command, run_command
 from app.core.config import settings
 from app.core.security import require_auth, require_user
 from app.db.models import (
+    CollectionRole,
     InboxItemState,
     InboxSourceKind,
     JobKind,
@@ -40,6 +41,12 @@ from app.modules.ingestion import importer, inbox, staging_leases
 from app.modules.storage import storage
 from app.modules.work import nudge
 from app.schemas.inbox import (
+    CaptureCapabilitiesRead,
+    CaptureDestinationRead,
+    CaptureRecoveryRead,
+    CaptureSessionCreate,
+    CaptureSourceStatusRead,
+    CaptureUploadFileDeclaration,
     CaptureUploadSlotRead,
     CaptureUploadSlotsCreate,
     CaptureUploadSlotsRead,
@@ -51,6 +58,131 @@ from app.schemas.inbox import (
 )
 
 router = APIRouter(prefix="/inbox", tags=["pending imports"])
+
+
+@router.post("/capture-sessions", response_model=CaptureRecoveryRead, status_code=201)
+@bounded_command
+def start_capture_session(
+    payload: CaptureSessionCreate, actor: CommandActor = Depends(require_capture_actor)
+) -> CaptureRecoveryRead:
+    with command_session(actor) as (session, user):
+        try:
+            row = inbox.start_capture_session(session, user, payload)
+        except staging_leases.StagingCapacityExceeded as exc:
+            raise HTTPException(status_code=507, detail=str(exc)) from exc
+        except (ValueError, importer.ImportError_) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        assert row.id is not None
+        return inbox.capture_recovery(session, user, row.id)
+
+
+@router.post(
+    "/{item_id}/capture-files", response_model=CaptureUploadSlotRead, status_code=201
+)
+@bounded_command
+def declare_capture_file(
+    item_id: int,
+    payload: CaptureUploadFileDeclaration,
+    actor: CommandActor = Depends(require_capture_actor),
+) -> CaptureUploadSlotRead:
+    with command_session(actor) as (session, user):
+        try:
+            return inbox.slot_read(
+                inbox.declare_capture_file(session, user, item_id, payload)
+            )
+        except staging_leases.StagingCapacityExceeded as exc:
+            raise HTTPException(status_code=507, detail=str(exc)) from exc
+        except (ValueError, importer.ImportError_) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{item_id}/capture-images/{position}",
+    response_model=CaptureUploadSlotRead,
+    status_code=201,
+)
+@bounded_command
+def declare_capture_image(
+    item_id: int,
+    position: int,
+    payload: CaptureUploadFileDeclaration,
+    actor: CommandActor = Depends(require_capture_actor),
+) -> CaptureUploadSlotRead:
+    with command_session(actor) as (session, user):
+        try:
+            return inbox.slot_read(
+                inbox.declare_capture_image(session, user, item_id, position, payload)
+            )
+        except staging_leases.StagingCapacityExceeded as exc:
+            raise HTTPException(status_code=507, detail=str(exc)) from exc
+        except (ValueError, importer.ImportError_) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/capture-capabilities", response_model=CaptureCapabilitiesRead)
+@bounded_command
+def capture_capabilities(
+    actor: CommandActor = Depends(require_capture_actor),
+) -> CaptureCapabilitiesRead:
+    with command_session(actor):
+        return CaptureCapabilitiesRead(
+            schema_versions=[1, 2, 3],
+            resumable_slots=True,
+            capture_preferences=True,
+            resumable_cover=True,
+            resumable_gallery=True,
+            idempotent_requests=True,
+            storage="managed",
+            max_files=64,
+            max_file_bytes=settings.max_upload_bytes,
+        )
+
+
+@router.get("/capture-destinations", response_model=list[CaptureDestinationRead])
+@bounded_command
+def capture_destinations(
+    q: str = Query("", max_length=128),
+    limit: int = Query(20, ge=1, le=20),
+    actor: CommandActor = Depends(require_capture_actor),
+) -> list[CaptureDestinationRead]:
+    from app.modules.library import collection_tree
+
+    with command_session(actor) as (session, user):
+        page = collection_tree.search(
+            session,
+            user,
+            query=q,
+            minimum=CollectionRole.EDIT,
+            cursor=None,
+            limit=limit,
+        )
+        return [
+            CaptureDestinationRead(id=item.id, label=item.display_path)
+            for item in page.items
+        ]
+
+
+@router.get("/capture-source-status", response_model=list[CaptureSourceStatusRead])
+@bounded_command
+def capture_source_status(
+    source_url: str = Query(min_length=1, max_length=2048),
+    limit: int = Query(default=20, ge=1, le=20),
+    actor: CommandActor = Depends(require_capture_actor),
+) -> list[CaptureSourceStatusRead]:
+    with command_session(actor) as (session, user):
+        try:
+            return inbox.capture_source_status(session, user, source_url, limit=limit)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{item_id}/capture-upload", response_model=CaptureRecoveryRead)
+@bounded_command
+def recover_capture_upload(
+    item_id: int, actor: CommandActor = Depends(require_capture_actor)
+) -> CaptureRecoveryRead:
+    with command_session(actor) as (session, user):
+        return inbox.capture_recovery(session, user, item_id)
 
 
 @router.post(

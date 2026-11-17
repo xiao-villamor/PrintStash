@@ -1,3 +1,8 @@
+import { MarkdownView } from "@/components/markdown-view";
+import { ProjectProfile } from "./project-profile";
+import { RelatedProfiles } from "./related-profiles";
+import { GeometryReport } from "./geometry-report";
+import { ModelSourceSummary } from "./source-summary";
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -102,6 +107,11 @@ export function ModelInformation({
           <dt>{uiText("Created")}</dt>
           <dd>{new Date(model.created_at).toLocaleDateString(currentLocale())}</dd>
         </dl>
+        <ModelSourceSummary modelId={model.id} />
+        <RelatedProfiles modelId={model.id} />
+        {sourceFile?.file_type === "3mf" && (
+          <ProjectProfile modelId={model.id} fileId={sourceFile.id} />
+        )}
       </div>
       <div className="model-information-geometry">
         <h2 className="text-sm font-semibold">{uiText("Geometry")}</h2>
@@ -123,6 +133,11 @@ export function ModelInformation({
               : uiText("Not recorded")}
           </dd>
         </dl>
+        <GeometryReport
+          modelId={model.id}
+          fileId={sourceFile?.file_type === "gcode" ? null : (sourceFile?.id ?? null)}
+          volume={geometry?.volume_measurement ?? null}
+        />
       </div>
     </section>
   );
@@ -130,7 +145,7 @@ export function ModelInformation({
 
 function ModelDescription({ description }: { description: string }) {
   const id = useId();
-  const content = useRef<HTMLParagraphElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   useLayoutEffect(() => {
@@ -147,13 +162,13 @@ function ModelDescription({ description }: { description: string }) {
   }, [description]);
   return (
     <div className="mt-2">
-      <p
+      <div
         id={id}
         ref={content}
-        className={`whitespace-pre-wrap wrap-anywhere text-sm leading-5 text-muted-foreground ${expanded ? "" : "line-clamp-4"}`}
+        className={`wrap-anywhere text-sm leading-5 text-muted-foreground ${expanded ? "" : "max-h-20 overflow-hidden"}`}
       >
-        {description}
-      </p>
+        <MarkdownView source={description} />
+      </div>
       {overflows && (
         <Button
           size="sm"

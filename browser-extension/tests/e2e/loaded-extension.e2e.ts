@@ -203,6 +203,10 @@ describe("loaded extension", () => {
           return;
         }
         response.setHeader("Content-Type", "application/json");
+        if (path === "/second/api/v1/inbox") {
+          response.end(JSON.stringify({ id: 2 }));
+          return;
+        }
         response.end(JSON.stringify({ status: "ok", name: "PrintStash", credential: "device-b" }));
       });
       await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -269,7 +273,7 @@ describe("loaded extension", () => {
         const inboxUrl = await browser.execute(
           () => document.querySelector<HTMLElement>("#open-inbox")?.dataset.url,
         );
-        assert.equal(inboxUrl, `${vault}/second/inbox`);
+        assert.equal(inboxUrl, `${vault}/second/inbox/2`);
         assert.deepEqual(writes, [
           { path: "/api/v1/inbox", authorization: "Bearer device-a" },
           { path: "/second/api/v1/browser-pairings/claim", authorization: undefined },

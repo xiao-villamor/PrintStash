@@ -114,7 +114,9 @@ test.describe("pending imports", () => {
       page.getByText("Captured URL. Review it before importing.", { exact: true }),
     ).toBeHidden();
 
-    await expect(page.getByRole("combobox", { name: "Destination" })).toHaveValue("new");
+    await expect(page.getByRole("combobox", { name: "Collection", exact: true })).toHaveValue(
+      "new",
+    );
     await expect(page.getByRole("textbox", { name: "Collection name" })).toHaveValue(
       "Capture bracket",
     );

@@ -87,11 +87,11 @@ describe("SlicerOpenButton", () => {
       expect(screen.getByRole("menuitem", { name: "Bambu Studio" })).toBeInTheDocument();
     });
 
-    it("renders nothing at all for a file no slicer opens", () => {
-      // A control that can only produce an empty menu is worse than no control.
-      renderButton({ fileType: "pdf" });
-
-      expect(screen.queryByRole("button", { name: "Open in slicer" })).toBeNull();
+    it("keeps a download fallback for unsupported formats", async () => {
+      renderButton({ fileType: "bgcode" });
+      await userEvent.setup().click(screen.getByRole("button", { name: "Open in slicer" }));
+      expect(screen.getByRole("menuitem", { name: "Download original file" })).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "OrcaSlicer" })).toBeNull();
     });
   });
 
@@ -149,7 +149,39 @@ describe("SlicerOpenButton", () => {
 
       await user.click(screen.getByRole("menuitem", { name: "OrcaSlicer" }));
 
-      expect(await screen.findByText("Couldn't open in slicer")).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          "Could not prepare the slicer download. You can still download this Artifact.",
+        ),
+      ).toBeInTheDocument();
     });
+  });
+});
+
+describe("Slicer account isolation", () => {
+  it("does not carry the preferred slicer into another account", async () => {
+    const { AuthContext } = await import("@/lib/auth-context");
+    const { adminSession, memberSession } = await import("@/test-support/render");
+    const user = userEvent.setup();
+    captureNavigation();
+    const view = renderApp(
+      <AuthContext.Provider value={adminSession()}>
+        <SlicerOpenButton fileId={20} fileType="stl" />
+      </AuthContext.Provider>,
+      { routes: { "GET /api/v1/files/20/slicer-url": json({ url: SLICER_URL }) } },
+    );
+    await user.click(screen.getByRole("button", { name: "Open in slicer" }));
+    await user.click(screen.getByRole("menuitem", { name: "PrusaSlicer" }));
+    await waitFor(() =>
+      expect(localStorage.getItem("printstash.slicer.http://vault.test.1")).toBe("prusaslicer"),
+    );
+    view.rerender(
+      <AuthContext.Provider value={memberSession()}>
+        <SlicerOpenButton fileId={20} fileType="stl" />
+      </AuthContext.Provider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Open in slicer" }));
+    expect(screen.getAllByRole("menuitem")[0]).toHaveTextContent("OrcaSlicer");
+    expect(screen.queryByText("(preferred)")).toBeNull();
   });
 });

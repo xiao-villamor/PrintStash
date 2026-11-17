@@ -641,3 +641,119 @@ class TestBrowserCapture:
         assert captured.status_code == 400
         assert captured.json()["detail"] == "makerworld_model_page_required"
         assert e2e_db.exec(select(InboxItem)).all() == []
+
+
+class TestBrowserGalleryCapture:
+    @pytest.mark.asyncio
+    async def test_imports_a_recoverable_publication_gallery(
+        self, api, superuser_headers, e2e_db
+    ):
+        import io
+
+        from PIL import Image
+
+        from app.modules.media.source_cover_processing import (
+            process_source_cover_upload,
+        )
+        from tests.factories.capture import DEFAULT_SOURCE_URL, capture_source
+
+        original = (FIXTURES_DIR / "sample.gcode").read_bytes()
+        source = capture_source()
+        captured = await api.post(
+            "/api/v1/inbox/capture-sessions",
+            headers=superuser_headers,
+            json={
+                "request_key": "gallery-e2e",
+                "source_url": DEFAULT_SOURCE_URL,
+                "capture_source": source,
+                "files": [{"id": "part", "name": "part.gcode", "file_type": "gcode"}],
+                "gallery": [
+                    {"id": str(i) * 64, "name": f"photo-{i}.png"} for i in range(3)
+                ],
+            },
+        )
+        assert captured.status_code == 201, captured.text
+        item_id = captured.json()["item"]["id"]
+        declaration = await api.post(
+            f"/api/v1/inbox/{item_id}/capture-files",
+            headers=superuser_headers,
+            json={
+                "id": "part",
+                "filename": "part.gcode",
+                "media_type": "application/octet-stream",
+                "size_bytes": len(original),
+                "sha256": hashlib.sha256(original).hexdigest(),
+            },
+        )
+        assert declaration.status_code == 201, declaration.text
+        uploaded = await api.put(
+            f"/api/v1/inbox/capture-upload-slots/{declaration.json()['id']}",
+            headers={**superuser_headers, "Content-Type": "application/octet-stream"},
+            content=original,
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        expected = []
+        for i, color in enumerate(("red", "green", "blue")):
+            buffer = io.BytesIO()
+            Image.new("RGB", (16, 16), color).save(buffer, "PNG")
+            data = buffer.getvalue()
+            expected.append(process_source_cover_upload(data, "image/png").data)
+            declared = await api.post(
+                f"/api/v1/inbox/{item_id}/capture-images/{i}",
+                headers=superuser_headers,
+                json={
+                    "id": str(i) * 64,
+                    "filename": f"photo-{i}.png",
+                    "media_type": "image/png",
+                    "size_bytes": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                },
+            )
+            assert declared.status_code == 201, declared.text
+            uploaded = await api.put(
+                f"/api/v1/inbox/capture-upload-slots/{declared.json()['id']}",
+                headers={**superuser_headers, "Content-Type": "image/png"},
+                content=data,
+            )
+            assert uploaded.status_code == 200, uploaded.text
+        finalized = await api.post(
+            f"/api/v1/inbox/{item_id}/capture-upload-finalize",
+            headers=superuser_headers,
+        )
+        assert finalized.status_code == 200, finalized.text
+        imported = await api.post(
+            f"/api/v1/inbox/{item_id}/import",
+            headers=superuser_headers,
+            json={"selected_ids": ["part"]},
+        )
+        assert imported.status_code == 200, imported.text
+        settle()
+        item = (
+            await api.get(f"/api/v1/inbox/{item_id}", headers=superuser_headers)
+        ).json()
+        assert item["state"] == "completed", item
+        result = item["results"][0]
+        artifact = await api.get(
+            f"/api/v1/files/{result['file_id']}/download", headers=superuser_headers
+        )
+        assert artifact.content == original
+        detail = await api.get(
+            f"/api/v1/models/{result['model_id']}", headers=superuser_headers
+        )
+        images = detail.json()["previews"]["source_images"]
+        assert [image["position"] for image in images] == [0, 1, 2]
+        assert detail.json()["thumbnail_url"] == images[0]["url"]
+        for image, content in zip(images, expected, strict=True):
+            response = await api.get(image["url"], headers=superuser_headers)
+            assert response.status_code == 200
+            assert response.content == content
+        chosen = await api.post(
+            f"/api/v1/models/{result['model_id']}/cover/source",
+            headers={**superuser_headers, "If-Match": detail.headers["etag"]},
+            json={"source_id": images[1]["source_id"], "position": 1},
+        )
+        assert chosen.status_code == 200, chosen.text
+        chosen_image = await api.get(
+            chosen.json()["thumbnail_url"], headers=superuser_headers
+        )
+        assert chosen_image.content == expected[1]

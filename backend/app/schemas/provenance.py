@@ -17,6 +17,7 @@ from printstash_core.imports.contracts import MAX_FIELD_VALUE_LENGTHS
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.editing import EditingBase
+from app.schemas.inbox import CaptureProfileDraft
 
 PROVENANCE_FIELD_NAMES = frozenset(MAX_FIELD_VALUE_LENGTHS)
 
@@ -115,3 +116,18 @@ __all__ = [
     "ProvenanceSourceRead",
     "ModelSourceCoverRead",
 ]
+
+
+class RelatedProfileRead(BaseModel):
+    model_id: int
+    model_name: str
+    file_id: int
+    filename: str
+    provider: str
+    captured_at: datetime
+    profile: "CaptureProfileDraft"
+
+
+class RelatedProfilesRead(BaseModel):
+    items: list[RelatedProfileRead]
+    has_more: bool

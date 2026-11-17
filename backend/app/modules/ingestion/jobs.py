@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
+from pydantic import TypeAdapter
 from sqlmodel import Session, col, select
 
 from app.core.time import utcnow
@@ -36,6 +37,7 @@ from app.modules.work.contracts import JobContext, JobDefinition, Step, WorkItem
 from app.schemas.ingest import UrlIngestRequest
 
 from . import background, requests, staging_leases
+from .archive_plan import ArchiveIntake
 from .import_resolvers import CollectionMember, ModelFile
 from .ingestion import StagedArtifact, ingest_staged_file, release_job_staging
 
@@ -177,6 +179,9 @@ def _archive_selection(ctx: JobContext) -> None:
             archive=archive,
             archive_name=str(selection.get("archive_name") or archive.name),
             names=[str(name) for name in selection.get("names", [])],
+            intake=TypeAdapter(ArchiveIntake).validate_python(selection["intake"])
+            if "intake" in selection
+            else None,
             collection=request.collection,
             tags=request.tags,
             source_url=request.source_url,

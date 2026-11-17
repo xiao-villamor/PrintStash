@@ -56,6 +56,7 @@
     "@tanstack/react-router": "1.170.46",
     "@tanstack/react-virtual": "3.14.26",
     "@types/three": "0.186.0",
+    "fflate": "0.8.3",
     "lucide-react": "^1.17.0",
     "pdfjs-dist": "5.4.296",
     "react": "^19.2.7",

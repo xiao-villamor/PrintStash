@@ -132,6 +132,7 @@ export function FilesTab({
           {sourceFiles.map((f) => (
             <article
               key={f.id}
+              id={`artifact-${f.id}`}
               aria-label={f.original_filename}
               className="@container/source-file min-w-0 space-y-3 border-b border-border py-5.5 min-[1500px]:py-5"
             >

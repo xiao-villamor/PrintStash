@@ -79,7 +79,11 @@ class TestLibraryBrowse:
                     "model_id": model.id,
                     "thumbnail_url": "/api/v1/files/123/thumbnail",
                     # No live mesh Artifact: only the cover can be shown.
-                    "previews": {"kind": "none", "cover_camera": "unknown"},
+                    "previews": {
+                        "kind": "none",
+                        "cover_camera": "unknown",
+                        "source_images": [],
+                    },
                 }
             ],
             "authorization_revision": displayed["authorization_revision"],

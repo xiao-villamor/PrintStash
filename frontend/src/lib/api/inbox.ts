@@ -1,6 +1,7 @@
 import { getJson, sendAction, sendJson } from "@/lib/api/request";
 import type {
   InboxCapturedFieldName,
+  CaptureProfile,
   InboxItem,
   InboxManifest,
   InboxManifestFile,
@@ -27,6 +28,7 @@ interface InboxCapturedFieldWire {
 }
 interface InboxManifestWire {
   schema_version?: number;
+  profiles?: Record<string, CaptureProfile>;
   kind?: string;
   source?: {
     provider?: string;
@@ -47,7 +49,7 @@ type InboxItemWire = Omit<InboxItem, "manifest"> & { manifest: InboxManifestWire
 
 export function parseInboxManifest(manifest: InboxManifestWire): InboxManifest | null {
   if (!manifest.kind) return null;
-  if (manifest.schema_version === 2) {
+  if (manifest.schema_version === 2 || manifest.schema_version === 3) {
     if (
       manifest.kind !== "model_files" ||
       !manifest.source?.provider ||
@@ -65,7 +67,26 @@ export function parseInboxManifest(manifest: InboxManifestWire): InboxManifest |
     ) {
       return null;
     }
-    // SAFETY: Every V2 discriminator, required collection, and captured-field
+    const selectedIds = manifest.selected_ids;
+    if (
+      manifest.schema_version === 3 &&
+      (!manifest.profiles ||
+        // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Decode persisted extension JSON: V3 requires a profile map before enumerating its entries.
+        typeof manifest.profiles !== "object" ||
+        Array.isArray(manifest.profiles) ||
+        Object.entries(manifest.profiles).some(
+          ([id, profile]) =>
+            !selectedIds.includes(id) ||
+            !profile ||
+            // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Establish the required profile identifier from persisted extension JSON.
+            typeof profile.id !== "string" ||
+            // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Establish the required display name before rendering persisted extension JSON.
+            typeof profile.name !== "string" ||
+            !["provider", "file"].includes(profile.origin),
+        ))
+    )
+      return null;
+    // SAFETY: Every V2/V3 discriminator, required collection, and captured-field
     // origin is checked above against this closed wire contract.
     return manifest as InboxManifest;
   }

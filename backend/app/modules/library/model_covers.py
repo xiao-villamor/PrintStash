@@ -160,6 +160,8 @@ def select_source(
     model: Model,
     source_id: int,
     precondition: EditPrecondition,
+    *,
+    position: int = 0,
 ) -> None:
     """Copy a source cover so future source edits cannot change the chosen image."""
     cover = session.exec(
@@ -167,6 +169,7 @@ def select_source(
         .join(ModelProvenanceSource)
         .where(
             ModelProvenanceSource.id == source_id,
+            ModelSourceCover.position == position,
             ModelProvenanceSource.model_id == model.id,
         )
     ).first()

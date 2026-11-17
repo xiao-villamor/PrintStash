@@ -6,7 +6,7 @@ import json
 import uuid
 import zipfile
 from collections.abc import Iterator
-from contextlib import closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -15,23 +15,26 @@ from urllib.parse import urlsplit
 
 from printstash_core.imports import (
     CaptureContractError,
+    CaptureManifest,
     CaptureManifestV2,
     CaptureSource,
     ResolvedAsset,
     StagedAsset,
     canonicalize_provider_url,
+    parse_capture_manifest,
 )
 from printstash_core.imports.contracts import MAX_MANIFEST_BYTES, CaptureFile
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import update as sql_update
-from sqlmodel import Session, col, select
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, col, or_, select
 
 from app.core.cancellation import OperationCancelled, checkpoint
 from app.core.config import settings
 from app.core.errors import ErrorKind, OperationError
 from app.core.metrics import record_capture_operation
 from app.core.provider_redaction import redact_url
-from app.core.time import utcnow
+from app.core.time import ensure_utc, utcnow
 from app.db.models import (
     SUFFIX_TO_FILE_TYPE,
     ArtifactProvenanceLink,
@@ -42,6 +45,7 @@ from app.db.models import (
     InboxItem,
     InboxItemCompletion,
     InboxItemResult,
+    InboxItemResultState,
     InboxItemState,
     InboxSourceKind,
     IngestionEntryState,
@@ -91,7 +95,12 @@ from app.modules.work.contracts import JobContext, JobExecution, JobOutcome
 from app.modules.work.jobs import TERMINAL_STATES, failure_of, safe_error, safe_item
 from app.modules.work.jobs import jobs as registry
 from app.schemas.inbox import (
+    CaptureImageIntent,
+    CaptureRecoveryRead,
+    CaptureSessionCreate,
     CaptureSourceDraft,
+    CaptureSourceStatusRead,
+    CaptureUploadFileDeclaration,
     CaptureUploadSlotRead,
     CaptureUploadSlotsCreate,
     InboxItemCreate,
@@ -121,6 +130,13 @@ def sanitize_source_url(value: str) -> str:
     if parts.scheme not in {"http", "https"} or not parts.hostname:
         raise ValueError("url_invalid")
     return sanitized
+
+
+def _publication_key(url: str) -> str | None:
+    identity = import_resolvers.publication_identity(url)
+    if identity is None:
+        return None
+    return hashlib.sha256(f"{identity[0]}:{identity[1]}".encode()).hexdigest()
 
 
 def _canonical_capture_source_url(
@@ -170,7 +186,7 @@ def validate_import_selection(row: InboxItem, requested: list[str]) -> list[str]
     """
     manifest = _json_dict(row.manifest_json)
     selected_value: Any = requested or manifest.get("selected_ids") or []
-    if manifest.get("schema_version") == 2 and not selected_value:
+    if manifest.get("schema_version") in (2, 3) and not selected_value:
         files = manifest.get("files")
         selected_value = (
             [
@@ -184,7 +200,7 @@ def validate_import_selection(row: InboxItem, requested: list[str]) -> list[str]
     if not isinstance(selected_value, list):
         selected_value = []
     selected = list(selected_value)
-    if manifest.get("schema_version") != 2 or not selected:
+    if manifest.get("schema_version") not in (2, 3) or not selected:
         return selected
 
     files = manifest.get("files")
@@ -277,7 +293,7 @@ def list_visible(
     if not include_completed:
         stmt = stmt.where(InboxItem.state != InboxItemState.COMPLETED)
     rows = session.exec(
-        stmt.order_by(InboxItem.updated_at.desc(), InboxItem.id.desc())  # type: ignore[attr-defined]
+        stmt.order_by(col(InboxItem.updated_at).desc(), col(InboxItem.id).desc())  # type: ignore[attr-defined]
     ).all()
     item_ids = [row.id for row in rows if row.id is not None]
     all_results = (
@@ -318,6 +334,26 @@ def prune_expired_browser_leases() -> int:
     from app.modules.storage.storage_deletion import process_storage_delete_intents
 
     with get_session_factory().scoped_session() as session:
+        # A sequential capture may be abandoned before its first reservation.
+        # It owns no bytes, so only expire the item; never sweep source paths.
+        empty_captures = session.exec(
+            select(InboxItem).where(
+                InboxItem.source_kind == InboxSourceKind.BROWSER,
+                InboxItem.state == InboxItemState.CAPTURED,
+                col(InboxItem.capture_request_key).is_not(None),
+                InboxItem.created_at
+                <= utcnow() - timedelta(days=settings.staging_review_lease_days),
+                ~select(CaptureUploadSlot.id)
+                .where(CaptureUploadSlot.inbox_item_id == InboxItem.id)
+                .exists(),
+            )
+        ).all()
+        for row in empty_captures:
+            row.state = InboxItemState.FAILED
+            row.error_code = "staging_expired"
+            row.retryable = False
+            row.updated_at = utcnow()
+            session.add(row)
         expired = session.exec(
             select(StagingLease).where(StagingLease.expires_at <= utcnow())
         ).all()
@@ -340,7 +376,7 @@ def prune_expired_browser_leases() -> int:
                 expired_slot_item_ids.get(slot.inbox_item_id, False)
                 or lease.job_id is not None
             )
-        expired_items = 0
+        expired_items = len(empty_captures)
         for inbox_item_id, job_owned in expired_slot_item_ids.items():
             row = session.get(InboxItem, inbox_item_id)
             if row is None or row.state in {
@@ -407,6 +443,7 @@ def create(session: Session, user: User, payload: InboxItemCreate) -> InboxItem:
         owner_user_id=user.id,
         source_kind=payload.source_kind,
         source_url=source_url,
+        source_identity_key=_publication_key(source_url),
         source_hostname=urlsplit(source_url).hostname,
         display_title=title,
         target_collection_id=payload.collection_id,
@@ -466,6 +503,7 @@ def slot_read(slot: CaptureUploadSlot) -> CaptureUploadSlotRead:
     return CaptureUploadSlotRead(
         id=slot.id,
         role=cast(Literal["file", "cover"], slot.role),
+        image_position=slot.image_position,
         source_file_id=slot.source_file_id,
         filename=slot.filename,
         media_type=slot.media_type,
@@ -475,11 +513,43 @@ def slot_read(slot: CaptureUploadSlot) -> CaptureUploadSlotRead:
     )
 
 
+def _capture_request_replay(
+    session: Session, user: User, key: str, request_hash: str
+) -> tuple[InboxItem, list[CaptureUploadSlot]] | None:
+    row = session.exec(
+        select(InboxItem).where(
+            InboxItem.owner_user_id == user.id, InboxItem.capture_request_key == key
+        )
+    ).first()
+    if row is None:
+        return None
+    if row.capture_request_hash != request_hash:
+        raise OperationError("capture_request_conflict", kind=ErrorKind.CONFLICT)
+    return row, list(
+        session.exec(
+            select(CaptureUploadSlot).where(CaptureUploadSlot.inbox_item_id == row.id)
+        ).all()
+    )
+
+
 def create_capture_upload_slots(
     session: Session, user: User, payload: CaptureUploadSlotsCreate
 ) -> tuple[InboxItem, list[CaptureUploadSlot]]:
     if user.id is None:
         raise ValueError("not_authenticated")
+    request_hash = hashlib.sha256(
+        json.dumps(
+            payload.model_dump(mode="json", exclude={"request_key"}),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    if payload.request_key is not None:
+        replay = _capture_request_replay(
+            session, user, payload.request_key, request_hash
+        )
+        if replay is not None:
+            return replay
     source_url = sanitize_source_url(payload.source_url)
     source = _capture_source_draft(payload.capture_source, source_url)
     assert source is not None
@@ -507,9 +577,12 @@ def create_capture_upload_slots(
     except CaptureContractError as exc:
         raise importer.ImportError_("capture_manifest_invalid") from exc
     row = InboxItem(
+        capture_request_key=payload.request_key,
+        capture_request_hash=request_hash if payload.request_key is not None else None,
         owner_user_id=user.id,
         source_kind=InboxSourceKind.BROWSER,
         source_url=source_url,
+        source_identity_key=_publication_key(source_url),
         source_hostname=urlsplit(source_url).hostname,
         display_title=safe_item(payload.title) if payload.title else None,
         state=InboxItemState.CAPTURED,
@@ -517,46 +590,426 @@ def create_capture_upload_slots(
         target_collection_id=payload.collection_id,
         requested_tags_json=json.dumps(payload.tags[:100]),
     )
-    session.add(row)
-    session.flush()
+    try:
+        with session.begin_nested():
+            session.add(row)
+            session.flush()
+    except IntegrityError:
+        if payload.request_key is None:
+            raise
+        replay = _capture_request_replay(
+            session, user, payload.request_key, request_hash
+        )
+        if replay is None:
+            raise
+        return replay
     assert row.id is not None
     slots: list[CaptureUploadSlot] = []
-    backend = get_backend()
     declarations: list[tuple[Literal["file", "cover"], Any, str | None]] = [
         ("file", item, item.id) for item in payload.files
     ]
     if payload.cover is not None:
         declarations.append(("cover", payload.cover, None))
     for role, item, source_file_id in declarations:
-        filename = Path(item.filename.replace("\\", "/")).name
-        if not filename:
-            raise importer.ImportError_("filename_required")
-        slot = CaptureUploadSlot(
-            id=uuid.uuid4().hex,
-            inbox_item_id=row.id,
-            role=role,
-            source_file_id=source_file_id,
-            filename=filename,
-            media_type=item.media_type.lower(),
-            size_bytes=item.size_bytes,
-            sha256=item.sha256,
-            storage_key=backend.capture_upload_slot_key(uuid.uuid4().hex),
+        slots.append(
+            _reserve_capture_slot(session, user, row.id, item, role, source_file_id)
         )
-        session.add(slot)
-        session.flush()
-        assert slot.storage_key is not None
-        staging_leases.create_capture_slot_lease(
-            session,
-            slot_id=slot.id,
-            owner_user_id=user.id,
-            destination_key=slot.storage_key,
-            size_bytes=slot.size_bytes,
-            sha256=slot.sha256,
-        )
-        slots.append(slot)
     session.commit()
     session.refresh(row)
     return row, slots
+
+
+def _reserve_capture_slot(
+    session: Session,
+    user: User,
+    item_id: int,
+    declaration: CaptureUploadFileDeclaration,
+    role: Literal["file", "cover"],
+    source_file_id: str | None,
+    image_position: int | None = None,
+) -> CaptureUploadSlot:
+    if user.id is None:
+        raise ValueError("not_authenticated")
+    filename = Path(declaration.filename.replace("\\", "/")).name
+    if not filename:
+        raise importer.ImportError_("filename_required")
+    slot = CaptureUploadSlot(
+        id=uuid.uuid4().hex,
+        inbox_item_id=item_id,
+        role=role,
+        source_file_id=source_file_id,
+        image_position=image_position,
+        filename=filename,
+        media_type=declaration.media_type.lower(),
+        size_bytes=declaration.size_bytes,
+        sha256=declaration.sha256,
+        storage_key=get_backend().capture_upload_slot_key(uuid.uuid4().hex),
+    )
+    session.add(slot)
+    session.flush()
+    assert slot.storage_key is not None
+    staging_leases.create_capture_slot_lease(
+        session,
+        slot_id=slot.id,
+        owner_user_id=user.id,
+        destination_key=slot.storage_key,
+        size_bytes=slot.size_bytes,
+        sha256=slot.sha256,
+    )
+    return slot
+
+
+def _check_capture_cover_replay(
+    slots: list[CaptureUploadSlot], declaration: CaptureUploadFileDeclaration | None
+) -> None:
+    # A reload cannot restore the local File. Omission retains the original slot;
+    # a newly selected cover must match it, never silently replace confirmed bytes.
+    if declaration is None:
+        return
+    cover = next((slot for slot in slots if slot.role == "cover"), None)
+    if cover is None or (
+        cover.filename,
+        cover.size_bytes,
+        cover.sha256,
+        cover.media_type,
+    ) != (
+        declaration.filename,
+        declaration.size_bytes,
+        declaration.sha256,
+        declaration.media_type.lower(),
+    ):
+        raise OperationError("capture_request_conflict", kind=ErrorKind.CONFLICT)
+
+
+def start_capture_session(
+    session: Session, user: User, payload: CaptureSessionCreate
+) -> InboxItem:
+    if user.id is None:
+        raise ValueError("not_authenticated")
+    if payload.cover is not None and payload.gallery is not None:
+        raise ValueError("cover_and_gallery_are_exclusive")
+    if payload.cover is not None:
+        _validate_capture_image(payload.cover)
+    gallery = payload.gallery or []
+    if len({image.id for image in gallery}) != len(gallery):
+        raise ValueError("duplicate_capture_image_id")
+    for image in gallery:
+        if image.name in {".", ".."} or any(
+            char in image.name for char in ("/", "\\", "\x00")
+        ):
+            raise ValueError("invalid_capture_filename")
+    for file in payload.files:
+        if file.name in {".", ".."} or any(
+            char in file.name for char in ("/", "\\", "\x00")
+        ):
+            raise ValueError("invalid_capture_filename")
+    source_url = sanitize_source_url(payload.source_url)
+    source = _capture_source_draft(payload.capture_source, source_url)
+    assert source is not None
+    manifest = parse_capture_manifest(
+        {
+            "schema_version": payload.schema_version,
+            **(
+                {
+                    "profiles": {
+                        key: profile.model_dump(
+                            exclude_none=True, exclude_defaults=True
+                        )
+                        for key, profile in payload.profiles.items()
+                    }
+                }
+                if payload.profiles is not None
+                else {}
+            ),
+            "kind": "model_files",
+            "source": source.to_dict(),
+            "files": [file.model_dump() for file in payload.files],
+            "selected_ids": [file.id for file in payload.files],
+        }
+    )
+    # Reopening a page may change its title or estimates. Keep the first
+    # snapshot for this request; only publication and file identities bind replay.
+    request_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "source": [
+                    source.provider,
+                    source.source_item_id or source.canonical_url,
+                ],
+                **(
+                    {"gallery": [image.model_dump() for image in gallery]}
+                    if payload.gallery is not None
+                    else {}
+                ),
+                "files": sorted(
+                    [(file.id, file.name, file.file_type) for file in manifest.files]
+                ),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    replay = _capture_request_replay(session, user, payload.request_key, request_hash)
+    if replay is not None:
+        _check_capture_cover_replay(replay[1], payload.cover)
+        return replay[0]
+    if payload.collection_id is not None:
+        _require_target(session, user, payload.collection_id)
+    row = InboxItem(
+        owner_user_id=user.id,
+        target_collection_id=payload.collection_id,
+        requested_tags_json=json.dumps(payload.tags),
+        source_kind=InboxSourceKind.BROWSER,
+        source_url=source_url,
+        source_identity_key=_publication_key(source_url),
+        source_hostname=urlsplit(source_url).hostname,
+        display_title=payload.title,
+        state=InboxItemState.CAPTURED,
+        manifest_json=json.dumps(manifest.to_dict()),
+        capture_request_key=payload.request_key,
+        capture_request_hash=request_hash,
+        gallery_json=json.dumps([image.model_dump() for image in gallery]),
+    )
+    try:
+        with session.begin_nested():
+            session.add(row)
+            session.flush()
+            assert row.id is not None
+            if payload.cover is not None:
+                _reserve_capture_slot(
+                    session, user, row.id, payload.cover, "cover", None
+                )
+    except IntegrityError:
+        replay = _capture_request_replay(
+            session, user, payload.request_key, request_hash
+        )
+        if replay is None:
+            raise
+        _check_capture_cover_replay(replay[1], payload.cover)
+        return replay[0]
+    session.commit()
+    return row
+
+
+def _validate_capture_image(declaration: CaptureUploadFileDeclaration) -> None:
+    if (
+        declaration.size_bytes > 15 * 1024 * 1024
+        or declaration.media_type.lower()
+        not in {"image/png", "image/jpeg", "image/webp", "image/gif"}
+        or declaration.filename in {".", ".."}
+        or any(char in declaration.filename for char in ("/", "\\", "\x00"))
+    ):
+        raise ValueError("invalid_cover_image")
+
+
+def declare_capture_file(
+    session: Session,
+    user: User,
+    item_id: int,
+    declaration: CaptureUploadFileDeclaration,
+) -> CaptureUploadSlot:
+    return _declare_capture_object(session, user, item_id, declaration)
+
+
+def declare_capture_image(
+    session: Session,
+    user: User,
+    item_id: int,
+    position: int,
+    declaration: CaptureUploadFileDeclaration,
+) -> CaptureUploadSlot:
+    return _declare_capture_object(
+        session, user, item_id, declaration, image_position=position
+    )
+
+
+def _declare_capture_object(
+    session: Session,
+    user: User,
+    item_id: int,
+    declaration: CaptureUploadFileDeclaration,
+    *,
+    image_position: int | None = None,
+) -> CaptureUploadSlot:
+    if user.id is None:
+        raise ValueError("not_authenticated")
+    if declaration.size_bytes > settings.max_upload_bytes:
+        raise ValueError("file_too_large")
+    row = require_visible(session, user, item_id)
+    if row.owner_user_id != user.id:
+        raise OperationError("pending_import_not_found", kind=ErrorKind.NOT_FOUND)
+    if (
+        row.state != InboxItemState.CAPTURED
+        or row.source_kind != InboxSourceKind.BROWSER
+    ):
+        raise OperationError("capture_upload_not_finalizable", kind=ErrorKind.CONFLICT)
+    if (
+        ensure_utc(row.created_at) + timedelta(days=settings.staging_review_lease_days)
+        <= utcnow()
+    ):
+        raise OperationError("staging_expired", kind=ErrorKind.CONFLICT)
+    if image_position is None:
+        manifest = parse_capture_manifest(_json_dict(row.manifest_json))
+        expected = next(
+            (file for file in manifest.files if file.id == declaration.id), None
+        )
+        identity = CaptureUploadSlot.source_file_id == declaration.id
+    else:
+        _validate_capture_image(declaration)
+        gallery = [
+            CaptureImageIntent.model_validate(image)
+            for image in json.loads(row.gallery_json)
+        ]
+        expected = (
+            gallery[image_position] if 0 <= image_position < len(gallery) else None
+        )
+        identity = CaptureUploadSlot.image_position == image_position
+    if (
+        expected is None
+        or expected.id != declaration.id
+        or expected.name != declaration.filename
+    ):
+        raise OperationError("capture_request_conflict", kind=ErrorKind.CONFLICT)
+    existing = session.exec(
+        select(CaptureUploadSlot).where(
+            CaptureUploadSlot.inbox_item_id == row.id, identity
+        )
+    ).first()
+    if existing is not None:
+        if (
+            existing.filename,
+            existing.size_bytes,
+            existing.sha256,
+            existing.media_type,
+        ) != (
+            declaration.filename,
+            declaration.size_bytes,
+            declaration.sha256,
+            declaration.media_type.lower(),
+        ):
+            raise OperationError("capture_request_conflict", kind=ErrorKind.CONFLICT)
+        return existing
+    backend = get_backend()
+    slot = CaptureUploadSlot(
+        id=uuid.uuid4().hex,
+        inbox_item_id=item_id,
+        role="file" if image_position is None else "cover",
+        source_file_id=declaration.id if image_position is None else None,
+        image_position=image_position,
+        filename=declaration.filename,
+        media_type=declaration.media_type.lower(),
+        size_bytes=declaration.size_bytes,
+        sha256=declaration.sha256,
+        storage_key=backend.capture_upload_slot_key(uuid.uuid4().hex),
+    )
+    try:
+        with session.begin_nested():
+            session.add(slot)
+            session.flush()
+    except IntegrityError:
+        concurrent = session.exec(
+            select(CaptureUploadSlot).where(
+                CaptureUploadSlot.inbox_item_id == item_id,
+                identity,
+            )
+        ).first()
+        if concurrent is None:
+            raise
+        if (
+            concurrent.filename,
+            concurrent.sha256,
+            concurrent.size_bytes,
+            concurrent.media_type,
+        ) != (
+            declaration.filename,
+            declaration.sha256,
+            declaration.size_bytes,
+            declaration.media_type.lower(),
+        ):
+            raise OperationError(
+                "capture_request_conflict", kind=ErrorKind.CONFLICT
+            ) from None
+        return concurrent
+    assert slot.storage_key is not None
+    staging_leases.create_capture_slot_lease(
+        session,
+        slot_id=slot.id,
+        owner_user_id=user.id,
+        destination_key=slot.storage_key,
+        size_bytes=slot.size_bytes,
+        sha256=slot.sha256,
+    )
+    session.commit()
+    return slot
+
+
+def capture_recovery(session: Session, user: User, item_id: int) -> CaptureRecoveryRead:
+    row = require_visible(session, user, item_id)
+    # Paired importers can recover their own captures, including for administrators.
+    if row.owner_user_id != user.id or row.source_kind != InboxSourceKind.BROWSER:
+        raise OperationError("pending_import_not_found", kind=ErrorKind.NOT_FOUND)
+    slots = list(
+        session.exec(
+            select(CaptureUploadSlot).where(CaptureUploadSlot.inbox_item_id == row.id)
+        ).all()
+    )
+    leases = session.exec(
+        select(StagingLease)
+        .join(
+            CaptureUploadSlot,
+            col(StagingLease.capture_upload_slot_id) == col(CaptureUploadSlot.id),
+        )
+        .where(CaptureUploadSlot.inbox_item_id == row.id)
+    ).all()
+    expiry = min(
+        (ensure_utc(lease.expires_at) for lease in leases),
+        default=ensure_utc(row.created_at)
+        + timedelta(days=settings.staging_review_lease_days),
+    )
+    recoverable = (
+        row.state == InboxItemState.CAPTURED
+        and len(leases) == len(slots)
+        and expiry > utcnow()
+    )
+    # This importer-specific projection never discloses library IDs. The signed-in
+    # review page resolves results using its normal library authority.
+    item = read(row, results=[]).model_copy(update={"resulting_model_id": None})
+    return CaptureRecoveryRead(
+        item=item,
+        slots=[slot_read(slot) for slot in slots],
+        expires_at=expiry,
+        recoverable=recoverable,
+    )
+
+
+def capture_source_status(
+    session: Session, user: User, source_url: str, *, limit: int = 20
+) -> list[CaptureSourceStatusRead]:
+    canonical = sanitize_source_url(source_url)
+    identity = _publication_key(canonical)
+    matches = InboxItem.source_url == canonical
+    if identity is not None:
+        matches = or_(InboxItem.source_identity_key == identity, matches)
+    rows = session.exec(
+        select(InboxItem)
+        .where(
+            InboxItem.owner_user_id == user.id,
+            matches,
+            InboxItem.state != InboxItemState.DISMISSED,
+        )
+        .order_by(col(InboxItem.updated_at).desc(), col(InboxItem.id).desc())
+        .limit(limit)
+    ).all()
+    return [
+        CaptureSourceStatusRead(
+            id=row.id,
+            state=row.state,
+            completion=row.completion,
+            updated_at=row.updated_at,
+        )
+        for row in rows
+        if row.id is not None
+    ]
 
 
 def require_capture_slot(
@@ -624,7 +1077,8 @@ def upload_capture_slot(
             raise ValueError("capture_upload_sha256_mismatch")
         if slot.role == "cover":
             if (
-                slot.media_type not in {"image/jpeg", "image/png", "image/webp"}
+                slot.media_type
+                not in {"image/jpeg", "image/png", "image/webp", "image/gif"}
                 or size > 15 * 1024 * 1024
             ):
                 raise ValueError("capture_cover_invalid")
@@ -743,7 +1197,7 @@ def _cleanup_capture_slots(
     row: InboxItem,
     *,
     durable_only: bool = False,
-    cover_candidate: source_covers.SourceCoverCandidate | None = None,
+    cover_candidates: tuple[source_covers.SourceCoverCandidate, ...] = (),
 ) -> bool:
     """Release exact slot receipts only after the whole inbox job is terminal."""
     if row.id is None:
@@ -864,11 +1318,12 @@ def _cleanup_capture_slots(
                 )
                 .with_for_update()
             ).all()
-        if cover_candidate is not None:
+        if cover_candidates:
             receipts = [receipt for _slot_id, receipt in validated_receipts]
-            receipts.append(cover_candidate.publication.receipt)
-            if cover_candidate.previous is not None:
-                receipts.append(cover_candidate.previous.receipt)
+            for candidate in cover_candidates:
+                receipts.append(candidate.publication.receipt)
+                if candidate.previous is not None:
+                    receipts.append(candidate.previous.receipt)
             for receipt in sorted(
                 receipts,
                 key=lambda receipt: (receipt.backend, receipt.namespace, receipt.key),
@@ -925,7 +1380,7 @@ def _cleanup_capture_slots(
 
 
 def _attach_capture_cover(
-    session: Session, row: InboxItem
+    session: Session, row: InboxItem, *, position: int = 0
 ) -> source_covers.SourceCoverCandidate | bool | None:
     """Normalize a durable optional cover only after provenance has been attached."""
     if row.id is None or row.resulting_model_id is None:
@@ -934,6 +1389,8 @@ def _attach_capture_cover(
         select(CaptureUploadSlot).where(
             CaptureUploadSlot.inbox_item_id == row.id,
             CaptureUploadSlot.role == "cover",
+            (CaptureUploadSlot.image_position == position)
+            | ((CaptureUploadSlot.image_position.is_(None)) & (position == 0)),
             CaptureUploadSlot.state == CaptureUploadSlotState.UPLOADED,
         )
     ).first()
@@ -984,6 +1441,7 @@ def _attach_capture_cover(
         actor_id=row.owner_user_id,
         data=data,
         content_type=cover.media_type,
+        position=position,
     )
     # Test doubles and legacy adapters may acknowledge without returning the
     # ownership write; production publication always returns it.
@@ -992,18 +1450,38 @@ def _attach_capture_cover(
 
 def finalize_capture_upload(session: Session, user: User, item_id: int) -> InboxItem:
     row = require_visible(session, user, item_id)
+    if row.source_kind == InboxSourceKind.BROWSER and row.state in {
+        InboxItemState.REVIEW,
+        InboxItemState.IMPORTING,
+        InboxItemState.COMPLETED,
+    }:
+        return row
     if (
         row.state != InboxItemState.CAPTURED
         or row.source_kind != InboxSourceKind.BROWSER
     ):
         raise OperationError("capture_upload_not_finalizable", kind=ErrorKind.CONFLICT)
+    if not capture_recovery(session, user, item_id).recoverable:
+        raise OperationError("staging_expired", kind=ErrorKind.CONFLICT)
     slots = list(
         session.exec(
             select(CaptureUploadSlot).where(CaptureUploadSlot.inbox_item_id == row.id)
         )
     )
+    manifest = parse_capture_manifest(_json_dict(row.manifest_json))
+    expected_ids = {file.id for file in manifest.files}
+    actual_ids = {slot.source_file_id for slot in slots if slot.role == "file"}
+    gallery = json.loads(row.gallery_json)
+    image_positions = {
+        slot.image_position for slot in slots if slot.image_position is not None
+    }
+    if image_positions != set(range(len(gallery))):
+        raise OperationError("capture_upload_slots_incomplete", kind=ErrorKind.CONFLICT)
+    if expected_ids != actual_ids:
+        raise OperationError("capture_upload_slots_incomplete", kind=ErrorKind.CONFLICT)
     if not slots or any(
-        slot.role == "file" and slot.state != CaptureUploadSlotState.UPLOADED
+        (slot.role == "file" or slot.image_position is not None)
+        and slot.state != CaptureUploadSlotState.UPLOADED
         for slot in slots
     ):
         raise OperationError("capture_upload_slots_incomplete", kind=ErrorKind.CONFLICT)
@@ -1083,6 +1561,7 @@ def _create_browser_upload(
         owner_user_id=user.id,
         source_kind=InboxSourceKind.BROWSER,
         source_url=clean_url,
+        source_identity_key=_publication_key(clean_url),
         source_hostname=urlsplit(clean_url).hostname,
         display_title=safe_item(title) if title else None,
         state=InboxItemState.RESOLVING,
@@ -1197,7 +1676,16 @@ def _parse_capture_source(value: str | None, source_url: str) -> CaptureSource |
         raise
     except (TypeError, ValueError, CaptureContractError) as exc:
         raise importer.ImportError_("capture_source_invalid") from exc
-    if source.provider not in {"makerworld", "printables", "thingiverse"}:
+    if source.provider not in {
+        "makerworld",
+        "printables",
+        "thingiverse",
+        "myminifactory",
+        "cults",
+        "thangs",
+        "crealitycloud",
+        "makeronline",
+    }:
         raise importer.ImportError_("capture_source_provider_invalid")
     # CaptureSource deliberately removes query/fragment data.  Reject rather
     # than silently drop it at this trust boundary, especially signed URLs.
@@ -1312,6 +1800,16 @@ def _begin_resolve(item_id: int) -> tuple[bool, str | None, int | None]:
             InboxItemState.FAILED,
             InboxItemState.RESOLVING,
         }:
+            return False, None, None
+        if (
+            row.capture_request_key is not None
+            or session.exec(
+                select(CaptureUploadSlot.id)
+                .where(CaptureUploadSlot.inbox_item_id == row.id)
+                .limit(1)
+            ).first()
+            is not None
+        ):
             return False, None, None
         row.state = InboxItemState.RESOLVING
         row.error_code = None
@@ -1918,10 +2416,11 @@ class _InboxBatchImport:
                 )
                 digest = hashlib.sha256()
                 received = 0
-                with (
-                    closing(backend.stream_chunks(key)) as chunks,
-                    target.open("xb") as output,
-                ):
+                with ExitStack() as stream_scope, target.open("xb") as output:
+                    chunks = backend.stream_chunks(key)
+                    close = getattr(chunks, "close", None)
+                    if callable(close):
+                        stream_scope.callback(close)
                     for chunk in chunks:
                         checkpoint(force=True)
                         received += len(chunk)
@@ -1932,12 +2431,24 @@ class _InboxBatchImport:
                 if received != size:
                     raise importer.ImportError_("batch_snapshot_mismatch")
                 window.seal(target)
-                self.consume(
-                    spec,
-                    (target, spec.display_name),
-                    resolved,
-                    digest=digest.hexdigest(),
-                )
+                self._consume_materialized(target, spec, resolved, digest.hexdigest())
+
+    def _consume_materialized(
+        self,
+        source: Path,
+        spec: EntrySpec,
+        resolved: ResolvedAsset | None,
+        digest: str,
+    ) -> None:
+        if Path(spec.display_name).suffix.lower() == ".zip":
+            names = [
+                entry.name
+                for entry in importer.inspect_archive(source)
+                if entry.file_type
+            ]
+            self.archive(source, names, spec.descriptor.source_id, resolved)
+        else:
+            self.consume(spec, (source, spec.display_name), resolved, digest=digest)
 
     def archive(
         self,
@@ -1945,7 +2456,7 @@ class _InboxBatchImport:
         wanted: list[str],
         source_id: str,
         resolved: ResolvedAsset | None = None,
-        manifest: CaptureManifestV2 | None = None,
+        manifest: CaptureManifest | None = None,
     ) -> None:
         with self._source_custody(source):
             captured = {}
@@ -2053,7 +2564,7 @@ class _InboxBatchImport:
         if target.stat().st_size != size:
             raise importer.ImportError_("batch_snapshot_mismatch")
         window.seal(target)
-        self.consume(spec, (target, spec.display_name), resolved, digest=digest)
+        self._consume_materialized(target, spec, resolved, digest)
 
     async def remote(
         self,
@@ -2125,7 +2636,7 @@ def _source_identity(source: str, selection: str) -> str:
 
 
 def _local_resolved_asset(
-    manifest: CaptureManifestV2, file_id: str, *, file: CaptureFile | None = None
+    manifest: CaptureManifest, file_id: str, *, file: CaptureFile | None = None
 ) -> ResolvedAsset:
     if file is None:
         file = next(file for file in manifest.files if file.id == file_id)
@@ -2154,9 +2665,9 @@ async def _run_import(
         checkpoint(force=True)
         flow = _InboxBatchImport(item_id, context, session_factory, job_context)
         v2 = None
-        if manifest.get("schema_version") == 2:
+        if manifest.get("schema_version") in (2, 3):
             try:
-                v2 = CaptureManifestV2.from_dict(manifest)
+                v2 = parse_capture_manifest(manifest)
             except ValueError as exc:
                 raise importer.ImportError_("capture_manifest_invalid") from exc
         kind = manifest.get("kind")
@@ -2524,7 +3035,7 @@ def _finish_import(
         row = session.get(InboxItem, item_id)
         if row is None:
             return
-        cover_write: source_covers.SourceCoverCandidate | None = None
+        cover_writes: list[source_covers.SourceCoverCandidate] = []
         # The cover intent uses a separate engine-bound transaction. Keep this
         # terminalization session in ``no_autoflush`` until that intent commit
         # is complete; otherwise result upserts or Inbox state assignment can
@@ -2547,12 +3058,68 @@ def _finish_import(
                 )
                 row.retryable = failed > 0
                 if not row.retryable:
-                    cover_result = _attach_capture_cover(session, row)
-                    if cover_result is False:
-                        row.error_code = "capture_cover_attach_pending"
-                        row.retryable = True
-                    elif isinstance(cover_result, source_covers.SourceCoverCandidate):
-                        cover_write = cover_result
+                    # Result upserts have not flushed: include both new receipts
+                    # and previously committed results from selective retries.
+                    results = list(
+                        session.exec(
+                            select(InboxItemResult).where(
+                                InboxItemResult.inbox_item_id == item_id
+                            )
+                        ).all()
+                    )
+                    results.extend(
+                        result
+                        for result in session.new
+                        if isinstance(result, InboxItemResult)
+                        and result.inbox_item_id == item_id
+                    )
+                    model_ids = {
+                        result.model_id
+                        for result in results
+                        if result.model_id is not None
+                        and result.state
+                        in {
+                            InboxItemResultState.IMPORTED,
+                            InboxItemResultState.DEDUPLICATED,
+                        }
+                    }
+                    model_ids.add(job.model_id)
+                    for model_id in sorted(model_ids):
+                        cover_result = _attach_capture_cover(
+                            session,
+                            row.model_copy(update={"resulting_model_id": model_id}),
+                        )
+                        if cover_result is False:
+                            row.error_code = "capture_cover_attach_pending"
+                            row.retryable = True
+                        elif isinstance(
+                            cover_result, source_covers.SourceCoverCandidate
+                        ):
+                            cover_writes.append(cover_result)
+                    positions = session.exec(
+                        select(CaptureUploadSlot.image_position)
+                        .where(
+                            CaptureUploadSlot.inbox_item_id == item_id,
+                            CaptureUploadSlot.role == "cover",
+                            CaptureUploadSlot.image_position > 0,
+                        )
+                        .order_by(CaptureUploadSlot.image_position)
+                    ).all()
+                    for position in positions:
+                        assert position is not None
+                        for model_id in sorted(model_ids):
+                            image_result = _attach_capture_cover(
+                                session,
+                                row.model_copy(update={"resulting_model_id": model_id}),
+                                position=position,
+                            )
+                            if image_result is False:
+                                row.error_code = "capture_cover_attach_pending"
+                                row.retryable = True
+                            elif isinstance(
+                                image_result, source_covers.SourceCoverCandidate
+                            ):
+                                cover_writes.append(image_result)
                 # Byte publication above precedes the short authority transaction.
                 # Never clean staging or commit completion across a retry.
                 if not _lock_import_completion(session, item_id, execution):
@@ -2569,10 +3136,13 @@ def _finish_import(
                     else:
                         row.error_code = "capture_upload_cleanup_pending"
                         row.retryable = True
-                if cover_write is not None:
+                for cover_write in cover_writes:
                     source_covers.attach_candidate(session, cover_write)
                 if not row.retryable and not _cleanup_capture_slots(
-                    session, row, durable_only=True, cover_candidate=cover_write
+                    session,
+                    row,
+                    durable_only=True,
+                    cover_candidates=tuple(cover_writes),
                 ):
                     row.error_code = "capture_upload_cleanup_pending"
                     row.retryable = True
@@ -2593,12 +3163,12 @@ def _finish_import(
             session.add(row)
         try:
             session.flush()
-            if cover_write is not None:
+            for cover_write in cover_writes:
                 source_covers.adopt_candidate(session, cover_write)
             session.commit()
         except Exception:
             session.rollback()
-            if cover_write is not None:
+            for cover_write in cover_writes:
                 abandon_publication(session, cover_write.publication)
             raise
 
@@ -2607,7 +3177,7 @@ def _record_v2_results(
     session: Session, row: InboxItem, result: object
 ) -> tuple[bool, int, int]:
     """Upsert durable per-file V2 results after each child artifact commits."""
-    expects_v2_results = _json_dict(row.manifest_json).get("schema_version") == 2
+    expects_v2_results = _json_dict(row.manifest_json).get("schema_version") in (2, 3)
     if row.id is None or not isinstance(result, dict):
         return (not expects_v2_results), 0, int(expects_v2_results)
     items = result.get("items")
@@ -3052,6 +3622,10 @@ class ResolveSource:
             .where(
                 InboxItem.state == InboxItemState.CAPTURED,
                 col(InboxItem.source_url).is_not(None),
+                col(InboxItem.capture_request_key).is_(None),
+                ~select(CaptureUploadSlot.id)
+                .where(CaptureUploadSlot.inbox_item_id == InboxItem.id)
+                .exists(),
             )
             .order_by(col(InboxItem.id))
             .limit(limit)

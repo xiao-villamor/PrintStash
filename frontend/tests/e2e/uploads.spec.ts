@@ -77,7 +77,9 @@ test.describe("upload and capture", () => {
     await page.getByRole("link", { name: "Open model" }).click();
     await page.getByRole("tab", { name: "Source info", exact: true }).click();
     await expect(page.getByTestId("model-detail-sidebar").getByText("Fixture maker")).toBeVisible();
-    await expect(page.getByText("CC BY 4.0")).toBeVisible();
+    await expect(
+      page.getByTestId("model-detail-sidebar").getByText("CC BY 4.0", { exact: true }),
+    ).toBeVisible();
     await expect(page.getByText("Print with supports.")).toBeVisible();
     // Each field's edit control names the field it edits, so this addresses the
     // Creator row directly. It used to walk two levels up from the heading
@@ -89,8 +91,12 @@ test.describe("upload and capture", () => {
     await page.getByLabel("Creator override").fill("Corrected maker");
     await page.getByRole("button", { name: "Save override", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "Edit Creator" })).toBeHidden();
-    await expect(page.getByText("Corrected maker")).toBeVisible();
-    await expect(page.getByText("Edited")).toBeVisible();
+    await expect(
+      page.getByTestId("model-detail-sidebar").getByText("Corrected maker", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("model-detail-sidebar").getByText("Edited", { exact: true }),
+    ).toBeVisible();
     await editCreator.click();
     await page.getByRole("button", { name: "Restore captured value" }).click();
     const dialog = page.getByRole("dialog", { name: "Restore captured value?" });

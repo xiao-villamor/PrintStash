@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryModelInspector } from "@/components/library-model-inspector";
 import { aModel, aPrinter, aRevision } from "@/test-support/factories";
 import { json, renderApp, type RouteTable } from "@/test-support/render";
@@ -57,9 +57,23 @@ async function ready() {
   await screen.findByRole("heading", { name: "Bracket" });
   await waitFor(() => expect(screen.getByRole("button", { name: "OK" })).toBeEnabled());
 }
+// Load the real lazy module before assertions, outside their DOM polling budget.
+beforeAll(async () => {
+  await import("@/components/library-model-inspector-content");
+});
 beforeEach(() => window.localStorage.clear());
 
 describe("Library model inspector", () => {
+  it("renders a Markdown description in the inspector", async () => {
+    setup({
+      "GET /api/v1/models/1": json(
+        aModel({ ...model, description: "### Assembly\n\nUse **two** clips." }),
+      ),
+    });
+    expect(await screen.findByRole("heading", { name: "Assembly" })).toBeVisible();
+    expect(screen.getByText("two").tagName).toBe("STRONG");
+  });
+
   it("logs the focused revision once when a numeric key is held", async () => {
     let created = false;
     const app = setup({

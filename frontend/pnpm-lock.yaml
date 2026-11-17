@@ -59,6 +59,9 @@ importers:
       '@types/three':
         specifier: 0.186.0
         version: 0.186.0
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
       lucide-react:
         specifier: ^1.17.0
         version: 1.17.0(react@19.2.7)

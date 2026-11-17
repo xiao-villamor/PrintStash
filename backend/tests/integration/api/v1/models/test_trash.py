@@ -411,3 +411,42 @@ class TestPurgeExpiredTrash:
         assert response.status_code == 200, response.text
         assert not paths["old"].exists()
         assert paths["new"].exists()
+
+
+class TestGalleryPurge:
+    def test_purges_all_owned_gallery_images(
+        self, client, auth_headers, db_session, make_model, make_provenance_source
+    ):
+        from app.modules.library import source_covers
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from app.modules.storage.storage_deletion import process_storage_delete_intents
+        from tests.factories.content import png
+
+        model = make_model()
+        source = make_provenance_source(model)
+        keys = []
+        for position in range(3):
+            write = source_covers.put(
+                db_session,
+                get_backend(),
+                provenance_source_id=source.id,
+                actor_id=None,
+                data=png(width=8 + position),
+                content_type="image/png",
+                position=position,
+            )
+            db_session.commit()
+            keys.append(write.cover.storage_key)
+        deleted = client.delete(f"/api/v1/models/{model.id}", headers=auth_headers)
+        assert deleted.status_code == 204, deleted.text
+        assert (
+            client.get(
+                f"/api/v1/models/{model.id}/provenance/{source.id}/cover/content?position=1",
+                headers=auth_headers,
+            ).status_code
+            == 404
+        )
+        purged = client.delete(f"/api/v1/models/{model.id}/purge", headers=auth_headers)
+        assert purged.status_code == 200, purged.text
+        process_storage_delete_intents()
+        assert all(get_backend().object_info(key) is None for key in keys)

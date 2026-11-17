@@ -49,6 +49,7 @@ from app.modules.storage.delivery_contracts import content_disposition
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.schemas.jobs import DerivativeRead
 from app.schemas.plates import FilePlatesRead, GcodePlatesRead
+from app.schemas.project_profiles import FileProjectProfileRead
 
 logger = get_logger(__name__)
 
@@ -244,6 +245,24 @@ def embedded_gcode(
         status_code=status_code,
         headers=headers,
     )
+
+
+@router.get(
+    "/{file_id}/project-profile",
+    response_model=FileProjectProfileRead,
+    summary="Saved settings and per-plate estimates of a 3MF project",
+)
+def file_project_profile(
+    file_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> FileProjectProfileRead:
+    from app.modules.derivatives import project_profiles
+
+    artifact = _accessible_file(session, file_id, current_user)
+    if artifact.file_type != FileType.THREE_MF:
+        raise HTTPException(status_code=404, detail="project_profile_not_supported")
+    return project_profiles.read(session, artifact)
 
 
 @router.get(

@@ -121,6 +121,13 @@ class TestRouteDependencies:
 
         assert capture_routes == {
             ("/inbox", "POST"),
+            ("/inbox/capture-sessions", "POST"),
+            ("/inbox/{item_id}/capture-files", "POST"),
+            ("/inbox/{item_id}/capture-images/{position}", "POST"),
+            ("/inbox/capture-capabilities", "GET"),
+            ("/inbox/capture-destinations", "GET"),
+            ("/inbox/capture-source-status", "GET"),
+            ("/inbox/{item_id}/capture-upload", "GET"),
             ("/inbox/capture-upload-slots", "POST"),
             ("/inbox/capture-upload-slots/{slot_id}", "PUT"),
             ("/inbox/{item_id}/capture-upload-finalize", "POST"),

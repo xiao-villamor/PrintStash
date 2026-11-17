@@ -6,7 +6,9 @@ import { useUiLocale } from "@/lib/i18n";
 import { useState } from "react";
 import { ChevronDown, ExternalLink } from "lucide-react";
 
-import { getJson } from "@/lib/api/request";
+import { useAuth } from "@/lib/auth-context";
+import { getSessionVersion } from "@/lib/session-transport";
+import { downloadAuthenticatedFile, getJson } from "@/lib/api/request";
 import { toast } from "@/lib/toast";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 
@@ -59,25 +61,55 @@ export function SlicerOpenButton({
 }) {
   useUiLocale();
   const [open, setOpen] = useState(false);
+  const { user } = useAuth();
+  const preferenceKey = user ? `printstash.slicer.${window.location.origin}.${user.id}` : null;
+  const [preference, setPreference] = useState<{ key: string | null; scheme: string } | null>(null);
+  const storedPreference = preferenceKey ? localStorage.getItem(preferenceKey) : null;
+  const preferred = preference?.key === preferenceKey ? preference.scheme : storedPreference;
 
   const iconSize = size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4";
   const chevronSize = size === "sm" ? "h-2.5 w-2.5" : "h-3 w-3";
 
   const slicers = SLICERS.filter((s) => s.types.has(fileType));
-  if (slicers.length === 0) return null;
+  slicers.sort((a, b) => Number(b.scheme === preferred) - Number(a.scheme === preferred));
+
+  async function download() {
+    setOpen(false);
+    try {
+      await downloadAuthenticatedFile(`/api/v1/files/${fileId}/download`);
+    } catch {
+      toast.error(uiText("The file could not be downloaded. Try again from this Artifact."));
+    }
+  }
 
   async function openInSlicer(scheme: string) {
     setOpen(false);
+    const session = getSessionVersion();
+    let fileUrl: string;
     try {
       // The slicer is a separate process with no login session, so it can't
       // send our bearer token. The backend returns a short-lived, filename-
       // bearing download URL (the path carries the extension so the slicer can
       // detect the format) with a file-scoped token embedded.
       const { url } = await getJson<{ url: string }>(`/api/v1/files/${fileId}/slicer-url`, {});
-      const fileUrl = `${window.location.origin}${url}`;
-      window.location.assign(slicerHref(scheme, fileUrl));
+      fileUrl = `${window.location.origin}${url}`;
     } catch {
-      toast.error(uiText("Couldn't open in slicer"));
+      if (getSessionVersion() === session)
+        toast.error(
+          uiText("Could not prepare the slicer download. You can still download this Artifact."),
+        );
+      return;
+    }
+    if (getSessionVersion() !== session) return;
+    if (preferenceKey) localStorage.setItem(preferenceKey, scheme);
+    setPreference({ key: preferenceKey, scheme });
+    try {
+      window.location.assign(slicerHref(scheme, fileUrl));
+      toast.info(
+        uiText("Slicer launch requested. If it does not open, download the file instead."),
+      );
+    } catch {
+      toast.error(uiText("The slicer protocol could not be launched. Download the file instead."));
     }
   }
 
@@ -107,6 +139,14 @@ export function SlicerOpenButton({
       }
       contentClassName="w-48 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
     >
+      <p className="px-3 py-2 text-xs text-muted-foreground">
+        {slicers.length === 0
+          ? uiText("No supported slicer handoff for this format. Download the original file.")
+          : uiText(
+              "Opening requires a registered slicer protocol and an address and certificate the slicer accepts.",
+            )}
+        {fileType === "3mf" && ` ${uiText("Opens the whole project, including all plates.")}`}
+      </p>
       {slicers.map(({ name, scheme }) => (
         <button
           key={scheme}
@@ -116,8 +156,17 @@ export function SlicerOpenButton({
           className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover outline-none transition-colors"
         >
           {name}
+          {scheme === preferred && <span className="sr-only">{uiText(" (preferred)")}</span>}
         </button>
       ))}
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => void download()}
+        className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover outline-none transition-colors"
+      >
+        {uiText("Download original file")}
+      </button>
     </DropdownMenu>
   );
 }

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { buildBrowserCaptureMessage } from "../../capture-adapter.ts";
 import { claimBrowserPairing } from "../../core.ts";
+import { captureSequentialFiles } from "../../sequential-capture.ts";
+import { captureDestinations } from "../../capture-preferences.ts";
 import { captureRichFiles } from "../../capture-transport.ts";
 
 interface SetupResponse {
@@ -139,6 +141,91 @@ describe("production extension capture against a real backend", () => {
     const finalized = captureResult;
     expect(finalized.state).toBe("review");
     expect(finalized.id).toBeGreaterThan(0);
+
+    // Recoverable capture negotiates hints and a durable optional cover with the real API.
+    const collection = await readJson<{ id: number; name: string }>(
+      await fetch(`${vault}/api/v1/collections`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${setup.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: `Capture collection ${suffix}` }),
+      }),
+      "collection creation",
+    );
+    expect(
+      await captureDestinations({
+        vault,
+        authorization: claimed.deviceCredential,
+        query: collection.name,
+      }),
+    ).toEqual([{ id: collection.id, label: collection.name }]);
+    const saved: Record<string, unknown> = {};
+    const incremental = await captureSequentialFiles({
+      vault,
+      authorization: claimed.deviceCredential,
+      source: capture.source,
+      collectionId: collection.id,
+      tags: ["review-me"],
+      cover: {
+        id: "cover",
+        filename: "selected.png",
+        mediaType: "image/png",
+        file: new Blob([
+          Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+            "base64",
+          ),
+        ]),
+      },
+      candidates: [{ id: "selected", filename: "selected.3mf", fileType: "other" }],
+      download: async () => ({
+        id: "selected",
+        filename: "selected.3mf",
+        mediaType: "model/3mf",
+        file: new Blob(["controlled profile bytes"]),
+      }),
+      storage: {
+        get: async () => saved,
+        set: async (values) => {
+          Object.assign(saved, values);
+        },
+        remove: async (keys) => {
+          for (const key of [keys].flat()) delete saved[key];
+        },
+      },
+      progress: () => {},
+    });
+    const reviewed = await readJson<{
+      state: string;
+      target_collection_id: number;
+      requested_tags: string[];
+    }>(
+      await fetch(`${vault}/api/v1/inbox/${incremental.id}`, {
+        headers: { Authorization: `Bearer ${setup.access_token}` },
+      }),
+      "suggestions readback",
+    );
+    expect(reviewed).toMatchObject({
+      state: "review",
+      target_collection_id: collection.id,
+      requested_tags: ["review-me"],
+    });
+    const transferred = await readJson<{ slots: Array<{ role: string; state: string }> }>(
+      await fetch(`${vault}/api/v1/inbox/${incremental.id}/capture-upload`, {
+        headers: { Authorization: `Bearer ${claimed.deviceCredential}` },
+      }),
+      "cover receipt",
+    );
+    expect(transferred.slots.map((slot) => ({ role: slot.role, state: slot.state }))).toEqual(
+      expect.arrayContaining([
+        { role: "file", state: "uploaded" },
+        { role: "cover", state: "uploaded" },
+      ]),
+    );
+    expect(transferred.slots).toHaveLength(2);
+    expect(saved).toEqual({});
 
     const devices = await readJson<Array<{ id: number; name: string }>>(
       await fetch(`${vault}/api/v1/browser-pairings`, {

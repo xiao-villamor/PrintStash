@@ -750,3 +750,30 @@ class TestSetUserOverride:
             )
             == 1
         )
+
+
+class TestGallerySourceMerge:
+    def test_retains_gallery_during_source_merge(
+        self, db_session, make_model, make_provenance_source, make_cover
+    ):
+        from sqlmodel import select
+
+        from app.db.models import ModelSourceCover
+        from app.modules.library import provenance
+
+        model = make_model()
+        target = make_provenance_source(model, source_item_id="123")
+        old = make_provenance_source(model, source_item_id=None)
+        first = make_cover(target, position=1)
+        second = make_cover(old, position=1)
+        third = make_cover(old, position=2)
+        before = [row.storage_key for row in (first, second, third)]
+        merged, _ = provenance._merge_sources(db_session, target, old)
+        db_session.commit()
+        rows = db_session.exec(
+            select(ModelSourceCover)
+            .where(ModelSourceCover.provenance_source_id == merged.id)
+            .order_by(ModelSourceCover.position)
+        ).all()
+        assert [row.storage_key for row in rows] == before
+        assert [row.position for row in rows] == [1, 2, 3]

@@ -62,6 +62,7 @@ export type {
   WorkOverview,
   PreviewActivity,
   IngestJobResult,
+  ArchiveIntake,
   ArchiveEntry,
   ArchiveManifest,
   ModelFile,

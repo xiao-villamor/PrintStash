@@ -27,6 +27,8 @@ const CAUSES = {
   no_geometry: "file",
   source_changed: "file",
   invalid_3mf: "file",
+  project_profile_malformed: "file",
+  project_profile_limits: "too_large",
   tessellation_failed: "file",
   resource_limit: "too_large",
   scene_resource_limit: "too_large",

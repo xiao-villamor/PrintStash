@@ -644,7 +644,8 @@ function ModelDetailPresentation({
   const latestFile = inspectedGcode ?? sortedFiles[sortedFiles.length - 1];
   const meta = latestFile?.metadata;
   const printSettingRows = buildPrintSettingRows(meta, metadataPreferences);
-  const meshFile = model.files.find(
+  const requestedArtifact = Number(searchParams.get("artifact"));
+  const meshCandidates = model.files.filter(
     (f) =>
       f.file_type === "stl" ||
       f.file_type === "3mf" ||
@@ -656,6 +657,8 @@ function ModelDetailPresentation({
       f.file_type === "fbx" ||
       f.file_type === "step",
   );
+  const meshFile =
+    meshCandidates.find((file) => file.id === requestedArtifact) ?? meshCandidates[0];
   const hasGcode = gcodeFiles.length > 0;
   const hasToolpathPreview = hasGcode || sourceFiles.some((file) => file.file_type === "3mf");
   const previewSourceId =

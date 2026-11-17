@@ -1295,6 +1295,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     drainRequest(req, () => sendJson(res, importedInboxItem()));
     return;
   }
+  if (/^\/api\/v1\/models\/\d+\/related-profiles$/.test(url.pathname)) {
+    sendJson(res, { items: [], has_more: false });
+    return;
+  }
   if (url.pathname === "/api/v1/models/1/provenance") {
     res.setHeader(
       "ETag",

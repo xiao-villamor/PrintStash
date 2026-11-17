@@ -28,8 +28,9 @@ from sqlmodel import Session, select
 from app.api.command_actor import CommandActor
 from app.api.v1 import documents as documents_router
 from app.core.config import _overlay
+from app.core.errors import ErrorKind, OperationError
 from app.db.models import CollectionRole, Document, User
-from app.modules.library import taxonomy
+from app.modules.library import document_uploads, taxonomy
 from app.modules.storage.storage_backend.runtime import get_backend
 from tests._env import use_local_storage
 from tests.factories import (
@@ -391,7 +392,7 @@ class TestUploadDocument:
             filename="manual.pdf", file=io.BytesIO(_OVER_A_MEGABYTE), size=2 * MEGABYTE
         )
 
-        with pytest.raises(HTTPException) as raised:
+        with pytest.raises(OperationError) as raised:
             await documents_router.upload_document(
                 file=oversized,
                 name=None,
@@ -400,7 +401,7 @@ class TestUploadDocument:
                 actor=CommandActor.from_user(admin),
             )
 
-        assert raised.value.status_code == 413
+        assert raised.value.kind is ErrorKind.TOO_LARGE
         assert raised.value.detail == "upload_too_large"
 
     @pytest.mark.asyncio
@@ -413,7 +414,7 @@ class TestUploadDocument:
             filename="notes.md", file=io.BytesIO(_OVER_A_MEGABYTE), size=None
         )
 
-        with pytest.raises(HTTPException) as raised:
+        with pytest.raises(OperationError) as raised:
             await documents_router.upload_document(
                 file=oversized,
                 name=None,
@@ -422,7 +423,7 @@ class TestUploadDocument:
                 actor=CommandActor.from_user(admin),
             )
 
-        assert raised.value.status_code == 413
+        assert raised.value.kind is ErrorKind.TOO_LARGE
         assert raised.value.detail == "upload_too_large"
 
     @pytest.mark.asyncio
@@ -436,7 +437,7 @@ class TestUploadDocument:
             filename="manual.pdf", file=io.BytesIO(_OVER_A_MEGABYTE), size=None
         )
 
-        with pytest.raises(HTTPException) as raised:
+        with pytest.raises(OperationError) as raised:
             await documents_router.upload_document(
                 file=oversized,
                 name=None,
@@ -445,7 +446,7 @@ class TestUploadDocument:
                 actor=CommandActor.from_user(admin),
             )
 
-        assert raised.value.status_code == 413
+        assert raised.value.kind is ErrorKind.TOO_LARGE
         assert raised.value.detail == "upload_too_large"
 
     def test_refuses_to_overwrite_an_occupied_destination(
@@ -1214,7 +1215,7 @@ class TestDocumentUploadExecution:
     ):
         loop = asyncio.get_running_loop()
         observations = []
-        publish = documents_router.prepare_stream
+        publish = document_uploads.prepare_stream
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -1230,7 +1231,7 @@ class TestDocumentUploadExecution:
                     observations.append(None)
                 return publish(*args, **kwargs)
 
-            monkeypatch.setattr(documents_router, "prepare_stream", delayed_publication)
+            monkeypatch.setattr(document_uploads, "prepare_stream", delayed_publication)
             response = await client.post(
                 "/api/v1/documents/upload",
                 headers=admin_headers,
