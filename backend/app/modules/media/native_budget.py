@@ -1,4 +1,4 @@
-"""One memory policy for native admission, preflight and loader ceilings.
+"""Native scheduling estimates, preflight bounds and hard worker ceilings.
 
 Weights combine a measured startup floor with historical whole-pipeline peak
 costs per face. Those coefficients already include loader/render overhead;
@@ -70,16 +70,21 @@ STEP_FACE_BYTES = 1500
 # corpus peaked under 620 MiB, so a derivative first claims 1 GiB and runs
 # once more under the whole pool if that is not enough.
 STEP_OPTIMISTIC_MEMORY = 1024**3
-# Optional text preflight must stay cheap in the supervisor. OBJ gets a
-# separate CPU allowance and wall watchdog: runnable-thread contention must not
-# turn a countable source into a whole-pool claim. Check at bounded 128-line
-# intervals (at most 512 KiB); parsing still happens in a guarded child. Exhausting any
-# bound keeps the original unknown-complexity claim; it never rejects a source.
+# Text preflight runs in the supervisor. Exhausting a bound keeps the
+# unknown-complexity claim; only the guarded child validates geometry.
 TEXT_PREFLIGHT_BYTES = 8 * 1024**2
 TEXT_PREFLIGHT_LINE_BYTES = 4096
-TEXT_PREFLIGHT_SECONDS = 0.1
-OBJ_PREFLIGHT_WALL_SECONDS = 1.0
+ASCII_PREFLIGHT_WALL_SECONDS = 1.0
 TEXT_PREFLIGHT_CPU_SECONDS = 0.25
+# Scan a bounded 128 MiB (16x the old limit) in 512 KiB blocks. Allow
+# another 0.25 s of CPU per 8 MiB, capped at 2 s. The 4 s wall cap also
+# covers I/O and runnable-thread contention.
+OBJ_PREFLIGHT_BYTES = 128 * 1024**2
+OBJ_PREFLIGHT_BLOCK_BYTES = 512 * 1024
+OBJ_PREFLIGHT_MAX_CPU_SECONDS = 2.0
+OBJ_PREFLIGHT_WALL_SECONDS = 4.0
+_OBJ_CHANNELS = {b"v": 0, b"vt": 1, b"vn": 2}
+_OBJ_OTHER_RECORDS = frozenset({b"o", b"g", b"s", b"l", b"p"})
 
 
 class RasterCodec(str, Enum):
@@ -193,6 +198,11 @@ def request(
     *,
     work: WorkProfile = GeometryWork(),
 ) -> Resources:
+    estimate = _face_estimate(counts, work)
+    return Resources(1, pool.bytes if estimate is None else min(pool.bytes, estimate))
+
+
+def _face_estimate(counts: tuple[int | None, ...], work: WorkProfile) -> int | None:
     if not counts:
         raise ValueError("native work must identify at least one source")
     if any(
@@ -201,9 +211,9 @@ def request(
         raise ValueError("face counts must be nonnegative integers or unknown")
     minimum, incremental, face_bytes = _work_memory(work)
     if any(value is None for value in counts):
-        return Resources(1, pool.bytes)
+        return None
     geometry = sum(value * face_bytes for value in counts if value is not None)
-    return Resources(1, min(pool.bytes, max(minimum, geometry) + incremental))
+    return max(minimum, geometry) + incremental
 
 
 def face_capacity(memory: int, suffix: str, *, lib3mf: bool = False) -> int:
@@ -229,45 +239,60 @@ def _obj_triangle_count(path: Path, *, deadline: float) -> int | None:
 
     with path.open("rb") as stream:
         before = STLSourceSnapshot.from_stat(os.fstat(stream.fileno()))
-        if before.size > TEXT_PREFLIGHT_BYTES:
+        if before.size > OBJ_PREFLIGHT_BYTES:
             return None
-        cpu_deadline = time.thread_time() + TEXT_PREFLIGHT_CPU_SECONDS
+        cpu_seconds = min(
+            OBJ_PREFLIGHT_MAX_CPU_SECONDS,
+            TEXT_PREFLIGHT_CPU_SECONDS * max(1, before.size / TEXT_PREFLIGHT_BYTES),
+        )
+        cpu_deadline = time.thread_time() + cpu_seconds
         coordinate_counts = [0, 0, 0]
-        triangles = scanned = lines = 0
+        triangles = scanned = 0
+        pending = b""
         while True:
-            if lines % 128 == 0 and (
-                time.monotonic() >= deadline or time.thread_time() >= cpu_deadline
-            ):
+            if time.monotonic() >= deadline or time.thread_time() >= cpu_deadline:
                 return None
-            lines += 1
-            raw = stream.readline(TEXT_PREFLIGHT_LINE_BYTES + 1)
-            if not raw:
-                break
-            scanned += len(raw)
+            block = stream.read(OBJ_PREFLIGHT_BLOCK_BYTES)
+            scanned += len(block)
+            contents = pending + block
             if (
-                len(raw) > TEXT_PREFLIGHT_LINE_BYTES
-                or scanned > TEXT_PREFLIGHT_BYTES
-                or not raw.isascii()
-                or b"\\" in raw
-                or b"\x00" in raw
-                or b"mtllib" in raw
+                scanned > before.size
+                or not contents.isascii()
+                or b"\\" in contents
+                or b"\x00" in contents
+                or b"mtllib" in contents
             ):
                 return None
-            fields = raw.split()
-            if not fields or fields[0].startswith(b"#"):
-                continue
-            kind = fields[0]
-            if kind in (b"v", b"vt", b"vn"):
-                channel = {b"v": 0, b"vt": 1, b"vn": 2}[kind]
-                if len(fields) not in ((3, 4) if channel == 1 else (4,)):
+            lines = contents.split(b"\n")
+            if block:
+                pending = lines.pop()
+                if len(pending) > TEXT_PREFLIGHT_LINE_BYTES:
                     return None
-                coordinate_counts[channel] += 1
-            elif kind == b"f":
-                if len(fields) < 4:
+            for raw in lines:
+                if len(raw) + bool(block) > TEXT_PREFLIGHT_LINE_BYTES:
                     return None
-                triangles += len(fields) - 3
-            elif kind not in (b"o", b"g", b"s", b"l", b"p"):
-                return None
+                fields = raw.split(None, 1)
+                if not fields or fields[0].startswith(b"#"):
+                    continue
+                kind = fields[0]
+                channel = _OBJ_CHANNELS.get(kind)
+                if channel is not None:
+                    if len(fields) != 2 or len(fields[1].split()) not in (
+                        (2, 3) if channel == 1 else (3,)
+                    ):
+                        return None
+                    coordinate_counts[channel] += 1
+                elif kind == b"f":
+                    if len(fields) != 2:
+                        return None
+                    corners = len(fields[1].split())
+                    if corners < 3:
+                        return None
+                    triangles += corners - 2
+                elif kind not in _OBJ_OTHER_RECORDS:
+                    return None
+            if not block:
+                break
         if (
             time.monotonic() >= deadline
             or time.thread_time() >= cpu_deadline
@@ -298,7 +323,7 @@ def _ascii_triangle_bound(path: Path) -> int | None:
         _iter_ascii_facets,
     )
 
-    deadline = time.monotonic() + OBJ_PREFLIGHT_WALL_SECONDS
+    deadline = time.monotonic() + ASCII_PREFLIGHT_WALL_SECONDS
     cpu_deadline = time.thread_time() + TEXT_PREFLIGHT_CPU_SECONDS
     with path.open("rb") as stream:
         before = STLSourceSnapshot.from_stat(os.fstat(stream.fileno()))
@@ -394,9 +419,7 @@ def _source_triangle_count(source: MeshSource, *, minimum_faces: int = 0) -> int
     return None
 
 
-def _three_mf_claim(
-    pool: Resources, source: MeshSource, work: GeometryWork | RasterWork
-) -> Resources | None:
+def _three_mf_claim(source: MeshSource, work: GeometryWork | RasterWork) -> int | None:
     """Weight one package by its bounded structure, or ``None`` when unknown."""
     from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 
@@ -425,7 +448,7 @@ def _three_mf_claim(
                 measured.reached_model_bytes * THREE_MF_LIB3MF_XML_BYTE_COST,
             ),
         )
-        return Resources(1, min(pool.bytes, claim + incremental))
+        return claim + incremental
     # The loader derives its face ceiling from the permit (`face_capacity`), so
     # the claim must admit every placed face at that weight as well.
     claim = max(
@@ -437,7 +460,7 @@ def _three_mf_claim(
             measured.reached_model_bytes * THREE_MF_XML_BYTE_COST,
         ),
     )
-    return Resources(1, min(pool.bytes, claim + incremental))
+    return claim + incremental
 
 
 def optimistic_step_claim(pool: Resources, work: WorkProfile) -> Resources | None:
@@ -462,45 +485,91 @@ def _source_bytes(sources: tuple[MeshSource, ...]) -> int | None:
         return None
 
 
+@dataclass(frozen=True)
+class NativeBudget:
+    admission: Resources
+    hard_bytes: int
+
+    @classmethod
+    def full(cls, amount: Resources) -> NativeBudget:
+        return cls(amount, amount.bytes)
+
+
 def estimate_sources(
     pool: Resources,
     sources: tuple[MeshSource, ...],
     *,
     work: WorkProfile = GeometryWork(),
 ) -> Resources:
+    """Reserve the complete worker ceiling for callers without split admission."""
+    return _estimate(pool, sources, work, split=False).admission
+
+
+def plan_sources(
+    pool: Resources,
+    sources: tuple[MeshSource, ...],
+    *,
+    work: WorkProfile,
+) -> NativeBudget:
+    """Plan both resident credits and the existing capped worker ceiling."""
+    return _estimate(pool, sources, work, split=True)
+
+
+def _estimate(
+    pool: Resources,
+    sources: tuple[MeshSource, ...],
+    work: WorkProfile,
+    *,
+    split: bool,
+) -> NativeBudget:
     from app.modules.media.mesh_observability import record_estimate
     from app.modules.media.mesh_telemetry import EstimateBasis, EstimateStats
 
     started = time.monotonic_ns()
-    minimum, _incremental, face_bytes = _work_memory(work)
-    claim: Resources | None = None
-    if (
-        len(sources) == 1
-        and sources[0].file_type.lower().lstrip(".") == "3mf"
-        and isinstance(work, (GeometryWork, RasterWork))
-    ):
+    minimum, incremental, face_bytes = _work_memory(work)
+    file_types = tuple(source.file_type.lower().lstrip(".") for source in sources)
+    if file_types == ("3mf",) and isinstance(work, (GeometryWork, RasterWork)):
         # Fingerprint analysis has its own uncalibrated peak and keeps the pool.
-        claim = _three_mf_claim(pool, sources[0], work)
-        counted = claim is not None
-    if claim is None:
+        estimate = _three_mf_claim(sources[0], work)
+    else:
         # The floor applies to the combined request, not separately to each source.
-        # Multi-source work needs actual bounds to retain its aggregate allowance.
         minimum_faces = minimum // face_bytes if len(sources) == 1 else 0
-        counts = tuple(
-            _source_triangle_count(source, minimum_faces=minimum_faces)
-            for source in sources
+        estimate = _face_estimate(
+            tuple(
+                _source_triangle_count(source, minimum_faces=minimum_faces)
+                for source in sources
+            ),
+            work,
         )
-        counted = all(count is not None for count in counts)
-        claim = request(pool, counts, work=work)
+    hard_bytes = pool.bytes if estimate is None else min(pool.bytes, estimate)
+    resident_bytes = hard_bytes
+    if (
+        split
+        and estimate is not None
+        and isinstance(work, RasterWork)
+        and work.codec is RasterCodec.WEBP
+        and work.frames == 1
+        and file_types in {("obj",), ("3mf",)}
+    ):
+        # The mixed cover lab measured ~270 MiB for the 640 MiB floor and
+        # 1.6 GiB for the 3MF with a ceiling capped at 3 GiB. Budget two thirds
+        # of the *uncapped* virtual estimate: at least 427 MiB at startup and
+        # a third of headroom over a half-virtual resident estimate. Charge
+        # additional frame workspace in full. Inputs outside this measured
+        # profile or without a count keep their full hard allowance.
+        resident_bytes = min(
+            hard_bytes, (2 * (estimate - incremental) + 2) // 3 + incremental
+        )
+    budget = NativeBudget(Resources(1, resident_bytes), hard_bytes)
     record_estimate(
         EstimateStats(
-            file_types=tuple(
-                source.file_type.lower().lstrip(".") for source in sources
-            ),
+            file_types=file_types,
             source_bytes=_source_bytes(sources),
-            basis=EstimateBasis.COUNTED if counted else EstimateBasis.UNKNOWN,
-            requested_bytes=claim.bytes,
+            basis=EstimateBasis.COUNTED
+            if estimate is not None
+            else EstimateBasis.UNKNOWN,
+            requested_bytes=budget.admission.bytes,
             elapsed_ns=time.monotonic_ns() - started,
         )
     )
-    return claim
+    return budget

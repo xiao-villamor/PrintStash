@@ -81,11 +81,12 @@ from app.modules.media.native_budget import (
     AnalysisWork,
     GeometryWork,
     MeshSource,
+    NativeBudget,
     RasterCodec,
     RasterWork,
     WorkProfile,
-    estimate_sources,
     optimistic_step_claim,
+    plan_sources,
 )
 from app.modules.media.native_execution import admission
 from app.modules.media.worker_bootstrap import (
@@ -743,14 +744,16 @@ def _run_worker(
         check()
     existing = current_permit()
     capacity = Resources(native_process.native_capacity().slots, memory_budget_bytes())
-    amount = (
-        existing.resources
+    budget = (
+        NativeBudget(existing.resources, existing.hard_bytes)
         if existing is not None
-        else amount
+        else NativeBudget.full(amount)
         if amount is not None
-        else estimate_sources(capacity, sources, work=work)
+        else plan_sources(capacity, sources, work=work)
     )
-    with admission(amount, capacity, checkpoint=check) as permit:
+    with admission(
+        budget.admission, capacity, checkpoint=check, hard_bytes=budget.hard_bytes
+    ) as permit:
         check()
         if module == "app.modules.media.mesh_worker":
             from app.core.native_settings import capture
@@ -761,11 +764,11 @@ def _run_worker(
         command = worker_command(
             module,
             [json.dumps(payload)],
-            permit.resources.bytes,
+            permit.hard_bytes,
         )
         return supervise_result(
             command,
-            memory_budget=permit.resources.bytes,
+            memory_budget=permit.hard_bytes,
             timeout_seconds=(
                 float(settings.mesh_worker_timeout_seconds)
                 if deadline is None
@@ -817,15 +820,20 @@ def prepared_worker_result(
     """
     existing = current_permit()
     capacity = Resources(native_process.native_capacity().slots, memory_budget_bytes())
-    amount = (
-        existing.resources
+    budget = (
+        NativeBudget(existing.resources, existing.hard_bytes)
         if existing is not None
-        else estimate_sources(capacity, sources, work=work)
+        else plan_sources(capacity, sources, work=work)
     )
     with worker_output_directory(workspace) as directory:
         owned = directory.lstat()
         identity = (owned.st_dev, owned.st_ino)
-        with admission(amount, capacity, checkpoint=checkpoint) as permit:
+        with admission(
+            budget.admission,
+            capacity,
+            checkpoint=checkpoint,
+            hard_bytes=budget.hard_bytes,
+        ) as permit:
             command = worker_command(
                 module,
                 [
@@ -837,11 +845,11 @@ def prepared_worker_result(
                         }
                     )
                 ],
-                permit.resources.bytes,
+                permit.hard_bytes,
             )
             reply = supervise_result(
                 command,
-                memory_budget=permit.resources.bytes,
+                memory_budget=permit.hard_bytes,
                 timeout_seconds=float(settings.mesh_worker_timeout_seconds),
                 permit=permit,
                 lifecycle=WorkerLifecycle.GUARDED,
@@ -1228,9 +1236,9 @@ def _render_packet_cpu(
             worker_command(
                 "app.modules.media.thumbnail_cpu_worker",
                 [json.dumps(spec)],
-                permit.resources.bytes,
+                permit.hard_bytes,
             ),
-            memory_budget=permit.resources.bytes,
+            memory_budget=permit.hard_bytes,
             timeout_seconds=max(0.001, handoff.deadline - time.monotonic()),
             permit=permit,
             lifecycle=WorkerLifecycle.GUARDED,

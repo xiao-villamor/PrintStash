@@ -345,9 +345,9 @@ def render_stl_preview_isolated(
                 worker_command(
                     "app.modules.media.stl_preview_worker",
                     arguments,
-                    permit.resources.bytes,
+                    permit.hard_bytes,
                 ),
-                memory_budget=min(worker_limits.max_rss_bytes, permit.resources.bytes),
+                memory_budget=min(worker_limits.max_rss_bytes, permit.hard_bytes),
                 timeout_seconds=worker_limits.hard_timeout_seconds,
                 permit=permit,
                 lifecycle=WorkerLifecycle.GUARDED,

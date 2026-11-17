@@ -16,10 +16,13 @@ def admission(
     capacity: Resources,
     *,
     checkpoint: Callable[[], None],
+    hard_bytes: int | None = None,
 ) -> Iterator[NativePermit]:
     """Record one parent admission; a worker's inherited scope is already admitted."""
     if current_permit() is not None:
-        with admit(request, capacity, checkpoint=checkpoint) as permit:
+        with admit(
+            request, capacity, checkpoint=checkpoint, hard_bytes=hard_bytes
+        ) as permit:
             yield permit
         return
     from printstash_core.inference import EmbeddingError
@@ -31,7 +34,7 @@ def admission(
     with ExitStack() as owned:
         try:
             permit = owned.enter_context(
-                admit(request, capacity, checkpoint=checkpoint)
+                admit(request, capacity, checkpoint=checkpoint, hard_bytes=hard_bytes)
             )
         except OperationCancelled:
             outcome = AdmissionOutcome.CANCELLED
