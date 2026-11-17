@@ -203,7 +203,7 @@ describe("ModelDetail", () => {
       const name = screen.getByRole("textbox", { name: "Model name" });
       await user.clear(name);
       await user.type(name, "New Benchy");
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.keyboard("{Enter}");
 
       expect(await screen.findByRole("heading", { name: "New Benchy", level: 1 })).toBeVisible();
       expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body ?? "{}")).toEqual({
@@ -226,38 +226,37 @@ describe("ModelDetail", () => {
       renderDetail();
       await user.click(await screen.findByRole("button", { name: "Rename Benchy" }));
 
-      expect(screen.getByRole("dialog", { name: "Rename Benchy" })).not.toHaveAttribute(
-        "aria-modal",
-        "true",
-      );
-      expect(screen.getByRole("heading", { level: 1, name: "Benchy" })).toBeVisible();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Model name" })).toHaveFocus();
       expect(screen.getByRole("button", { name: "Add tags to Benchy" })).toBeVisible();
       expect(screen.getByRole("button", { name: "Add Benchy to favorites" })).toBeVisible();
       expect(screen.getByRole("button", { name: "Share" })).toBeVisible();
       expect(screen.queryByPlaceholderText("Add a description…")).not.toBeInTheDocument();
     });
 
-    it.each(["Cancel", "Escape", "outside"])(
-      "discards a title draft through %s",
-      async (dismiss) => {
-        const user = userEvent.setup();
-        const app = renderDetail();
-        await user.click(await screen.findByRole("button", { name: "Rename Benchy" }));
-        await user.clear(screen.getByRole("textbox", { name: "Model name" }));
-        await user.type(screen.getByRole("textbox", { name: "Model name" }), "Discarded title");
-        if (dismiss === "Cancel") await user.click(screen.getByRole("button", { name: "Cancel" }));
-        else if (dismiss === "Escape") await user.keyboard("{Escape}");
-        else await user.click(screen.getByRole("tab", { name: "Overview" }));
+    it("discards an inline draft with Escape", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail();
+      await user.click(await screen.findByRole("button", { name: "Rename Benchy" }));
+      await user.type(screen.getByRole("textbox", { name: "Model name" }), " draft");
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("textbox", { name: "Model name" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Rename Benchy" })).toHaveFocus();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+    });
 
-        await waitFor(() =>
-          expect(screen.queryByRole("dialog", { name: "Rename Benchy" })).not.toBeInTheDocument(),
-        );
-        expect(screen.getByRole("heading", { level: 1, name: "Benchy" })).toBeVisible();
-        expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
-        await user.click(screen.getByRole("button", { name: "Rename Benchy" }));
-        expect(screen.getByRole("textbox", { name: "Model name" })).toHaveValue("Benchy");
-      },
-    );
+    it("commits a changed inline title on blur", async () => {
+      const user = userEvent.setup();
+      renderDetail({
+        routes: { "PATCH /api/v1/models/1": json(aModel({ name: "Changed", edit_version: 2 })) },
+      });
+      await user.keyboard("{F2}");
+      const field = await screen.findByRole("textbox", { name: "Model name" });
+      await user.clear(field);
+      await user.type(field, "Changed");
+      await user.tab();
+      expect(await screen.findByRole("heading", { level: 1, name: "Changed" })).toBeVisible();
+    });
 
     it("prevents an empty title save inside the editor", async () => {
       const user = userEvent.setup();
@@ -266,9 +265,8 @@ describe("ModelDetail", () => {
       await user.clear(screen.getByRole("textbox", { name: "Model name" }));
       await user.keyboard("{Enter}");
 
-      const editor = within(screen.getByRole("dialog", { name: "Rename Benchy" }));
-      expect(editor.getByRole("alert")).toHaveTextContent("Model name is required.");
-      expect(editor.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(screen.queryByRole("textbox", { name: "Model name" })).toBeNull();
+      expect(screen.getByRole("heading", { name: "Benchy", level: 1 })).toBeVisible();
       expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
     });
 
@@ -297,7 +295,7 @@ describe("ModelDetail", () => {
           }),
         ),
       );
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.keyboard("{Enter}");
 
       expect(await screen.findByRole("button", { name: "Review latest version" })).toBeVisible();
       expect(screen.getByRole("textbox", { name: "Model name" })).toHaveValue("My title");
@@ -305,7 +303,7 @@ describe("ModelDetail", () => {
       expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body)).toEqual({ name: "My title" });
     });
 
-    it("reviews a conflicting title inside its anchored editor", async () => {
+    it("reviews a conflicting title beside the inline editor", async () => {
       const user = userEvent.setup();
       const app = renderDetail({
         routes: {
@@ -316,16 +314,12 @@ describe("ModelDetail", () => {
       await user.click(await screen.findByRole("button", { name: "Rename Benchy" }));
       await user.clear(screen.getByRole("textbox", { name: "Model name" }));
       await user.type(screen.getByRole("textbox", { name: "Model name" }), "My title");
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.keyboard("{Enter}");
       await user.click(await screen.findByRole("button", { name: "Review latest version" }));
 
       expect(await screen.findByText("Remote title")).toBeVisible();
-      expect(screen.getAllByRole("dialog")).toHaveLength(1);
-      expect(screen.getByRole("dialog", { name: "Rename Benchy" })).toHaveTextContent(
-        "Remote title",
-      );
+      expect(screen.queryByRole("dialog")).toBeNull();
       expect(screen.getByRole("textbox", { name: "Model name" })).toHaveValue("My title");
-      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
       let version: string | null = null;
       app.route({
         "PATCH /api/v1/models/1": (_url, init) => {
@@ -348,13 +342,13 @@ describe("ModelDetail", () => {
         },
       });
       await user.click(await screen.findByRole("button", { name: "Rename Benchy" }));
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.type(screen.getByRole("textbox", { name: "Model name" }), " draft");
+      await user.keyboard("{Enter}");
       await user.click(await screen.findByRole("button", { name: "Review latest version" }));
       await user.click(await screen.findByRole("button", { name: "Use latest version" }));
 
       expect(screen.getByRole("textbox", { name: "Model name" })).toHaveValue("Saved title");
-      expect(screen.getByRole("heading", { level: 1, name: "Saved title" })).toBeVisible();
-      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+      expect(screen.getByRole("textbox", { name: "Model name" })).toBeEnabled();
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     });
     it("preserves a pending title save through repeated edit gestures", async () => {
@@ -367,16 +361,16 @@ describe("ModelDetail", () => {
       await user.click(await screen.findByRole("button", { name: "Rename Benchy" }));
       await user.clear(screen.getByRole("textbox", { name: "Model name" }));
       await user.type(screen.getByRole("textbox", { name: "Model name" }), "Saved title");
-      await user.click(screen.getByRole("button", { name: "Save" }));
-      await user.dblClick(screen.getByRole("heading", { level: 1, name: "Benchy" }));
+      await user.keyboard("{Enter}");
+      await user.dblClick(screen.getByRole("textbox", { name: "Model name" }));
       expect(screen.getByRole("textbox", { name: "Model name" })).toHaveValue("Saved title");
-      expect(screen.getByRole("textbox", { name: "Model name" })).toBeDisabled();
+      expect(screen.getByRole("textbox", { name: "Model name" })).toHaveAttribute("readonly");
       await user.pointer({
-        target: screen.getByRole("heading", { level: 1 }),
+        target: screen.getByRole("banner"),
         keys: "[MouseRight]",
       });
       await user.click(screen.getByRole("menuitem", { name: "Edit details" }));
-      expect(screen.getByRole("textbox", { name: "Model name" })).toBeDisabled();
+      expect(screen.getByRole("textbox", { name: "Model name" })).toHaveAttribute("readonly");
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
       await act(async () => {
         release(json(aModel({ name: "Saved title", edit_version: 2 })));
@@ -393,7 +387,8 @@ describe("ModelDetail", () => {
       });
       const app = renderDetail({ routes: { "PATCH /api/v1/models/1": () => pending } });
       await user.click(await screen.findByRole("button", { name: "Rename Benchy" }));
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.type(screen.getByRole("textbox", { name: "Model name" }), " draft");
+      await user.keyboard("{Enter}");
       act(() =>
         app.client.setQueryData(
           queryKeys.model(1),
@@ -401,7 +396,7 @@ describe("ModelDetail", () => {
         ),
       );
       await waitFor(() =>
-        expect(screen.queryByRole("dialog", { name: "Rename Benchy" })).not.toBeInTheDocument(),
+        expect(screen.queryByRole("textbox", { name: "Model name" })).not.toBeInTheDocument(),
       );
       await act(async () => {
         release(json(aModel({ name: "Retired result", edit_version: 2 })));
@@ -432,11 +427,12 @@ describe("ModelDetail", () => {
         },
       });
       await user.click(await screen.findByRole("button", { name: "Rename Benchy" }));
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.type(screen.getByRole("textbox", { name: "Model name" }), " draft");
+      await user.keyboard("{Enter}");
       await user.click(await screen.findByRole("button", { name: "Review latest version" }));
       await user.click(screen.getByRole("button", { name: "Cancel" }));
       await waitFor(() =>
-        expect(screen.queryByRole("dialog", { name: "Rename Benchy" })).not.toBeInTheDocument(),
+        expect(screen.queryByRole("textbox", { name: "Model name" })).not.toBeInTheDocument(),
       );
       await user.click(screen.getByRole("button", { name: "Rename Benchy" }));
       await user.clear(screen.getByRole("textbox", { name: "Model name" }));
@@ -447,7 +443,7 @@ describe("ModelDetail", () => {
       });
       expect(screen.queryByText("Late review")).not.toBeInTheDocument();
       expect(screen.getByRole("textbox", { name: "Model name" })).toHaveValue("New draft");
-      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+      expect(screen.getByRole("textbox", { name: "Model name" })).not.toHaveAttribute("readonly");
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     });
 
@@ -459,11 +455,11 @@ describe("ModelDetail", () => {
       await user.click(await screen.findByRole("button", { name: "Rename Benchy" }));
       await user.clear(screen.getByRole("textbox", { name: "Model name" }));
       await user.type(screen.getByRole("textbox", { name: "Model name" }), "Taken name");
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.keyboard("{Enter}");
 
       expect(await screen.findByText("An item with that name already exists.")).toBeVisible();
       expect(screen.getByRole("textbox", { name: "Model name" })).toHaveValue("Taken name");
-      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+      expect(screen.getByRole("textbox", { name: "Model name" })).not.toHaveAttribute("readonly");
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     });
   });

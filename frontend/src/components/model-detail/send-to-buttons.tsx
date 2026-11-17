@@ -841,7 +841,9 @@ export function SendToButtons({
                     {uiText(
                       deliveryMode === "queue" && routingStrategy !== "manual"
                         ? "This job can wait in the queue for an eligible printer."
-                        : "No configured printer supports Vault upload/send.",
+                        : printers.length === 0
+                          ? "No printers configured"
+                          : "None of the configured printers can receive this file.",
                     )}
                   </div>
                 )}

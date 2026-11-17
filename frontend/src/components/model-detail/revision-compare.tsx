@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { useFilePlates } from "@/lib/queries/file-plates";
+import { formatPlateEstimate } from "./format-plate-estimate";
+import type { GcodePlateMetadata } from "@/lib/api/plates";
+import { useFilePlates, useGcodePlates } from "@/lib/queries/file-plates";
 import { HashValue } from "./file-hashes";
 import { Button } from "@/components/ui/button";
 import { Localized } from "@/components/ui/localized";
@@ -22,7 +24,7 @@ import type { ArtifactOutcomeRead, FileRead } from "@/types";
 import { revisionStatusLabel } from "./presentation";
 
 export type ComparisonMode = "gcode" | "source" | "all";
-type Value = string | null;
+type Value = string | null | { number: number; name?: string; value: string }[];
 interface ComparisonRow {
   labelKey: MessageKey | "SHA-256";
   left: Value;
@@ -67,7 +69,12 @@ function ComparisonTable({
         </thead>
         <tbody>
           {group.rows.map((row) => {
-            const different = row.left !== null && row.right !== null && row.left !== row.right;
+            const different =
+              row.left !== null &&
+              !Array.isArray(row.left) &&
+              row.right !== null &&
+              !Array.isArray(row.right) &&
+              row.left !== row.right;
             return (
               <tr
                 key={row.labelKey}
@@ -84,10 +91,23 @@ function ComparisonTable({
                     key={index}
                     className="break-words px-2 py-2 align-top tabular-nums [overflow-wrap:anywhere]"
                   >
-                    {value &&
-                    (row.labelKey === "SHA-256" ||
-                      row.labelKey === "File SHA-256" ||
-                      row.labelKey === "Geometry SHA-256") ? (
+                    {Array.isArray(value) ? (
+                      <dl className="space-y-2">
+                        {value.map((plate) => (
+                          <div key={plate.number}>
+                            <dt className="text-xs text-muted-foreground" title={plate.name}>
+                              {uiText("Plate {value1}", {
+                                value1: String(plate.number).padStart(2, "0"),
+                              })}
+                            </dt>
+                            <dd>{plate.value}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    ) : value &&
+                      (row.labelKey === "SHA-256" ||
+                        row.labelKey === "File SHA-256" ||
+                        row.labelKey === "Geometry SHA-256") ? (
                       <HashValue
                         sha={value}
                         label={row.labelKey === "SHA-256" ? row.labelKey : uiText(row.labelKey)}
@@ -183,6 +203,39 @@ export function RevisionCompare({
     selectedRight.model_id,
     canReadPlates && selectedRight.file_type === "3mf" ? selectedRight.id : null,
   );
+  const slicedId = (file: FileRead) =>
+    !loading &&
+    user &&
+    choices.length >= 2 &&
+    file.file_type === "gcode" &&
+    file.original_filename.toLowerCase().endsWith(".3mf")
+      ? file.id
+      : null;
+  const leftSliced = useGcodePlates(selectedLeft.model_id, slicedId(selectedLeft));
+  const rightSliced = useGcodePlates(selectedRight.model_id, slicedId(selectedRight));
+  function estimate(
+    file: FileRead,
+    metric: keyof GcodePlateMetadata,
+    format: (value: number) => string,
+  ): Value {
+    const data = file.id === selectedLeft.id ? leftSliced : rightSliced;
+    if (
+      data &&
+      data.plates.length > 1 &&
+      data.plate_metadata?.some((plate) => plate.metadata[metric] != null)
+    ) {
+      return data.plates.map((number) => ({
+        number,
+        name: data.identities?.find((plate) => plate.number === number)?.name,
+        value: formatPlateEstimate(
+          metric,
+          data.plate_metadata.find((plate) => plate.number === number)?.metadata[metric],
+        ),
+      }));
+    }
+    const value = file.metadata?.[metric];
+    return value == null ? null : format(value);
+  }
   const leftOutcome = outcomes.find((row) => row.file_id === selectedLeft.id);
   const rightOutcome = outcomes.find((row) => row.file_id === selectedRight.id);
   const numeric = (
@@ -297,13 +350,9 @@ export function RevisionCompare({
               row("Bed temperature", (file) =>
                 numeric(file.metadata?.bed_temperature_c, formatTemperature),
               ),
-              row("Estimated time", (file) =>
-                numeric(file.metadata?.estimated_time_s, formatDuration),
-              ),
-              row("Filament weight", (file) =>
-                numeric(file.metadata?.filament_weight_g, formatGrams),
-              ),
-              row("Filament cost", (file) => numeric(file.metadata?.filament_cost, formatCost)),
+              row("Estimated time", (file) => estimate(file, "estimated_time_s", formatDuration)),
+              row("Filament weight", (file) => estimate(file, "filament_weight_g", formatGrams)),
+              row("Filament cost", (file) => estimate(file, "filament_cost", formatCost)),
               row("LAYERS", (file) => numeric(file.metadata?.layer_count, formatNumber)),
               ...(selectedLeft.file_type === "resin" || selectedRight.file_type === "resin"
                 ? [

@@ -96,6 +96,9 @@ test.describe("Existing Model review", () => {
           await waitForPreview();
 
           if (phase === "details") {
+            const canvas = preview.locator("canvas").first();
+            const initialCanvas = await canvas.boundingBox();
+            const plateTray = preview.getByRole("group", { name: "Plates", exact: true });
             // ── Every detail tab, retaining the data and empty states actually present ──
             for (const label of [
               "Overview",
@@ -107,6 +110,10 @@ test.describe("Existing Model review", () => {
               "Similar",
             ]) {
               await tab(label);
+              expect(await canvas.boundingBox()).toEqual(initialCanvas);
+              const frame = await preview.boundingBox();
+              const tray = await plateTray.boundingBox();
+              expect(tray!.y + tray!.height).toBeLessThanOrEqual(frame!.y + frame!.height);
               await capturePanel(label.toLowerCase().replaceAll(" ", "-"));
             }
             await inspector.getByRole("button", { name: "Filters", exact: true }).click();
@@ -280,6 +287,22 @@ test.describe("Existing Model review", () => {
                 .getByRole("group", { name: "Comparison type", exact: true })
                 .getByRole("button", { name: label, exact: true })
                 .click();
+              if (
+                label === "All files" &&
+                revisions.length === 1 &&
+                slicedPlates.plates.length > 1
+              ) {
+                for (const metric of ["Estimated time", "Filament weight"]) {
+                  const estimates = inspector.getByRole("row", { name: new RegExp("^" + metric) });
+                  for (const number of slicedPlates.plates) {
+                    await expect(
+                      estimates.getByText("Plate " + String(number).padStart(2, "0"), {
+                        exact: true,
+                      }),
+                    ).toBeVisible();
+                  }
+                }
+              }
               await capturePanel(`compare-${label.toLowerCase().replaceAll(" ", "-")}`);
             }
             await inspector.getByRole("button", { name: "Back to revisions", exact: true }).click();
@@ -413,11 +436,10 @@ test.describe("Existing Model review", () => {
               await preview.getByRole("button", { name: "Collapse preview", exact: true }).click();
               await preview.getByRole("button", { name: "Fit to view", exact: true }).click();
             }
-            for (const mode of ["X-Ray", "Wireframe", "Solid"]) {
-              await preview.getByRole("button", { name: mode, exact: true }).click();
-              await expect(
-                preview.getByRole("button", { name: mode, exact: true }),
-              ).toHaveAttribute("aria-pressed", "true");
+            const display = preview.getByRole("combobox", { name: "Display" });
+            for (const mode of ["xray", "wireframe", "solid"]) {
+              await display.selectOption(mode);
+              await expect(display).toHaveValue(mode);
             }
             for (const camera of ["Top", "Front", "Isometric"]) {
               await preview.getByRole("button", { name: camera, exact: true }).click();

@@ -57,14 +57,8 @@ function renderToolbar(
 describe("ViewerToolbar screenshot", () => {
   it("keeps model controls inert until the preview is ready", () => {
     renderToolbar(false);
-    for (const name of [
-      "Solid",
-      "X-Ray",
-      "Wireframe",
-      "Fit to view",
-      "Screenshot",
-      "Build plate grid",
-    ]) {
+    expect(screen.getByRole("combobox", { name: "Display" })).toBeDisabled();
+    for (const name of ["Fit to view", "Screenshot", "Build plate grid"]) {
       expect(screen.getByRole("button", { name })).toBeDisabled();
     }
   });
@@ -146,9 +140,7 @@ describe("ViewerToolbar selection", () => {
   it("keeps mesh display controls out of the toolpath preview", () => {
     renderToolbar(true, undefined, { hasGcode: true, viewerMode: "gcode" });
 
-    expect(screen.queryByRole("button", { name: "Solid" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "X-Ray" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Wireframe" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Display" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Build plate grid" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Fit to view" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Front" })).toBeEnabled();
@@ -198,12 +190,7 @@ describe("ViewerToolbar selection", () => {
   it("announces the active rendering style", () => {
     renderToolbar(true, undefined, { displayMode: "xray" });
 
-    expect(screen.getByRole("button", { name: "Solid" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "X-Ray" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Wireframe" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+    expect(screen.getByRole("combobox", { name: "Display" })).toHaveValue("xray");
   });
 
   it.each([true, false])("announces grid visibility when it is %s", (visible) => {

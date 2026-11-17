@@ -1,6 +1,6 @@
 import type { GcodePlates } from "@/lib/api/plates";
-import { formatCost, formatNumber } from "@/lib/format";
-import { currentLocale, uiText } from "@/lib/locale";
+import { uiText } from "@/lib/locale";
+import { formatPlateEstimate } from "./format-plate-estimate";
 
 /** Estimates are slicer predictions for each plate, never the archive total. */
 export function PlateEstimates({
@@ -16,21 +16,6 @@ export function PlateEstimates({
   showWeight?: boolean;
   showCost?: boolean;
 }) {
-  const unit = (value: number, name: "hour" | "minute" | "second") =>
-    new Intl.NumberFormat(currentLocale(), {
-      style: "unit",
-      unit: name,
-      unitDisplay: "narrow",
-    }).format(value);
-  const duration = (seconds: number | null | undefined) => {
-    if (seconds == null) return uiText("Not recorded");
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    return [h ? unit(h, "hour") : null, h || m ? unit(m, "minute") : null, unit(s, "second")]
-      .filter(Boolean)
-      .join(" ");
-  };
   return (
     <section className="@container/estimates space-y-2" aria-label={uiText("Plate estimates")}>
       <h3 className="text-sm font-semibold">{uiText("Plate estimates")}</h3>
@@ -55,31 +40,19 @@ export function PlateEstimates({
               {showTime && (
                 <div>
                   <dt>{uiText("Estimated time")}</dt>
-                  <dd>{duration(metadata?.estimated_time_s)}</dd>
+                  <dd>{formatPlateEstimate("estimated_time_s", metadata?.estimated_time_s)}</dd>
                 </div>
               )}
               {showWeight && (
                 <div>
                   <dt>{uiText("Filament weight")}</dt>
-                  <dd>
-                    {metadata?.filament_weight_g == null
-                      ? uiText("Not recorded")
-                      : uiText("{value1} g", {
-                          value1: formatNumber(metadata.filament_weight_g, {
-                            maximumFractionDigits: 2,
-                          }),
-                        })}
-                  </dd>
+                  <dd>{formatPlateEstimate("filament_weight_g", metadata?.filament_weight_g)}</dd>
                 </div>
               )}
               {showCost && (
                 <div>
                   <dt>{uiText("Filament cost")}</dt>
-                  <dd>
-                    {metadata?.filament_cost == null
-                      ? uiText("Not recorded")
-                      : formatCost(metadata.filament_cost)}
-                  </dd>
+                  <dd>{formatPlateEstimate("filament_cost", metadata?.filament_cost)}</dd>
                 </div>
               )}
             </dl>

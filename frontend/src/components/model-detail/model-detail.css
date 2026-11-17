@@ -532,10 +532,23 @@
   flex-shrink: 0;
 }
 @media (min-width: 1100px) {
-  /* Let the preview shrink when model information returns after expansion. */
+  .model-detail-layout {
+    overflow: clip;
+  }
+  .model-detail-content {
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+  .model-detail-heading .library-collection-title h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+  /* Reserve intrinsic rows for the dock and complete plate tray. Only the canvas shrinks. */
   .model-detail-preview {
-    flex: 1 1 0;
-    min-height: 0;
+    flex: 1 0 0;
+    min-height: min-content;
+    grid-template-rows: auto auto minmax(10rem, 1fr) auto auto;
   }
 }
 .detail-preview-canvas {
@@ -558,7 +571,8 @@
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  margin: 12px 12px 0;
+  padding: 9px 12px 0;
+  background: var(--card);
 }
 .detail-preview-heading > div:last-child button {
   font-size: 0.8125rem;
@@ -579,32 +593,32 @@
 .detail-viewer-commandbar {
   grid-row: 2;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  justify-self: start;
-  max-width: calc(100% - 24px);
-  margin: 12px 12px 0;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
   background: var(--card);
 }
 .detail-viewer-control-group {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
-.detail-viewer-control-group > span {
-  padding-inline: 6px;
-  margin-bottom: 3px;
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
+.detail-viewer-commandbar .detail-mode-switch {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 2px;
 }
-.detail-viewer-control-group > div {
-  display: flex;
-}
-.detail-viewer-control-group + .detail-viewer-control-group {
-  border-left: 1px solid var(--border);
-  padding-left: 10px;
+.detail-preview-style {
+  margin-left: auto;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  color: var(--foreground);
+  padding: 4px 8px;
+  font-size: 0.8125rem;
 }
 .detail-viewer-commandbar button,
 .detail-viewer-dock button {

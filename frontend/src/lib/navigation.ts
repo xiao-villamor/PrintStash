@@ -9,7 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { useLayoutEffect, useMemo, useState } from "react";
 
-type NavigationOptions = { state?: HistoryState };
+type NavigationOptions = { state?: HistoryState; resetScroll?: boolean };
 export interface AppRouter {
   push: (href: string, options?: NavigationOptions) => void;
   replace: (href: string, options?: NavigationOptions) => void;
@@ -22,10 +22,10 @@ export function useRouter(): AppRouter {
   return useMemo(
     () => ({
       push: (href: string, options?: NavigationOptions) => {
-        void router.navigate({ href, state: options?.state });
+        void router.navigate({ href, ...options });
       },
       replace: (href: string, options?: NavigationOptions) => {
-        void router.navigate({ href, replace: true, state: options?.state });
+        void router.navigate({ href, replace: true, ...options });
       },
       back: () => router.history.back(),
       forward: () => router.history.forward(),

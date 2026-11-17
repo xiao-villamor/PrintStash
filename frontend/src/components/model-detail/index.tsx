@@ -17,7 +17,7 @@ import { useLibraryStar } from "@/features/library/mutations";
 import { ApiError } from "@/lib/errors";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { Modal } from "@/components/ui/modal";
-import { TitleEditor } from "@/components/title-editor";
+import { InlineTitleEditor } from "@/components/inline-title-editor";
 import { ModelInformation } from "./model-information";
 import { RevisionPicker } from "./revision-picker";
 import { inspectedRevision } from "./inspected-revision";
@@ -239,6 +239,7 @@ function ModelDetailPresentation({
     const params = new URLSearchParams(searchParams);
     params.set("tab", tab);
     router.replace(`/models/${model.id}?${params}`, {
+      resetScroll: false,
       state: location.state,
     });
   }
@@ -478,6 +479,33 @@ function ModelDetailPresentation({
     if (mode === "details") selectTab("overview");
     setEditMode(mode);
   }
+
+  useEffect(() => {
+    function rename(event: KeyboardEvent) {
+      if (
+        event.key !== "F2" ||
+        event.defaultPrevented ||
+        event.repeat ||
+        event.isComposing ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.shiftKey ||
+        keyboardOverlayOpen() ||
+        !auth.isAuthenticated ||
+        !canEditModel ||
+        editMode ||
+        saving ||
+        (event.target instanceof HTMLElement &&
+          event.target.closest('input, textarea, select, [contenteditable="true"]'))
+      )
+        return;
+      event.preventDefault();
+      enterEdit("name");
+    }
+    window.addEventListener("keydown", rename, true);
+    return () => window.removeEventListener("keydown", rename, true);
+  });
 
   function cancelEdit() {
     editLifetime.current += 1;
@@ -979,113 +1007,82 @@ function ModelDetailPresentation({
             >
               <div className="flex w-full min-w-0 items-start gap-3 md:w-auto md:flex-1 md:gap-4">
                 <div className="min-w-0 flex-1">
-                  <TitleEditor
-                    open={renaming && canEditModel && auth.isAuthenticated}
-                    onOpenChange={(open) => {
-                      if (!open) cancelEdit();
-                    }}
-                    label={uiText("Rename {value1}", { value1: model.name })}
+                  <InlineTitleEditor
+                    title={model.name}
                     fieldLabel={uiText("Model name")}
+                    canEdit={canEditModel && auth.isAuthenticated}
+                    open={renaming && canEditModel && auth.isAuthenticated}
                     value={editName}
                     onValueChange={setEditName}
-                    onSave={() => void saveEdit()}
+                    onOpen={() => enterEdit("name")}
+                    onCancel={cancelEdit}
+                    onSave={() => saveEdit()}
+                    saveBlocked={editProblem !== null}
                     busy={saving}
-                    requiredMessage={uiText("Model name is required.")}
-                    saveDisabled={editProblem !== null || !canEditModel}
-                    trigger={
-                      <h1
-                        onDoubleClick={() => {
-                          if (auth.isAuthenticated && canEditModel && !renaming) enterEdit("name");
-                        }}
-                        aria-label={model.name}
-                        tabIndex={auth.isAuthenticated && canEditModel ? undefined : 0}
-                        data-menu-trigger={auth.isAuthenticated && canEditModel ? undefined : true}
-                        className="min-w-0 break-words text-2xl font-semibold text-on-surface leading-tight tracking-tight"
-                      >
-                        {auth.isAuthenticated && canEditModel ? (
-                          <button
-                            type="button"
-                            className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            aria-label={uiText("Rename {value1}", { value1: model.name })}
-                            title={uiText("Rename")}
-                            onClick={() => {
-                              if (!saving) {
-                                if (!renaming) enterEdit("name");
+                  />
+                  {renaming && editProblem && (
+                    <div className="space-y-2 border-t border-border pt-3 text-xs">
+                      <Button size="sm" variant="outline" onClick={cancelEdit} disabled={saving}>
+                        {uiText("Cancel")}
+                      </Button>
+                      <p role="alert">
+                        {uiText(
+                          editProblem === "conflict"
+                            ? "library.editConflict"
+                            : "library.saveUnconfirmed",
+                        )}
+                      </p>
+                      {reviewedModel ? (
+                        <>
+                          <p className="font-medium">{uiText("library.latestVersion")}</p>
+                          <p className="break-words">{reviewedModel.name}</p>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={useReviewedVersion}
+                              disabled={saving}
+                            >
+                              {uiText("library.useLatest")}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setReviewedModel(null)}
+                              disabled={saving}
+                            >
+                              {uiText("library.keepDraft")}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-auto min-h-9 whitespace-normal"
+                              loading={saving}
+                              disabled={
+                                reviewedModel.effective_role !== "edit" &&
+                                reviewedModel.effective_role !== "admin"
                               }
-                            }}
-                            data-menu-trigger
-                            aria-haspopup="dialog"
-                            aria-expanded={renaming}
-                          >
-                            {model.name}
-                          </button>
-                        ) : (
-                          model.name
-                        )}
-                      </h1>
-                    }
-                  >
-                    {renaming && editProblem && (
-                      <div className="space-y-2 border-t border-border pt-3 text-xs">
-                        <p role="alert">
-                          {uiText(
-                            editProblem === "conflict"
-                              ? "library.editConflict"
-                              : "library.saveUnconfirmed",
-                          )}
-                        </p>
-                        {reviewedModel ? (
-                          <>
-                            <p className="font-medium">{uiText("library.latestVersion")}</p>
-                            <p className="break-words">{reviewedModel.name}</p>
-                            <div className="flex flex-wrap gap-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={useReviewedVersion}
-                                disabled={saving}
-                              >
-                                {uiText("library.useLatest")}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setReviewedModel(null)}
-                                disabled={saving}
-                              >
-                                {uiText("library.keepDraft")}
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                className="h-auto min-h-9 whitespace-normal"
-                                loading={saving}
-                                disabled={
-                                  reviewedModel.effective_role !== "edit" &&
-                                  reviewedModel.effective_role !== "admin"
-                                }
-                                onClick={() => void saveEdit(reviewedModel)}
-                              >
-                                {uiText("library.retryDraft")}
-                              </Button>
-                            </div>
-                          </>
-                        ) : (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => void reviewLatest()}
-                            loading={reviewing}
-                          >
-                            {uiText("library.reviewLatest")}
-                          </Button>
-                        )}
-                      </div>
-                    )}
-                  </TitleEditor>
+                              onClick={() => void saveEdit(reviewedModel)}
+                            >
+                              {uiText("library.retryDraft")}
+                            </Button>
+                          </div>
+                        </>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void reviewLatest()}
+                          loading={reviewing}
+                        >
+                          {uiText("library.reviewLatest")}
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               <div

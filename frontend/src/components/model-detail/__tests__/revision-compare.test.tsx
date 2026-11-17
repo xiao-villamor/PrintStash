@@ -74,6 +74,35 @@ describe("RevisionCompare", () => {
     expect(walls.getAllByRole("mark")).toHaveLength(2);
     expect(walls.getByText("0")).toBeVisible();
   });
+  it("shows each sliced plate's recorded estimates in its comparison column", async () => {
+    const sliced = { ...second, original_filename: "two.gcode.3mf" };
+    renderApp(<RevisionCompare left={source} right={sliced} />, {
+      routes: {
+        "GET /api/v1/files/2/gcode-plates": json({
+          plates: [1, 2],
+          identities: [],
+          plate_metadata: [
+            {
+              number: 1,
+              metadata: { estimated_time_s: 60, filament_weight_g: 9.15, filament_cost: null },
+            },
+            {
+              number: 2,
+              metadata: { estimated_time_s: 25, filament_weight_g: null, filament_cost: null },
+            },
+          ],
+        }),
+      },
+    });
+    const time = within(screen.getByRole("row", { name: /^Estimated time/ }));
+    expect(await time.findByText("1m 0s")).toBeVisible();
+    expect(time.getByText("25s")).toBeVisible();
+    expect(time.getByText("Not recorded")).toBeVisible();
+    expect(time.queryAllByRole("mark")).toHaveLength(0);
+    const weight = within(screen.getByRole("row", { name: /^Filament weight/ }));
+    expect(weight.getByText("9.15 g")).toBeVisible();
+    expect(weight.getAllByText("Not recorded")).toHaveLength(2);
+  });
   it("leaves missing evidence outside the change highlights", () => {
     renderApp(<RevisionCompare left={first} right={{ ...second, metadata: aMetadata() }} />);
 

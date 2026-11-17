@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Camera, Minus, Plus } from "lucide-react";
+import { Box, Camera, Grid2X2, Layers, Minus, Plus, Ruler } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
@@ -93,83 +93,81 @@ export function ViewerToolbar({
       </div>
       <div className="detail-viewer-commandbar">
         {hasGcode && (
-          <div className="detail-viewer-control-group">
-            <span>{uiText("Preview")}</span>
-            <div>
-              <Button
-                size="sm"
-                variant="ghost"
-                aria-pressed={viewerMode === "model"}
-                className={buttonClass(viewerMode === "model")}
-                onClick={() => setViewerMode("model")}
-              >
-                {uiText("3D model")}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                aria-pressed={viewerMode === "gcode"}
-                className={buttonClass(viewerMode === "gcode")}
-                onClick={() => setViewerMode("gcode")}
-              >
-                {uiText("G-code")}
-              </Button>
-            </div>
+          <div
+            className="detail-viewer-control-group detail-mode-switch"
+            role="group"
+            aria-label={uiText("Preview")}
+          >
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-pressed={viewerMode === "model"}
+              className={buttonClass(viewerMode === "model")}
+              onClick={() => setViewerMode("model")}
+            >
+              <Box className="h-4 w-4" aria-hidden />
+              {uiText("3D model")}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-pressed={viewerMode === "gcode"}
+              className={buttonClass(viewerMode === "gcode")}
+              onClick={() => setViewerMode("gcode")}
+            >
+              <Layers className="h-4 w-4" aria-hidden />
+              {uiText("G-code")}
+            </Button>
           </div>
         )}
-        <div className="detail-viewer-control-group">
-          <span>{uiText("Overlays")}</span>
-          <div>
+        <div className="detail-viewer-control-group" role="group" aria-label={uiText("Overlays")}>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={!viewerReady}
+            aria-label={uiText("Build plate grid")}
+            aria-pressed={showGrid}
+            className={buttonClass(showGrid)}
+            onClick={() => setShowGrid(!showGrid)}
+          >
+            <Grid2X2 className="h-4 w-4" aria-hidden />
+            {uiText("Grid")}
+          </Button>
+          {onDimensions && (
             <Button
               size="sm"
               variant="ghost"
               disabled={!viewerReady}
-              aria-label={uiText("Build plate grid")}
-              aria-pressed={showGrid}
-              className={buttonClass(showGrid)}
-              onClick={() => setShowGrid(!showGrid)}
+              aria-pressed={showDimensions}
+              className={buttonClass(showDimensions)}
+              onClick={() => onDimensions(!showDimensions)}
             >
-              {uiText("Grid")}
+              <Ruler className="h-4 w-4" aria-hidden />
+              {uiText("Dimensions")}
             </Button>
-            {onDimensions && (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!viewerReady}
-                aria-pressed={showDimensions}
-                className={buttonClass(showDimensions)}
-                onClick={() => onDimensions(!showDimensions)}
-              >
-                {uiText("Dimensions")}
-              </Button>
-            )}
-          </div>
+          )}
         </div>
         {viewerMode === "model" && (
-          <>
-            <div className="detail-viewer-control-group">
-              <span>{uiText("Display")}</span>
-              <div>
-                {DISPLAY_MODES.map((mode) => (
-                  <Button
-                    key={mode}
-                    size="sm"
-                    variant="ghost"
-                    disabled={!viewerReady || viewerMode !== "model"}
-                    aria-pressed={displayMode === mode}
-                    className={buttonClass(displayMode === mode)}
-                    onClick={() => setDisplayMode(mode)}
-                  >
-                    {mode === "wireframe"
-                      ? uiText("Wireframe")
-                      : mode === "xray"
-                        ? uiText("X-Ray")
-                        : uiText("Solid")}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          </>
+          <select
+            aria-label={uiText("Display")}
+            className="detail-preview-style"
+            disabled={!viewerReady}
+            value={displayMode}
+            onChange={(event) => {
+              const selected = DISPLAY_MODES.find((mode) => mode === event.target.value);
+              if (selected) setDisplayMode(selected);
+            }}
+          >
+            {DISPLAY_MODES.map((mode) => (
+              <option key={mode} value={mode}>
+                {mode === "wireframe"
+                  ? uiText("Wireframe")
+                  : mode === "xray"
+                    ? uiText("X-Ray")
+                    : uiText("Solid")}
+              </option>
+            ))}
+          </select>
         )}
       </div>
       <div className="detail-viewer-dock">

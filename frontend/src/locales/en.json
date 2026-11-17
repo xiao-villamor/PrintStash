@@ -1265,7 +1265,7 @@
   "No audit has run yet.": "No audit has run yet.",
   "No backups available.": "No backups available.",
   "No collection selected": "No collection selected",
-  "No configured printer supports Vault upload/send.": "No configured printer supports Vault upload/send.",
+  "None of the configured printers can receive this file.": "None of the configured printers can receive this file.",
   "No editable collections.": "No editable collections.",
   "No findings in this category.": "No findings in this category.",
   "No G-code file": "No G-code file",

@@ -850,9 +850,7 @@ test.describe("model detail route", () => {
       .locator("..");
     await expect(viewingLabel).toBeVisible();
     const modeControls = [
-      page.getByRole("button", { name: "Solid" }),
-      page.getByRole("button", { name: "X-Ray" }),
-      page.getByRole("button", { name: "Wireframe" }),
+      page.getByRole("combobox", { name: "Display" }),
       page.getByRole("button", { name: "Zoom in", exact: true }),
       page.getByRole("button", { name: "Zoom out", exact: true }),
       page.getByRole("button", { name: "Isometric", exact: true }),

@@ -1265,7 +1265,7 @@
   "No audit has run yet.": "Aún no se ha ejecutado ninguna auditoría.",
   "No backups available.": "No hay copias disponibles.",
   "No collection selected": "No hay ninguna colección seleccionada",
-  "No configured printer supports Vault upload/send.": "Ninguna impresora configurada admite subir o enviar desde la bóveda.",
+  "None of the configured printers can receive this file.": "Ninguna de las impresoras configuradas puede recibir este archivo.",
   "No editable collections.": "No hay colecciones editables.",
   "No findings in this category.": "No hay hallazgos en esta categoría.",
   "No G-code file": "No hay archivo G-code",
