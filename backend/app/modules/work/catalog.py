@@ -178,10 +178,15 @@ class WorkCatalog:
         )
 
     def interactive_waiting(
-        self, session: Session, name: JobKind, *, now: datetime
+        self,
+        session: Session,
+        name: JobKind,
+        *,
+        now: datetime,
+        queue_locked: bool = False,
     ) -> bool:
         """Whether interactive work still needs a lane slot or a Job."""
-        waiting = session.exec(
+        waiting = (
             select(Job.id)
             .where(
                 col(Job.kind) == name,
@@ -190,13 +195,17 @@ class WorkCatalog:
                 col(Job.state).in_((JobState.QUEUED, JobState.INTERRUPTED)),
             )
             .limit(1)
-        ).first()
-        if waiting is not None:
+        )
+        if session.exec(waiting).first() is not None:
             return True
         source = self.definition(name).source
-        return isinstance(source, InteractiveBacklogSource) and source.owes_interactive(
-            session, now=now
-        )
+        if not isinstance(source, InteractiveBacklogSource):
+            return False
+        if source.owes_interactive(session, now=now):
+            return True
+        # Discovery can turn owed intent into a queued Job between the two
+        # reads. A claim holding SQLite's writer already excludes that race.
+        return not queue_locked and session.exec(waiting).first() is not None
 
     @property
     def paced_during_additions(self) -> tuple[JobKind, ...]:

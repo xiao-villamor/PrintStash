@@ -2125,6 +2125,35 @@ class TestDiscoveryYieldsToInteractiveWork:
             reconciler_module.PassNote.YIELDING_TO_INTERACTIVE.value
         ) == (1 if owes else None)
 
+    def test_holds_back_when_owed_work_enters_the_queue(
+        self, yielding_engine, make_job, db_session: Session
+    ) -> None:
+        from dataclasses import replace
+
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        class Materializing:
+            def pending(self, session, *, now, limit):
+                return []
+
+            def next_due(self, session, *, now):
+                return None
+
+            def owes_interactive(self, session, *, now):
+                # Discovery on another connection makes this intent visible
+                # as a queued Job before the backlog read observes it.
+                make_job(kind=INTERACTIVE_WORK)
+                return False
+
+        definitions = yielding_engine.catalog.definitions
+        definitions[INTERACTIVE_WORK] = replace(
+            definitions[INTERACTIVE_WORK], source=Materializing()
+        )
+
+        run_pass(YIELDING)
+
+        assert TestDiscoveryWaitsForAdditions._created(db_session, YIELDING) == []
+
     def test_finds_work_once_no_interactive_job_is_active(
         self, yielding_engine, make_job, db_session: Session
     ) -> None:

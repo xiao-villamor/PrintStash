@@ -16,9 +16,10 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import timedelta
-from threading import Barrier
+from threading import Barrier, local
 
 import pytest
+from sqlalchemy import event
 from sqlmodel import Session, col, create_engine, select
 
 from app.core.config import settings
@@ -51,6 +52,7 @@ from app.modules.work.contracts import (
     JobSubmission,
     Lane,
     LaneOrder,
+    PassSubmission,
     Step,
     WorkItem,
 )
@@ -61,6 +63,7 @@ from app.modules.work.reconciler import (
     _discovery_budget,
     run_pass,
 )
+from app.modules.work.runner import _begin
 from tests import factories as f
 from tests.containers import fresh_postgres_database
 
@@ -144,6 +147,43 @@ class TestOneActiveJobPerSubject:
 
         assert JobStore().create(
             definition=JobKind.SOURCES_SCAN, subject_key="library/1", owner_user_id=None
+        )
+
+
+class TestInteractiveClaims:
+    def test_concurrent_claims_wake_search(self, pg, work_engine) -> None:
+        jobs_to_claim = []
+        for index in range(2):
+            job = f.build_job(
+                pg, kind=JobKind.DERIVATIVES_MESH, subject=subject_key(index + 1)
+            )
+            jobs_to_claim.append((job.id, job.execution_epoch))
+        committing = Barrier(2)
+        thread = local()
+
+        def before_commit(_connection):
+            if not thread.claiming:
+                return
+            thread.claiming = False
+            committing.wait(timeout=10)
+
+        def claim(index):
+            thread.claiming = True
+            job_id, epoch = jobs_to_claim[index]
+            return _begin(job_id, 1, epoch)
+
+        target = pg.get_bind()
+        event.listen(target, "commit", before_commit)
+        try:
+            results = _race(2, claim)
+        finally:
+            event.remove(target, "commit", before_commit)
+
+        assert all(isinstance(result, dict) for result in results), results
+        assert any(
+            isinstance(execution.submission, PassSubmission)
+            and execution.submission.source is JobKind.SEARCH_PROJECT
+            for execution in work_engine.executions.values()
         )
 
 

@@ -481,6 +481,62 @@ class TestStamp:
             AT.replace(tzinfo=None),
         )
 
+    @pytest.mark.parametrize(
+        ("queued_priority", "priority"),
+        [
+            (WorkPriority.INTERACTIVE, WorkPriority.INTERACTIVE),
+            (WorkPriority.INTERACTIVE, WorkPriority.BACKFILL),
+            (WorkPriority.BACKFILL, WorkPriority.BACKFILL),
+        ],
+    )
+    def test_a_covered_nudge_takes_one_statement(
+        self, db_session: Session, sql_statements, queued_priority, priority
+    ) -> None:
+        source = JobKind.SOURCES_SCAN
+        stamp(db_session, source, now=AT, priority=queued_priority)
+        db_session.commit()
+        later = AT + timedelta(seconds=1)
+
+        with sql_statements.recording():
+            needed = stamp(db_session, source, now=later, priority=priority)
+        db_session.commit()
+
+        cursor = _cursor(db_session, source)
+        assert (needed, sql_statements.count) == (False, 1)
+        assert (cursor.nudged_at, cursor.pass_queued_at, cursor.pass_priority) == (
+            later.replace(tzinfo=None),
+            AT.replace(tzinfo=None),
+            queued_priority,
+        )
+
+    def test_a_queue_stamp_at_the_grace_boundary_no_longer_covers(
+        self, db_session: Session
+    ) -> None:
+        source = JobKind.SOURCES_SCAN
+        stamp(db_session, source, now=AT)
+        db_session.commit()
+        expires = AT + timedelta(seconds=settings.jobs_submit_grace_seconds)
+
+        assert stamp(db_session, source, now=expires) is True
+        db_session.commit()
+
+        assert _cursor(db_session, source).pass_queued_at == expires.replace(
+            tzinfo=None
+        )
+
+    def test_rollback_preserves_the_prior_mark_for_a_covered_pass(
+        self, db_session: Session
+    ) -> None:
+        source = JobKind.SOURCES_SCAN
+        stamp(db_session, source, now=AT)
+        db_session.commit()
+
+        assert stamp(db_session, source, now=AT + timedelta(seconds=1)) is False
+        db_session.rollback()
+
+        cursor = _cursor(db_session, source)
+        assert cursor.nudged_at == cursor.pass_queued_at == AT.replace(tzinfo=None)
+
     def test_a_backfill_pass_does_not_cover_an_interactive_stamp(
         self, work_engine, db_session: Session
     ) -> None:
@@ -495,7 +551,7 @@ class TestStamp:
         )
 
     def test_marks_a_running_pass_dirty_without_asking_for_another(
-        self, work_engine, db_session: Session
+        self, work_engine, db_session: Session, sql_statements
     ) -> None:
         db_session.add(
             ReconcileCursor(
@@ -506,14 +562,21 @@ class TestStamp:
         )
         db_session.commit()
 
-        needed = stamp(db_session, JobKind.SOURCES_SCAN, now=AT)
+        with sql_statements.recording():
+            needed = stamp(db_session, JobKind.SOURCES_SCAN, now=AT)
         db_session.commit()
 
         cursor = _cursor(db_session, JobKind.SOURCES_SCAN)
-        assert (needed, cursor.nudged_at, cursor.pass_queued_at) == (
+        assert (
+            needed,
+            cursor.nudged_at,
+            cursor.pass_queued_at,
+            sql_statements.count,
+        ) == (
             False,
             AT.replace(tzinfo=None),
             None,
+            1,
         )
 
     def test_a_rolled_back_caller_leaves_no_mark(

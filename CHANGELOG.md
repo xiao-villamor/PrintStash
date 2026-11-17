@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Performance
+
+- Search indexing can start while the final cover thumbnails are still rendering after an import. Cover generation also does less database work per thumbnail.
+
 ### Changed
 
 - New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.

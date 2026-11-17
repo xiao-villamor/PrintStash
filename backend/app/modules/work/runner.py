@@ -479,6 +479,7 @@ def _begin(job_id: str, attempt: int, execution_epoch: str) -> dict[str, str] | 
             "priority": row.priority.value,
         }
         session.add(row)
+        check_after_commit: JobKind | None = None
         if row.priority is WorkPriority.INTERACTIVE:
             from .submission import nudge_after_commit
 
@@ -490,15 +491,37 @@ def _begin(job_id: str, attempt: int, execution_epoch: str) -> dict[str, str] | 
                 # priority quotas and admission checks still bound discovery.
                 nudge_after_commit(session, definition.name)
             yielding = catalog.yielding_to(definition.name)
-            if (
-                starting
-                and yielding
-                and not catalog.interactive_waiting(session, definition.name, now=now)
-            ):
-                for source in yielding:
-                    nudge_after_commit(session, source)
+            if starting and yielding:
+                if session.get_bind().dialect.name == "sqlite":
+                    if not catalog.interactive_waiting(
+                        session, definition.name, now=now, queue_locked=True
+                    ):
+                        for source in yielding:
+                            nudge_after_commit(session, source)
+                else:
+                    # Concurrent PostgreSQL claims can each see the other
+                    # Job as queued until both writes commit.
+                    check_after_commit = definition.name
         session.commit()
-        return claim
+
+    if check_after_commit is not None:
+        _wake_yielding_after_claim(check_after_commit)
+    return claim
+
+
+def _wake_yielding_after_claim(name: JobKind) -> None:
+    """Check the committed queue before sending a best-effort wakeup."""
+    from .submission import nudge
+
+    catalog = catalog_module.get_catalog()
+    try:
+        with get_session_factory().scoped_session() as session:
+            if catalog.interactive_waiting(session, name, now=utcnow()):
+                return
+        for source in catalog.yielding_to(name):
+            nudge(source)
+    except Exception:  # noqa: BLE001 - settlement and the tick recover this hint
+        logger.exception("interactive claim wakeup failed", extra={"source": name.value})
 
 
 def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:

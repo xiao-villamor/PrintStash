@@ -49,6 +49,7 @@ from app.modules.work.contracts import (
 )
 from app.modules.work.jobs import jobs
 from app.modules.work.runner import ExecutionContext, _begin, _settle, execute_job
+from app.modules.work.submission import submit
 from app.runtime.engine.inline import InlineJobEngine, _Execution, _Runner
 
 # Probes borrow real kinds and a lane; this catalog holds only them.
@@ -252,14 +253,15 @@ def hold() -> float:
     return 30.0
 
 
-class TestBegin:
-    @pytest.fixture
-    def prioritized_source(self, engine: InlineJobEngine) -> None:
-        definition = engine.catalog.definition(DISCOVERED)
-        engine.catalog.definitions[DISCOVERED] = replace(
-            definition, source=_PrioritizedNothingPending()
-        )
+@pytest.fixture
+def prioritized_source(engine: InlineJobEngine) -> None:
+    definition = engine.catalog.definition(DISCOVERED)
+    engine.catalog.definitions[DISCOVERED] = replace(
+        definition, source=_PrioritizedNothingPending()
+    )
 
+
+class TestBegin:
     def test_claim_queues_interactive_successor_discovery(
         self, engine, prioritized_source, make_job, db_session, transactions
     ) -> None:
@@ -569,36 +571,76 @@ class TestExecutionContext:
 
         assert DISCOVERED in _stamped(db_session) & _nudged(engine)
 
+    def test_prioritized_settlement_defers_refill_to_an_accepted_successor(
+        self, engine, prioritized_source, make_job, db_session, sql_statements
+    ) -> None:
+        successor = make_job(kind=DISCOVERED)
+        submit(successor.id)
+        job = make_job(kind=DISCOVERED, state=JobState.RUNNING, attempts=1)
+
+        with sql_statements.recording():
+            _context(job).finish(JobOutcome.COMPLETED)
+
+        assert (_stamped(db_session), _nudged(engine)) == (set(), set())
+        assert not [
+            statement.sql
+            for statement in sql_statements.statements
+            if statement.sql.startswith(
+                ("UPDATE reconcile_cursors", "INSERT INTO reconcile_cursors")
+            )
+        ]
+        assert _begin(successor.id, 1, successor.execution_epoch) is not None
+        assert _nudged(engine) == {DISCOVERED}
+
     @pytest.mark.parametrize(
-        ("submitted_epoch", "settlement_nudge"),
+        ("submitted_epoch", "priority", "state"),
         [
-            pytest.param("current", False, id="engine-accepted"),
-            pytest.param("retired", True, id="retired-epoch"),
-            pytest.param(None, True, id="not-submitted"),
+            pytest.param(
+                "retired", WorkPriority.INTERACTIVE, JobState.QUEUED, id="retired-epoch"
+            ),
+            pytest.param(
+                None, WorkPriority.INTERACTIVE, JobState.QUEUED, id="never-submitted"
+            ),
+            pytest.param(
+                "current", WorkPriority.BACKFILL, JobState.QUEUED, id="backfill"
+            ),
+            pytest.param(
+                "current",
+                WorkPriority.INTERACTIVE,
+                JobState.RUNNING,
+                id="already-running",
+            ),
+            pytest.param(
+                "current",
+                WorkPriority.INTERACTIVE,
+                JobState.INTERRUPTED,
+                id="interrupted",
+            ),
         ],
     )
-    def test_prioritized_settlement_defers_refill_to_an_accepted_successor(
-        self, engine, make_job, db_session, submitted_epoch, settlement_nudge
+    def test_prioritized_settlement_refills_without_an_accepted_queued_successor(
+        self,
+        engine,
+        prioritized_source,
+        make_job,
+        db_session,
+        submitted_epoch,
+        priority,
+        state,
     ) -> None:
-        definition = engine.catalog.definition(DISCOVERED)
-        engine.catalog.definitions[DISCOVERED] = replace(
-            definition, source=_PrioritizedNothingPending()
-        )
-        next_job = make_job(
+        make_job(
             kind=DISCOVERED,
             attempts=1,
             execution_epoch="current",
             submitted_epoch=submitted_epoch,
+            priority=priority,
+            state=state,
         )
         job = make_job(kind=DISCOVERED, state=JobState.RUNNING, attempts=1)
 
         _context(job).finish(JobOutcome.COMPLETED)
 
-        expected = {DISCOVERED} if settlement_nudge else set()
-        assert (_stamped(db_session), _nudged(engine)) == (expected, expected)
-        if not settlement_nudge:
-            assert _begin(next_job.id, 1, "current") is not None
-            assert _nudged(engine) == {DISCOVERED}
+        assert (_stamped(db_session), _nudged(engine)) == ({DISCOVERED}, {DISCOVERED})
 
     def test_finish_leaves_the_settled_cleanup_to_the_end_of_the_attempt(
         self, engine: InlineJobEngine, make_job
@@ -1693,7 +1735,7 @@ class TestInteractiveRelease:
     """Starting the last waiting interactive Job releases work that yielded."""
 
     def test_claim_nudges_only_after_the_last_waiting_job_starts(
-        self, yielding_engine, make_job
+        self, yielding_engine, make_job, monkeypatch
     ) -> None:
         from .conftest import INTERACTIVE_WORK, YIELDING
 
@@ -1702,7 +1744,56 @@ class TestInteractiveRelease:
 
         assert _begin(first.id, 1, first.execution_epoch) is not None
         assert YIELDING not in _nudged(yielding_engine)
-        assert _begin(last.id, 1, last.execution_epoch) is not None
+        last_id = last.id
+        submit = yielding_engine.submit
+
+        def submit_after_claim(submission):
+            if isinstance(submission, PassSubmission) and submission.source is YIELDING:
+                job = jobs.get(last_id)
+                assert job is not None and job.state is JobState.RUNNING
+            return submit(submission)
+
+        monkeypatch.setattr(yielding_engine, "submit", submit_after_claim)
+        assert _begin(last_id, 1, last.execution_epoch) is not None
+        assert YIELDING in _nudged(yielding_engine)
+
+    def test_rolled_back_claim_leaves_no_projection_wakeup(
+        self, yielding_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        job = make_job(kind=INTERACTIVE_WORK)
+        job_id, epoch = job.id, job.execution_epoch
+
+        def reject_commit(session):
+            assert YIELDING in _stamped(session)
+            raise _LOCKED
+
+        event.listen(Session, "before_commit", reject_commit)
+        try:
+            with pytest.raises(OperationalError, match="database is locked"):
+                _begin(job_id, 1, epoch)
+        finally:
+            event.remove(Session, "before_commit", reject_commit)
+
+        assert YIELDING not in _nudged(yielding_engine)
+        assert YIELDING not in _stamped(db_session)
+        assert (
+            db_session.get_one(Job, job_id, populate_existing=True).state
+            is JobState.QUEUED
+        )
+
+    def test_tick_wakes_projection_without_a_claim_nudge(
+        self, yielding_engine, make_job
+    ) -> None:
+        from app.modules.work.reconciler import tick
+
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        make_job(kind=INTERACTIVE_WORK, state=JobState.RUNNING, attempts=1)
+
+        tick()
+
         assert YIELDING in _nudged(yielding_engine)
 
     def test_the_last_interactive_job_to_end_nudges_the_yielding_work(
