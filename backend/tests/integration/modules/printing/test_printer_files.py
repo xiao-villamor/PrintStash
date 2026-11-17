@@ -185,6 +185,78 @@ def _make_gcode(
 
 
 class TestSyncPrinterFiles:
+    @pytest.mark.parametrize("custom_name", [False, True])
+    def test_sync_preserves_selected_plate(self, db_session: Session, custom_name):
+        _, file = _make_gcode(db_session, name="part.gcode.3mf")
+        printer = build_printer(db_session)
+        remote = (
+            "custom.gcode"
+            if custom_name
+            else build_traceable_remote_filename(file, plate_index=10)
+        )
+        build_print_job(
+            db_session,
+            file,
+            printer_id=printer.id,
+            remote_filename=remote,
+            plate_index=10,
+        )
+        pf.upsert_printer_file(
+            db_session,
+            printer_id=printer.id,
+            remote_filename=remote,
+            file_id=file.id,
+            matched_by="upload_history",
+            plate_index=10,
+        )
+        rows = sync_printer_files(
+            db_session,
+            printer_id=printer.id,
+            remote_files=[{"path": remote, "size": 999}],
+        )
+        assert rows[0].file_id == file.id
+        assert rows[0].plate_index == 10
+
+    def test_replacing_sliced_upload_clears_selected_plate(self, db_session: Session):
+        _, sliced = _make_gcode(db_session, name="part.gcode.3mf")
+        _, plain = _make_gcode(db_session, model_slug="other")
+        printer = build_printer(db_session)
+        for file, plate in ((sliced, 10), (plain, None)):
+            pf.upsert_printer_file(
+                db_session,
+                printer_id=printer.id,
+                remote_filename="custom.gcode",
+                file_id=file.id,
+                matched_by="upload_history",
+                plate_index=plate,
+            )
+        stored = db_session.exec(select(PrinterFile)).one()
+        assert stored.file_id == plain.id
+        assert stored.plate_index is None
+
+    def test_sync_clears_plate_when_marker_no_longer_matches(self, db_session: Session):
+        _, file = _make_gcode(db_session, name="part.gcode.3mf")
+        printer = build_printer(db_session)
+        remote = build_traceable_remote_filename(file, plate_index=10)
+        pf.upsert_printer_file(
+            db_session,
+            printer_id=printer.id,
+            remote_filename=remote,
+            file_id=file.id,
+            matched_by="upload_history",
+            plate_index=10,
+        )
+        file.deleted_at = datetime.now(timezone.utc)
+        db_session.add(file)
+        db_session.commit()
+        rows = sync_printer_files(
+            db_session,
+            printer_id=printer.id,
+            remote_files=[{"path": remote, "size": 999}],
+        )
+        assert rows[0].file_id is None
+        assert rows[0].plate_index is None
+
     def test_sync_matches_upload_history_first(self, db_session: Session):
         _, f = _make_gcode(db_session)
         printer = build_printer(

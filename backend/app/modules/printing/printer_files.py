@@ -179,8 +179,11 @@ def upsert_printer_file(
         file_id, matched_by = _find_match(
             session, printer_id, remote_filename, size_bytes
         )
-
-    if matched_by == "upload_history":
+        # Inventory refresh does not carry plate metadata. Keep the known plate
+        # only while the remote file still resolves to the same Artifact.
+        if row.file_id != file_id:
+            row.plate_index = None
+    else:
         row.plate_index = plate_index
     row.file_id = file_id
     row.size_bytes = size_bytes
