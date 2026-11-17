@@ -966,6 +966,45 @@ class TestThreeMFPlates:
 
 class TestSlicedPlates:
     @pytest.mark.asyncio
+    async def test_attaches_sliced_archive_to_uploaded_source(
+        self, api, superuser_headers
+    ):
+        source = await api.post(
+            "/api/v1/ingest/model",
+            headers=superuser_headers,
+            files={
+                "file": (
+                    "part.stl",
+                    _microfaceted_stl(columns=2, rows=2),
+                    "application/sla",
+                )
+            },
+        )
+        assert source.status_code == 202, source.text
+        source_job = await _await_job(api, superuser_headers, source.json()["job_id"])
+        model = (
+            await api.get(
+                f"/api/v1/models/{source_job['model_id']}", headers=superuser_headers
+            )
+        ).json()
+        sliced = await api.post(
+            "/api/v1/ingest/orca",
+            headers=superuser_headers,
+            files={"file": ("part.gcode.3mf", build_sliced_project(), "model/3mf")},
+            data={"source_hash": model["hash"]},
+        )
+        assert sliced.status_code == 202, sliced.text
+        sliced_job = await _await_job(api, superuser_headers, sliced.json()["job_id"])
+        assert sliced_job["state"] == "completed", sliced_job
+        assert sliced_job["model_id"] == model["id"]
+        updated = (
+            await api.get(f"/api/v1/models/{model['id']}", headers=superuser_headers)
+        ).json()
+        assert sorted(row["file_type"] for row in updated["files"]) == ["gcode", "stl"]
+        revision = next(row for row in updated["files"] if row["file_type"] == "gcode")
+        assert revision["gcode_revision_number"] == 1
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("delivery", ["send", "queue", "batch", "later"])
     async def test_prints_selected_sliced_revision(
         self, api, superuser_headers, e2e_db, delivery

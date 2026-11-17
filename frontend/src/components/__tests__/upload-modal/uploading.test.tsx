@@ -122,12 +122,16 @@ function renderUpload(
   options: RenderAppOptions & {
     onUploaded?: () => Promise<void>;
     beforeChunk?: () => Promise<void>;
+    preloadFiles?: File[];
+    onboarding?: boolean;
   } = {},
 ) {
   const {
     seed = [],
     routes = {},
     beforeChunk,
+    preloadFiles,
+    onboarding,
     onUploaded = vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     ...rest
   } = options;
@@ -176,7 +180,14 @@ function renderUpload(
     return { id, request };
   };
   const result = renderApp(
-    <UploadModal open onClose={onClose} onUploaded={onUploaded} defaultCollection={null} />,
+    <UploadModal
+      open
+      onClose={onClose}
+      onUploaded={onUploaded}
+      defaultCollection={null}
+      preloadFiles={preloadFiles}
+      onboarding={onboarding}
+    />,
     {
       seed: [[queryKeys.tags, [aTag()]], ...seed],
       routes: {
@@ -270,6 +281,31 @@ afterEach(async () => {
 });
 
 describe("UploadModal ingestion", () => {
+  it("keeps a dropped sliced revision paired with its source", async () => {
+    const view = renderUpload({
+      preloadFiles: [new File(["mesh"], "cube.stl"), new File(["archive"], "cube.gcode.3mf")],
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Upload to vault" }));
+    await waitFor(() => expect(view.uploadRequests()).toHaveLength(2));
+    expect(view.uploadRequests().map((request) => request.filename)).toEqual([
+      "cube.stl",
+      "cube.gcode.3mf",
+    ]);
+    expect(view.uploadRequests()[1].source_hash).toBe("a".repeat(64));
+  });
+
+  it("onboards a sliced archive as one G-code upload", async () => {
+    const view = renderUpload({ onboarding: true });
+    await userEvent.upload(
+      await screen.findByLabelText("Model or G-code file"),
+      new File(["archive"], "cube.gcode.3mf"),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Add to my library" }));
+    await waitFor(() => expect(view.uploadRequests()[0]?.purpose).toBe("gcode"));
+    await waitFor(() => expect(view.onUploaded).toHaveBeenCalled());
+    expect(view.uploadRequests()).toHaveLength(1);
+  });
+
   describe("library-source destinations", () => {
     it("offers only enabled roots with a bound identity", async () => {
       const safe = aLibrary({ id: 4, name: "Safe NAS" });
