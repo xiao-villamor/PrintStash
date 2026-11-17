@@ -2,8 +2,75 @@
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { test, expect } from "./helpers";
-import { openModelPage, uploadGcodeModel } from "./util";
-import type { Locator } from "@playwright/test";
+import { collapseNavigationSidebar, openModelPage, uploadGcodeModel } from "./util";
+import type { Locator, Page } from "@playwright/test";
+
+async function clippedControls(panel: Locator): Promise<string[]> {
+  return panel.evaluate((element) => {
+    const boundary = element.getBoundingClientRect();
+    return [...element.querySelectorAll<HTMLElement>("button, input, select, .toolpath-section")]
+      .filter((control) => {
+        const box = control.getBoundingClientRect();
+        // A hidden tab is deliberately absent from layout; overflow-clipped
+        // controls still have a box and must not be mistaken for visible ones.
+        return (
+          box.height > 0 &&
+          (box.top < boundary.top ||
+            box.bottom > boundary.bottom ||
+            box.left < boundary.left ||
+            box.right > boundary.right)
+        );
+      })
+      .map(
+        (control) =>
+          control.getAttribute("aria-label") ?? control.textContent?.trim() ?? control.tagName,
+      );
+  });
+}
+
+async function coveredControls(panel: Locator): Promise<string[]> {
+  await panel.scrollIntoViewIfNeeded();
+  return panel.evaluate((element) =>
+    [
+      ...element.querySelectorAll<HTMLElement>(
+        "button:not(:disabled), input:not(:disabled), select:not(:disabled)",
+      ),
+    ]
+      .filter((control) => {
+        const box = control.getBoundingClientRect();
+        if (box.height === 0) return false;
+        const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+        return hit === null || !control.contains(hit);
+      })
+      .map(
+        (control) =>
+          control.getAttribute("aria-label") ?? control.textContent?.trim() ?? control.tagName,
+      ),
+  );
+}
+
+async function uploadSlicedFixture(page: Page, name: string): Promise<number> {
+  const upload = await page.request.post("/api/v1/ingest/model", {
+    multipart: {
+      file: { name: `${name}.gcode.3mf`, mimeType: "model/3mf", buffer: slicedArchive(name) },
+      model_name: name,
+    },
+  });
+  expect(upload.status()).toBe(202);
+  const jobId = (await upload.json()).job_id;
+  let modelId = 0;
+  await expect
+    .poll(
+      async () => {
+        const job = await (await page.request.get(`/api/v1/jobs/${jobId}`)).json();
+        modelId = job.model_id;
+        return job.state;
+      },
+      { timeout: 60_000 },
+    )
+    .toBe("completed");
+  return modelId;
+}
 
 async function hasRenderedPixels(canvas: Locator): Promise<boolean> {
   return canvas.evaluate((source: HTMLCanvasElement) => {
@@ -47,6 +114,79 @@ sys.stdout.buffer.write(original)`,
 }
 
 test.describe("Sliced G-code plates", () => {
+  for (const viewport of [
+    { width: 1280, height: 720, theme: "light" },
+    { width: 1440, height: 1000, theme: "light" },
+    { width: 1920, height: 1080, theme: "dark" },
+  ]) {
+    test(`fits sidebar controls at ${viewport.width}×${viewport.height} in ${viewport.theme}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await page.addInitScript(
+        (theme) => localStorage.setItem("printstash.theme", theme),
+        viewport.theme,
+      );
+      const name = `e2e-controls-fit-${Date.now()}`;
+      const modelId = await uploadSlicedFixture(page, name);
+      try {
+        await page.goto(`/models/${modelId}`);
+        await collapseNavigationSidebar(page);
+        await page.getByRole("button", { name: "Layers", exact: true }).click();
+        const panel = page.getByRole("complementary", { name: "Toolpath controls" });
+        await expect(panel.getByRole("spinbutton", { name: "Layer number" })).toHaveValue("2");
+        expect(await clippedControls(panel)).toEqual([]);
+        await panel.getByRole("tab", { name: "View", exact: true }).click();
+        await expect(panel.getByRole("button", { name: "Dimensions", exact: true })).toBeVisible();
+        expect(await clippedControls(panel)).toEqual([]);
+        expect(await coveredControls(panel)).toEqual([]);
+        const preview = page.getByRole("region", { name: "Preview", exact: true });
+        const previewBox = await preview.boundingBox();
+        const panelBox = await panel.boundingBox();
+        expect(panelBox!.y + panelBox!.height).toBeLessThanOrEqual(
+          previewBox!.y + previewBox!.height,
+        );
+        const information = await page
+          .getByRole("region", { name: "About this model", exact: true })
+          .boundingBox();
+        expect(information!.y).toBeGreaterThanOrEqual(previewBox!.y + previewBox!.height);
+        await page.getByRole("button", { name: "Expand", exact: true }).click();
+        await expect(page.getByRole("heading", { name: "About this model" })).toBeHidden();
+        expect(await clippedControls(panel)).toEqual([]);
+        expect(await coveredControls(panel)).toEqual([]);
+        await preview.scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: test.info().outputPath("expanded-view-controls.png"),
+          fullPage: true,
+        });
+
+        await page.getByRole("button", { name: "Collapse preview", exact: true }).click();
+        await expect(page.getByRole("heading", { name: "About this model" })).toBeVisible();
+        await page.getByRole("tab", { name: "Source info", exact: true }).click();
+        await expect(panel.getByRole("tab", { name: "View", exact: true })).toHaveAttribute(
+          "aria-selected",
+          "true",
+        );
+        expect(await clippedControls(panel)).toEqual([]);
+        await page.getByRole("tab", { name: "Files", exact: true }).click();
+        expect(await clippedControls(panel)).toEqual([]);
+        await panel.getByRole("tab", { name: "Layers", exact: true }).click();
+        await panel.getByRole("button", { name: "Plate 02", exact: true }).click();
+        await expect(panel.getByRole("spinbutton", { name: "Layer number" })).toHaveValue("2");
+        expect(await clippedControls(panel)).toEqual([]);
+        await expect
+          .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+          .toBe(true);
+        await page.screenshot({
+          path: test.info().outputPath("normal-layer-controls.png"),
+          fullPage: true,
+        });
+      } finally {
+        expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
+      }
+    });
+  }
+
   test("previews a dense multiplate revision with side panel controls", async ({ page }) => {
     const name = `e2e-dense-plates-${Date.now()}`;
     const upload = await page.request.post("/api/v1/ingest/model", {
@@ -74,6 +214,7 @@ test.describe("Sliced G-code plates", () => {
       .toBe("completed");
     try {
       await page.goto(`/models/${modelId}`);
+      await collapseNavigationSidebar(page);
       await page.getByRole("button", { name: "Layers", exact: true }).click();
       const panel = page.getByRole("complementary", { name: "Toolpath controls" });
       const entry = panel.getByRole("spinbutton", { name: "Layer number" });
@@ -92,6 +233,7 @@ test.describe("Sliced G-code plates", () => {
         "aria-pressed",
         "true",
       );
+      await panel.getByRole("tab", { name: "View", exact: true }).click();
       await panel.getByRole("combobox", { name: "Camera view" }).selectOption("top");
       await panel.getByRole("button", { name: "Build plate grid" }).click();
       await expect(panel.getByRole("button", { name: "Build plate grid" })).toHaveAttribute(
@@ -102,29 +244,20 @@ test.describe("Sliced G-code plates", () => {
       await page.getByRole("button", { name: "Expand", exact: true }).scrollIntoViewIfNeeded();
       await page.screenshot({ path: test.info().outputPath("dense-sidebar.png") });
 
+      await panel.getByRole("tab", { name: "Layers", exact: true }).click();
       const second = panel.getByRole("button", { name: "Plate 02", exact: true });
       await second.focus();
       await second.press("Enter");
       await expect(second).toBeFocused();
       await expect(entry).toHaveValue("2");
       await expect.poll(() => hasRenderedPixels(page.locator("canvas"))).toBe(true);
-      await page.setViewportSize({ width: 390, height: 844 });
       await panel.getByRole("button", { name: "Plate 01", exact: true }).click();
       await expect(entry).toHaveValue("750");
+      await panel.getByRole("tab", { name: "View", exact: true }).click();
       await panel.getByRole("button", { name: "Fit to view" }).click();
-      await expect
-        .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
-        .toBe(true);
+      expect(await clippedControls(panel)).toEqual([]);
+      expect(await coveredControls(panel)).toEqual([]);
       await expect.poll(() => hasRenderedPixels(page.locator("canvas"))).toBe(true);
-      const mobileCanvas = await page.locator("canvas").boundingBox();
-      const mobilePanel = await panel.boundingBox();
-      expect(mobilePanel!.y).toBeGreaterThanOrEqual(mobileCanvas!.y + mobileCanvas!.height);
-      expect(mobilePanel!.height).toBeLessThanOrEqual(352);
-      await page.getByRole("button", { name: "Expand", exact: true }).scrollIntoViewIfNeeded();
-      await page.screenshot({
-        path: test.info().outputPath("dense-sidebar-mobile.png"),
-        fullPage: true,
-      });
       await expect(page.getByRole("alert")).toHaveCount(0);
     } finally {
       expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
@@ -135,6 +268,7 @@ test.describe("Sliced G-code plates", () => {
     const name = `e2e-sliced-revision-${Date.now()}`;
     await uploadGcodeModel(page, name);
     await openModelPage(page, name);
+    await collapseNavigationSidebar(page);
     const modelId = Number(new URL(page.url()).pathname.split("/").pop());
     const addedPrinter = await page.request.post("/api/v1/printers", {
       data: {
@@ -223,6 +357,7 @@ test.describe("Sliced G-code plates", () => {
         .toBe("completed");
       try {
         await page.goto(`/models/${modelId}`);
+        await collapseNavigationSidebar(page);
         const firstRequest = page.waitForResponse((response) =>
           response.url().includes("/embedded-gcode?plate_index=1"),
         );

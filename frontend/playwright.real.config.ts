@@ -1,4 +1,5 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
+import { DESKTOP_CHROMIUM } from "./tests/playwright-desktop";
 
 // Real end-to-end config: drives the actual FastAPI backend + a throwaway
 // SQLite DB (see tests/e2e-real/scripts/start-backend.sh) through a real Vite
@@ -65,5 +66,5 @@ export default defineConfig({
       env: { PLAYWRIGHT_MOCK_PRINTER_PORT: String(mockPrinterPort) },
     },
   ],
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [{ name: "chromium", use: { ...DESKTOP_CHROMIUM } }],
 });

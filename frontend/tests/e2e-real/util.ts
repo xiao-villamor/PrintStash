@@ -4,6 +4,15 @@ import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { settleLibraryRead } from "../e2e/_library";
 
+/** Default visual review state: the main navigation leaves room for the page. */
+export async function collapseNavigationSidebar(page: Page): Promise<void> {
+  const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+  await expect(toggle).toBeVisible();
+  if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator("#collections-pane")).toHaveCSS("width", "0px");
+}
+
 /** The new backup, as the finished `backups.create` Job reports it. */
 export interface CreatedBackup {
   backup_id: string;

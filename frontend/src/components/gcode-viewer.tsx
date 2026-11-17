@@ -3,7 +3,7 @@ import { formatNumber } from "@/lib/format";
 import { ApiError } from "@/lib/errors";
 import { createPortal } from "react-dom";
 import { Input } from "@/components/ui/input";
-import { ToolpathLayout } from "@/components/toolpath-layout";
+import { ToolpathLayout, type ToolpathControlContainers } from "@/components/toolpath-layout";
 import { Button } from "@/components/ui/button";
 
 import React, { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
@@ -321,7 +321,7 @@ export interface GcodeViewerProps {
   onShowGridChange?: (visible: boolean) => void;
   onShowDimensionsChange?: (visible: boolean) => void;
   /** Render controls beside the parent-owned source picker without remounting it. */
-  controlsContainer?: HTMLElement | null;
+  controlsContainers?: ToolpathControlContainers;
   onControlsReady?: (controls: ViewerControls | null) => void;
   canvasRenderer?: ComponentType<CanvasRendererProps>;
   toolpathParser?: typeof parseGcodeInWorker;
@@ -337,7 +337,7 @@ export function GcodeViewer({
   showDimensions: externalDimensions,
   onShowGridChange,
   onShowDimensionsChange,
-  controlsContainer,
+  controlsContainers,
   onControlsReady,
   canvasRenderer,
   toolpathParser = parseGcodeInWorker,
@@ -463,13 +463,16 @@ export function GcodeViewer({
   const noDataCopy = viewerCopy(i18n, "viewer.noToolpathData");
   const noToolpathCopy = viewerCopy(i18n, "viewer.noToolpathFound");
 
-  const layout = (canvas: React.ReactNode, controls?: React.ReactNode) =>
-    controlsContainer === undefined ? (
-      <ToolpathLayout sidebar={controls}>{canvas}</ToolpathLayout>
+  const layout = (canvas: React.ReactNode, layers?: React.ReactNode, view?: React.ReactNode) =>
+    controlsContainers === undefined ? (
+      <ToolpathLayout layers={layers} view={view} viewAvailable={view !== undefined}>
+        {canvas}
+      </ToolpathLayout>
     ) : (
       <>
         {canvas}
-        {controlsContainer && createPortal(controls, controlsContainer)}
+        {controlsContainers.layers && createPortal(layers, controlsContainers.layers)}
+        {controlsContainers.view && createPortal(view, controlsContainers.view)}
       </>
     );
 
@@ -546,7 +549,7 @@ export function GcodeViewer({
   );
 
   return layout(
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full" title={uiText("Drag to orbit · Scroll to zoom")}>
       <GcodeErrorBoundary renderFailed={renderFailedCopy}>
         <CanvasRenderer
           className="h-full w-full"
@@ -567,78 +570,78 @@ export function GcodeViewer({
         </CanvasRenderer>
       </GcodeErrorBoundary>
     </div>,
-    <>
-      <section className="toolpath-section" aria-label={uiText("Layers")}>
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="toolpath-section-title">{uiText("Layers")}</h3>
-          <span className="font-mono text-xs text-muted-foreground">
-            {uiText("{value1} mm", {
-              value1: formatNumber(data.layerRanges[currentLayer]?.z ?? 0, {
-                maximumFractionDigits: 2,
-              }),
-            })}
-          </span>
-        </div>
-        <div className="toolpath-layer-entry">
-          <Button
-            variant="outline"
-            size="icon-sm"
-            aria-label={uiText("Previous layer")}
-            disabled={currentLayer <= 0}
-            onClick={() => selectLayer(currentLayer - 1)}
-          >
-            <ChevronLeft className="h-4 w-4" aria-hidden />
-          </Button>
-          <Input
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={data.totalLayers}
-            step={1}
-            aria-label={uiText("Layer number")}
-            value={layerEntry ?? currentLayer + 1}
-            onChange={(event) => setLayerEntry(event.target.value)}
-            onBlur={commitLayer}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                commitLayer();
-              }
-              if (event.key === "Escape") {
-                event.preventDefault();
-                setLayerEntry(null);
-              }
-            }}
-            className="min-w-0 font-mono text-center"
-          />
-          <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">
-            / {data.totalLayers}
-          </span>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            aria-label={uiText("Next layer")}
-            disabled={currentLayer >= data.totalLayers - 1}
-            onClick={() => selectLayer(currentLayer + 1)}
-          >
-            <ChevronRight className="h-4 w-4" aria-hidden />
-          </Button>
-        </div>
-        <input
-          aria-label={viewerCopy(i18n, "viewer.currentLayer")}
-          aria-valuetext={viewerCopy(i18n, "viewer.layer", {
-            current: String(currentLayer + 1),
-            total: String(data.totalLayers),
+    <section className="toolpath-section" aria-label={uiText("Layers")}>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="toolpath-section-title">{uiText("Layers")}</h3>
+        <span className="font-mono text-xs text-muted-foreground">
+          {uiText("{value1} mm", {
+            value1: formatNumber(data.layerRanges[currentLayer]?.z ?? 0, {
+              maximumFractionDigits: 2,
+            }),
           })}
-          type="range"
-          min={0}
-          max={data.totalLayers - 1}
-          value={currentLayer}
-          onChange={(event) => selectLayer(Number(event.target.value))}
-          className="toolpath-layer-slider"
+        </span>
+      </div>
+      <div className="toolpath-layer-entry">
+        <Button
+          variant="outline"
+          size="icon-sm"
+          aria-label={uiText("Previous layer")}
+          disabled={currentLayer <= 0}
+          onClick={() => selectLayer(currentLayer - 1)}
+        >
+          <ChevronLeft className="h-4 w-4" aria-hidden />
+        </Button>
+        <Input
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={data.totalLayers}
+          step={1}
+          aria-label={uiText("Layer number")}
+          value={layerEntry ?? currentLayer + 1}
+          onChange={(event) => setLayerEntry(event.target.value)}
+          onBlur={commitLayer}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commitLayer();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setLayerEntry(null);
+            }
+          }}
+          className="min-w-0 font-mono text-center"
         />
-        {toggle(uiText("This layer"), onlyCurrentLayer, setOnlyCurrentLayer)}
-      </section>
+        <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">
+          / {data.totalLayers}
+        </span>
+        <Button
+          variant="outline"
+          size="icon-sm"
+          aria-label={uiText("Next layer")}
+          disabled={currentLayer >= data.totalLayers - 1}
+          onClick={() => selectLayer(currentLayer + 1)}
+        >
+          <ChevronRight className="h-4 w-4" aria-hidden />
+        </Button>
+      </div>
+      <input
+        aria-label={viewerCopy(i18n, "viewer.currentLayer")}
+        aria-valuetext={viewerCopy(i18n, "viewer.layer", {
+          current: String(currentLayer + 1),
+          total: String(data.totalLayers),
+        })}
+        type="range"
+        min={0}
+        max={data.totalLayers - 1}
+        value={currentLayer}
+        onChange={(event) => selectLayer(Number(event.target.value))}
+        className="toolpath-layer-slider"
+      />
+      {toggle(uiText("This layer"), onlyCurrentLayer, setOnlyCurrentLayer)}
+    </section>,
+    <>
       <section className="toolpath-section" aria-label={uiText("Camera view")}>
         <label className="toolpath-field">
           <span className="toolpath-section-title">{uiText("Camera view")}</span>
@@ -689,7 +692,6 @@ export function GcodeViewer({
             <Plus className="h-4 w-4" aria-hidden />
           </Button>
         </div>
-        <p className="text-2xs text-muted-foreground">{uiText("Drag to orbit · Scroll to zoom")}</p>
       </section>
       <section className="toolpath-section" aria-label={uiText("Display")}>
         <h3 className="toolpath-section-title">{uiText("Display")}</h3>

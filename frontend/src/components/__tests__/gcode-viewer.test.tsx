@@ -127,7 +127,8 @@ describe("GcodeViewer", () => {
         toolpathParser={async (text) => parseGcode(text)}
       />,
     );
-    const toggle = await screen.findByRole("button", { name: "Dimensions" });
+    await user.click(await screen.findByRole("tab", { name: "View" }));
+    const toggle = screen.getByRole("button", { name: "Dimensions" });
     expect(screen.getByText("20 × 0 × 0 mm")).toBeVisible();
 
     await user.click(toggle);
@@ -211,6 +212,7 @@ describe("GcodeViewer", () => {
     expect(slider).toHaveAttribute("max", "0");
     expect(slider).toHaveAttribute("aria-valuetext", "Layer 1 / 1");
 
+    await user.click(screen.getByRole("tab", { name: "View" }));
     const travel = screen.getByRole("button", { name: "Travel" });
     const bed = screen.getByRole("button", { name: "Bed 220×220" });
     expect(travel).toHaveAttribute("aria-pressed", "false");
@@ -240,17 +242,20 @@ describe("GcodeViewer", () => {
       </I18nProvider>,
     );
 
-    const view = await screen.findByRole("combobox", { name: "Camera view" });
+    await user.click(await screen.findByRole("tab", { name: "View" }));
+    const view = screen.getByRole("combobox", { name: "Camera view" });
     expect(view).toHaveValue("isometric");
     expect(Array.from(view.querySelectorAll("option")).map((option) => option.textContent)).toEqual(
       ["Isometric", "Front", "Top"],
     );
 
     await user.selectOptions(view, "top");
+    await user.click(screen.getByRole("tab", { name: "Layers" }));
     fireEvent.change(screen.getByRole("slider", { name: "Current layer" }), {
       target: { value: "0" },
     });
 
+    await user.click(screen.getByRole("tab", { name: "View" }));
     expect(screen.getByRole("combobox", { name: "Camera view" })).toHaveValue("top");
     await user.click(screen.getByRole("button", { name: "Fit to view" }));
     expect(screen.getByRole("combobox", { name: "Camera view" })).toHaveValue("isometric");

@@ -1,4 +1,5 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
+import { DESKTOP_CHROMIUM } from "./tests/playwright-desktop";
 const port = Number(process.env.PLAYWRIGHT_ONBOARDING_PORT ?? 3331);
 const apiPort = Number(process.env.PLAYWRIGHT_ONBOARDING_API_PORT ?? 8431);
 const apiBase = `http://127.0.0.1:${apiPort}`;
@@ -27,5 +28,5 @@ export default defineConfig({
       reuseExistingServer: false,
     },
   ],
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [{ name: "chromium", use: { ...DESKTOP_CHROMIUM } }],
 });

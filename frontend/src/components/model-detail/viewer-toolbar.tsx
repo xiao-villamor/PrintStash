@@ -52,7 +52,7 @@ export function ViewerToolbar({
   const buttonClass = (active: boolean) =>
     active ? "bg-accent text-accent-foreground" : "text-foreground";
   return (
-    <div className="detail-viewer-controls">
+    <div className="detail-viewer-controls" data-viewer-mode={viewerMode}>
       <div className="detail-preview-heading">
         <div className="min-w-0 flex flex-wrap items-baseline gap-3">
           <h2>{uiText("Model preview")}</h2>

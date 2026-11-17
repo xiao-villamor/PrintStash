@@ -1,6 +1,6 @@
 /** Inline revision outcomes persist through the real manual-print owner and a fresh Library read. */
 import { test, expect } from "./helpers";
-import { gcodeFor, modelCard, uploadModel } from "./util";
+import { collapseNavigationSidebar, gcodeFor, modelCard, uploadModel } from "./util";
 import type { ModelPrintJobRead, ModelRead } from "../../src/types";
 
 test.describe("Library inline inspector", () => {
@@ -14,6 +14,7 @@ test.describe("Library inline inspector", () => {
         buffer: Buffer.from(`${gcodeFor(name)}\nG1 X10 Y10 E1\nG1 Z0.4\nG1 X20 Y10 E2`),
       },
     });
+    await collapseNavigationSidebar(page);
     const card = modelCard(page, name);
     const href = await card.getAttribute("href");
     const match = href?.match(/^\/models\/(\d+)/);
@@ -25,6 +26,7 @@ test.describe("Library inline inspector", () => {
       await drawer.getByRole("radio", { name: "G-code", exact: true }).click();
       const panel = drawer.getByRole("complementary", { name: "Toolpath controls" });
       await expect(panel.getByRole("slider")).toBeVisible();
+      await panel.getByRole("tab", { name: "View", exact: true }).click();
       await panel.getByRole("combobox", { name: "Camera view" }).selectOption("top");
       await panel.getByRole("button", { name: "Travel", exact: true }).click();
       await expect(panel.getByRole("button", { name: "Travel", exact: true })).toHaveAttribute(

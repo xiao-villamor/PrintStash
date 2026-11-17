@@ -30,6 +30,10 @@ For UI implementation or a reported visual mismatch, follow
 before editing. Completion requires checking the actual user-facing preview,
 including interactive states and persisted writes; isolated screenshots alone
 are insufficient evidence.
+Use a 1920×1080 desktop viewport with the main navigation sidebar collapsed for
+Playwright reviews and screenshots by default. Mobile or tablet testing requires
+an explicit user request. Before running browser tests, follow the
+[viewport and review rules](.agents/skills/printstash/references/tests/playwright.md#viewport-and-visual-review).
 
 ## Task completion
 

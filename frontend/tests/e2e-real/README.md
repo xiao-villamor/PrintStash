@@ -97,6 +97,8 @@ Requires the backend dev venv (`backend/.venv`); falls back to `uv run`.
 emulator, records a failed outcome through the inline inspector's revision shortcut
 and Mod+Enter note action, verifies the exact persisted record, then reloads the
 Library and checks its history. The flow removes its Model and printer afterward.
+Its toolpath flow also opens a real G-code preview in the narrow Library inspector,
+switches to View, and exercises camera, travel and fit controls.
 
 Dropdown placement covers Statistics customization at phone width, an open-menu
 resize, a short viewport, and member Model actions. Checkbox choices survive a
@@ -233,4 +235,4 @@ sends no further setup probe.
 - `documents.spec.ts`: collection spreadsheets and binary resin attachments remain downloadable with their original filenames and bytes.
 
 - `model-covers.spec.ts`: source selection, upload, real 3D-view capture, preservation through thumbnail regeneration, and reset to automatic.
-- `gcode-plates.spec.ts`: upload sliced 3MF exports with or without meshes, then switch between distinct plate toolpaths in the real viewer.
+- `gcode-plates.spec.ts`: upload sliced 3MF exports with or without meshes, switch plate toolpaths, preview a dense 750-layer revision, and send the selected revision to a printer emulator. Desktop layout cases check that Layers and View controls fit without clipping or overlap in normal and expanded previews and across model tabs. The default render is 1920×1080 with the main navigation collapsed; explicit 1280×720 and 1440×1000 cases reproduce the reported sidebar clipping.

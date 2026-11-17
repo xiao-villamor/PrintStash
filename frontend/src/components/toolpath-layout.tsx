@@ -1,15 +1,54 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { TabBar } from "@/components/ui/tabs";
 import { uiText } from "@/lib/locale";
 import "./gcode-viewer.css";
 
-/** Keep the source picker usable while a plate loads or cannot be rendered. */
-export function ToolpathLayout({ children, sidebar }: { children: ReactNode; sidebar: ReactNode }) {
+export interface ToolpathControlContainers {
+  layers: HTMLElement | null;
+  view: HTMLElement | null;
+}
+
+/** Keep each control panel short enough to share the canvas's height. Hidden
+ * panels stay mounted so changing tabs preserves layer and camera settings. */
+export function ToolpathLayout({
+  children,
+  layers,
+  view,
+  viewAvailable = false,
+}: {
+  children: ReactNode;
+  layers?: ReactNode;
+  view?: ReactNode;
+  viewAvailable?: boolean;
+}) {
+  const [selected, setSelected] = useState<"layers" | "view">("layers");
+  const active = viewAvailable ? selected : "layers";
   return (
     <div className="toolpath-layout">
       <div className="toolpath-workspace">
         <div className="toolpath-viewport">{children}</div>
         <aside aria-label={uiText("Toolpath controls")} className="toolpath-sidebar">
-          {sidebar}
+          <TabBar
+            tabs={
+              viewAvailable
+                ? [
+                    { key: "layers", label: uiText("Layers") },
+                    { key: "view", label: uiText("View") },
+                  ]
+                : [{ key: "layers", label: uiText("Layers") }]
+            }
+            active={active}
+            onChange={setSelected}
+            className="toolpath-control-tabs"
+            tabClassName="flex-1 min-h-9 px-3 text-xs font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            activeTabClassName="text-foreground"
+          />
+          <div role="tabpanel" aria-label={uiText("Layers")} hidden={active !== "layers"}>
+            {layers}
+          </div>
+          <div role="tabpanel" aria-label={uiText("View")} hidden={active !== "view"}>
+            {view}
+          </div>
         </aside>
       </div>
     </div>

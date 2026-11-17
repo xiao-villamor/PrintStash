@@ -517,6 +517,9 @@
 .model-detail-layout[data-expanded="true"] .model-detail-inspector {
   display: none;
 }
+.model-detail-layout[data-expanded="true"] .model-information {
+  display: none;
+}
 /* Controls occupy their own rows so loading/error content cannot be covered. */
 .model-detail-preview {
   display: grid;
@@ -573,6 +576,15 @@
   padding: 6px 8px;
   border: 1px solid var(--border);
   background: var(--card);
+}
+.detail-viewer-controls[data-viewer-mode="gcode"] .detail-viewer-commandbar {
+  margin-top: 8px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+}
+.detail-viewer-controls[data-viewer-mode="gcode"] .detail-viewer-control-group > span {
+  display: none;
 }
 .detail-viewer-control-group {
   display: flex;
