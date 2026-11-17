@@ -435,7 +435,7 @@ class TestExecutionContext:
         assert _status(job.id).current_item == "second.stl"
 
     def test_held_progress_is_written_when_the_hold_ends_without_another_report(
-        self, engine: InlineJobEngine, make_job
+        self, engine: InlineJobEngine, threaded_hub_db, make_job
     ) -> None:
         # A step that reports once and then blocks (a slow download) never
         # calls back: what it reported must still appear.
