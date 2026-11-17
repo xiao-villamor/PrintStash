@@ -531,11 +531,23 @@
 .model-information {
   flex-shrink: 0;
 }
+@media (min-width: 1100px) {
+  /* Let the preview shrink when model information returns after expansion. */
+  .model-detail-preview {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+}
 .detail-preview-canvas {
   grid-row: 3;
   min-width: 0;
   min-height: 0;
   height: 100%;
+}
+/* The grid row owns the canvas height; the shared toolpath layout must not
+   extend its larger standalone minimum into the camera dock. */
+.detail-preview-canvas .toolpath-workspace {
+  min-height: 0;
 }
 .detail-viewer-controls {
   display: contents;
@@ -607,9 +619,9 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  margin: 0 12px 12px;
-  padding: 6px;
-  border: 1px solid var(--border);
+  margin: 0;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
   background: var(--card);
 }
 .detail-viewer-dock p {

@@ -4729,6 +4729,8 @@
   "Print settings": "Ajustes de impresión",
   "Selected plate mesh bounds": "Límites de la malla de la placa seleccionada",
   "Bed position is illustrative": "La posición de la cama es ilustrativa",
+  "Non-printing moves": "Desplazamientos sin impresión",
+  "Toolpath bounds": "Límites de trayectoria",
   "Whole source geometry": "Geometría de toda la fuente",
   "Extrusion bounds (includes any purge; excludes travel)": "Límites de extrusión (incluyen purgas; excluyen desplazamientos)",
   "Printer bed size unknown; grid is illustrative": "Tamaño de la cama desconocido; la cuadrícula es ilustrativa",

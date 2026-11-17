@@ -1,5 +1,6 @@
 /** Sliced plate selection shows exactly one toolpath and never reuses another file's plate. */
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { GcodeViewer, type GcodeViewerProps } from "@/components/gcode-viewer";
@@ -36,6 +37,34 @@ function preview(files = [sliced]) {
 }
 
 describe("GcodePreview", () => {
+  it("keeps the sliced plate picker outside the toolpath controls", async () => {
+    function WithPlateArea() {
+      const [target, setTarget] = useState<HTMLDivElement | null>(null);
+      return (
+        <>
+          <div data-testid="plate-area" ref={setTarget} />
+          <GcodePreview
+            files={[sliced]}
+            bedSizeFor={bedSizeFor}
+            ToolpathViewer={Toolpath}
+            plateContainer={target}
+          />
+        </>
+      );
+    }
+    renderApp(<WithPlateArea />, { routes: platesRoute });
+    const area = screen.getByTestId("plate-area");
+    const secondPlate = await within(area).findByRole("button", { name: "Plate 10" });
+    expect(
+      within(screen.getByRole("complementary", { name: "Toolpath controls" })).queryByRole(
+        "group",
+        { name: "Sliced plates" },
+      ),
+    ).not.toBeInTheDocument();
+    await userEvent.click(secondPlate);
+    expect(secondPlate).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("img", { name: "Toolpath" })).toHaveTextContent("plate_index=10");
+  });
   it("opens the corresponding sliced plate using its declared identity", async () => {
     const sources = [
       aFilePlate({ number: 1, name: "Shelf", object_count: 5 }),
@@ -61,7 +90,7 @@ describe("GcodePreview", () => {
         },
       },
     );
-    expect(await screen.findByRole("button", { name: /Plate 10 Wall mount/ })).toHaveAttribute(
+    expect(await screen.findByRole("button", { name: /Plate 10.*Wall mount/ })).toHaveAttribute(
       "aria-pressed",
       "true",
     );

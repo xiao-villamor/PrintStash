@@ -25,7 +25,7 @@ import { getDerivedText } from "@/lib/api/request";
 import { subscribeEvents } from "@/lib/events";
 import { useOptionalI18n, type MessageKey } from "@/lib/i18n";
 import { previewPixelRatio, usePreviewPreferences } from "@/lib/preview-preferences";
-import { fitCameraToBounds } from "@/lib/thumbnail-camera";
+import { fitCameraToBounds, viewerPresetDirection } from "@/lib/thumbnail-camera";
 import type { ToolpathData } from "@/lib/gcode";
 import { parseGcodeInWorker, ToolpathParseError } from "@/lib/gcode-worker-client";
 
@@ -129,22 +129,19 @@ function GcodeScene({
   // render, so a fresh array would snap the camera back to its starting point
   // whenever a control or the layer slider re-rendered the scene.
   const initialCameraPosition = useMemo<[number, number, number]>(
-    () => [data.bounds.maxDim * 0.8, data.bounds.maxDim * 0.9, data.bounds.maxDim * 1.2],
+    () =>
+      viewerPresetDirection("isometric")
+        .multiplyScalar(data.bounds.maxDim * 1.75)
+        .toArray(),
     [data],
   );
 
   useEffect(() => {
     function setView(preset: ViewerCameraPreset) {
       presetRef.current = preset;
-      // OrbitControls keeps the world up axis it started with; the top view
-      // looks straight down by sitting a hair off the axis instead of rolling it.
-      camera.up.set(0, 1, 0);
-      const direction =
-        preset === "front"
-          ? new THREE.Vector3(0, 0, 1)
-          : preset === "top"
-            ? new THREE.Vector3(0, 1, 0.001)
-            : new THREE.Vector3(0.8, 0.9, 1.2);
+      // Match the mesh preview's upright top view as well as its isometric angle.
+      camera.up.set(0, preset === "top" ? 0 : 1, preset === "top" ? -1 : 0);
+      const direction = viewerPresetDirection(preset);
       const aspect = gl.domElement.clientWidth / Math.max(gl.domElement.clientHeight, 1);
       const fit = fitCameraToBounds(
         new THREE.Vector3(data.bounds.sizeX, data.bounds.sizeZ, data.bounds.sizeY),
@@ -538,14 +535,23 @@ export function GcodeViewer({
     }
     setLayerEntry(null);
   };
-  const toggle = (label: string, checked: boolean, change: (value: boolean) => void) => (
+  const toggle = (
+    label: string,
+    checked: boolean,
+    change: (value: boolean) => void,
+    description?: string,
+  ) => (
     <Button
       variant="ghost"
+      aria-label={label}
       aria-pressed={checked}
       onClick={() => change(!checked)}
       className="toolpath-toggle"
     >
-      <span>{label}</span>
+      <span className="toolpath-toggle-copy">
+        <span>{label}</span>
+        {description && <span className="toolpath-toggle-description">{description}</span>}
+      </span>
       <span className="toolpath-check" aria-hidden>
         {checked && <Check className="h-3.5 w-3.5" />}
       </span>
@@ -701,13 +707,16 @@ export function GcodeViewer({
       )}
       <section className="toolpath-section" aria-label={uiText("Display")}>
         <h3 className="toolpath-section-title">{uiText("Display")}</h3>
-        <div>
-          {toggle(viewerCopy(i18n, "viewer.travel"), showTravel, setShowTravel)}
+        <div className="toolpath-option-group">
+          {toggle(
+            viewerCopy(i18n, "viewer.travel"),
+            showTravel,
+            setShowTravel,
+            uiText("Non-printing moves"),
+          )}
           {!sharedControls &&
             (externalGrid === undefined || onShowGridChange) &&
             toggle(uiText("Build plate grid"), showGrid, onShowGridChange ?? setGrid)}
-          {!printerBedMm && <p>{uiText("Printer bed size unknown; grid is illustrative")}</p>}
-          {printerBedMm && <p>{uiText("Bed position is illustrative")}</p>}
           {printerBedMm &&
             toggle(
               viewerCopy(i18n, "viewer.bed", {
@@ -716,24 +725,43 @@ export function GcodeViewer({
               }),
               showBed,
               setShowBed,
+              uiText("Bed position is illustrative"),
             )}
           {!sharedControls &&
             (externalDimensions === undefined || onShowDimensionsChange) &&
             toggle(uiText("Dimensions"), showDimensions, onShowDimensionsChange ?? setDimensions)}
         </div>
-        {showDimensions && (
-          <div className="border-t border-border pt-2 text-xs text-muted-foreground">
-            <p>{uiText("Extrusion bounds (includes any purge; excludes travel)")}</p>
-            <p className="font-mono">
-              {formatNumber(data.bounds.sizeX, { maximumFractionDigits: 1 })} ×{" "}
-              {formatNumber(data.bounds.sizeY, { maximumFractionDigits: 1 })} ×{" "}
-              {uiText("{value1} mm", {
-                value1: formatNumber(data.bounds.sizeZ, { maximumFractionDigits: 1 }),
-              })}
-            </p>
-          </div>
+        {!printerBedMm && (
+          <p className="toolpath-view-note">
+            {uiText("Printer bed size unknown; grid is illustrative")}
+          </p>
         )}
       </section>
+      {showDimensions && (
+        <section className="toolpath-section" aria-label={uiText("Toolpath bounds")}>
+          <div className="toolpath-bounds-heading">
+            <h3 className="toolpath-section-title">{uiText("Toolpath bounds")}</h3>
+            <span className="toolpath-bounds-unit">mm</span>
+          </div>
+          <dl className="toolpath-bounds-grid">
+            {(
+              [
+                ["X", data.bounds.sizeX],
+                ["Y", data.bounds.sizeY],
+                ["Z", data.bounds.sizeZ],
+              ] as const
+            ).map(([axis, value]) => (
+              <div key={axis}>
+                <dt>{axis}</dt>
+                <dd>{formatNumber(value, { maximumFractionDigits: 1 })}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="toolpath-view-note">
+            {uiText("Extrusion bounds (includes any purge; excludes travel)")}
+          </p>
+        </section>
+      )}
     </>,
   );
 }

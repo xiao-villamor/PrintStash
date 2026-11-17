@@ -68,6 +68,7 @@
 
 - Large sliced plates no longer hit the former one-million-segment preview limit. Arc rendering uses bounded curve error, and typed geometry storage supports up to four million segments without dropping layers.
 - Model detail retains matching plate selection between source and sliced previews, keeps common view controls in reach, and labels measurement scope and illustrative bed placement. Sliced archives now recover shared print settings and per-plate estimates, including when existing metadata is reprocessed.
+- Model detail keeps plate cards in the same place across 3D and G-code, aligns camera viewpoints and preview edges, and groups toolpath view options and bounds for easier comparison.
 
 - Saved multipart descriptions stay visible in the overview. Multipart member names wrap without clipping, and the mobile composition editor keeps Add variant and Save changes at the shared touch-target size.
 

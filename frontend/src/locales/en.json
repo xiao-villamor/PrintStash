@@ -4729,6 +4729,8 @@
   "Print settings": "Print settings",
   "Selected plate mesh bounds": "Selected plate mesh bounds",
   "Bed position is illustrative": "Bed position is illustrative",
+  "Non-printing moves": "Non-printing moves",
+  "Toolpath bounds": "Toolpath bounds",
   "Whole source geometry": "Whole source geometry",
   "Extrusion bounds (includes any purge; excludes travel)": "Extrusion bounds (includes any purge; excludes travel)",
   "Printer bed size unknown; grid is illustrative": "Printer bed size unknown; grid is illustrative",

@@ -14,7 +14,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -163,6 +163,22 @@ describe("GcodeViewer", () => {
     expect(screen.getByText("Bed position is illustrative")).toBeVisible();
   });
 
+  it("explains which moves the travel control shows", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(TOOLPATH));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    await user.click(await screen.findByRole("tab", { name: "View" }));
+    expect(
+      within(screen.getByRole("button", { name: "Travel" })).getByText("Non-printing moves"),
+    ).toBeVisible();
+  });
+
   it("leaves shared controls to the parent toolbar", async () => {
     const user = userEvent.setup();
     fetchMock.mockResolvedValue(textResponse(TOOLPATH));
@@ -192,12 +208,15 @@ describe("GcodeViewer", () => {
     );
     await user.click(await screen.findByRole("tab", { name: "View" }));
     const toggle = screen.getByRole("button", { name: "Dimensions" });
-    expect(screen.getByText("20 × 0 × 0 mm")).toBeVisible();
+    const bounds = screen.getByRole("region", { name: "Toolpath bounds" });
+    expect(within(bounds).getByText("X")).toBeVisible();
+    expect(within(bounds).getByText("20")).toBeVisible();
+    expect(within(bounds).getByText("mm")).toBeVisible();
 
     await user.click(toggle);
 
     expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect(screen.queryByText("20 × 0 × 0 mm")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Toolpath bounds" })).not.toBeInTheDocument();
   });
   it("keeps a public Gcode viewer outside private events", async () => {
     storeLogin("", { id: 1, username: "owner", email: null, is_superuser: true });

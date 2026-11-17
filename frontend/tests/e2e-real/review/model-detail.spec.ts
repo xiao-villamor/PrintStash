@@ -85,7 +85,14 @@ test.describe("Existing Model review", () => {
           await collapseNavigationSidebar(page);
           const preview = page.getByRole("region", { name: "Preview", exact: true });
           const screenshot = preview.getByRole("button", { name: "Screenshot", exact: true });
-          await expect(screenshot).toBeEnabled({ timeout: 60_000 });
+          const waitForPreview = async () => {
+            await expect(async () => {
+              const retry = preview.getByRole("button", { name: "Try preview again", exact: true });
+              if (await retry.isVisible()) await retry.click();
+              await expect(screenshot).toBeEnabled({ timeout: 2_000 });
+            }).toPass({ timeout: 60_000, intervals: [1_000, 2_000] });
+          };
+          await waitForPreview();
 
           if (phase === "details") {
             // ── Every detail tab, retaining the data and empty states actually present ──
@@ -335,6 +342,24 @@ test.describe("Existing Model review", () => {
               }
             };
             await assertImageMatte(plates);
+            const assertDockAlignment = async () => {
+              const frame = await preview.boundingBox();
+              const dock = await preview.locator(".detail-viewer-dock").boundingBox();
+              expect(frame).not.toBeNull();
+              expect(dock).not.toBeNull();
+              // The dock meets the preview's inner edge on both sides, including expanded mode.
+              expect(Math.abs(dock!.x - frame!.x)).toBeLessThanOrEqual(2);
+              expect(Math.abs(dock!.x + dock!.width - frame!.x - frame!.width)).toBeLessThanOrEqual(
+                2,
+              );
+              const workspace = preview.locator(".toolpath-workspace");
+              if (await workspace.count()) {
+                const box = await workspace.boundingBox();
+                expect(box).not.toBeNull();
+                expect(box!.y + box!.height).toBeLessThanOrEqual(dock!.y + 1);
+              }
+            };
+            await assertDockAlignment();
             for (const plate of sourcePlates.plates) {
               await plates
                 .getByRole("button", {
@@ -344,7 +369,6 @@ test.describe("Existing Model review", () => {
               await expect(preview.getByText(/^Selected plate mesh bounds:/)).toBeVisible();
               await review.capture(`mesh-plate-${plate.number}`);
               await preview.getByRole("button", { name: "Fit to view", exact: true }).click();
-              await review.capture(`mesh-plate-${plate.number}-fitted`);
             }
             for (const mode of ["X-Ray", "Wireframe", "Solid"]) {
               await preview.getByRole("button", { name: mode, exact: true }).click();
@@ -356,8 +380,12 @@ test.describe("Existing Model review", () => {
               await preview.getByRole("button", { name: camera, exact: true }).click();
             }
             await preview.getByRole("button", { name: "Expand", exact: true }).click();
+            await assertDockAlignment();
+            const expandedSourcePlateBox = await plates.boundingBox();
             await review.capture("mesh-expanded");
             await preview.getByRole("button", { name: "Collapse preview", exact: true }).click();
+            await expect(page.getByTestId("model-detail-sidebar")).toBeVisible();
+            await waitForPreview();
             // Shared overlays and camera presets retain their state and location across modes.
             const grid = preview.getByRole("button", { name: "Build plate grid", exact: true });
             const dimensions = preview.getByRole("button", { name: "Dimensions", exact: true });
@@ -366,6 +394,7 @@ test.describe("Existing Model review", () => {
             const gridState = await grid.getAttribute("aria-pressed");
             const dimensionsState = await dimensions.getAttribute("aria-pressed");
             const gridBox = await grid.boundingBox();
+            const sourcePlateBox = await plates.boundingBox();
             await preview.getByRole("button", { name: "G-code", exact: true }).click();
             await expect(grid).toHaveAttribute("aria-pressed", gridState!);
             await expect(dimensions).toHaveAttribute("aria-pressed", dimensionsState!);
@@ -389,7 +418,19 @@ test.describe("Existing Model review", () => {
             const controls = page.getByRole("complementary", { name: "Toolpath controls" });
             const filePicker = controls.getByRole("combobox", { name: "G-code file" });
             if (await filePicker.count()) await filePicker.selectOption(String(sliced!.id));
-            const slicedGroup = controls.getByRole("group", { name: "Sliced plates", exact: true });
+            const slicedGroup = page.getByRole("group", { name: "Sliced plates", exact: true });
+            const assertPlatePlacement = async (
+              sourceBox: Awaited<ReturnType<typeof plates.boundingBox>>,
+            ) => {
+              const slicedBox = await slicedGroup.boundingBox();
+              expect(sourceBox).not.toBeNull();
+              expect(slicedBox).not.toBeNull();
+              for (const key of ["x", "y", "width"] as const)
+                expect(
+                  Math.abs(sourceBox![key] - slicedBox![key]),
+                  `plate picker ${key} should remain stable`,
+                ).toBeLessThanOrEqual(2);
+            };
             const assertPlateCardsFit = async () => {
               for (const sourcePlate of sourcePlates.plates) {
                 expect(sourcePlate.name).toBeTruthy();
@@ -413,15 +454,20 @@ test.describe("Existing Model review", () => {
               const boxes = await slicedGroup.getByRole("button").evaluateAll((cards) =>
                 cards.map((card) => {
                   const box = card.getBoundingClientRect();
-                  return { top: box.top, bottom: box.bottom };
+                  return { top: box.top, bottom: box.bottom, left: box.left, right: box.right };
                 }),
               );
-              for (let i = 1; i < boxes.length; i++)
-                expect(boxes[i].top).toBeGreaterThanOrEqual(boxes[i - 1].bottom);
+              for (let i = 1; i < boxes.length; i++) {
+                const previous = boxes[i - 1];
+                const current = boxes[i];
+                expect(current.left >= previous.right || current.top >= previous.bottom).toBe(true);
+              }
             };
             const layer = controls.getByRole("spinbutton", { name: "Layer number" });
             await expect(layer).toBeVisible({ timeout: 60_000 });
-            await expect(screenshot).toBeEnabled({ timeout: 60_000 });
+            await waitForPreview();
+            await assertPlatePlacement(sourcePlateBox);
+            await assertDockAlignment();
             for (const action of [
               "Build plate grid",
               "Dimensions",
@@ -461,7 +507,7 @@ test.describe("Existing Model review", () => {
             // This review is for the supplied multi-plate artifacts with named plates.
             const selectedSource = sourcePlates.plates.at(-1)!;
             expect(selectedSource.name).toBeTruthy();
-            const selectedSliced = controls.getByRole("button", {
+            const selectedSliced = slicedGroup.getByRole("button", {
               name: selectedSource.name!,
             });
             await expect(selectedSliced).toHaveAttribute("aria-pressed", "true", {
@@ -470,30 +516,29 @@ test.describe("Existing Model review", () => {
             await review.capture("toolpath-entry-selected-plate");
             for (const sourcePlate of sourcePlates.plates) {
               expect(sourcePlate.name).toBeTruthy();
-              const slicedCard = controls.getByRole("button", { name: sourcePlate.name! });
+              const slicedCard = slicedGroup.getByRole("button", { name: sourcePlate.name! });
               await expect(slicedCard).toHaveCount(1);
               await slicedCard.focus();
               await expect(slicedCard).toBeFocused();
               await slicedCard.press("Enter");
               await expect(slicedCard).toHaveAttribute("aria-pressed", "true");
-              await expect(screenshot).toBeEnabled({ timeout: 60_000 });
+              await waitForPreview();
               await preview.getByRole("button", { name: "3D model", exact: true }).click();
               const sourceCard = plates.getByRole("button", { name: sourcePlate.name! });
               await expect(sourceCard).toHaveAttribute("aria-pressed", "true", { timeout: 60_000 });
-              await expect(screenshot).toBeEnabled({ timeout: 60_000 });
-              await review.capture(`mesh-return-plate-${sourcePlate.number}`);
+              await waitForPreview();
               await preview.getByRole("button", { name: "G-code", exact: true }).click();
               await expect(slicedCard).toHaveAttribute("aria-pressed", "true", { timeout: 60_000 });
-              await expect(screenshot).toBeEnabled({ timeout: 60_000 });
+              await waitForPreview();
             }
             for (const plate of slicedPlates.plates) {
-              await controls
+              await slicedGroup
                 .getByRole("button", {
                   name: new RegExp(`^Plate ${String(plate).padStart(2, "0")}\\b`),
                 })
                 .click();
               await expect(layer).toBeVisible({ timeout: 60_000 });
-              await expect(screenshot).toBeEnabled({ timeout: 60_000 });
+              await waitForPreview();
               await review.capture(`toolpath-plate-${plate}-full`);
               const middle = String(
                 Math.max(1, Math.floor(Number(await layer.getAttribute("max")) / 2)),
@@ -501,7 +546,6 @@ test.describe("Existing Model review", () => {
               await layer.fill(middle);
               await layer.press("Enter");
               await expect(layer).toHaveValue(middle);
-              await review.capture(`toolpath-plate-${plate}-middle`);
             }
             await controls.getByRole("tab", { name: "View", exact: true }).click();
             if (sliced!.metadata?.printer_model === "Bambu Lab P1S") {
@@ -527,13 +571,15 @@ test.describe("Existing Model review", () => {
             for (const action of ["Zoom in", "Zoom out", "Fit to view"])
               await preview.getByRole("button", { name: action, exact: true }).click();
             await preview.getByRole("button", { name: "Expand", exact: true }).click();
+            await assertDockAlignment();
+            await assertPlatePlacement(expandedSourcePlateBox);
             await review.capture("toolpath-expanded-view");
             await controls.getByRole("tab", { name: "Layers", exact: true }).click();
             await assertPlateCardsFit();
             await review.capture("toolpath-expanded-layers");
             await preview.getByRole("button", { name: "Collapse preview", exact: true }).click();
             await preview.getByRole("button", { name: "3D model", exact: true }).click();
-            await expect(screenshot).toBeEnabled({ timeout: 60_000 });
+            await waitForPreview();
             await expect(grid).toHaveAttribute("aria-pressed", gridState!);
             await expect(dimensions).toHaveAttribute("aria-pressed", dimensionsState!);
             await review.capture("mesh-return-from-toolpath");

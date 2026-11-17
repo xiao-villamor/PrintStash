@@ -320,6 +320,8 @@ function ModelDetailPresentation({
   const [deleteTagTarget, setDeleteTagTarget] = useState<TagRead | null>(null);
   const [deleteTagBusy, setDeleteTagBusy] = useState(false);
   const [viewerMode, setViewerMode] = useState<ViewerMode>("model");
+  const [plateContainer, setPlateContainer] = useState<HTMLDivElement | null>(null);
+  const [slicedPlatePickerReady, setSlicedPlatePickerReady] = useState(false);
   const [revisionSelection, setRevisionSelection] = useState<{
     modelId: number;
     fileId: number;
@@ -683,7 +685,8 @@ function ModelDetailPresentation({
   const filePlates = useFilePlates(model.id, meshFile?.file_type === "3mf" ? meshFile.id : null);
   // A single plate is the whole build; only a multi-plate project offers a choice.
   const plates = filePlates !== null && filePlates.plates.length > 1 ? filePlates.plates : [];
-  const pickerShown = viewerMode === "model" && plates.length > 1;
+  // Keep the same row in place until the sliced picker is ready to take over.
+  const pickerShown = plates.length > 1 && (viewerMode === "model" || !slicedPlatePickerReady);
   // The viewer's corner controls sit above the plate strip when it is shown.
   const shownPlate =
     chosenPlate !== null && chosenPlate.fileId === meshFile?.id
@@ -1215,6 +1218,8 @@ function ModelDetailPresentation({
                       selectedFileId={previewSource?.id}
                       onSelectFile={selectToolpathSource}
                       sourcePlates={plates}
+                      plateContainer={plateContainer}
+                      onPlatePickerReady={setSlicedPlatePickerReady}
                       selectedSourcePlate={shownPlate?.number ?? null}
                       onSelectSourcePlate={(number) =>
                         setChosenPlate(
@@ -1334,9 +1339,11 @@ function ModelDetailPresentation({
                     </div>
                   )}
               </div>
+              <div className="contents" ref={setPlateContainer} />
               {pickerShown && meshFile && (
                 <PlatePicker
                   plates={plates}
+                  allowAll={viewerMode === "model"}
                   selected={shownPlate?.number ?? null}
                   onSelect={(number) =>
                     setChosenPlate(number === null ? null : { fileId: meshFile.id, number })
