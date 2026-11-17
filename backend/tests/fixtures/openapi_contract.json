@@ -1252,6 +1252,18 @@
             "title": "File Id",
             "type": "integer"
           },
+          "plate_index": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
+          },
           "printer_id": {
             "anyOf": [
               {
@@ -15258,6 +15270,17 @@
             "$ref": "#/components/schemas/OperatorGateState",
             "default": "not_required"
           },
+          "plate_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
+          },
           "printer_id": {
             "anyOf": [
               {
@@ -17794,6 +17817,18 @@
             "title": "File Id",
             "type": "integer"
           },
+          "plate_index": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
+          },
           "printer_id": {
             "anyOf": [
               {
@@ -18966,6 +19001,18 @@
             "exclusiveMinimum": 0.0,
             "title": "File Id",
             "type": "integer"
+          },
+          "plate_index": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
           },
           "remote_filename": {
             "anyOf": [

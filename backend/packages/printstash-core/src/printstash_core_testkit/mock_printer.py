@@ -58,6 +58,7 @@ class MockState:
         self.files: list[dict] = [
             {"path": "existing.gcode", "size": 42, "modified": time.time()}
         ]
+        self.file_contents: dict[str, bytes] = {}
         self.history: list[dict] = []
         self._job_id = 0
 
@@ -227,7 +228,9 @@ def create_app(
         upload_file = form["file"]
         if isinstance(upload_file, UploadFile):
             name = upload_file.filename or "upload.gcode"
-            size = len(await upload_file.read())
+            content = await upload_file.read()
+            size = len(content)
+            state.file_contents[name] = content
         else:
             name = "upload.gcode"
             size = 0

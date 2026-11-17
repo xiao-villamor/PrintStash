@@ -249,6 +249,7 @@ export interface PrintJobRead {
   external_profile_id: string | null;
   external_gcode_file: string | null;
   external_plate_index: number | null;
+  plate_index: number | null;
   external_current_layer: number | null;
   external_total_layers: number | null;
   external_nozzle_diameter: number | null;
@@ -327,6 +328,7 @@ export interface PrintJobReproducibilityRead {
 
 export interface SendToPrinter {
   file_id: number;
+  plate_index?: number | null;
   start_print?: boolean;
   remote_filename?: string;
   spool_id?: number | null;
@@ -410,6 +412,7 @@ export interface FleetSummary {
 
 export interface QueueJobCreate {
   file_id: number;
+  plate_index?: number | null;
   strategy: RoutingStrategy;
   printer_id?: number | null;
   spool_id?: number | null;

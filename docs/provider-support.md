@@ -7,6 +7,16 @@ certification claim.
 PrintStash is Moonraker/Klipper-first. Other printer providers can exist, but
 they must make unsupported actions explicit in the API and UI.
 
+## Sliced G-code archives (Unreleased)
+
+Files named `.gcode.3mf` can be stored as one Revision with several sliced plates.
+Sending, queuing or batching requires a selected plate when more than one exists.
+PrintStash uploads only that plate’s extracted `.gcode` through the provider’s
+existing G-code transport, and retains the original archive for downloading.
+The commands must already be sliced for the target printer. This does not add
+native Bambu project dispatch, AMS mapping options or new hardware certification.
+Ordinary unsliced `.3mf` projects remain source files.
+
 ## Material and tool state
 
 Every provider supports operator-managed tools and material feeds in PrintStash.

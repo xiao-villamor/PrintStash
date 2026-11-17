@@ -196,8 +196,8 @@ export function UploadModal({
 
   function sortIntoSlots(files: File[]) {
     for (const f of files) {
-      if (isSourceFile(f.name)) setMeshFile(f);
-      else if (isGcodeFile(f.name)) setGcodeFile(f);
+      if (isGcodeFile(f.name)) setGcodeFile(f);
+      else if (isSourceFile(f.name)) setMeshFile(f);
     }
   }
 
@@ -586,7 +586,9 @@ export function UploadModal({
                     aria-label={t("setup.chooseFile")}
                     onChange={(event) => {
                       const file = event.target.files?.[0] ?? null;
-                      setMeshFile(file && isSourceFile(file.name) ? file : null);
+                      setMeshFile(
+                        file && isSourceFile(file.name) && !isGcodeFile(file.name) ? file : null,
+                      );
                       setGcodeFile(file && isGcodeFile(file.name) ? file : null);
                       if (file) autoName(file);
                     }}

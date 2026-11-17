@@ -19,7 +19,7 @@ export const MESH_ACCEPT = ".stl,.3mf,.obj,.glb,.gltf,.ply,.3dm,.fbx,.step,.stp,
 export const SOURCE_ACCEPT = MESH_ACCEPT + ",.ctb,.goo";
 const RESIN_EXTENSIONS = new Set([".ctb", ".goo"]);
 const GCODE_EXTENSIONS = new Set([".gcode", ".g", ".gco", ".bgcode"]);
-export const GCODE_ACCEPT = ".gcode,.g,.gco,.bgcode";
+export const GCODE_ACCEPT = ".gcode,.g,.gco,.bgcode,.gcode.3mf";
 // Archives the server rewrites for review; compound suffixes come first so a
 // ".tar.gz" is never read by its last extension alone.
 const ARCHIVE_SUFFIXES = [".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tar", ".zip", ".7z", ".rar"];
@@ -59,7 +59,7 @@ export function isSourceFile(name: string): boolean {
 }
 
 export function isGcodeFile(name: string): boolean {
-  return GCODE_EXTENSIONS.has(extensionOf(name));
+  return name.toLowerCase().endsWith(".gcode.3mf") || GCODE_EXTENSIONS.has(extensionOf(name));
 }
 
 /** Folder portion of a path, no filename. "Lib/brackets/foo.stl" → "Lib/brackets". */

@@ -908,6 +908,13 @@ async def start_printer_file(
             detail="operation_not_supported_for_provider",
         )
 
+    stored_remote = session.exec(
+        select(PrinterFile).where(
+            PrinterFile.printer_id == printer_id,
+            PrinterFile.remote_filename == payload.remote_filename,
+            PrinterFile.missing_since.is_(None),
+        )
+    ).first()
     file_row: File | None = None
     source = "external"
     if payload.file_id is not None:
@@ -945,6 +952,11 @@ async def start_printer_file(
         file_id=file_id,
         model_id=model_id,
         remote_filename=payload.remote_filename,
+        plate_index=(
+            stored_remote.plate_index
+            if stored_remote is not None and stored_remote.file_id == file_id
+            else None
+        ),
         state=PrintJobState.STARTED,
         source=source,
         started_at=utcnow(),

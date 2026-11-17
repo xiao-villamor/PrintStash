@@ -15,6 +15,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
+import type { ComponentProps } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -24,7 +25,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SendToButtons, type SendToCommands } from "@/components/model-detail/send-to-buttons";
 import { clearLogin } from "@/lib/auth-store";
 import { storeLogin } from "@/lib/auth";
-import { aPrinter } from "@/test-support/factories";
+import { aRevision, aPrinter } from "@/test-support/factories";
 import { AuthContext, type AuthState } from "@/lib/auth-context";
 import { queryKeys } from "@/lib/query-client";
 import type {
@@ -83,6 +84,7 @@ const queuedJob: PrintJobRead = {
   external_profile_id: null,
   external_gcode_file: null,
   external_plate_index: null,
+  plate_index: null,
   external_current_layer: null,
   external_total_layers: null,
   external_nozzle_diameter: null,
@@ -186,6 +188,8 @@ interface PanelOptions {
   metadata?: MetadataRead | null;
   spools?: SpoolRead[];
   filename?: string;
+  plates?: number[];
+  files?: ComponentProps<typeof SendToButtons>["gcodeFiles"];
   printers?: ReturnType<typeof aPrinter>[];
 }
 
@@ -196,6 +200,8 @@ function renderPanel({
   metadata = null,
   spools,
   filename = "cube.gcode",
+  plates,
+  files,
   printers = [printer],
   initialDeliveryMode = "send",
   open,
@@ -204,6 +210,7 @@ function renderPanel({
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
   });
+  if (plates !== undefined) client.setQueryData(["gcode-plates", 42], { plates });
   client.setQueryData(queryKeys.printers, printers);
   client.setQueryData(queryKeys.spoolmanStatus, spoolmanStatus(spools !== undefined));
   client.setQueryData(queryKeys.spools, spools ?? []);
@@ -218,17 +225,19 @@ function renderPanel({
             open={open}
             preselectPrinterId={preselectPrinterId}
             compact={open !== undefined}
-            gcodeFiles={[
-              {
-                id: 42,
-                original_filename: filename,
-                version: 1,
-                gcode_revision_number: 1,
-                revision_label: null,
-                is_recommended: true,
-                metadata,
-              },
-            ]}
+            gcodeFiles={
+              files ?? [
+                {
+                  id: 42,
+                  original_filename: filename,
+                  version: 1,
+                  gcode_revision_number: 1,
+                  revision_label: null,
+                  is_recommended: true,
+                  metadata,
+                },
+              ]
+            }
             printerFiles={[]}
           />
         </AuthContext.Provider>
@@ -546,5 +555,104 @@ describe("SendToQueue", () => {
     await waitFor(() => expect(screen.getByRole("radio", { name: "Add to queue" })).toBeChecked());
     expect(screen.queryByRole("button", { name: "Send to printer" })).not.toBeInTheDocument();
     expect(enqueueFleetJob).not.toHaveBeenCalled();
+  });
+});
+
+describe("SendToButtons sliced archives", () => {
+  it("requires a choice when several plates exist", async () => {
+    renderPanel({ open: true, filename: "project.gcode.3mf", plates: [2, 10] });
+    expect(await screen.findByLabelText("Sliced plate")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Send to printer" })).toBeDisabled();
+    expect(sendToPrinter).not.toHaveBeenCalled();
+  });
+
+  it("submits the chosen plate to the printer", async () => {
+    sendToPrinter.mockResolvedValue(queuedJob);
+    renderPanel({ open: true, filename: "project.GCODE.3MF", plates: [2, 10] });
+    await userEvent.selectOptions(await screen.findByLabelText("Sliced plate"), "10");
+    await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+    await waitFor(() =>
+      expect(sendToPrinter).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({ file_id: 42, plate_index: 10, start_print: false }),
+      ),
+    );
+  });
+
+  it("queues the chosen plate", async () => {
+    renderPanel({
+      open: true,
+      initialDeliveryMode: "queue",
+      filename: "project.gcode.3mf",
+      plates: [2, 10],
+    });
+    await userEvent.selectOptions(await screen.findByLabelText("Sliced plate"), "2");
+    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+    await waitFor(() =>
+      expect(enqueueFleetJob).toHaveBeenCalledWith(
+        expect.objectContaining({ file_id: 42, plate_index: 2 }),
+      ),
+    );
+  });
+
+  it("requires a new plate choice after changing revisions", async () => {
+    const { client } = renderPanel({
+      open: true,
+      plates: [2, 10],
+      files: [
+        aRevision({
+          id: 42,
+          file_type: "gcode",
+          original_filename: "first.gcode.3mf",
+          is_recommended: true,
+          gcode_revision_number: 1,
+        }),
+        aRevision({
+          id: 43,
+          file_type: "gcode",
+          original_filename: "second.gcode.3mf",
+          is_recommended: false,
+          gcode_revision_number: 2,
+        }),
+      ],
+    });
+    client.setQueryData(["gcode-plates", 43], { plates: [2, 10] });
+    await userEvent.selectOptions(await screen.findByLabelText("Sliced plate"), "10");
+    await userEvent.click(screen.getByRole("radio", { name: /Rev 2/ }));
+    expect(await screen.findByLabelText("Sliced plate")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Send to printer" })).toBeDisabled();
+    expect(sendToPrinter).not.toHaveBeenCalled();
+  });
+
+  it("batches the chosen plate", async () => {
+    renderPanel({
+      open: true,
+      initialDeliveryMode: "queue",
+      filename: "project.gcode.3mf",
+      plates: [2, 10],
+    });
+    await userEvent.selectOptions(await screen.findByLabelText("Sliced plate"), "10");
+    await userEvent.clear(screen.getByLabelText("Copies"));
+    await userEvent.type(screen.getByLabelText("Copies"), "3");
+    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+    await waitFor(() =>
+      expect(createFleetBatch).toHaveBeenCalledWith(
+        expect.objectContaining({ file_id: 42, plate_index: 10, quantity: 3 }),
+      ),
+    );
+  });
+
+  it("selects the only available sliced plate", async () => {
+    renderPanel({ open: true, filename: "project.gcode.3mf", plates: [10] });
+    expect(await screen.findByLabelText("Sliced plate")).toHaveValue("10");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Send to printer" })).toBeEnabled(),
+    );
+  });
+
+  it("blocks unsliced archives", async () => {
+    renderPanel({ open: true, filename: "project.gcode.3mf", plates: [] });
+    expect(await screen.findByRole("alert")).toHaveTextContent("This 3MF has no sliced G-code");
+    expect(screen.getByRole("button", { name: "Send to printer" })).toBeDisabled();
   });
 });

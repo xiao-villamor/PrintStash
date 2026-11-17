@@ -319,6 +319,7 @@ class TestBuildFile:
             pytest.param("part.stl", FileType.STL, id="stl"),
             pytest.param("plate.3mf", FileType.THREE_MF, id="3mf"),
             pytest.param("rev.gcode", FileType.GCODE, id="gcode"),
+            pytest.param("rev.GCODE.3MF", FileType.GCODE, id="sliced-3mf"),
         ],
     )
     def test_derives_the_type_from_the_filename(
@@ -457,6 +458,15 @@ class TestBuildPrinter:
 
 
 class TestBuildPrintJob:
+    @pytest.mark.parametrize("plate", [None, 10])
+    def test_preserves_selected_plate(self, db_session: Session, plate) -> None:
+        artifact = factories.build_file(
+            db_session, factories.build_model(db_session), filename="project.gcode.3mf"
+        )
+        job = factories.build_print_job(db_session, artifact, plate_index=plate)
+        db_session.refresh(job)
+        assert job.plate_index == plate
+
     def test_derives_its_model_from_the_artifact(self, db_session: Session) -> None:
         model = factories.build_model(db_session)
         gcode = factories.build_file(db_session, model)
@@ -466,6 +476,15 @@ class TestBuildPrintJob:
         # A job whose model does not own its file is unreachable in production and
         # makes every read path that joins the two return nothing.
         assert job.model_id == model.id
+
+
+class TestBuildPrinterFile:
+    @pytest.mark.parametrize("plate", [None, 10])
+    def test_preserves_selected_plate(self, db_session: Session, plate) -> None:
+        printer = factories.build_printer(db_session)
+        remote = factories.build_printer_file(db_session, printer, plate_index=plate)
+        db_session.refresh(remote)
+        assert remote.plate_index == plate
 
 
 class TestBuildExternalLibrary:

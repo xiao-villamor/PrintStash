@@ -246,7 +246,7 @@ def _type_from(filename: str | None) -> FileType:
     the chance to disagree; pass `file_type=` explicitly when the mismatch is
     the thing under test.
     """
-    if filename is None:
+    if filename is None or filename.lower().endswith(".gcode.3mf"):
         return FileType.GCODE
     suffix = filename.rsplit(".", 1)[-1].lower()
     try:

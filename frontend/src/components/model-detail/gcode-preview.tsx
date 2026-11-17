@@ -40,7 +40,7 @@ export function GcodePreview({
     sources.find((source) => source.is_recommended) ??
     sources.findLast((source) => source.file_type === "gcode") ??
     sources[0];
-  const embedded = file?.file_type === "3mf";
+  const embedded = file?.original_filename.toLowerCase().endsWith(".3mf") === true;
   const query = useQuery(gcodePlatesOptions(embedded ? file.id : null));
   if (file === undefined) return null;
   const numbers = query.data?.plates ?? [];

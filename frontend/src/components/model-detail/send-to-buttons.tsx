@@ -1,6 +1,7 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { gcodePlatesOptions } from "@/lib/queries/file-plates";
 import { refreshFleet } from "@/features/printers/queries";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 
@@ -109,6 +110,22 @@ export function SendToButtons({
   const [selectedFile, setSelectedFile] = useState<number>(defaultFile?.id ?? 0);
   const selectedFileDetails = gcodeFiles.find((file) => file.id === selectedFile);
   const selectedFileFormat = printArtifactFormat(selectedFileDetails?.original_filename ?? "");
+  const sliced =
+    selectedFileDetails?.original_filename.toLowerCase().endsWith(".gcode.3mf") === true;
+  const platesQuery = useQuery(gcodePlatesOptions(showSend && sliced ? selectedFile : null));
+  const [plateSelection, setPlateSelection] = useState<{ fileId: number; index: number } | null>(
+    null,
+  );
+  const plates = platesQuery.data?.plates ?? [];
+  const plateIndex = sliced
+    ? plateSelection?.fileId === selectedFile && plates.includes(plateSelection.index)
+      ? plateSelection.index
+      : plates.length === 1
+        ? plates[0]
+        : null
+    : null;
+  const plateReady =
+    !sliced || (!platesQuery.isPending && !platesQuery.isError && plateIndex !== null);
 
   useEffect(() => {
     if (showSend && preselectFileId) {
@@ -234,7 +251,7 @@ export function SendToButtons({
 
   async function send(allowMismatch = false) {
     const session = getSessionVersion();
-    if (!selectedFile) return;
+    if (!selectedFile || !plateReady) return;
     const targetPrinterIds =
       deliveryMode === "send" || routingStrategy === "manual"
         ? selectedPrinters.map((printer) => printer.id)
@@ -268,6 +285,7 @@ export function SendToButtons({
       try {
         const payload = {
           file_id: selectedFile,
+          plate_index: sliced ? plateIndex : undefined,
           strategy: routingStrategy,
           printer_id: routingStrategy === "manual" ? selectedPrinters[0]?.id : undefined,
           spool_id: selectedSpoolId === "" ? null : selectedSpoolId,
@@ -333,6 +351,7 @@ export function SendToButtons({
             selectedSpoolId !== "" ? spools.find((s) => s.id === selectedSpoolId) : undefined;
           const job = await commands.sendToPrinter(printer.id, {
             file_id: selectedFile,
+            plate_index: sliced ? plateIndex : undefined,
             start_print: startPrint,
             spool_id: selectedSpoolId === "" ? null : selectedSpoolId,
             spool_name: spool
@@ -608,6 +627,7 @@ export function SendToButtons({
                 loading={sending}
                 disabled={
                   !selectedFile ||
+                  !plateReady ||
                   (deliveryMode === "send"
                     ? selectedPrinters.length === 0 || (startPrint && !selectedPrintersCanStart)
                     : quantity < 1 ||
@@ -835,6 +855,52 @@ export function SendToButtons({
                           .join(" · ") || file.original_filename,
                     }))}
                   />
+                  {sliced && (
+                    <div className="space-y-2">
+                      {platesQuery.isError ? (
+                        <div role="alert">
+                          <p>{uiText("Couldn’t load sliced plates")}</p>
+                          <Button variant="outline" onClick={() => void platesQuery.refetch()}>
+                            {uiText("Retry")}
+                          </Button>
+                        </div>
+                      ) : platesQuery.isPending ? (
+                        <p role="status">{uiText("Loading sliced plates…")}</p>
+                      ) : plates.length === 0 ? (
+                        <p role="alert">
+                          {uiText(
+                            "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.",
+                          )}
+                        </p>
+                      ) : (
+                        <label className="grid gap-2 text-sm">
+                          {uiText("Sliced plate")}
+                          <select
+                            className={selectClassName}
+                            value={plateIndex ?? ""}
+                            disabled={sending}
+                            onChange={(event) =>
+                              setPlateSelection({
+                                fileId: selectedFile,
+                                index: Number(event.target.value),
+                              })
+                            }
+                          >
+                            <option value="" disabled>
+                              {uiText("Choose a plate")}
+                            </option>
+                            {plates.map((index) => (
+                              <option key={index} value={index}>
+                                {uiText("Plate {value1}", {
+                                  value1: String(index).padStart(2, "0"),
+                                })}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                    </div>
+                  )}
                   <h3 className="border-t border-border pt-5 text-sm font-semibold">
                     {uiText("Delivery")}
                   </h3>

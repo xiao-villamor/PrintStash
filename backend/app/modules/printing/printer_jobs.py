@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
@@ -27,6 +28,8 @@ from app.db.models import (
 from app.db.scopes import live
 from app.db.session import get_session_factory
 from app.modules.identity import printer_rbac, rbac
+from app.modules.media.sliced_gcode import is_container, plate_toolpath
+from app.modules.media.three_mf_preview import EmbeddedGcodeError
 from app.modules.printing import fleet
 from app.modules.printing.printer_files import upsert_printer_file
 from app.modules.printing.printer_provider import PrinterProviderClient, ProviderError
@@ -35,6 +38,7 @@ from app.modules.storage.artifact_content import (
     ArtifactContentMissingError,
     resolve,
 )
+from app.modules.storage.hashing import sha256_file
 from app.modules.storage.storage_backend.runtime import get_backend
 
 logger = get_logger(__name__)
@@ -73,7 +77,9 @@ def reproducibility_payload(
         "project_id": job.external_project_id,
         "profile_id": job.external_profile_id,
         "gcode_file": job.external_gcode_file,
-        "plate_index": job.external_plate_index,
+        "plate_index": job.plate_index
+        if job.plate_index is not None
+        else job.external_plate_index,
     }
     metadata = {
         "current_layer": job.external_current_layer,
@@ -104,11 +110,12 @@ def reproducibility_payload(
         is_three_mf = str(effective_file_type).lower() in {"3mf", "filetype.three_mf"}
     toolpath_preview_url = None
     if (
-        job.artifact_evidence == "project_archived"
-        and is_three_mf
-        and getattr(job, "file_id", None) is not None
-    ):
-        plate_index = getattr(job, "external_plate_index", None)
+        job.plate_index is not None
+        or (job.artifact_evidence == "project_archived" and is_three_mf)
+    ) and getattr(job, "file_id", None) is not None:
+        plate_index = (
+            job.plate_index if job.plate_index is not None else job.external_plate_index
+        )
         # A malformed provider value must never become an advertised URL query;
         # the preview endpoint treats the absent index as its unique-candidate
         # fallback instead.
@@ -150,6 +157,12 @@ class DispatchOutcomeUnknownError(PrinterJobError):
         super().__init__("dispatch_outcome_unknown")
 
 
+@dataclass(frozen=True)
+class TransferReceipt:
+    size_bytes: int
+    sha256: str
+
+
 async def transfer_artifact(
     backend,
     provider,
@@ -158,23 +171,38 @@ async def transfer_artifact(
     *,
     start_print: bool,
     mark_outcome_unknown: bool = False,
-) -> None:
+    plate_index: int | None = None,
+) -> TransferReceipt:
     """Single storage-to-provider transfer seam for immediate and queued sends."""
     try:
         try:
             handle = resolve(artifact, backend=backend)
-            with handle.materialize() as local:
+            with ExitStack() as stack:
+                local = stack.enter_context(handle.materialize())
+                filename = artifact.original_filename
+                if is_container(artifact):
+                    if plate_index is None:
+                        raise PrinterJobError("plate_selection_required")
+                    local = stack.enter_context(plate_toolpath(local, plate_index))
+                    filename = local.name
+                elif plate_index is not None:
+                    raise PrinterJobError("plate_not_supported")
                 artifact_format = await asyncio.to_thread(
                     classify_print_artifact,
                     local,
-                    filename=artifact.original_filename,
+                    filename=filename,
                 )
                 if not provider.capabilities.accepts_format(artifact_format):
                     raise PrinterJobError("artifact_format_not_supported")
+                receipt = TransferReceipt(
+                    size_bytes=local.stat().st_size,
+                    sha256=await asyncio.to_thread(sha256_file, local),
+                )
                 try:
                     await provider.upload(local, remote_filename)
                     if start_print:
                         await provider.start(remote_filename)
+                    return receipt
                 except Exception as exc:
                     # Upload and start are non-transactional remote operations. A
                     # transport error can arrive after the printer accepted either
@@ -186,7 +214,7 @@ async def transfer_artifact(
             raise PrinterJobError("file_blob_missing") from exc
         except ArtifactContentError as exc:
             raise PrinterJobError("storage_error") from exc
-        except PrintArtifactFormatError as exc:
+        except (PrintArtifactFormatError, EmbeddedGcodeError) as exc:
             raise PrinterJobError(exc.code) from exc
     except OSError as exc:
         raise PrinterJobError("storage_error") from exc
@@ -424,6 +452,7 @@ class DispatchContext:
     printer: Printer
     artifact: File
     remote_filename: str
+    plate_index: int | None
 
 
 def _load_dispatch_context(job_id: int) -> DispatchContext:
@@ -439,6 +468,7 @@ def _load_dispatch_context(job_id: int) -> DispatchContext:
             printer=printer,
             artifact=artifact,
             remote_filename=job.remote_filename,
+            plate_index=job.plate_index,
         )
 
 
@@ -455,7 +485,9 @@ def _mark_dispatch_failed(job_id: int, code: str) -> None:
             session.commit()
 
 
-def _mark_dispatch_started(job_id: int, context: DispatchContext) -> None:
+def _mark_dispatch_started(
+    job_id: int, context: DispatchContext, receipt: TransferReceipt
+) -> None:
     with get_session_factory().scoped_session() as session:
         job = session.get(PrintJob, job_id)
         if job is None:
@@ -473,9 +505,10 @@ def _mark_dispatch_started(job_id: int, context: DispatchContext) -> None:
             printer_id=int(context.printer.id),
             file_id=int(context.artifact.id),
             remote_filename=context.remote_filename,
-            size_bytes=context.artifact.size_bytes,
-            sha256=context.artifact.sha256,
+            size_bytes=receipt.size_bytes,
+            sha256=receipt.sha256,
             matched_by="upload_history",
+            plate_index=context.plate_index,
         )
 
 
@@ -502,16 +535,17 @@ async def _dispatch_claimed(job_id: int, provider_builder: ProviderBuilder) -> N
         if state not in {"standby", "ready", "idle", "complete", "cancelled"}:
             raise ProviderError("printer_not_ready", code="printer_not_ready")
 
-    await transfer_artifact(
+    receipt = await transfer_artifact(
         get_backend(),
         provider,
         artifact,
         remote_filename,
         start_print=True,
         mark_outcome_unknown=True,
+        plate_index=context.plate_index,
     )
 
-    await asyncio.to_thread(_mark_dispatch_started, job_id, context)
+    await asyncio.to_thread(_mark_dispatch_started, job_id, context, receipt)
 
 
 async def drain_dispatch_queue(

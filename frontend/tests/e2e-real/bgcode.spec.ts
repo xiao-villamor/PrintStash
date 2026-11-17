@@ -14,7 +14,7 @@ test.describe("BGCODE toolpath", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Upload model" });
-    await dialog.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
+    await dialog.locator('input[accept=".gcode,.g,.gco,.bgcode,.gcode.3mf"]').setInputFiles({
       name: "cube.bgcode",
       mimeType: "application/octet-stream",
       buffer: original,

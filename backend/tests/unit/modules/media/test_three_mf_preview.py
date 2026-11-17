@@ -294,6 +294,7 @@ class TestExtractEmbeddedGcode:
             external_profile_id=None,
             external_gcode_file="benchy.gcode",
             external_plate_index=plate_index,
+            plate_index=None,
             external_current_layer=None,
             external_total_layers=None,
             external_nozzle_diameter=None,
