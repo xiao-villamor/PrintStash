@@ -112,3 +112,46 @@ class TestLimits:
             render_views(
                 trimesh.creation.box(), source_sha256="a" * 64, max_faces=LIMIT
             )
+
+
+class TestDegenerateViews:
+    # A plate standing on edge: looking straight down sees less than a pixel.
+    PLATE = (10, 0.01, 10)
+
+    def test_omits_a_pole_that_sees_only_an_edge(self):
+        manifest, images = render_views(
+            trimesh.creation.box(extents=self.PLATE),
+            source_sha256="a" * 64,
+            max_faces=LIMIT,
+            include_poles=True,
+        )
+        assert [view.id for view in manifest.views] == [
+            "orbit-0",
+            "orbit-1",
+            "orbit-2",
+            "orbit-3",
+        ]
+        assert manifest.size == sum(len(image) for image in images)
+
+    def test_reports_progress_for_every_attempted_view(self):
+        reported = []
+        render_views(
+            trimesh.creation.box(extents=self.PLATE),
+            source_sha256="a" * 64,
+            max_faces=LIMIT,
+            include_poles=True,
+            progress=lambda done, total: reported.append((done, total)),
+        )
+        assert reported == [(done, 6) for done in range(1, 7)]
+
+    def test_fails_when_an_orbit_view_is_empty(self, monkeypatch):
+        from app.modules.media import thumbnail
+
+        def empty(*args, **kwargs):
+            raise thumbnail.EmptyThumbnailError("thumbnail_empty")
+
+        monkeypatch.setattr(thumbnail, "to_webp", empty)
+        with pytest.raises(thumbnail.EmptyThumbnailError):
+            render_views(
+                trimesh.creation.box(), source_sha256="a" * 64, max_faces=LIMIT
+            )

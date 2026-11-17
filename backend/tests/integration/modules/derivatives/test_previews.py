@@ -1,6 +1,7 @@
 """Published sets retain usable images independently of primary derivatives."""
 
 import hashlib
+import json
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import timedelta
@@ -680,3 +681,137 @@ class TestPreviewModes:
         summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
         assert summary.state == "pending"
         assert summary.published is None
+
+
+def _views_row(db_session, artifact):
+    db_session.expire_all()
+    return records.rows_for(db_session, artifact).get(DerivativeKind.PREVIEWS)
+
+
+class TestCoverPassViews:
+    """The cover Job renders the views from its own mesh load."""
+
+    def test_publishes_views_from_the_cover_pass(self, db_session, artifact):
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds[DerivativeKind.PREVIEWS] is DerivativeState.READY
+        row = _views_row(db_session, artifact)
+        assert (row.state, row.attempts) == (DerivativeState.READY, 1)
+        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        assert [view.id for view in summary.published.views] == [
+            "orbit-0",
+            "orbit-1",
+            "orbit-2",
+            "orbit-3",
+        ]
+
+    def test_publishes_the_bytes_the_batch_would(self, db_session, artifact):
+        producers.derive_mesh(artifact.id)
+        from_pass = get_backend().read_bytes(
+            _views_row(db_session, artifact).storage_key
+        )
+        with get_session_factory().scoped_session() as session:
+            file = session.get(type(artifact), artifact.id)
+            # An audit-style invalidation: the batch renders the set again.
+            records.invalidate(session, file, [DerivativeKind.PREVIEWS])
+            session.commit()
+
+        assert previews.derive(artifact.id).kinds == {
+            DerivativeKind.PREVIEWS: DerivativeState.READY
+        }
+        from_batch = get_backend().read_bytes(
+            _views_row(db_session, artifact).storage_key
+        )
+        assert from_batch == from_pass
+
+    def test_includes_poles_when_enabled(self, db_session, artifact):
+        policy.update(
+            db_session, {policy.SettingName.PREVIEW_POLES: True}, commit=False
+        )
+        db_session.commit()
+
+        producers.derive_mesh(artifact.id)
+
+        manifest = json.loads(_views_row(db_session, artifact).output_json)
+        assert [view["id"] for view in manifest["views"]][-2:] == ["top", "bottom"]
+
+    def test_claims_no_views_while_previews_are_disabled(self, db_session, artifact):
+        policy.update(db_session, {policy.SettingName.PREVIEWS: False}, commit=False)
+        db_session.commit()
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert DerivativeKind.PREVIEWS not in outcome.kinds
+        assert _views_row(db_session, artifact) is None
+
+    def test_keeps_an_already_ready_set(self, db_session, artifact, ready):
+        producers.derive_mesh(artifact.id)
+
+        row = _views_row(db_session, artifact)
+        assert (row.storage_key, row.attempts) == (ready.storage_key, ready.attempts)
+
+    def test_leaves_views_to_the_batch_when_the_cover_owes_nothing(
+        self, db_session, artifact
+    ):
+        policy.update(db_session, {policy.SettingName.PREVIEWS: False}, commit=False)
+        db_session.commit()
+        producers.derive_mesh(artifact.id)
+        policy.update(db_session, {policy.SettingName.PREVIEWS: True}, commit=False)
+        db_session.commit()
+
+        assert producers.derive_mesh(artifact.id).kinds == {}
+        assert _views_row(db_session, artifact) is None
+
+    def test_records_the_load_refusal_of_an_unreadable_source(
+        self, db_session, stored, local_storage
+    ):
+        artifact = stored("broken.stl", b"not geometry")
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds[DerivativeKind.PREVIEWS] is DerivativeState.FAILED
+        row = _views_row(db_session, artifact)
+        # Deterministic, as the batch records it: no second load is scheduled.
+        assert (row.failure_reason, row.next_attempt_at) == ("invalid_source", None)
+
+    def test_leaves_views_retryable_when_the_worker_dies(
+        self, db_session, artifact, monkeypatch
+    ):
+        from app.modules.media import mesh_isolation
+        from app.modules.media.mesh_contracts import ThumbnailFailureReason
+
+        def crash(*args, **kwargs):
+            raise mesh_isolation.MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
+
+        monkeypatch.setattr(mesh_isolation, "generate", crash)
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds[DerivativeKind.PREVIEWS] is DerivativeState.FAILED
+        row = _views_row(db_session, artifact)
+        assert row.failure_reason == "worker_failed"
+        assert row.next_attempt_at is not None
+
+    def test_yields_views_to_a_superseding_attempt(
+        self, db_session, artifact, monkeypatch
+    ):
+        original = previews._publish
+
+        def supersede(file, *args, **kwargs):
+            # A regeneration claims the views while the cover pass publishes.
+            with get_session_factory().scoped_session() as session:
+                row = session.get(type(artifact), artifact.id)
+                records.begin(
+                    session, row, DerivativeKind.PREVIEWS, PREVIEWS_RECIPE, now=utcnow()
+                )
+                session.commit()
+            return original(file, *args, **kwargs)
+
+        monkeypatch.setattr(previews, "_publish", supersede)
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert DerivativeKind.PREVIEWS not in outcome.kinds
+        assert outcome.kinds[DerivativeKind.THUMBNAIL] is DerivativeState.READY
+        row = _views_row(db_session, artifact)
+        assert (row.state, row.storage_key) == (DerivativeState.RUNNING, None)
