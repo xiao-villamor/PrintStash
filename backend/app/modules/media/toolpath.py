@@ -69,6 +69,10 @@ def read_ascii(file: File) -> bytes:
     """The toolpath of an ASCII G-code Artifact: its own bounded bytes."""
     if file.file_type != FileType.GCODE:
         raise OperationError("toolpath_not_gcode", kind=ErrorKind.NOT_FOUND)
+    from app.modules.media.sliced_gcode import is_container
+
+    if is_container(file):
+        raise OperationError("plate_selection_required", kind=ErrorKind.CONFLICT)
     try:
         with tempfile.TemporaryDirectory(prefix="printstash-toolpath-") as directory:
             incoming = Path(directory) / "input.gcode"

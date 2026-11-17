@@ -229,7 +229,7 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
   await expect(dialog).toBeVisible();
 
   if (gcode) {
-    await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles(
+    await page.locator('input[accept=".gcode,.g,.gco,.bgcode,.gcode.3mf"]').setInputFiles(
       opts.gcodeFile ?? {
         name: `${name}.gcode`,
         mimeType: "text/plain",

@@ -63,7 +63,12 @@ from app.modules.media.mesh_contracts import (
     ThumbnailStrategy,
 )
 from app.modules.media.mesh_isolation import MeshWorkerError
+from app.modules.media.sliced_gcode import is_container, plate_toolpath
 from app.modules.media.source_preparation import reserve_sources
+from app.modules.media.three_mf_preview import (
+    EmbeddedGcodeError,
+    list_embedded_gcode_plates,
+)
 from app.modules.media.thumbnail_publication import (
     ThumbnailPublicationError,
     adopt_thumbnail,
@@ -469,7 +474,10 @@ def _derive_mesh(
                         strategy=frame.strategy.value,
                         renderer_encoded=frame.strategy is ThumbnailStrategy.FULL,
                         complete=frame.coverage.preview
-                        in (PreviewCoverage.COMPLETE, PreviewCoverage.DOCUMENT_SUPPLIED),
+                        in (
+                            PreviewCoverage.COMPLETE,
+                            PreviewCoverage.DOCUMENT_SUPPLIED,
+                        ),
                         duration_ms=frame.duration_ms,
                         peak_rss_bytes=frame.peak_rss_bytes,
                         abort_on_failure=True,
@@ -692,10 +700,28 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
                 try:
                     if file_row.file_type is FileType.RESIN:
                         meta = resin.parse(source)
+                    elif is_container(file_row):
+                        plates = list_embedded_gcode_plates(source)
+                        if len(plates) == 1:
+                            with plate_toolpath(source, plates[0]) as toolpath:
+                                meta = gcode_parser.parse(toolpath)
+                                captured = capture_settings(toolpath)
+                        else:
+                            with get_session_factory().scoped_session() as session:
+                                records.mark_skipped(
+                                    session,
+                                    attempts[DerivativeKind.METADATA],
+                                    "per_plate_metadata"
+                                    if plates
+                                    else "no_sliced_plates",
+                                    now=utcnow(),
+                                )
+                                session.commit()
+                            outcome[DerivativeKind.METADATA] = DerivativeState.SKIPPED
                     else:
                         meta = gcode_parser.parse(source)
                         captured = capture_settings(source)
-                except ResinFormatError:
+                except ResinFormatError, EmbeddedGcodeError:
                     _fail(
                         attempts[DerivativeKind.METADATA],
                         "invalid_source",
@@ -707,9 +733,13 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
                     image = (
                         resin.extract(source)
                         if file_row.file_type is FileType.RESIN
+                        else mesh_previews.extract_embedded_3mf_thumbnail(
+                            source, file_type="3mf"
+                        )
+                        if is_container(file_row)
                         else thumbnail.extract(source)
                     )
-                except ResinFormatError:
+                except ResinFormatError, EmbeddedGcodeError:
                     _fail(
                         attempts[DerivativeKind.THUMBNAIL],
                         "invalid_source",

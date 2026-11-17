@@ -397,6 +397,7 @@ class PrintJob(SQLModel, table=True):
     external_profile_id: Optional[str] = Field(default=None, max_length=255)
     external_gcode_file: Optional[str] = Field(default=None, max_length=1024)
     external_plate_index: Optional[int] = None
+    plate_index: int | None = None
     external_current_layer: Optional[int] = None
     external_total_layers: Optional[int] = None
     external_nozzle_diameter: Optional[float] = None
@@ -492,6 +493,7 @@ class PrinterFile(SQLModel, table=True):
     printer_id: int = Field(foreign_key="printers.id", index=True)
     file_id: Optional[int] = Field(default=None, foreign_key="files.id", index=True)
 
+    plate_index: int | None = None
     remote_filename: str = Field(max_length=512)
     size_bytes: Optional[int] = None
     sha256: Optional[str] = Field(default=None, max_length=64, index=True)

@@ -49,7 +49,7 @@ export function AddGcodeRevisionModal({
   function selectFile(nextFile: File | null) {
     if (nextFile && !isGcodeFile(nextFile.name)) {
       setFile(null);
-      setError(uiText("Choose a .gcode, .g, .gco, or .bgcode file."));
+      setError(uiText("Choose a .gcode, .g, .gco, .bgcode, or .gcode.3mf file."));
       return;
     }
     setFile(nextFile);

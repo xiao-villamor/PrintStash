@@ -29,6 +29,7 @@ from app.db.models import (
     User,
 )
 from app.modules.identity import printer_rbac, rbac
+from app.modules.media.sliced_gcode import selected_plate
 from app.modules.printing import materials
 from app.modules.printing.printer_files import (
     build_traceable_remote_filename,
@@ -78,6 +79,7 @@ async def send_to_printer(
     if not provider.capabilities.accepts_format(artifact_format):
         raise OperationError("artifact_format_not_supported", kind=ErrorKind.CONFLICT)
     _require_file_role(session, current_user, f, CollectionRole.EDIT)
+    plate_index = await asyncio.to_thread(selected_plate, f, payload.plate_index)
     if provider.capabilities.requires_ready_before_send:
         try:
             status = await provider.query_status()
@@ -112,7 +114,7 @@ async def send_to_printer(
     remote_name = (
         payload.remote_filename.strip()
         if payload.remote_filename
-        else build_traceable_remote_filename(f)
+        else build_traceable_remote_filename(f, plate_index=plate_index)
     )
     if artifact_format.value == "bgcode_binary":
         if not remote_name.lower().endswith(".bgcode"):
@@ -126,6 +128,7 @@ async def send_to_printer(
         model_id=f.model_id,
         remote_filename=remote_name,
         state=PrintJobState.UPLOADING,
+        plate_index=plate_index,
         spool_id=payload.spool_id,
         spool_name=payload.spool_name,
         spool_filament_id=payload.spool_filament_id,
@@ -146,8 +149,13 @@ async def send_to_printer(
     session.refresh(job)
 
     try:
-        await transfer_artifact(
-            backend, provider, f, remote_name, start_print=payload.start_print
+        receipt = await transfer_artifact(
+            backend,
+            provider,
+            f,
+            remote_name,
+            start_print=payload.start_print,
+            plate_index=plate_index,
         )
     except ProviderError as exc:
         job.state = PrintJobState.FAILED
@@ -211,9 +219,10 @@ async def send_to_printer(
         printer_id=printer_id,
         file_id=f.id,  # type: ignore[arg-type]
         remote_filename=remote_name,
-        size_bytes=f.size_bytes,
-        sha256=f.sha256,
+        size_bytes=receipt.size_bytes,
+        sha256=receipt.sha256,
         matched_by="upload_history",
+        plate_index=plate_index,
     )
     return out
 

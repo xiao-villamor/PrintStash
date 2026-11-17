@@ -290,6 +290,13 @@ class TestConversionValidation:
 
 
 class TestReadAscii:
+    def test_refuses_to_serve_archive_bytes_as_text(self, stored):
+        from tests.fixtures.three_mf_projects import build_sliced_project
+
+        artifact = stored("project.gcode.3mf", build_sliced_project())
+        with pytest.raises(OperationError, match="plate_selection_required"):
+            toolpath.read_ascii(artifact)
+
     def test_serves_the_artifact_bytes_as_its_toolpath(self, make_model, make_file):
         content = b"G90\nG1 X10 E1\n"
         artifact = make_file(

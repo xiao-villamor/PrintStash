@@ -154,7 +154,7 @@ test.describe("Standalone similarity", () => {
           )
           .setInputFiles({ name: `${name}.stl`, mimeType: "model/stl", buffer: mesh });
         await dialog
-          .locator('input[accept=".gcode,.g,.gco,.bgcode"]')
+          .locator('input[accept=".gcode,.g,.gco,.bgcode,.gcode.3mf"]')
           .setInputFiles({ name: `${name}.gcode`, mimeType: "text/plain", buffer: revision });
         await page.getByPlaceholder("e.g. Bracket v2").fill(name);
         await page.getByRole("button", { name: /upload to vault/i }).click();

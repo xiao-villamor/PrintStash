@@ -1020,6 +1020,61 @@ class TestDeriveMesh:
 
 
 class TestDeriveGcode:
+    def test_uses_sliced_archive_thumbnail(self, db_session, stored):
+        package = io.BytesIO()
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("Metadata/plate_1.gcode", b"G28\n")
+            archive.writestr("Metadata/plate_1.png", content.png())
+        artifact = stored("project.gcode.3mf", package.getvalue())
+        outcome = producers.derive_gcode(artifact.id)
+        assert outcome.kinds[DerivativeKind.THUMBNAIL] == DerivativeState.READY
+        db_session.refresh(artifact)
+        assert artifact.thumbnail_path is not None
+        assert get_backend().exists(artifact.thumbnail_path)
+
+    def test_parses_single_plate_slicer_metadata(self, db_session, stored):
+        package = io.BytesIO()
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr(
+                "Metadata/plate_7.gcode",
+                (FIXTURES_DIR / "real_orca_ender3_benchy.gcode").read_bytes(),
+            )
+        artifact = stored("project.gcode.3mf", package.getvalue())
+        outcome = producers.derive_gcode(artifact.id)
+        metadata = db_session.exec(
+            select(Metadata).where(Metadata.file_id == artifact.id)
+        ).one()
+        assert outcome.kinds[DerivativeKind.METADATA] == DerivativeState.READY
+        assert metadata.slicer_name == "OrcaSlicer"
+        assert metadata.estimated_time_s is not None
+
+    @pytest.mark.parametrize("plates", [(1, 2), ()], ids=["multiple", "unsliced"])
+    def test_does_not_publish_one_plates_metadata_as_the_whole_revision(
+        self, db_session, stored, plates
+    ):
+        from tests.fixtures.three_mf_projects import build_sliced_project
+
+        artifact = stored(
+            "project.gcode.3mf", build_sliced_project(plate_numbers=plates)
+        )
+        outcome = producers.derive_gcode(artifact.id)
+        assert outcome.kinds[DerivativeKind.METADATA] == DerivativeState.SKIPPED
+        assert (
+            db_session.exec(
+                select(Metadata).where(Metadata.file_id == artifact.id)
+            ).first()
+            is None
+        )
+
+    def test_refuses_malformed_sliced_metadata(self, db_session, stored):
+        artifact = stored("broken.gcode.3mf", b"invalid zip")
+        outcome = producers.derive_gcode(artifact.id)
+        assert outcome.kinds[DerivativeKind.METADATA] == DerivativeState.FAILED
+        assert (
+            _rows(db_session, artifact.id)[DerivativeKind.METADATA].failure_reason
+            == "invalid_source"
+        )
+
     def test_persists_the_selected_plate_temperature(
         self, db_session: Session, stored
     ) -> None:

@@ -37,6 +37,8 @@
 
 ### Added
 
+- Sliced `.gcode.3mf` archives are G-code Revisions: import or attach them, retain the original download, recommend a revision, preview its plates, and choose a plate to send, queue or batch. Printer history retains the selected plate. Existing explicit sliced archives are recognized during upgrade.
+
 - Custom recovery pages distinguish missing content, restricted access and connection failures, with retry and return actions that match the workbench.
 - Model cards offer lightweight multi-angle previews with deliberate arrows and an expanded gallery, including Top/Bottom and shape-aware planar views. Visible-image admission, intent-based prefetching and bounded background generation preserve primary covers and avoid hover-triggered geometry downloads. Generation has its own Background work control (`VAULT_DERIVATIVES_PREVIEWS_ENABLED`). See [preview behavior and limits](docs/model-previews.md).
 

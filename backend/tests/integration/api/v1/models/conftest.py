@@ -8,14 +8,12 @@ each file is how the same helper came to exist in four slightly different forms.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 from sqlmodel import Session
 
-from app.core.config import _overlay
 from app.db.models import (
     Collection,
     CollectionPermission,
@@ -120,17 +118,7 @@ def grant_role(db_session: Session):
 
 @pytest.fixture
 def local_storage(tmp_path: Path):
-    """Point every storage directory at a throwaway tree for this test."""
-    _overlay["data_dir"] = tmp_path / "files"
-    _overlay["thumb_dir"] = tmp_path / "thumbs"
-    _overlay["staging_dir"] = tmp_path / "staging"
-    for role, root in (
-        ("data", _overlay["data_dir"]),
-        ("thumb", _overlay["thumb_dir"]),
-    ):
-        root.mkdir(parents=True, exist_ok=True)
-        (root / ".printstash-storage-root.json").write_text(
-            json.dumps({"format": 1, "installation": "a" * 64, "role": role}),
-            encoding="utf-8",
-        )
-    return tmp_path
+    """Bind the adapter to this test's enrolled roots, not a previous test's roots."""
+    from tests._env import use_local_storage
+
+    return use_local_storage(tmp_path)

@@ -275,6 +275,7 @@ class SendToPrinter(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     file_id: int = Field(gt=0)
+    plate_index: int | None = Field(default=None, ge=0)
     start_print: bool = False
     remote_filename: Optional[str] = Field(default=None, max_length=512)
     # Optional Spoolman spool this print consumes. ``spool_name`` is the
@@ -350,6 +351,7 @@ class PrintJobRead(BaseModel):
     external_profile_id: Optional[str] = None
     external_gcode_file: Optional[str] = None
     external_plate_index: Optional[int] = None
+    plate_index: int | None = None
     external_current_layer: Optional[int] = None
     external_total_layers: Optional[int] = None
     external_nozzle_diameter: Optional[float] = None

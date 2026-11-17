@@ -1259,7 +1259,9 @@ def add_gcode_revision(
 
         original_filename = Path(file.filename).name
         suffix = Path(original_filename).suffix.lower() or ".gcode"
-        if suffix not in _GCODE_SUFFIXES:
+        if suffix not in _GCODE_SUFFIXES and not original_filename.lower().endswith(
+            ".gcode.3mf"
+        ):
             raise HTTPException(status_code=400, detail="unsupported_file_type")
 
         staged = _stage_gcode_upload(file, suffix)

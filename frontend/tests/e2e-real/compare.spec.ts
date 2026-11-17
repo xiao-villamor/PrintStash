@@ -42,7 +42,7 @@ test.describe("revision comparison", () => {
     // should show up as a highlighted diff once compared.
     await page.getByRole("button", { name: "Add revision", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Add G-code revision" })).toBeVisible();
-    await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
+    await page.locator('input[accept=".gcode,.g,.gco,.bgcode,.gcode.3mf"]').setInputFiles({
       name: "rev2.gcode",
       mimeType: "text/plain",
       buffer: Buffer.from(

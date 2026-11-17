@@ -24,11 +24,12 @@ from app.core.config import settings
 from app.core.http import get_or_404
 from app.core.logging import get_logger
 from app.core.security import get_current_user, require_auth, require_user
-from app.db.models import CollectionRole, DerivativeKind, File, FileType, Model, User
+from app.db.models import CollectionRole, DerivativeKind, File, Model, User
 from app.db.scopes import live
 from app.db.session import get_session
 from app.modules.identity import auth, rbac
 from app.modules.library.model_views.thumbnails import thumbnail_version
+from app.modules.media.sliced_gcode import is_container
 from app.modules.media.three_mf_preview import (
     EmbeddedGcodeError,
     list_embedded_gcode_plates,
@@ -176,7 +177,7 @@ def gcode_plates(
     session: Session = Depends(get_session),
 ) -> GcodePlatesRead:
     artifact = _accessible_file(session, file_id, current_user)
-    if artifact.file_type != FileType.THREE_MF:
+    if not is_container(artifact):
         raise HTTPException(status_code=404, detail="embedded_gcode_not_supported")
     if artifact.size_bytes > settings.three_mf_preview_max_archive_mb * 1024 * 1024:
         raise HTTPException(status_code=413, detail="embedded_gcode_archive_too_large")
@@ -217,7 +218,7 @@ def embedded_gcode(
     session: Session = Depends(get_session),
 ):
     artifact = _accessible_file(session, file_id, current_user)
-    if artifact.file_type != FileType.THREE_MF:
+    if not is_container(artifact):
         raise HTTPException(status_code=404, detail="embedded_gcode_not_supported")
     archive_cap = settings.three_mf_preview_max_archive_mb * 1024 * 1024
     if artifact.size_bytes > archive_cap:

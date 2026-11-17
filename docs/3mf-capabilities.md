@@ -59,3 +59,14 @@ remain bounded. Loading and STL conversion run under supervised worker memory an
 time limits. A small archive with too many placements can still be refused.
 
 See [compute settings](compute.md#settings) for the XML and memory budgets.
+
+## Sliced archives (Unreleased)
+
+An explicit `.gcode.3mf` filename identifies a G-code Revision, even when the
+archive also contains source meshes. The original archive remains downloadable.
+The G-code viewer lists its canonical `Metadata/plate_<N>.gcode` members; the
+Send dialog chooses which plate to transfer through the existing printer
+provider. Queued jobs, batch copies and print history retain that choice.
+See [provider support](provider-support.md#sliced-g-code-archives-unreleased)
+for transport limits. Plain `.3mf` projects continue to use the geometry
+capabilities described above and can preview embedded G-code when present.

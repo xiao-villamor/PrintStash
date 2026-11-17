@@ -782,6 +782,10 @@ def persist_artifact(
     into a mounted external library, or a file indexed where it already lies.
     """
     from app.modules.derivatives.jobs import nudge_for
+    from app.modules.media.sliced_gcode import is_sliced_filename
+
+    if is_sliced_filename(command.original_filename):
+        command = replace(command, file_type=FileType.GCODE)
 
     model_id = command.model.id
     assert model_id is not None
@@ -1092,6 +1096,10 @@ def commit_staged_artifact(
     its ingestion key and reports it as resumed instead of creating another.
     Raises on failure; the staged bytes are left for the caller's lease.
     """
+    from app.modules.media.sliced_gcode import is_sliced_filename
+
+    if is_sliced_filename(artifact.original_filename):
+        artifact = replace(artifact, file_type=FileType.GCODE)
     session_factory = session_factory or get_session_factory()
     with session_factory.scoped_session() as recovery:
         committed = recovery.exec(

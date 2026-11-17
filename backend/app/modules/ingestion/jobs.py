@@ -31,6 +31,7 @@ from app.db.models import (
     WorkPriority,
 )
 from app.db.session import get_session_factory
+from app.modules.media.sliced_gcode import is_sliced_filename
 from app.modules.work.async_steps import run_async
 from app.modules.work.contracts import JobContext, JobDefinition, Step, WorkItem
 from app.schemas.ingest import UrlIngestRequest
@@ -126,7 +127,9 @@ def _upload(ctx: JobContext) -> None:
                 ),
                 revision_notes=selection.get("revision_notes"),
                 is_recommended=bool(selection.get("is_recommended")),
-                auto_recommend_first_gcode=False,
+                auto_recommend_first_gcode=is_sliced_filename(
+                    request.original_filename or staged.name
+                ),
                 received_sha256=received,
             ),
             actor_user_id=request.owner_user_id,

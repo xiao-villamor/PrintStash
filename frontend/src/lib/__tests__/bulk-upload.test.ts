@@ -150,6 +150,9 @@ describe("isGcodeFile", () => {
     ["foo.gco", true],
     ["foo.bgcode", true],
     ["FOO.BGCODE", true],
+    ["project.gcode.3mf", true],
+    ["PROJECT.GCODE.3MF", true],
+    ["project.3mf", false],
     ["foo.stl", false],
     ["foo", false],
   ])("classifies %s as %s", (name, expected) => {
@@ -157,7 +160,7 @@ describe("isGcodeFile", () => {
   });
 
   it("advertises every accepted extension to native file pickers", () => {
-    expect(GCODE_ACCEPT).toBe(".gcode,.g,.gco,.bgcode");
+    expect(GCODE_ACCEPT).toBe(".gcode,.g,.gco,.bgcode,.gcode.3mf");
   });
 });
 

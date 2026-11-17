@@ -7,7 +7,7 @@ import { aRevision } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
 import { GcodePreview } from "../gcode-preview";
 
-const sliced = aRevision({ id: 10, file_type: "3mf", original_filename: "project.gcode.3mf" });
+const sliced = aRevision({ id: 10, file_type: "gcode", original_filename: "project.gcode.3mf" });
 const second = aRevision({ id: 11, file_type: "3mf", original_filename: "second.gcode.3mf" });
 const revision = aRevision({
   id: 12,

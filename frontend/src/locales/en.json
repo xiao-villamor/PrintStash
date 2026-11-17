@@ -1,4 +1,7 @@
 {
+  "Sliced plate": "Sliced plate",
+  "Choose a plate": "Choose a plate",
+  "Choose a .gcode, .g, .gco, .bgcode, or .gcode.3mf file.": "Choose a .gcode, .g, .gco, .bgcode, or .gcode.3mf file.",
   "Multi-angle previews": "Multi-angle previews",
   "Multi-angle preview setting saved.": "Multi-angle preview setting saved.",
   "Generate extra views for each Model. Turn off to save preparation time; cover images and existing views stay available.": "Generate extra views for each Model. Turn off to save preparation time; cover images and existing views stay available.",

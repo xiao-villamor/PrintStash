@@ -33,7 +33,7 @@ test.describe("revisions", () => {
     // Add a second revision (unique bytes so the content-hash dedupe keeps it).
     await page.getByRole("button", { name: "Add revision", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Add G-code revision" })).toBeVisible();
-    await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
+    await page.locator('input[accept=".gcode,.g,.gco,.bgcode,.gcode.3mf"]').setInputFiles({
       name: "rev2.gcode",
       mimeType: "text/plain",
       buffer: Buffer.from(`; second revision for ${name}\nG28\nG1 Z0.2\n`),

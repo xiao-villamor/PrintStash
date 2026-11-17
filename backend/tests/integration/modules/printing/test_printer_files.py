@@ -48,6 +48,18 @@ class _FakeFile:
 
 
 class TestTraceableFilename:
+    def test_long_sliced_names_keep_each_plate_distinct(self):
+        file = _FakeFile(7, "a" * 512 + ".gcode.3mf", "deadbeef" * 8)
+        names = [
+            build_traceable_remote_filename(file, plate_index=index)
+            for index in (2, 10)
+        ]
+        assert names[0] != names[1]
+        assert all(len(name) <= 512 for name in names)
+        assert "-plate-2__vault-f7-" in names[0]
+        assert "-plate-10__vault-f7-" in names[1]
+        assert all(name.endswith(".gcode") for name in names)
+
     def test_marker_round_trips_through_regex(self) -> None:
         f = _FakeFile(42, "My Cool Part.gcode", "abcdef0123456789" * 4)
         name = build_traceable_remote_filename(f)

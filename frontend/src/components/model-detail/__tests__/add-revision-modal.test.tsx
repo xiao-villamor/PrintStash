@@ -130,7 +130,7 @@ describe("AddGcodeRevisionModal", () => {
 
       expect(document.querySelector("input[type=file]")).toHaveAttribute(
         "accept",
-        ".gcode,.g,.gco,.bgcode",
+        ".gcode,.g,.gco,.bgcode,.gcode.3mf",
       );
     });
 
@@ -160,7 +160,7 @@ describe("AddGcodeRevisionModal", () => {
       drop(new File(["solid"], "benchy.stl", { type: "model/stl" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
-        "Choose a .gcode, .g, .gco, or .bgcode file.",
+        "Choose a .gcode, .g, .gco, .bgcode, or .gcode.3mf file.",
       );
     });
 
@@ -181,6 +181,15 @@ describe("AddGcodeRevisionModal", () => {
       await choose(user, aGcodeFile("draft.g"));
 
       expect(await screen.findByText("draft.g")).toBeInTheDocument();
+    });
+
+    it("uploads a sliced 3MF revision", async () => {
+      const user = userEvent.setup();
+      const view = renderModal();
+      await choose(user, aGcodeFile("project.GCODE.3MF"));
+      await user.click(screen.getByRole("button", { name: "Add revision" }));
+      await waitFor(() => expect(view.sent()?.get("file")).toBeInstanceOf(File));
+      expect(view.sent()?.get("file")).toHaveProperty("name", "project.GCODE.3MF");
     });
 
     it("accepts .gco", async () => {

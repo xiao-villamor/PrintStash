@@ -182,6 +182,7 @@ export function aPrintJob(override?: Partial<PrintJobRead>): PrintJobRead {
     external_profile_id: null,
     external_gcode_file: null,
     external_plate_index: null,
+    plate_index: null,
     external_current_layer: null,
     external_total_layers: null,
     external_nozzle_diameter: null,
