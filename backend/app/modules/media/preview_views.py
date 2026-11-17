@@ -11,6 +11,7 @@ from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 from printstash_core.mesh.rasterizer import render_prepared_thumbnail
 from printstash_core.mesh.render_geometry import (
     PreparedRenderGeometry,
+    RenderableMesh,
     prepare_mesh,
     prepare_normals,
 )
@@ -18,7 +19,6 @@ from printstash_core.mesh.similarity import GeometryError
 from printstash_core.mesh.similarity.components import ExpandedScene
 
 from app.core.cancellation import checkpoint
-from app.modules.media import thumbnail
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.preview_contracts import (
     MAX_IMAGE_BYTES,
@@ -110,7 +110,7 @@ def _cameras(
 
 
 def render_views(
-    mesh: Trimesh,
+    mesh: RenderableMesh,
     *,
     source_sha256: str,
     max_faces: int,
@@ -119,12 +119,15 @@ def render_views(
     include_poles: bool = False,
     progress: Callable[[int, int], None] | None = None,
 ) -> tuple[PreviewManifest, list[bytes]]:
-    if not 0 < len(mesh.faces) <= max_faces:
+    faces = mesh.faces
+    if faces is None:
+        raise ValueError("preview_no_geometry")
+    if not 0 < len(faces) <= max_faces:
         raise PreviewLimitError
     geometry = prepare_mesh(mesh)
     if geometry is None:
         raise ValueError("preview_no_geometry")
-    used = np.asarray(mesh.vertices)[np.unique(mesh.faces)]
+    used = np.asarray(mesh.vertices)[np.unique(faces)]
     return render_prepared_views(
         geometry,
         center=(used.min(axis=0) + used.max(axis=0)) * 0.5,
@@ -158,6 +161,10 @@ def render_prepared_views(
     profile, views = _cameras(
         geometry.face_count, max_faces=max_faces, include_poles=include_poles
     )
+    # The canonical encoder brings G-code and printer models with it; a cover
+    # worker loads it only once it renders views, never at startup.
+    from app.modules.media import thumbnail
+
     height = height_for(width)
     prepared = prepare_normals(geometry)
     images: list[bytes] = []
@@ -222,7 +229,7 @@ def render_prepared_views(
         source_sha256=source_sha256,
         recipe=recipe,
         profile=profile,
-        center=tuple(float(value) for value in center),
+        center=(float(center[0]), float(center[1]), float(center[2])),
         views=tuple(published),
         size=offset,
     ), images

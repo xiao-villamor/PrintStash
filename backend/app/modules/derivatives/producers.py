@@ -366,7 +366,7 @@ def _derive_mesh(
 
     from . import mesh_continuations
     from .mesh_continuation_values import FingerprintPlan
-    from .previews import PassClaim
+    from .preview_publication import PassClaim
 
     with phases.phase("options"):
         options = extraction_options(get_session_factory())
@@ -391,12 +391,15 @@ def _derive_mesh(
         pending = mesh_continuations.resume(
             session, claimed_file, plan, execution=execution
         )
-        from . import previews
+        from . import preview_publication as publication
 
         # This pass loads the mesh anyway: its views share that load. A replay
         # whose basics already landed still finishes the views it stranded.
-        if claimed_kinds or previews.stranded(session, claimed_file.id):
-            views = previews.claim_for_pass(session, claimed_file, execution=execution)
+        assert claimed_file.id is not None
+        if claimed_kinds or publication.stranded(session, claimed_file.id):
+            views = publication.claim_for_pass(
+                session, claimed_file, execution=execution
+            )
 
     with phases.phase("claim"):
         begun = _begin(
@@ -426,13 +429,13 @@ def _derive_mesh(
     def publish(frame: BasicOutput) -> None:
         nonlocal pending, views_settled
         if isinstance(frame, ViewsReady | ViewsRefused):
-            from . import previews
+            from . import preview_publication as publication
 
             if views is None or views_settled:
                 raise ValueError("unexpected_mesh_views_output")
             views_settled = True
             with phases.phase("publish_views"):
-                state = previews.publish_pass(
+                state = publication.publish_pass(
                     file_row, views.attempt, frame, started=views_started
                 )
             if state is not None:
@@ -660,10 +663,10 @@ def _derive_mesh(
                     outcome[DerivativeKind.THUMBNAIL] = state
                     published(DerivativeKind.THUMBNAIL, state)
             if views is not None and not views_settled:
-                from . import previews
+                from . import preview_publication as publication
 
                 views_settled = True
-                state = previews.fail_pass(views.attempt, reason)
+                state = publication.fail_pass(views.attempt, reason)
                 if state is not None:
                     published(DerivativeKind.PREVIEWS, state)
             for kind, authority in attempts.items():
@@ -702,9 +705,9 @@ def _derive_mesh(
         # Any exit that did not settle the claimed views (a crash, a superseded
         # cover) gives them back untouched, so the batch renders them at once.
         if views is not None and not views_settled:
-            from . import previews
+            from . import preview_publication as publication
 
-            previews.release_pass(views)
+            publication.release_pass(views)
 
 
 def _replace_material_requirements(

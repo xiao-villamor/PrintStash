@@ -88,12 +88,12 @@ def _hooks(derivative_group: DerivativeGroup):
         file_row = _file(session, subject_key)
         if file_row is not None:
             if derivative_group.definition is JobKind.DERIVATIVES_MESH:
-                from . import previews
+                from . import preview_publication as publication
                 from .mesh_continuations import withdraw_current_job
 
                 withdraw_current_job(session, file_id_of(subject_key))
                 # The pass ended before its views: a retry, never a verdict.
-                previews.settle_stranded(
+                publication.settle_stranded(
                     session,
                     file_id_of(subject_key),
                     ThumbnailFailureReason.WORKER_FAILED.value,
@@ -114,9 +114,9 @@ def _hooks(derivative_group: DerivativeGroup):
         if derivative_group.definition is JobKind.DERIVATIVES_MESH:
             # Views a dead cover pass claimed would otherwise wait out the
             # stale window; as a retry, the batch renders them.
-            from . import previews
+            from . import preview_publication as publication
 
-            previews.settle_stranded(session, file_row.id, reason)
+            publication.settle_stranded(session, file_id_of(subject_key), reason)
         if reason == SkipReason.DERIVATIVE_GROUP_DISABLED:
             # Settle started work without spending attempts on outputs that
             # were never started. Re-enabling the group can discover them.

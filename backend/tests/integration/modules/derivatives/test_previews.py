@@ -816,7 +816,9 @@ class TestCoverPassViews:
     def test_yields_views_to_a_superseding_attempt(
         self, db_session, artifact, monkeypatch
     ):
-        original = previews._publish
+        from app.modules.derivatives import preview_publication
+
+        original = preview_publication.publish
 
         def supersede(file, *args, **kwargs):
             # A regeneration claims the views while the cover pass publishes.
@@ -828,7 +830,7 @@ class TestCoverPassViews:
                 session.commit()
             return original(file, *args, **kwargs)
 
-        monkeypatch.setattr(previews, "_publish", supersede)
+        monkeypatch.setattr(preview_publication, "publish", supersede)
 
         outcome = producers.derive_mesh(artifact.id)
 
