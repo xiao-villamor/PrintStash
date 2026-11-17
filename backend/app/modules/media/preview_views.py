@@ -160,7 +160,7 @@ def render_prepared_views(
     images: list[bytes] = []
     published: list[PublishedView] = []
     offset = 0
-    for view in views:
+    for index, view in enumerate(views, start=1):
         checkpoint(force=True)
         encoded = render_prepared_thumbnail(
             prepared,
@@ -173,13 +173,23 @@ def render_prepared_views(
         if encoded is None:
             raise ValueError("preview_renderer_no_output")
         # Every advertised image crosses the same canonical validation seam.
-        encoded = thumbnail.to_webp(
-            encoded,
-            width=WIDTH,
-            normalize=False,
-            preserve_frame=True,
-            renderer_encoded=True,
-        )
+        try:
+            encoded = thumbnail.to_webp(
+                encoded,
+                width=WIDTH,
+                normalize=False,
+                preserve_frame=True,
+                renderer_encoded=True,
+            )
+        except thumbnail.EmptyThumbnailError:
+            # A pole of a plate standing on edge sees less than a pixel. The
+            # orbit still shows the Model, so that one view is left out; an
+            # empty orbit view means there is nothing to show at all.
+            if view.role is ViewRole.ORBIT:
+                raise
+            if progress is not None:
+                progress(index, len(views))
+            continue
         if len(encoded) > MAX_IMAGE_BYTES:
             raise PreviewLimitError
         points = geometry.vertices @ np.asarray(view.rotation).T.astype(np.float32)
@@ -202,7 +212,7 @@ def render_prepared_views(
         images.append(encoded)
         offset += len(encoded)
         if progress is not None:
-            progress(len(images), len(views))
+            progress(index, len(views))
     return PreviewManifest(
         source_sha256=source_sha256,
         recipe=recipe,

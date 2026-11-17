@@ -254,6 +254,9 @@ class _Generation:
         self.geometry_emitted = False
         self.thumbnail_emitted = False
         self.views_emitted = False
+        # Why the source could not be read, kept after an embedded cover
+        # replaces the thumbnail failure: views still owe that reason.
+        self.load_refusal: ThumbnailFailureReason | None = None
         self.reload_mesh_for_fingerprint = False
         self.stl_measurements: STLMeasurements | None = None
         self.embedded = None
@@ -504,6 +507,7 @@ class _Generation:
                     else ThumbnailFailureReason.INVALID_SOURCE
                 )
                 self.failure = refusal
+                self.load_refusal = refusal
                 if self.request.include_geometry:
                     self.geometry_outcome = GeometryRefused(refusal)
                 if self.request.include_fingerprint:
@@ -576,6 +580,7 @@ class _Generation:
                     else ThumbnailFailureReason.INVALID_SOURCE
                 )
                 self.failure = refusal
+                self.load_refusal = refusal
                 if self.request.include_geometry:
                     self.geometry_outcome = GeometryRefused(refusal)
                 if self.request.include_fingerprint:
@@ -1053,7 +1058,9 @@ class _Generation:
                         ViewsRefused(
                             ThumbnailFailureReason.RESOURCE_LIMIT
                             if self.over_cap
-                            else self.failure or ThumbnailFailureReason.WORKER_FAILED,
+                            else self.load_refusal
+                            or self.failure
+                            or ThumbnailFailureReason.WORKER_FAILED,
                             elapsed(),
                         )
                     )
@@ -1177,7 +1184,10 @@ class _Generation:
             if not self.views_emitted:
                 self.emit_views(
                     ViewsRefused(
-                        self.failure or ThumbnailFailureReason.WORKER_FAILED, 0
+                        self.load_refusal
+                        or self.failure
+                        or ThumbnailFailureReason.WORKER_FAILED,
+                        0,
                     )
                 )
         except _OutputDeliveryError as exc:

@@ -35,7 +35,11 @@ from app.modules.media.preview_contracts import (
     PreviewManifest,
 )
 from app.modules.media.source_preparation import reserve_sources
-from app.modules.media.stl_isolation import manifest_for, open_worker_output
+from app.modules.media.stl_isolation import (
+    STLManifest,
+    manifest_for,
+    open_worker_output,
+)
 from app.modules.storage.artifact_content import ArtifactContentError, resolve
 from app.modules.storage.capacity import CapacityManager, CapacityResource
 from app.modules.storage.capacity_estimates import vault_allocation
@@ -58,13 +62,17 @@ def _publish(
     attempt: records.DerivativeAttempt,
     manifest: PreviewManifest,
     stream: BinaryIO,
+    bundle: STLManifest,
     *,
     started: float,
 ) -> None:
-    """Verify every advertised view, then publish the bundle under ``attempt``."""
+    """Verify every advertised view, then publish the bundle under ``attempt``.
+
+    ``bundle`` is the size and digest of ``stream``'s bytes, taken by the
+    caller from whatever holds them: a worker's output file or memory.
+    """
     if manifest.source_sha256 != file.sha256 or manifest.recipe != attempt.recipe:
         raise ValueError("preview_source_changed")
-    bundle = manifest_for(stream)
     if bundle.size != manifest.size:
         raise ValueError("preview_size_mismatch")
     for view in manifest.views:
@@ -190,6 +198,9 @@ def publish_pass(
                 attempt,
                 output.manifest,
                 io.BytesIO(output.bundle),
+                STLManifest(
+                    len(output.bundle), hashlib.sha256(output.bundle).hexdigest()
+                ),
                 started=started,
             )
         return DerivativeState.READY
@@ -300,7 +311,14 @@ def _derive(
                     )
                 manifest = PreviewManifest.model_validate_json(payload)
                 with open_worker_output(directory / "views.bin") as stream:
-                    _publish(file, attempt, manifest, stream, started=started)
+                    _publish(
+                        file,
+                        attempt,
+                        manifest,
+                        stream,
+                        manifest_for(stream),
+                        started=started,
+                    )
     except records.AttemptSuperseded:
         return Outcome({})
     except (
