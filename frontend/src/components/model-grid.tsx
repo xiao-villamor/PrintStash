@@ -883,20 +883,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     mode: UploadMode;
   } | null>(null);
 
-  useEffect(() => {
-    const reviewImport = () => {
-      setDropPreload({ files: [], mode: "url" });
-      setUploadOpen(true);
-    };
-    window.addEventListener("printstash:review-import", reviewImport);
-    return () => window.removeEventListener("printstash:review-import", reviewImport);
-  }, []);
   const [dropCollection, setDropCollection] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragEnterCount = useRef(0);
 
   function classifyDrop(files: File[]): { files: File[]; mode: UploadMode } | null {
-    const meshes = files.filter((f) => isSourceFile(f.name));
+    const meshes = files.filter((f) => isSourceFile(f.name) && !isGcodeFile(f.name));
     const gcodes = files.filter((f) => isGcodeFile(f.name));
     const zips = files.filter((f) => isArchiveFile(f.name));
     if (meshes.length >= 2) return { mode: "bulk", files: meshes };
@@ -3973,18 +3965,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           >
                             {uiText("Upload files")}
                           </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={!canUploadToVault}
-                            onClick={() => {
-                              setDropPreload({ files: [], mode: "url" });
-                              setUploadOpen(true);
-                            }}
-                          >
-                            {uiText("Import from URL")}
-                          </Button>
+                          {canUploadToVault && (
+                            <Button asChild variant="outline" size="sm">
+                              <Link href="/inbox">{uiText("Import from URL")}</Link>
+                            </Button>
+                          )}
                           {user?.is_superuser && (
                             <Button asChild variant="outline" size="sm">
                               <Link href="/settings">{uiText("Connect folder or NAS")}</Link>

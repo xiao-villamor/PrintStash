@@ -7,12 +7,11 @@ import { uiMessage } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useI18n, useUiLocale } from "@/lib/i18n";
 
-import { useId, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { vaultConfigOptions } from "@/lib/queries/settings-config";
 import { librarySourcesOptions } from "@/lib/queries/settings-library-sources";
 import { ChevronDown, File as FileIcon, Loader2, Plus, Upload, X } from "lucide-react";
-import { capturePendingImport } from "@/lib/api";
 import { useCollectionLookup, useCollectionSearch, useTags } from "@/lib/queries";
 import { CollectionPicker } from "@/components/collection-picker";
 import { toast } from "@/lib/toast";
@@ -31,6 +30,7 @@ import {
   extensionOf,
   fileListToItems,
   GCODE_ACCEPT,
+  isArchiveFile,
   isGcodeFile,
   isSourceFile,
   mergeBulkItems,
@@ -41,7 +41,6 @@ import {
 } from "@/lib/bulk-upload";
 import { CollectionNodeRead } from "@/types";
 import { ApiError } from "@/lib/errors";
-import { useRouter } from "@/lib/navigation";
 import {
   runModelUpload,
   runBulkModelUpload,
@@ -59,7 +58,15 @@ declare module "react" {
   }
 }
 
-export type UploadMode = "files" | "bulk" | "url" | "zip";
+type UploadTab = "files" | "bulk";
+export type UploadMode = UploadTab | "zip";
+
+type BulkSelection = { kind: "bulk"; items: BulkItem[] } | { kind: "zip"; file: File };
+const EMPTY_BULK: BulkSelection = { kind: "bulk", items: [] };
+
+function isBulkModel({ file }: BulkItem) {
+  return isSourceFile(file.name) && !isGcodeFile(file.name);
+}
 
 /**
  * The open-time props the modal seeds its form from: files or bulk items handed
@@ -118,28 +125,26 @@ export function UploadModal({
   onboarding?: boolean;
   onTaskStarted?: (taskId: string) => void;
 }) {
-  const sourceUrlId = useId();
   useUiLocale();
   const { t } = useI18n();
   const { createTag } = useTaxonomyCommands();
-  const router = useRouter();
   const auth = useRequireAuth();
   const { user } = useAuth();
   const meshRef = useRef<HTMLInputElement>(null);
   const gcodeRef = useRef<HTMLInputElement>(null);
   const [meshFile, setMeshFile] = useState<File | null>(null);
   const [gcodeFile, setGcodeFile] = useState<File | null>(null);
-  const [mode, setMode] = useState<UploadMode>("files");
+  const [mode, setMode] = useState<UploadTab>("files");
   const modeMotion = useContentReveal(mode, { enabled: open, scroll: "self" });
   // Bulk mode: each mesh becomes its own model, queued as an independent
   // ingest task. No mesh+G-code linking (that stays on the "Files" tab).
   // Picking/dropping a folder mirrors its subfolders into nested collections.
-  const [bulkFiles, setBulkFiles] = useState<BulkItem[]>([]);
+  const [bulkSelection, setBulkSelection] = useState<BulkSelection>(EMPTY_BULK);
+  const bulkFiles = bulkSelection.kind === "bulk" ? bulkSelection.items : [];
+  const zipFile = bulkSelection.kind === "zip" ? bulkSelection.file : null;
+  const submissionKind = mode === "files" ? "files" : bulkSelection.kind;
   const bulkRef = useRef<HTMLInputElement>(null);
   const bulkFolderRef = useRef<HTMLInputElement>(null);
-  const [urlValue, setUrlValue] = useState("");
-  const [zipFile, setZipFile] = useState<File | null>(null);
-  const zipRef = useRef<HTMLInputElement>(null);
   const [modelName, setModelName] = useState("");
   const [tagInput, setTagInput] = useState("");
   const [tagSuggestionsOpen, setTagSuggestionsOpen] = useState(false);
@@ -179,7 +184,7 @@ export function UploadModal({
   const selectedAvailable = libraries.some((library) => library.id === targetLibraryId);
   const destinationBlocked =
     sourceSelected && (!selectedAvailable || config.isFetching || sources.isFetching);
-  const sourceMode = mode === "files" || mode === "bulk";
+  const sourceMode = submissionKind !== "zip";
   const catalogFailed =
     !!user?.is_superuser &&
     (config.isError || (!!config.data?.external_libraries_enabled && sources.isError));
@@ -202,15 +207,16 @@ export function UploadModal({
   }
 
   function applySeed(seed: UploadSeed) {
-    if (seed.initialMode) setMode(seed.initialMode);
-    if (!seed.preloadFiles?.length && !seed.preloadItems?.length) return;
+    if (seed.initialMode) setMode(seed.initialMode === "zip" ? "bulk" : seed.initialMode);
     if (seed.initialMode === "bulk") {
-      setBulkFiles(
-        seed.preloadItems?.length ? seed.preloadItems : fileListToItems(seed.preloadFiles ?? []),
-      );
+      const items = seed.preloadItems?.length
+        ? seed.preloadItems
+        : fileListToItems(seed.preloadFiles ?? []);
+      setBulkSelection({ kind: "bulk", items: items.filter(isBulkModel) });
     } else if (seed.initialMode === "zip") {
-      setZipFile(seed.preloadFiles?.[0] ?? null);
-    } else {
+      const file = seed.preloadFiles?.[0];
+      setBulkSelection(file ? { kind: "zip", file } : EMPTY_BULK);
+    } else if (seed.preloadFiles?.length) {
       setMeshFile(null);
       setGcodeFile(null);
       setModelName("");
@@ -301,14 +307,29 @@ export function UploadModal({
   // Merge newly picked/dropped meshes into the bulk queue (drops non-mesh
   // files and duplicates), then surface a notice for anything skipped.
   function addBulkItems(items: BulkItem[]) {
-    setBulkFiles((prev) => mergeBulkItems(prev, items).items);
-    const skipped = items.length - items.filter((it) => isSourceFile(it.file.name)).length;
+    const models = items.filter(isBulkModel);
+    const archives = items.filter(({ file }) => isArchiveFile(file.name));
+    if (models.length > 0) {
+      setBulkSelection((prev) => ({
+        kind: "bulk",
+        items: mergeBulkItems(prev.kind === "bulk" ? prev.items : [], models).items,
+      }));
+      if (archives.length > 0) {
+        toast.warning(uiText("Archives were skipped because Model files were selected."));
+      }
+    } else if (archives.length > 0) {
+      setBulkSelection({ kind: "zip", file: archives[0].file });
+      if (archives.length > 1) {
+        toast.warning(uiText("Only the first archive was selected."));
+      }
+    }
+    const skipped = items.length - models.length - archives.length;
     if (skipped > 0) {
       toast.warning(
         uiText("Some files skipped"),
         uiText("uploads.ignored", {
           value1: String(skipped),
-          value3: String(SOURCE_ACCEPT),
+          value3: bulkAccept,
           count: Number(skipped),
         }),
       );
@@ -321,9 +342,7 @@ export function UploadModal({
     setMeshFile(null);
     setGcodeFile(null);
     setMode("files");
-    setBulkFiles([]);
-    setUrlValue("");
-    setZipFile(null);
+    setBulkSelection(EMPTY_BULK);
     setModelName("");
     setPickedCollection(null);
     setSelectedTags([]);
@@ -349,27 +368,6 @@ export function UploadModal({
     return true;
   }
 
-  async function runUrlImport() {
-    if (!auth.isAuthenticated || submitting) {
-      if (!auth.isAuthenticated) auth.showAuthRequiredToast();
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const item = await capturePendingImport({
-        url: urlValue.trim(),
-        collection_id: chosenCollection?.id ?? null,
-        tags: selectedTags,
-      });
-      toast.success(uiText("Captured URL. Review it before importing."));
-      close();
-      router.push(`/inbox/${item.id}`);
-    } catch (err) {
-      toast.error(err);
-      setSubmitting(false);
-    }
-  }
-
   function doInspectZip() {
     if (!collectionGate() || submitting || !zipFile) return;
     const file = zipFile;
@@ -391,17 +389,11 @@ export function UploadModal({
   function doSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting || pendingTagCount > 0 || (sourceMode && destinationBlocked)) return;
-    if (mode === "url") {
-      if (!urlValue.trim()) return;
-      void runUrlImport();
-      return;
-    }
-    if (mode === "zip") {
-      if (!zipFile) return;
+    if (submissionKind === "zip") {
       doInspectZip();
       return;
     }
-    if (mode === "bulk") {
+    if (submissionKind === "bulk") {
       if (bulkFiles.length === 0) return;
       if (!collectionGate()) return;
       void runBulkModelUpload(
@@ -509,7 +501,9 @@ export function UploadModal({
             <p className="mt-1 text-sm text-muted-foreground">
               {onboarding
                 ? t("setup.firstUploadHelp")
-                : uiText("Add a 3D Model, an existing G-code file, or both together.")}
+                : mode === "bulk"
+                  ? uiText("Add many Models from files, a folder or an archive.")
+                  : uiText("Add a 3D Model, an existing G-code file, or both together.")}
             </p>
           </div>
           <Button
@@ -542,8 +536,6 @@ export function UploadModal({
                 [
                   ["files", "uploads.mode.files"],
                   ["bulk", "uploads.mode.bulk"],
-                  ["url", "uploads.mode.url"],
-                  ["zip", "uploads.mode.zip"],
                 ] as const
               ).map(([key, label]) => ({ key, label: t(label) }))}
               active={mode}
@@ -629,44 +621,22 @@ export function UploadModal({
                   inputRef={gcodeRef}
                 />
               </div>
-            ) : mode === "bulk" ? (
+            ) : (
               <BulkFiles
                 items={bulkFiles}
+                archive={zipFile}
                 fileInputRef={bulkRef}
                 folderInputRef={bulkFolderRef}
                 onAddItems={addBulkItems}
-                onRemove={(idx) => setBulkFiles((prev) => prev.filter((_, i) => i !== idx))}
-                onClear={() => setBulkFiles([])}
-              />
-            ) : mode === "url" ? (
-              <div>
-                <label htmlFor={sourceUrlId} className="mb-2 block text-sm text-foreground">
-                  {uiText("Source URL")}
-                </label>
-                <input
-                  id={sourceUrlId}
-                  type="url"
-                  inputMode="url"
-                  value={urlValue}
-                  onChange={(e) => setUrlValue(e.target.value)}
-                  className="h-10 w-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  placeholder={uiText("Model page, collection, or direct .stl/.zip link")}
-                />
-                <p className="mt-1.5 max-w-prose text-xs leading-5 text-muted-foreground">
-                  {uiText(
-                    "Create a durable capture, then review its files and confirm or change the collection and tags.",
-                  )}
-                </p>
-              </div>
-            ) : (
-              <FileSlot
-                label={uiText("Archive")}
-                large
-                accept={ARCHIVE_ACCEPT}
-                file={zipFile}
-                setFile={setZipFile}
-                placeholder={uiText(".zip .7z .rar .tar .tgz")}
-                inputRef={zipRef}
+                onRemove={(idx) =>
+                  setBulkSelection((prev) =>
+                    prev.kind === "bulk"
+                      ? { kind: "bulk", items: prev.items.filter((_, i) => i !== idx) }
+                      : prev,
+                  )
+                }
+                onClear={() => setBulkSelection(EMPTY_BULK)}
+                onRemoveArchive={() => setBulkSelection(EMPTY_BULK)}
               />
             )}
 
@@ -674,8 +644,6 @@ export function UploadModal({
               <h4 className="text-sm font-semibold">{uiText("Library destination")}</h4>
             )}
             <div className={onboarding ? "space-y-5" : "grid grid-cols-1 gap-5 sm:grid-cols-2"}>
-              {/* Model name (single-file uploads only; URL imports take their
-                  name from the downloaded file/page) */}
               {mode === "files" && (
                 <div>
                   <label
@@ -957,30 +925,26 @@ export function UploadModal({
                 (!user?.is_superuser && !collectionPath) ||
                 // A destination that has not resolved yet would land at the root.
                 (collectionPath !== "" && chosenCollection === null) ||
-                (mode === "files"
+                (submissionKind === "files"
                   ? !meshFile && !gcodeFile
-                  : mode === "bulk"
+                  : submissionKind === "bulk"
                     ? bulkFiles.length === 0
-                    : mode === "url"
-                      ? !urlValue.trim()
-                      : !zipFile)
+                    : !zipFile)
               }
               size="sm"
             >
               {submitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  {mode === "zip" ? uiText("Preparing archive…") : uiText("Working…")}
+                  {submissionKind === "zip" ? uiText("Preparing archive…") : uiText("Working…")}
                 </>
-              ) : mode === "bulk" ? (
+              ) : submissionKind === "bulk" ? (
                 bulkFiles.length > 0 ? (
                   uiText("counts.uploadModels", { count: bulkFiles.length })
                 ) : (
                   uiText("Upload to vault")
                 )
-              ) : mode === "url" ? (
-                uiText("Capture for review")
-              ) : mode === "zip" ? (
+              ) : submissionKind === "zip" ? (
                 uiText("Prepare archive")
               ) : onboarding ? (
                 t("setup.addModel")
@@ -1002,10 +966,8 @@ function FileSlot({
   setFile,
   placeholder,
   inputRef,
-  large = false,
 }: {
   label: string;
-  large?: boolean;
   accept: string;
   file: File | null;
   setFile: (f: File | null) => void;
@@ -1055,17 +1017,17 @@ function FileSlot({
           }
           setFile(dropped);
         }}
-        className={`flex ${large ? "min-h-[150px] flex-col items-center justify-center text-center" : "min-h-[104px] items-start justify-between"} gap-3 border border-dashed px-4 py-3 transition-colors cursor-action ${
-          file
-            ? "border-primary bg-primary/5"
-            : dragActive
-              ? "border-primary bg-primary/10"
+        className={`flex min-h-[104px] items-start justify-between gap-3 border border-dashed px-4 py-3 transition-colors duration-fast ease-out cursor-action ${
+          dragActive
+            ? "border-ring bg-muted"
+            : file
+              ? "border-border bg-muted"
               : "border-input bg-muted/20 hover:border-ring"
         }`}
       >
         {file ? (
           <div className="flex items-center gap-2 min-w-0 flex-1">
-            <FileIcon className="h-4 w-4 text-primary flex-shrink-0" />
+            <FileIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             <span className="text-xs font-medium text-on-surface truncate">{file.name}</span>
             <span className="font-mono text-3xs text-on-surface-variant flex-shrink-0">
               {formatBytes(file.size)}
@@ -1085,7 +1047,7 @@ function FileSlot({
         ) : (
           <>
             <Upload className="mt-2 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
-            <div className={large ? "flex min-w-0 flex-col items-center" : "min-w-0 flex-1"}>
+            <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
@@ -1115,16 +1077,17 @@ function FileSlot({
           className="hidden"
         />
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">
-        {file ? file.name : uiText("No files selected")}
-      </p>
     </div>
   );
 }
 
+const bulkAccept = `${SOURCE_ACCEPT},${ARCHIVE_ACCEPT}`;
+
 // Exported for unit tests; not used outside this module.
 export function BulkFiles({
   items,
+  archive,
+  onRemoveArchive,
   fileInputRef,
   folderInputRef,
   onAddItems,
@@ -1132,6 +1095,8 @@ export function BulkFiles({
   onClear,
 }: {
   items: BulkItem[];
+  archive?: File | null;
+  onRemoveArchive?: () => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   folderInputRef: React.RefObject<HTMLInputElement | null>;
   onAddItems: (items: BulkItem[]) => void;
@@ -1147,31 +1112,48 @@ export function BulkFiles({
   const totalBytes = items.reduce((sum, it) => sum + it.file.size, 0);
   const folderCount = new Set(items.map((it) => it.relPath).filter(Boolean)).size;
 
+  const inputVersion = useRef(0);
+  useLayoutEffect(() => {
+    return () => {
+      inputVersion.current += 1;
+    };
+  }, []);
+
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     dragDepth.current = 0;
     setDragActive(false);
+    const version = ++inputVersion.current;
     const dt = e.dataTransfer;
-    // Entries must be pulled out synchronously — the DataTransfer is emptied
-    // once this handler returns; the async folder walk happens afterwards.
+    // Snapshot entries before the browser clears DataTransfer.
     const entries = entriesFromDataTransfer(dt.items);
     if (entries.length > 0) {
       walkEntries(entries)
-        .then(onAddItems)
-        .catch((err) =>
-          toast.error(err instanceof Error ? err : new Error("Couldn't read the dropped folder")),
-        );
+        .then((dropped) => {
+          if (inputVersion.current === version) onAddItems(dropped);
+        })
+        .catch((err) => {
+          if (inputVersion.current === version) {
+            toast.error(err instanceof Error ? err : new Error("Couldn't read the dropped folder"));
+          }
+        });
     } else if (dt.files?.length) {
-      // Browsers without the entries API still give a flat FileList.
       onAddItems(fileListToItems(dt.files));
     }
   }
 
+  function handlePick(event: React.ChangeEvent<HTMLInputElement>) {
+    if (event.target.files?.length) {
+      inputVersion.current += 1;
+      onAddItems(fileListToItems(event.target.files));
+    }
+    event.target.value = "";
+  }
+
+  const compact = items.length > 0 || !!archive;
   return (
-    <div>
-      <p className="mb-2 text-sm text-foreground">{uiText("Model files")}</p>
+    <div className="space-y-3">
       <div
-        onClick={() => fileInputRef.current?.click()}
         onDragEnter={(e) => {
           e.preventDefault();
           dragDepth.current += 1;
@@ -1189,72 +1171,47 @@ export function BulkFiles({
           }
         }}
         onDrop={handleDrop}
-        className={`flex min-h-[150px] flex-col items-center justify-center gap-3 border border-dashed bg-muted/20 px-4 py-5 text-center transition-colors cursor-action ${
-          dragActive
-            ? "border-primary bg-primary/10"
-            : "border-outline-variant hover:border-outline"
-        }`}
+        className={`flex items-center gap-3 border border-dashed px-4 text-center transition-colors duration-fast ease-out ${
+          compact ? "flex-wrap py-2" : "min-h-[150px] flex-col justify-center py-5"
+        } ${dragActive ? "border-ring bg-muted" : "border-input bg-muted/20"}`}
       >
-        <Upload className="h-5 w-5 text-muted-foreground" aria-hidden />
+        <Upload className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+        <p className="text-sm">{uiText("Drop Model files, a folder or an archive")}</p>
         <div className="flex flex-wrap items-center justify-center gap-2">
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={(event) => {
-              event.stopPropagation();
-              fileInputRef.current?.click();
-            }}
+            onClick={() => fileInputRef.current?.click()}
           >
             {uiText("Choose files")}
           </Button>
-          <span className="text-xs text-muted-foreground">{uiText("or drop files here")}</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => folderInputRef.current?.click()}
+          >
+            {uiText("Choose folder")}
+          </Button>
         </div>
+        {!compact && (
+          <p className="text-xs text-muted-foreground">{bulkAccept.replaceAll(",", " ")}</p>
+        )}
+      </div>
+      {!archive && (
         <p className="text-xs text-muted-foreground">
-          {uiText("Choose Model files or drop a folder. G-code pairing is available on Files.")}
-        </p>
-      </div>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => folderInputRef.current?.click()}
-        >
-          {uiText("Choose folder")}
-        </Button>
-        <span className="text-xs text-muted-foreground">
-          {items.length ? (
-            <>
-              {uiText("counts.files", { count: items.length })}
-              {folderCount > 0
-                ? uiText("folders.count", { value1: String(folderCount), count: folderCount })
-                : ""}{" "}
-              · {formatBytes(totalBytes)}
-            </>
-          ) : (
-            uiText("No files selected")
+          {uiText(
+            "Each Model file creates a separate Model. Subfolders become nested Collections.",
           )}
-        </span>
-        <Button type="button" variant="ghost" size="sm" onClick={onClear} disabled={!items.length}>
-          {uiText("Clear all")}
-        </Button>
-      </div>
-      <p className="mt-6 text-xs text-muted-foreground">
-        {uiText("Each Model file creates a separate Model. Subfolders become nested Collections.")}
-      </p>
-      {/* Outside the drop zone: a programmatic click on either input bubbles, and the
-          zone's own onClick would open the file picker over the folder picker. */}
+        </p>
+      )}
       <input
         ref={fileInputRef}
         type="file"
-        accept={SOURCE_ACCEPT}
+        accept={bulkAccept}
         multiple
-        onChange={(e) => {
-          if (e.target.files?.length) onAddItems(fileListToItems(e.target.files));
-          // Allow re-picking the same files after a removal.
-          e.target.value = "";
-        }}
+        onChange={handlePick}
         className="hidden"
       />
       <input
@@ -1262,21 +1219,48 @@ export function BulkFiles({
         type="file"
         webkitdirectory=""
         multiple
-        onChange={(e) => {
-          if (e.target.files?.length) onAddItems(fileListToItems(e.target.files));
-          e.target.value = "";
-        }}
+        onChange={handlePick}
         className="hidden"
       />
+      {archive && (
+        <div className="flex items-center gap-2 border border-border bg-muted px-3 py-2">
+          <FileIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-xs">{archive.name}</span>
+          <span className="shrink-0 font-mono text-3xs text-muted-foreground">
+            {formatBytes(archive.size)}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={onRemoveArchive}
+            aria-label={uiText("Remove {value1}", { value1: archive.name })}
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
       {items.length > 0 && (
         <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground">
+              {uiText("counts.files", { count: items.length })}
+              {folderCount > 0
+                ? uiText("folders.count", { value1: String(folderCount), count: folderCount })
+                : ""}{" "}
+              · {formatBytes(totalBytes)}
+            </span>
+            <Button type="button" variant="ghost" size="sm" onClick={onClear}>
+              {uiText("Clear all")}
+            </Button>
+          </div>
           <div className="rounded border border-outline-variant divide-y divide-outline-variant max-h-56 overflow-y-auto">
             {items.map((it, idx) => (
               <div
                 key={`${it.relPath}/${it.file.name}:${it.file.size}:${idx}`}
                 className="flex items-center gap-2 px-3 py-2"
               >
-                <FileIcon className="h-4 w-4 text-primary flex-shrink-0" />
+                <FileIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 <span className="min-w-0 flex-1 truncate text-xs text-on-surface">
                   {it.relPath && <span className="text-on-surface-variant/60">{it.relPath}/</span>}
                   {it.file.name}

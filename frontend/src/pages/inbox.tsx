@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   CheckCircle2,
   CircleAlert,
@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { Modal } from "@/components/ui/modal";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
@@ -30,6 +31,7 @@ import { timeAgo } from "@/lib/format";
 import { uiText } from "@/lib/locale";
 import { userMessage } from "@/lib/errors";
 import { Link } from "@/lib/link";
+import { useRouter } from "@/lib/navigation";
 import { useI18n } from "@/lib/i18n";
 import { getSessionVersion } from "@/lib/session-transport";
 import { toast } from "@/lib/toast";
@@ -37,6 +39,7 @@ import type { InboxItem } from "@/types";
 
 export interface InboxPageDeps {
   listPendingImports: typeof listPendingImports;
+  capturePendingImport?: typeof inboxApi.capturePendingImport;
   retryPendingImport: typeof retryPendingImport;
   dismissPendingImport: typeof dismissPendingImport;
   batchPendingImports: typeof batchPendingImports;
@@ -241,6 +244,12 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
   const { locale, t } = useI18n();
   const snapshot = useInboxSnapshot(deps);
   const commands = useInboxCommands({ ...inboxApi, ...deps });
+  const router = useRouter();
+  const sourceUrlId = useId();
+  const captureFormId = useId();
+  const captureInFlight = useRef(false);
+  const [addUrlOpen, setAddUrlOpen] = useState(false);
+  const [sourceUrl, setSourceUrl] = useState("");
   const items = snapshot.data ?? EMPTY_INBOX;
   const loading = snapshot.isPending;
   const [activeTab, setActiveTab] = useState<InboxTab>("queue");
@@ -255,6 +264,32 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
     }),
     [items],
   );
+
+  function closeAddUrl() {
+    if (captureInFlight.current) return;
+    setAddUrlOpen(false);
+    setSourceUrl("");
+  }
+
+  async function submitCapture(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const url = sourceUrl.trim();
+    if (!url || captureInFlight.current) return;
+    captureInFlight.current = true;
+    const session = getSessionVersion();
+    try {
+      const item = await commands.capture.mutateAsync({ url, session });
+      if (getSessionVersion() !== session) return;
+      toast.success(uiText("Captured URL. Review it before importing."));
+      captureInFlight.current = false;
+      closeAddUrl();
+      router.push(`/inbox/${item.id}`);
+    } catch (error) {
+      if (getSessionVersion() === session) toast.error(error);
+    } finally {
+      captureInFlight.current = false;
+    }
+  }
 
   async function deleteImport() {
     if (!deleteTarget) return;
@@ -314,8 +349,8 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             >
               {uiText("Refresh")}
             </Button>
-            <Button asChild size="sm">
-              <Link href="/?upload=1">{t("inbox.openImport")}</Link>
+            <Button size="sm" onClick={() => setAddUrlOpen(true)}>
+              {t("inbox.addUrl")}
             </Button>
           </>
         }
@@ -410,9 +445,7 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
                 activeTab === "queue" ? t("inbox.emptyQueueTitle") : t("inbox.emptyCompletedTitle")
               }
               description={
-                activeTab === "queue"
-                  ? t("inbox.emptyQueueDescription")
-                  : t("inbox.emptyCompletedDescription")
+                activeTab === "queue" ? t("inbox.startHelp") : t("inbox.emptyCompletedDescription")
               }
             />
           )}
@@ -423,6 +456,53 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
           )}
         </p>
       </Card>
+      <Modal
+        open={addUrlOpen}
+        onClose={closeAddUrl}
+        title={t("inbox.addUrl")}
+        className="max-w-md"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={commands.capture.isPending}
+              onClick={closeAddUrl}
+            >
+              {uiText("Cancel")}
+            </Button>
+            <Button
+              type="submit"
+              form={captureFormId}
+              disabled={!sourceUrl.trim() || commands.capture.isPending}
+              loading={commands.capture.isPending}
+            >
+              {uiText("Capture for review")}
+            </Button>
+          </>
+        }
+      >
+        <form id={captureFormId} onSubmit={(event) => void submitCapture(event)}>
+          <label htmlFor={sourceUrlId} className="mb-2 block text-sm text-foreground">
+            {uiText("Source URL")}
+          </label>
+          <input
+            id={sourceUrlId}
+            type="url"
+            inputMode="url"
+            value={sourceUrl}
+            readOnly={commands.capture.isPending}
+            onChange={(event) => setSourceUrl(event.target.value)}
+            className="h-10 w-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            placeholder={uiText("Model page, collection, or direct .stl/.zip link")}
+          />
+          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+            {uiText(
+              "Create a durable capture, then review its files and confirm or change the collection and tags.",
+            )}
+          </p>
+        </form>
+      </Modal>
       <ConfirmModal
         open={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
