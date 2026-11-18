@@ -11,7 +11,11 @@ import os
 import sys
 from pathlib import Path
 
-from app.modules.media.mesh_contracts import PreparedThumbnailResult, ThumbnailRequest
+from app.modules.media.mesh_contracts import (
+    PreparedThumbnailResult,
+    ThumbnailRequest,
+    ViewsRequest,
+)
 from app.modules.media.mesh_isolation import read_spec
 from app.modules.media.mesh_protocol import BasicOutput, FingerprintFinal, encode_frame
 from app.modules.media.render_context import background_render_scope
@@ -34,6 +38,7 @@ def main(argv: list[str]) -> int:
         triangle_cap=spec["triangle_cap"],
         output_format=spec["output_format"],
         reason=spec["reason"],
+        views=None if spec["views"] is None else ViewsRequest(**spec["views"]),
     )
     sequence = 0
 

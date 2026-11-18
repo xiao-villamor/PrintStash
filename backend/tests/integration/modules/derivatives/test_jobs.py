@@ -111,7 +111,7 @@ class TestDerivation:
         derivative_jobs.nudge_for(db_session, artifact)
         drain_work()
 
-        # The secondary view set follows once the primary cover has settled.
+        # The cover pass renders the view set from the same load.
         assert _states(db_session, artifact.id) == {
             DerivativeKind.METADATA: DerivativeState.READY,
             DerivativeKind.THUMBNAIL: DerivativeState.READY,
@@ -123,6 +123,7 @@ class TestDerivation:
             "derivatives": {
                 DerivativeKind.METADATA: "ready",
                 DerivativeKind.THUMBNAIL: "ready",
+                DerivativeKind.PREVIEWS: "ready",
             }
         }
 

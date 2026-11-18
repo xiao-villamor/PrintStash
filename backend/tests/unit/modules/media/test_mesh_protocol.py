@@ -38,6 +38,7 @@ from app.modules.media.mesh_contracts import (
     ThumbnailFailureReason,
     ThumbnailRequest,
     ThumbnailStrategy,
+    ViewsRequest,
     encode_coverage,
 )
 from app.modules.media.mesh_facts import (
@@ -52,7 +53,16 @@ from app.modules.media.mesh_protocol import (
     GeometryOutput,
     MeshProtocolError,
     ThumbnailOutput,
+    ViewsReady,
+    ViewsRefused,
     encode_frame,
+)
+from app.modules.media.preview_contracts import (
+    PreviewManifest,
+    PublishedView,
+    ViewId,
+    ViewProfile,
+    ViewRole,
 )
 
 _GEOMETRY_COVERAGE = MeshCoverage(
@@ -244,7 +254,7 @@ class TestEncodeFrame:
 
     @pytest.mark.parametrize(
         "sequence",
-        [-1, True, 1.5, 3],
+        [-1, True, 1.5, 4],
         ids=["negative", "bool", "fractional", "too-many"],
     )
     def test_rejects_invalid_sequence(self, final, sequence):
@@ -1043,3 +1053,139 @@ class TestPreparedThumbnailFrames:
             PreparedThumbnailOutput(
                 PacketDescriptor(100, "a" * 64, 1), _PREVIEW_COVERAGE, 1, 1
             )
+
+
+_IDENTITY = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+
+
+def _views(*images: bytes) -> ViewsReady:
+    import hashlib
+
+    published, offset = [], 0
+    for index, image in enumerate(images):
+        published.append(
+            PublishedView(
+                id=ViewId(f"orbit-{index}"),
+                role=ViewRole.ORBIT,
+                rotation=_IDENTITY,
+                azimuth_degrees=0.0,
+                elevation_degrees=30.0,
+                width=640,
+                height=480,
+                view_center=(0.0, 0.0),
+                pixels_per_unit=1.0,
+                offset=offset,
+                size=len(image),
+                sha256=hashlib.sha256(image).hexdigest(),
+            )
+        )
+        offset += len(image)
+    manifest = PreviewManifest(
+        recipe=3,
+        source_sha256="a" * 64,
+        profile=ViewProfile.ORBIT,
+        center=(0.0, 0.0, 0.0),
+        views=tuple(published),
+        size=offset,
+    )
+    return ViewsReady(manifest, b"".join(images), 5)
+
+
+@pytest.fixture
+def views_request():
+    return ThumbnailRequest(
+        Path("mesh.stl"),
+        views=ViewsRequest(
+            recipe=3, include_poles=False, source_sha256="a" * 64, width=640
+        ),
+    )
+
+
+@pytest.fixture
+def views_final():
+    return FingerprintFinal(None, (), 20, 3000, _PREVIEW_COVERAGE)
+
+
+class TestViewsFrames:
+    def test_round_trips_a_rendered_view_set(
+        self, views_request, geometry, thumbnail, views_final
+    ):
+        views = _views(b"first", b"second")
+        stream = b"".join(
+            encode_frame(frame, sequence=i)
+            for i, frame in enumerate((geometry, thumbnail, views, views_final))
+        )
+
+        frames = tuple(FrameDecoder(views_request).feed(stream))
+
+        assert frames[2] == views
+
+    @pytest.mark.parametrize(
+        "reason",
+        [ThumbnailFailureReason.RESOURCE_LIMIT, ThumbnailFailureReason.INVALID_SOURCE],
+        ids=str,
+    )
+    def test_round_trips_a_refusal(
+        self, views_request, geometry, thumbnail, views_final, reason
+    ):
+        refused = ViewsRefused(reason, 3)
+        stream = b"".join(
+            encode_frame(frame, sequence=i)
+            for i, frame in enumerate((geometry, thumbnail, refused, views_final))
+        )
+
+        frames = tuple(FrameDecoder(views_request).feed(stream))
+
+        assert frames[2] == refused
+
+    def test_owes_requested_views_before_the_terminal_frame(
+        self, views_request, geometry, thumbnail, views_final
+    ):
+        decoder = FrameDecoder(views_request)
+        list(decoder.feed(encode_frame(geometry, sequence=0)))
+        list(decoder.feed(encode_frame(thumbnail, sequence=1)))
+
+        with pytest.raises(MeshProtocolError):
+            list(decoder.feed(encode_frame(views_final, sequence=2)))
+
+    def test_rejects_unrequested_views(self, geometry, thumbnail):
+        decoder = FrameDecoder(ThumbnailRequest(Path("mesh.stl")))
+        list(decoder.feed(encode_frame(geometry, sequence=0)))
+        list(decoder.feed(encode_frame(thumbnail, sequence=1)))
+
+        with pytest.raises(MeshProtocolError):
+            list(decoder.feed(encode_frame(_views(b"image"), sequence=2)))
+
+    def test_rejects_views_ahead_of_the_cover(self, views_request, geometry):
+        decoder = FrameDecoder(views_request)
+        list(decoder.feed(encode_frame(geometry, sequence=0)))
+
+        with pytest.raises(MeshProtocolError):
+            list(decoder.feed(encode_frame(_views(b"image"), sequence=1)))
+
+    def test_rejects_a_bundle_shorter_than_its_manifest(self):
+        views = _views(b"first", b"second")
+
+        with pytest.raises(MeshProtocolError):
+            ViewsReady(views.manifest, views.bundle[:-1], 5)
+
+    def test_rejects_a_refusal_carrying_images(
+        self, views_request, geometry, thumbnail
+    ):
+        decoder = FrameDecoder(views_request)
+        list(decoder.feed(encode_frame(geometry, sequence=0)))
+        list(decoder.feed(encode_frame(thumbnail, sequence=1)))
+        forged = _forge(
+            FrameKind.VIEWS,
+            2,
+            {
+                "manifest": None,
+                "failure_reason": "invalid_source",
+                "bundle_length": 5,
+                "duration_ms": 1,
+            },
+            b"image",
+        )
+
+        with pytest.raises(MeshProtocolError):
+            list(decoder.feed(forged))

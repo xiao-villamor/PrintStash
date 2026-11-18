@@ -256,7 +256,7 @@ class DerivativeSource:
     # Whether a fresh upload's gap is discovered at INTERACTIVE priority.
     interactive = True
 
-    def prerequisite(self) -> ColumnElement[bool]:
+    def prerequisite(self, session: Session) -> ColumnElement[bool]:
         """A File predicate that must hold before this group's gap is owed."""
         return true()
 
@@ -284,7 +284,7 @@ class DerivativeSource:
                 pending_predicate(self.group, session, now=now), not_(active)
             )
 
-            predicate = and_(predicate, self.prerequisite())
+            predicate = and_(predicate, self.prerequisite(session))
 
             def eligible(
                 ids: list[int],

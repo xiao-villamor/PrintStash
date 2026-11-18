@@ -1729,7 +1729,7 @@ class TestBegin:
     def test_commits_what_the_caller_adds_with_the_claims(self, db_session, stored):
         artifact = stored("claimed.gcode", content.gcode())
 
-        def rename(session, file):
+        def rename(session, file, _attempts):
             file.revision_notes = "claimed"
             session.add(file)
 
@@ -1743,7 +1743,7 @@ class TestBegin:
 
         artifact = stored("refused.gcode", content.gcode())
 
-        def refuse(_session, _file):
+        def refuse(_session, _file, _attempts):
             raise RuntimeError("continuation unavailable")
 
         with pytest.raises(RuntimeError, match="continuation unavailable"):
@@ -1754,7 +1754,7 @@ class TestBegin:
     def test_a_claim_with_its_artifact_is_one_transaction(self, stored, transactions):
         artifact = stored("once.gcode", content.gcode())
 
-        def rename(session, file):
+        def rename(session, file, _attempts):
             file.revision_notes = "claimed"
             session.add(file)
 
@@ -1776,7 +1776,7 @@ class TestBegin:
         begun = producers._begin(
             404,
             JobKind.DERIVATIVES_GCODE,
-            claimed=lambda _session, file: called.append(file.id),
+            claimed=lambda _session, file, _attempts: called.append(file.id),
         )
 
         assert (begun, called) == (None, [])

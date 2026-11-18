@@ -16,9 +16,11 @@ from app.modules.media.native_budget import (
     Resources,
     estimate_sources,
 )
-from app.modules.media.preview_contracts import HEIGHT, WIDTH, PreviewManifest
+from app.modules.media.preview_contracts import PreviewManifest, height_for
 from tests.factories.geometry import three_mf
 
+# The Model image quality default (VAULT_MODEL_THUMBNAIL_WIDTH).
+WIDTH = 640
 # More placed faces than the generic 3MF weight admits under a lib3mf claim.
 FACES = 327_680
 
@@ -31,7 +33,7 @@ def dense_package(tmp_path_factory):
 
 
 def _produce_within_claim(path, directory):
-    work = RasterWork(WIDTH, HEIGHT, 1, RasterCodec.WEBP)
+    work = RasterWork(WIDTH, height_for(WIDTH), 1, RasterCodec.WEBP)
     claim = estimate_sources(
         Resources(1, 64 * 1024**3), (MeshSource(path, "3mf"),), work=work
     )
@@ -41,6 +43,7 @@ def _produce_within_claim(path, directory):
             "3mf",
             hashlib.sha256(path.read_bytes()).hexdigest(),
             directory,
+            width=WIDTH,
             include_poles=True,
         )
 

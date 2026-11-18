@@ -592,8 +592,9 @@ toolpaths. Optional multi-angle previews default to disabled; ordinary thumbnail
 | `VAULT_DERIVATIVES_PREVIEWS_INCLUDE_POLES` | `false` |
 
 Settings → Previews offers one thumbnail (the default), four consistent oblique
-views, or oblique views plus top and bottom. Multi-angle generation runs after
-the cover and needs mesh processing enabled. Changing the angle selection
+views, or oblique views plus top and bottom. Multi-angle views render in the
+same pass as the cover, at the Model image quality setting, and need mesh
+processing enabled. Changing the angle selection
 regenerates existing view sets in the background. Single-thumbnail mode hides
 existing extra views without deleting them.
 
