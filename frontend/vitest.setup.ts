@@ -33,7 +33,7 @@ if (!("ResizeObserver" in globalThis)) {
 
 // jsdom has no media queries or animation clock. Ask for reduced motion, so content
 // is shown at once, unless a test supplies its own matcher.
-if (typeof window.matchMedia !== "function") {
+if (!("matchMedia" in window)) {
   window.matchMedia = (query) => ({
     matches: query.includes("prefers-reduced-motion: reduce"),
     media: query,
