@@ -9,6 +9,7 @@ import hashlib
 import struct
 import time
 from collections import OrderedDict
+from typing import Any
 
 import numpy as np
 from printstash_core.mesh import rasterizer as core
@@ -24,6 +25,8 @@ from .gpu_render_layout import (
     FRAME_STRIDE,
     MAX_FRAMES,
     VIEW_WORKSPACE_BYTES,
+    bounds_scratch_sizes,
+    view_bounds_sizes,
 )
 from .gpu_views import FRAME_STRUCT, ViewPipeline, frame_config
 
@@ -47,9 +50,6 @@ fn unit(value: vec3<f32>) -> vec3<f32> {
     let scaled = value / scale;
     return scaled / max(length(scaled), 1e-30);
 }
-fn rotate(value: vec3<f32>) -> vec3<f32> {
-    return vec3(dot(value,frame.r0.xyz), dot(value,frame.r1.xyz), dot(value,frame.r2.xyz));
-}
 struct Vertex { @builtin(position) pos: vec4<f32>, @location(0) normal: vec3<f32> };
 @vertex fn vs(@builtin(vertex_index) corner: u32, @builtin(instance_index) face: u32) -> Vertex {
     let offset = face * 3u;
@@ -62,8 +62,8 @@ struct Vertex { @builtin(position) pos: vec4<f32>, @location(0) normal: vec3<f32
     let blended = vec3(smoothed[p],smoothed[p+1u],smoothed[p+2u]);
     var weight = clamp((dot(blended,flat)-0.75)/0.17,0.,1.);
     weight = weight*weight*(3.-2.*weight);
-    let normal = rotate(unit(weight*blended+(1.-weight)*flat));
-    let position = rotate(point(index));
+    let normal = rotate(unit(weight*blended+(1.-weight)*flat), frame);
+    let position = rotate(point(index), frame);
     let xy = (position.xy-frame.projection.xy)*frame.projection.z;
     var out: Vertex;
     out.pos = vec4(2.*xy.x/frame.extent.x, 2.*xy.y/frame.extent.y,
@@ -150,6 +150,8 @@ class Renderer:
             },
         )
         self.color = self.depth = self.projected = self.uniform = self.visible = None
+        self.view_bounds: list[Any] = []
+        self.view_bounds_size = 0
         self.readback = None
         self.readback_size = 0
         self.size = None
@@ -177,9 +179,11 @@ class Renderer:
         self.gpu_geometry_uploads += 1
         return buffer
 
-    def attachments(self, width, height, size):
+    def attachments(self, width, height, vertex_count):
         import wgpu
 
+        bound_sizes = view_bounds_sizes(vertex_count)
+        bounds_bytes = sum(bound_sizes)
         frame_bytes = self.readback_frame_bytes
         if frame_bytes is None:
             frame_bytes = ((width * 4 + 255) // 256) * 256 * height
@@ -191,6 +195,7 @@ class Renderer:
             )
             + self.postprocess_size
             + VIEW_WORKSPACE_BYTES
+            + max(self.view_bounds_size, bounds_bytes)
             > self.workspace_limit
         ):
             from app.runtime.compute.contracts import ComputeUnavailable, Reason
@@ -232,10 +237,40 @@ class Renderer:
                 usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST,
             )
 
+        if bounds_bytes > self.view_bounds_size:
+            self._destroy_view_bounds()
+            try:
+                for size in bound_sizes:
+                    self.view_bounds.append(
+                        self.device.create_buffer(
+                            size=size, usage=wgpu.BufferUsage.STORAGE
+                        )
+                    )
+            except BaseException:
+                self._destroy_view_bounds()
+                raise
+            self.view_bounds_size = bounds_bytes
+
+    def _destroy_view_bounds(self):
+        for buffer in self.view_bounds:
+            buffer.destroy()
+        self.view_bounds.clear()
+        self.view_bounds_size = 0
+
     def draw(self, encoder, prepared, key, frame_index, width, height):
         geometry = self.geometry[key]
+        vertex_count = len(prepared.vertices)
+        levels = len(bounds_scratch_sizes(vertex_count))
         self.views.encode_camera(
-            encoder, geometry.bounds, self.visible, self.uniform, frame_index
+            encoder,
+            geometry.bounds,
+            geometry.positions,
+            vertex_count,
+            self.view_bounds[0],
+            self.view_bounds[1 : 1 + levels],
+            self.visible,
+            self.uniform,
+            frame_index,
         )
         entries = [
             {"binding": index, "resource": {"buffer": buffer}}
@@ -444,7 +479,9 @@ class Renderer:
             # Allocate the largest workspace first so later models cannot replace
             # the shared buffers while earlier commands are still pending.
             if missing:
-                self.attachments(w, h, 0)
+                self.attachments(
+                    w, h, max(len(decoded[i][0].vertices) for i in missing)
+                )
                 if self.packer is None:
                     self.packer = CompactGeometry(self.device, self.memory, self.views)
                     self.packer.geometry = self.geometry
@@ -627,6 +664,7 @@ class Renderer:
         if self.postprocessor is not None:
             self.postprocessor.close()
         self.postprocess_size = 0
+        self._destroy_view_bounds()
         self.outputs.clear()
         self.output_bytes = 0
         for resource in (

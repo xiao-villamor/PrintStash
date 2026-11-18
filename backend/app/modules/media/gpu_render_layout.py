@@ -22,6 +22,11 @@ def bounds_scratch_sizes(vertex_count: int) -> tuple[int, ...]:
     return tuple(sizes)
 
 
+def view_bounds_sizes(vertex_count: int) -> tuple[int, ...]:
+    """Final view bounds followed by one reusable buffer per reduction level."""
+    return (BOUND_BYTES, *bounds_scratch_sizes(vertex_count)) if vertex_count else ()
+
+
 def geometry_sizes(vertices: int, faces: int, positions: int) -> tuple[int, ...]:
     return vertices * 12, faces * 12, vertices * 4, positions * 12, BOUND_BYTES
 
@@ -59,7 +64,7 @@ def transient_sizes(
 def device_geometry_bytes(vertices: int, faces: int, positions: int, mode: str) -> int:
     """New geometry, transient scratch and its share of grouped staging.
 
-    Add frame_count*FRAME_STRIDE staging, VIEW_WORKSPACE_BYTES fixed workspace,
+    Add frame_count*FRAME_STRIDE staging, fixed frame slots and shared view bounds,
     color/depth/postprocess/readback, and one four-byte owner fence per batch.
     """
     return (
