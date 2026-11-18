@@ -7,11 +7,13 @@ export function LibraryCardSelection({
   checked,
   label,
   onChange,
+  className,
 }: {
   selecting: boolean;
   checked: boolean;
   label: string;
   onChange: () => void;
+  className?: string;
 }) {
   return (
     <div
@@ -20,6 +22,7 @@ export function LibraryCardSelection({
         !selecting &&
           !checked &&
           "[@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:pointer-events-none group-hover/selection-card:opacity-100 group-hover/selection-card:pointer-events-auto group-focus-within/selection-card:opacity-100 group-focus-within/selection-card:pointer-events-auto",
+        className,
       )}
     >
       {/* The enlarged target belongs to the control, so the card's drag cursor cannot show around it. */}

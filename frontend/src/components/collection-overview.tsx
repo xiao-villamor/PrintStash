@@ -139,6 +139,7 @@ export function CollectionOverviewCard({
           checked={!!selected}
           onChange={() => onToggleSelect(collection.id)}
           label={uiText("Select folder {value1}", { value1: String(collection.name) })}
+          className={compact ? "left-auto right-2 top-1/2 -translate-y-1/2" : undefined}
         />
       )}
       {(pending || error || (models && models.length === 0)) && (

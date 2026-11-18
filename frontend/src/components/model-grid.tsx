@@ -25,7 +25,7 @@ import {
   useLibraryReadingPosition,
   type LibraryReadingRenderer,
 } from "@/features/library/reading-position";
-import { LibraryItems } from "@/components/library-items";
+import { LibraryItems, type LibraryInspectorDock } from "@/components/library-items";
 import { PANE_MOVING_EVENT, PANE_SETTLED_EVENT } from "@/components/use-collections-pane-motion";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { useModelOpenIntent } from "@/features/library/model-detail";
@@ -87,6 +87,7 @@ import {
   useMemo,
   useState,
   useRef,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -534,7 +535,7 @@ function PrinterMenu({ open, onOpenChange, value, options, onSelect, onIntent }:
           onFocus={onIntent}
           onPointerDown={onIntent}
           onClick={() => onOpenChange(!open)}
-          className="h-8 w-36 max-w-full"
+          className="library-toolbar-printer h-8 w-36 max-w-full"
         >
           <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
           <span className="min-w-0 flex-1 truncate text-left">{current?.label}</span>
@@ -2313,6 +2314,37 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     !authority.authorizationChanged &&
     visibleModels.length > 0;
   const inspectorOpen = inspectorAvailable && !!inspectorIntent?.open;
+  const [inspectorDock, setInspectorDock] = useState<LibraryInspectorDock | null>(null);
+  const receiveInspectorDock = useCallback((dock: LibraryInspectorDock | null) => {
+    setInspectorDock((previous) =>
+      previous?.width === dock?.width && previous?.paddingOffset === dock?.paddingOffset
+        ? previous
+        : dock,
+    );
+  }, []);
+  const [inspectorMotion, setInspectorMotion] = useState<{
+    open: boolean;
+    locked: { dock: LibraryInspectorDock | null } | null;
+  }>({ open: inspectorOpen, locked: inspectorOpen ? { dock: null } : null });
+  const gridDock = viewMode === "grid" ? inspectorDock : null;
+  const appliedDock = inspectorMotion.locked ? inspectorMotion.locked.dock : gridDock;
+  if (inspectorMotion.open !== inspectorOpen) {
+    // The spring's travel is relative to its width. Hold the current width
+    // through the entrance, exit, or a reversal, then apply the latest fit.
+    setInspectorMotion({ open: inspectorOpen, locked: { dock: appliedDock } });
+  }
+  const settleInspectorDock = useCallback(() => {
+    setInspectorMotion((motion) => (motion.locked ? { ...motion, locked: null } : motion));
+  }, []);
+  const inspectorDockStyle: CSSProperties & {
+    "--library-inspector-width"?: string;
+    "--library-inspector-padding-offset"?: string;
+  } = appliedDock
+    ? {
+        "--library-inspector-width": `${appliedDock.width}px`,
+        "--library-inspector-padding-offset": `${appliedDock.paddingOffset}px`,
+      }
+    : {};
   const inspectorOpener = useRef<HTMLElement | null>(null);
   const setInspector = useCallback(
     (intent: InspectorIntent) => {
@@ -3119,7 +3151,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               onSelect={selectSort}
               labelFor={ui}
               triggerSize="xs"
-              triggerClassName="h-8 w-32 max-w-full"
+              triggerClassName="library-toolbar-sort h-8 w-32 max-w-full"
               wrapperClassName="min-w-0 max-w-full"
             />
             <div className="flex items-center bg-muted/50">
@@ -3360,6 +3392,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           tabIndex={-1}
           aria-busy={reading.status === "restoring"}
           data-inspector-open={inspectorOpen || undefined}
+          data-inspector-grid={(docView === "models" && viewMode === "grid") || undefined}
+          data-inspector-compact-dock={(compact && !!appliedDock) || undefined}
+          style={inspectorDockStyle}
           className="@container/library relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-background pb-24 md:pb-0"
           onDragEnter={onMainDragEnter}
           onDragOver={onMainDragOver}
@@ -4030,6 +4065,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       readingId="models"
                       layout="grid"
                       freezeInspectorTracks={inspectorOpen}
+                      onInspectorDockChange={receiveInspectorDock}
+                      inspectorDockLocked={inspectorMotion.locked !== null}
                       estimateSize={compact ? 290 : 250}
                       compact={compact}
                     />
@@ -4167,6 +4204,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             key={entry.session}
             id={inspectorIntent.id}
             open={inspectorOpen}
+            style={inspectorDockStyle}
+            onMotionSettled={settleInspectorDock}
             origin={snapshot?.entry}
             canWrite={auth.isAuthenticated && !authority.authorizationChanged && inspectorOpen}
             onOpenPage={() => reading.rememberAnchor(`/models/${inspectorIntent.id}`)}

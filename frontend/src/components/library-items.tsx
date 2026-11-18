@@ -50,6 +50,11 @@ function fittedTrack(width: number, preferredWidth: number, gap: number) {
     : Math.max(preferredWidth, Math.floor((width - gap * (columns - 1)) / columns));
 }
 
+export interface LibraryInspectorDock {
+  width: number;
+  paddingOffset: number;
+}
+
 interface LibraryItemsProps<T> {
   items: readonly T[];
   itemKey: (item: T) => string;
@@ -62,6 +67,9 @@ interface LibraryItemsProps<T> {
   estimateSize?: number;
   /** Keep the closed grid's tracks while the docked inspector consumes space. */
   freezeInspectorTracks?: boolean;
+  /** Only the Model grid owns the dock's width. */
+  onInspectorDockChange?: (dock: LibraryInspectorDock | null) => void;
+  inspectorDockLocked?: boolean;
   /** A production-build comparison can disable the renderer without changing cards or data. */
   virtualize?: boolean;
   className?: string;
@@ -88,6 +96,8 @@ export function LibraryItems<T>({
   virtualize = import.meta.env.VITE_LIBRARY_VIRTUALIZATION !== "off",
   className,
   freezeInspectorTracks = false,
+  onInspectorDockChange,
+  inspectorDockLocked = false,
   extraColumns = 0,
   minCardWidth,
   onColumnsChange,
@@ -100,6 +110,8 @@ export function LibraryItems<T>({
     width: 0,
     height: 0,
     closedFrameWidth: 0,
+    inspectorWidth: 0,
+    inspectorPaddingOffset: 0,
     track: 0,
     preferredWidth: 0,
     gap: 0,
@@ -165,7 +177,7 @@ export function LibraryItems<T>({
     const scroll = scrollRef.current;
     if (!node || !scroll) return;
     const measure = (restingWidth?: number) => {
-      const width = restingWidth ?? node.clientWidth;
+      const measuredWidth = restingWidth ?? node.clientWidth;
       // Hidden surfaces have no layout yet; observe again when they become visible.
       if (node.clientWidth === 0) return;
       // While the Collections pane moves, the grid already holds the tracks of
@@ -173,14 +185,29 @@ export function LibraryItems<T>({
       if (restingWidth === undefined && "paneMoving" in document.documentElement.dataset) return;
       // The scroll surface docks the inspector with right padding. Recover the
       // closed width, including when the Collections pane targets a new width.
+      const style =
+        onInspectorDockChange || freezeInspectorTracks ? getComputedStyle(scroll) : null;
       const dockWidth =
-        freezeInspectorTracks && layout === "grid"
-          ? Math.round(parseFloat(getComputedStyle(scroll).paddingRight) || 0)
+        freezeInspectorTracks && layout === "grid" && style
+          ? Math.round(parseFloat(style.paddingRight))
           : 0;
       const docked = dockWidth > 0;
       // A scrollbar can appear as the cards rewrap. The outer frame tells us
       // whether the closed layout itself changed or just the open grid did.
-      const closedFrameWidth = width + dockWidth + scroll.offsetWidth - scroll.clientWidth;
+      const scrollbarWidth = scroll.offsetWidth - scroll.clientWidth;
+      const closedFrameWidth = measuredWidth + dockWidth + scrollbarWidth;
+      const inset = style?.getPropertyValue("--library-inspector-inset");
+      const gutter = style?.getPropertyValue("--library-inspector-gutter");
+      const inspector =
+        onInspectorDockChange && style && inset && gutter && node.parentElement
+          ? {
+              baseWidth: parseFloat(style.getPropertyValue("--workbench-sidebar-width")),
+              reservedSpace:
+                parseFloat(inset) +
+                parseFloat(gutter) -
+                parseFloat(getComputedStyle(node.parentElement).paddingRight),
+            }
+          : null;
       const margin =
         node.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop;
       setGeometry((previous) => {
@@ -194,13 +221,32 @@ export function LibraryItems<T>({
             ? 0
             : frozen
               ? previous.track
-              : fittedTrack(width + dockWidth, preferredWidth, gap);
+              : fittedTrack(measuredWidth + dockWidth, preferredWidth, gap);
+        let width = measuredWidth;
+        let inspectorWidth = 0;
+        let inspectorPaddingOffset = 0;
+        if (inspector && nextTrack > 0) {
+          const { baseWidth, reservedSpace } = inspector;
+          const available = closedFrameWidth - baseWidth - reservedSpace;
+          if (available >= nextTrack) {
+            const columns = fittingColumns(available, nextTrack, gap);
+            const gridWidth = columns * nextTrack + (columns - 1) * gap;
+            inspectorWidth = Math.round(closedFrameWidth - reservedSpace - gridWidth);
+            // The scrollbar occupies part of the gap between the cards and panel.
+            inspectorPaddingOffset = reservedSpace - scrollbarWidth;
+            // Commit the row and dock together unless the spring is holding
+            // the applied width until it comes to rest.
+            if (docked && !inspectorDockLocked) width = gridWidth;
+          }
+        }
         const nextColumns =
           layout === "list" ? 1 : fittingColumns(width, docked ? nextTrack : preferredWidth, gap);
         if (
           previous.columns === nextColumns &&
           previous.track === nextTrack &&
           previous.closedFrameWidth === closedFrameWidth &&
+          previous.inspectorWidth === inspectorWidth &&
+          previous.inspectorPaddingOffset === inspectorPaddingOffset &&
           previous.preferredWidth === preferredWidth &&
           previous.gap === gap &&
           previous.docked === docked &&
@@ -247,6 +293,8 @@ export function LibraryItems<T>({
           width,
           height: scroll.clientHeight,
           closedFrameWidth,
+          inspectorWidth,
+          inspectorPaddingOffset,
           track: nextTrack,
           preferredWidth,
           gap,
@@ -283,7 +331,26 @@ export function LibraryItems<T>({
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [scrollRef, layout, gap, preferredWidth, freezeInspectorTracks]);
+  }, [
+    scrollRef,
+    layout,
+    gap,
+    preferredWidth,
+    freezeInspectorTracks,
+    onInspectorDockChange,
+    inspectorDockLocked,
+  ]);
+
+  const { inspectorWidth, inspectorPaddingOffset } = geometry;
+  useLayoutEffect(() => {
+    onInspectorDockChange?.(
+      inspectorWidth ? { width: inspectorWidth, paddingOffset: inspectorPaddingOffset } : null,
+    );
+  }, [inspectorWidth, inspectorPaddingOffset, onInspectorDockChange]);
+
+  useLayoutEffect(() => {
+    return () => onInspectorDockChange?.(null);
+  }, [onInspectorDockChange]);
 
   // Crossing the native/virtual threshold remounts row wrappers. Retain the
   // focused control's identity before that commit, then restore it without scrolling.

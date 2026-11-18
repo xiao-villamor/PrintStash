@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef, type CSSProperties } from "react";
 import { Loader2, Maximize2, X } from "lucide-react";
 import { LibraryItemLink } from "@/features/library/navigation";
 import type { LibraryEntry } from "@/features/library/navigation-state";
@@ -38,6 +38,8 @@ export function LibraryModelInspector({
   canWrite,
   onClose,
   onOpenPage,
+  onMotionSettled,
+  style,
 }: {
   id: number;
   open: boolean;
@@ -45,13 +47,15 @@ export function LibraryModelInspector({
   canWrite: boolean;
   onClose: () => void;
   onOpenPage?: () => void;
+  onMotionSettled?: () => void;
+  style?: CSSProperties;
 }) {
   useUiLocale();
   const detail = useModelDetail(id);
   const title = useRef<HTMLHeadingElement>(null);
   // One panel serves every Model it is pointed at: switching Models swaps its
   // contents in place, so the panel itself only moves when it opens or closes.
-  const { panel, present } = useInspectorMotion(open, id);
+  const { panel, present } = useInspectorMotion(open, id, onMotionSettled);
   useEffect(() => {
     if (open) title.current?.focus({ preventScroll: true });
   }, [id, open]);
@@ -64,6 +68,7 @@ export function LibraryModelInspector({
       id="model-drawer"
       aria-label={uiText("Model details")}
       className="library-model-inspector"
+      style={style}
     >
       <header className="library-inspector-header">
         <h2 ref={title} tabIndex={-1} title={detail.data?.name}>

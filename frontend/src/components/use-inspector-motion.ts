@@ -8,7 +8,7 @@ const VELOCITY_SETTLED = 0.03;
 
 /** A compositor spring keeps moving while the 3D preview initializes. Presence
  * follows completion, and reversals inherit the presentation and its velocity. */
-export function useInspectorMotion(open: boolean, contentKey: number) {
+export function useInspectorMotion(open: boolean, contentKey: number, onSettled?: () => void) {
   const panel = useRef<HTMLElement>(null);
   useEffect(() => {
     if (panel.current) panel.current.scrollTop = 0;
@@ -35,6 +35,7 @@ export function useInspectorMotion(open: boolean, contentKey: number) {
       animation?.cancel();
       element.style.removeProperty("will-change");
       if (!open) setPresent(false);
+      onSettled?.();
     };
     const onPreference = () => {
       if (reduced.matches) settle();
@@ -79,7 +80,7 @@ export function useInspectorMotion(open: boolean, contentKey: number) {
       animation?.cancel();
       element.style.removeProperty("will-change");
     };
-  }, [open, present]);
+  }, [open, present, onSettled]);
 
   return { panel, present };
 }
