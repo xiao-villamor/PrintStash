@@ -110,6 +110,7 @@ const config = {
         sm: "var(--radius)",
       },
       fontSize: {
+        field: "0.8125rem",
         // The app's mono-label ramp, previously text-[11px]/text-[10px].
         "2xs": "0.6875rem",
         "3xs": "0.625rem",

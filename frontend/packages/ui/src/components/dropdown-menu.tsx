@@ -46,6 +46,8 @@ export interface DropdownMenuProps {
   portal?: boolean;
   className?: string;
   contentClassName?: string;
+  /** Match a field trigger and place the panel just outside its border. */
+  field?: boolean;
   children: ReactNode;
 }
 
@@ -62,6 +64,7 @@ export function DropdownMenu({
   portal = false,
   className,
   contentClassName,
+  field = false,
   children,
 }: DropdownMenuProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -69,7 +72,7 @@ export function DropdownMenu({
   const descendants = useRef(new Set<HTMLElement>());
   const parent = useContext(DropdownContext);
   const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
-  const { mounted, state } = useMountTransition(open, DURATION.press);
+  const { mounted, state } = useMountTransition(open, field ? DURATION.fast : DURATION.press);
   const scope = useMemo<DropdownScope>(
     () => ({
       portalHost,
@@ -104,12 +107,13 @@ export function DropdownMenu({
     function position() {
       if (!wrapper || !panel) return;
       const box = wrapper.getBoundingClientRect();
+      const gap = field ? 4 : GAP;
       const anchor = anchorPoint
         ? {
             left: anchorPoint.x,
             right: anchorPoint.x,
-            top: anchorPoint.y - GAP,
-            bottom: anchorPoint.y - GAP,
+            top: anchorPoint.y - gap,
+            bottom: anchorPoint.y - gap,
           }
         : box;
       const viewport = window.visualViewport;
@@ -118,19 +122,20 @@ export function DropdownMenu({
       const rightEdge = leftEdge + (viewport?.width ?? window.innerWidth) - GUTTER * 2;
       const bottomEdge = topEdge + (viewport?.height ?? window.innerHeight) - GUTTER * 2;
       panel.style.maxWidth = Math.max(0, rightEdge - leftEdge) + "px";
+      if (field) panel.style.width = box.width + "px";
       const width = panel.offsetWidth;
       const naturalHeight = panel.scrollHeight + panel.offsetHeight - panel.clientHeight;
       const limit = Number.parseFloat(configuredMaxHeight);
       const height = Number.isFinite(limit) ? Math.min(naturalHeight, limit) : naturalHeight;
       const preferredLeft = align === "end" && !anchorPoint ? anchor.right - width : anchor.left;
       const left = Math.max(leftEdge, Math.min(preferredLeft, rightEdge - width));
-      const below = Math.max(0, bottomEdge - anchor.bottom - GAP);
-      const above = Math.max(0, anchor.top - GAP - topEdge);
+      const below = Math.max(0, bottomEdge - anchor.bottom - gap);
+      const above = Math.max(0, anchor.top - gap - topEdge);
       const upward = height > below && above > below;
       const available = upward ? above : below;
       const top = upward
-        ? Math.max(topEdge, anchor.top - GAP - Math.min(height, available))
-        : Math.max(topEdge, Math.min(anchor.bottom + GAP, bottomEdge));
+        ? Math.max(topEdge, anchor.top - gap - Math.min(height, available))
+        : Math.max(topEdge, Math.min(anchor.bottom + gap, bottomEdge));
       panel.style.left = left - (portal ? 0 : box.left + wrapper.clientLeft) + "px";
       panel.style.top = top - (portal ? 0 : box.top + wrapper.clientTop) + "px";
       panel.style.right = "auto";
@@ -180,7 +185,7 @@ export function DropdownMenu({
       window.visualViewport?.removeEventListener("resize", onResize);
       window.visualViewport?.removeEventListener("scroll", position);
     };
-  }, [mounted, align, anchorPoint, portal, portalHost, onOpenChange]);
+  }, [mounted, align, anchorPoint, portal, portalHost, onOpenChange, field]);
 
   function contains(target: Node) {
     return (
@@ -288,21 +293,29 @@ export function DropdownMenu({
     items[next]?.focus();
   }
 
+  // Keep the visible options in place during exit, even when the search is cleared.
+  const [lastOpenChildren, setLastOpenChildren] = useState(children);
+  if (field && open && children !== lastOpenChildren) {
+    setLastOpenChildren(children);
+  }
+
   const panel = mounted && (
     <div
       ref={panelRef}
       role={role}
       aria-label={ariaLabel}
       data-state={state}
+      inert={field && !open ? true : undefined}
       className={cn(
         portal ? "fixed z-dropdown" : "absolute top-full z-dropdown mt-2",
         align === "end" ? "right-0 origin-top-right" : "left-0 origin-top-left",
-        "transition-[opacity,transform] duration-press ease-out",
-        "data-[state=closed]:opacity-0 data-[state=closed]:scale-95 motion-reduce:data-[state=closed]:scale-100",
+        field
+          ? "transition-[opacity,transform] duration-fast ease-out data-[state=closed]:opacity-0 data-[state=closed]:scale-content-enter motion-reduce:transition-none motion-reduce:data-[state=closed]:scale-100"
+          : "transition-[opacity,transform] duration-press ease-out data-[state=closed]:opacity-0 data-[state=closed]:scale-95 motion-reduce:data-[state=closed]:scale-100",
         contentClassName,
       )}
     >
-      {children}
+      {field && !open ? lastOpenChildren : children}
     </div>
   );
   return (
