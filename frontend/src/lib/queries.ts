@@ -451,7 +451,7 @@ export type ModelListFilters = Omit<ListModelsParams, "limit" | "offset">;
 function modelFacetsOptions(api: QueryApi, filters: ModelListFilters) {
   return queryOptions<ModelFacetsRead>({
     queryKey: [...queryKeys.models, "facets", filters],
-    queryFn: () => api.getModelFacets(filters),
+    queryFn: ({ signal }) => api.getModelFacets(filters, { signal }),
   });
 }
 

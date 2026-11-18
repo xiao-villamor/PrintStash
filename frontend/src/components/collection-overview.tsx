@@ -75,7 +75,7 @@ export function CollectionOverviewCard({
           selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path, collection.id)
         }
         title={collection.name}
-        className={`${compact ? "flex items-center gap-3 p-2" : "block"} w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`}
+        className={`${compact ? "flex items-center gap-3 px-2 py-[7px]" : "block"} w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`}
       >
         <div
           data-library-preview={
@@ -116,11 +116,15 @@ export function CollectionOverviewCard({
         </div>
         <div className={`flex min-w-0 flex-1 items-center gap-3 ${compact ? "" : "px-3 py-3"}`}>
           <div className="min-w-0 flex-1">
-            <p className="collection-card-name flex min-h-10 min-w-0 items-start gap-1.5 text-sm font-semibold leading-5 text-foreground">
+            <p
+              className={`collection-card-name flex min-w-0 items-start gap-1.5 text-sm font-semibold leading-5 text-foreground ${compact ? "" : "min-h-10"}`}
+            >
               <Folder className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-              <span className="line-clamp-2 wrap-anywhere">{collection.name}</span>
+              <span className={compact ? "truncate" : "line-clamp-2 wrap-anywhere"}>
+                {collection.name}
+              </span>
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className={`text-xs text-muted-foreground ${compact ? "" : "mt-1"}`}>
               {uiText("counts.models", { count: collection.model_count })}
             </p>
           </div>

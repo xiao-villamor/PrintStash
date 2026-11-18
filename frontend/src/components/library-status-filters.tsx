@@ -13,7 +13,7 @@ export function LibraryStatusFilters({
 }: {
   value: string[];
   counts: FacetValueRead[] | undefined;
-  total: number;
+  total: number | undefined;
   onChange: (value: Status[]) => void;
   onIntent: () => void;
 }) {
@@ -52,7 +52,7 @@ export function LibraryStatusFilters({
   const active = value.length === 0 ? "all" : value.length === 1 ? value[0] : null;
   return (
     <div
-      className="library-status-filters order-1 flex w-full min-w-0 items-center overflow-x-auto @3xl/library:w-auto"
+      className="library-status-filters flex max-w-full flex-wrap items-center"
       role="radiogroup"
       aria-label={uiText("Filter models by status")}
       onFocusCapture={onIntent}
@@ -86,8 +86,10 @@ export function LibraryStatusFilters({
           onClick={() => onChange(item.key === "all" ? [] : [item.key])}
         >
           {item.dot && <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${item.dot}`} />}
-          {item.label}{" "}
-          <span className="font-mono text-3xs text-muted-foreground">{item.count}</span>
+          {item.label}
+          {item.count !== undefined && (
+            <span className="font-mono text-3xs text-muted-foreground">{item.count}</span>
+          )}
         </Button>
       ))}
     </div>

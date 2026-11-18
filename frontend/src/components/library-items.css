@@ -361,18 +361,21 @@
   aspect-ratio: 2 / 1;
 }
 [data-compact] .collection-card-collage {
-  width: 96px;
-  height: 64px;
+  width: 72px;
+  height: 44px;
   aspect-ratio: auto;
 }
 .collection-card-name {
   font-size: 1rem;
 }
+[data-compact] .collection-card-name {
+  font-size: 0.875rem;
+}
 
-/* A compact collection card's frame (collage 64px + 8px padding + border),
+/* A compact collection card's frame (44px collage + 14px padding + 2px border),
    so the reserved row has the height of the row that replaces it. */
 .library-collection-placeholder {
-  height: 82px;
+  height: 60px;
   border: 1px solid var(--border);
   background: var(--card);
 }

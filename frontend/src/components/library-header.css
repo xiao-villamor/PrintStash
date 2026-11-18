@@ -1,14 +1,14 @@
 .library-collection-header {
-  padding-top: 20px;
+  padding-top: 14px;
   padding-bottom: 0;
 }
 .library-collection-identity {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 .library-collection-identity h1 {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.015em;
   line-height: 1.2;
@@ -18,12 +18,10 @@
   height: 30px;
 }
 .library-collection-meta {
-  gap: 6px 8px;
+  min-height: 22px;
+  gap: 4px 8px;
   font-size: 12px;
   color: var(--muted-foreground);
-}
-.library-collection-meta > p {
-  font-size: inherit;
 }
 .collection-header-tags {
   display: inline-flex;
@@ -31,14 +29,13 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  margin-left: 8px;
 }
 .collection-header-tag {
   box-sizing: content-box;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 26px;
+  height: 22px;
   max-width: 100%;
   padding: 0 4px 0 10px;
   border: 1px solid var(--border-strong);
@@ -49,12 +46,12 @@
 }
 .collection-header-tag > button {
   width: 24px;
-  height: 24px;
+  height: 20px;
   padding: 0;
   color: var(--muted-foreground);
 }
 .collection-header-tags .collection-add-tag {
-  height: 26px;
+  height: 22px;
   padding: 0 10px;
   border: 1px solid var(--border);
   background: transparent;
@@ -78,7 +75,7 @@
 }
 .collection-header-tag-input {
   box-sizing: border-box;
-  height: 26px;
+  height: 22px;
   display: inline-flex;
   gap: 4px;
   align-items: center;
@@ -89,7 +86,7 @@
 }
 .collection-header-tag-input > input {
   width: 120px;
-  height: 24px;
+  height: 20px;
   border: 0;
   padding: 0;
   background: transparent;
@@ -110,17 +107,11 @@
   clip-path: inset(0 0 100% 0);
 }
 .library-subcollections {
-  margin-top: 14px;
+  margin-top: 12px;
   margin-bottom: 0;
 }
-.library-subcollections > h2 {
-  margin-bottom: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--secondary);
-}
 .library-model-toolbar-wrap {
-  padding-top: 18px;
+  padding-top: 12px;
   padding-bottom: 0;
 }
 .collection-overview-toolbar-wrap {
@@ -140,9 +131,6 @@
 .collection-overview-actions > [role="group"] > a {
   height: 36px;
 }
-.library-model-toolbar > h2 {
-  letter-spacing: -0.005em;
-}
 .library-status-filters {
   gap: 2px;
   padding: 2px;
@@ -158,9 +146,8 @@
   color: var(--secondary);
 }
 .library-status-filters > button[aria-checked="true"] {
-  background: var(--card);
-  color: var(--foreground);
-  box-shadow: 0 1px 2px var(--dialog-shadow);
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 .library-status-filters > button:disabled {
   opacity: 1;
@@ -180,58 +167,36 @@
 .library-status-none {
   background: var(--border-strong);
 }
-@container library (min-width: 768px) {
-  .library-model-toolbar > button,
-  .library-model-toolbar > [role="group"]:not(.library-status-filters) > button,
-  .library-model-toolbar > [role="group"] > a {
-    height: 28px;
-    padding: 0 10px;
-    font-size: 13px;
-    font-weight: 500;
-  }
-  .library-model-toolbar [aria-label="Sort models"] {
-    width: 154px;
-    height: 32px;
-    font-size: 13px;
-  }
-  .library-model-toolbar [aria-label="Sort models"] > svg:first-child {
-    display: none;
-  }
-  .library-model-toolbar select {
-    font-size: 13px;
-  }
-}
-
-.collection-header-readme {
-  position: relative;
+.library-description {
+  order: -1;
 }
 .collection-header-readme .prose {
   max-width: 80ch;
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 18px;
   color: var(--secondary);
 }
 .collection-header-readme .prose p {
   margin-block: 0;
 }
-.collection-header-readme .collection-readme-actions {
-  position: absolute;
-  right: 0;
-  top: 0;
-  opacity: 0;
+.collection-readme-clamp {
+  max-height: 18px;
+  overflow: hidden;
 }
-.collection-header-readme:hover .collection-readme-actions,
-.collection-header-readme:focus-within .collection-readme-actions {
-  opacity: 1;
+.collection-header-readme .collection-readme-clamp + div button {
+  height: 18px;
+  padding-block: 0;
 }
-@media (hover: none) {
-  .collection-header-readme .collection-readme-actions {
-    position: static;
-    opacity: 1;
-  }
+.library-folder-search {
+  width: 220px;
+  flex: 1 1 220px;
 }
-.library-model-toolbar > div > label {
-  border-color: var(--border);
+.library-toolbar-filters,
+.library-display-controls {
+  max-width: 100%;
+}
+.library-display-controls {
+  width: max-content;
 }
 .library-model-toolbar [aria-label="Sort models"] {
   justify-content: flex-start;
@@ -266,7 +231,7 @@
   border-radius: 0;
   background: transparent;
   color: var(--foreground);
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.015em;
   outline: none;
@@ -333,10 +298,10 @@
   height: auto;
   min-height: 0;
   padding: 0;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.4;
   font-weight: 400;
-  color: var(--secondary);
+  color: var(--muted-foreground);
 }
 
 .library-meta-part + .library-meta-part::before {
@@ -344,35 +309,22 @@
   margin-right: 8px;
 }
 
-@container library (min-width: 768px) and (max-width: 1099px) {
-  .library-model-toolbar > .library-display-controls {
-    flex-basis: 100%;
-    margin-left: 0;
-    justify-content: flex-start;
-  }
-}
-
-/* With the inspector docked the library narrows to ~1180px. The toolbar keeps
-   one row, so opening the panel never pushes the grid down: the search field
-   shortens and Filters/Select keep their icons, with their names still
-   announced to assistive technology. */
-@container library (max-width: 1440px) {
+@container library (width < 1250px) {
   .library-folder-search {
-    width: 10rem;
-  }
-  .library-model-toolbar .library-toolbar-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+    flex-basis: 9rem;
   }
 }
 
-/* Same box as the compact readme's one-line "Add a description" button. */
-.collection-header-readme-placeholder {
+@container library (width < 768px) {
+  .library-display-controls {
+    width: 100%;
+  }
+}
+
+.collection-header-meta-placeholder {
   display: flex;
   align-items: center;
-  height: 18px;
+  height: 22px;
+  width: 15rem;
+  max-width: 100%;
 }

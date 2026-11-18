@@ -5194,6 +5194,13 @@
     "one": "{count} collection",
     "other": "{count} collections"
   },
+  "Add a description": "Add a description",
+  "Could not load Models.": "Could not load Models.",
+  "library.header.filteredCount": "{count} of {total}",
+  "library.header.items": {
+    "one": "{count} item",
+    "other": "{count} items"
+  },
   "library.header.modelsHere": {
     "one": "{count} model here",
     "other": "{count} models here"
