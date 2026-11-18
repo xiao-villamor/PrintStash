@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import math
 import time
 import zipfile
@@ -33,6 +34,7 @@ from sqlmodel import Session, col, select
 
 from app.core.config import _overlay, settings
 from app.core.errors import ErrorKind, OperationError
+from app.core.execution_scope import ExecutionIdentity, execution_scope
 from app.core.time import utcnow
 from app.db.models import (
     ArtifactDerivative,
@@ -780,6 +782,43 @@ class TestDeriveMesh:
         row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
         assert json.loads(row.output_json)["strategy"] == "embedded"
         assert row.has_embedded_3mf_preview is True
+
+    @pytest.mark.parametrize(
+        "picture",
+        [pytest.param(content.png(), id="present"), pytest.param(None, id="absent")],
+    )
+    def test_logs_the_parent_embedded_probe(self, stored, caplog, picture):
+        extras = {"Metadata/thumbnail.png": picture} if picture is not None else {}
+        source = three_mf(extras=extras)
+        artifact = stored("probed.3mf", source)
+        caplog.set_level(logging.INFO, logger="app.modules.media.mesh_observability")
+
+        identity = ExecutionIdentity("job-1", "job-1:e:1", "derivatives.mesh")
+        with execution_scope(identity):
+            producers.derive_mesh(artifact.id)
+
+        records = [
+            json.loads(record.getMessage().removeprefix("mesh_phases "))
+            for record in caplog.records
+            if record.getMessage().startswith("mesh_phases ")
+        ]
+        parent_record = next(
+            record for record in records if record["execution_id"] is None
+        )
+        (phase,) = parent_record["stages"]
+        assert (
+            parent_record["file_id"],
+            parent_record["job_execution_id"],
+            phase["phase"],
+            phase["input_bytes"],
+            phase["output_bytes"],
+        ) == (
+            artifact.id,
+            identity.execution_id,
+            "embedded",
+            len(source),
+            len(picture) if picture is not None else None,
+        )
 
     @pytest.mark.parametrize(
         "extras", [{}, {"Metadata/thumbnail.png": content.png()[:30]}]

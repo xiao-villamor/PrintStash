@@ -291,23 +291,27 @@ def launch(
     descriptors: tuple[int, ...],
     cwd: Path,
     warm: bool,
+    template_headroom_bytes: int | None = None,
 ) -> Worker:
     """Start ``command`` as a supervised worker in its own session.
 
     With ``warm``, a forkable worker whose ceiling leaves room above the
-    template is forked from it. A template that is unavailable, or refuses the
-    request, costs that job a spawn and nothing else.
+    template is forked from it. A measured work profile can supply a smaller
+    absolute headroom requirement. The worker still applies the same ceiling.
+    Unavailable templates and jobs that lack headroom use a fresh interpreter.
     """
     if warm and forkable(command):
         template = _current(cwd, environment)
-        if template is not None and int(command[3]) >= (
-            template.virtual_size * _CEILING_FACTOR
-        ):
-            try:
-                return _fork(template, command[3:], environment, descriptors)
-            except OSError:
-                logger.exception("worker template refused a job")
-                stop_template()
+        if template is not None:
+            minimum = template.virtual_size * _CEILING_FACTOR
+            if template_headroom_bytes is not None:
+                minimum = min(minimum, template.virtual_size + template_headroom_bytes)
+            if int(command[3]) >= minimum:
+                try:
+                    return _fork(template, command[3:], environment, descriptors)
+                except OSError:
+                    logger.exception("worker template refused a job")
+                    stop_template()
     return subprocess.Popen(  # nosec B603 - fixed argv; no shell
         command,
         stdin=subprocess.DEVNULL,

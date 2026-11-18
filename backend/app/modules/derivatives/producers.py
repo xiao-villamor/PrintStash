@@ -318,10 +318,21 @@ def _publish_thumbnail(
     return DerivativeState.READY
 
 
-def _embedded_3mf_cover(source: Path) -> bytes | None:
-    return mesh_previews.extract_embedded_3mf_thumbnail(
-        source, validate_image=True, file_type=FileType.THREE_MF.value
-    )
+def _embedded_3mf_cover(source: Path, file_id: int, source_bytes: int) -> bytes | None:
+    from app.modules.media.mesh_observability import record_phases
+    from app.modules.media.mesh_telemetry import MeshPhase, PhaseRecorder
+
+    phases = PhaseRecorder()
+    phases.start(MeshPhase.EMBEDDED, input_bytes=source_bytes)
+    try:
+        image = mesh_previews.extract_embedded_3mf_thumbnail(
+            source, validate_image=True, file_type=FileType.THREE_MF.value
+        )
+        phases.finish(output_bytes=len(image) if image is not None else None)
+        return image
+    finally:
+        phases.fail_active()
+        record_phases(phases.snapshot(), file_id=file_id)
 
 
 def _thumbnail_failure(
@@ -589,7 +600,9 @@ def _derive_mesh(
                     )
                 if check_embedded:
                     with phases.phase("embedded_cover"):
-                        embedded = _embedded_3mf_cover(source)
+                        embedded = _embedded_3mf_cover(
+                            source, file_id, file_row.size_bytes
+                        )
                     embedded_checked = True
                     if embedded is not None and not recreate_embedded:
                         publish_embedded(embedded)
@@ -693,7 +706,9 @@ def _derive_mesh(
                         # Capacity or worker admission can fail before probing.
                         # The bounded archive read is independent of mesh loading.
                         with resolve(file_row).materialize() as source:
-                            embedded = _embedded_3mf_cover(source)
+                            embedded = _embedded_3mf_cover(
+                                source, file_id, file_row.size_bytes
+                            )
                     if embedded is not None:
                         publish_embedded(embedded)
                 except ArtifactContentError:

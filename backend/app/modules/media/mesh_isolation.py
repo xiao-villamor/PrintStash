@@ -80,6 +80,7 @@ from app.modules.media.mesh_telemetry import (
     encode_phase_stats,
 )
 from app.modules.media.native_budget import (
+    MIN_NATIVE_MEMORY,
     AnalysisWork,
     GeometryWork,
     MeshSource,
@@ -110,6 +111,11 @@ if TYPE_CHECKING:
 
 REPLY_MAGIC = b"MSH1"
 MAX_REPLY_BYTES = 32 * 1024 * 1024
+# The warm template already holds the 3MF reader, NumPy and trimesh.
+# Geometry-only passes with a full 512 MiB floor can use a fixed startup
+# margin instead of requiring half the template size again. Source allocations
+# still use the existing per-file claim and the worker's hard ceiling.
+_THREE_MF_GEOMETRY_TEMPLATE_HEADROOM = 80 * 1024**2
 # Output wakes the supervisor at once; this is only how often it samples the
 # worker's memory and looks for a cancel or deadline while the worker is quiet.
 # The worker's own address-space limit is the hard ceiling in between.
@@ -414,6 +420,7 @@ def supervise_result(
     reply_limit: int = MAX_REPLY_BYTES,
     withdrawn: Callable[[], bool] | None = None,
     on_chunk: Callable[[bytes], None] | None = None,
+    template_headroom_bytes: int | None = None,
 ) -> SupervisedReply:
     """Own the process lifecycle and retain observed costs on every exit.
 
@@ -471,6 +478,7 @@ def supervise_result(
                 descriptors=inherited.descriptors if inherited is not None else (),
                 cwd=Path(application_file).resolve().parent.parent,
                 warm=settings.mesh_worker_template_enabled,
+                template_headroom_bytes=template_headroom_bytes,
             )
         except OSError as exc:
             raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED) from exc
@@ -768,6 +776,14 @@ def _run_worker(
             [json.dumps(payload)],
             permit.hard_bytes,
         )
+        template_headroom = (
+            _THREE_MF_GEOMETRY_TEMPLATE_HEADROOM
+            if isinstance(work, GeometryWork)
+            and len(sources) == 1
+            and sources[0].file_type.lower().lstrip(".") == "3mf"
+            and permit.hard_bytes >= MIN_NATIVE_MEMORY
+            else None
+        )
         return supervise_result(
             command,
             memory_budget=permit.hard_bytes,
@@ -779,6 +795,7 @@ def _run_worker(
             permit=permit,
             lifecycle=WorkerLifecycle.GUARDED,
             on_chunk=on_chunk,
+            template_headroom_bytes=template_headroom,
         )
 
 
