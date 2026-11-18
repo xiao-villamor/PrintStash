@@ -37,7 +37,7 @@ def _edit(engine, assignment: str) -> int:
     return after - before
 
 
-def _at_previous_release(url: str):
+def _at_previous_release(url: str, previous: str = PREVIOUS):
     config = Config(str(ALEMBIC_INI))
     config.set_main_option("script_location", str(ALEMBIC_DIR))
     config.set_main_option("sqlalchemy.url", url)
@@ -47,9 +47,9 @@ def _at_previous_release(url: str):
         # historical baseline is SQLite-only.
         SQLModel.metadata.create_all(engine)
         command.stamp(config, "head")
-        command.downgrade(config, PREVIOUS)
+        command.downgrade(config, previous)
     else:
-        command.upgrade(config, PREVIOUS)
+        command.upgrade(config, previous)
     with engine.begin() as connection:
         seed_schema_row(connection, "system_config", id=1, currency="USD")
     return config, engine
@@ -86,5 +86,30 @@ class TestPreviewPolesMigration:
                 for column in inspect(engine).get_columns("system_config")
             }
             assert _edit(engine, "currency='JPY'") == 1
+        finally:
+            engine.dispose()
+
+
+class TestEmbeddedCoverPreferenceMigration:
+    def test_round_trips_existing_preview_configuration(self, control_url):
+        previous = "aac0f6b39802"
+        config, engine = _at_previous_release(control_url, previous)
+        try:
+            assert _edit(engine, "currency='EUR'") == 1
+            command.upgrade(config, "a7a56e830824")
+            with engine.connect() as connection:
+                assert connection.execute(
+                    text(
+                        "SELECT currency, prefer_rendered_3mf_preview FROM system_config WHERE id=1"
+                    )
+                ).one() == ("EUR", None)
+            assert _edit(engine, "prefer_rendered_3mf_preview=true") == 1
+            assert _edit(engine, "currency='GBP'") == 1
+            command.downgrade(config, previous)
+            assert _edit(engine, "derivatives_previews_include_poles=true") == 1
+            assert "prefer_rendered_3mf_preview" not in {
+                column["name"]
+                for column in inspect(engine).get_columns("system_config")
+            }
         finally:
             engine.dispose()

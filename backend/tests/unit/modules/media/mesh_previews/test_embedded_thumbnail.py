@@ -118,6 +118,22 @@ class TestExtractEmbedded3mfThumbnail:
         with pytest.raises(ValueError, match="thumbnail_too_large"):
             thumbnail.to_webp(b"not-an-image")
 
+    def test_rejects_over_budget_directory_before_opening(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = _make_3mf(
+            tmp_path,
+            {"Metadata/thumbnail.png": _PNG_BIG, "3D/model.model": b"<xml/>"},
+        )
+        monkeypatch.setattr("app.modules.media.mesh_previews._MAX_3MF_ENTRIES", 1)
+        monkeypatch.setattr(
+            zipfile,
+            "ZipFile",
+            lambda *args: pytest.fail("over-budget ZIP directory was opened"),
+        )
+
+        assert extract_embedded_3mf_thumbnail(path) is None
+
     def test_rejects_thumbnail_declared_over_limit_without_reading_member(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

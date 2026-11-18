@@ -3,20 +3,29 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from sqlmodel import Session, select
+from sqlalchemy import and_, delete, or_
+from sqlmodel import Session, col, select
 
 from app.core.config import settings
 from app.core.errors import ErrorKind, OperationError
 from app.core.time import utcnow
 from app.db.library_revision import invalidate_library_browse
 from app.db.models import (
+    ArtifactDerivative,
     DerivativeGroupRegeneration,
     DerivativeKind,
+    DerivativeState,
+    File,
+    FileType,
     JobKind,
+    Model,
     SystemConfig,
 )
+from app.db.scopes import live
 from app.db.transactions import begin_write
 from app.modules.work.contracts import SkipReason
+
+from .kinds import THREE_MF_THUMBNAIL_RECIPE
 
 
 class SettingName(StrEnum):
@@ -27,6 +36,7 @@ class SettingName(StrEnum):
     # extra CPU and storage of generated views. Views still need a cover.
     PREVIEWS = "derivatives_previews_enabled"
     PREVIEW_POLES = "derivatives_previews_include_poles"
+    RECREATE_EMBEDDED_COVERS = "prefer_rendered_3mf_preview"
 
 
 SETTINGS = {
@@ -91,6 +101,11 @@ def resolve(session: Session) -> dict[JobKind, GroupPolicy]:
     }
     session.info[_RESOLVED] = (_scope(session), controls)
     return dict(controls)
+
+
+def effective_setting(config: SystemConfig | None, name: SettingName) -> bool:
+    override = getattr(config, name) if config is not None else None
+    return getattr(settings.frozen, name) if override is None else override
 
 
 def preview_poles(session: Session) -> bool:
@@ -160,6 +175,37 @@ def lock_enabled(session: Session, definition: JobKind) -> None:
     _require_enabled(_group_policy(lock(session), definition))
 
 
+def _invalidate_embedded_covers(session: Session) -> None:
+    """Make affected covers pending while keeping their published images readable.
+
+    The caller holds the configuration write lock. A running pass with unknown
+    availability must also be fenced so it cannot publish under the old policy.
+    """
+    eligible = (
+        select(File.id)
+        .join(Model, col(Model.id) == col(File.model_id))
+        .where(live(File), live(Model), col(File.file_type) == FileType.THREE_MF)
+    )
+    derivative = ArtifactDerivative
+    session.execute(
+        delete(derivative)
+        .where(
+            col(derivative.file_id).in_(eligible),
+            col(derivative.kind) == DerivativeKind.THUMBNAIL,
+            col(derivative.recipe_version) == THREE_MF_THUMBNAIL_RECIPE,
+            col(derivative.state) != DerivativeState.CANCELLED,
+            or_(
+                col(derivative.has_embedded_3mf_preview).is_(True),
+                and_(
+                    col(derivative.state) == DerivativeState.RUNNING,
+                    col(derivative.has_embedded_3mf_preview).is_(None),
+                ),
+            ),
+        )
+        .execution_options(synchronize_session=False)
+    )
+
+
 def update(
     session: Session, changes: dict[SettingName, bool | None], *, commit: bool = True
 ) -> None:
@@ -168,6 +214,9 @@ def update(
         return
     config = lock(session)
     previous_poles = preview_poles(session)
+    previous_cover_policy = effective_setting(
+        config, SettingName.RECREATE_EMBEDDED_COVERS
+    )
     previous_enabled = resolve(session)[JobKind.DERIVATIVES_PREVIEWS].enabled
     for name, value in changes.items():
         setattr(config, name, value)
@@ -190,6 +239,10 @@ def update(
             request = DerivativeGroupRegeneration(definition=definition, kind=kind)
         request.requested_at = config.updated_at
         session.add(request)
+    if previous_cover_policy != effective_setting(
+        config, SettingName.RECREATE_EMBEDDED_COVERS
+    ):
+        _invalidate_embedded_covers(session)
     if commit:
         session.commit()
         publish_changes(changes)
@@ -204,8 +257,15 @@ def publish_changes(changes: dict[SettingName, bool | None]) -> None:
 
     derivative_policy_changed()
     for definition, name in SETTINGS.items():
-        if name in changes or (
-            definition == JobKind.DERIVATIVES_PREVIEWS
-            and SettingName.PREVIEW_POLES in changes
+        if (
+            name in changes
+            or (
+                definition == JobKind.DERIVATIVES_PREVIEWS
+                and SettingName.PREVIEW_POLES in changes
+            )
+            or (
+                definition == JobKind.DERIVATIVES_MESH
+                and SettingName.RECREATE_EMBEDDED_COVERS in changes
+            )
         ):
             nudge(definition)

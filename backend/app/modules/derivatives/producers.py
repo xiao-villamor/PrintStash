@@ -42,6 +42,7 @@ from app.db.models import (
     FileType,
     JobKind,
     Metadata,
+    SystemConfig,
 )
 from app.db.scopes import live
 from app.db.session import get_session_factory
@@ -249,6 +250,7 @@ def _publish_thumbnail(
     abort_on_failure: bool = False,
     preserve_frame: bool = False,
     renderer_encoded: bool = False,
+    has_embedded_3mf_preview: bool | None = None,
 ) -> DerivativeState:
     assert file_row.id is not None
     try:
@@ -307,6 +309,7 @@ def _publish_thumbnail(
             },
             duration_ms=duration_ms,
             peak_rss_bytes=peak_rss_bytes,
+            has_embedded_3mf_preview=has_embedded_3mf_preview,
         )
         point_at(session, fresh, published.key)
         session.flush()
@@ -315,27 +318,21 @@ def _publish_thumbnail(
     return DerivativeState.READY
 
 
-def _publish_embedded_3mf_cover(
-    file_row: File, attempt: records.DerivativeAttempt
-) -> DerivativeState | None:
-    """Publish a 3MF's own slicer picture, or None when it carries none."""
+def _embedded_3mf_cover(source: Path, file_id: int, source_bytes: int) -> bytes | None:
+    from app.modules.media.mesh_observability import record_phases
+    from app.modules.media.mesh_telemetry import MeshPhase, PhaseRecorder
+
+    phases = PhaseRecorder()
+    phases.start(MeshPhase.EMBEDDED, input_bytes=source_bytes)
     try:
-        with resolve(file_row).materialize() as source:
-            image = mesh_previews.extract_embedded_3mf_thumbnail(
-                source, validate_image=True
-            )
-    except ArtifactContentError:
-        return None
-    if image is None:
-        return None
-    return _publish_thumbnail(
-        file_row,
-        image,
-        attempt=attempt,
-        normalize=True,
-        strategy=ThumbnailStrategy.EMBEDDED.value,
-        complete=True,
-    )
+        image = mesh_previews.extract_embedded_3mf_thumbnail(
+            source, validate_image=True, file_type=FileType.THREE_MF.value
+        )
+        phases.finish(output_bytes=len(image) if image is not None else None)
+        return image
+    finally:
+        phases.fail_active()
+        record_phases(phases.snapshot(), file_id=file_id)
 
 
 def _thumbnail_failure(
@@ -368,7 +365,7 @@ def _derive_mesh(
         ViewsRefused,
     )
 
-    from . import mesh_continuations
+    from . import mesh_continuations, policy
     from .mesh_continuation_values import FingerprintPlan
     from .preview_publication import PassClaim
 
@@ -383,6 +380,7 @@ def _derive_mesh(
     )
     pending: mesh_continuations.MeshContinuation | None = None
     views: PassClaim | None = None
+    recreate_embedded = False
 
     def resume(
         session: Session,
@@ -391,7 +389,15 @@ def _derive_mesh(
     ) -> None:
         # The claim already holds the Job, the generation and this Artifact:
         # durable fingerprint intent is resumed under those same locks.
-        nonlocal pending, views
+        nonlocal pending, views, recreate_embedded
+        if (
+            claimed_file.file_type is FileType.THREE_MF
+            and DerivativeKind.THUMBNAIL in claimed_kinds
+        ):
+            recreate_embedded = policy.effective_setting(
+                session.get(SystemConfig, 1),
+                policy.SettingName.RECREATE_EMBEDDED_COVERS,
+            )
         pending = mesh_continuations.resume(
             session, claimed_file, plan, execution=execution
         )
@@ -429,6 +435,27 @@ def _derive_mesh(
 
     views_started = time.monotonic()
     views_settled = False
+
+    cover_attempt = attempts.get(DerivativeKind.THUMBNAIL)
+    check_embedded = (
+        cover_attempt is not None and file_row.file_type is FileType.THREE_MF
+    )
+    embedded_checked = False
+    embedded = None
+
+    def publish_embedded(image: bytes) -> None:
+        assert cover_attempt is not None
+        with phases.phase("publish_thumbnail"):
+            state = _publish_thumbnail(
+                file_row,
+                image,
+                attempt=cover_attempt,
+                normalize=True,
+                strategy=ThumbnailStrategy.EMBEDDED.value,
+                complete=True,
+                has_embedded_3mf_preview=True,
+            )
+        published(DerivativeKind.THUMBNAIL, state)
 
     def publish(frame: BasicOutput) -> None:
         nonlocal pending, views_settled
@@ -493,6 +520,9 @@ def _derive_mesh(
             kind = DerivativeKind.THUMBNAIL
             if kind not in attempts or kind in outcome:
                 raise ValueError("unexpected_mesh_thumbnail_output")
+            if frame.image is None and embedded is not None:
+                publish_embedded(embedded)
+                return
             with phases.phase("publish_thumbnail"):
                 state = (
                     _thumbnail_failure(
@@ -516,6 +546,9 @@ def _derive_mesh(
                         duration_ms=frame.duration_ms,
                         peak_rss_bytes=frame.peak_rss_bytes,
                         abort_on_failure=True,
+                        has_embedded_3mf_preview=(embedded is not None)
+                        if check_embedded
+                        else None,
                     )
                 )
             published(kind, state)
@@ -565,11 +598,31 @@ def _derive_mesh(
                     (source,) = stack.enter_context(
                         prepared.materialize(capacity_claimed=True)
                     )
+                if check_embedded:
+                    with phases.phase("embedded_cover"):
+                        embedded = _embedded_3mf_cover(
+                            source, file_id, file_row.size_bytes
+                        )
+                    embedded_checked = True
+                    if embedded is not None and not recreate_embedded:
+                        publish_embedded(embedded)
+                need_thumbnail = (
+                    cover_attempt is not None
+                    and DerivativeKind.THUMBNAIL not in outcome
+                )
+                if not (
+                    need_thumbnail
+                    or DerivativeKind.METADATA in attempts
+                    or pending is not None
+                    or views is not None
+                ):
+                    return Outcome(outcome)
                 request = ThumbnailRequest(
                     path=source,
                     file_type=file_row.file_type.value,
                     include_geometry=DerivativeKind.METADATA in attempts,
-                    include_thumbnail=DerivativeKind.THUMBNAIL in attempts,
+                    include_thumbnail=need_thumbnail,
+                    check_embedded_3mf_preview=False,
                     reason="derivative",
                     output_format="WEBP",
                     include_fingerprint=plan is not None
@@ -585,7 +638,7 @@ def _derive_mesh(
                     # consumers share source arrays; the GPU handoff starts after
                     # clean worker exit releases its native memory reservation.
                     with phases.phase("generate"):
-                        if handoff_plan is not None:
+                        if need_thumbnail and handoff_plan is not None:
                             handoff = stack.enter_context(
                                 thumbnail_handoff.reserve(
                                     handoff_plan, prepared.directory
@@ -647,25 +700,21 @@ def _derive_mesh(
                 "mesh derivation failed in its worker",
                 extra={"file_id": file_id, "reason": reason},
             )
-            if (
-                DerivativeKind.THUMBNAIL in attempts
-                and DerivativeKind.THUMBNAIL not in outcome
-                and file_row.file_type is FileType.THREE_MF
-                and settings.prefer_rendered_3mf_preview
-            ):
-                # A preferred render is attempted before the slicer's picture is
-                # published, so a worker that dies while reading the mesh would
-                # otherwise leave the Model without a cover. The picture is a
-                # bounded archive read, done here as G-code's embedded image is.
+            if check_embedded and DerivativeKind.THUMBNAIL not in outcome:
                 try:
-                    state = _publish_embedded_3mf_cover(
-                        file_row, attempts[DerivativeKind.THUMBNAIL]
-                    )
+                    if not embedded_checked:
+                        # Capacity or worker admission can fail before probing.
+                        # The bounded archive read is independent of mesh loading.
+                        with resolve(file_row).materialize() as source:
+                            embedded = _embedded_3mf_cover(
+                                source, file_id, file_row.size_bytes
+                            )
+                    if embedded is not None:
+                        publish_embedded(embedded)
+                except ArtifactContentError:
+                    pass
                 except records.AttemptSuperseded:
                     return Outcome(outcome)
-                if state is not None:
-                    outcome[DerivativeKind.THUMBNAIL] = state
-                    published(DerivativeKind.THUMBNAIL, state)
             if views is not None and not views_settled:
                 from . import preview_publication as publication
 

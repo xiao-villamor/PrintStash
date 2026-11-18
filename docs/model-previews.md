@@ -21,6 +21,18 @@ or a source image. Reset to automatic restores the latest automatic thumbnail.
 Chosen covers survive regeneration. Covers with no measured camera are labelled
 as covers, separately from generated viewpoints.
 
+## Embedded 3MF covers
+
+PrintStash uses a usable embedded 3MF picture as its automatic cover. In
+**Settings → Previews**, turn on **Recreate embedded covers** to render automatic
+covers for those files. The embedded picture remains available as a fallback.
+Changing the setting refreshes affected covers in the background. Multi-angle
+views follow their own setting.
+
+`VAULT_PREFER_RENDERED_3MF_PREVIEW` defaults to `false`. A saved admin override
+takes precedence over the environment value. On upgrade, PrintStash checks
+existing 3MF covers for embedded pictures in the background.
+
 ## Fetching and access
 
 Primary image requests start only inside the viewport preload range. A 350 ms

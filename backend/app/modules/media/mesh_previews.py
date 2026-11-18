@@ -10,7 +10,12 @@ from pathlib import Path, PurePosixPath
 from typing import Optional
 
 from app.core.logging import get_logger
+from app.core.native_settings import settings
 from app.modules.media import mesh_policy
+from app.modules.media.three_mf_preview import (
+    EmbeddedGcodeError,
+    check_zip_directory_limits,
+)
 
 logger = get_logger(__name__)
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -39,6 +44,13 @@ def extract_embedded_3mf_thumbnail(
     if mesh_policy.canonical_suffix(path, file_type) != ".3mf":
         return None
     try:
+        check_zip_directory_limits(
+            path,
+            path.stat().st_size,
+            max_entries=_MAX_3MF_ENTRIES,
+            max_central_directory_bytes=settings.three_mf_preview_max_central_directory_mb
+            * 1024**2,
+        )
         with zipfile.ZipFile(path) as zf:
             infos = zf.infolist()
             if len(infos) > _MAX_3MF_ENTRIES:
@@ -130,7 +142,7 @@ def extract_embedded_3mf_thumbnail(
                 try:
                     with zf.open(candidate) as source:
                         data = source.read(candidate.file_size + 1)
-                except (OSError, RuntimeError, zipfile.BadZipFile):
+                except OSError, RuntimeError, zipfile.BadZipFile:
                     logger.warning(
                         "mesh_processing: embedded 3MF thumbnail candidate is unreadable",
                         extra={"entry": candidate.filename},
@@ -172,7 +184,7 @@ def extract_embedded_3mf_thumbnail(
                     len(data),
                 )
                 return data
-    except (zipfile.BadZipFile, OSError, KeyError):
+    except EmbeddedGcodeError, zipfile.BadZipFile, OSError, KeyError:
         logger.warning(
             "mesh_processing: embedded 3MF thumbnail read failed for %s",
             path.name,

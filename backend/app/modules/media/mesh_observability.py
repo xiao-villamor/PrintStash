@@ -213,16 +213,25 @@ def record_supervision(stats: SupervisionStats) -> None:
         logger.exception("failed to publish mesh supervision metrics")
 
 
-def record_phases(stats: tuple[PhaseStats, ...], supervision: SupervisionStats) -> None:
+def record_phases(
+    stats: tuple[PhaseStats, ...],
+    supervision: SupervisionStats | None = None,
+    *,
+    file_id: int | None = None,
+) -> None:
     try:
         logger.info(
             "mesh_phases %s",
             json.dumps(
                 {
                     "version": 1,
-                    "execution_id": supervision.execution_id,
+                    "execution_id": supervision.execution_id
+                    if supervision is not None
+                    else None,
                     "process_id": os.getpid(),
                     "process_role": settings.process_role.value,
+                    **_execution_fields(),
+                    "file_id": file_id,
                     "stages": [asdict(stage) for stage in stats],
                 },
                 allow_nan=False,

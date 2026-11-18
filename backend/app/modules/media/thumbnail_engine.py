@@ -448,6 +448,7 @@ class _Generation:
         """Take a 3MF's own picture, and publish it before the mesh is read."""
         if (
             self.request.include_thumbnail
+            and self.request.check_embedded_3mf_preview
             and self.suffix == ".3mf"
             and (not self.over_cap or settings.use_embedded_3mf_preview_for_large_files)
         ):

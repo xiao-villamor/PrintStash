@@ -406,6 +406,8 @@ function preferenceLabel(intent: PreferenceIntent): string {
   switch (intent.kind) {
     case "multi-angle":
       return uiText("Multi-angle previews");
+    case "recreate-embedded-covers":
+      return uiText("Recreate embedded covers");
     case "auto-mark":
       return uiText("Auto-mark known good on successful print");
     case "currency":
@@ -688,6 +690,10 @@ export function SettingsPanel() {
     preferenceIntent?.kind === "multi-angle"
       ? preferenceIntent.value
       : previewMode(remoteConfigData);
+  const recreateEmbeddedCovers =
+    preferenceIntent?.kind === "recreate-embedded-covers"
+      ? preferenceIntent.value
+      : (remoteConfigData?.prefer_rendered_3mf_preview ?? false);
   const autoMarkKnownGood =
     preferenceIntent?.kind === "auto-mark"
       ? preferenceIntent.value
@@ -1057,6 +1063,24 @@ export function SettingsPanel() {
     try {
       await preferenceCommand.run({ kind: "multi-angle", value: next }, remoteConfigData);
       if (accountCurrent(session)) toast.success(uiText("Multi-angle preview setting saved."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
+    }
+  }
+  async function saveEmbeddedCoverPreference(value: boolean) {
+    if (
+      !user?.is_superuser ||
+      !remoteConfigData ||
+      remoteConfig.isError ||
+      previewBusy !== null ||
+      backupPolicy.isPending ||
+      preferenceCommand.blocked
+    )
+      return;
+    const session = getSessionVersion();
+    try {
+      await preferenceCommand.run({ kind: "recreate-embedded-covers", value }, remoteConfigData);
+      if (accountCurrent(session)) toast.success(uiText("Embedded cover setting saved."));
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
     }
@@ -5429,6 +5453,29 @@ export function SettingsPanel() {
                         <option value="oblique">{previewModeLabel("oblique")}</option>
                         <option value="oblique-poles">{previewModeLabel("oblique-poles")}</option>
                       </select>
+                    </div>
+                    <div className="settings-preference-row">
+                      <span>
+                        {uiText("Recreate embedded covers")}
+                        <span className="settings-row-hint">
+                          {uiText(
+                            "Turn on to render new covers for 3MF files with a built-in picture. Turning off restores the built-in pictures. Covers update in the background.",
+                          )}
+                        </span>
+                      </span>
+                      <SettingsSwitch
+                        label={uiText("Recreate embedded covers")}
+                        checked={recreateEmbeddedCovers}
+                        onChange={(value) => void saveEmbeddedCoverPreference(value)}
+                        disabled={
+                          !user?.is_superuser ||
+                          !remoteConfigData ||
+                          remoteConfig.isError ||
+                          previewBusy !== null ||
+                          preferenceCommand.blocked ||
+                          backupPolicy.isPending
+                        }
+                      />
                     </div>
                     <p className="settings-footnote">
                       {uiText(

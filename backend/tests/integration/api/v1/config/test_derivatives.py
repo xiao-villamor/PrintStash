@@ -5,6 +5,15 @@ import pytest
 from app.db.models import SystemConfig
 from app.modules.derivatives.policy import SettingName
 
+SETTING_DEFAULTS = {
+    SettingName.MESH: True,
+    SettingName.GCODE: True,
+    SettingName.TOOLPATH: True,
+    SettingName.PREVIEWS: False,
+    SettingName.PREVIEW_POLES: False,
+    SettingName.RECREATE_EMBEDDED_COVERS: False,
+}
+
 
 @pytest.mark.parametrize("name", list(SettingName))
 class TestDerivativeControls:
@@ -19,12 +28,11 @@ class TestDerivativeControls:
     def test_null_clears_an_override(
         self, client, auth_headers, db_session, make_system_config, name
     ):
-        make_system_config(**{name: False})
+        default = SETTING_DEFAULTS[name]
+        make_system_config(**{name: not default})
         response = client.put("/api/v1/config", headers=auth_headers, json={name: None})
         assert response.status_code == 200, response.text
-        assert response.json()[name] is (
-            name not in (SettingName.PREVIEWS, SettingName.PREVIEW_POLES)
-        )
+        assert response.json()[name] is default
         db_session.expire_all()
         assert getattr(db_session.get(SystemConfig, 1), name) is None
 

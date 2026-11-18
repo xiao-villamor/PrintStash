@@ -925,9 +925,7 @@ class TestCallerProfiles:
             observed.append(ceiling)
             return ["probe"]
 
-        def supervise(
-            command, *, memory_budget, timeout_seconds, permit, lifecycle, on_chunk
-        ):
+        def supervise(command, *, memory_budget, permit, **_options):
             assert current_permit() is permit
             assert memory_budget == amount.bytes
             assert permit.resources == amount
