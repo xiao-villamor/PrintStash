@@ -16,6 +16,7 @@ import os
 import time
 from dataclasses import dataclass
 from enum import Enum
+from io import BytesIO
 from pathlib import Path
 
 from app.runtime.native_admission import Resources
@@ -263,13 +264,16 @@ def _obj_triangle_count(path: Path, *, deadline: float) -> int | None:
                 or b"mtllib" in contents
             ):
                 return None
-            lines = contents.split(b"\n")
             if block:
-                pending = lines.pop()
+                end = contents.rfind(b"\n") + 1
+                pending = contents[end:]
                 if len(pending) > TEXT_PREFLIGHT_LINE_BYTES:
                     return None
-            for raw in lines:
-                if len(raw) + bool(block) > TEXT_PREFLIGHT_LINE_BYTES:
+                contents = contents[:end]
+            # Iterating the block keeps one physical line at a time, even
+            # when dense face records would produce tens of thousands of slices.
+            for raw in BytesIO(contents):
+                if len(raw) > TEXT_PREFLIGHT_LINE_BYTES:
                     return None
                 fields = raw.split(None, 1)
                 if not fields or fields[0].startswith(b"#"):
