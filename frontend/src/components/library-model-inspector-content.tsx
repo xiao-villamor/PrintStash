@@ -2,7 +2,7 @@
 
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Box, Check, ChevronRight, Loader2, Star, X } from "lucide-react";
+import { Box, Check, ChevronRight, Loader2, X } from "lucide-react";
 import {
   modelPrinterFilesOptions,
   useModelDetail,
@@ -41,6 +41,9 @@ const GcodeViewer = lazy(() =>
   import("@/components/gcode-viewer").then((m) => ({ default: m.GcodeViewer })),
 );
 const meshTypes = new Set(["stl", "3mf", "obj", "step", "glb", "gltf", "ply", "3dm", "fbx"]);
+
+const sectionAction = "px-0 text-muted-foreground hover:bg-transparent hover:text-foreground";
+const descriptionText = "text-[13px] leading-5 text-muted-foreground";
 
 export function InspectorContent({
   model,
@@ -471,7 +474,7 @@ export function InspectorContent({
         </Suspense>
       </div>
       {error && (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="mb-3 text-xs text-destructive">
           {error}
         </p>
       )}
@@ -487,7 +490,7 @@ export function InspectorContent({
               {uiText("G-code revisions")} <span>{revisions.length}</span>
             </h3>
             <Button
-              className="-mr-3"
+              className={sectionAction}
               size="xs"
               variant="ghost"
               disabled={!canEdit}
@@ -555,46 +558,50 @@ export function InspectorContent({
                 aria-labelledby="inspector-tab-print"
                 hidden={tab !== "print"}
               >
-                <div className="library-inspector-overview">
-                  <div className="library-inspector-revision-line">
-                    <span className="text-muted-foreground">{uiText("Revision")}</span>
-                    {revisions.length > 1 ? (
-                      <select
-                        disabled={busy}
-                        value={file.id}
-                        aria-label={uiText("Choose G-code revision")}
-                        onChange={(event) => selectRevision(Number(event.target.value))}
-                      >
-                        {revisions.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {revisionName(item)}
-                            {item.is_recommended ? ` · ★ ${uiText("Recommended")}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div className="library-inspector-single">
-                        <strong>{revisionName(file)}</strong>
-                        {file.is_recommended && (
-                          <span>
-                            <Star className="h-3 w-3 fill-current" />
-                            {uiText("Recommended")}
+                <div>
+                  <dl className="library-inspector-properties divide-y divide-border">
+                    <div className="library-inspector-revision">
+                      <dt>{uiText("Revision")}</dt>
+                      <dd>
+                        {revisions.length > 1 ? (
+                          <select
+                            disabled={busy}
+                            value={file.id}
+                            aria-label={uiText("Choose G-code revision")}
+                            onChange={(event) => selectRevision(Number(event.target.value))}
+                          >
+                            {revisions.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {revisionName(item)}
+                                {item.is_recommended ? ` · ★ ${uiText("Recommended")}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="min-w-0 truncate" title={revisionName(file)}>
+                            <span className="font-medium">{revisionName(file)}</span>
+                            {file.is_recommended && (
+                              <span className="text-muted-foreground">
+                                {" · "}
+                                <span aria-hidden="true">★ </span>
+                                {uiText("Recommended")}
+                              </span>
+                            )}
                           </span>
                         )}
-                      </div>
-                    )}
-                    {!file.is_recommended && (
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        disabled={!canEdit || revision.saving !== null}
-                        onClick={() => void revision.update(file, { is_recommended: true })}
-                      >
-                        {uiText("Recommend")}
-                      </Button>
-                    )}
-                  </div>
-                  <dl className="library-inspector-properties divide-y divide-border">
+                        {!file.is_recommended && (
+                          <Button
+                            className={sectionAction}
+                            variant="ghost"
+                            size="xs"
+                            disabled={!canEdit || revision.saving !== null}
+                            onClick={() => void revision.update(file, { is_recommended: true })}
+                          >
+                            {uiText("Recommend")}
+                          </Button>
+                        )}
+                      </dd>
+                    </div>
                     {(ok > 0 || failed > 0) && (
                       <div>
                         <dt>{uiText("Result")}</dt>
@@ -612,7 +619,7 @@ export function InspectorContent({
                     </div>
                     <div>
                       <dt>{uiText("File")}</dt>
-                      <dd className="font-mono">{revisionFacts(file.metadata)}</dd>
+                      <dd className="font-mono text-xs">{revisionFacts(file.metadata)}</dd>
                     </div>
                   </dl>
                   {administrator && history.isPending && (
@@ -659,7 +666,7 @@ export function InspectorContent({
                       {userMessage(printersQuery.error)}
                     </p>
                   )}
-                  {!canSend && (
+                  {printer && !canSend && (
                     <p className="library-inspector-caption">
                       {!canEdit
                         ? uiText("Read-only")
@@ -688,93 +695,100 @@ export function InspectorContent({
                     </Button>
                   </div>
                 </section>
-                <section
-                  className="library-inspector-results"
-                  aria-label={uiText("Log print outcome")}
-                >
-                  <span>{uiText("Print outcome")}</span>
-                  {!failing && (
-                    <div className="library-inspector-actions" data-library-log-outcomes>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        disabled={!canLog}
-                        aria-keyshortcuts="1"
-                        onClick={() => void log("completed")}
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                        {uiText("OK")}
-                      </Button>
-                      <Button
-                        ref={failedButton}
-                        size="xs"
-                        variant="outline"
-                        disabled={!canLog}
-                        aria-keyshortcuts="2"
-                        onClick={beginFailure}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                        {uiText("Failed")}
-                      </Button>
-                    </div>
-                  )}
-                  {failing && (
-                    <div
-                      className="library-inspector-failure"
-                      role="group"
-                      aria-label={uiText("Log a failed print")}
-                    >
-                      <p>{uiText("Log failed print")}</p>
-                      <label htmlFor="inspector-failure-note">
-                        {uiText("What went wrong?")}{" "}
-                        <span className="text-muted-foreground">{uiText("Optional")}</span>
-                      </label>
-                      <textarea
-                        ref={failureInput}
-                        id="inspector-failure-note"
-                        maxLength={300}
-                        rows={2}
-                        value={failNote}
-                        disabled={busy || !canEdit || !administrator}
-                        onChange={(event) => setFailNote(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (
-                            event.defaultPrevented ||
-                            event.nativeEvent.isComposing ||
-                            event.repeat ||
-                            event.altKey ||
-                            event.shiftKey ||
-                            event.getModifierState("AltGraph") ||
-                            !(event.metaKey || event.ctrlKey) ||
-                            event.key !== "Enter"
-                          )
-                            return;
-                          event.preventDefault();
-                          void log("failed");
-                        }}
-                        placeholder={uiText("e.g. Corner lifted at layer 112")}
-                      />
-                      <div className="flex items-center justify-end gap-2">
-                        <kbd className="mr-auto text-xs text-muted-foreground">
-                          {navigator.platform.includes("Mac") ? "⌘" : uiText("Ctrl")}
-                          {uiText("+Enter")}
-                        </kbd>
-                        <Button size="xs" variant="outline" disabled={busy} onClick={cancelFailure}>
-                          {uiText("Cancel")}
-                        </Button>
+                {printer && (
+                  <section
+                    className="library-inspector-results"
+                    aria-label={uiText("Log print outcome")}
+                  >
+                    <span>{uiText("Print outcome")}</span>
+                    {!failing && (
+                      <div className="library-inspector-actions" data-library-log-outcomes>
                         <Button
                           size="xs"
                           variant="outline"
-                          loading={busy}
                           disabled={!canLog}
-                          onClick={() => void log("failed")}
+                          aria-keyshortcuts="1"
+                          onClick={() => void log("completed")}
                         >
-                          {uiText("Save failed print")}
+                          <Check className="h-3.5 w-3.5" />
+                          {uiText("OK")}
+                        </Button>
+                        <Button
+                          ref={failedButton}
+                          size="xs"
+                          variant="outline"
+                          disabled={!canLog}
+                          aria-keyshortcuts="2"
+                          onClick={beginFailure}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                          {uiText("Failed")}
                         </Button>
                       </div>
-                    </div>
-                  )}
-                </section>
+                    )}
+                    {failing && (
+                      <div
+                        className="library-inspector-failure"
+                        role="group"
+                        aria-label={uiText("Log a failed print")}
+                      >
+                        <p>{uiText("Log failed print")}</p>
+                        <label htmlFor="inspector-failure-note">
+                          {uiText("What went wrong?")}{" "}
+                          <span className="text-muted-foreground">{uiText("Optional")}</span>
+                        </label>
+                        <textarea
+                          ref={failureInput}
+                          id="inspector-failure-note"
+                          maxLength={300}
+                          rows={2}
+                          value={failNote}
+                          disabled={busy || !canEdit || !administrator}
+                          onChange={(event) => setFailNote(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (
+                              event.defaultPrevented ||
+                              event.nativeEvent.isComposing ||
+                              event.repeat ||
+                              event.altKey ||
+                              event.shiftKey ||
+                              event.getModifierState("AltGraph") ||
+                              !(event.metaKey || event.ctrlKey) ||
+                              event.key !== "Enter"
+                            )
+                              return;
+                            event.preventDefault();
+                            void log("failed");
+                          }}
+                          placeholder={uiText("e.g. Corner lifted at layer 112")}
+                        />
+                        <div className="flex items-center justify-end gap-2">
+                          <kbd className="mr-auto text-xs text-muted-foreground">
+                            {navigator.platform.includes("Mac") ? "⌘" : uiText("Ctrl")}
+                            {uiText("+Enter")}
+                          </kbd>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={cancelFailure}
+                          >
+                            {uiText("Cancel")}
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            loading={busy}
+                            disabled={!canLog}
+                            onClick={() => void log("failed")}
+                          >
+                            {uiText("Save failed print")}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                )}
               </section>
               <section
                 role="tabpanel"
@@ -855,16 +869,22 @@ export function InspectorContent({
           )}
         </section>
       ) : (
-        <section className="library-inspector-section library-inspector-empty">
+        <section className="library-inspector-section">
           <header className="library-inspector-section-heading">
             <h3>
               {uiText("G-code revisions")} <span>{revisions.length}</span>
             </h3>
+            <Button
+              className={sectionAction}
+              size="xs"
+              variant="ghost"
+              disabled={!canEdit}
+              onClick={() => setAddOpen(true)}
+            >
+              {uiText("Add revision")}
+            </Button>
           </header>
           <p className="text-muted-foreground">{uiText("No G-code revisions yet")}</p>
-          <Button size="xs" variant="outline" disabled={!canEdit} onClick={() => setAddOpen(true)}>
-            {uiText("Add revision")}
-          </Button>
         </section>
       )}
       <section className="library-inspector-section">
@@ -872,8 +892,9 @@ export function InspectorContent({
           <h3>{uiText("Description")}</h3>
           {canEdit && !descriptionIntent && (
             <Button
+              className={sectionAction}
               size="xs"
-              variant="outline"
+              variant="ghost"
               aria-label={uiText("Edit description")}
               onClick={beginDescription}
             >
@@ -882,7 +903,7 @@ export function InspectorContent({
           )}
         </header>
         {descriptionIntent ? (
-          <div className="space-y-2 pb-3">
+          <div className="space-y-2">
             {descriptionProblem && (
               <div role="alert" className="space-y-2 border border-border bg-muted p-3 text-xs">
                 <p>
@@ -996,15 +1017,15 @@ export function InspectorContent({
         ) : model.description ? (
           <InspectorDescription description={model.description} />
         ) : (
-          <p className="text-muted-foreground">
+          <p className={descriptionText}>
             {uiText("No description yet. Add orientation, hardware or print notes.")}
           </p>
         )}
       </section>
       <details className="library-inspector-section">
         <summary className="library-inspector-section-heading">
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
           <h3>{uiText("Geometry")}</h3>
+          <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </summary>
         <dl className="library-inspector-properties divide-y divide-border">
           {geometryFacts(geometry).map(([label, value]) => (
@@ -1017,11 +1038,11 @@ export function InspectorContent({
       </details>
       <details className="library-inspector-section">
         <summary className="library-inspector-section-heading">
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
           <h3>
             {uiText("Files")} <span>{files.length}</span>
           </h3>
           <span className="text-xs text-muted-foreground">{uiText("SHA-256")}</span>
+          <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </summary>
         <ul className="library-inspector-files divide-y divide-border">
           {files.map((item) => (
@@ -1099,7 +1120,7 @@ function InspectorDescription({ description }: { description: string }) {
       <p
         id={id}
         ref={content}
-        className={`whitespace-pre-wrap wrap-anywhere leading-5 ${expanded ? "" : "line-clamp-4"}`}
+        className={`${descriptionText} whitespace-pre-wrap wrap-anywhere ${expanded ? "" : "line-clamp-4"}`}
       >
         {description}
       </p>
@@ -1107,7 +1128,7 @@ function InspectorDescription({ description }: { description: string }) {
         <Button
           size="xs"
           variant="ghost"
-          className="-ml-3 mt-1"
+          className={sectionAction}
           aria-controls={id}
           aria-expanded={expanded}
           onClick={() => setExpanded(!expanded)}
