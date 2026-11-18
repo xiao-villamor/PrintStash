@@ -632,11 +632,29 @@ def _discovery_budget(session: Session, definition: JobDefinition) -> DiscoveryB
         for item in catalog.definitions.values()
         if item.lane == definition.lane
     ]
+    lane_jobs = col(Job.kind).in_(definitions)
+    if not definition.batch_interactive_discovery:
+        # Buffered covers and plates may already occupy several waves. Leave
+        # prompt sources (such as an opened viewer) their own shared queue
+        # allowance, while still sharing the single backfill slot.
+        batched = [
+            name
+            for name in definitions
+            if catalog.definition(name).batch_interactive_discovery
+        ]
+        if batched:
+            lane_jobs = and_(
+                lane_jobs,
+                or_(
+                    col(Job.kind).not_in(batched),
+                    col(Job.priority) == WorkPriority.BACKFILL,
+                ),
+            )
     counts = dict(
         session.exec(
             select(Job.priority, func.count(col(Job.id)))
             .where(
-                col(Job.kind).in_(definitions),
+                lane_jobs,
                 active_job_predicate(),
                 or_(
                     col(Job.priority) == WorkPriority.BACKFILL,
@@ -646,7 +664,10 @@ def _discovery_budget(session: Session, definition: JobDefinition) -> DiscoveryB
             .group_by(col(Job.priority))
         ).all()
     )
-    interactive = max(0, lane.concurrency - counts.get(WorkPriority.INTERACTIVE, 0))
+    # Batched sources fill three waves. The first claim that leaves one
+    # wave queued wakes discovery while that reserve can still feed the lane.
+    target = lane.concurrency * (3 if definition.batch_interactive_discovery else 1)
+    interactive = max(0, target - counts.get(WorkPriority.INTERACTIVE, 0))
     backfill = max(0, 1 - counts.get(WorkPriority.BACKFILL, 0))
     return DiscoveryBudget(
         total=min(settings.jobs_reconcile_batch, interactive + backfill),

@@ -329,9 +329,10 @@ class JobStore:
         )
 
     @staticmethod
-    def has_submitted_interactive_queue(session: Session, definition: JobKind) -> bool:
-        # These Jobs already reached the engine. Their next claim can refill
-        # the source's pending quota without a redundant settlement pass.
+    def has_submitted_interactive_queue(
+        session: Session, definition: JobKind, *, minimum: int = 1
+    ) -> bool:
+        # Only current attempts that made it to the engine can cover a wakeup.
         return (
             session.exec(
                 select(Job.id)
@@ -343,6 +344,7 @@ class JobStore:
                     col(Job.submitted_epoch) == col(Job.execution_epoch),
                 )
                 .limit(1)
+                .offset(minimum - 1)
             ).first()
             is not None
         )

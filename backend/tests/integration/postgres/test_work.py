@@ -186,6 +186,54 @@ class TestInteractiveClaims:
             for execution in work_engine.executions.values()
         )
 
+    def test_concurrent_claims_refill_from_the_committed_reserve(
+        self, pg, work_engine, work_catalog, monkeypatch
+    ) -> None:
+        kind = JobKind.DERIVATIVES_MESH
+        monkeypatch.setitem(
+            work_catalog.lanes, LaneName.DERIVE_NATIVE, Lane(LaneName.DERIVE_NATIVE, 2)
+        )
+        assert run_pass(kind).submitted == 0  # Leave an existing, unstamped cursor.
+        rows = [f.build_job(pg, kind=kind, attempts=1) for _ in range(4)]
+        identities = [(row.id, row.execution_epoch) for row in rows[:2]]
+        committing = Barrier(2)
+        committed = Barrier(2)
+        thread = local()
+        reserve = work_catalog.interactive_reserve_covers
+
+        def count_committed(session, name):
+            if name is kind:
+                committed.wait(timeout=10)
+            return reserve(session, name)
+
+        monkeypatch.setattr(work_catalog, "interactive_reserve_covers", count_committed)
+
+        def before_commit(_connection):
+            if getattr(thread, "claiming", False):
+                thread.claiming = False
+                committing.wait(timeout=10)
+
+        def claim(index):
+            thread.claiming = True
+            job_id, epoch = identities[index]
+            return _begin(job_id, 1, epoch)
+
+        target = pg.get_bind()
+        event.listen(target, "commit", before_commit)
+        try:
+            results = _race(2, claim)
+        finally:
+            event.remove(target, "commit", before_commit)
+
+        assert all(isinstance(result, dict) for result in results), results
+        refills = [
+            execution
+            for execution in work_engine.executions.values()
+            if isinstance(execution.submission, PassSubmission)
+            and execution.submission.source is kind
+        ]
+        assert len(refills) == 1
+
 
 class TestRetention:
     def test_a_pending_import_outlives_the_job_that_resolved_it(self, pg) -> None:

@@ -135,14 +135,13 @@ def _during_additions(name: JobKind) -> DuringAdditions:
     """How a derivative definition looks for work while Models are being added.
 
     A viewer mesh is what opening a Model in 3D waits for; it never yields.
-    Mesh outputs follow an import as its Models land, at a pace. G-code and
-    toolpath outputs wait for the last addition to settle: a paced look costs
-    the import a writer turn every few seconds even when the batch brings no
-    G-code, and the settling addition stamps them, so nothing is lost.
+    Mesh covers refill from committed Artifacts and accepted Job claims.
+    Optional previews still look at a pace. The other groups wait for the last
+    addition to settle, which stamps their sources.
     """
-    if name is JobKind.DERIVATIVES_VIEWER_STL:
+    if name in {JobKind.DERIVATIVES_VIEWER_STL, JobKind.DERIVATIVES_MESH}:
         return DuringAdditions.RUNS
-    if name in {JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_PREVIEWS}:
+    if name is JobKind.DERIVATIVES_PREVIEWS:
         return DuringAdditions.PACED
     return DuringAdditions.WAITS
 
@@ -163,6 +162,8 @@ def _definition(name: JobKind, lane: LaneName, produce: Producer) -> JobDefiniti
         completion_nudges=(JobKind.DERIVATIVES_PREVIEWS,)
         if name in {JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_GCODE}
         else (),
+        batch_interactive_discovery=name
+        in {JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_PLATES},
         label=derivative_group.label,
         admission=lambda session: policy.admission(session, name),
         during_additions=_during_additions(name),
@@ -205,7 +206,7 @@ def nudge_for(session: Session, file_row: File) -> None:
     controls = policy.resolve(session)
     for derivative_group in groups_for(file_row):
         if controls[derivative_group.definition].enabled:
-            nudge(derivative_group.definition)
+            nudge(derivative_group.definition, use_interactive_reserve=True)
 
 
 def nudge_with_commit(session: Session, file_row: File) -> None:

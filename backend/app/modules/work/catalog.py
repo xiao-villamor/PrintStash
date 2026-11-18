@@ -32,7 +32,7 @@ from .contracts import (
     LaneOrder,
     LanePace,
 )
-from .jobs import active_job_predicate
+from .jobs import active_job_predicate, jobs
 
 # How many reconcile passes run at once, deployment-wide.
 RECONCILE_CONCURRENCY = 4
@@ -175,6 +175,15 @@ class WorkCatalog:
         """Definitions whose discovery waits for interactive work of ``name`` to start."""
         return tuple(
             other for other, item in self.definitions.items() if name in item.yields_to
+        )
+
+    def interactive_reserve_covers(self, session: Session, name: JobKind) -> bool:
+        """Whether accepted successors cover a claim or arrival wakeup."""
+        definition = self.definition(name)
+        if not definition.batch_interactive_discovery:
+            return False
+        return jobs.has_submitted_interactive_queue(
+            session, name, minimum=self.lanes[definition.lane].concurrency + 1
         )
 
     def interactive_waiting(

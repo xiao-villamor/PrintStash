@@ -485,14 +485,16 @@ def _begin(job_id: str, attempt: int, execution_epoch: str) -> dict[str, str] | 
 
             catalog = catalog_module.get_catalog()
             definition = catalog.definition(row.kind)
+            sqlite = session.get_bind().dialect.name == "sqlite"
             if isinstance(definition.source, PrioritizedWorkSource):
-                # Running interactive work frees a pending slot. Let the source
-                # fill that existing allowance while this attempt runs; its
-                # priority quotas and admission checks still bound discovery.
+                # The transactional nudge checks a batched source's reserve
+                # after this claim is visible (after commit on PostgreSQL).
+                if sqlite and definition.batch_interactive_discovery:
+                    session.flush()
                 nudge_after_commit(session, definition.name)
             yielding = catalog.yielding_to(definition.name)
             if starting and yielding:
-                if session.get_bind().dialect.name == "sqlite":
+                if sqlite:
                     if not catalog.interactive_waiting(
                         session, definition.name, now=now, queue_locked=True
                     ):
@@ -521,7 +523,9 @@ def _wake_yielding_after_claim(name: JobKind) -> None:
         for source in catalog.yielding_to(name):
             nudge(source)
     except Exception:  # noqa: BLE001 - settlement and the tick recover this hint
-        logger.exception("interactive claim wakeup failed", extra={"source": name.value})
+        logger.exception(
+            "interactive claim wakeup failed", extra={"source": name.value}
+        )
 
 
 def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:

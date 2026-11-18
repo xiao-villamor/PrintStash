@@ -6,6 +6,8 @@
 
 - Search indexing can start while the final cover thumbnails are still rendering after an import. Cover generation also does less database work per thumbnail.
 
+- Cover and plate work refills in batches during imports. When a GPU is ready to render covers, discovery can start one large cover early in each batch.
+
 ### Changed
 
 - New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.

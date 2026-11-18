@@ -351,6 +351,9 @@ class JobDefinition:
     retry: RetryHook = _no_retry_hook
     # Sources this definition's completions should nudge (always its own).
     completion_nudges: tuple[JobKind, ...] = ()
+    # Keep an interactive reserve for a prioritized source that tends to
+    # receive bursts. Refill on the low-water claim, ahead of completions.
+    batch_interactive_discovery: bool = False
     # On a partitioned lane: the partition a subject belongs to (a printer id,
     # a notification channel). Required there and refused elsewhere.
     partition: Callable[[str], str] | None = None
@@ -386,6 +389,10 @@ class JobDefinition:
     admission: Callable[["Session"], SkipReason | None] = _allow_admission
 
     def __post_init__(self) -> None:
+        if self.batch_interactive_discovery and not isinstance(
+            self.source, PrioritizedWorkSource
+        ):
+            raise ValueError("batched_discovery_requires_prioritized_source")
         if not self.steps:
             raise ValueError("job_definition_without_steps")
         if len({step.name for step in self.steps}) != len(self.steps):

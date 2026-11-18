@@ -282,9 +282,11 @@ def stamp(
         .on_conflict_do_nothing(index_elements=["source"])
     )
     queued_at, queued_priority = session.execute(
-        select(ReconcileCursor.pass_queued_at, ReconcileCursor.pass_priority).where(
-            col(ReconcileCursor.source) == source
-        )
+        select(ReconcileCursor.pass_queued_at, ReconcileCursor.pass_priority)
+        .where(col(ReconcileCursor.source) == source)
+        # PostgreSQL claims can arrive together after the reserve runs low.
+        # Serialize the fallback read with the mark it decides to write.
+        .with_for_update()
     ).one()
     covered = _covered(queued_at, queued_priority, priority, now)
     values: dict[str, object] = {"nudged_at": now}
@@ -322,6 +324,7 @@ def nudge(
     now: datetime | None = None,
     delay: float | None = None,
     priority: WorkPriority = WorkPriority.INTERACTIVE,
+    use_interactive_reserve: bool = False,
 ) -> None:
     """Ask for ``source``'s reconcile pass soon. Never raises into the caller.
 
@@ -333,15 +336,21 @@ def nudge(
     waiting behind the backfill pass the sweep queued for the same source.
     A delayed nudge (a source's next due time) only enqueues its pass: the
     work it waits for is not due yet, so it marks nothing dirty.
+    Arrivals and claims can let a batched source's accepted reserve cover
+    their wakeup. Recovery and administrative nudges still run a pass.
     """
     if not catalog_module.bound():
         return
     now = now or utcnow()
     try:
-        catalog_module.get_catalog().definition(source)
+        catalog = catalog_module.get_catalog()
+        catalog.definition(source)
         if delay is None:
             with get_session_factory().scoped_session() as session:
-                if _held_for_additions(session, source):
+                if _held_for_additions(session, source) or (
+                    use_interactive_reserve
+                    and catalog.interactive_reserve_covers(session, source)
+                ):
                     return
                 needed = stamp(session, source, now=now, priority=priority)
                 session.commit()
@@ -423,8 +432,10 @@ def _stamp_committing(session: Session) -> None:
     now = utcnow()
     for source in sorted(pending):
         try:
-            catalog_module.get_catalog().definition(source)
-            if _held_for_additions(session, source):
+            catalog = catalog_module.get_catalog()
+            if _held_for_additions(
+                session, source
+            ) or catalog.interactive_reserve_covers(session, source):
                 pending[source] = False
                 continue
             pending[source] = stamp(session, source, now=now)
@@ -444,7 +455,7 @@ def _nudge_committed(session: Session) -> None:
     queue_stamped(source for source, needed in outcomes if needed)
     for source, needed in outcomes:
         if needed is None:
-            nudge(source)
+            nudge(source, use_interactive_reserve=True)
 
 
 def _forget_rolled_back(session: Session, previous_transaction) -> None:
