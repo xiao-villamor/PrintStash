@@ -116,3 +116,31 @@ class TestHostReservation:
         with pytest.raises(ComputeUnavailable) as error:
             owner.make_host_room("renderer", remaining + 1)
         assert error.value.reason is Reason.CAPACITY
+
+
+class TestMaximalVisualGeometry:
+    def test_reserves_two_transfer_copies_of_a_full_body(self):
+        from app.runtime.compute.budget import QueueBudget
+        from app.runtime.compute.geometry_cache import INPUT_QUEUE_BYTES
+
+        transfers = QueueBudget(INPUT_QUEUE_BYTES)
+        body_bytes = 96_000_000
+        transfers.reserve(2 * body_bytes)
+        with pytest.raises(ComputeUnavailable) as error:
+            transfers.reserve(2 * body_bytes)
+        assert error.value.reason is Reason.CAPACITY
+        transfers.release(2 * body_bytes)
+        assert transfers.used == 0
+
+    def test_pins_one_maximal_input_until_render_releases_it(self):
+        cache = GeometryCache()
+        counts = (6_000_000, 2_000_000, 6_000_000)
+        first = cache.insert("a", 96_000_000, counts, object())
+
+        with pytest.raises(ComputeUnavailable) as error:
+            cache.insert("b", 96_000_000, counts, object())
+        assert error.value.reason is Reason.CAPACITY
+        cache.release(first)
+
+        assert cache.insert("b", 96_000_000, counts, object()).size == 96_000_000
+        assert cache.acquire("a", 96_000_000, counts) is None

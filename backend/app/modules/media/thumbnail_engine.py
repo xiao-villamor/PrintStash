@@ -803,9 +803,10 @@ class _Generation:
                                         self.width,
                                         self.height,
                                     )
-                                except ValueError:
-                                    # A source may fit native CPU rendering while its
-                                    # immutable packet exceeds the shared wire budget.
+                                except ValueError as exc:
+                                    # The CPU renderer can still consume geometry
+                                    # the bounded transport cannot represent.
+                                    logger.debug("thumbnail packet refused: %s", exc)
                                     self.packet = None
                         self.image = (
                             None

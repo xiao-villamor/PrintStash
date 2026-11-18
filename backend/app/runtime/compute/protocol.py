@@ -11,6 +11,11 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter
 
+from app.modules.media.compute_geometry_wire import (
+    MAX_GEOMETRY_HEADER_BYTES,
+    MAX_VISUAL_GEOMETRY_BYTES,
+)
+
 from .contracts import ComputeUnavailable, Reason
 
 MAX_FRAME = 96 * 1024**2
@@ -52,8 +57,8 @@ class RenderRequest(WorkRequest):
 class BinaryRenderRequest(WorkRequest):
     operation: Literal["render_binary"] = "render_binary"
     geometry_key: str = Field(pattern=r"^[0-9a-f]{64}$")
-    geometry_bytes: int = Field(gt=0, le=48 * 1024**2)
-    header: str = Field(min_length=1, max_length=4096)
+    geometry_bytes: int = Field(gt=0, le=MAX_VISUAL_GEOMETRY_BYTES)
+    header: str = Field(min_length=1, max_length=MAX_GEOMETRY_HEADER_BYTES)
     recipe: str = Field(min_length=1, max_length=256)
     units: int = Field(ge=1)
     # Only the broker can attach validated arrays, never the wire decoder.
@@ -68,18 +73,24 @@ request_type = TypeAdapter(Request)
 
 
 def _read(connection: socket.socket, length: int, deadline: float, checkpoint) -> bytes:
-    result = bytearray()
-    while len(result) < length:
+    # The broker reserves two full bodies: the receive buffer and the
+    # immutable result. Growing a bytearray could exceed that reservation.
+    result = bytearray(length)
+    offset = 0
+    while offset < length:
         checkpoint()
         if time.monotonic() >= deadline:
             raise ComputeUnavailable(Reason.DEADLINE)
         try:
-            chunk = connection.recv(min(length - len(result), 65536))
+            chunk = connection.recv(min(length - offset, 65536))
         except socket.timeout:
             continue
         if not chunk:
             raise ComputeUnavailable(Reason.CANCELLED)
-        result.extend(chunk)
+        end = offset + len(chunk)
+        result[offset:end] = chunk
+        offset = end
+        del chunk
     return bytes(result)
 
 

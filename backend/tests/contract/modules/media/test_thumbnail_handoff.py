@@ -21,6 +21,7 @@ from app.modules.media import (
 from app.modules.media.mesh_contracts import PreparedThumbnailResult, ThumbnailRequest
 from app.modules.media.thumbnail_engine import ThumbnailEngine
 from app.runtime import native_runtime, preparation_runtime
+from app.runtime.compute.contracts import ComputeUnavailable, Reason
 from app.runtime.native_admission import Resources
 from tests.fixtures.compute_renderer import qualified_renderer as qualified_renderer
 
@@ -88,13 +89,19 @@ class TestPreparedExecution:
                 pass
             if refused:
                 source.unlink()  # CPU recovery must consume the owned packet.
-                return None
+                return render_packet(payload, **kwargs)
             rgba = bytearray(640 * 480 * 4)
             rgba[(240 * 640 + 320) * 4 : (240 * 640 + 320) * 4 + 4] = bytes(
                 (100, 150, 200, 255)
             )
             return RenderedPixels(640, 480, bytes(rgba))
 
+        render_packet = compute_render.render_packet
+
+        def refuse_device(*args, **kwargs):
+            raise ComputeUnavailable(Reason.DEVICE_FAILED)
+
+        monkeypatch.setattr(compute_render.client, "exchange_render", refuse_device)
         monkeypatch.setattr(compute_render, "render_packet", render)
         capacity = Resources(4, 384 * 1024**2)
         plan = thumbnail_handoff.HandoffPlan(

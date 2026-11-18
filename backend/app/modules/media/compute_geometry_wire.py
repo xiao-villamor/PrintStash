@@ -13,7 +13,11 @@ from typing import Final, Literal, cast
 
 MAX_GEOMETRY_BYTES = 48 * 1024**2
 MAX_FACES = 2_000_000
-MAX_VERTICES = 6_000_000
+MAX_VERTICES = 3 * MAX_FACES
+# The visual layout carries only float32 positions and uint32 triangles.
+MAX_VISUAL_GEOMETRY_BYTES = 12 * (MAX_VERTICES + MAX_FACES)
+MAX_GEOMETRY_HEADER_BYTES = 4096
+MAX_GEOMETRY_PACKET_BYTES = MAX_VISUAL_GEOMETRY_BYTES + MAX_GEOMETRY_HEADER_BYTES + 4
 CANONICAL_MODE: Final = "canonical"
 NORMAL_MODE: Final = "gpu-angle-csr-v1"
 VISUAL_NORMAL_MODE: Final = "gpu-visual-v2"
@@ -56,16 +60,18 @@ def _validate_layout(layout: GeometryLayout) -> None:
         or (layout.normal_mode == VISUAL_NORMAL_MODE and k != n)
     ):
         raise ValueError("compute_geometry_shape")
-    # A smaller deferred encoding must not silently enlarge source admission.
+    # Canonical and legacy CSR retain the original envelope. The visual
+    # path allocates neither canonical normals nor host CSR scratch.
     if (
-        n * 20 + f * 24 + k * 24 > MAX_GEOMETRY_BYTES
-        or body_size(layout) > MAX_GEOMETRY_BYTES
+        body_size(layout) > MAX_VISUAL_GEOMETRY_BYTES
+        if layout.normal_mode == VISUAL_NORMAL_MODE
+        else n * 20 + f * 24 + k * 24 > MAX_GEOMETRY_BYTES
     ):
         raise ValueError("compute_geometry_budget")
 
 
 def descriptor(header: bytes) -> tuple[dict, GeometryLayout]:
-    if len(header) > 4096:
+    if len(header) > MAX_GEOMETRY_HEADER_BYTES:
         raise ValueError("compute_geometry_header")
     value = json.loads(header)
     fields = {"vertices", "faces", "normals", "width", "height", "views", "matte"}

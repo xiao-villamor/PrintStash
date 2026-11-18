@@ -43,3 +43,14 @@ class TestVisualCanary:
     def test_refuses_invalid_visual_scratch_shape(self, vertices):
         with pytest.raises(ValueError, match="compute_normals_shape"):
             visual_scratch_sizes(vertices)
+
+
+class TestVisualScratch:
+    def test_fits_the_minimum_storage_binding_limit_at_maximal_geometry(self):
+        assert visual_scratch_sizes(6_000_000) == (
+            67_108_864,
+            72_000_000,
+            24_000_000,
+            4,
+        )
+        assert max(visual_scratch_sizes(6_000_000)) <= 128 * 1024**2

@@ -13,14 +13,7 @@ import math
 from typing import Any
 
 from .gpu_normals import DeviceNormals, VisualRender
-
-
-def visual_scratch_sizes(vertices: int) -> tuple[int, int, int, int]:
-    if type(vertices) is not int or vertices < 1:
-        raise ValueError("compute_normals_shape")
-    capacity = 1 << (2 * vertices - 1).bit_length()
-    return capacity * 4, capacity * 12, capacity * 4, 4
-
+from .gpu_render_layout import visual_scratch_sizes as visual_scratch_sizes
 
 SHADER = """
 @group(0) @binding(0) var<storage, read> positions: array<f32>;
@@ -65,12 +58,12 @@ fn weld(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) g
     for (var probe = 0u; probe < 64u; probe++) {
         let claimed = atomicCompareExchangeWeak(&heads[slot], 0u, i+1u);
         if claimed.exchanged {
-            identities[i] = slot;
+            identities[i] = i;
             return;
         }
         if claimed.old_value == 0u { continue; }
         if all(bits(vertex(claimed.old_value-1u)) == key) {
-            identities[i] = slot;
+            identities[i] = claimed.old_value-1u;
             return;
         }
         slot = (slot + 1u) & mask;
@@ -94,15 +87,15 @@ fn accumulate(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgro
                        acos(clamp(dot(-ab, bc), -1.0, 1.0)),
                        acos(clamp(dot(-ac, -bc), -1.0, 1.0)));
     for (var corner = 0u; corner < 3u; corner++) {
-        let slot = identities[indices[corner]];
-        if slot == 0xffffffffu { continue; }
+        let representative = identities[indices[corner]];
+        if representative == 0xffffffffu { continue; }
         // At most 4096*pi*65536 per component, below signed32-bit overflow.
-        let degree = atomicAdd(&degrees[slot], 1u);
+        let degree = atomicAdd(&degrees[representative], 1u);
         if degree >= 4096u { continue; }
         let value = vec3<i32>(round(normal * weights[corner] * 65536.0));
-        atomicAdd(&sums[3u*slot], value.x);
-        atomicAdd(&sums[3u*slot+1u], value.y);
-        atomicAdd(&sums[3u*slot+2u], value.z);
+        atomicAdd(&sums[3u*representative], value.x);
+        atomicAdd(&sums[3u*representative+1u], value.y);
+        atomicAdd(&sums[3u*representative+2u], value.z);
     }
 }
 
@@ -110,12 +103,12 @@ fn accumulate(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgro
 fn normalize(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) groups: vec3<u32>) {
     let i = global_index(id, groups);
     if i >= arrayLength(&identities) { return; }
-    let slot = identities[i];
+    let representative = identities[i];
     var normal = vec3(0.0);
-    if slot != 0xffffffffu {
-        if atomicLoad(&degrees[slot]) <= 4096u {
-            normal = unit_zero(vec3<f32>(f32(atomicLoad(&sums[3u*slot])),
-                       f32(atomicLoad(&sums[3u*slot+1u])), f32(atomicLoad(&sums[3u*slot+2u]))));
+    if representative != 0xffffffffu {
+        if atomicLoad(&degrees[representative]) <= 4096u {
+            normal = unit_zero(vec3<f32>(f32(atomicLoad(&sums[3u*representative])),
+                       f32(atomicLoad(&sums[3u*representative+1u])), f32(atomicLoad(&sums[3u*representative+2u]))));
         }
     }
     if all(normal == vec3(0.0)) { atomicAdd(&fallback_vertices, 1u); }

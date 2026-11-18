@@ -35,12 +35,20 @@ def upload_bytes(vertices: int, faces: int, positions: int, mode: str) -> int:
     return size
 
 
+def visual_scratch_sizes(vertices: int) -> tuple[int, int, int, int]:
+    if type(vertices) is not int or vertices < 1:
+        raise ValueError("compute_normals_shape")
+    table = 1 << (2 * vertices - 1).bit_length()
+    # Only hash heads are indexed by slot. Sums and degrees are indexed by
+    # the representative vertex, so each binding fits even at MAX_VERTICES.
+    return table * 4, vertices * 12, vertices * 4, 4
+
+
 def normal_scratch_sizes(
     vertices: int, faces: int, positions: int, mode: str
 ) -> tuple[int, ...]:
     if mode == VISUAL_NORMAL_MODE:
-        table = 1 << (2 * vertices - 1).bit_length()
-        return table * 4, table * 12, table * 4, 4
+        return visual_scratch_sizes(vertices)
     if mode == NORMAL_MODE:
         # Legacy provider owns a temporary smooth output, copied into the cache.
         return (positions + 1) * 4, faces * 12, faces * 24, positions * 12, 4

@@ -8,7 +8,8 @@ from printstash_core.mesh.render_geometry import PreparedRender, PreparedRenderG
 
 from .compute_geometry_wire import (
     CANONICAL_MODE,
-    MAX_GEOMETRY_BYTES,
+    MAX_GEOMETRY_HEADER_BYTES,
+    MAX_GEOMETRY_PACKET_BYTES,
     NORMAL_MODE,
     VISUAL_NORMAL_MODE,
     GeometryLayout,
@@ -100,10 +101,10 @@ def encode(prepared: RenderInput, width: int, height: int, views, matte: bool) -
 
 
 def decode(payload: bytes):
-    if len(payload) < 4 or len(payload) > MAX_GEOMETRY_BYTES + 4096:
+    if len(payload) < 4 or len(payload) > MAX_GEOMETRY_PACKET_BYTES:
         raise ValueError("compute_geometry_budget")
     length = struct.unpack("!I", payload[:4])[0]
-    if length > 4096:
+    if not 0 < length <= MAX_GEOMETRY_HEADER_BYTES or 4 + length > len(payload):
         raise ValueError("compute_geometry_header")
     header = payload[4 : 4 + length]
     counts, width, height, views, matte = decode_header(header)
