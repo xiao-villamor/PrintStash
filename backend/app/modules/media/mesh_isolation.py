@@ -1027,6 +1027,7 @@ def _generate_once(
         "height": request.height,
         "include_geometry": request.include_geometry,
         "include_thumbnail": request.include_thumbnail,
+        "check_embedded_3mf_preview": request.check_embedded_3mf_preview,
         "include_fingerprint": request.include_fingerprint,
         "triangle_cap": request.triangle_cap,
         "output_format": request.output_format,

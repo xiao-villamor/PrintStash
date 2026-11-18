@@ -47,7 +47,7 @@ from app.modules.work.contracts import JobExecution
 from app.schemas.jobs import DerivativeRead, DerivativeStatus
 
 from . import policy
-from .kinds import groups_for, recipes_for
+from .kinds import THREE_MF_THUMBNAIL_RECIPE, groups_for, recipes_for
 
 STALE_IN_FLIGHT = timedelta(hours=1)
 _SATISFIED = {DerivativeState.READY, DerivativeState.SKIPPED}
@@ -405,6 +405,7 @@ def mark_ready(
     now: datetime,
     storage_key: str | None = None,
     output: dict[str, Any] | None = None,
+    has_embedded_3mf_preview: bool | None = None,
     duration_ms: int | None = None,
     peak_rss_bytes: int | None = None,
 ) -> File:
@@ -413,6 +414,7 @@ def mark_ready(
     row.state = DerivativeState.READY
     row.storage_key = storage_key if storage_key is not None else row.storage_key
     row.output_json = json.dumps(output or {}, separators=(",", ":"), default=str)
+    row.has_embedded_3mf_preview = has_embedded_3mf_preview
     row.failure_reason = None
     row.next_attempt_at = None
     row.duration_ms = duration_ms
@@ -660,6 +662,37 @@ def reset(
             ),
         )
     return removed
+
+
+def invalidate_embedded_covers(session: Session) -> None:
+    """Make affected covers pending while keeping their published images readable.
+
+    The caller holds the generation lock. A running pass with unknown
+    availability must also be fenced so it cannot publish under the old policy.
+    """
+    eligible = (
+        select(File.id)
+        .join(Model, col(Model.id) == col(File.model_id))
+        .where(live(File), live(Model), col(File.file_type) == FileType.THREE_MF)
+    )
+    derivative = ArtifactDerivative
+    session.execute(
+        delete(derivative)
+        .where(
+            col(derivative.file_id).in_(eligible),
+            col(derivative.kind) == DerivativeKind.THUMBNAIL,
+            col(derivative.recipe_version) == THREE_MF_THUMBNAIL_RECIPE,
+            col(derivative.state) != DerivativeState.CANCELLED,
+            or_(
+                col(derivative.has_embedded_3mf_preview).is_(True),
+                and_(
+                    col(derivative.state) == DerivativeState.RUNNING,
+                    col(derivative.has_embedded_3mf_preview).is_(None),
+                ),
+            ),
+        )
+        .execution_options(synchronize_session=False)
+    )
 
 
 def invalidate(session: Session, file: File, kinds: list[DerivativeKind]) -> int:

@@ -27,6 +27,7 @@ class SettingName(StrEnum):
     # extra CPU and storage of generated views. Views still need a cover.
     PREVIEWS = "derivatives_previews_enabled"
     PREVIEW_POLES = "derivatives_previews_include_poles"
+    RECREATE_EMBEDDED_COVERS = "prefer_rendered_3mf_preview"
 
 
 SETTINGS = {
@@ -91,6 +92,11 @@ def resolve(session: Session) -> dict[JobKind, GroupPolicy]:
     }
     session.info[_RESOLVED] = (_scope(session), controls)
     return dict(controls)
+
+
+def effective_setting(config: SystemConfig | None, name: SettingName) -> bool:
+    override = getattr(config, name) if config is not None else None
+    return getattr(settings.frozen, name) if override is None else override
 
 
 def preview_poles(session: Session) -> bool:
@@ -168,6 +174,9 @@ def update(
         return
     config = lock(session)
     previous_poles = preview_poles(session)
+    previous_cover_policy = effective_setting(
+        config, SettingName.RECREATE_EMBEDDED_COVERS
+    )
     previous_enabled = resolve(session)[JobKind.DERIVATIVES_PREVIEWS].enabled
     for name, value in changes.items():
         setattr(config, name, value)
@@ -190,6 +199,12 @@ def update(
             request = DerivativeGroupRegeneration(definition=definition, kind=kind)
         request.requested_at = config.updated_at
         session.add(request)
+    if previous_cover_policy != effective_setting(
+        config, SettingName.RECREATE_EMBEDDED_COVERS
+    ):
+        from . import records
+
+        records.invalidate_embedded_covers(session)
     if commit:
         session.commit()
         publish_changes(changes)
@@ -204,8 +219,15 @@ def publish_changes(changes: dict[SettingName, bool | None]) -> None:
 
     derivative_policy_changed()
     for definition, name in SETTINGS.items():
-        if name in changes or (
-            definition == JobKind.DERIVATIVES_PREVIEWS
-            and SettingName.PREVIEW_POLES in changes
+        if (
+            name in changes
+            or (
+                definition == JobKind.DERIVATIVES_PREVIEWS
+                and SettingName.PREVIEW_POLES in changes
+            )
+            or (
+                definition == JobKind.DERIVATIVES_MESH
+                and SettingName.RECREATE_EMBEDDED_COVERS in changes
+            )
         ):
             nudge(definition)

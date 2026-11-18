@@ -177,6 +177,8 @@ class ThumbnailRequest:
     include_fingerprint: bool = False
     triangle_cap: int = MAX_ANALYSIS_FACES
     include_thumbnail: bool = True
+    # The derivative producer checks the archive before admitting cover rendering.
+    check_embedded_3mf_preview: bool = True
     # None: this pass renders no views (the standalone batch may own them).
     views: ViewsRequest | None = None
 

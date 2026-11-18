@@ -450,13 +450,9 @@ class Settings(BaseSettings):
     # previous load-then-fallback behaviour.
     use_embedded_3mf_preview_for_large_files: bool = True
 
-    # A 3MF often carries its slicer's own picture (Metadata/thumbnail.png): the
-    # part on a textured build plate. When on (default), the library cover is a
-    # render of the model itself, so every card shares one look, and the slicer
-    # picture is kept only as the fallback when the mesh cannot be rendered
-    # (over the size cap, or the render fails). Off publishes the slicer picture
-    # first, before the mesh is read, as earlier releases did.
-    prefer_rendered_3mf_preview: bool = True
+    # Deployment default for the persisted Previews setting. A database override
+    # wins. When enabled, try a render before falling back to the slicer's picture.
+    prefer_rendered_3mf_preview: bool = False
 
     # Hard ceiling on the on-disk size of a mesh file we will hand to trimesh.
     # The triangle estimate above is format-specific and can come up empty — a

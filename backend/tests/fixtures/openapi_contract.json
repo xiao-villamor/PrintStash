@@ -22324,6 +22324,10 @@
             "title": "Oidc Username Claim",
             "type": "string"
           },
+          "prefer_rendered_3mf_preview": {
+            "title": "Prefer Rendered 3Mf Preview",
+            "type": "boolean"
+          },
           "s3_access_key": {
             "default": "",
             "title": "S3 Access Key",
@@ -22419,7 +22423,8 @@
           "derivatives_gcode_enabled",
           "derivatives_toolpath_enabled",
           "derivatives_previews_enabled",
-          "derivatives_previews_include_poles"
+          "derivatives_previews_include_poles",
+          "prefer_rendered_3mf_preview"
         ],
         "title": "VaultConfigRead",
         "type": "object"
@@ -22785,6 +22790,17 @@
               }
             ],
             "title": "Oidc Username Claim"
+          },
+          "prefer_rendered_3mf_preview": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefer Rendered 3Mf Preview"
           },
           "s3_access_key": {
             "anyOf": [

@@ -33,6 +33,7 @@ from sqlmodel import Session, col, select
 
 from app.core.config import _overlay, settings
 from app.core.errors import ErrorKind, OperationError
+from app.core.time import utcnow
 from app.db.models import (
     ArtifactDerivative,
     DerivativeKind,
@@ -45,9 +46,10 @@ from app.db.models import (
     JobState,
     Metadata,
     Model,
+    ModelCover,
 )
 from app.db.session import get_session_factory
-from app.modules.derivatives import kinds, producers, records
+from app.modules.derivatives import kinds, policy, producers, records
 from app.modules.ingestion import extensions
 from app.modules.library.volume_metadata import apply_volume, read_volume
 from app.modules.media import mesh_isolation, toolpath
@@ -733,18 +735,11 @@ class TestDeriveMesh:
         with zipfile.ZipFile(io.BytesIO(original)) as archive:
             assert archive.read("Metadata/thumbnail.png") == image.getvalue()
 
-    def test_a_3mf_cover_is_the_render_rather_than_its_slicer_picture(
-        self, db_session, stored
-    ):
-        import io
-
-        from PIL import Image
-
-        image = io.BytesIO()
-        Image.new("RGB", (32, 32), "red").save(image, format="PNG")
+    def test_recreates_a_cover_when_enabled(self, db_session, stored):
+        policy.update(db_session, {policy.SettingName.RECREATE_EMBEDDED_COVERS: True})
         artifact = stored(
             "pictured.3mf",
-            three_mf(extras={"Metadata/thumbnail.png": image.getvalue()}),
+            three_mf(extras={"Metadata/thumbnail.png": content.png()}),
         )
 
         result = producers.derive_mesh(artifact.id)
@@ -752,10 +747,176 @@ class TestDeriveMesh:
         assert result.kinds[DerivativeKind.THUMBNAIL] == DerivativeState.READY
         row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
         assert json.loads(row.output_json)["strategy"] == "full"
+        assert row.has_embedded_3mf_preview is True
+
+    def test_publishes_embedded_cover_without_render_preparation(
+        self, db_session, stored, monkeypatch
+    ):
+        from app.modules.media import thumbnail_handoff
+        from app.runtime.native_admission import Resources
+
+        artifact = stored(
+            "pictured.3mf",
+            three_mf(extras={"Metadata/thumbnail.png": content.png()}),
+        )
+        handoff = thumbnail_handoff.HandoffPlan(
+            640, 480, Resources(1, 100), Resources(4, 400)
+        )
+        monkeypatch.setattr(thumbnail_handoff, "plan", lambda *args: handoff)
+        monkeypatch.setattr(
+            thumbnail_handoff,
+            "reserve",
+            lambda *args: pytest.fail("embedded cover entered GPU preparation"),
+        )
+        generate = mesh_isolation.generate
+
+        def worker(request, *, on_output):
+            assert not request.include_thumbnail
+            return generate(request, on_output=on_output)
+
+        monkeypatch.setattr(mesh_isolation, "generate", worker)
+        producers.derive_mesh(artifact.id)
+
+        row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
+        assert json.loads(row.output_json)["strategy"] == "embedded"
+        assert row.has_embedded_3mf_preview is True
+
+    @pytest.mark.parametrize(
+        "extras", [{}, {"Metadata/thumbnail.png": content.png()[:30]}]
+    )
+    def test_renders_when_no_usable_picture_is_present(
+        self, db_session, stored, extras
+    ):
+        artifact = stored("no-picture.3mf", three_mf(extras=extras))
+
+        producers.derive_mesh(artifact.id)
+
+        row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
+        assert json.loads(row.output_json)["strategy"] == "full"
+        assert row.has_embedded_3mf_preview is False
+
+    def test_keeps_fingerprints_with_an_embedded_cover(
+        self, db_session, stored, make_system_config, monkeypatch
+    ):
+        artifact = stored(
+            "pictured-fingerprint.3mf",
+            three_mf(extras={"Metadata/thumbnail.png": content.png()}),
+        )
+        make_system_config(
+            similarity_settings_json=json.dumps(
+                {"enabled": True, "fingerprint_on_ingest": True}
+            )
+        )
+        monkeypatch.setattr(extensions, "_derivatives", similarity_ingestion)
+
+        producers.derive_mesh(artifact.id)
+
+        fingerprint = db_session.exec(
+            select(GeometryFingerprint).where(
+                GeometryFingerprint.file_id == artifact.id,
+                GeometryFingerprint.component_index == 0,
+            )
+        ).one()
+        assert fingerprint.state == "ready"
+
+    def test_uses_the_embedded_picture_after_a_renderer_refusal(
+        self, db_session, stored, monkeypatch
+    ):
+        from app.modules.media import mesh_render, thumbnail_handoff
+        from app.modules.media.thumbnail_engine import ThumbnailEngine
+
+        policy.update(db_session, {policy.SettingName.RECREATE_EMBEDDED_COVERS: True})
+        artifact = stored(
+            "renderer-refused.3mf",
+            three_mf(extras={"Metadata/thumbnail.png": content.png()}),
+        )
+        monkeypatch.setattr(thumbnail_handoff, "plan", lambda *args: None)
+        monkeypatch.setattr(mesh_isolation, "generate", ThumbnailEngine().generate)
+        render = []
+
+        def refuse(*args, **kwargs):
+            render.append(args)
+            return None
+
+        monkeypatch.setattr(mesh_render, "render_scene_thumbnail", refuse)
+
+        producers.derive_mesh(artifact.id)
+
+        assert len(render) == 1
+        row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
+        assert row.state is DerivativeState.READY
+        assert json.loads(row.output_json)["strategy"] == "embedded"
+
+    def test_requeues_only_affected_covers(self, db_session, stored):
+        from app.modules.derivatives.source import DerivativeSource
+
+        pictured = stored(
+            "pictured.3mf",
+            three_mf(extras={"Metadata/thumbnail.png": content.png()}),
+        )
+        plain = stored("plain.3mf", three_mf())
+        stl = stored("different-format.stl", content.binary_stl())
+        for artifact in (pictured, plain, stl):
+            producers.derive_mesh(artifact.id)
+        source = DerivativeSource(kinds.group(JobKind.DERIVATIVES_MESH))
+        assert source.pending(db_session, now=utcnow(), limit=10) == []
+
+        for enabled, strategy in ((True, "full"), (False, "embedded")):
+            policy.update(
+                db_session, {policy.SettingName.RECREATE_EMBEDDED_COVERS: enabled}
+            )
+            pending = source.pending(db_session, now=utcnow(), limit=10)
+            assert [item.subject_key for item in pending] == [f"file/{pictured.id}"]
+            assert producers.derive_mesh(pictured.id).kinds == {
+                DerivativeKind.THUMBNAIL: DerivativeState.READY
+            }
+            row = _rows(db_session, pictured.id)[DerivativeKind.THUMBNAIL]
+            assert json.loads(row.output_json)["strategy"] == strategy
+
+    def test_preserves_a_chosen_cover_on_regeneration(
+        self, db_session, stored, make_model_cover
+    ):
+        artifact = stored(
+            "pictured.3mf",
+            three_mf(extras={"Metadata/thumbnail.png": content.png()}),
+        )
+        producers.derive_mesh(artifact.id)
+        chosen = make_model_cover(db_session.get_one(Model, artifact.model_id))
+        before = (chosen.filename, chosen.sha256)
+
+        policy.update(db_session, {policy.SettingName.RECREATE_EMBEDDED_COVERS: True})
+        producers.derive_mesh(artifact.id)
+
+        db_session.expire_all()
+        after = db_session.get_one(ModelCover, artifact.model_id)
+        assert (after.filename, after.sha256) == before
+
+    def test_replaces_a_previous_recipe_render(self, db_session, stored):
+        artifact = stored(
+            "pictured.3mf",
+            three_mf(extras={"Metadata/thumbnail.png": content.png()}),
+        )
+        policy.update(db_session, {policy.SettingName.RECREATE_EMBEDDED_COVERS: True})
+        producers.derive_mesh(artifact.id)
+        previous = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
+        assert json.loads(previous.output_json)["strategy"] == "full"
+        previous.recipe_version = kinds.THREE_MF_THUMBNAIL_RECIPE - 1
+        previous.has_embedded_3mf_preview = None
+        db_session.add(previous)
+        db_session.commit()
+        policy.update(db_session, {policy.SettingName.RECREATE_EMBEDDED_COVERS: None})
+
+        producers.derive_mesh(artifact.id)
+
+        db_session.refresh(artifact)
+        current = records.rows_for(db_session, artifact)[DerivativeKind.THUMBNAIL]
+        assert json.loads(current.output_json)["strategy"] == "embedded"
+        assert artifact.thumbnail_path == current.storage_key
 
     def test_a_failed_mesh_worker_still_publishes_the_slicer_picture(
         self, db_session, stored, monkeypatch
     ):
+        policy.update(db_session, {policy.SettingName.RECREATE_EMBEDDED_COVERS: True})
         import io
 
         from PIL import Image

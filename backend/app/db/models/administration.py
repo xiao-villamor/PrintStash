@@ -171,6 +171,7 @@ class SystemConfig(SQLModel, table=True):
     derivatives_toolpath_enabled: Optional[bool] = None
     derivatives_previews_enabled: Optional[bool] = None
     derivatives_previews_include_poles: Optional[bool] = None
+    prefer_rendered_3mf_preview: Optional[bool] = None
 
     # Behaviour toggles
     # When true, a file's revision is auto-marked known_good after its first

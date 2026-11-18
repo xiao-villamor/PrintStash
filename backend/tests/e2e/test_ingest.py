@@ -30,6 +30,7 @@ from app.db.models import ArtifactDerivative, GeometryFingerprint
 from app.modules.derivatives import kinds
 from app.schemas.orca import OrcaNativeContext
 from tests.e2e._jobs import settle
+from tests.factories import content
 from tests.factories.geometry import tetrahedron, three_mf
 from tests.factories.three_mf_pilot import load_case, opc_package
 from tests.fixtures.three_mf_projects import (
@@ -856,7 +857,7 @@ class TestStepTessellation:
 class TestThreeMFReader:
     @pytest.mark.asyncio
     async def test_a_3mf_is_derived_at_its_own_recipes(self, api, tmp_path, e2e_db):
-        """3MF outputs carry their reader's recipes; other meshes keep theirs."""
+        """An embedded cover still publishes the geometry and enabled multi-angle views."""
         headers = await _setup_and_login(api, tmp_path)
 
         enabled = await api.put(
@@ -868,7 +869,13 @@ class TestThreeMFReader:
 
         uploaded = await api.post(
             "/api/v1/ingest/model",
-            files={"file": ("part.3mf", three_mf(), "model/3mf")},
+            files={
+                "file": (
+                    "part.3mf",
+                    three_mf(extras={"Metadata/thumbnail.png": content.png()}),
+                    "model/3mf",
+                )
+            },
             data={"model_name": "lib3mf recipes"},
             headers=headers,
         )
@@ -887,6 +894,7 @@ class TestThreeMFReader:
             "previews": ("ready", kinds.PREVIEWS_RECIPE),
             "thumbnail": ("ready", kinds.THREE_MF_THUMBNAIL_RECIPE),
         }
+        assert _thumbnail_output(e2e_db, job["file_id"])["strategy"] == "embedded"
 
     @pytest.mark.asyncio
     async def test_a_3mf_is_measured_in_single_precision(self, api, tmp_path, e2e_db):
