@@ -29,8 +29,10 @@ test.describe("model library", () => {
       // Resolve the uploaded revision through the existing API from the card.
       const card = modelCard(page, name).locator("xpath=ancestor::article");
       const download = page.waitForEvent("download");
+      await card.hover();
       await card.getByRole("button", { name: "Download Rev 1", exact: true }).click();
       expect((await download).suggestedFilename()).toContain(name);
+      await card.hover();
       await card.getByRole("button", { name: "Print Rev 1", exact: true }).click();
       await expect(
         page.getByRole("dialog", { name: "Send Rev 1 to printer", exact: true }),
