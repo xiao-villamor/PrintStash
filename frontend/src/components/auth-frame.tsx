@@ -8,12 +8,12 @@ import { cn } from "@/lib/utils";
 
 /** Shared page chrome for sign-in and first-run setup. */
 export function AuthFrame({
-  wide = false,
+  cardClassName,
   label,
   note,
   children,
 }: {
-  wide?: boolean;
+  cardClassName?: string;
   /** Names the card region for assistive technology. */
   label?: string;
   note?: ReactNode;
@@ -36,10 +36,7 @@ export function AuthFrame({
         <Card
           role={label ? "region" : undefined}
           aria-label={label}
-          className={cn(
-            "w-full min-w-0 border-border",
-            wide ? "max-w-[560px] px-6 py-8 sm:px-8" : "max-w-[380px] p-7",
-          )}
+          className={cn("w-full min-w-0 border-border", cardClassName ?? "max-w-[380px] p-7")}
         >
           {children}
         </Card>

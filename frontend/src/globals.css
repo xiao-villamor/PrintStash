@@ -330,6 +330,19 @@
 }
 
 @layer components {
+  .setup-card {
+    display: grid;
+    max-width: 800px;
+  }
+
+  @media (min-width: 768px) {
+    .setup-card {
+      height: min(600px, 100dvh - 136px);
+      grid-template-columns: 220px minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr);
+    }
+  }
+
   .field-option {
     @apply flex min-h-8 w-full min-w-0 items-center gap-2 px-2.5 py-2 text-left text-field leading-4 text-popover-foreground hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none data-[active=true]:bg-popover-hover;
   }

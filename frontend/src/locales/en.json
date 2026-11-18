@@ -1483,7 +1483,6 @@
   "setup.defaultHelp": "Choose where PrintStash saves new uploads and previews.",
   "setup.existingHelp": "Already have a folder of models? You can connect it after setup without moving its files.",
   "setup.advanced": "View location and advanced options",
-  "setup.check": "Check storage",
   "setup.checking": "Checking…",
   "setup.creating": "Creating your account…",
   "setup.availableSpace": "available",

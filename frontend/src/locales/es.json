@@ -1483,7 +1483,6 @@
   "setup.defaultHelp": "Elige dónde guarda PrintStash las nuevas cargas y sus vistas previas.",
   "setup.existingHelp": "¿Ya tienes una carpeta con modelos? Podrás conectarla después de la configuración sin mover sus archivos.",
   "setup.advanced": "Ver ubicación y opciones avanzadas",
-  "setup.check": "Comprobar almacenamiento",
   "setup.checking": "Comprobando…",
   "setup.creating": "Creando tu cuenta…",
   "setup.availableSpace": "disponibles",
