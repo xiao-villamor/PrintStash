@@ -379,10 +379,18 @@
     [data-inspector-open] .library-model-toolbar .library-status-filters > button {
       padding-inline: 6px;
     }
+    [data-inspector-open]
+      .library-model-toolbar
+      .library-display-controls
+      button:not([class*="library-toolbar-sort"]):has(> svg:only-child) {
+      width: 32px;
+      height: 32px;
+    }
   }
   @container library (720px <= width < 960px) {
     [data-inspector-open] .library-model-toolbar .library-toolbar-sort {
       width: 32px;
+      justify-content: center;
       padding-inline: 0;
     }
     [data-inspector-open] .library-model-toolbar .library-toolbar-sort > :not(:first-child) {
