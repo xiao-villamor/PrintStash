@@ -129,7 +129,8 @@ def render_packet(
     the original absolute deadline always propagate.
     """
     from .compute_geometry_wire import (
-        MAX_GEOMETRY_BYTES,
+        MAX_GEOMETRY_HEADER_BYTES,
+        MAX_GEOMETRY_PACKET_BYTES,
         body_size,
         descriptor,
         identity,
@@ -142,10 +143,10 @@ def render_packet(
     check_deadline(deadline, force=True)
     if type(payload) is not bytes:
         raise ValueError("compute_geometry_mutable")
-    if not 4 <= len(payload) <= MAX_GEOMETRY_BYTES + 4100:
+    if not 4 <= len(payload) <= MAX_GEOMETRY_PACKET_BYTES:
         raise ValueError("compute_geometry_budget")
     length = struct.unpack_from("!I", payload)[0]
-    if not 0 < length <= 4096 or 4 + length > len(payload):
+    if not 0 < length <= MAX_GEOMETRY_HEADER_BYTES or 4 + length > len(payload):
         raise ValueError("compute_geometry_header")
     header = payload[4 : 4 + length]
     value, layout = descriptor(header)

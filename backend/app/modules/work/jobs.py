@@ -329,6 +329,27 @@ class JobStore:
         )
 
     @staticmethod
+    def has_submitted_interactive_queue(
+        session: Session, definition: JobKind, *, minimum: int = 1
+    ) -> bool:
+        # Only current attempts that made it to the engine can cover a wakeup.
+        return (
+            session.exec(
+                select(Job.id)
+                .where(
+                    col(Job.kind) == definition,
+                    active_job_predicate(),
+                    col(Job.state) == JobState.QUEUED,
+                    col(Job.priority) == WorkPriority.INTERACTIVE,
+                    col(Job.submitted_epoch) == col(Job.execution_epoch),
+                )
+                .limit(1)
+                .offset(minimum - 1)
+            ).first()
+            is not None
+        )
+
+    @staticmethod
     def any_active(
         session: Session,
         definitions: Iterable[JobKind],

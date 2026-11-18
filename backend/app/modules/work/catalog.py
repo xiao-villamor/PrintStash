@@ -9,20 +9,30 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
+from datetime import datetime
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.core.config import settings
-from app.db.models import JobKind, LaneName, WorkLaneOverride
+from app.db.models import (
+    Job,
+    JobKind,
+    JobState,
+    LaneName,
+    WorkLaneOverride,
+    WorkPriority,
+)
 
 from .contracts import (
     DuringAdditions,
+    InteractiveBacklogSource,
     JobDefinition,
     JobEngine,
     Lane,
     LaneOrder,
     LanePace,
 )
+from .jobs import active_job_predicate, jobs
 
 # How many reconcile passes run at once, deployment-wide.
 RECONCILE_CONCURRENCY = 4
@@ -162,12 +172,49 @@ class WorkCatalog:
         )
 
     def yielding_to(self, name: JobKind) -> tuple[JobKind, ...]:
-        """Definitions whose discovery waits behind interactive Jobs of ``name``."""
+        """Definitions whose discovery waits for interactive work of ``name`` to start."""
         return tuple(
-            other
-            for other, item in self.definitions.items()
-            if name in item.yields_to
+            other for other, item in self.definitions.items() if name in item.yields_to
         )
+
+    def interactive_reserve_covers(self, session: Session, name: JobKind) -> bool:
+        """Whether accepted successors cover a claim or arrival wakeup."""
+        definition = self.definition(name)
+        if not definition.batch_interactive_discovery:
+            return False
+        return jobs.has_submitted_interactive_queue(
+            session, name, minimum=self.lanes[definition.lane].concurrency + 1
+        )
+
+    def interactive_waiting(
+        self,
+        session: Session,
+        name: JobKind,
+        *,
+        now: datetime,
+        queue_locked: bool = False,
+    ) -> bool:
+        """Whether interactive work still needs a lane slot or a Job."""
+        waiting = (
+            select(Job.id)
+            .where(
+                col(Job.kind) == name,
+                active_job_predicate(),
+                col(Job.priority) == WorkPriority.INTERACTIVE,
+                col(Job.state).in_((JobState.QUEUED, JobState.INTERRUPTED)),
+            )
+            .limit(1)
+        )
+        if session.exec(waiting).first() is not None:
+            return True
+        source = self.definition(name).source
+        if not isinstance(source, InteractiveBacklogSource):
+            return False
+        if source.owes_interactive(session, now=now):
+            return True
+        # Discovery can turn owed intent into a queued Job between the two
+        # reads. A claim holding SQLite's writer already excludes that race.
+        return not queue_locked and session.exec(waiting).first() is not None
 
     @property
     def paced_during_additions(self) -> tuple[JobKind, ...]:

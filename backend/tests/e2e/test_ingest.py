@@ -1612,3 +1612,36 @@ class TestComputePlacement:
         listed = await api.get(f"/api/v1/files/{file_id}/derivatives", headers=headers)
         metadata = next(row for row in listed.json() if row["kind"] == "metadata")
         assert metadata["state"] == "ready"
+
+
+class TestBurstMeshCovers:
+    @pytest.mark.asyncio
+    async def test_publishes_covers_for_a_cpu_only_burst(
+        self, api, tmp_path, monkeypatch
+    ):
+        monkeypatch.setitem(_overlay, "compute_mode", "cpu")
+        headers = await _setup_and_login(api, tmp_path)
+        jobs = []
+        for size in (1, 2, 3, 4):
+            mesh = tetrahedron()
+            mesh.apply_scale(size)
+            source = mesh.export(file_type="stl")
+            response = await api.post(
+                "/api/v1/ingest/model",
+                files={"file": (f"burst-{size}.stl", source, "application/sla")},
+                headers=headers,
+            )
+            assert response.status_code == 202, response.text
+            jobs.append(response.json()["job_id"])
+
+        settle()
+
+        for job_id in jobs:
+            completed = await api.get(f"/api/v1/jobs/{job_id}", headers=headers)
+            assert completed.json()["state"] == "completed", completed.text
+            thumbnail = await api.get(
+                f"/api/v1/files/{completed.json()['file_id']}/thumbnail",
+                headers=headers,
+            )
+            assert thumbnail.status_code == 200, thumbnail.text
+            assert thumbnail.headers["content-type"] == "image/webp"

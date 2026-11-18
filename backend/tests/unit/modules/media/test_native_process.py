@@ -138,7 +138,9 @@ class TestNativeMemoryBudget:
         monkeypatch.setattr(
             native_runtime,
             "current_permit",
-            lambda: SimpleNamespace(resources=Resources(1, 3 * 1024**3)),
+            lambda: SimpleNamespace(
+                resources=Resources(1, 2 * 1024**3), hard_bytes=3 * 1024**3
+            ),
         )
 
         assert native_process.native_memory_budget_bytes() == 3 * 1024**3

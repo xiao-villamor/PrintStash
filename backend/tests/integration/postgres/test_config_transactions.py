@@ -10,9 +10,12 @@ from sqlmodel import Session, create_engine
 
 from app.api.v1.config import VaultConfigUpdate, update_config
 from app.core.config import settings
+from app.core.errors import OperationError
 from app.db.migrate import run_migrations
-from app.db.models import SystemConfig
+from app.db.models import JobKind, SystemConfig
 from app.db.url import normalize_database_url
+from app.modules.derivatives import policy
+from app.modules.work.contracts import SkipReason
 from app.schemas.editing import EditPrecondition
 from tests.containers import fresh_postgres_database
 from tests.factories import build_system_config, build_user
@@ -76,6 +79,31 @@ class TestConfigurationTransaction:
             assert row.oidc_client_id == "original"
         assert settings.oidc_client_id == original_client_id
         assert settings.backup_retention_days == original_retention
+
+    def test_claim_uses_the_committed_policy_edit(self, pg_config: Engine) -> None:
+        definition = JobKind.DERIVATIVES_MESH
+        with Session(pg_config) as reader, Session(pg_config) as writer:
+            actor = build_user(writer, superuser=True)
+            before = reader.get_one(SystemConfig, 1).vault_edit_version
+            assert policy.resolve(reader)[definition].enabled
+
+            receipt = update_config(
+                VaultConfigUpdate(derivatives_mesh_enabled=False),
+                response=Response(),
+                session=writer,
+                actor=actor,
+                precondition=EditPrecondition(),
+            )
+
+            with pytest.raises(OperationError) as rejected:
+                policy.lock_enabled(reader, definition)
+            assert rejected.value.code == SkipReason.DERIVATIVE_GROUP_DISABLED
+            reader.commit()
+
+        with Session(pg_config) as verify:
+            config = verify.get_one(SystemConfig, 1)
+            assert config.derivatives_mesh_enabled is False
+            assert config.vault_edit_version == receipt.edit_version > before
 
     def test_persists_the_accepted_mixed_patch(self, pg_config: Engine) -> None:
         with Session(pg_config) as session:

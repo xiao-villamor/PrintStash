@@ -267,17 +267,22 @@ class TestEncode:
             encode(deferred_geometry, 64, 48, [camera], False)
 
     @pytest.mark.parametrize(
-        ("limit", "accepted"),
-        [(180, True), (179, False)],
+        ("slack", "accepted"),
+        [(0, True), (-1, False)],
         ids=["at-limit", "over-limit"],
     )
     def test_retains_geometry_admission_boundary(
-        self, packet_geometry, monkeypatch, limit, accepted
+        self, packet_geometry, monkeypatch, slack, accepted
     ):
         from app.modules.media import compute_geometry_wire
 
-        _, prepared, _ = packet_geometry
-        monkeypatch.setattr(compute_geometry_wire, "MAX_GEOMETRY_BYTES", limit)
+        mode, prepared, _ = packet_geometry
+        constant, limit = (
+            ("MAX_VISUAL_GEOMETRY_BYTES", 60)
+            if mode == "visual"
+            else ("MAX_GEOMETRY_BYTES", 180)
+        )
+        monkeypatch.setattr(compute_geometry_wire, constant, limit + slack)
         if accepted:
             payload = encode(prepared, 64, 48, [None], False)
             assert decode(payload)[0].face_count == 2

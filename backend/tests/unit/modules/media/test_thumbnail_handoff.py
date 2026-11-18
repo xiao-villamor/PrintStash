@@ -88,7 +88,8 @@ class TestHostWindow:
         capacity = handoff.host_capacity(physical, physical // 2, 0.25)
         assert capacity == Resources(4, 384 * 1024**2)
         assert capacity.bytes <= (physical - physical // 2 - physical // 4) // 4
-        assert 4 * handoff.resident_bytes(640, 480) <= capacity.bytes
+        assert 3 * handoff.resident_bytes(640, 480) <= capacity.bytes
+        assert 4 * handoff.resident_bytes(640, 480) > capacity.bytes
 
     @pytest.mark.parametrize(
         "physical,geometry,fraction",

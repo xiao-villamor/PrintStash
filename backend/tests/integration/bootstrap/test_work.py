@@ -746,7 +746,7 @@ class TestAdditionDeclarations:
     @pytest.mark.parametrize(
         "kind,during",
         [
-            (JobKind.DERIVATIVES_MESH, DuringAdditions.PACED),
+            (JobKind.DERIVATIVES_MESH, DuringAdditions.RUNS),
             (JobKind.DERIVATIVES_GCODE, DuringAdditions.WAITS),
             (JobKind.DERIVATIVES_TOOLPATH, DuringAdditions.WAITS),
             (JobKind.DERIVATIVES_VIEWER_STL, DuringAdditions.RUNS),

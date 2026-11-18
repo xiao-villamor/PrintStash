@@ -1483,3 +1483,50 @@ class TestOfflineRendering:
             )
 
         assert "_alembic_tmp" not in buffer.getvalue()
+
+
+class TestMeshDiscoveryOrderMigration:
+    def test_existing_cursor_keeps_its_scan_position(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "existing-mesh-cursor.sqlite"
+        cfg = _upgrade_to(db_path, "8d0710caf97a")
+        engine = create_engine(_url(tmp_path, db_path.name))
+        try:
+            with engine.begin() as connection:
+                seed_schema_row(
+                    connection,
+                    "reconcile_cursors",
+                    source="derivatives.mesh",
+                    scan_position=11,
+                    scan_high_water=37,
+                    discovery_next_priority="interactive",
+                )
+
+            command.upgrade(cfg, "aac0f6b39802")
+
+            with engine.connect() as connection:
+                row = connection.execute(
+                    text(
+                        "SELECT scan_position, scan_high_water, discovery_next_priority, "
+                        "mesh_discovery_order FROM reconcile_cursors WHERE source = 'derivatives.mesh'"
+                    )
+                ).one()
+                assert tuple(row) == (11, 37, "interactive", "smallest")
+                with pytest.raises(IntegrityError):
+                    connection.execute(
+                        text(
+                            "UPDATE reconcile_cursors SET mesh_discovery_order = 'invalid'"
+                        )
+                    )
+
+            command.downgrade(cfg, "8d0710caf97a")
+
+            with engine.connect() as connection:
+                row = connection.execute(
+                    text(
+                        "SELECT scan_position, scan_high_water, discovery_next_priority "
+                        "FROM reconcile_cursors WHERE source = 'derivatives.mesh'"
+                    )
+                ).one()
+                assert tuple(row) == (11, 37, "interactive")
+        finally:
+            engine.dispose()

@@ -77,9 +77,9 @@ def render(
                 worker_command(
                     "app.modules.media.visual_worker",
                     [str(path), file_type, recipe.encode()],
-                    permit.resources.bytes,
+                    permit.hard_bytes,
                 ),
-                memory_budget=permit.resources.bytes,
+                memory_budget=permit.hard_bytes,
                 timeout_seconds=context.remaining(),
                 permit=permit,
                 lifecycle=WorkerLifecycle.GUARDED,

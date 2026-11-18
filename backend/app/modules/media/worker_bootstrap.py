@@ -433,7 +433,7 @@ def main(argv: list[str]) -> int:
         permit = credits.enter_context(
             inherit(int(inherited), Path(os.environ[PERMIT_PATH_ENV]))
         )
-        if int(argv[0]) != permit.resources.bytes:
+        if int(argv[0]) != permit.hard_bytes:
             raise ValueError("worker ceiling differs from its native resource permit")
         prepared = os.environ.get(PREPARATION_ENV)
         if prepared is not None:

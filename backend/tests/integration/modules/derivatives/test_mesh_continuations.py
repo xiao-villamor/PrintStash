@@ -238,6 +238,30 @@ class TestMeshContinuation:
             == pending.context.token
         )
 
+    def test_resume_rejects_a_retired_execution(
+        self, db_session, pending_mesh, make_job
+    ) -> None:
+        from app.db.models import JobState, MeshFingerprintContinuation
+        from app.modules.work.contracts import JobExecution
+
+        owner, file, plan, pending = pending_mesh
+        job = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            state=JobState.RUNNING,
+            subject=f"file/{file.id}",
+            attempts=1,
+        )
+        execution = JobExecution(job.id, job.attempts, job.execution_epoch)
+        job.execution_epoch = "replacement-execution"
+        db_session.commit()
+
+        with pytest.raises(records.AttemptSuperseded):
+            owner.resume(db_session, file, plan, execution=execution)
+        db_session.rollback()
+
+        row = db_session.exec(select(MeshFingerprintContinuation)).one()
+        assert row.token == pending.context.token
+
     @pytest.mark.parametrize("changed", ["source", "regeneration"])
     def test_stale_context_cannot_publish_cache(
         self,

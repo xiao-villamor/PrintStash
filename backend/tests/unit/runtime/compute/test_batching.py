@@ -199,7 +199,7 @@ class TestRenderBatchFits:
 
     @pytest.mark.parametrize(
         "mode,normal_staging",
-        [("deferred", 152), ("visual", 212)],
+        [("deferred", 152), ("visual", 132)],
         ids=["legacy-csr", "device-weld"],
     )
     def test_reserves_normal_scratch_once_for_reused_geometry(
@@ -229,7 +229,7 @@ class TestRenderBatchFits:
             [request.units] * 2,
             gpu_finalize=True,
         ).device_bytes
-        # Shared128-byte geometry; CSR92+upload60 or hash164+upload48.
+        # Shared128-byte geometry; CSR92+upload60 or weld84+upload48.
         bound = workspace + 128 + normal_staging + 2048 + 4
         assert not render_batch_fits([request] * 2, device_bytes=bound - 1)
         assert render_batch_fits([request] * 2, device_bytes=bound)

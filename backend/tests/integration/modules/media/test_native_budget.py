@@ -166,7 +166,7 @@ class TestEstimateSources:
     def test_counts_slower_bounded_text(self, tmp_path, monkeypatch):
         source = tmp_path / "mesh.obj"
         source.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
-        clock = iter([0.0, 0.0, 0.15, 0.16])
+        clock = iter([0.0, 0.0, 0.15, 0.16, 0.17])
         monkeypatch.setattr(native_budget.time, "monotonic", lambda: next(clock))
 
         claim = native_budget.estimate_sources(
@@ -330,7 +330,7 @@ class TestEstimateSources:
         file_type = "obj"
         source = tmp_path / "source"
         with source.open("wb") as stream:
-            stream.truncate(native_budget.TEXT_PREFLIGHT_BYTES + 1)
+            stream.truncate(native_budget.OBJ_PREFLIGHT_BYTES + 1)
         pool = Resources(4, 4 * 1024**3)
 
         amount = native_budget.estimate_sources(
@@ -357,7 +357,6 @@ class TestEstimateSources:
         payload = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"
         source = tmp_path / "source"
         source.write_bytes(payload)
-        monkeypatch.setattr(native_budget, "TEXT_PREFLIGHT_SECONDS", -1)
         monkeypatch.setattr(native_budget, "OBJ_PREFLIGHT_WALL_SECONDS", -1)
         pool = Resources(4, 4 * 1024**3)
 
@@ -662,6 +661,25 @@ class TestObjTriangleCount:
         assert loaded is not None
         assert count == len(loaded.faces) == 1
 
+    @pytest.mark.parametrize("texture", [b"0 0", b"0 0 1"], ids=["2d-uv", "3d-uv"])
+    def test_matches_loader_for_textured_faces(self, tmp_path, texture):
+        from app.modules.media import mesh_loading
+
+        source = tmp_path / "textured.obj"
+        source.write_bytes(
+            b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt "
+            + texture
+            + b"\nvn 0 0 1\nf 1/1/1 2/1/1 3/1/1\n"
+        )
+        loaded = mesh_loading.load_mesh(source)
+
+        assert loaded is not None
+        assert (
+            native_budget._obj_triangle_count(source, deadline=float("inf"))
+            == len(loaded.faces)
+            == 1
+        )
+
     @pytest.mark.parametrize(
         "face,expected",
         [
@@ -915,7 +933,7 @@ class TestCallerProfiles:
             assert permit.resources == amount
             raise _CapturedWork
 
-        monkeypatch.setattr(mesh_isolation, "estimate_sources", no_reestimate)
+        monkeypatch.setattr(mesh_isolation, "plan_sources", no_reestimate)
         monkeypatch.setattr(mesh_isolation, "worker_command", command)
         monkeypatch.setattr(mesh_isolation, "supervise_result", supervise)
         with admit(amount, pool, checkpoint=lambda: None):
@@ -1079,7 +1097,7 @@ class TestStableStlByteBound:
     def test_expired_scan_keeps_a_source_byte_bound(self, tmp_path, monkeypatch):
         source = tmp_path / "source.stl"
         source.write_bytes(ascii_stl())
-        monkeypatch.setattr(native_budget, "OBJ_PREFLIGHT_WALL_SECONDS", -1)
+        monkeypatch.setattr(native_budget, "ASCII_PREFLIGHT_WALL_SECONDS", -1)
         pool = Resources(4, 4 * 1024**3)
         claim = native_budget.estimate_sources(
             pool, (native_budget.MeshSource(source, "stl"),)
@@ -1167,3 +1185,88 @@ class TestWeightedObjRefusals:
         assert actual.volume == reference.volume
         assert actual.failure_reason == reference.failure_reason
         assert actual.image is None
+
+
+class TestPlanSources:
+    def test_bounds_a_large_plain_obj_across_blocks(self, tmp_path):
+        path = tmp_path / "large.obj"
+        # A trailing polygon has no newline. Cover interior block boundaries
+        # with CRLF, leading tabs and polygon corners as well.
+        path.write_bytes(
+            b"v 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\n"
+            + (b"\tf 1 2 3 4\r\n# " + b"p" * 120 + b"\n") * 100_000
+            + b"f 1 2 3"
+        )
+        pool = Resources(3, 3 * 1024**3)
+
+        budget = native_budget.plan_sources(
+            pool, (native_budget.MeshSource(path, "obj"),), work=THUMBNAIL_WORK
+        )
+
+        assert budget.hard_bytes == 200_001 * native_budget.WEBP_FACE_BYTES
+        assert 0 < budget.admission.bytes < budget.hard_bytes < pool.bytes
+
+    @pytest.mark.parametrize(
+        "tail",
+        [b"\x00", b"unknown value", b"mtllib material.mtl"],
+        ids=["nul", "unknown-directive", "material"],
+    )
+    def test_unsafe_large_obj_keeps_the_full_pool(self, tmp_path, tail):
+        path = tmp_path / "large.obj"
+        path.write_bytes(
+            b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"
+            + (b"# " + b"p" * 4000 + b"\n") * 2500
+            + tail
+        )
+        pool = Resources(3, 3 * 1024**3)
+
+        budget = native_budget.plan_sources(
+            pool, (native_budget.MeshSource(path, "obj"),), work=THUMBNAIL_WORK
+        )
+
+        assert budget == native_budget.NativeBudget.full(Resources(1, pool.bytes))
+
+    def test_counted_3mf_can_share_a_pool_sized_hard_ceiling(
+        self, tmp_path, without_lib3mf
+    ):
+        source = tmp_path / "plate.3mf"
+        source.write_bytes(
+            three_mf(
+                assemblies={2: [(1, None)] * 500},
+                build=((2, None),) * 275,
+                opc=False,
+            )
+        )
+        small = tmp_path / "small.3mf"
+        small.write_bytes(three_mf(opc=False))
+        pool = Resources(3, 3 * 1024**3)
+
+        large_budget = native_budget.plan_sources(
+            pool, (native_budget.MeshSource(source, "3mf"),), work=THUMBNAIL_WORK
+        )
+        small_budget = native_budget.plan_sources(
+            pool, (native_budget.MeshSource(small, "3mf"),), work=THUMBNAIL_WORK
+        )
+
+        assert large_budget.hard_bytes == pool.bytes
+        assert (
+            large_budget.admission.bytes + 2 * small_budget.admission.bytes
+            <= pool.bytes
+        )
+
+    def test_webp_worker_loads_under_its_hard_ceiling(self, tmp_path, monkeypatch):
+        from app.core.config import _overlay
+        from app.modules.media import mesh_isolation, native_process
+        from app.modules.media.mesh_contracts import ThumbnailRequest
+
+        source = tmp_path / "triangle.obj"
+        source.write_bytes(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+        pool = Resources(3, 3 * 1024**3)
+        monkeypatch.setattr(native_process, "native_capacity", lambda: pool)
+        monkeypatch.setitem(_overlay, "compute_mode", "cpu")
+
+        result = mesh_isolation.generate(
+            ThumbnailRequest(source, width=640, height=480, output_format="WEBP")
+        )
+
+        assert result.image is not None
