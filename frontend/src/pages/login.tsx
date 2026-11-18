@@ -115,7 +115,7 @@ export default function LoginPage() {
   }
 
   return (
-    <AuthFrame note={t("auth.local")}>
+    <AuthFrame layout="split" note={t("auth.local")}>
       <h1 className="text-xl font-semibold tracking-tight text-foreground">{t("auth.welcome")}</h1>
       <p className="mt-1 text-field leading-relaxed text-muted-foreground">
         {t("auth.description")}
