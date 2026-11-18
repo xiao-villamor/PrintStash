@@ -33,7 +33,8 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Modal } from "@/components/ui/modal";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
+import { FormField } from "@/components/ui/form-field";
+import { Input, inputClasses } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TabBar } from "@/components/ui/tabs";
 import { ProfileSettingsDetails } from "@/components/slicer-profile-details";
@@ -77,8 +78,6 @@ type DeletePresetTarget = {
   id: number;
   name: string;
 };
-
-const compactInputClass = "h-10 text-sm";
 
 function parseOptionalNumber(value: string): number | null {
   if (!value.trim()) return null;
@@ -132,16 +131,6 @@ function printerDirty(profile: PrinterProfileRead, edit: PrinterEdit): boolean {
     base.nozzle !== edit.nozzle ||
     base.notes !== edit.notes
   );
-}
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  useUiLocale();
-  return <span className="mb-1.5 block text-sm font-medium text-foreground">{children}</span>;
-}
-
-function RowLabel({ children }: { children: React.ReactNode }) {
-  useUiLocale();
-  return <span className="mb-1.5 block text-sm font-medium text-foreground">{children}</span>;
 }
 
 function RowStatus({ state }: { state?: "saving" | "saved" }) {
@@ -309,7 +298,7 @@ function ProfileRow({
         }}
         title={editTitle}
       >
-        <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-6">
+        <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-6">
           <p className="col-span-full text-xs text-muted-foreground">
             {uiText("Changes save automatically when leaving a row.")}
           </p>
@@ -370,6 +359,8 @@ function ProfileSummary({ name, facts }: { name: string; facts: [string, string 
 export function FilamentProfilesCard() {
   useUiLocale();
   const helpId = useId();
+  const filamentFormId = useId();
+  const printerFormId = useId();
   const auth = useRequireAuth();
   const { locale, t } = useI18n();
   const { user } = useAuth();
@@ -1006,111 +997,8 @@ export function FilamentProfilesCard() {
                 }}
                 title={uiText("New filament preset")}
                 description={uiText("Material information used by your saved Revisions.")}
-              >
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleCreateFilament();
-                  }}
-                  aria-label={uiText("Create filament preset")}
-                  className="space-y-4"
-                >
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <h3 className="col-span-full text-sm font-semibold">
-                      {uiText("Profile name")}
-                    </h3>
-                    <div className="col-span-full">
-                      <label>
-                        <FieldLabel>{uiText("Name")}</FieldLabel>
-                        <Input
-                          value={newName}
-                          onChange={(e) => setNewName(e.target.value)}
-                          placeholder={uiText("Everyday PLA")}
-                          className={compactInputClass}
-                          data-autofocus
-                          required
-                          maxLength={128}
-                          aria-describedby={`${helpId}-filament-name`}
-                        />
-                      </label>
-                      <span
-                        id={`${helpId}-filament-name`}
-                        className="mt-1 block text-xs text-muted-foreground"
-                      >
-                        {uiText("Required · up to 128 characters.")}
-                      </span>
-                    </div>
-                    <h3 className="col-span-full border-t border-border pt-4 text-sm font-semibold">
-                      {uiText("Material & cost")}
-                    </h3>
-                    <label>
-                      <FieldLabel>{uiText("Material")}</FieldLabel>
-                      <Input
-                        value={newType}
-                        onChange={(e) => setNewType(e.target.value)}
-                        placeholder={uiText("PLA, PETG…")}
-                        className={compactInputClass}
-                      />
-                    </label>
-                    <label>
-                      <FieldLabel>{uiText("Brand")}</FieldLabel>
-                      <Input
-                        value={newBrand}
-                        onChange={(e) => setNewBrand(e.target.value)}
-                        placeholder={uiText("Manufacturer")}
-                        className={compactInputClass}
-                      />
-                    </label>
-                    <div className="col-span-full">
-                      <label>
-                        <FieldLabel>
-                          {currency
-                            ? t("Cost per kg ({currency})", { currency })
-                            : uiText("Cost per kg")}
-                        </FieldLabel>
-                        <Input
-                          value={newCost}
-                          onChange={(e) => setNewCost(e.target.value)}
-                          inputMode="decimal"
-                          placeholder="0.00"
-                          className={`${compactInputClass} max-w-40`}
-                          aria-describedby={`${helpId}-filament-cost`}
-                        />
-                      </label>
-                      <p
-                        id={`${helpId}-filament-cost`}
-                        className="mt-1 text-xs text-muted-foreground"
-                      >
-                        {currencyName
-                          ? t("{currency} per kilogram. Enter zero or a positive amount.", {
-                              currency: currencyName,
-                            })
-                          : t("Enter zero or a positive amount.")}
-                      </p>
-                    </div>
-                    <h3 className="col-span-full border-t border-border pt-4 text-sm font-semibold">
-                      {uiText("Notes")}
-                    </h3>
-                    <div className="col-span-full">
-                      <label>
-                        <FieldLabel>{uiText("Notes")}</FieldLabel>
-                        <textarea
-                          value={newNotes}
-                          onChange={(e) => setNewNotes(e.target.value)}
-                          placeholder={uiText("Optional")}
-                          className="min-h-20 w-full resize-y border border-input bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          aria-describedby={`${helpId}-filament-notes`}
-                        />
-                      </label>
-                      <span
-                        id={`${helpId}-filament-notes`}
-                        className="mt-1 block text-xs text-muted-foreground"
-                      >
-                        {uiText("Optional details to keep with this preset.")}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="-mx-6 -mb-6 mt-6 flex justify-end gap-2 border-t border-border bg-plate px-6 py-4">
+                footer={
+                  <>
                     <Button
                       type="button"
                       variant="outline"
@@ -1123,12 +1011,96 @@ export function FilamentProfilesCard() {
                     </Button>
                     <Button
                       type="submit"
+                      form={filamentFormId}
                       loading={commands.createFilament.isPending}
                       disabled={!newName.trim()}
                     >
                       {uiText("Add profile")}
                     </Button>
+                  </>
+                }
+              >
+                <form
+                  id={filamentFormId}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleCreateFilament();
+                  }}
+                  aria-label={uiText("Create filament preset")}
+                  className="space-y-5"
+                >
+                  <FormField
+                    label={uiText("Name")}
+                    hintId={`${helpId}-filament-name`}
+                    hint={uiText("Required · up to 128 characters.")}
+                  >
+                    <Input
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      placeholder={uiText("Everyday PLA")}
+                      data-autofocus
+                      required
+                      maxLength={128}
+                      aria-describedby={`${helpId}-filament-name`}
+                    />
+                  </FormField>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <h3 className="col-span-full text-field font-semibold">
+                      {uiText("Material & cost")}
+                    </h3>
+                    <FormField label={uiText("Material")}>
+                      <Input
+                        value={newType}
+                        onChange={(e) => setNewType(e.target.value)}
+                        placeholder={uiText("PLA, PETG…")}
+                      />
+                    </FormField>
+                    <FormField label={uiText("Brand")}>
+                      <Input
+                        value={newBrand}
+                        onChange={(e) => setNewBrand(e.target.value)}
+                        placeholder={uiText("Manufacturer")}
+                      />
+                    </FormField>
+                    <FormField
+                      className="col-span-full"
+                      label={
+                        currency
+                          ? t("Cost per kg ({currency})", { currency })
+                          : uiText("Cost per kg")
+                      }
+                      hintId={`${helpId}-filament-cost`}
+                      hint={
+                        currencyName
+                          ? t("{currency} per kilogram. Enter zero or a positive amount.", {
+                              currency: currencyName,
+                            })
+                          : t("Enter zero or a positive amount.")
+                      }
+                    >
+                      <Input
+                        value={newCost}
+                        onChange={(e) => setNewCost(e.target.value)}
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        className="max-w-40"
+                        aria-describedby={`${helpId}-filament-cost`}
+                      />
+                    </FormField>
                   </div>
+                  <FormField
+                    label={uiText("Notes")}
+                    hintId={`${helpId}-filament-notes`}
+                    hint={uiText("Optional details to keep with this preset.")}
+                  >
+                    <textarea
+                      value={newNotes}
+                      onChange={(e) => setNewNotes(e.target.value)}
+                      placeholder={uiText("Optional")}
+                      className={inputClasses}
+                      aria-describedby={`${helpId}-filament-notes`}
+                    />
+                  </FormField>
                 </form>
               </Modal>
 
@@ -1195,8 +1167,7 @@ export function FilamentProfilesCard() {
                           detailsHost={detailsHost}
                           editor={
                             <>
-                              <label className="min-w-0 sm:col-span-2">
-                                <RowLabel>{uiText("Name")}</RowLabel>
+                              <FormField className="min-w-0 sm:col-span-2" label={uiText("Name")}>
                                 <Input
                                   value={edit.name}
                                   onChange={(e) =>
@@ -1206,11 +1177,9 @@ export function FilamentProfilesCard() {
                                   aria-label={uiText("Filament preset name {value1}", {
                                     value1: String(profile.id),
                                   })}
-                                  className={compactInputClass}
                                 />
-                              </label>
-                              <label>
-                                <RowLabel>{uiText("Material")}</RowLabel>
+                              </FormField>
+                              <FormField label={uiText("Material")}>
                                 <Input
                                   value={edit.materialType}
                                   onChange={(e) =>
@@ -1221,11 +1190,9 @@ export function FilamentProfilesCard() {
                                     value1: String(profile.id),
                                   })}
                                   placeholder="PLA"
-                                  className={compactInputClass}
                                 />
-                              </label>
-                              <label>
-                                <RowLabel>{uiText("Brand")}</RowLabel>
+                              </FormField>
+                              <FormField label={uiText("Brand")}>
                                 <Input
                                   value={edit.materialBrand}
                                   onChange={(e) =>
@@ -1238,11 +1205,9 @@ export function FilamentProfilesCard() {
                                     value1: String(profile.id),
                                   })}
                                   placeholder={uiText("Brand")}
-                                  className={compactInputClass}
                                 />
-                              </label>
-                              <label className="lg:col-span-2">
-                                <RowLabel>{uiText("Cost / kg")}</RowLabel>
+                              </FormField>
+                              <FormField className="lg:col-span-2" label={uiText("Cost / kg")}>
                                 <Input
                                   value={edit.cost}
                                   onChange={(e) =>
@@ -1260,7 +1225,6 @@ export function FilamentProfilesCard() {
                                       : undefined
                                   }
                                   placeholder="0.00"
-                                  className={compactInputClass}
                                 />
                                 {filamentValidationErrors[profile.id] && (
                                   <span
@@ -1271,9 +1235,8 @@ export function FilamentProfilesCard() {
                                     {filamentValidationErrors[profile.id]}
                                   </span>
                                 )}
-                              </label>
-                              <label className="col-span-full min-w-0">
-                                <RowLabel>{uiText("Notes")}</RowLabel>
+                              </FormField>
+                              <FormField className="col-span-full min-w-0" label={uiText("Notes")}>
                                 <textarea
                                   value={edit.notes}
                                   onChange={(e) =>
@@ -1284,9 +1247,9 @@ export function FilamentProfilesCard() {
                                     value1: String(profile.id),
                                   })}
                                   placeholder={uiText("Optional")}
-                                  className="min-h-16 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-disabled disabled:opacity-50"
+                                  className={inputClasses}
                                 />
-                              </label>
+                              </FormField>
                               <div className="col-span-full flex items-center gap-2">
                                 {linked ? (
                                   <Badge variant="success">{uiText("Synced")}</Badge>
@@ -1392,85 +1355,8 @@ export function FilamentProfilesCard() {
                 description={uiText(
                   "Describe the settings captured with a Revision; this does not change a connected printer.",
                 )}
-              >
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleCreatePrinter();
-                  }}
-                  aria-label={uiText("Create printer preset")}
-                  className="space-y-4"
-                >
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <h3 className="col-span-full text-sm font-semibold">
-                      {uiText("Profile name")}
-                    </h3>
-                    <div className="col-span-full">
-                      <label>
-                        <FieldLabel>{uiText("Name")}</FieldLabel>
-                        <Input
-                          value={newPrinterName}
-                          onChange={(e) => setNewPrinterName(e.target.value)}
-                          placeholder={uiText("Voron 2.4 — 0.4 mm")}
-                          className={compactInputClass}
-                          data-autofocus
-                          required
-                          maxLength={128}
-                          aria-describedby={`${helpId}-printer-name`}
-                        />
-                      </label>
-                      <span
-                        id={`${helpId}-printer-name`}
-                        className="mt-1 block text-xs text-muted-foreground"
-                      >
-                        {uiText("Required · up to 128 characters.")}
-                      </span>
-                    </div>
-                    <h3 className="col-span-full border-t border-border pt-4 text-sm font-semibold">
-                      {uiText("Printer & nozzle")}
-                    </h3>
-                    <label>
-                      <FieldLabel>{uiText("Printer model")}</FieldLabel>
-                      <Input
-                        value={newPrinterModel}
-                        onChange={(e) => setNewPrinterModel(e.target.value)}
-                        placeholder={uiText("Machine model")}
-                        className={compactInputClass}
-                      />
-                    </label>
-                    <label>
-                      <FieldLabel>{uiText("Nozzle diameter")}</FieldLabel>
-                      <Input
-                        value={newPrinterNozzle}
-                        onChange={(e) => setNewPrinterNozzle(e.target.value)}
-                        inputMode="decimal"
-                        placeholder="0.4"
-                        className={compactInputClass}
-                      />
-                    </label>
-                    <h3 className="col-span-full border-t border-border pt-4 text-sm font-semibold">
-                      {uiText("Notes")}
-                    </h3>
-                    <div className="col-span-full">
-                      <label>
-                        <FieldLabel>{uiText("Notes")}</FieldLabel>
-                        <textarea
-                          value={newPrinterNotes}
-                          onChange={(e) => setNewPrinterNotes(e.target.value)}
-                          placeholder={uiText("Optional")}
-                          className="min-h-20 w-full resize-y border border-input bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          aria-describedby={`${helpId}-printer-notes`}
-                        />
-                      </label>
-                      <span
-                        id={`${helpId}-printer-notes`}
-                        className="mt-1 block text-xs text-muted-foreground"
-                      >
-                        {uiText("Optional details to keep with this preset.")}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="-mx-6 -mb-6 mt-6 flex justify-end gap-2 border-t border-border bg-plate px-6 py-4">
+                footer={
+                  <>
                     <Button
                       type="button"
                       variant="outline"
@@ -1483,12 +1369,72 @@ export function FilamentProfilesCard() {
                     </Button>
                     <Button
                       type="submit"
+                      form={printerFormId}
                       loading={commands.createPrinter.isPending}
                       disabled={!newPrinterName.trim()}
                     >
                       {uiText("Add profile")}
                     </Button>
+                  </>
+                }
+              >
+                <form
+                  id={printerFormId}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleCreatePrinter();
+                  }}
+                  aria-label={uiText("Create printer preset")}
+                  className="space-y-5"
+                >
+                  <FormField
+                    label={uiText("Name")}
+                    hintId={`${helpId}-printer-name`}
+                    hint={uiText("Required · up to 128 characters.")}
+                  >
+                    <Input
+                      value={newPrinterName}
+                      onChange={(e) => setNewPrinterName(e.target.value)}
+                      placeholder={uiText("Voron 2.4 — 0.4 mm")}
+                      data-autofocus
+                      required
+                      maxLength={128}
+                      aria-describedby={`${helpId}-printer-name`}
+                    />
+                  </FormField>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <h3 className="col-span-full text-field font-semibold">
+                      {uiText("Printer & nozzle")}
+                    </h3>
+                    <FormField label={uiText("Printer model")}>
+                      <Input
+                        value={newPrinterModel}
+                        onChange={(e) => setNewPrinterModel(e.target.value)}
+                        placeholder={uiText("Machine model")}
+                      />
+                    </FormField>
+                    <FormField label={uiText("Nozzle diameter")}>
+                      <Input
+                        value={newPrinterNozzle}
+                        onChange={(e) => setNewPrinterNozzle(e.target.value)}
+                        inputMode="decimal"
+                        placeholder="0.4"
+                      />
+                    </FormField>
                   </div>
+                  <FormField
+                    label={uiText("Notes")}
+                    hintId={`${helpId}-printer-notes`}
+                    hint={uiText("Optional details to keep with this preset.")}
+                  >
+                    <textarea
+                      value={newPrinterNotes}
+                      onChange={(e) => setNewPrinterNotes(e.target.value)}
+                      placeholder={uiText("Optional")}
+                      className={inputClasses}
+                      aria-describedby={`${helpId}-printer-notes`}
+                    />
+                  </FormField>
                 </form>
               </Modal>
 
@@ -1549,8 +1495,7 @@ export function FilamentProfilesCard() {
                           detailsHost={detailsHost}
                           editor={
                             <>
-                              <label className="min-w-0 sm:col-span-2">
-                                <RowLabel>{uiText("Name")}</RowLabel>
+                              <FormField className="min-w-0 sm:col-span-2" label={uiText("Name")}>
                                 <Input
                                   value={edit.name}
                                   onChange={(e) =>
@@ -1563,11 +1508,9 @@ export function FilamentProfilesCard() {
                                   aria-label={uiText("Printer preset name {value1}", {
                                     value1: String(profile.id),
                                   })}
-                                  className={compactInputClass}
                                 />
-                              </label>
-                              <label className="lg:col-span-2">
-                                <RowLabel>{uiText("Printer model")}</RowLabel>
+                              </FormField>
+                              <FormField className="lg:col-span-2" label={uiText("Printer model")}>
                                 <Input
                                   value={edit.model}
                                   onChange={(e) =>
@@ -1581,11 +1524,9 @@ export function FilamentProfilesCard() {
                                     value1: String(profile.id),
                                   })}
                                   placeholder={uiText("Machine model")}
-                                  className={compactInputClass}
                                 />
-                              </label>
-                              <label className="lg:col-span-2">
-                                <RowLabel>{uiText("Nozzle")}</RowLabel>
+                              </FormField>
+                              <FormField className="lg:col-span-2" label={uiText("Nozzle")}>
                                 <Input
                                   value={edit.nozzle}
                                   onChange={(e) =>
@@ -1600,11 +1541,9 @@ export function FilamentProfilesCard() {
                                     value1: String(profile.id),
                                   })}
                                   placeholder="0.4"
-                                  className={compactInputClass}
                                 />
-                              </label>
-                              <label className="col-span-full min-w-0">
-                                <RowLabel>{uiText("Notes")}</RowLabel>
+                              </FormField>
+                              <FormField className="col-span-full min-w-0" label={uiText("Notes")}>
                                 <textarea
                                   value={edit.notes}
                                   onChange={(e) =>
@@ -1618,9 +1557,9 @@ export function FilamentProfilesCard() {
                                     value1: String(profile.id),
                                   })}
                                   placeholder={uiText("Optional")}
-                                  className="min-h-16 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-disabled disabled:opacity-50"
+                                  className={inputClasses}
                                 />
-                              </label>
+                              </FormField>
                               <div className="col-span-full flex items-center gap-2">
                                 <RowStatus state={rowStatus[`p${profile.id}`]} />
                                 <Button

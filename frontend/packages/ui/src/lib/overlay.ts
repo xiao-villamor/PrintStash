@@ -77,6 +77,8 @@ export function useOverlayBehavior(
     function onKey(e: KeyboardEvent) {
       if (layers.at(-1) !== layer || e.defaultPrevented) return;
       if (e.key === "Escape") {
+        // An open native select owns this Escape; closing it keeps the dialog open.
+        if (CSS.supports("selector(:open)") && panel?.querySelector("select:open")) return;
         e.preventDefault();
         e.stopPropagation();
         close.current();

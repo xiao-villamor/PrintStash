@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   batchPendingImports,
+  capturePendingImport,
   dismissPendingImport,
   getPendingImport,
   importPendingImport,
@@ -14,6 +15,7 @@ import type { InboxItem } from "@/types";
 
 export const inboxApi = {
   batchPendingImports,
+  capturePendingImport,
   dismissPendingImport,
   getPendingImport,
   importPendingImport,
@@ -145,6 +147,18 @@ export function useInboxCommands(api: InboxApi = inboxApi) {
     }
   };
   return {
+    capture: useMutation({
+      mutationFn: ({ url, session }: { url: string; session: number }) => {
+        requireSessionVersion(session);
+        return api.capturePendingImport({ url });
+      },
+      onMutate: prepare,
+      onSuccess: async (item, _, version) => {
+        await publish(item, version);
+        assertSession(version);
+        void client.invalidateQueries({ queryKey: inboxKeys.snapshots });
+      },
+    }),
     dismiss: useMutation({
       mutationFn: ({ id, session }: { id: number; session: number }) => {
         requireSessionVersion(session);

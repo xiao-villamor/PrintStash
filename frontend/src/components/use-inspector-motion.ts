@@ -1,18 +1,22 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import { criticalSpring } from "@/lib/critical-spring";
 import { cssTimeSeconds } from "@/lib/css-time";
+
+export const LIBRARY_INSPECTOR_MIN_WIDTH = 320;
+export const LIBRARY_INSPECTOR_MAX_WIDTH = 800;
+
+export function clampInspectorWidth(width: number, maxWidth: number) {
+  return Math.max(LIBRARY_INSPECTOR_MIN_WIDTH, Math.min(maxWidth, Math.round(width)));
+}
 
 const POSITION_SETTLED = 0.001;
 const VELOCITY_SETTLED = 0.03;
 
 /** A compositor spring keeps moving while the 3D preview initializes. Presence
  * follows completion, and reversals inherit the presentation and its velocity. */
-export function useInspectorMotion(open: boolean, contentKey: number) {
+export function useInspectorMotion(open: boolean, onSettled?: () => void) {
   const panel = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (panel.current) panel.current.scrollTop = 0;
-  }, [contentKey]);
   const position = useRef(1);
   const velocity = useRef(0);
   const [present, setPresent] = useState(open);
@@ -35,6 +39,7 @@ export function useInspectorMotion(open: boolean, contentKey: number) {
       animation?.cancel();
       element.style.removeProperty("will-change");
       if (!open) setPresent(false);
+      onSettled?.();
     };
     const onPreference = () => {
       if (reduced.matches) settle();
@@ -79,7 +84,7 @@ export function useInspectorMotion(open: boolean, contentKey: number) {
       animation?.cancel();
       element.style.removeProperty("will-change");
     };
-  }, [open, present]);
+  }, [open, present, onSettled]);
 
   return { panel, present };
 }

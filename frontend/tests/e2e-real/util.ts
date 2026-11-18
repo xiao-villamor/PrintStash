@@ -248,10 +248,10 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
         },
       );
   }
-  await page.getByPlaceholder("e.g. Bracket v2").fill(name);
+  await dialog.getByLabel("Model name").fill(name);
 
   if (collection) {
-    await dialog.getByRole("button", { name: "None" }).click();
+    await dialog.getByRole("button", { name: "Collection" }).click();
     // Destination results are paginated. Search by the leaf name before selecting
     // the full displayed path, including when earlier flows created other folders.
     await page
@@ -262,7 +262,7 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
     await page.getByRole("option", { name: new RegExp(collection + " \\(\\d+\\)$") }).click();
   }
   if (tag) {
-    const tagInput = page.getByPlaceholder("Search or create — press Enter");
+    const tagInput = dialog.getByPlaceholder("Add tags");
     await tagInput.fill(tag);
     await tagInput.press("Enter");
     await expect(dialog.getByRole("button", { name: `Remove ${tag}`, exact: true })).toBeVisible();

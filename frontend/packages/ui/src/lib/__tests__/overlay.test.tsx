@@ -273,6 +273,26 @@ describe("useOverlayBehavior", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves Escape to an open native select", () => {
+    const onClose = vi.fn<() => void>();
+    const supports = vi.spyOn(CSS, "supports").mockReturnValue(true);
+    render(
+      <Overlay open={true} onClose={onClose}>
+        <select aria-label="Material" />
+      </Overlay>,
+    );
+    const openSelect = vi
+      .spyOn(screen.getByTestId("panel"), "querySelector")
+      .mockReturnValue(screen.getByLabelText("Material"));
+
+    const event = press("Escape");
+
+    expect(openSelect).toHaveBeenCalledWith("select:open");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+    supports.mockRestore();
+  });
+
   it("locks the page behind it from scrolling", () => {
     render(<Overlay open={true} onClose={vi.fn<() => void>()} />);
 

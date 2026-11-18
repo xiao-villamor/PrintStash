@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { AuthPrintArt } from "@/components/auth-print-art";
 import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LocaleToggle } from "@/components/locale-toggle";
@@ -6,53 +7,70 @@ import { Card } from "@/components/ui/card";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-/**
- * The one shell for the pages a visitor sees before the app: sign-in and
- * first-run setup. Both share the brand row, the language and theme controls,
- * the card padding and the footer, so the first two screens read as one product.
- * Only the width differs: sign-in is a single column of fields, setup carries a
- * storage chooser.
- */
+/** Shared page chrome for sign-in and first-run setup. */
 export function AuthFrame({
-  wide = false,
+  layout = "centered",
+  cardClassName,
   label,
+  note,
   children,
 }: {
-  wide?: boolean;
-  /** Names the card region for assistive technology when the page has no landmark heading of its own. */
+  layout?: "centered" | "split";
+  cardClassName?: string;
+  /** Names the card region for assistive technology. */
   label?: string;
+  note?: ReactNode;
   children: ReactNode;
 }) {
   const { t } = useI18n();
+  const split = layout === "split";
+  const content = (
+    <>
+      <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-6">
+        <div className="flex min-w-0 items-center gap-2.5 text-foreground">
+          <BrandMark className="h-5 w-5 shrink-0" />
+          <span className="text-[15px] font-semibold tracking-tight">PrintStash</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <LocaleToggle />
+          <ThemeToggle />
+        </div>
+      </header>
+      <main className={cn("grid flex-1 place-items-center px-4 py-6", split && "auth-split-main")}>
+        <Card
+          role={label ? "region" : undefined}
+          aria-label={label}
+          className={cn(
+            "w-full min-w-0 border-border",
+            cardClassName ?? "max-w-[380px] p-7",
+            split && "auth-split-form",
+          )}
+        >
+          {children}
+        </Card>
+      </main>
+      <footer className="flex flex-col gap-2 px-6 py-4 text-muted-foreground sm:min-h-14 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <p
+          className={cn(
+            "font-mono text-2xs uppercase tracking-wider",
+            split && "auth-split-tagline",
+          )}
+        >
+          {t("auth.tagline")}
+        </p>
+        {note && <p className="text-xs sm:text-right">{note}</p>}
+      </footer>
+    </>
+  );
+  if (!split) {
+    return <div className="flex min-h-dvh flex-col bg-background">{content}</div>;
+  }
   return (
-    <main className="grid min-h-dvh grid-rows-[1fr_auto_1fr] justify-items-center bg-background px-4 py-6 sm:py-10">
-      <Card
-        role={label ? "region" : undefined}
-        aria-label={label}
-        className={cn(
-          "row-start-2 w-full overflow-hidden border-border bg-card",
-          wide ? "max-w-[560px]" : "max-w-[400px]",
-        )}
-      >
-        <header className="flex items-center justify-between gap-4 px-6 pt-8 sm:px-8">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-7 w-7 items-center justify-center rounded-brand bg-primary text-primary-foreground">
-              <BrandMark className="h-5 w-5" />
-            </span>
-            <span className="text-[15px] font-semibold tracking-tight text-foreground">
-              PrintStash
-            </span>
-          </div>
-          <div className="flex items-center gap-1">
-            <LocaleToggle />
-            <ThemeToggle />
-          </div>
-        </header>
-        <div className="min-w-0 px-6 pb-8 pt-6 sm:px-8">{children}</div>
-      </Card>
-      <p className="row-start-3 pt-5 font-mono text-2xs uppercase tracking-wider text-muted-foreground">
-        {t("auth.tagline")}
-      </p>
-    </main>
+    <div className="auth-frame-split flex min-h-dvh flex-col bg-background">
+      <div className="auth-split-workspace flex min-w-0 flex-1 flex-col">{content}</div>
+      <div className="auth-split-art hidden border-l border-border" aria-hidden="true">
+        <AuthPrintArt />
+      </div>
+    </div>
   );
 }

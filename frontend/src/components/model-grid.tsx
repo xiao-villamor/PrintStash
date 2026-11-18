@@ -25,7 +25,11 @@ import {
   useLibraryReadingPosition,
   type LibraryReadingRenderer,
 } from "@/features/library/reading-position";
-import { LibraryItems } from "@/components/library-items";
+import { LibraryItems, type LibraryInspectorDock } from "@/components/library-items";
+import {
+  LIBRARY_INSPECTOR_MAX_WIDTH,
+  LIBRARY_INSPECTOR_MIN_WIDTH,
+} from "@/components/use-inspector-motion";
 import { PANE_MOVING_EVENT, PANE_SETTLED_EVENT } from "@/components/use-collections-pane-motion";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { useModelOpenIntent } from "@/features/library/model-detail";
@@ -83,9 +87,11 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useId,
   useMemo,
   useState,
   useRef,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -131,7 +137,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Modal, ModalShell } from "@/components/ui/modal";
+import { FormField } from "@/components/ui/form-field";
+import { Modal } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { SavedViewSelector } from "@/components/saved-view-selector";
 import { Localized } from "@/components/ui/localized";
@@ -190,6 +197,7 @@ import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
 import { Link } from "@/lib/link";
+import { displayModelName } from "@/lib/display-name";
 import { timeAgo } from "@/lib/format";
 import { rememberLastCollection, readLastView, rememberLastView } from "@/lib/last-collection";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
@@ -319,7 +327,7 @@ function FolderSearch({
     return () => window.clearTimeout(timer);
   }, [draft, value, onCommit]);
   return (
-    <label className="library-folder-search relative order-1 hidden w-56 items-center @3xl/library:flex">
+    <label className="library-folder-search relative flex min-w-0 items-center">
       <Search
         aria-hidden
         className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-muted-foreground"
@@ -347,6 +355,8 @@ function FolderSearch({
     </label>
   );
 }
+
+const COMPACT_COLLECTION_HEIGHT = 60;
 
 /**
  * One row of collections above the models, expandable per folder. It owns its
@@ -393,7 +403,7 @@ function CollectionStrip({
   return (
     <>
       {!overview && (
-        <div className="mb-2 flex min-h-7 items-center justify-between gap-3">
+        <div className="mb-1 flex min-h-5 items-center justify-between gap-3">
           <h2 className="text-xs font-medium text-foreground">
             {uiText("Collections")} <span className="font-mono font-normal">{total}</span>
           </h2>
@@ -407,7 +417,7 @@ function CollectionStrip({
             aria-hidden={!expanded && hidden === 0 ? true : undefined}
             tabIndex={!expanded && hidden === 0 ? -1 : undefined}
             onClick={() => setExpandedFor(expanded ? null : resetKey)}
-            className={`transition-opacity duration-press ease-out ${!expanded && hidden === 0 ? "pointer-events-none opacity-0" : "opacity-100"}`}
+            className={`h-5 transition-opacity duration-press ease-out ${!expanded && hidden === 0 ? "pointer-events-none opacity-0" : "opacity-100"}`}
           >
             {expanded
               ? uiText("Show fewer")
@@ -529,7 +539,7 @@ function PrinterMenu({ open, onOpenChange, value, options, onSelect, onIntent }:
           onFocus={onIntent}
           onPointerDown={onIntent}
           onClick={() => onOpenChange(!open)}
-          className="h-8 w-40"
+          className="library-toolbar-printer h-8 w-36 max-w-full"
         >
           <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
           <span className="min-w-0 flex-1 truncate text-left">{current?.label}</span>
@@ -686,6 +696,21 @@ export interface BrowserInitialData {
   models: ModelListItem[];
   tags: TagRead[];
   printers: PrinterRead[];
+}
+
+const INSPECTOR_WIDTH_KEY = "ps-library-inspector-width";
+
+function storedInspectorWidth() {
+  try {
+    const width = Number(localStorage.getItem(INSPECTOR_WIDTH_KEY));
+    return Number.isSafeInteger(width) &&
+      width >= LIBRARY_INSPECTOR_MIN_WIDTH &&
+      width <= LIBRARY_INSPECTOR_MAX_WIDTH
+      ? width
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 type InspectorIntent = { id: number; open: boolean };
@@ -854,7 +879,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }, [initialLibraryPreferences.view]);
   const [sortOpen, setSortOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
-  const [desktopSortOpen, setDesktopSortOpen] = useState(false);
   const [printerMenuOpen, setPrinterMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const toolbarMenuOpener = useRef<HTMLElement | null>(null);
@@ -881,20 +905,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     mode: UploadMode;
   } | null>(null);
 
-  useEffect(() => {
-    const reviewImport = () => {
-      setDropPreload({ files: [], mode: "url" });
-      setUploadOpen(true);
-    };
-    window.addEventListener("printstash:review-import", reviewImport);
-    return () => window.removeEventListener("printstash:review-import", reviewImport);
-  }, []);
   const [dropCollection, setDropCollection] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragEnterCount = useRef(0);
 
   function classifyDrop(files: File[]): { files: File[]; mode: UploadMode } | null {
-    const meshes = files.filter((f) => isSourceFile(f.name));
+    const meshes = files.filter((f) => isSourceFile(f.name) && !isGcodeFile(f.name));
     const gcodes = files.filter((f) => isGcodeFile(f.name));
     const zips = files.filter((f) => isArchiveFile(f.name));
     if (meshes.length >= 2) return { mode: "bulk", files: meshes };
@@ -954,6 +970,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setUploadOpen(true);
   }
 
+  const collectionFormId = useId();
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
   const createCollectionRequested = searchParams.get("newCollection") === "1";
@@ -1194,8 +1211,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       (selectedCollectionId === null || destinationCollection?.path === selectedCollection),
     firstRowSize,
   );
-  const includeSubfolders =
-    requestedIncludeSubfolders || modelQuery.data?.pages[0]?.effective_direct === false;
+  const browsePage = modelQuery.isPlaceholderData ? undefined : modelQuery.data?.pages[0];
+  const effectiveDirect = browsePage?.effective_direct ?? browseParams.direct;
+  const includeSubfolders = requestedIncludeSubfolders || effectiveDirect === false;
+  const statusFilterActive = structured.revision_status.length > 0;
+  const canReusePickerFacets = effectiveDirect === false && !statusFilterActive;
+  const statusFacetQuery = useModelFacets(
+    { ...folderModelFilters(), direct: effectiveDirect, revision_status: undefined },
+    {
+      enabled: filtersEnabled && docView === "models" && !!browsePage && !canReusePickerFacets,
+    },
+  );
   const recent = useRecentFolders(
     destinationSettled ? selectedLookup.data : undefined,
     recentFoldersOpen,
@@ -1255,7 +1281,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     !modelQuery.isPlaceholderData;
 
   const entry = useLibraryEntry(canonicalLibraryHref, projectionReady);
-  const modelMoves = useModelMoves(entry, refresh);
   const [refreshState, setRefreshState] = useState<LibraryRefreshState | null>(null);
   const refreshScope = useRef({ entry, sequence: 0 });
   useLayoutEffect(() => {
@@ -1339,7 +1364,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     selectedCollectionRow,
     selectedLookup.data,
     modelQuery.hasNextPage,
-    modelQuery.data?.pages,
+    modelQuery.data,
   ]);
   const [settledSnapshot, setSettledSnapshot] = useState(nextSnapshot);
   const lookupStatus = selectedLookup.error ? parseApiError(selectedLookup.error).status : null;
@@ -1367,11 +1392,116 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       if (session === getSessionVersion()) toast.error(error);
     });
   }, [refreshAuth]);
+  const refreshForAuthority = useRef<(() => Promise<void>) | null>(null);
   const authority = useLibraryAuthority(browseReady ? (modelQuery.data?.pages[0] ?? null) : null, {
     eventsReady: startup.canLoad("activity"),
-    onRefresh: () => reading.refresh(refresh),
+    onRefresh: () => refreshForAuthority.current?.(),
     onAuthorityRetired,
   });
+  async function refresh() {
+    const session = getSessionVersion();
+    if (
+      entry.session !== session ||
+      authority.authorizationChanged ||
+      currentRefresh?.status === "pending"
+    )
+      return;
+    const scope = refreshScope.current;
+    const sequence = ++scope.sequence;
+    const isCurrent = () =>
+      getSessionVersion() === session && scope.entry === entry && scope.sequence === sequence;
+    // The view below explicitly reloads its taxonomy and continuation pages.
+    // Mark other metadata stale without starting duplicate reads of that view.
+    for (const queryKey of [queryKeys.models, queryKeys.collections])
+      void queryClient.invalidateQueries({ queryKey, refetchType: "none" });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.vaultStats });
+    setRefreshState({ entry, status: "pending" });
+    let lookupPending = selectedCollection !== null;
+    try {
+      const previousFolders =
+        searchQuery === undefined
+          ? queryKeys.collectionChildren(selectedCollectionRow?.id ?? null)
+          : queryKeys.collectionSearch(searchQuery, "view");
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: libraryBrowseKeys.all }),
+        queryClient.cancelQueries({ queryKey: previousFolders, exact: true }),
+        queryClient.cancelQueries({
+          queryKey:
+            selectedCollectionId === null
+              ? queryKeys.collectionLookup(selectedCollection)
+              : queryKeys.collectionLookupById(selectedCollectionId),
+          exact: true,
+        }),
+      ]);
+      if (!isCurrent()) return;
+      await queryClient.invalidateQueries({ queryKey: libraryBrowseKeys.all, refetchType: "none" });
+      if (!isCurrent()) return;
+      // Resolve the saved identity before refreshing its current children.
+      let parentId: number | null = null;
+      if (selectedCollection !== null) {
+        const lookup = await selectedLookup.refetch({ throwOnError: true });
+        if (!isCurrent()) return;
+        if (!lookup.data) throw new Error("Collection refresh returned no lookup");
+        parentId = lookup.data.collection.id;
+      }
+      lookupPending = false;
+      const folderKey =
+        searchQuery === undefined
+          ? queryKeys.collectionChildren(parentId)
+          : queryKeys.collectionSearch(searchQuery, "view");
+      await queryClient.cancelQueries({ queryKey: folderKey, exact: true });
+      if (!isCurrent()) return;
+      await Promise.all([
+        queryClient.resetQueries(
+          { queryKey: libraryBrowseKeys.pages(browseParams), exact: true },
+          { throwOnError: true },
+        ),
+        (async () => {
+          await queryClient.resetQueries(
+            { queryKey: folderKey, exact: true },
+            { throwOnError: true },
+          );
+          if (!isCurrent()) return;
+          // A new parent key may not have an observer yet. Fetch its same Query
+          // entry explicitly; Infinity reuses the page resetQueries just read.
+          await queryClient.fetchInfiniteQuery<
+            CollectionPage,
+            Error,
+            CollectionPage,
+            typeof folderKey,
+            string | null
+          >({
+            queryKey: folderKey,
+            queryFn: ({ pageParam, signal }) =>
+              searchQuery === undefined
+                ? listCollectionChildren(parentId, pageParam, undefined, { signal })
+                : searchCollections(searchQuery, "view", pageParam, undefined, { signal }),
+            initialPageParam: null,
+            getNextPageParam: (page: CollectionPage) => page.next_cursor,
+            staleTime: Infinity,
+          });
+        })(),
+        queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
+      ]);
+      if (isCurrent()) setRefreshState(null);
+    } catch (error) {
+      if (!isCurrent()) return;
+      const interrupted = isCancelledError(error);
+      const failure = parseApiError(error);
+      if (interrupted || (failure.status === 409 && failure.code === "browse_refresh_required")) {
+        // Ingest completion replaces ongoing reads; further catalog writes can
+        // also reject both first-page attempts. Preserve the displayed snapshot
+        // and reading anchor, then settle replaced reads through the same timer.
+        setRefreshState({ entry, status: "stale" });
+        return;
+      }
+      const denied = lookupPending && failure.status === 404;
+      if (denied) setSettledSnapshot(null);
+      setRefreshState({ entry, status: denied ? "denied" : "failed", error: userMessage(error) });
+    }
+  }
+
   const refreshRequired =
     authority.refreshRequired || modelQuery.refreshRequired || currentRefresh !== null;
   const libraryItems = snapshot?.items ?? [];
@@ -1480,11 +1610,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       if (isCurrent()) setCollectionRenameBusy(false);
     }
   }
+  const modelReadError = modelQuery.refreshRequired ? null : modelQuery.error?.message;
   const error =
     (currentRefresh?.status === "failed" || currentRefresh?.status === "denied"
       ? currentRefresh.error
       : null) ??
-    (modelQuery.refreshRequired ? null : modelQuery.error?.message) ??
+    modelReadError ??
     (selectedCollection !== null ? selectedLookup.error?.message : null) ??
     folderPages.error?.message ??
     null;
@@ -1573,34 +1704,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     animateOnEnable: true,
   });
 
-  // Reconcile changed pages in the background, including stale continuations.
-  // Reading-position recovery reloads only the previously visited pages and
-  // restores the visible anchor. Selection postpones reordering until it ends.
-  const settlesByItself =
-    !selectMode &&
-    !authority.authorizationChanged &&
-    ((currentRefresh === null && (authority.refreshRequired || modelQuery.refreshRequired)) ||
-      currentRefresh?.status === "stale");
-  const lastSettled = useRef(0);
-  // The timer must survive re-renders, so it reads the latest refresh through a
-  // ref instead of depending on an object that is new on every render.
-  const settleNow = useRef<() => void>(() => undefined);
-  useLayoutEffect(() => {
-    settleNow.current = () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.outliner });
-      void (snapshot?.entry === entry ? reading.refresh(refresh) : refresh());
-    };
-  });
-  useEffect(() => {
-    if (!settlesByItself) return;
-    const wait = Math.max(800, lastSettled.current + 4000 - Date.now());
-    const timer = setTimeout(() => {
-      lastSettled.current = Date.now();
-      settleNow.current();
-    }, wait);
-    return () => clearTimeout(timer);
-  }, [settlesByItself]);
-
   useEffect(() => {
     if (browseReady) settleStartup("cards", "ready");
     else if (error !== null) settleStartup("cards", "failed");
@@ -1649,109 +1752,41 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (hasMore && !loadingMore && !refreshRequired && !authority.authorizationChanged)
       void modelQuery.loadMore();
   }
-  async function refresh() {
-    const session = getSessionVersion();
-    if (
-      entry.session !== session ||
-      authority.authorizationChanged ||
-      currentRefresh?.status === "pending"
-    )
-      return;
-    const scope = refreshScope.current;
-    const sequence = ++scope.sequence;
-    const isCurrent = () =>
-      getSessionVersion() === session && scope.entry === entry && scope.sequence === sequence;
-    // The view below explicitly reloads its taxonomy and continuation pages.
-    // Mark other metadata stale without starting duplicate reads of that view.
-    for (const queryKey of [queryKeys.models, queryKeys.collections])
-      void queryClient.invalidateQueries({ queryKey, refetchType: "none" });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.vaultStats });
-    setRefreshState({ entry, status: "pending" });
-    let lookupPending = selectedCollection !== null;
-    try {
-      const previousFolders =
-        searchQuery === undefined
-          ? queryKeys.collectionChildren(selectedCollectionRow?.id ?? null)
-          : queryKeys.collectionSearch(searchQuery, "view");
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: libraryBrowseKeys.all }),
-        queryClient.cancelQueries({ queryKey: previousFolders, exact: true }),
-        queryClient.cancelQueries({
-          queryKey:
-            selectedCollectionId === null
-              ? queryKeys.collectionLookup(selectedCollection)
-              : queryKeys.collectionLookupById(selectedCollectionId),
-          exact: true,
-        }),
-      ]);
-      if (!isCurrent()) return;
-      await queryClient.invalidateQueries({ queryKey: libraryBrowseKeys.all, refetchType: "none" });
-      if (!isCurrent()) return;
-      // Resolve the saved identity before refreshing its current children.
-      let parentId: number | null = null;
-      if (selectedCollection !== null) {
-        const lookup = await selectedLookup.refetch({ throwOnError: true });
-        if (!isCurrent()) return;
-        if (!lookup.data) throw new Error("Collection refresh returned no lookup");
-        parentId = lookup.data.collection.id;
-      }
-      lookupPending = false;
-      const folderKey =
-        searchQuery === undefined
-          ? queryKeys.collectionChildren(parentId)
-          : queryKeys.collectionSearch(searchQuery, "view");
-      await queryClient.cancelQueries({ queryKey: folderKey, exact: true });
-      if (!isCurrent()) return;
-      await Promise.all([
-        queryClient.resetQueries(
-          { queryKey: libraryBrowseKeys.pages(browseParams), exact: true },
-          { throwOnError: true },
-        ),
-        (async () => {
-          await queryClient.resetQueries(
-            { queryKey: folderKey, exact: true },
-            { throwOnError: true },
-          );
-          if (!isCurrent()) return;
-          // A new parent key may not have an observer yet. Fetch its same Query
-          // entry explicitly; Infinity reuses the page resetQueries just read.
-          await queryClient.fetchInfiniteQuery<
-            CollectionPage,
-            Error,
-            CollectionPage,
-            typeof folderKey,
-            string | null
-          >({
-            queryKey: folderKey,
-            queryFn: ({ pageParam, signal }) =>
-              searchQuery === undefined
-                ? listCollectionChildren(parentId, pageParam, undefined, { signal })
-                : searchCollections(searchQuery, "view", pageParam, undefined, { signal }),
-            initialPageParam: null,
-            getNextPageParam: (page: CollectionPage) => page.next_cursor,
-            staleTime: Infinity,
-          });
-        })(),
-        queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
-      ]);
-      if (isCurrent()) setRefreshState(null);
-    } catch (error) {
-      if (!isCurrent()) return;
-      const interrupted = isCancelledError(error);
-      const failure = parseApiError(error);
-      if (interrupted || (failure.status === 409 && failure.code === "browse_refresh_required")) {
-        // Ingest completion replaces ongoing reads; further catalog writes can
-        // also reject both first-page attempts. Preserve the displayed snapshot
-        // and reading anchor, then settle replaced reads through the same timer.
-        setRefreshState({ entry, status: "stale" });
-        return;
-      }
-      const denied = lookupPending && failure.status === 404;
-      if (denied) setSettledSnapshot(null);
-      setRefreshState({ entry, status: denied ? "denied" : "failed", error: userMessage(error) });
-    }
-  }
+  // Reconcile changed pages in the background, including stale continuations.
+  // Reading-position recovery reloads only the previously visited pages and
+  // restores the visible anchor. Selection postpones reordering until it ends.
+  const settlesByItself =
+    !selectMode &&
+    !authority.authorizationChanged &&
+    ((currentRefresh === null && (authority.refreshRequired || modelQuery.refreshRequired)) ||
+      currentRefresh?.status === "stale");
+  const lastSettled = useRef(0);
+  // The timer must survive re-renders, so it reads the latest refresh through a
+  // ref instead of depending on an object that is new on every render.
+  const settleNow = useRef<() => void>(() => undefined);
+  useLayoutEffect(() => {
+    settleNow.current = () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.outliner });
+      void (snapshot?.entry === entry ? reading.refresh(refresh) : refresh());
+    };
+  });
+  useEffect(() => {
+    if (!settlesByItself) return;
+    const wait = Math.max(800, lastSettled.current + 4000 - Date.now());
+    const timer = setTimeout(() => {
+      lastSettled.current = Date.now();
+      settleNow.current();
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [settlesByItself]);
+
+  useLayoutEffect(() => {
+    refreshForAuthority.current = () => reading.refresh(refresh);
+    return () => {
+      refreshForAuthority.current = null;
+    };
+  });
+  const modelMoves = useModelMoves(entry, refresh);
 
   // Multi-select for batch actions. The selected set is view-independent so it
   // survives load-more and search; backend per-model RBAC makes cross-collection
@@ -2234,7 +2269,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     searchParams.has("uploaded_after") ||
     searchParams.has("uploaded_before") ||
     historyKeys.some((key) => searchParams.has(key));
-  const displayCount = libraryItems.length;
+  const browseTotal =
+    unavailableCollection || currentRefresh?.status === "denied" ? undefined : browsePage?.total;
+  const statusFacets = canReusePickerFacets ? facetQuery : statusFacetQuery;
+  const statusCounts =
+    browseTotal !== undefined && !statusFacets.isPlaceholderData ? statusFacets.data : undefined;
+  const allStatusCount = statusFilterActive
+    ? statusCounts?.printed.reduce((total, item) => total + item.count, 0)
+    : browseTotal;
+  const hasMultipartResults =
+    browseTotal !== undefined && orderedItems.some((item) => item.kind === "multipart");
   const folderHoldsOnlyFolders =
     !favoritesOnly &&
     docView === "models" &&
@@ -2242,7 +2286,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     !loading &&
     !includeSubfolders &&
     visibleCollections.length > 0 &&
-    displayCount === 0 &&
+    browseTotal === 0 &&
     !hasMore &&
     !hasActiveFilters;
   const subtreeHasModels = (displayedCollection?.model_count ?? 1) > 0;
@@ -2266,7 +2310,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         0)
       : 0;
   const showScopeToggle =
-    !favoritesOnly && docView === "models" && !searchQuery && visibleCollections.length > 0;
+    !favoritesOnly &&
+    docView === "models" &&
+    !searchQuery &&
+    (visibleCollections.length > 0 || reservedCollections > 0);
   // Links belong to the displayed result even while another destination loads.
   const currentLibraryHref = snapshot?.entry.href ?? canonicalLibraryHref;
   const inspectorScope = `${entry.session}:${entry.key}:${currentLibraryHref}`;
@@ -2286,6 +2333,49 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     !authority.authorizationChanged &&
     visibleModels.length > 0;
   const inspectorOpen = inspectorAvailable && !!inspectorIntent?.open;
+  const [preferredInspectorWidth, setPreferredInspectorWidth] = useState(storedInspectorWidth);
+  const chooseInspectorWidth = useCallback((width: number | null) => {
+    setPreferredInspectorWidth(width);
+    try {
+      if (width === null) localStorage.removeItem(INSPECTOR_WIDTH_KEY);
+      else localStorage.setItem(INSPECTOR_WIDTH_KEY, String(width));
+    } catch {
+      // The width remains usable for this session.
+    }
+  }, []);
+  const [inspectorDock, setInspectorDock] = useState<LibraryInspectorDock | null>(null);
+  const receiveInspectorDock = useCallback((dock: LibraryInspectorDock | null) => {
+    setInspectorDock((previous) =>
+      previous?.width === dock?.width &&
+      previous?.paddingOffset === dock?.paddingOffset &&
+      previous?.custom === dock?.custom &&
+      previous?.maxWidth === dock?.maxWidth
+        ? previous
+        : dock,
+    );
+  }, []);
+  const [inspectorMotion, setInspectorMotion] = useState<{
+    open: boolean;
+    locked: { dock: LibraryInspectorDock | null } | null;
+  }>({ open: inspectorOpen, locked: inspectorOpen ? { dock: null } : null });
+  const appliedDock = inspectorMotion.locked ? inspectorMotion.locked.dock : inspectorDock;
+  if (inspectorMotion.open !== inspectorOpen) {
+    // The spring's travel is relative to its width. Hold the current width
+    // through the entrance, exit, or a reversal, then apply the latest fit.
+    setInspectorMotion({ open: inspectorOpen, locked: { dock: appliedDock } });
+  }
+  const settleInspectorDock = useCallback(() => {
+    setInspectorMotion((motion) => (motion.locked ? { ...motion, locked: null } : motion));
+  }, []);
+  const inspectorDockStyle: CSSProperties & {
+    "--library-inspector-width"?: string;
+    "--library-inspector-padding-offset"?: string;
+  } = appliedDock
+    ? {
+        "--library-inspector-width": `${appliedDock.width}px`,
+        "--library-inspector-padding-offset": `${appliedDock.paddingOffset}px`,
+      }
+    : {};
   const inspectorOpener = useRef<HTMLElement | null>(null);
   const setInspector = useCallback(
     (intent: InspectorIntent) => {
@@ -2745,16 +2835,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     );
 
   const libraryActions = auth.isAuthenticated ? (
-    <div
-      role="group"
-      aria-label={t("vault.libraryTools")}
-      className="order-3 flex basis-full flex-wrap items-center gap-2 @3xl/library:order-4 @3xl/library:ml-auto @3xl/library:basis-auto"
-    >
+    <div role="group" aria-label={t("vault.libraryTools")} className="flex shrink-0 items-center">
       <Button
         variant="ghost"
         size="xs"
-        className="h-10 aria-pressed:bg-accent aria-pressed:text-accent-foreground @3xl/library:h-8"
+        className="h-8 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
         aria-pressed={selectMode}
+        aria-label={uiText("Select")}
         onClick={() => (selectMode ? clearSelection() : setKeyboardSelection(true))}
       >
         <ListChecks className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -2923,10 +3010,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             aria-haspopup="dialog"
             aria-expanded={!!filtersExpanded}
             aria-controls="library-filter-panel"
-            className="h-10 w-full gap-2 aria-expanded:bg-accent aria-expanded:text-accent-foreground @3xl/library:h-8"
+            className="h-8 w-full gap-2 aria-expanded:bg-accent aria-expanded:text-accent-foreground"
           >
             <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            {uiText("Filters")}
+            <span className="library-toolbar-filter-label">{uiText("Filters")}</span>
             {activeFilterItems.length > Number(!!query.trim()) && (
               <span className="text-xs tabular-nums text-muted-foreground">
                 {activeFilterItems.length - Number(!!query.trim())}
@@ -3020,140 +3107,83 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           }}
           className="library-model-toolbar flex min-w-0 flex-wrap items-center gap-2"
         >
-          <h2 className="mr-2 w-full shrink-0 text-base font-semibold @3xl/library:w-auto">
-            {t("vault.models")}
-          </h2>
-          {docView === "models" && (
-            <FolderSearch
-              value={query}
-              onCommit={setFolderQuery}
-              placeholder={
-                selectedName
-                  ? uiText("Search in {value1}", { value1: selectedName })
-                  : uiText("Search models")
-              }
-            />
-          )}
-          {docView === "models" && (
-            <LibraryStatusFilters
-              value={structured.revision_status}
-              counts={facetQuery.data?.revision_status}
-              total={displayCount}
-              onChange={(value) => setStructuredFilter("revision_status", value)}
-              onIntent={() => startup.request("filters")}
-            />
-          )}
-          {showScopeToggle && (
-            <div
-              role="radiogroup"
-              aria-label={uiText("Model scope")}
-              className="library-status-filters library-scope-toggle order-1 hidden items-center @3xl/library:flex"
-              onKeyDown={(event) => {
-                if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
-                event.preventDefault();
-                const group = event.currentTarget;
-                setModelScope(includeSubfolders ? "here" : "all");
-                requestAnimationFrame(() =>
-                  group.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus(),
-                );
-              }}
-            >
-              {(["here", "all"] as const).map((scope) => {
-                const checked = (scope === "all") === includeSubfolders;
-                return (
-                  <Button
-                    key={scope}
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    role="radio"
-                    aria-checked={checked}
-                    tabIndex={checked ? 0 : -1}
-                    onClick={() => setModelScope(scope)}
-                    title={uiText(scope === "here" ? "This folder" : "Include subfolders")}
-                  >
-                    {scope === "here" ? (
-                      <Folder className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    ) : (
-                      <FolderTree className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    )}
-                    <span className="library-toolbar-label">
-                      {uiText(scope === "here" ? "This folder" : "Include subfolders")}
-                    </span>
-                  </Button>
-                );
-              })}
-            </div>
-          )}
-          {filterControl("order-2 min-w-0 flex-1 md:order-1 @3xl/library:flex-none")}
-          <div className="library-secondary-tools order-2 ml-auto grid min-w-0 flex-2 grid-cols-2 items-center gap-2 @3xl/library:hidden">
-            <div className="min-w-0 @3xl/library:hidden">
-              <SortMenu
-                open={sortOpen}
-                onOpenChange={setSortOpen}
-                sortKey={sortKey}
-                onSelect={selectSort}
-                labelFor={ui}
-                triggerSize="sm"
-                triggerClassName="h-10 w-full min-w-0 px-2 text-xs"
-                wrapperClassName="min-w-0"
-              />
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              data-menu-trigger
-              aria-haspopup="menu"
-              aria-expanded={moreOpen}
-              aria-label={t("nav.more")}
-              onClick={(event) => {
-                toolbarMenuOpener.current = event.currentTarget;
-                setMoreOpen(!moreOpen);
-              }}
-              className="h-10 min-w-0 px-2 @3xl/library:h-8 @3xl/library:w-8 @3xl/library:[&>span]:sr-only @3xl/library:[&>svg:last-child]:hidden"
-            >
-              <MoreHorizontal className="h-4 w-4 shrink-0" />
-              <span className="min-w-0 flex-1 truncate">{t("nav.more")}</span>
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            </Button>
-          </div>
-          {canViewPrinters && (
-            <div className="order-1 hidden @3xl/library:flex">
-              <PrinterMenu
-                open={printerMenuOpen}
-                onOpenChange={setPrinterMenuOpen}
-                value={
-                  selectedPrinterId !== null
-                    ? String(selectedPrinterId)
-                    : (selectedPrinterPresence ?? "")
-                }
-                options={[
-                  { value: "", label: uiText("Any printer") },
-                  { value: "any", label: uiText("On a printer") },
-                  { value: "none", label: uiText("Vault only") },
-                  ...printers.map((printer) => ({
-                    value: String(printer.id),
-                    label: printer.name,
-                  })),
-                ]}
+          <h2 className="sr-only">{t("vault.models")}</h2>
+          <div className="library-toolbar-filters flex min-w-0 flex-wrap items-center gap-2">
+            {docView === "models" && (
+              <LibraryStatusFilters
+                value={structured.revision_status}
+                counts={statusCounts?.revision_status}
+                total={allStatusCount}
+                onChange={(value) => setStructuredFilter("revision_status", value)}
                 onIntent={() => startup.request("filters")}
-                onSelect={(value) => {
-                  if (value === "any" || value === "none") setSelectedPrinterPresence(value);
-                  else setSelectedPrinterId(value ? Number(value) : null);
-                }}
               />
-            </div>
-          )}
-          {libraryActions}
-          <div className="library-display-controls order-5 hidden shrink-0 items-center gap-2 @3xl/library:flex">
+            )}
+            {showScopeToggle && (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                aria-pressed={includeSubfolders}
+                aria-label={uiText("Include subfolders")}
+                disabled={loading}
+                onClick={() => setModelScope(includeSubfolders ? "here" : "all")}
+                className="h-8 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
+              >
+                <FolderTree className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="library-toolbar-label">{uiText("Include subfolders")}</span>
+              </Button>
+            )}
+            {filterControl("shrink-0")}
+            {canViewPrinters && (
+              <div className="min-w-0 max-w-full">
+                <PrinterMenu
+                  open={printerMenuOpen}
+                  onOpenChange={setPrinterMenuOpen}
+                  value={
+                    selectedPrinterId !== null
+                      ? String(selectedPrinterId)
+                      : (selectedPrinterPresence ?? "")
+                  }
+                  options={[
+                    { value: "", label: uiText("Any printer") },
+                    { value: "any", label: uiText("On a printer") },
+                    { value: "none", label: uiText("Vault only") },
+                    ...printers.map((printer) => ({
+                      value: String(printer.id),
+                      label: printer.name,
+                    })),
+                  ]}
+                  onIntent={() => startup.request("filters")}
+                  onSelect={(value) => {
+                    if (value === "any" || value === "none") setSelectedPrinterPresence(value);
+                    else setSelectedPrinterId(value ? Number(value) : null);
+                  }}
+                />
+              </div>
+            )}
+          </div>
+          <div className="library-display-controls ml-auto flex min-w-0 flex-wrap items-center gap-2">
+            {docView === "models" && (
+              <FolderSearch
+                value={query}
+                onCommit={setFolderQuery}
+                placeholder={
+                  selectedName
+                    ? uiText("Search in {value1}", { value1: selectedName })
+                    : uiText("Search models")
+                }
+              />
+            )}
+            {libraryActions}
             <SortMenu
-              open={desktopSortOpen}
-              onOpenChange={setDesktopSortOpen}
+              open={sortOpen}
+              onOpenChange={setSortOpen}
               sortKey={sortKey}
               onSelect={selectSort}
               labelFor={ui}
               triggerSize="xs"
-              triggerClassName="h-8 w-40"
+              triggerClassName="library-toolbar-sort h-8 w-32 max-w-full"
+              wrapperClassName="min-w-0 max-w-full"
             />
             <div className="flex items-center bg-muted/50">
               {(["grid", "list"] as const).map((mode) => (
@@ -3393,6 +3423,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           tabIndex={-1}
           aria-busy={reading.status === "restoring"}
           data-inspector-open={inspectorOpen || undefined}
+          data-inspector-grid={(docView === "models" && viewMode === "grid") || undefined}
+          data-inspector-layout={docView === "models" ? viewMode : undefined}
+          data-inspector-compact-dock={
+            (viewMode === "grid" && compact && !!appliedDock) || undefined
+          }
+          style={inspectorDockStyle}
           className="@container/library relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-background pb-24 md:pb-0"
           onDragEnter={onMainDragEnter}
           onDragOver={onMainDragOver}
@@ -3519,9 +3555,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           </LibraryBreadcrumbs>
 
           {/* The pane owns breakpoints: an open outliner also consumes horizontal room. */}
-          <div className="library-collection-header flex flex-col gap-3 px-4 sm:px-6">
-            <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
-              <div className="library-collection-identity min-w-0 flex-1 basis-full @3xl/library:basis-0">
+          <div className="library-collection-header px-4 sm:px-6">
+            <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-1">
+              <div className="library-collection-identity min-w-0 flex-1">
                 <CollectionTitleEditor
                   title={
                     unavailableCollection
@@ -3539,20 +3575,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   onSave={saveCollectionRename}
                   busy={collectionRenameBusy}
                 />
-                {selectedCollection !== null && !displayedCollection ? (
-                  <CollectionHeaderSkeleton />
-                ) : (
-                  displayedCollection && (
-                    <CollectionReadme
-                      key={displayedCollection.id}
-                      collectionId={displayedCollection.id}
-                      compact
-                      hasReadme={displayedCollection.has_readme}
-                      canEdit={!!user?.is_superuser || canWriteCollection(displayedCollection)}
-                      disabled={!browseReady}
-                    />
-                  )
-                )}
                 <div className="library-collection-meta flex flex-wrap items-center">
                   {collectionOverview && !displayedCollection && (
                     <span className="library-meta-part">
@@ -3566,42 +3588,39 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       })}
                     </span>
                   )}
-                  {!collectionOverview && (
-                    <p className="library-meta-part text-sm text-muted-foreground">
-                      {unavailableCollection
-                        ? uiText("library.collectionUnavailableHelp")
-                        : loading
-                          ? uiText("Loading...")
-                          : uiText(
-                              // Subtree results are not "here": count what is shown.
-                              selectedName && !includeSubfolders
-                                ? visibleMultipartModels.length
-                                  ? "library.header.itemsHere"
-                                  : "library.header.modelsHere"
-                                : "counts.items",
-                              {
-                                count: displayCount,
-                              },
-                            )}
-                    </p>
-                  )}
+                  {browseTotal !== undefined &&
+                    (displayedCollection?.path ?? null) === selectedCollection && (
+                      <span className="library-meta-part">
+                        {displayedCollection && (searchQuery || foldersHidden)
+                          ? uiText("library.header.filteredCount", {
+                              count: browseTotal,
+                              total: displayedCollection.model_count,
+                            })
+                          : uiText(hasMultipartResults ? "library.header.items" : "counts.models", {
+                              count: browseTotal,
+                            })}
+                      </span>
+                    )}
                   {displayedCollection && (
-                    <span className="library-meta-part">
-                      {uiText(
-                        collectionOverview
-                          ? "library.collectionOverview.modelsBelow"
-                          : "{count} in total",
-                        { count: displayedCollection.model_count },
-                      )}
-                    </span>
+                    <>
+                      <CollectionHeaderTags
+                        key={`tags:${displayedCollection.id}`}
+                        tags={displayedCollection.tags}
+                        canEdit={!!user?.is_superuser || canWriteCollection(displayedCollection)}
+                        onSave={(nextTags) => saveCollectionTags(displayedCollection, nextTags)}
+                      />
+                      <CollectionReadme
+                        key={displayedCollection.id}
+                        collectionId={displayedCollection.id}
+                        compact
+                        hasReadme={displayedCollection.has_readme}
+                        canEdit={!!user?.is_superuser || canWriteCollection(displayedCollection)}
+                        disabled={!browseReady}
+                      />
+                    </>
                   )}
-                  {displayedCollection && (
-                    <CollectionHeaderTags
-                      key={displayedCollection.id}
-                      tags={displayedCollection.tags}
-                      canEdit={!!user?.is_superuser || canWriteCollection(displayedCollection)}
-                      onSave={(nextTags) => saveCollectionTags(displayedCollection, nextTags)}
-                    />
+                  {selectedCollection !== null && loading && (
+                    <CollectionHeaderSkeleton hasDescription={destinationCollection?.has_readme} />
                   )}
                 </div>
               </div>
@@ -3652,59 +3671,20 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           )}
 
-          <ModalShell
+          <Modal
             open={isCreatingCollection}
             onClose={() => {
               setIsCreatingCollection(false);
               setNewCollectionName("");
             }}
-            labelledBy="library-create-title"
-            className="w-full max-w-[480px] border border-border bg-card shadow-lg"
-          >
-            <header className="relative border-b border-border px-6 py-6">
-              <h2 id="library-create-title" className="text-lg font-semibold">
-                {uiText("New collection")}
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {uiText("Create a collection inside the current collection.")}
-              </p>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={uiText("Close")}
-                className="absolute right-5 top-5"
-                onClick={() => {
-                  setIsCreatingCollection(false);
-                  setNewCollectionName("");
-                }}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </header>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                handleCreateCollection();
-              }}
-            >
-              <div className="px-6 py-6">
-                <label className="block space-y-2 text-sm">
-                  <span>{uiText("Name")}</span>
-                  <Input
-                    autoFocus
-                    value={newCollectionName}
-                    onChange={(event) => setNewCollectionName(event.target.value)}
-                    disabled={!auth.isAuthenticated}
-                    maxLength={100}
-                  />
-                </label>
-              </div>
-              <footer className="flex justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
+            title={uiText("New collection")}
+            description={uiText("Create a collection inside the current collection.")}
+            className="max-w-[480px]"
+            footer={
+              <>
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
                   onClick={() => {
                     setIsCreatingCollection(false);
                     setNewCollectionName("");
@@ -3714,16 +3694,34 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </Button>
                 <Button
                   type="submit"
-                  size="sm"
+                  form={collectionFormId}
                   disabled={
                     !newCollectionName.trim() || !auth.isAuthenticated || !canCreateCollection
                   }
                 >
                   {uiText("Create collection")}
                 </Button>
-              </footer>
+              </>
+            }
+          >
+            <form
+              id={collectionFormId}
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleCreateCollection();
+              }}
+            >
+              <FormField label={uiText("Name")}>
+                <Input
+                  autoFocus
+                  value={newCollectionName}
+                  onChange={(event) => setNewCollectionName(event.target.value)}
+                  disabled={!auth.isAuthenticated}
+                  maxLength={100}
+                />
+              </FormField>
             </form>
-          </ModalShell>
+          </Modal>
 
           {docView === "docs" && !favoritesOnly && (
             <div className="flex items-center gap-4 px-4 pt-4 text-sm sm:px-6">
@@ -3789,22 +3787,43 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </div>
               )}
               {error && (
-                <div className="mx-6 mt-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-                  {unavailableCollection ? uiText("library.collectionUnavailableHelp") : error}
+                <div
+                  role="alert"
+                  className="mx-4 mt-4 flex items-center justify-between gap-3 border border-destructive/40 bg-destructive/10 p-3 text-sm sm:mx-6"
+                >
+                  <p className="min-w-0 break-words text-foreground">
+                    {unavailableCollection ? (
+                      uiText("library.collectionUnavailableHelp")
+                    ) : (
+                      <>
+                        {uiText("Could not load Models.")}{" "}
+                        <span className="text-muted-foreground">{error}</span>
+                      </>
+                    )}
+                  </p>
                   {unavailableCollection && (
                     <Button
                       variant="outline"
                       size="sm"
+                      className="shrink-0"
                       onClick={() => handleCollectionChange(null)}
                     >
                       {uiText("aiSearch.backToLibrary")}
                     </Button>
                   )}
-                  {currentRefresh && currentRefresh.status !== "pending" && (
+                  {(currentRefresh ||
+                    (!unavailableCollection &&
+                      modelReadError &&
+                      !modelQuery.isFetchNextPageError)) && (
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => void (snapshot ? reading.refresh(refresh) : refresh())}
+                      className="shrink-0"
+                      disabled={currentRefresh?.status === "pending" || modelQuery.isFetching}
+                      onClick={() => {
+                        if (currentRefresh) void (snapshot ? reading.refresh(refresh) : refresh());
+                        else void modelQuery.refetch();
+                      }}
                     >
                       {uiText("Retry")}
                     </Button>
@@ -3848,8 +3867,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           readingRenderers={readingRenderers}
                           readingId="collections-placeholder"
                           layout="grid"
+                          freezeInspectorTracks={inspectorOpen}
                           compact={compact}
-                          estimateSize={82}
+                          estimateSize={COMPACT_COLLECTION_HEIGHT}
                           minCardWidth={300}
                           virtualize={false}
                           onColumnsChange={onColumns}
@@ -3906,8 +3926,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           readingRenderers={readingRenderers}
                           readingId="collections"
                           layout="grid"
+                          freezeInspectorTracks={inspectorOpen}
                           compact={!collectionOverview && compact}
-                          estimateSize={collectionOverview ? 266 : 82}
+                          estimateSize={collectionOverview ? 266 : COMPACT_COLLECTION_HEIGHT}
                           minCardWidth={collectionOverview ? undefined : 300}
                           onColumnsChange={onColumns}
                           extraColumns={extraColumns}
@@ -4002,18 +4023,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           >
                             {uiText("Upload files")}
                           </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={!canUploadToVault}
-                            onClick={() => {
-                              setDropPreload({ files: [], mode: "url" });
-                              setUploadOpen(true);
-                            }}
-                          >
-                            {uiText("Import from URL")}
-                          </Button>
+                          {canUploadToVault && (
+                            <Button asChild variant="outline" size="sm">
+                              <Link href="/inbox">{uiText("Import from URL")}</Link>
+                            </Button>
+                          )}
                           {user?.is_superuser && (
                             <Button asChild variant="outline" size="sm">
                               <Link href="/settings">{uiText("Connect folder or NAS")}</Link>
@@ -4031,7 +4045,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     // every card being rebuilt on each navigation. The surrounding
                     // content reveal settles the committed visit as one surface.
                     key="grid"
-                    className={compact ? "p-3" : "p-4 sm:p-6"}
+                    className={compact ? "p-3" : "px-4 pb-4 pt-3 sm:px-6 sm:pb-6"}
                   >
                     <LibraryItems
                       items={libraryItems}
@@ -4068,7 +4082,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                               model={item.value}
                               origin={snapshot?.entry}
                               arriving={arriving.has(`m:${item.value.id}`)}
-                              collectionLabel={item.value.collection_label}
+                              collectionLabel={
+                                includeSubfolders ? item.value.collection_label : null
+                              }
                               selectable={selectMode}
                               selected={selectedIds.has(item.value.id)}
                               onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
@@ -4085,6 +4101,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       readingRenderers={readingRenderers}
                       readingId="models"
                       layout="grid"
+                      freezeInspectorTracks={inspectorOpen}
+                      onInspectorDockChange={receiveInspectorDock}
+                      inspectorDockLocked={inspectorMotion.locked !== null}
+                      preferredInspectorWidth={preferredInspectorWidth}
+                      appliedInspectorCustomWidth={appliedDock?.custom}
+                      estimateSize={compact ? 290 : 250}
                       compact={compact}
                     />
                     <LoadMore
@@ -4200,6 +4222,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         readingRenderers={readingRenderers}
                         readingId="models"
                         layout="list"
+                        freezeInspectorTracks={inspectorOpen}
+                        onInspectorDockChange={receiveInspectorDock}
+                        inspectorDockLocked={inspectorMotion.locked !== null}
+                        preferredInspectorWidth={preferredInspectorWidth}
                       />
                     </div>
                     <LoadMore
@@ -4221,6 +4247,18 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             key={entry.session}
             id={inspectorIntent.id}
             open={inspectorOpen}
+            style={inspectorDockStyle}
+            onMotionSettled={settleInspectorDock}
+            resize={
+              appliedDock && appliedDock.maxWidth >= LIBRARY_INSPECTOR_MIN_WIDTH
+                ? {
+                    current: appliedDock.width,
+                    max: appliedDock.maxWidth,
+                    locked: inspectorMotion.locked !== null,
+                    onResize: chooseInspectorWidth,
+                  }
+                : null
+            }
             origin={snapshot?.entry}
             canWrite={auth.isAuthenticated && !authority.authorizationChanged && inspectorOpen}
             onOpenPage={() => reading.rememberAnchor(`/models/${inspectorIntent.id}`)}
@@ -4539,7 +4577,9 @@ function ModelListRow({
           }
         />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-foreground truncate">{model.name}</p>
+          <p className="text-sm font-medium text-foreground truncate" title={model.name}>
+            {displayModelName(model.name)}
+          </p>
           {model.tags.length > 0 && (
             <div className="flex gap-1 mt-0.5">
               {model.tags.slice(0, 2).map((tag) => (
@@ -4715,17 +4755,23 @@ function LoadMore({
   );
 }
 
-/** The description line of a Collection, before its row and readme arrive. It
- * has the height of the "Add a description" line that usually replaces it. */
-export function CollectionHeaderSkeleton() {
+/** Reserve the compact metadata line while the collection snapshot loads. */
+export function CollectionHeaderSkeleton({ hasDescription = false }: { hasDescription?: boolean }) {
   useUiLocale();
   return (
     <div
       role="status"
       aria-label={uiText("Loading…")}
-      className="library-loading-placeholder collection-header-readme-placeholder"
+      className="library-loading-placeholder w-full min-w-0"
     >
-      <Skeleton className="h-3 w-60 max-w-full" />
+      {hasDescription && (
+        <div className="mb-1 flex h-[18px] items-center">
+          <Skeleton className="h-3 w-60 max-w-full" />
+        </div>
+      )}
+      <div className="collection-header-meta-placeholder">
+        <Skeleton className="h-3 w-60 max-w-full" />
+      </div>
     </div>
   );
 }
@@ -4827,7 +4873,7 @@ export function ModelGridSkeleton({
       ref={setScrollNode}
       role="status"
       aria-label={uiText("Loading...")}
-      className={compact ? "p-3" : "p-4 sm:p-6"}
+      className={compact ? "p-3" : "px-4 pb-4 pt-3 sm:px-6 sm:pb-6"}
     >
       {scrollNode && (
         <LibraryItems
@@ -4846,7 +4892,7 @@ export function ModelGridSkeleton({
               className="library-model-card overflow-hidden border border-border bg-card"
               aria-hidden
             >
-              <div className="library-preview border-b border-border">
+              <div className="library-preview">
                 <LibraryPreviewPlaceholder />
               </div>
               <LibraryCardDetailsPlaceholder />

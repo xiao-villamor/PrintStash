@@ -243,6 +243,40 @@ test.describe("Model preview browsing", () => {
     }
   }
 
+  test("keeps card arrows compact over the image", async ({ page }) => {
+    const { card, next } = await library(page);
+
+    await card.hover();
+
+    expect(await next.boundingBox()).toMatchObject({ width: 24, height: 32 });
+  });
+
+  test("browses views with arrows inside the gallery", async ({ page }) => {
+    const { card } = await library(page);
+    await card.getByRole("button", { name: "Model views", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Model views" });
+
+    await dialog.getByRole("button", { name: "Next preview", exact: true }).click();
+
+    await expect(dialog.locator("img[data-preview-view]")).toHaveAttribute(
+      "data-preview-view",
+      "orbit-1",
+    );
+  });
+
+  test("centers the gallery view indicator", async ({ page }) => {
+    const { card } = await library(page);
+    await card.getByRole("button", { name: "Model views", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Model views" });
+
+    const stage = await dialog.locator("[data-model-preview]").boundingBox();
+    const indicator = await dialog.locator('[aria-live="polite"]').boundingBox();
+
+    expect(
+      Math.abs(indicator!.x + indicator!.width / 2 - (stage!.x + stage!.width / 2)),
+    ).toBeLessThan(1);
+  });
+
   test("keeps the view count discoverable before hover", async ({ page }) => {
     const { card } = await library(page);
     await page.mouse.move(0, 0);

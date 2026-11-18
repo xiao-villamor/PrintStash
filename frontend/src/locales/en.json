@@ -1006,7 +1006,6 @@
   "No active tasks": "No active tasks",
   "active": "active",
   "3D Model": "3D Model",
-  "Archive": "Archive",
   "G-code": "G-code",
   "Vault storage": "Vault storage",
   "Close": "Close",
@@ -1336,7 +1335,6 @@
   "STATE": "STATE",
   "Status": "Status",
   "Store in": "Store in",
-  "Sync status": "Sync status",
   "Tasks": "Tasks",
   "This document is empty.": "This document is empty.",
   "This halts the printer immediately and requires a firmware restart.": "This halts the printer immediately and requires a firmware restart.",
@@ -1488,7 +1486,6 @@
   "setup.defaultHelp": "Choose where PrintStash saves new uploads and previews.",
   "setup.existingHelp": "Already have a folder of models? You can connect it after setup without moving its files.",
   "setup.advanced": "View location and advanced options",
-  "setup.check": "Check storage",
   "setup.checking": "Checking…",
   "setup.creating": "Creating your account…",
   "setup.availableSpace": "available",
@@ -1549,8 +1546,8 @@
   "setup.resume": "Resume the getting-started guide",
   "build.chooseMultipart": "Choose a multipart set",
   "build.startHelp": "Open a multipart set, then choose Create build to plan its pieces.",
-  "inbox.openImport": "Open import dialog",
-  "inbox.startHelp": "Open the import dialog, then choose From URL to add a model link.",
+  "inbox.addUrl": "Add URL",
+  "inbox.startHelp": "Choose Add URL to capture a Model link for review.",
   "build.title": "Builds",
   "build.help": "Track the pieces needed for a multipart object, including failed attempts and replacements.",
   "build.create": "Create build",
@@ -1645,7 +1642,8 @@
   "auth.expired": "Session expired. Sign in again to continue.",
   "auth.local": "Your credentials stay with your self-hosted server.",
   "auth.tagline": "Your prints, your vault",
-  "auth.forgot": "Forgot your password? Another administrator can reset it in Settings → Users.",
+  "auth.forgotAction": "Forgot password?",
+  "auth.forgotHelp": "Another administrator can reset it in Settings → Users.",
   "auth.forgotLink": "How recovery works",
   "setup.reviewEmail": "Email",
   "setup.editAccount": "Edit account",
@@ -1736,7 +1734,6 @@
   "inbox.queueDescription": "Captures waiting for review or import.",
   "inbox.completedDescription": "Finished jobs. Imported Models remain in your vault.",
   "inbox.emptyQueueTitle": "No imports in the queue",
-  "inbox.emptyQueueDescription": "Capture a model URL to prepare a reviewable import.",
   "inbox.emptyCompletedTitle": "No completed imports",
   "inbox.emptyCompletedDescription": "Finished jobs appear here until you clear them.",
   "inbox.clearCompleted": "Clear completed",
@@ -2650,7 +2647,6 @@
   ".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf": ".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf",
   "DXF preview is not supported yet. Download the original file below.": "DXF preview is not supported yet. Download the original file below.",
   ".gcode .g .gco .bgcode": ".gcode .g .gco .bgcode",
-  ".zip .7z .rar .tar .tgz": ".zip .7z .rar .tar .tgz",
   "{value1} (library source)": "{value1} (library source)",
   " (library source)": " (library source)",
   "Importing…": "Importing…",
@@ -2863,8 +2859,8 @@
   "Delete selected": "Delete selected",
   "This will delete the selected models and all their files immediately. This cannot be undone.": "This will delete the selected models and all their files immediately. This cannot be undone.",
   "uploads.ignored": {
-    "one": "{value1} file ignored — only 3D models ({value3}) are accepted here.",
-    "other": "{value1} files ignored — only 3D models ({value3}) are accepted here."
+    "one": "{value1} file ignored — only Model files and archives ({value3}) are accepted here.",
+    "other": "{value1} files ignored — only Model files and archives ({value3}) are accepted here."
   },
   "uploads.queued": {
     "one": "Queued {value1} upload — track progress in the task center",
@@ -3378,8 +3374,6 @@
   "setup.chooseAnother": "Choose a file to retry",
   "uploads.mode.files": "Files",
   "uploads.mode.bulk": "Bulk",
-  "uploads.mode.url": "From URL",
-  "uploads.mode.zip": "From archive",
   "setup.chooseFileAction": "Choose a file",
   "setup.scanPartial": "Some files could not be indexed. Review the scan in the task center or retry this folder. Models already added remain in your library.",
   "setup.folderPathExample": "/libraries/models",
@@ -4158,9 +4152,13 @@
   "aiSearch.listView": "List view",
   "aiSearch.backToLibrary": "Back to library",
   "aiSearch.searchOptions": "Search options",
-  "aiSearch.resultsShown": {
-    "one": "{count} result shown",
-    "other": "{count} results shown"
+  "aiSearch.resultsCount": {
+    "one": "{count} result",
+    "other": "{count} results"
+  },
+  "aiSearch.resultsCountMore": {
+    "one": "{count}+ results",
+    "other": "{count}+ results"
   },
   "aiSearch.timeout": "The search took too long. Try again.",
   "aiSearch.setupPermissions": "AI permissions",
@@ -4857,12 +4855,17 @@
   "Copy link": "Copy link",
   "Create user": "Create user",
   "Add a 3D Model, an existing G-code file, or both together.": "Add a 3D Model, an existing G-code file, or both together.",
+  "Drop a 3D model or": "Drop a 3D model or",
+  "Drop G-code or": "Drop G-code or",
+  "choose a file": "choose a file",
+  "Create \"{value1}\"": "Create \"{value1}\"",
   "Choose file": "Choose file",
   "Choose file for {value1}": "Choose file for {value1}",
   "or drop files here": "or drop files here",
   "No files selected": "No files selected",
   "Library destination": "Library destination",
   "Optional. Uses the selected filename when left blank.": "Optional. Uses the selected filename when left blank.",
+  "Uses the filename if blank": "Uses the filename if blank",
   "PrintStash stores existing files. It does not slice Models or verify G-code safety.": "PrintStash stores existing files. It does not slice Models or verify G-code safety.",
   "Add tag": "Add tag",
   "settings.subtitle.trash": "Deleted Models stay restorable until the retention window expires.",
@@ -4902,11 +4905,12 @@
   "A match does not merge models or delete files.": "A match does not merge models or delete files.",
   "Similarity filters": "Similarity filters",
   "Review trashed items by name before restoring or permanently removing them.": "Review trashed items by name before restoring or permanently removing them.",
-  "Model files": "Model files",
   "Choose folder": "Choose folder",
-  "Choose Model files or drop a folder. G-code pairing is available on Files.": "Choose Model files or drop a folder. G-code pairing is available on Files.",
+  "Drop Model files, a folder or an archive": "Drop Model files, a folder or an archive",
+  "Add many Models from files, a folder or an archive.": "Add many Models from files, a folder or an archive.",
+  "Archives were skipped because Model files were selected.": "Archives were skipped because Model files were selected.",
+  "Only the first archive was selected.": "Only the first archive was selected.",
   "Each Model file creates a separate Model. Subfolders become nested Collections.": "Each Model file creates a separate Model. Subfolders become nested Collections.",
-  "Prepare the archive for review, then choose the files to import.": "Prepare the archive for review, then choose the files to import.",
   "Capture for review": "Capture for review",
   "Known model storage: {size}": "Known model storage: {size}",
   "Connect your printer using its local integration.": "Connect your printer using its local integration.",
@@ -5117,6 +5121,7 @@
   "No description yet. Add orientation, hardware or print notes.": "No description yet. Add orientation, hardware or print notes.",
   "No print results recorded yet.": "No print results recorded yet.",
   "Open page": "Open page",
+  "Open full page": "Open full page",
   "Open the full model page": "Open the full model page",
   "Print this revision": "Print this revision",
   "Printer for printing and logging": "Printer for printing and logging",
@@ -5182,7 +5187,6 @@
   "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.": "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.",
   "Sliced plates": "Sliced plates",
   "No G-code revision yet. Add a revision to capture the settings that worked.": "No G-code revision yet. Add a revision to capture the settings that worked.",
-  "No G-code revision": "No G-code revision",
   "No G-code yet": "No G-code yet",
   "Not printed yet": "Not printed yet",
   "library.cardOutcome": "{result} {count}× on {printer}",
@@ -5195,6 +5199,13 @@
   "library.header.collections": {
     "one": "{count} collection",
     "other": "{count} collections"
+  },
+  "Add a description": "Add a description",
+  "Could not load Models.": "Could not load Models.",
+  "library.header.filteredCount": "{count} of {total}",
+  "library.header.items": {
+    "one": "{count} item",
+    "other": "{count} items"
   },
   "library.header.modelsHere": {
     "one": "{count} model here",
@@ -5245,5 +5256,8 @@
   "One thumbnail": "One thumbnail",
   "Oblique views": "Oblique views",
   "Oblique views + top and bottom": "Oblique views + top and bottom",
-  "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background."
+  "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.",
+  "Add a Revision to keep the settings that worked.": "Add a Revision to keep the settings that worked.",
+  "None yet": "None yet",
+  "Details": "Details"
 }

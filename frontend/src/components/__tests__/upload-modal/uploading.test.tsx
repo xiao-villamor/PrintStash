@@ -514,7 +514,7 @@ describe("UploadModal ingestion", () => {
       const { container, uploadRequests } = renderUpload();
       await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
       await user.upload(fileInputs(container)[0], new File(["x"], "cube.stl"));
-      await user.click(await screen.findByRole("button", { name: "None" }));
+      await user.click(await screen.findByRole("button", { name: "Collection" }));
       await user.click(await screen.findByRole("option", { name: /Parts/ }));
 
       await user.click(screen.getByRole("button", { name: "Upload to vault" }));
@@ -745,7 +745,7 @@ describe("UploadModal ingestion", () => {
       const { container } = renderUpload({
         routes: { "POST /api/v1/ingest/archive/inspect": () => response },
       });
-      await user.click(screen.getByRole("tab", { name: /\s*From archive\s*/ }));
+      await user.click(screen.getByRole("tab", { name: /\s*Bulk\s*/ }));
       await user.upload(fileInputs(container)[0], new File([new Uint8Array(1024)], "wait.zip"));
       await user.click(screen.getByRole("button", { name: "Prepare archive" }));
 
@@ -774,7 +774,7 @@ describe("UploadModal ingestion", () => {
       const { container } = renderUpload({
         routes: { "POST /api/v1/ingest/archive/inspect": () => response },
       });
-      await user.click(screen.getByRole("tab", { name: /\s*From archive\s*/ }));
+      await user.click(screen.getByRole("tab", { name: /\s*Bulk\s*/ }));
       await user.upload(fileInputs(container)[0], new File([new Uint8Array(1024)], "large.zip"));
       await user.click(screen.getByRole("button", { name: "Prepare archive" }));
 
@@ -803,7 +803,7 @@ describe("UploadModal ingestion", () => {
       const { container, onClose } = renderUpload({
         routes: { "POST /api/v1/ingest/archive/inspect": () => response },
       });
-      await user.click(screen.getByRole("tab", { name: /\s*From archive\s*/ }));
+      await user.click(screen.getByRole("tab", { name: /\s*Bulk\s*/ }));
       await user.upload(fileInputs(container)[0], new File(["x"], "large.zip"));
 
       await user.click(screen.getByRole("button", { name: "Prepare archive" }));
@@ -825,7 +825,7 @@ describe("UploadModal ingestion", () => {
           "POST /api/v1/ingest/archive/inspect": json({ detail: "upload_too_large" }, 413),
         },
       });
-      await user.click(screen.getByRole("tab", { name: /\s*From archive\s*/ }));
+      await user.click(screen.getByRole("tab", { name: /\s*Bulk\s*/ }));
       await user.upload(fileInputs(container)[0], new File(["x"], "oversized.zip"));
 
       await user.click(screen.getByRole("button", { name: "Prepare archive" }));
@@ -853,7 +853,7 @@ describe("UploadModal ingestion", () => {
             }),
         },
       });
-      await user.click(screen.getByRole("tab", { name: /\s*From archive\s*/ }));
+      await user.click(screen.getByRole("tab", { name: /\s*Bulk\s*/ }));
       await user.upload(fileInputs(container)[0], new File(["x"], "huge.zip"));
 
       await user.click(screen.getByRole("button", { name: "Prepare archive" }));
@@ -872,7 +872,7 @@ describe("UploadModal ingestion", () => {
       const { container } = renderUpload({
         routes: { "POST /api/v1/ingest/archive/inspect": () => pending.promise },
       });
-      await user.click(screen.getByRole("tab", { name: /\s*From archive\s*/ }));
+      await user.click(screen.getByRole("tab", { name: /\s*Bulk\s*/ }));
       await user.upload(fileInputs(container)[0], new File(["x"], "private.zip"));
       await user.click(screen.getByRole("button", { name: "Prepare archive" }));
 
@@ -897,7 +897,7 @@ describe("UploadModal ingestion", () => {
       const { container } = renderUpload({
         routes: { "POST /api/v1/ingest/archive/inspect": () => new Promise<Response>(() => {}) },
       });
-      await user.click(screen.getByRole("tab", { name: /\s*From archive\s*/ }));
+      await user.click(screen.getByRole("tab", { name: /\s*Bulk\s*/ }));
       await user.upload(fileInputs(container)[0], new File(["x"], "cancel.zip"));
       await user.click(screen.getByRole("button", { name: "Prepare archive" }));
       const task = listTasks().find((item) => item.title === "Upload cancel.zip");
@@ -914,7 +914,7 @@ describe("UploadModal ingestion", () => {
 
     async function prepare(user: ReturnType<typeof userEvent.setup>, container: HTMLElement) {
       setJobSource(async () => [aJob({ kind: "ingestion.archive_inspect", state: "completed" })]);
-      await user.click(screen.getByRole("tab", { name: /\s*From archive\s*/ }));
+      await user.click(screen.getByRole("tab", { name: /\s*Bulk\s*/ }));
       await user.upload(fileInputs(container)[0], new File(["x"], "parts.zip"));
       await user.click(screen.getByRole("button", { name: "Prepare archive" }));
       await waitFor(() => expect(listTasks().some((task) => task.jobId === jobId())).toBe(true));
@@ -942,9 +942,9 @@ describe("UploadModal ingestion", () => {
     it("tracks the ZIP Job with the selected destination", async () => {
       const user = userEvent.setup();
       const { container } = renderUpload();
-      await user.click(screen.getByRole("button", { name: "None" }));
+      await user.click(screen.getByRole("button", { name: "Collection" }));
       await user.click(screen.getByRole("option", { name: /Parts/ }));
-      await user.type(screen.getByPlaceholderText("Search or create — press Enter"), "fun");
+      await user.type(screen.getByPlaceholderText("Add tags"), "fun");
       await user.click(screen.getByRole("option", { name: /functional/ }));
       await prepare(user, container);
 
@@ -961,32 +961,22 @@ describe("UploadModal ingestion", () => {
 
 describe("pending upload tags", () => {
   async function beginTag(user: ReturnType<typeof userEvent.setup>, name = "spares") {
-    await user.type(
-      screen.getByPlaceholderText("Search or create — press Enter"),
-      `${name}{Enter}`,
-    );
+    await user.type(screen.getByPlaceholderText("Add tags"), `${name}{Enter}`);
   }
 
-  it.each(["Files", "Bulk", "From URL", "From archive"])(
+  it.each(["Files", "Bulk", "Archive"])(
     "waits for a new tag before submitting %s",
     async (mode) => {
       const user = userEvent.setup();
       const pending = Promise.withResolvers<Response>();
       const view = renderUpload({ routes: { "POST /api/v1/tags": () => pending.promise } });
-      if (mode !== "Files")
-        await user.click(screen.getByRole("tab", { name: new RegExp(`^\\s*${mode}\\s*$`) }));
-      if (mode === "From URL")
-        await user.type(
-          screen.getByPlaceholderText(/Model page, collection/),
-          "https://example.test/model",
-        );
-      else
-        await user.upload(
-          fileInputs(view.container)[0],
-          new File(["x"], mode === "From archive" ? "parts.zip" : "cube.stl"),
-        );
+      if (mode !== "Files") await user.click(screen.getByRole("tab", { name: /^\s*Bulk\s*$/ }));
+      await user.upload(
+        fileInputs(view.container)[0],
+        new File(["x"], mode === "Archive" ? "parts.zip" : "cube.stl"),
+      );
       const submit = screen.getByRole("button", {
-        name: /^(Upload to vault|Upload \d+ models?|Capture for review|Prepare archive)$/,
+        name: /^(Upload to vault|Upload \d+ models?|Prepare archive)$/,
       });
       await waitFor(() => expect(submit).toBeEnabled());
       try {

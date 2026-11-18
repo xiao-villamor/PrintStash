@@ -813,6 +813,9 @@
   .model-detail-inspector {
     height: 100%;
   }
+  .model-detail-layout[data-model-facts-in-panel="true"] .model-detail-preview {
+    flex: 1 1 0;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .model-detail-tabs [role="tab"]:active {

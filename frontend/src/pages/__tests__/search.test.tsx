@@ -140,7 +140,7 @@ describe("Search results", () => {
       },
     });
     expect(await screen.findByAltText("")).toHaveAttribute("src", "blob:search-preview");
-    expect(screen.getByText("1 result shown")).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent(/^1 result/);
   });
   it("returns to all result types from a narrowed search", async () => {
     const user = userEvent.setup();
@@ -186,8 +186,7 @@ describe("Search results", () => {
       },
     });
     const card = await screen.findByRole("link", { name: "Desk bracket" });
-    expect(within(card).getByText("PETG revision")).toBeVisible();
-    expect(within(card).getByText("Known good")).toBeVisible();
+    expect(within(card).getByText("PETG revision · Known good")).toBeVisible();
     expect(card).toHaveTextContent("45 g");
     expect(card).toHaveTextContent("PETG");
   });

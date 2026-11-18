@@ -58,12 +58,13 @@ export function CollectionReadme({
   }, []);
 
   // Collapse tall descriptions so a long/technical one doesn't bury the model
-  // list. CLAMP_PX must match the max-h-* class below.
-  const CLAMP_PX = 192;
+  // list. The compact header keeps just one line of prose.
+  const clampHeight = compact ? 18 : 192;
   useLayoutEffect(() => {
     const el = contentRef.current;
     if (!el) return;
-    const measure = () => setOverflows(el.scrollHeight > CLAMP_PX);
+    const measure = () =>
+      setOverflows(el.scrollHeight > clampHeight || el.scrollWidth > el.clientWidth);
     // Measure before paint, then track images that change the prose later.
     measure();
     if (!("ResizeObserver" in window)) return;
@@ -71,7 +72,7 @@ export function CollectionReadme({
     observer.observe(el);
     if (el.firstElementChild) observer.observe(el.firstElementChild);
     return () => observer.disconnect();
-  }, [collectionId, readme, editing, MarkdownView]);
+  }, [collectionId, readme, editing, MarkdownView, clampHeight]);
 
   // Switching collections drops an open edit in the render that first sees the
   // new id — React's "adjust state when a prop changes". The readme itself is
@@ -212,24 +213,32 @@ export function CollectionReadme({
       className={`${compact ? "collection-header-readme" : ""} ${readme ? "min-w-0 basis-full" : "min-w-0"}`}
     >
       {readme ? (
-        <div>
+        <div
+          className={compact && !expanded ? "flex items-start justify-between gap-2" : undefined}
+        >
           <div
             ref={contentRef}
-            className={!expanded ? "relative max-h-48 overflow-hidden" : "relative"}
+            className={
+              expanded
+                ? "relative"
+                : compact
+                  ? "collection-readme-clamp min-w-0"
+                  : "relative max-h-48 overflow-hidden"
+            }
           >
             {MarkdownView && <MarkdownView source={readme} />}
-            {overflows && !expanded && (
+            {overflows && !expanded && !compact && (
               <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background to-transparent" />
             )}
           </div>
           <div
             className={
-              compact && !overflows
-                ? "collection-readme-actions"
+              compact
+                ? "flex shrink-0 items-center gap-1"
                 : "mt-2 flex flex-wrap items-center gap-2"
             }
           >
-            {overflows && (
+            {(overflows || expanded) && (
               <Button
                 type="button"
                 variant="ghost"
@@ -273,7 +282,7 @@ export function CollectionReadme({
           }
         >
           {!compact && <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden />}
-          {uiText(" Add a description for this collection")}
+          {uiText(compact ? "Add a description" : " Add a description for this collection")}
         </Button>
       )}
     </div>
@@ -290,7 +299,7 @@ export function CollectionReadme({
       aria-label={uiText("Description")}
       align="start"
       portal
-      className="min-w-0 basis-full"
+      className={readme ? "library-description min-w-0 basis-full" : "min-w-0"}
       contentClassName="w-xl border border-border bg-popover p-3 text-popover-foreground shadow-lg"
     >
       {editor}

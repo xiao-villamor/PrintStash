@@ -201,21 +201,19 @@ export function StorageProviderPicker(props: {
                   } else setCategoryOverride(category.id);
                 }}
                 className={cn(
-                  "h-auto justify-start gap-2 whitespace-normal px-3 py-3 text-left",
-                  props.onboarding && "min-h-16 items-start",
-                  active &&
-                    (props.onboarding
-                      ? "border-primary bg-accent text-accent-foreground hover:bg-accent"
-                      : "border-transparent bg-accent text-accent-foreground hover:bg-accent"),
+                  props.onboarding
+                    ? "h-14 min-w-0 justify-start gap-2 px-2 text-left sm:px-3"
+                    : "h-auto justify-start gap-2 whitespace-normal px-3 py-3 text-left",
+                  active && "border-transparent bg-accent text-accent-foreground hover:bg-accent",
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden />
                 {props.onboarding ? (
                   <span className="min-w-0">
-                    <span className="block text-xs font-medium">
+                    <span className="block truncate text-xs font-medium">
                       {ONBOARDING_CATEGORIES[category.id].title}
                     </span>
-                    <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                    <span className="mt-0.5 block truncate text-xs font-normal text-muted-foreground">
                       {category.id === "this_machine" && props.values.data_dir
                         ? `${String(props.values.data_dir)} · `
                         : ""}
@@ -355,6 +353,7 @@ export function StorageProviderPicker(props: {
 
           <StorageProviderFields
             provider={selected}
+            onboarding={props.onboarding}
             values={props.values}
             onChange={props.onValueChange}
             disabled={props.disabled}

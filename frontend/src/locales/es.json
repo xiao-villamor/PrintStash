@@ -1006,7 +1006,6 @@
   "No active tasks": "No hay tareas activas",
   "active": "activas",
   "3D Model": "Modelo 3D",
-  "Archive": "Archivo comprimido",
   "G-code": "G-code",
   "Vault storage": "Almacenamiento de la bóveda",
   "Close": "Cerrar",
@@ -1336,7 +1335,6 @@
   "STATE": "ESTADO",
   "Status": "Estado",
   "Store in": "Guardar en",
-  "Sync status": "Estado de sincronización",
   "Tasks": "Tareas",
   "This document is empty.": "Este documento está vacío.",
   "This halts the printer immediately and requires a firmware restart.": "Esto detiene la impresora de inmediato y requiere reiniciar el firmware.",
@@ -1488,7 +1486,6 @@
   "setup.defaultHelp": "Elige dónde guarda PrintStash las nuevas cargas y sus vistas previas.",
   "setup.existingHelp": "¿Ya tienes una carpeta con modelos? Podrás conectarla después de la configuración sin mover sus archivos.",
   "setup.advanced": "Ver ubicación y opciones avanzadas",
-  "setup.check": "Comprobar almacenamiento",
   "setup.checking": "Comprobando…",
   "setup.creating": "Creando tu cuenta…",
   "setup.availableSpace": "disponibles",
@@ -1549,8 +1546,8 @@
   "setup.resume": "Retomar la guía de primeros pasos",
   "build.chooseMultipart": "Elegir un conjunto multiparte",
   "build.startHelp": "Abre un conjunto multiparte y elige Crear fabricación para planificar sus piezas.",
-  "inbox.openImport": "Abrir diálogo de importación",
-  "inbox.startHelp": "Abre el diálogo de importación y elige Desde URL para añadir un enlace de modelo.",
+  "inbox.addUrl": "Añadir URL",
+  "inbox.startHelp": "Elige Añadir URL para capturar un enlace de modelo y revisarlo.",
   "build.title": "Fabricaciones",
   "build.help": "Sigue las piezas necesarias para un objeto multipieza, incluidos los fallos y las reposiciones.",
   "build.create": "Crear fabricación",
@@ -1645,7 +1642,8 @@
   "auth.expired": "La sesión ha caducado. Inicia sesión de nuevo para continuar.",
   "auth.local": "Tus credenciales permanecen en tu servidor autohospedado.",
   "auth.tagline": "Tus impresiones, tu bóveda",
-  "auth.forgot": "¿Olvidaste tu contraseña? Otro administrador puede restablecerla en Ajustes → Usuarios.",
+  "auth.forgotAction": "¿Olvidaste tu contraseña?",
+  "auth.forgotHelp": "Otro administrador puede restablecerla en Ajustes → Usuarios.",
   "auth.forgotLink": "Cómo recuperarla",
   "setup.reviewEmail": "Correo",
   "setup.editAccount": "Editar cuenta",
@@ -1736,7 +1734,6 @@
   "inbox.queueDescription": "Capturas pendientes de revisión o importación.",
   "inbox.completedDescription": "Trabajos finalizados. Los modelos importados permanecen en tu bóveda.",
   "inbox.emptyQueueTitle": "No hay importaciones en la cola",
-  "inbox.emptyQueueDescription": "Captura la URL de un modelo para preparar una importación revisable.",
   "inbox.emptyCompletedTitle": "No hay importaciones completadas",
   "inbox.emptyCompletedDescription": "Los trabajos finalizados aparecerán aquí hasta que los borres.",
   "inbox.clearCompleted": "Borrar completadas",
@@ -2650,7 +2647,6 @@
   ".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf": ".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf",
   "DXF preview is not supported yet. Download the original file below.": "La vista previa de DXF aún no es compatible. Descarga el archivo original abajo.",
   ".gcode .g .gco .bgcode": ".gcode .g .gco .bgcode",
-  ".zip .7z .rar .tar .tgz": ".zip .7z .rar .tar .tgz",
   "{value1} (library source)": "{value1} (fuente de biblioteca)",
   " (library source)": " (fuente de biblioteca)",
   "Importing…": "Importando…",
@@ -2863,8 +2859,8 @@
   "Delete selected": "Eliminar seleccionados",
   "This will delete the selected models and all their files immediately. This cannot be undone.": "Esto eliminará de inmediato los modelos seleccionados y todos sus archivos. No se puede deshacer.",
   "uploads.ignored": {
-    "one": "Se ha omitido {value1} archivo — aquí solo se aceptan modelos 3D ({value3}).",
-    "other": "Se han omitido {value1} archivos — aquí solo se aceptan modelos 3D ({value3})."
+    "one": "Se ha omitido {value1} archivo — aquí solo se aceptan archivos de modelo y archivos comprimidos ({value3}).",
+    "other": "Se han omitido {value1} archivos — aquí solo se aceptan archivos de modelo y archivos comprimidos ({value3})."
   },
   "uploads.queued": {
     "one": "{value1} carga en cola — sigue el progreso en el centro de tareas",
@@ -3378,8 +3374,6 @@
   "setup.chooseAnother": "Elegir un archivo para reintentar",
   "uploads.mode.files": "Archivos",
   "uploads.mode.bulk": "En lote",
-  "uploads.mode.url": "Desde URL",
-  "uploads.mode.zip": "Desde archivo comprimido",
   "setup.chooseFileAction": "Elegir un archivo",
   "setup.scanPartial": "No se pudieron añadir algunos archivos. Revisa la búsqueda en el centro de tareas o vuelve a buscar en esta carpeta. Los modelos ya añadidos siguen en tu biblioteca.",
   "setup.folderPathExample": "/libraries/models",
@@ -4158,9 +4152,13 @@
   "aiSearch.listView": "Vista de lista",
   "aiSearch.backToLibrary": "Volver a la biblioteca",
   "aiSearch.searchOptions": "Opciones de búsqueda",
-  "aiSearch.resultsShown": {
-    "one": "{count} resultado mostrado",
-    "other": "{count} resultados mostrados"
+  "aiSearch.resultsCount": {
+    "one": "{count} resultado",
+    "other": "{count} resultados"
+  },
+  "aiSearch.resultsCountMore": {
+    "one": "{count}+ resultados",
+    "other": "{count}+ resultados"
   },
   "aiSearch.timeout": "La búsqueda ha tardado demasiado. Inténtalo de nuevo.",
   "aiSearch.setupPermissions": "Permisos de IA",
@@ -4857,12 +4855,17 @@
   "Copy link": "Copiar enlace",
   "Create user": "Crear usuario",
   "Add a 3D Model, an existing G-code file, or both together.": "Añade un modelo 3D, un archivo G-code existente o ambos juntos.",
+  "Drop a 3D model or": "Suelta un modelo 3D o",
+  "Drop G-code or": "Suelta un archivo G-code o",
+  "choose a file": "elige un archivo",
+  "Create \"{value1}\"": "Crear «{value1}»",
   "Choose file": "Elegir archivo",
   "Choose file for {value1}": "Elegir archivo para {value1}",
   "or drop files here": "o arrastra archivos aquí",
   "No files selected": "Ningún archivo seleccionado",
   "Library destination": "Destino en la biblioteca",
   "Optional. Uses the selected filename when left blank.": "Opcional. Si se deja vacío, se usa el nombre del archivo seleccionado.",
+  "Uses the filename if blank": "Si se deja vacío, se usa el nombre del archivo",
   "PrintStash stores existing files. It does not slice Models or verify G-code safety.": "PrintStash almacena archivos existentes. No lamina modelos ni verifica la seguridad del G-code.",
   "Add tag": "Añadir etiqueta",
   "settings.subtitle.trash": "Los modelos eliminados se pueden restaurar hasta que venza el plazo de conservación.",
@@ -4902,11 +4905,12 @@
   "A match does not merge models or delete files.": "Una coincidencia no fusiona modelos ni elimina archivos.",
   "Similarity filters": "Filtros de similitud",
   "Review trashed items by name before restoring or permanently removing them.": "Revisa los elementos eliminados por nombre antes de restaurarlos o eliminarlos definitivamente.",
-  "Model files": "Archivos de modelo",
   "Choose folder": "Elegir carpeta",
-  "Choose Model files or drop a folder. G-code pairing is available on Files.": "Elige archivos de modelo o arrastra una carpeta. Puedes asociar G-code en Archivos.",
+  "Drop Model files, a folder or an archive": "Suelta archivos de modelo, una carpeta o un archivo comprimido",
+  "Add many Models from files, a folder or an archive.": "Añade varios modelos desde archivos, una carpeta o un archivo comprimido.",
+  "Archives were skipped because Model files were selected.": "Se omitieron los archivos comprimidos porque se seleccionaron archivos de modelo.",
+  "Only the first archive was selected.": "Solo se seleccionó el primer archivo comprimido.",
   "Each Model file creates a separate Model. Subfolders become nested Collections.": "Cada archivo de modelo crea un modelo independiente. Las subcarpetas se convierten en colecciones anidadas.",
-  "Prepare the archive for review, then choose the files to import.": "Prepara el archivo para revisarlo y elige los archivos que quieres importar.",
   "Capture for review": "Capturar para revisar",
   "Known model storage: {size}": "Almacenamiento conocido de modelos: {size}",
   "Connect your printer using its local integration.": "Conecta tu impresora mediante su integración local.",
@@ -5117,6 +5121,7 @@
   "No description yet. Add orientation, hardware or print notes.": "Aún no hay descripción. Añade notas sobre la orientación, el hardware o la impresión.",
   "No print results recorded yet.": "Aún no hay resultados de impresión registrados.",
   "Open page": "Abrir página",
+  "Open full page": "Abrir página completa",
   "Open the full model page": "Abrir la página completa del modelo",
   "Print this revision": "Imprimir esta revisión",
   "Printer for printing and logging": "Impresora para imprimir y registrar resultados",
@@ -5182,7 +5187,6 @@
   "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.": "Este 3MF no contiene G-code laminado. Lamínalo en Bambu Studio u OrcaSlicer y sube el archivo laminado.",
   "Sliced plates": "Placas laminadas",
   "No G-code revision yet. Add a revision to capture the settings that worked.": "Todavía no hay revisiones G-code. Añade una revisión para guardar los ajustes que funcionaron.",
-  "No G-code revision": "Sin revisión G-code",
   "No G-code yet": "Sin G-code todavía",
   "Not printed yet": "Todavía no se ha impreso",
   "library.cardOutcome": "{result} {count}× en {printer}",
@@ -5195,6 +5199,13 @@
   "library.header.collections": {
     "one": "{count} colección",
     "other": "{count} colecciones"
+  },
+  "Add a description": "Añadir una descripción",
+  "Could not load Models.": "No se pudieron cargar los modelos.",
+  "library.header.filteredCount": "{count} de {total}",
+  "library.header.items": {
+    "one": "{count} elemento",
+    "other": "{count} elementos"
   },
   "library.header.modelsHere": {
     "one": "{count} modelo aquí",
@@ -5245,5 +5256,8 @@
   "One thumbnail": "Una miniatura",
   "Oblique views": "Vistas oblicuas",
   "Oblique views + top and bottom": "Vistas oblicuas + superior e inferior",
-  "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Empieza con una miniatura para importar más rápido. Activa cuatro vistas oblicuas y, opcionalmente, las vistas superior e inferior. Los modelos existentes se actualizan en segundo plano."
+  "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Empieza con una miniatura para importar más rápido. Activa cuatro vistas oblicuas y, opcionalmente, las vistas superior e inferior. Los modelos existentes se actualizan en segundo plano.",
+  "Add a Revision to keep the settings that worked.": "Añade una revisión para guardar los ajustes que funcionaron.",
+  "None yet": "Aún ninguno",
+  "Details": "Detalles"
 }
