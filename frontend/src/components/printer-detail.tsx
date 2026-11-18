@@ -15,7 +15,7 @@ import {
 import { formatNumber } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { Link } from "@/lib/link";
 import { useSearchParams } from "@/lib/navigation";
 import type { ProviderJsonObject, ProviderJsonValue } from "@/types/printers";
@@ -49,7 +49,8 @@ import { useRequireAuth } from "@/lib/use-require-auth";
 import { formatBytes, formatDuration } from "@/lib/format";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { PageFailure } from "@/components/page-failure";
-import { Input } from "@/components/ui/input";
+import { FormField } from "@/components/ui/form-field";
+import { Input, inputClasses } from "@/components/ui/input";
 import { TabBar } from "@/components/ui/tabs";
 import { Modal } from "@/components/ui/modal";
 import { PageHeader } from "@/components/ui/page-header";
@@ -1303,7 +1304,7 @@ function ConfigSummary({ title, data }: { title: string; data: ProviderJsonObjec
 export function PrinterSettings({
   printer: initialPrinter,
   canEdit,
-  compact = false,
+  modalActions,
   onCancel,
   onSaved,
   onRemove,
@@ -1311,7 +1312,7 @@ export function PrinterSettings({
 }: {
   printer: PrinterRead;
   canEdit: boolean;
-  compact?: boolean;
+  modalActions?: { formId: string; target: HTMLElement | null };
   onCancel?: () => void;
   onSaved?: () => void;
   onRemove?: () => void;
@@ -1322,6 +1323,9 @@ export function PrinterSettings({
   const command = usePrinterSettingsCommand(printer.id);
   const active = useRef(true);
   const form = useRef<HTMLFormElement>(null);
+  const hintId = useId();
+  const compact = modalActions !== undefined;
+  const Field = compact ? FormField : SettingsField;
   useEffect(() => {
     active.current = true;
 
@@ -1429,9 +1433,42 @@ export function PrinterSettings({
     }
   }
 
+  const actions = (
+    <>
+      {onRemove && (
+        <Button
+          type="button"
+          variant="ghost"
+          className="mr-auto text-destructive"
+          disabled={saving}
+          onClick={onRemove}
+        >
+          {uiText("Remove printer")}
+        </Button>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        disabled={saving}
+        onClick={onCancel ?? (() => adopt(printer))}
+      >
+        {uiText("Cancel")}
+      </Button>
+      <Button
+        type="submit"
+        form={modalActions?.formId}
+        loading={saving}
+        disabled={!canEdit || command.blocked || !name.trim()}
+      >
+        {uiText("Save changes")}
+      </Button>
+    </>
+  );
+
   return (
     <Localized>
       <form
+        id={modalActions?.formId}
         ref={form}
         onSubmit={save}
         className={compact ? "space-y-5" : "printer-settings-form border border-border bg-card p-5"}
@@ -1460,24 +1497,26 @@ export function PrinterSettings({
           )}
         <div className={compact ? "space-y-5" : "printer-settings-fields"}>
           <div className={compact ? "space-y-4" : "contents"}>
-            <SettingsField label={uiText("Name")}>
+            <Field label={uiText("Name")}>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
                 disabled={!canEdit || saving}
               />
-            </SettingsField>
-            <SettingsField label={uiText("Integration")}>
+            </Field>
+            <Field label={uiText("Integration")}>
               <Input value={providerLabel(printer)} readOnly />
-            </SettingsField>
-            <SettingsField
+            </Field>
+            <Field
               label={uiText("Model")}
               hint={uiText("Pick a known model or type your own")}
+              hintId={`${hintId}-model`}
             >
               {/* ponytail: native datalist — suggestions from the catalog, free text still allowed */}
               <Input
                 list="printer-model-options"
+                aria-describedby={compact ? `${hintId}-model` : undefined}
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
                 placeholder={printer.detected_model ?? uiText("Auto-detected")}
@@ -1488,20 +1527,25 @@ export function PrinterSettings({
                   <option key={model} value={model} />
                 ))}
               </datalist>
-            </SettingsField>
-            <SettingsField label={uiText("Group")} hint={uiText("Optional farm grouping")}>
+            </Field>
+            <Field
+              label={uiText("Group")}
+              hint={uiText("Optional farm grouping")}
+              hintId={`${hintId}-group`}
+            >
               <Input
                 value={group}
+                aria-describedby={compact ? `${hintId}-group` : undefined}
                 onChange={(e) => setGroup(e.target.value)}
                 placeholder={uiText("Workshop")}
                 disabled={!canEdit || saving}
               />
-            </SettingsField>
+            </Field>
           </div>
-          <div className={compact ? "space-y-4 border-t border-border pt-5" : "contents"}>
+          <div className={compact ? "space-y-4" : "contents"}>
             {compact && (
               <div>
-                <p className="text-sm font-semibold text-foreground">{uiText("Connection")}</p>
+                <p className="text-field font-semibold text-foreground">{uiText("Connection")}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {uiText("{value1} configuration", {
                     value1: String(providerLabel(printer) ?? ""),
@@ -1509,7 +1553,7 @@ export function PrinterSettings({
                 </p>
               </div>
             )}
-            <SettingsField
+            <Field
               label={
                 printer.provider === "moonraker" ||
                 printer.provider === "prusalink" ||
@@ -1524,61 +1568,72 @@ export function PrinterSettings({
                 required
                 disabled={!canEdit || saving}
               />
-            </SettingsField>
+            </Field>
             {printer.provider === "bambu_lan" && (
-              <SettingsField label={uiText("Printer serial")}>
+              <Field label={uiText("Printer serial")}>
                 <Input
                   value={serial}
                   onChange={(e) => setSerial(e.target.value)}
                   required
                   disabled={!canEdit || saving}
                 />
-              </SettingsField>
+              </Field>
             )}
             {printer.provider === "prusalink" && printer.prusalink_auth_mode !== "api_key" && (
-              <SettingsField label={uiText("Username")}>
+              <Field label={uiText("Username")}>
                 <Input
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   required
                   disabled={!canEdit || saving}
                 />
-              </SettingsField>
+              </Field>
             )}
             {printer.provider === "elegoo_centauri" &&
               printer.provider_variant === "elegoo_centauri_carbon" && (
-                <SettingsField
+                <Field
                   label={uiText("Mainboard ID")}
+                  hintId={`${hintId}-mainboard`}
                   hint={uiText(
                     "Needed for reliable printer commands while idle, paused, or errored.",
                   )}
                 >
                   <Input
                     value={mainboardId}
+                    aria-describedby={compact ? `${hintId}-mainboard` : undefined}
                     onChange={(e) => setMainboardId(e.target.value)}
                     disabled={!canEdit || saving}
                   />
-                </SettingsField>
+                </Field>
               )}
-            <SettingsField label={secretLabel} hint={uiText("Leave blank to keep current value")}>
+            <Field
+              label={secretLabel}
+              hint={uiText("Leave blank to keep current value")}
+              hintId={`${hintId}-secret`}
+            >
               <Input
                 type="password"
                 value={secret}
+                aria-describedby={compact ? `${hintId}-secret` : undefined}
                 onChange={(e) => setSecret(e.target.value)}
                 placeholder={uiText("Unchanged")}
                 disabled={!canEdit || saving}
               />
-            </SettingsField>
-            <SettingsField label={uiText("Notes")}>
+            </Field>
+            <Field label={uiText("Notes")}>
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                rows={4}
+                rows={compact ? undefined : 4}
                 disabled={!canEdit || saving}
-                className="w-full resize-y rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-disabled disabled:opacity-50"
+                className={
+                  compact
+                    ? inputClasses
+                    : "w-full resize-y rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-disabled disabled:opacity-50"
+                }
               />
-            </SettingsField>
-            <label className="flex items-start gap-3 py-3">
+            </Field>
+            <label className={cn("flex items-start gap-3", !compact && "py-3")}>
               <input
                 type="checkbox"
                 checked={providerMaterialSync}
@@ -1587,17 +1642,24 @@ export function PrinterSettings({
                 className="mt-0.5 h-4 w-4"
               />
               <span>
-                <span className="block text-sm font-medium text-foreground">
+                <span
+                  className={cn(
+                    "block font-medium text-foreground",
+                    compact ? "text-field" : "text-sm",
+                  )}
+                >
                   {uiText("Provider material sync")}
                 </span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
+                <span
+                  className={cn("block text-xs text-muted-foreground", compact ? "mt-1" : "mt-0.5")}
+                >
                   {uiText(
                     "Import supported AMS or active-Spoolman state. Turn off to use manual state exclusively.",
                   )}
                 </span>
               </span>
             </label>
-            <label className="flex items-start gap-3 py-3">
+            <label className={cn("flex items-start gap-3", !compact && "py-3")}>
               <input
                 type="checkbox"
                 checked={operatorReleaseRequired}
@@ -1606,10 +1668,17 @@ export function PrinterSettings({
                 className="mt-0.5 h-4 w-4"
               />
               <span>
-                <span className="block text-sm font-medium text-foreground">
+                <span
+                  className={cn(
+                    "block font-medium text-foreground",
+                    compact ? "text-field" : "text-sm",
+                  )}
+                >
                   {uiText("Require operator release")}
                 </span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
+                <span
+                  className={cn("block text-xs text-muted-foreground", compact ? "mt-1" : "mt-0.5")}
+                >
                   {uiText(
                     "After a managed print completes, block scheduling until an operator releases or holds the printer.",
                   )}
@@ -1626,42 +1695,11 @@ export function PrinterSettings({
             )}
           </div>
         </div>
-        {
-          <div
-            className={
-              compact
-                ? "-mx-6 -mb-6 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-plate px-6 py-4"
-                : "mt-6 flex flex-wrap items-center justify-end gap-2"
-            }
-          >
-            {onRemove && (
-              <Button
-                type="button"
-                variant="ghost"
-                className="mr-auto text-destructive"
-                disabled={saving}
-                onClick={onRemove}
-              >
-                {uiText("Remove printer")}
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              disabled={saving}
-              onClick={onCancel ?? (() => adopt(printer))}
-            >
-              {uiText("Cancel")}
-            </Button>
-            <Button
-              type="submit"
-              loading={saving}
-              disabled={!canEdit || command.blocked || !name.trim()}
-            >
-              {uiText("Save changes")}
-            </Button>
-          </div>
-        }
+        {modalActions ? (
+          modalActions.target && createPortal(actions, modalActions.target)
+        ) : (
+          <div className="mt-6 flex flex-wrap items-center justify-end gap-2">{actions}</div>
+        )}
         <PrinterSettingsReview
           canSave={Boolean(name.trim())}
           state={command.state}

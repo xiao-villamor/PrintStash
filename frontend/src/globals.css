@@ -39,7 +39,7 @@
     --dialog-shadow: rgb(16 24 40 / 0.12);
     --input: #8190a3;
     --ring: #4d6f9b;
-    --radius: 4px;
+    --radius: 0px;
     color-scheme: light;
 
     /* Interaction shades of primary (hover = one step darker; soft = 40% for

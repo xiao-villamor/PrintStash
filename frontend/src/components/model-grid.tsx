@@ -83,6 +83,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useId,
   useMemo,
   useState,
   useRef,
@@ -131,7 +132,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Modal, ModalShell } from "@/components/ui/modal";
+import { FormField } from "@/components/ui/form-field";
+import { Modal } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { SavedViewSelector } from "@/components/saved-view-selector";
 import { Localized } from "@/components/ui/localized";
@@ -948,6 +950,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setUploadOpen(true);
   }
 
+  const collectionFormId = useId();
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
   const createCollectionRequested = searchParams.get("newCollection") === "1";
@@ -3597,59 +3600,20 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           )}
 
-          <ModalShell
+          <Modal
             open={isCreatingCollection}
             onClose={() => {
               setIsCreatingCollection(false);
               setNewCollectionName("");
             }}
-            labelledBy="library-create-title"
-            className="w-full max-w-[480px] border border-border bg-card shadow-lg"
-          >
-            <header className="relative border-b border-border px-6 py-6">
-              <h2 id="library-create-title" className="text-lg font-semibold">
-                {uiText("New collection")}
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {uiText("Create a collection inside the current collection.")}
-              </p>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={uiText("Close")}
-                className="absolute right-5 top-5"
-                onClick={() => {
-                  setIsCreatingCollection(false);
-                  setNewCollectionName("");
-                }}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </header>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                handleCreateCollection();
-              }}
-            >
-              <div className="px-6 py-6">
-                <label className="block space-y-2 text-sm">
-                  <span>{uiText("Name")}</span>
-                  <Input
-                    autoFocus
-                    value={newCollectionName}
-                    onChange={(event) => setNewCollectionName(event.target.value)}
-                    disabled={!auth.isAuthenticated}
-                    maxLength={100}
-                  />
-                </label>
-              </div>
-              <footer className="flex justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
+            title={uiText("New collection")}
+            description={uiText("Create a collection inside the current collection.")}
+            className="max-w-[480px]"
+            footer={
+              <>
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
                   onClick={() => {
                     setIsCreatingCollection(false);
                     setNewCollectionName("");
@@ -3659,16 +3623,34 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </Button>
                 <Button
                   type="submit"
-                  size="sm"
+                  form={collectionFormId}
                   disabled={
                     !newCollectionName.trim() || !auth.isAuthenticated || !canCreateCollection
                   }
                 >
                   {uiText("Create collection")}
                 </Button>
-              </footer>
+              </>
+            }
+          >
+            <form
+              id={collectionFormId}
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleCreateCollection();
+              }}
+            >
+              <FormField label={uiText("Name")}>
+                <Input
+                  autoFocus
+                  value={newCollectionName}
+                  onChange={(event) => setNewCollectionName(event.target.value)}
+                  disabled={!auth.isAuthenticated}
+                  maxLength={100}
+                />
+              </FormField>
             </form>
-          </ModalShell>
+          </Modal>
 
           {docView === "docs" && !favoritesOnly && (
             <div className="flex items-center gap-4 px-4 pt-4 text-sm sm:px-6">

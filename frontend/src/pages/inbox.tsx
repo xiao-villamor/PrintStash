@@ -14,6 +14,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { FormField } from "@/components/ui/form-field";
+import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageContainer } from "@/components/ui/page-container";
@@ -483,24 +485,25 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
         }
       >
         <form id={captureFormId} onSubmit={(event) => void submitCapture(event)}>
-          <label htmlFor={sourceUrlId} className="mb-2 block text-sm text-foreground">
-            {uiText("Source URL")}
-          </label>
-          <input
-            id={sourceUrlId}
-            type="url"
-            inputMode="url"
-            value={sourceUrl}
-            readOnly={commands.capture.isPending}
-            onChange={(event) => setSourceUrl(event.target.value)}
-            className="h-10 w-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            placeholder={uiText("Model page, collection, or direct .stl/.zip link")}
-          />
-          <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-            {uiText(
+          <FormField
+            label={uiText("Source URL")}
+            htmlFor={sourceUrlId}
+            hintId={`${sourceUrlId}-hint`}
+            hint={uiText(
               "Create a durable capture, then review its files and confirm or change the collection and tags.",
             )}
-          </p>
+          >
+            <Input
+              id={sourceUrlId}
+              type="url"
+              inputMode="url"
+              value={sourceUrl}
+              readOnly={commands.capture.isPending}
+              onChange={(event) => setSourceUrl(event.target.value)}
+              placeholder={uiText("Model page, collection, or direct .stl/.zip link")}
+              aria-describedby={`${sourceUrlId}-hint`}
+            />
+          </FormField>
         </form>
       </Modal>
       <ConfirmModal

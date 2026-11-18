@@ -66,6 +66,7 @@ module.exports = {
         sm: "var(--radius)",
       },
       fontSize: {
+        field: "0.8125rem",
         "2xs": "0.6875rem",
         "3xs": "0.625rem",
       },

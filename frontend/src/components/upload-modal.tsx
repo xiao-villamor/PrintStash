@@ -930,7 +930,7 @@ export function UploadModal({
               </div>
             )}
           </div>
-          <div className="upload-dialog-actions flex justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
+          <div className="upload-dialog-actions flex justify-end gap-2 border-t border-border bg-plate px-6 py-4">
             {!onboarding && (
               <p className="upload-storage-note min-w-0 flex-1 text-xs text-muted-foreground">
                 {uiText(
@@ -938,7 +938,7 @@ export function UploadModal({
                 )}
               </p>
             )}
-            <Button type="button" variant="outline" onClick={close} size="sm">
+            <Button type="button" variant="outline" onClick={close}>
               {uiText("Cancel")}
             </Button>
             <Button
@@ -957,7 +957,6 @@ export function UploadModal({
                     ? bulkFiles.length === 0
                     : !zipFile)
               }
-              size="sm"
             >
               {submitting ? (
                 <>
