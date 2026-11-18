@@ -3811,7 +3811,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       {uiText("aiSearch.backToLibrary")}
                     </Button>
                   )}
-                  {!unavailableCollection && (currentRefresh || modelReadError) && (
+                  {(currentRefresh ||
+                    (!unavailableCollection &&
+                      modelReadError &&
+                      !modelQuery.isFetchNextPageError)) && (
                     <Button
                       variant="outline"
                       size="sm"

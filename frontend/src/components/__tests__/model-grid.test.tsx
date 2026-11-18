@@ -40,6 +40,7 @@ import type {
 } from "@/types";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import {
+  aModelFacets,
   anEditingBase,
   aCollectionNode,
   aModel,
@@ -138,15 +139,7 @@ function signedOutSession() {
   return adminSession({ user: null });
 }
 
-const EMPTY_FACETS = {
-  file_type: [],
-  material_type: [],
-  slicer_name: [],
-  printer_model: [],
-  revision_status: [],
-  print_outcome: [],
-  storage: [],
-};
+const EMPTY_FACETS = aModelFacets();
 
 function observePagination() {
   const observers: {
@@ -455,7 +448,11 @@ describe("ModelBrowser", () => {
       expect(screen.queryByRole("button", { name: "Clear all filters" })).not.toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "Upload files" }));
       const dialog = await screen.findByRole("dialog", { name: "Upload model" });
-      expect(await within(dialog).findByRole("button", { name: "Parts" })).toBeVisible();
+      await waitFor(() =>
+        expect(within(dialog).getByRole("button", { name: "Collection" })).toHaveTextContent(
+          "Parts",
+        ),
+      );
     });
 
     it.each([false, true])(
@@ -1447,7 +1444,7 @@ describe("ModelBrowser", () => {
 
       await user.click(await folderCard("parts/brackets"));
 
-      await screen.findByRole("button", { name: /Add a description for this collection/ });
+      await screen.findByRole("button", { name: /Add a description/ });
       expect(requests().some((call) => call.url.endsWith("/readme"))).toBe(false);
     });
 

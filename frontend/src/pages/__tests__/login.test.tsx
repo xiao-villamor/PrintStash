@@ -97,10 +97,12 @@ describe("LoginPage", () => {
       expect(screen.getByLabelText("Remember me")).toBeInTheDocument();
     });
 
-    it("points a forgotten password to administrator recovery", () => {
+    it("points a forgotten password to administrator recovery", async () => {
       renderLogin({ auth: signedOut() });
 
-      expect(screen.getByText(/Another administrator can reset it/)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Forgot password?" }));
+
+      expect(screen.getByText(/Another administrator can reset it/)).toBeVisible();
       expect(screen.getByRole("link", { name: "How recovery works" })).toHaveAttribute(
         "href",
         expect.stringContaining("first-run.md#forgotten-password"),

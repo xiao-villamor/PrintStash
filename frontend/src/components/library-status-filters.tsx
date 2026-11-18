@@ -86,7 +86,7 @@ export function LibraryStatusFilters({
           onClick={() => onChange(item.key === "all" ? [] : [item.key])}
         >
           {item.dot && <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${item.dot}`} />}
-          {item.label}
+          {item.label}{" "}
           {item.count !== undefined && (
             <span className="font-mono text-3xs text-muted-foreground">{item.count}</span>
           )}

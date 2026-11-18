@@ -593,7 +593,7 @@ describe("ModelDetail", () => {
         model: aModel({ collection: "parts/brackets", collection_label: "Parts/Brackets" }),
       });
 
-      expect(await screen.findByText("Parts/Brackets")).toBeVisible();
+      expect(await screen.findByTitle("Parts/Brackets")).toHaveTextContent("Brackets");
       expect(
         requests().filter(
           (call) => new URL(call.url, "http://test").pathname === "/api/v1/collections",
@@ -670,7 +670,9 @@ describe("ModelDetail", () => {
         routes: { "GET /api/v1/files/10/plates": json({ state: "skipped", plates: [] }) },
       });
 
-      expect(await screen.findByText("No G-code revision", { exact: true })).toBeVisible();
+      expect(
+        await screen.findByText("Add a Revision to keep the settings that worked."),
+      ).toBeVisible();
     });
 
     it("offers each plate of a multi-plate 3MF", async () => {
@@ -1509,9 +1511,10 @@ describe("ModelDetail", () => {
       const user = userEvent.setup();
       renderDetail();
       const bar = await handle();
+      bar.focus();
+      await user.keyboard("{ArrowLeft}");
       const before = Number(bar.getAttribute("aria-valuenow"));
 
-      bar.focus();
       await user.keyboard("{ArrowRight}");
 
       expect(Number(bar.getAttribute("aria-valuenow"))).toBeLessThan(before);
@@ -1548,12 +1551,13 @@ describe("ModelDetail", () => {
       renderDetail();
       const bar = await handle();
       bar.focus();
-      await user.keyboard("{Home}");
-      const narrowest = bar.getAttribute("aria-valuenow");
+      const defaultWidth = bar.getAttribute("aria-valuenow");
+      await user.keyboard("{End}");
+      expect(bar.getAttribute("aria-valuenow")).not.toBe(defaultWidth);
 
       await user.dblClick(bar);
 
-      expect(bar.getAttribute("aria-valuenow")).not.toBe(narrowest);
+      expect(bar.getAttribute("aria-valuenow")).toBe(defaultWidth);
     });
 
     it("leaves a key that means something else alone", async () => {
