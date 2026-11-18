@@ -24,7 +24,7 @@ export function previewMode(
 }
 export type PreferenceIntent =
   | { kind: "multi-angle"; value: PreviewMode }
-  | { kind: "auto-mark"; value: boolean }
+  | { kind: "recreate-embedded-covers" | "auto-mark"; value: boolean }
   | { kind: "currency"; value: string }
   | { kind: "backup-retention" | "trash-retention"; value: number; draft: string }
   | { kind: "thumbnail-width"; value: NonNullable<VaultConfigUpdate["model_thumbnail_width"]> };
@@ -46,6 +46,8 @@ function payload(intent: PreferenceIntent): VaultConfigUpdate {
         derivatives_previews_enabled: intent.value !== "single",
         derivatives_previews_include_poles: intent.value === "oblique-poles",
       };
+    case "recreate-embedded-covers":
+      return { prefer_rendered_3mf_preview: intent.value };
     case "auto-mark":
       return { auto_mark_known_good: intent.value };
     case "currency":
@@ -62,6 +64,8 @@ export function savedPreference(snapshot: VaultConfigRead, intent: PreferenceInt
   switch (intent.kind) {
     case "multi-angle":
       return previewMode(snapshot);
+    case "recreate-embedded-covers":
+      return snapshot.prefer_rendered_3mf_preview;
     case "auto-mark":
       return snapshot.auto_mark_known_good;
     case "currency":

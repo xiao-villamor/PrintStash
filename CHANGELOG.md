@@ -11,6 +11,7 @@
 ### Changed
 
 - Library cards keep more of the Model visible: preview arrows and selection are smaller, and status sits in the image corner. An expand icon on card hover and in the details panel opens the full page. Model views adds previous and next arrows and centers its view indicator.
+- 3MF files use their embedded picture as the automatic Model cover by default. Settings → Previews can render these covers instead. Existing automatic 3MF covers update in the background.
 
 - Multi-angle previews render in the same pass as the cover, from the mesh it already loaded, on every native slot. A 60-file import with orbit views finishes in about a third of the time (239 s → 89 s on a 3-CPU host); a cover pass that stops early hands its views back so they are rendered again at once. Views follow the Model image quality setting (Compact, Standard or High) instead of a fixed 480 × 360, and Recreate all images rebuilds them with the covers; existing view sets update once in the background. A top or bottom view that would show only the edge of a plate is left out instead of failing the whole set.
 

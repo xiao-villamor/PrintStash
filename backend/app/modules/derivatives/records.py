@@ -405,6 +405,7 @@ def mark_ready(
     now: datetime,
     storage_key: str | None = None,
     output: dict[str, Any] | None = None,
+    has_embedded_3mf_preview: bool | None = None,
     duration_ms: int | None = None,
     peak_rss_bytes: int | None = None,
 ) -> File:
@@ -413,6 +414,7 @@ def mark_ready(
     row.state = DerivativeState.READY
     row.storage_key = storage_key if storage_key is not None else row.storage_key
     row.output_json = json.dumps(output or {}, separators=(",", ":"), default=str)
+    row.has_embedded_3mf_preview = has_embedded_3mf_preview
     row.failure_reason = None
     row.next_attempt_at = None
     row.duration_ms = duration_ms

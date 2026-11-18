@@ -105,6 +105,9 @@ class ArtifactDerivative(SQLModel, table=True):
     # Owner-defined description of the output (a size, a strategy). Never
     # input: a re-derivation reads the Artifact, not this.
     output_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    # Set when a mesh cover pass checks a 3MF for a usable embedded picture.
+    # None means unchecked or a derivative other than a 3MF cover.
+    has_embedded_3mf_preview: Optional[bool] = None
     duration_ms: Optional[int] = None
     # Bytes: a native render's resident set passes 2 GiB, beyond INTEGER.
     peak_rss_bytes: Optional[int] = Field(

@@ -34,6 +34,7 @@ def main(argv: list[str]) -> int:
         height=spec["height"],
         include_geometry=spec["include_geometry"],
         include_thumbnail=spec["include_thumbnail"],
+        check_embedded_3mf_preview=spec["check_embedded_3mf_preview"],
         include_fingerprint=spec["include_fingerprint"],
         triangle_cap=spec["triangle_cap"],
         output_format=spec["output_format"],

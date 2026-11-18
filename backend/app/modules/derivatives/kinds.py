@@ -39,7 +39,8 @@ MESH_GEOMETRY_RECIPE = 12
 MESH_THUMBNAIL_RECIPE = 18
 # 3MF scenes are read through lib3mf in single precision.
 THREE_MF_GEOMETRY_RECIPE = 13
-THREE_MF_THUMBNAIL_RECIPE = 20
+# 21 selects embedded covers by default and records picture availability.
+THREE_MF_THUMBNAIL_RECIPE = 21
 THREE_MF_VIEWER_STL_RECIPE = 4
 # STEP is tessellated at 0.05 mm linear deflection.
 STEP_GEOMETRY_RECIPE = 13

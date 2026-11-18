@@ -847,6 +847,7 @@ export function aVaultConfig(
     derivatives_toolpath_enabled: true,
     derivatives_previews_enabled: false,
     derivatives_previews_include_poles: false,
+    prefer_rendered_3mf_preview: false,
     storage_backend: "local",
     storage_provider: "local",
     storage_provider_config: {
