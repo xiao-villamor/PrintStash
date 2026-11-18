@@ -350,6 +350,10 @@ Choosing:
 
 `ease-in` is never correct on UI — it starts slow, delaying exactly the moment
 the user is watching. **Nothing in the app may exceed 300ms.**
+The decorative sign-in build-plate print is the duration exception. It plays
+once over 18.95 seconds, is non-interactive, and shows the filled layers,
+top infill, and parked nozzle under
+reduced motion.
 
 ### Rules
 
@@ -358,7 +362,9 @@ the user is watching. **Nothing in the app may exceed 300ms.**
    `transform: scaleX()`, not `width`. The docked sidebar is an explicit exception:
    one width animation keeps its boundary and the workspace on the same timeline.
    Child-collection disclosure uses a bounded clip-path for the row and a
-   compositor translation for the Model content, with one layout commit.
+   compositor translation for the Model content, with one layout commit. The
+   sign-in build-plate print updates the active SVG path geometry so the tip
+   and nozzle share the same endpoint.
 2. **`transition-all` is banned.** It animates properties you did not intend,
    off the GPU. List them: `transition-[background-color,border-color,transform]`.
    The count in `frontend/src/` must stay at zero.
