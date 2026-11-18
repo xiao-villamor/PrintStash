@@ -661,6 +661,25 @@ class TestObjTriangleCount:
         assert loaded is not None
         assert count == len(loaded.faces) == 1
 
+    @pytest.mark.parametrize("texture", [b"0 0", b"0 0 1"], ids=["2d-uv", "3d-uv"])
+    def test_matches_loader_for_textured_faces(self, tmp_path, texture):
+        from app.modules.media import mesh_loading
+
+        source = tmp_path / "textured.obj"
+        source.write_bytes(
+            b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt "
+            + texture
+            + b"\nvn 0 0 1\nf 1/1/1 2/1/1 3/1/1\n"
+        )
+        loaded = mesh_loading.load_mesh(source)
+
+        assert loaded is not None
+        assert (
+            native_budget._obj_triangle_count(source, deadline=float("inf"))
+            == len(loaded.faces)
+            == 1
+        )
+
     @pytest.mark.parametrize(
         "face,expected",
         [

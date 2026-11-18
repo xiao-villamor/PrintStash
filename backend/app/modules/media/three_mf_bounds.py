@@ -20,8 +20,10 @@ import re
 import threading
 import time
 import zipfile
+import zlib
 from collections import OrderedDict
 from dataclasses import dataclass
+from io import BufferedReader, FileIO
 from pathlib import Path, PurePosixPath
 
 from app.modules.media import three_mf_package as package
@@ -32,6 +34,13 @@ _STRUCTURE = re.compile(
 )
 _STRUCTURAL_WORDS = (b"model", b"object", b"component", b"item", b"build")
 _CACHE_ENTRIES = 256
+# ZipExtFile reads compressed input in chunks up to the requested output size.
+# Smaller reads keep zlib from repeatedly copying a large unconsumed tail.
+_SCAN_CHUNK_BYTES = 256 * 1024
+# ZipFile reads the entire central directory before exposing its entry list.
+# Bound that allocation even if the footer lies about the number of entries.
+_MAX_ARCHIVE_READ_BYTES = 2 * 1024 * 1024
+_ESTIMATED_COMPRESSION = {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}
 
 
 @dataclass(frozen=True)
@@ -67,6 +76,20 @@ class _Object:
 _CACHE: OrderedDict[tuple[object, ...], ThreeMFBounds | None] = OrderedDict()
 _CACHE_LOCK = threading.Lock()
 _Unresolvable = package.Ambiguous
+
+
+class _AdmissionArchiveStream(BufferedReader):
+    """A seekable ZIP input with a cap on the reads ZipFile requests."""
+
+    def read(self, size: int | None = -1, /) -> bytes:
+        if size is None or size < 0:
+            data = super().read(_MAX_ARCHIVE_READ_BYTES + 1)
+            if len(data) > _MAX_ARCHIVE_READ_BYTES:
+                raise _Unresolvable("archive read limit")
+            return data
+        if size > _MAX_ARCHIVE_READ_BYTES:
+            raise _Unresolvable("archive read limit")
+        return super().read(size)
 
 
 def _object_id(value: bytes | None) -> int:
@@ -167,7 +190,9 @@ def _scan_part(
                     current.children.append(reference)
         count(window, position)
 
-    for window in package.windows(archive, info, checkpoint=budget.check):
+    for window in package.windows(
+        archive, info, checkpoint=budget.check, chunk_bytes=_SCAN_CHUNK_BYTES
+    ):
         scan(window)
     if model is None:
         raise _Unresolvable("part without a model element")
@@ -201,6 +226,7 @@ def bounds(
         stat.st_ino,
         stat.st_size,
         stat.st_mtime_ns,
+        stat.st_ctime_ns,
         face_cap,
         max_model_bytes,
     )
@@ -238,10 +264,21 @@ def _bounds(
 ) -> ThreeMFBounds | None:
     budget = _Budget(wall_seconds, cpu_seconds)
     try:
-        with zipfile.ZipFile(path) as archive:
+        with (
+            _AdmissionArchiveStream(FileIO(path)) as stream,
+            zipfile.ZipFile(stream) as archive,
+        ):
             names, models = package.model_parts(
                 archive, max_model_bytes=max_model_bytes
             )
+            if any(
+                info.compress_type not in _ESTIMATED_COMPRESSION
+                for name, info in names.items()
+                if name.lower().endswith((".model", ".rels"))
+            ):
+                # Uncommon codecs can allocate decoder memory from the
+                # untrusted stream header. Only the guarded worker opens them.
+                return None
             opc = package.is_opc(names)
             root = package.root_part(archive, names, models)
             linked = package.linked_parts(archive, names, root)
@@ -254,6 +291,7 @@ def _bounds(
         RuntimeError,
         NotImplementedError,
         zipfile.BadZipFile,
+        zlib.error,
     ):
         # Encrypted, truncated or unsupported entries are the reader's to refuse.
         return None
@@ -262,6 +300,7 @@ def _bounds(
     placed: dict[tuple[str, int], int] = {}
 
     def faces(key: tuple[str, int], ancestors: tuple[tuple[str, int], ...]) -> int:
+        budget.check()
         if key in ancestors or len(ancestors) >= MAX_DEPTH:
             raise _Unresolvable("cyclic or deep component graph")
         if key in placed:

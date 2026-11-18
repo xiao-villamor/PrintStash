@@ -275,24 +275,19 @@ def _obj_triangle_count(path: Path, *, deadline: float) -> int | None:
             for raw in BytesIO(contents):
                 if len(raw) > TEXT_PREFLIGHT_LINE_BYTES:
                     return None
-                fields = raw.split(None, 1)
+                fields = raw.split()
                 if not fields or fields[0].startswith(b"#"):
                     continue
                 kind = fields[0]
                 channel = _OBJ_CHANNELS.get(kind)
                 if channel is not None:
-                    if len(fields) != 2 or len(fields[1].split()) not in (
-                        (2, 3) if channel == 1 else (3,)
-                    ):
+                    if len(fields) != 4 and not (channel == 1 and len(fields) == 3):
                         return None
                     coordinate_counts[channel] += 1
                 elif kind == b"f":
-                    if len(fields) != 2:
+                    if len(fields) < 4:
                         return None
-                    corners = len(fields[1].split())
-                    if corners < 3:
-                        return None
-                    triangles += corners - 2
+                    triangles += len(fields) - 3
                 elif kind not in _OBJ_OTHER_RECORDS:
                     return None
             if not block:
