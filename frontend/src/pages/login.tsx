@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { loginProvidersOptions } from "@/features/auth/entry";
 import { Navigate } from "@tanstack/react-router";
 import { useRouter } from "@/lib/navigation";
-import { AlertCircle, Info, ShieldCheck } from "lucide-react";
+import { AlertCircle, Eye, EyeOff, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -41,6 +41,8 @@ export default function LoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [remember_me, setremember_me] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const providerRead = useQuery(loginProvidersOptions());
@@ -58,6 +60,9 @@ export default function LoginPage() {
 
   // Kept out of state so the message follows the locale toggle on this page.
   const error = formError ?? (ssoFailed ? t("auth.ssoFailed") : null);
+  const fieldDescription =
+    [sessionExpired && "login-session-expired", error && "login-error"].filter(Boolean).join(" ") ||
+    undefined;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -110,15 +115,16 @@ export default function LoginPage() {
   }
 
   return (
-    <AuthFrame>
-      <h1 className="text-[22px] font-semibold tracking-tight text-foreground">
-        {t("auth.welcome")}
-      </h1>
-      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{t("auth.description")}</p>
+    <AuthFrame note={t("auth.local")}>
+      <h1 className="text-xl font-semibold tracking-tight text-foreground">{t("auth.welcome")}</h1>
+      <p className="mt-1 text-field leading-relaxed text-muted-foreground">
+        {t("auth.description")}
+      </p>
 
       <form onSubmit={handleSubmit} className="mt-5 grid gap-4">
         {sessionExpired && (
           <div
+            id="login-session-expired"
             role="status"
             className="flex items-start gap-2.5 border border-border bg-muted/50 px-3 py-2.5 text-[13px] font-medium text-foreground"
           >
@@ -147,7 +153,7 @@ export default function LoginPage() {
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            aria-describedby={error ? "login-error" : undefined}
+            aria-describedby={fieldDescription}
             autoComplete="username"
             autoCapitalize="none"
             spellCheck={false}
@@ -157,20 +163,65 @@ export default function LoginPage() {
           />
         </div>
 
-        <div className="grid gap-1.5">
-          <label htmlFor="password" className={authFieldLabel}>
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5">
+          <label htmlFor="password" className={`col-start-1 row-start-1 ${authFieldLabel}`}>
             {t("auth.password")}
           </label>
-          <Input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            aria-describedby={error ? "login-error" : undefined}
-            autoComplete="current-password"
-            required
-            className={authFieldInput}
-          />
+          <div className="relative col-span-2 row-start-2">
+            <Input
+              id="password"
+              type={passwordVisible ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              aria-describedby={fieldDescription}
+              autoComplete="current-password"
+              required
+              className={`${authFieldInput} pr-10`}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="absolute inset-y-0 right-0 h-full w-10 text-muted-foreground"
+              aria-label={t(passwordVisible ? "setup.hideField" : "setup.showField", {
+                field: t("auth.password"),
+              })}
+              aria-controls="password"
+              aria-pressed={passwordVisible}
+              onClick={() => setPasswordVisible((visible) => !visible)}
+            >
+              {passwordVisible ? (
+                <EyeOff className="h-4 w-4" aria-hidden />
+              ) : (
+                <Eye className="h-4 w-4" aria-hidden />
+              )}
+            </Button>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            className="col-start-2 row-start-1 h-auto p-0 text-xs font-normal text-muted-foreground underline-offset-2 hover:bg-transparent hover:underline"
+            aria-expanded={recoveryOpen}
+            aria-controls="login-password-recovery"
+            onClick={() => setRecoveryOpen((open) => !open)}
+          >
+            {t("auth.forgotAction")}
+          </Button>
+          <p
+            id="login-password-recovery"
+            hidden={!recoveryOpen}
+            className="col-span-2 text-xs leading-relaxed text-muted-foreground"
+          >
+            {t("auth.forgotHelp")}{" "}
+            <a
+              href={PASSWORD_RECOVERY_DOCS}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-foreground underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {t("auth.forgotLink")}
+            </a>
+          </p>
         </div>
 
         {/* The whole row toggles the box, as a native checkbox label would. */}
@@ -183,7 +234,7 @@ export default function LoginPage() {
           <span>{t("auth.remember")}</span>
         </label>
 
-        <Button type="submit" loading={busy} className="mt-1 h-10 w-full">
+        <Button type="submit" loading={busy} className="w-full">
           {t("auth.signIn")}
         </Button>
       </form>
@@ -202,7 +253,7 @@ export default function LoginPage() {
         <>
           <div
             role="separator"
-            className="my-5 flex items-center gap-3 text-xs text-muted-foreground"
+            className="my-4 flex items-center gap-3 text-xs text-muted-foreground"
           >
             <span className="h-px flex-1 bg-border" />
             <span>{t("auth.or")}</span>
@@ -211,7 +262,7 @@ export default function LoginPage() {
           <Button
             type="button"
             variant="outline"
-            className="h-10 w-full"
+            className="w-full"
             disabled={busy}
             onClick={() => window.location.assign(oidcLoginUrl())}
           >
@@ -219,22 +270,6 @@ export default function LoginPage() {
           </Button>
         </>
       )}
-
-      <p className="mt-5 text-xs leading-relaxed text-muted-foreground">
-        {t("auth.forgot")}{" "}
-        <a
-          href={PASSWORD_RECOVERY_DOCS}
-          target="_blank"
-          rel="noreferrer"
-          className="font-medium text-foreground underline underline-offset-2 hover:text-primary"
-        >
-          {t("auth.forgotLink")}
-        </a>
-      </p>
-      <p className="mt-4 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-        <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
-        {t("auth.local")}
-      </p>
     </AuthFrame>
   );
 }
