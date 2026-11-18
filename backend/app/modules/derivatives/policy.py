@@ -3,20 +3,29 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from sqlmodel import Session, select
+from sqlalchemy import and_, delete, or_
+from sqlmodel import Session, col, select
 
 from app.core.config import settings
 from app.core.errors import ErrorKind, OperationError
 from app.core.time import utcnow
 from app.db.library_revision import invalidate_library_browse
 from app.db.models import (
+    ArtifactDerivative,
     DerivativeGroupRegeneration,
     DerivativeKind,
+    DerivativeState,
+    File,
+    FileType,
     JobKind,
+    Model,
     SystemConfig,
 )
+from app.db.scopes import live
 from app.db.transactions import begin_write
 from app.modules.work.contracts import SkipReason
+
+from .kinds import THREE_MF_THUMBNAIL_RECIPE
 
 
 class SettingName(StrEnum):
@@ -166,6 +175,37 @@ def lock_enabled(session: Session, definition: JobKind) -> None:
     _require_enabled(_group_policy(lock(session), definition))
 
 
+def _invalidate_embedded_covers(session: Session) -> None:
+    """Make affected covers pending while keeping their published images readable.
+
+    The caller holds the configuration write lock. A running pass with unknown
+    availability must also be fenced so it cannot publish under the old policy.
+    """
+    eligible = (
+        select(File.id)
+        .join(Model, col(Model.id) == col(File.model_id))
+        .where(live(File), live(Model), col(File.file_type) == FileType.THREE_MF)
+    )
+    derivative = ArtifactDerivative
+    session.execute(
+        delete(derivative)
+        .where(
+            col(derivative.file_id).in_(eligible),
+            col(derivative.kind) == DerivativeKind.THUMBNAIL,
+            col(derivative.recipe_version) == THREE_MF_THUMBNAIL_RECIPE,
+            col(derivative.state) != DerivativeState.CANCELLED,
+            or_(
+                col(derivative.has_embedded_3mf_preview).is_(True),
+                and_(
+                    col(derivative.state) == DerivativeState.RUNNING,
+                    col(derivative.has_embedded_3mf_preview).is_(None),
+                ),
+            ),
+        )
+        .execution_options(synchronize_session=False)
+    )
+
+
 def update(
     session: Session, changes: dict[SettingName, bool | None], *, commit: bool = True
 ) -> None:
@@ -202,9 +242,7 @@ def update(
     if previous_cover_policy != effective_setting(
         config, SettingName.RECREATE_EMBEDDED_COVERS
     ):
-        from . import records
-
-        records.invalidate_embedded_covers(session)
+        _invalidate_embedded_covers(session)
     if commit:
         session.commit()
         publish_changes(changes)
