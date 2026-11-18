@@ -258,6 +258,11 @@ removable chips, and survive reloads. Reset in the picker preserves the folder,
 keyword query and view. Keep loading, retry and empty states inside the picker;
 Escape and the close button return focus to Filters.
 
+A plain click on a Library card opens the inspector. The card's hover or focus
+corner action and the inspector header share one expand icon for the full page.
+Card overlays stay compact so the Model remains visible; touch enlarges their hit
+area without enlarging the mark.
+
 Model context menus show the Model name once above concise, icon-led actions:
 Open page, Model details, Favorites and tags. Details uses the existing inspector;
 tags respects edit permissions. Pointer menus anchor at the click and keyboard

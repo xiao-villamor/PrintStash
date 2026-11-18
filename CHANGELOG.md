@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Library cards keep more of the Model visible: preview arrows and selection are smaller, and status sits in the image corner. An expand icon on card hover and in the details panel opens the full page. Model views adds previous and next arrows and centers its view indicator.
+
 - New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.
 
 - Flat-model previews now support arrow navigation through all five views and back to the cover. Single-cover and multi-angle cards share a larger image area, and the expanded gallery uses more room on large screens while fitting narrow displays.

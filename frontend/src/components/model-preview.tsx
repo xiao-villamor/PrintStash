@@ -1,9 +1,10 @@
-import { type MouseEvent, type PointerEvent, type ReactNode, type Ref } from "react";
+import { type MouseEvent, type ReactNode, type Ref } from "react";
 import { Box, ChevronLeft, ChevronRight, FileText, Images } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { LibraryPreviewPlaceholder } from "@/components/library-card-placeholder";
+import { keepOffCard } from "@/lib/card-overlay";
 import { previewTransferPolicy } from "@/lib/use-model-previews";
 import { useModelPreviewCard, type PreviewCard } from "@/lib/use-model-preview-card";
 import { uiText } from "@/lib/locale";
@@ -142,22 +143,62 @@ export function ModelPreviewFrame({
   );
 }
 
-const keepOffCard = {
-  draggable: false,
-  onPointerDown: (event: PointerEvent) => event.stopPropagation(),
-  onDragStart: (event: { preventDefault(): void; stopPropagation(): void }) => {
-    event.preventDefault();
-    event.stopPropagation();
-  },
-};
+/** Previous and next view, centered on the two edges of the nearest positioned frame. */
+function PreviewArrows({ state, size }: { state: PreviewCard; size: "card" | "gallery" }) {
+  const { preview } = state;
+  const iconClass = size === "card" ? "h-4 w-4" : "h-5 w-5";
+  return (
+    <>
+      {[preview.destination(-1), preview.destination(1)].map(
+        (view, index) =>
+          view && (
+            <Button
+              key={index}
+              {...keepOffCard}
+              variant="outline"
+              size="icon"
+              data-side={index === 0 ? "previous" : "next"}
+              className={cn(
+                "library-preview-arrow pointer-events-auto absolute top-1/2 -translate-y-1/2",
+                size === "card" ? "h-8 w-6" : "h-11 w-8",
+                index === 0
+                  ? size === "card"
+                    ? "left-1"
+                    : "left-2"
+                  : size === "card"
+                    ? "right-1"
+                    : "right-2",
+              )}
+              aria-label={uiText(index === 0 ? "modelPreview.previous" : "modelPreview.next")}
+              title={uiText(labels[view.id])}
+              onPointerEnter={() => {
+                state.enter();
+                preview.prioritize(view);
+              }}
+              onPointerLeave={state.leave}
+              onFocus={() => preview.prioritize(view)}
+              onClick={(event) => {
+                stop(event);
+                preview.select(view.id);
+              }}
+            >
+              {index === 0 ? (
+                <ChevronLeft className={iconClass} strokeWidth={1.5} />
+              ) : (
+                <ChevronRight className={iconClass} strokeWidth={1.5} />
+              )}
+            </Button>
+          ),
+      )}
+    </>
+  );
+}
 
 /** Arrows, gallery and retry: siblings of the card's link, laid over its image. */
 export function ModelPreviewControls({ name, state }: { name: string; state: PreviewCard }) {
   useUiLocale();
   const { preview, views } = state;
   const { navigationViews } = preview;
-  const previous = preview.destination(-1);
-  const next = preview.destination(1);
   return (
     <>
       <div
@@ -170,36 +211,7 @@ export function ModelPreviewControls({ name, state }: { name: string; state: Pre
             className="library-preview-navigation absolute inset-x-0 top-0 bottom-11"
             data-preview-navigation
           >
-            {[previous, next].map(
-              (view, index) =>
-                view && (
-                  <Button
-                    key={index}
-                    {...keepOffCard}
-                    variant="outline"
-                    size="icon"
-                    className={`pointer-events-auto absolute top-1/2 h-11 w-11 -translate-y-1/2 ${index === 0 ? "left-1" : "right-1"}`}
-                    aria-label={uiText(index === 0 ? "modelPreview.previous" : "modelPreview.next")}
-                    title={uiText(labels[view.id])}
-                    onPointerEnter={() => {
-                      state.enter();
-                      preview.prioritize(view);
-                    }}
-                    onPointerLeave={state.leave}
-                    onFocus={() => preview.prioritize(view)}
-                    onClick={(event) => {
-                      stop(event);
-                      preview.select(view.id);
-                    }}
-                  >
-                    {index === 0 ? (
-                      <ChevronLeft className="h-5 w-5" />
-                    ) : (
-                      <ChevronRight className="h-5 w-5" />
-                    )}
-                  </Button>
-                ),
-            )}
+            <PreviewArrows state={state} size="card" />
           </div>
         )}
         <div className="absolute inset-x-0 bottom-0 flex h-11 items-center border-t border-border bg-card text-card-foreground">
@@ -271,9 +283,12 @@ export function ModelPreviewGallery({
         onPointerLeave={state.leave}
       >
         <PreviewImage name={name} state={state} imageClassName="h-full w-full object-contain" />
+        {views.length >= 2 && preview.navigationViews.length >= 2 && (
+          <PreviewArrows state={state} size="gallery" />
+        )}
         <ViewIndicator
           state={state}
-          className="absolute right-1 bottom-1 max-w-full border border-border"
+          className="absolute bottom-2 left-1/2 max-w-full -translate-x-1/2 border border-border"
         />
         {preview.failed && (
           <Button variant="outline" className="absolute left-1 top-1 h-11" onClick={preview.retry}>

@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef } from "react";
-import { Loader2, X } from "lucide-react";
+import { Loader2, Maximize2, X } from "lucide-react";
 import { LibraryItemLink } from "@/features/library/navigation";
 import type { LibraryEntry } from "@/features/library/navigation-state";
 import { useModelDetail } from "@/features/library/model-detail";
@@ -68,25 +68,27 @@ export function LibraryModelInspector({
         <h2 ref={title} tabIndex={-1} title={detail.data?.name}>
           {detail.data?.name ?? uiText("Model details")}
         </h2>
-        <LibraryItemLink
-          origin={origin}
-          href={`/models/${id}`}
-          className="library-inspector-open-page"
-          onClick={(event) => {
-            if (
-              !event.defaultPrevented &&
-              event.button === 0 &&
-              !event.ctrlKey &&
-              !event.metaKey &&
-              !event.altKey &&
-              !event.shiftKey
-            )
-              onOpenPage?.();
-          }}
-          title={uiText("Open the full model page")}
-        >
-          {uiText("Open page")}
-        </LibraryItemLink>
+        <Button variant="ghost" size="icon-sm" asChild>
+          <LibraryItemLink
+            origin={origin}
+            href={`/models/${id}`}
+            aria-label={uiText("Open page")}
+            onClick={(event) => {
+              if (
+                !event.defaultPrevented &&
+                event.button === 0 &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.altKey &&
+                !event.shiftKey
+              )
+                onOpenPage?.();
+            }}
+            title={uiText("Open the full model page")}
+          >
+            <Maximize2 className="h-4 w-4" aria-hidden />
+          </LibraryItemLink>
+        </Button>
         <Button
           variant="ghost"
           size="icon-sm"

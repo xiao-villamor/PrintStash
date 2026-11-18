@@ -37,16 +37,6 @@
   font-weight: 600;
   outline: none;
 }
-.library-inspector-open-page {
-  display: inline-flex;
-  align-items: center;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-}
 .library-inspector-body {
   display: flex;
   flex-direction: column;

@@ -16,13 +16,19 @@ export function LibraryCardSelection({
   return (
     <div
       className={cn(
-        "absolute left-2 top-2 z-10 rounded bg-card/90 p-1.5 shadow-sm transition-opacity duration-fast",
+        "absolute left-1.5 top-1.5 z-10 transition-opacity duration-fast",
         !selecting &&
           !checked &&
           "[@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:pointer-events-none group-hover/selection-card:opacity-100 group-hover/selection-card:pointer-events-auto group-focus-within/selection-card:opacity-100 group-focus-within/selection-card:pointer-events-auto",
       )}
     >
-      <Checkbox checked={checked} onChange={onChange} ariaLabel={label} />
+      {/* The enlarged target belongs to the control, so the card's drag cursor cannot show around it. */}
+      <Checkbox
+        checked={checked}
+        onChange={onChange}
+        ariaLabel={label}
+        className="relative before:absolute before:-inset-1.5"
+      />
     </div>
   );
 }
