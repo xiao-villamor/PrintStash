@@ -315,18 +315,17 @@ class TestDerivativeWorkPriority:
         mesh = JobKind.DERIVATIVES_MESH
         search = JobKind.SEARCH_PROJECT
         run_pass(mesh)
-        assert list(_job_states(mesh).values()) == [JobState.QUEUED]
+        assert list(_job_states(mesh).values()) == [JobState.QUEUED, JobState.QUEUED]
         work_engine.launch(listen_lanes=[LaneName.DERIVE_NATIVE])
 
         capacity = native_capacity()
         queue = tmp_path / "runtime" / "native"
         with ThreadPoolExecutor(1) as executor:
-            # Hold the worker budget so we can inspect the real cover Job with
-            # its lane slot occupied, then enqueue the next cover behind it.
+            # Hold the running cover in its lane slot while the second cover
+            # from the same discovery batch waits behind it.
             with native_runtime.admit(capacity, capacity, checkpoint=lambda: None):
                 first = executor.submit(copy_context().run, work_engine.run_one)
                 _wait_for_native_queue(queue)
-                run_pass(mesh)
                 assert set(_job_states(mesh).values()) == {
                     JobState.RUNNING,
                     JobState.QUEUED,
