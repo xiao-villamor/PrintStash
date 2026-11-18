@@ -191,6 +191,13 @@
   width: 220px;
   flex: 1 1 220px;
 }
+.library-folder-search input::placeholder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.library-folder-search input {
+  text-overflow: ellipsis;
+}
 .library-toolbar-filters,
 .library-display-controls {
   max-width: 100%;
@@ -327,4 +334,33 @@
   height: 22px;
   width: 15rem;
   max-width: 100%;
+}
+
+/* Compact only where the docked inspector leaves a narrower toolbar. */
+@media (min-width: 1024px) {
+  @container library (720px <= width < 1250px) {
+    [data-inspector-open] .library-model-toolbar .library-toolbar-label {
+      display: none;
+    }
+    [data-inspector-open] .library-model-toolbar button:has(> .library-toolbar-label) {
+      width: 32px;
+      padding-inline: 0;
+    }
+    [data-inspector-open] .library-model-toolbar .library-folder-search {
+      width: 160px;
+      flex: 0 0 160px;
+    }
+    [data-inspector-open] .library-model-toolbar .library-display-controls {
+      width: max-content;
+    }
+    [data-inspector-open] .library-model-toolbar .library-status-filters > button {
+      padding-inline: 6px;
+    }
+  }
+  @container library (1160px <= width < 1250px) {
+    [data-inspector-open]
+      :is(.library-model-toolbar, .library-toolbar-filters, .library-display-controls) {
+      flex-wrap: nowrap;
+    }
+  }
 }

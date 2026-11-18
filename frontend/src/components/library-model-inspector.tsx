@@ -102,7 +102,7 @@ export function LibraryModelInspector({
       {detail.isError || !detail.active ? (
         <div className="library-inspector-body" role="alert">
           <p>{detail.error ? userMessage(detail.error) : uiText("Sign in to view this model")}</p>
-          <Button variant="outline" size="sm" onClick={() => void detail.refetch()}>
+          <Button variant="outline" size="xs" onClick={() => void detail.refetch()}>
             {uiText("Retry")}
           </Button>
         </div>

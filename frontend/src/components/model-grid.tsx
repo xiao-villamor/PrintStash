@@ -2778,10 +2778,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         size="xs"
         className="h-8 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
         aria-pressed={selectMode}
+        aria-label={uiText("Select")}
         onClick={() => (selectMode ? clearSelection() : setKeyboardSelection(true))}
       >
         <ListChecks className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        <span>{uiText("Select")}</span>
+        <span className="library-toolbar-label">{uiText("Select")}</span>
       </Button>
     </div>
   ) : null;
@@ -3060,12 +3061,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 variant="outline"
                 size="xs"
                 aria-pressed={includeSubfolders}
+                aria-label={uiText("Include subfolders")}
                 disabled={loading}
                 onClick={() => setModelScope(includeSubfolders ? "here" : "all")}
                 className="h-8 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
               >
                 <FolderTree className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                {uiText("Include subfolders")}
+                <span className="library-toolbar-label">{uiText("Include subfolders")}</span>
               </Button>
             )}
             {filterControl("shrink-0")}
@@ -3793,6 +3795,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           readingRenderers={readingRenderers}
                           readingId="collections-placeholder"
                           layout="grid"
+                          freezeInspectorTracks={inspectorOpen}
                           compact={compact}
                           estimateSize={COMPACT_COLLECTION_HEIGHT}
                           minCardWidth={300}
@@ -3851,6 +3854,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           readingRenderers={readingRenderers}
                           readingId="collections"
                           layout="grid"
+                          freezeInspectorTracks={inspectorOpen}
                           compact={!collectionOverview && compact}
                           estimateSize={collectionOverview ? 266 : COMPACT_COLLECTION_HEIGHT}
                           minCardWidth={collectionOverview ? undefined : 300}
@@ -4025,6 +4029,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       readingRenderers={readingRenderers}
                       readingId="models"
                       layout="grid"
+                      freezeInspectorTracks={inspectorOpen}
                       estimateSize={compact ? 290 : 250}
                       compact={compact}
                     />
