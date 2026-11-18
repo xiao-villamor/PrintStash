@@ -18,7 +18,7 @@ from app.runtime.compute.protocol import MAX_FRAME, BinaryRenderRequest, Priorit
 from .render_context import background_render_scope as background_render_scope
 from .render_context import background_rendering
 
-RECIPE = "webgpu-native-raster-v4"
+RECIPE = "webgpu-native-raster-v5"
 
 
 def render_priority() -> Priority:

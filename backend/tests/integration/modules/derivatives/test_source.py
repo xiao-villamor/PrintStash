@@ -142,15 +142,32 @@ class TestPending:
         [DerivativeState.READY, DerivativeState.FAILED],
         ids=["ready", "failed"],
     )
+    @pytest.mark.parametrize(
+        ("file_type", "previous_recipe"),
+        [
+            pytest.param(FileType.STL, 17, id="stl"),
+            pytest.param(FileType.THREE_MF, 19, id="3mf"),
+            pytest.param(FileType.STEP, 18, id="step"),
+        ],
+    )
     def test_rederives_thumbnails_from_the_previous_gpu_recipe(
-        self, db_session, mesh, make_derivative, state
+        self,
+        db_session,
+        make_file,
+        make_model,
+        make_derivative,
+        state,
+        file_type,
+        previous_recipe,
     ):
-        artifact = mesh()
+        artifact = make_file(
+            make_model(), filename=f"part.{file_type.value}", file_type=file_type
+        )
         make_derivative(artifact, DerivativeKind.METADATA)
         make_derivative(
             artifact,
             DerivativeKind.THUMBNAIL,
-            recipe_version=14,
+            recipe_version=previous_recipe,
             state=state,
             exhausted=state is DerivativeState.FAILED,
             failure_reason="render_failed" if state is DerivativeState.FAILED else None,

@@ -63,6 +63,8 @@
 
 ### Fixed
 
+- GPU-generated Model covers use the same framing as CPU covers, including for rounded and diagonal shapes.
+
 - Saved multipart descriptions stay visible in the overview. Multipart member names wrap without clipping, and the mobile composition editor keeps Add variant and Save changes at the shared touch-target size.
 
 - Captured-source conflict recovery stays inside the edit dialog, keeping review and retry controls reachable. Keyboard focus remains on its card when a growing Library switches to virtual rows.

@@ -5,9 +5,13 @@ import pytest
 from printstash_core.mesh.preview_profile import RASTERIZER_RECIPE
 from printstash_core.mesh.render_geometry import PreparedRender
 
-from app.modules.media.compute_geometry import encode
+from app.modules.media.compute_geometry import decode, encode
 from app.modules.media.compute_render import RECIPE
-from app.runtime.compute.render_policy import admission, admission_many
+from app.runtime.compute.render_policy import (
+    admission,
+    admission_decoded,
+    admission_many,
+)
 
 
 @pytest.fixture
@@ -50,6 +54,33 @@ class TestAdmission:
         assert single.device_bytes < batch.device_bytes < 8 * single.device_bytes
         assert single.host_bytes < batch.host_bytes < 8 * single.host_bytes
 
+    def test_charges_one_view_reduction_workspace_for_the_largest_model(self, frame):
+        payload, recipe = frame
+        prepared, width, height, views, matte = decode(payload)
+        small = (prepared, width, height, views, matte)
+        large = (
+            PreparedRender(
+                np.resize(prepared.vertices, (4097, 3)),
+                prepared.face_count,
+                prepared.face_chunks,
+                np.resize(prepared.position_ids, 4097),
+                prepared.smooth_normals,
+            ),
+            width,
+            height,
+            views,
+            matte,
+        )
+        small_batch = admission_decoded(
+            [small, small], [len(payload)] * 2, [recipe] * 2, [1] * 2
+        )
+        mixed_batch = admission_decoded(
+            [large, small], [len(payload)] * 2, [recipe] * 2, [1] * 2
+        )
+
+        # 65 partial bounds become 2, then 1; models share these buffers.
+        assert mixed_batch.device_bytes - small_batch.device_bytes == (65 + 2) * 32
+
     def test_refuses_more_than_eight_frames(self, frame):
         from app.runtime.compute.contracts import ComputeUnavailable, Reason
 
@@ -59,9 +90,7 @@ class TestAdmission:
         assert exc.value.reason is Reason.CAPACITY
 
     def test_accounts_for_binary_owner_workspace(self, frame):
-        from app.modules.media.compute_geometry import decode
         from app.modules.media.gpu_postprocess import workspace_bytes
-        from app.runtime.compute.render_policy import admission_decoded
 
         payload, recipe = frame
         legacy = admission(payload, recipe, 1)
@@ -75,9 +104,7 @@ class TestAdmission:
     def test_bounds_deferred_normal_batch_resources(self, frame):
         from printstash_core.mesh.render_geometry import PreparedRenderGeometry
 
-        from app.modules.media.compute_geometry import decode
         from app.modules.media.gpu_normals import defer, host_scratch_bytes
-        from app.runtime.compute.render_policy import admission_decoded
 
         payload, recipe = frame
         prepared, width, height, views, matte = decode(payload)

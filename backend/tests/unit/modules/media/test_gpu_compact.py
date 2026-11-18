@@ -141,9 +141,10 @@ class TestNativeBatch:
         assert renderer.submissions == renderer.readback_batches == 1
         assert renderer.batch_model_counts[1] == renderer.batch_frame_counts[2] == 1
         camera_offsets = [
-            group["entries"][1]["resource"]["offset"]
+            resource["offset"]
             for group in device.groups
-            if len(group["entries"]) == 3
+            for entry in group["entries"]
+            if (resource := entry["resource"])["buffer"] is renderer.visible
         ]
         assert camera_offsets == [0, 256, 512]
         assert len({slot["offset"] for slot in device.readbacks}) == 3
