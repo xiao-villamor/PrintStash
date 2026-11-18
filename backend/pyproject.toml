@@ -10,7 +10,7 @@ dependencies = [
     "anyio>=4.15.1,<5",
     "boto3>=1.43,<2",
     "botocore>=1.43,<2",
-    "croniter>=6.2,<7",
+    "croniter>=6.2,<8",
     "fastapi>=0.141,<1",
     # SQLAlchemy needs greenlet for every asyncio path, but declares it only for
     # platform_machine in (AMD64, WIN32, aarch64, amd64, ppc64le, win32, x86_64).
