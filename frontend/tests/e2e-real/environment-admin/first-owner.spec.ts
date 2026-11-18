@@ -52,7 +52,7 @@ test.describe("Environment-provisioned owner", () => {
     // ── Storage no longer blocks the rest of the app ──
     await page.goto("/settings");
     await expect(
-      page.getByRole("heading", { name: "Settings", exact: true, level: 1 }),
+      page.getByRole("heading", { name: "Overview", exact: true, level: 1 }),
     ).toBeVisible();
   });
 });

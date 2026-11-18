@@ -7,7 +7,7 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { providerFormError } from "@/lib/storage-provider-form";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AlertTriangle, Folder } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { vaultConfigOptions, useVaultConfigCommand } from "@/lib/queries/settings-config";
 import { storageProvidersOptions, storageReadDenied } from "@/lib/queries/settings-storage";
@@ -246,7 +246,7 @@ export function StorageConfigCard({
   if (loading) {
     return (
       <Localized>
-        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+        <div className="settings-flat overflow-hidden rounded-lg border border-border bg-card shadow-sm">
           <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border">
             <h3 className="text-sm font-semibold text-foreground">
               {t("settings.currentStorage")}
@@ -323,16 +323,14 @@ export function StorageConfigCard({
 
   return (
     <Localized>
-      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+      <div className="settings-flat overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <SettingsGroupHead
-          icon={Folder}
           level={3}
           title={t("settings.currentStorage")}
           description={t("Where PrintStash keeps your Vault files.")}
-          className="settings-card-head--flush"
         />
 
-        <div className="space-y-5 px-4 pb-4 sm:pl-16 sm:pr-5">
+        <div className="space-y-5 pt-2">
           {readError && enabled && (
             <div role="alert" className="space-y-2 text-sm text-destructive">
               <p>{t("settings.storageReadFailed")}</p>
@@ -467,7 +465,7 @@ export function StorageConfigCard({
                 {t("settings.storageRootIdentityDescription")}
               </p>
               {invalidRoots.map(([role, path]) => (
-                <p key={role} className="font-mono text-xs text-foreground">
+                <p key={role} className="text-xs text-foreground">
                   {t("settings.storageRootLocation", {
                     role: role === "data" ? "Data" : "Thumbnail",
                     path: path ?? "",
@@ -493,7 +491,7 @@ export function StorageConfigCard({
                     key={role}
                     className="flex flex-wrap items-center justify-between gap-2 border border-border px-3 py-2"
                   >
-                    <span className="font-mono text-xs text-foreground">
+                    <span className="text-xs text-foreground">
                       {t("settings.storageRootPath", {
                         role: role === "data" ? "Data" : "Thumbnail",
                         path: path ?? "",

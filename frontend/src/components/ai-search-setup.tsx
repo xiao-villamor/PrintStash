@@ -294,7 +294,7 @@ export function AiSearchSetup({
           <label className="block space-y-1.5 text-sm">
             <span className="font-medium">{t("Location")}</span>
             <select
-              className="block h-10 w-full border border-input bg-card px-3"
+              className="h-10 w-full border border-input bg-card px-3"
               value={path ?? ""}
               disabled={!!building || !!downloading}
               onChange={(event) => {
@@ -322,7 +322,7 @@ export function AiSearchSetup({
             <label className="block space-y-1.5 text-sm">
               <span className="font-medium">{t("aiSearch.modelOrServer")}</span>
               <select
-                className="block h-10 w-full border border-input bg-card px-3"
+                className="h-10 w-full border border-input bg-card px-3"
                 value={path === "local" ? (local?.id ?? "") : String(remote?.id ?? "")}
                 disabled={!!building || !!downloading}
                 onChange={(event) => {
@@ -493,7 +493,7 @@ export function AiSearchSetup({
     );
   }
   return (
-    <div>
+    <div className="settings-flush">
       {settingsReview && (
         <section
           aria-label={t("library.latestVersion")}

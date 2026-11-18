@@ -2,7 +2,6 @@ import { SearchSettingsSnapshot } from "@/components/search-settings-snapshot";
 import { SettingsGroupHead } from "@/components/settings-card";
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Settings2 } from "lucide-react";
 
 import { AiSearchSetup } from "@/components/ai-search-setup";
 import { InferenceEndpointForm } from "@/components/inference-endpoint-form";
@@ -465,7 +464,7 @@ export function AiSearchSettings() {
     void settings.refetch();
   };
   return (
-    <Card className="overflow-hidden">
+    <Card className="settings-flat overflow-hidden">
       {settings.isError && (
         <EmptyState
           title={t("aiSearch.settingsLoadError")}
@@ -506,15 +505,13 @@ export function AiSearchSettings() {
               />
             </fieldset>
           </Modal>
-          <section className="border-t border-border">
+          <section className="mt-9">
             <SettingsGroupHead
-              icon={Settings2}
               level={2}
               title={t("Setup and options")}
               description={t("Search types, AI servers and technical limits.")}
-              className="settings-card-head--flush"
             />
-            <div className="divide-y divide-border px-4 pb-4 sm:pl-16 sm:pr-5">
+            <div className="divide-y divide-border">
               <div className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div>
                   <p className="text-sm font-medium">{t("Guided setup")}</p>

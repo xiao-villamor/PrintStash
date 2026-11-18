@@ -1,24 +1,15 @@
 /**
  * Settings → Background work: what every job-running process is doing.
  *
- * One framed work surface (DESIGN.md): current activity and the path to a
- * model's own preview status come first. Queue tools and worker controls are
+ * Open rows (DESIGN.md): current activity and the path to a model's own
+ * preview status come first. Queue tools and worker controls are
  * separate views below. It refreshes when the events socket reports a Job
  * change, and on a slow interval as a fallback, because a notice can be dropped.
  */
 import type * as React from "react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import {
-  Activity,
-  AlertTriangle,
-  ChevronDown,
-  Cpu,
-  Images,
-  Info,
-  Layers,
-  Server,
-  SlidersHorizontal,
-} from "lucide-react";
+import { Activity, AlertTriangle, ChevronDown, Layers } from "lucide-react";
+import { SettingsGroupHead } from "@/components/settings-card";
 import { Link } from "@/lib/link";
 
 import { Badge } from "@/components/ui/badge";
@@ -111,30 +102,15 @@ type Pending =
   | { kind: "regenerate"; derivative: DerivativeKind };
 
 function SectionHeader({
-  icon: Icon,
   title,
   description,
   action,
 }: {
-  icon: typeof Activity;
   title: string;
   description: string;
   action?: React.ReactNode;
 }) {
-  return (
-    <div className="flex items-start gap-3 border-t border-border px-4 pb-3 pt-4 first:border-t-0 sm:px-5">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted text-foreground">
-        <Icon className="h-4 w-4" aria-hidden />
-      </div>
-      <div className="min-w-0 flex-1">
-        <h3 className="text-sm font-semibold">{title}</h3>
-        <p className="mt-0.5 max-w-[72ch] text-xs leading-normal text-muted-foreground">
-          {description}
-        </p>
-      </div>
-      {action && <div className="shrink-0">{action}</div>}
-    </div>
-  );
+  return <SettingsGroupHead title={title} description={description} action={action} />;
 }
 
 function LaneRow({
@@ -162,10 +138,10 @@ function LaneRow({
   }
   const valid = Number.isInteger(parsed) && parsed >= 1 && parsed <= 64;
   return (
-    <li className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:px-5">
+    <li className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono text-sm">{lane.name}</span>
+          <span className="text-sm">{lane.name}</span>
           {lane.overridden && <Badge variant="secondary">{uiText("Overridden")}</Badge>}
           {lane.partitioned && <Badge variant="outline">{uiText("Per partition")}</Badge>}
         </div>
@@ -330,9 +306,9 @@ function BackgroundWorkView({
   }
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="settings-flat overflow-hidden">
       {error && (
-        <div className="flex items-center justify-between gap-3 border-b px-4 py-3 text-sm sm:px-5">
+        <div className="flex items-center justify-between gap-3 border-b py-3 text-sm">
           <div role="alert" className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-warning" aria-hidden />
             {error}
@@ -352,14 +328,14 @@ function BackgroundWorkView({
         />
       )}
       {!overview && loading && !error ? (
-        <div className="space-y-3 p-4 sm:p-5" aria-busy="true">
+        <div className="space-y-3 py-4" aria-busy="true">
           <Skeleton className="h-6 w-1/3" />
           <Skeleton className="h-12 w-full" />
           <Skeleton className="h-12 w-full" />
         </div>
       ) : overview ? (
         <>
-          <div className="grid grid-cols-1 gap-3 border-b border-border px-4 py-4 sm:grid-cols-3 sm:px-5">
+          <div className="grid grid-cols-1 gap-3 border-b border-border py-4 sm:grid-cols-3">
             {[
               { label: uiText("Running now"), value: running, icon: Activity },
               { label: uiText("Waiting to start"), value: waiting, icon: Layers },
@@ -382,7 +358,6 @@ function BackgroundWorkView({
             ))}
           </div>
           <SectionHeader
-            icon={Images}
             action={
               <Button size="sm" variant="outline" onClick={() => void refresh()}>
                 {uiText("Refresh")}
@@ -436,7 +411,6 @@ function BackgroundWorkView({
               ))}
           </ul>
           <SectionHeader
-            icon={Info}
             title={uiText("Checking a model's preview?")}
             description={uiText("This page shows totals for the whole vault.")}
             action={
@@ -462,10 +436,7 @@ function BackgroundWorkView({
           />
 
           {staleWorkers ? (
-            <div
-              role="alert"
-              className="flex flex-wrap items-center gap-2 border-b px-4 py-3 text-sm sm:px-5"
-            >
+            <div role="alert" className="flex flex-wrap items-center gap-2 border-b py-3 text-sm">
               <AlertTriangle className="h-4 w-4 text-warning" aria-hidden />
               <span>{uiText("Workers not responding: {count}.", { count: staleWorkers })}</span>
               <Button
@@ -482,7 +453,6 @@ function BackgroundWorkView({
           ) : null}
 
           <SectionHeader
-            icon={AlertTriangle}
             title={uiText("Recent failures")}
             description={uiText(
               "Preview or metadata failures across the library: {count}. Review and retry recent work here.",
@@ -490,7 +460,7 @@ function BackgroundWorkView({
             )}
           />
           {overview.failed_jobs.length === 0 ? (
-            <p className="border-b px-4 py-4 text-sm text-muted-foreground sm:px-5">
+            <p className="border-b py-4 text-sm text-muted-foreground">
               {uiText("No recent failures.")}
             </p>
           ) : (
@@ -498,7 +468,7 @@ function BackgroundWorkView({
               {overview.failed_jobs.map((job) => (
                 <li
                   key={job.job_id}
-                  className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:px-5"
+                  className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">{job.label ?? job.kind}</p>
@@ -522,10 +492,7 @@ function BackgroundWorkView({
           )}
 
           <details ref={advancedRef} className="group">
-            <summary className="flex cursor-action list-none items-start gap-3 px-4 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-5">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
-                <SlidersHorizontal className="h-4 w-4 text-muted-foreground" aria-hidden />
-              </span>
+            <summary className="flex cursor-action list-none items-start gap-3 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-semibold">{uiText("Advanced controls")}</span>
                 <span className="block text-xs text-muted-foreground">
@@ -555,7 +522,6 @@ function BackgroundWorkView({
             {activeView === "workers" ? (
               <>
                 <SectionHeader
-                  icon={Cpu}
                   title={uiText("Mesh processing")}
                   description={uiText(
                     "More models at once finish imports sooner and use more memory. Memory admission still holds back what does not fit.",
@@ -564,7 +530,6 @@ function BackgroundWorkView({
                 <MeshWorkersSection api={meshApi} />
 
                 <SectionHeader
-                  icon={Layers}
                   title={uiText("How many jobs run at once")}
                   description={uiText(
                     "Advanced limits for each work lane. Changes apply to every worker immediately.",
@@ -582,7 +547,6 @@ function BackgroundWorkView({
                 </ul>
 
                 <SectionHeader
-                  icon={Server}
                   title={uiText("Worker processes")}
                   description={uiText("The processes currently handling background work.")}
                 />
@@ -590,11 +554,11 @@ function BackgroundWorkView({
                   {overview.executors.map((executor) => (
                     <li
                       key={executor.executor_id}
-                      className="flex flex-wrap items-center gap-2 px-4 py-3 sm:px-5"
+                      className="flex flex-wrap items-center gap-2 py-3"
                     >
                       <span className="text-sm font-medium">{executor.hostname}</span>
                       <Badge variant="outline">{executor.role}</Badge>
-                      <span className="font-mono text-2xs text-muted-foreground">
+                      <span className="text-2xs text-muted-foreground">
                         {uiText("v{value1}", { value1: executor.app_version })}
                       </span>
                       {executor.stale ? (
@@ -609,7 +573,6 @@ function BackgroundWorkView({
             ) : (
               <>
                 <SectionHeader
-                  icon={Activity}
                   title={uiText("Queues by type")}
                   description={uiText("Every kind of work, including ones with nothing waiting.")}
                 />
@@ -617,14 +580,12 @@ function BackgroundWorkView({
                   {overview.definitions.map((definition) => (
                     <li
                       key={definition.name}
-                      className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:px-5"
+                      className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-medium">{definition.label}</span>
-                          <span className="font-mono text-2xs text-muted-foreground">
-                            {definition.lane}
-                          </span>
+                          <span className="text-2xs text-muted-foreground">{definition.lane}</span>
                           {definition.failed > 0 && (
                             <Badge variant="warning">
                               {uiText("{count} failed", { count: definition.failed })}
@@ -658,7 +619,6 @@ function BackgroundWorkView({
                 {derivativeKinds.length > 0 && (
                   <>
                     <SectionHeader
-                      icon={Cpu}
                       title={uiText("Rebuild previews and details")}
                       description={uiText(
                         "Previews and metadata derived from each Artifact. Current outputs stay visible until their replacements are ready.",
@@ -668,13 +628,13 @@ function BackgroundWorkView({
                       {derivativeKinds.map((kind) => (
                         <li
                           key={kind}
-                          className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:px-5"
+                          className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center"
                         >
                           <span className="min-w-0 flex-1">
                             <span className="block text-sm font-medium">
                               {derivativeLabel(kind)}
                             </span>
-                            <span className="font-mono text-2xs text-muted-foreground">{kind}</span>
+                            <span className="text-2xs text-muted-foreground">{kind}</span>
                           </span>
                           <div className="flex gap-2">
                             <Button
@@ -749,7 +709,6 @@ function ActiveWorkJobs({
   return (
     <>
       <SectionHeader
-        icon={Activity}
         title={uiText("In progress")}
         description={uiText("Work that is running or waiting to start.")}
       />

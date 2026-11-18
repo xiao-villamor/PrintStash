@@ -227,7 +227,7 @@ test.describe("production PWA cache contracts", () => {
 
     expect(response?.status()).toBe(200);
     await expect(
-      page.getByRole("heading", { name: "Settings", exact: true, level: 1 }),
+      page.getByRole("heading", { name: "Overview", exact: true, level: 1 }),
     ).toBeVisible();
   });
 
@@ -295,7 +295,7 @@ test.describe("production route recovery", () => {
     await context.unroute(/\/assets\/settings-[^/]+\.js$/);
     await page.getByRole("button", { name: "Reload page" }).click();
     await expect(
-      page.getByRole("heading", { name: "Settings", exact: true, level: 1 }),
+      page.getByRole("heading", { name: "Overview", exact: true, level: 1 }),
     ).toBeVisible();
     expect(documents).toBe(3);
   });

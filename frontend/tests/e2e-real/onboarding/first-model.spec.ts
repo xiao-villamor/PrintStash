@@ -225,7 +225,7 @@ test.describe("Browser onboarding", () => {
       await page.getByRole("button", { name: "Don't show again", exact: true }).click();
       await page.reload();
       await expect(
-        page.getByRole("heading", { name: "Settings", exact: true, level: 1 }),
+        page.getByRole("heading", { name: "Overview", exact: true, level: 1 }),
       ).toBeVisible();
       await expect(
         page.getByRole("button", { name: "Resume the getting-started guide" }),
@@ -258,7 +258,7 @@ test.describe("Browser onboarding", () => {
       ).toBeVisible();
       await page.goto("/settings");
       await expect(
-        page.getByRole("heading", { name: "Settings", exact: true, level: 1 }),
+        page.getByRole("heading", { name: "Overview", exact: true, level: 1 }),
       ).toBeVisible();
       await expect(
         page.getByRole("button", { name: "Resume the getting-started guide" }),

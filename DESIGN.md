@@ -14,7 +14,8 @@ only when nothing fits, and add it as a token, never as a one-off value.**
 PrintStash is a **productivity app** for working with a print library. Its
 OpenDesign language is compact and technical: neutral surfaces, fine dividers,
 square controls, and restrained blue for actions. Inter carries interface text;
-JetBrains Mono is reserved for compact technical values and labels. Motion is
+JetBrains Mono is reserved for compact technical values and labels outside
+Settings. Settings uses Inter throughout. Motion is
 subtle, fast, and functional. It explains a change or confirms an action; it
 never turns routine navigation into a performance.
 
@@ -158,7 +159,15 @@ only where a small file's exact size helps a technical task.
 Format stored durations as hours and minutes in filter summaries; keep the input
 unit explicit wherever users enter a number.
 
-Dense document workflows such as Profiles, Settings, and Pending Imports use a
+**Settings uses open rows.** Its header and sections share one centered
+47.5rem reading column inside `PageContainer`. The page heading names the open
+section. A group is a 15px heading and description above a fine rule, followed
+by rows on the column edge: no outer frame, icon tile or indent. Keep borders for
+real sub-forms, choice lists and empty states. Compose `SettingsCard` or
+`SettingsGroupHead`; a shared section wrapper that also appears outside Settings
+takes `settings-flat`. Settings values, labels and inputs use Inter.
+
+Other dense document workflows such as Profiles and Pending Imports use a
 shared visual grammar: **one framed work surface**, not a collection of loose
 status cards. The frame keeps controls, context, rows, loading, and empty states
 visually attached to the same task.
@@ -184,8 +193,8 @@ the app's compact tool-panel hierarchy. Nested bordered groups are appropriate
 only when they represent a real sub-form, table, or independently editable
 unit.
 
-Use mono uppercase micro-labels for technical fields and table-like headers,
-not for primary titles or prose. Keep primary blue for actions that start work;
+Outside Settings, use mono uppercase micro-labels for technical fields and
+table-like headers, not for primary titles or prose. Keep primary blue for actions that start work;
 status and selection use their semantic tokens. On narrow screens, rows stack
 into a readable content band and a separate action band. Text gets `min-w-0`
 and may wrap; actions must remain reachable without horizontal scrolling.
@@ -445,7 +454,7 @@ these calls at zero.
 | `Drawer` | The above, sliding from an edge, interruptible mid-flight |
 | `DropdownMenu` | Origin-aware scale/fade, outside-`pointerdown` dismiss, Escape refocuses trigger, arrow-key roving |
 | `TabBar` | ARIA `tablist`, arrow-key nav, sliding indicator |
-| `Switch` | The one binary toggle: square 36×20 track, On/Off written as text |
+| `Switch` | The one binary toggle: square 36×20 track, solid when on and empty when off, On/Off written as text |
 | `Input`, `Checkbox`, `Badge`, `Spinner`, `EmptyState`, `Card`, `Skeleton` | Token-correct defaults |
 
 `Button` variants: `default` is the one filled primary action of a group,
@@ -461,7 +470,7 @@ uppercase.
 (`SETTINGS_BUTTON_PRIMARY`, `SETTINGS_BUTTON`, `SETTINGS_BUTTON_DANGER`,
 `SETTINGS_FIELD`). A Settings panel uses these instead of its own header,
 toggle, callout, status chip or button classes: every button is 34px/13px,
-statuses are aligned text, and notices are neutral panels whose tone is only a
+statuses are aligned Inter text, and notices are neutral panels whose tone is only a
 small icon. Rows place label and help on the left and the control on the
 right (`settings-preference-row`); lists use `settings-list-row`.
 
@@ -498,6 +507,6 @@ Supporting hooks in `frontend/src/lib/`:
 6. New movement is registered in the reduced-motion block, at matching
    specificity.
 7. Nothing over 300ms. Nothing bounces.
-8. Dense workflows use one framed work surface. Related rows share its frame,
+8. Dense workflows outside Settings use one framed work surface. Related rows share its frame,
    and loading and empty states remain inside it instead of becoming loose page
    content.
