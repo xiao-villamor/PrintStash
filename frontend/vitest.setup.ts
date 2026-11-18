@@ -33,18 +33,16 @@ if (!("ResizeObserver" in globalThis)) {
 
 // jsdom has no media queries or animation clock. Ask for reduced motion, so content
 // is shown at once, unless a test supplies its own matcher.
-if (!("matchMedia" in window)) {
-  window.matchMedia = (query) => ({
-    matches: query.includes("prefers-reduced-motion: reduce"),
-    media: query,
-    onchange: null,
-    addEventListener() {},
-    removeEventListener() {},
-    addListener() {},
-    removeListener() {},
-    dispatchEvent: () => false,
-  });
-}
+window.matchMedia = (query) => ({
+  matches: query.includes("prefers-reduced-motion: reduce"),
+  media: query,
+  onchange: null,
+  addEventListener() {},
+  removeEventListener() {},
+  addListener() {},
+  removeListener() {},
+  dispatchEvent: () => false,
+});
 
 // jsdom does not implement CSS.supports. Report features as unavailable, so code
 // behind a support check takes its fallback unless a test opts in.
