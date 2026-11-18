@@ -1332,7 +1332,6 @@
   "STATE": "ESTADO",
   "Status": "Estado",
   "Store in": "Guardar en",
-  "Sync status": "Estado de sincronización",
   "Tasks": "Tareas",
   "This document is empty.": "Este documento está vacío.",
   "This halts the printer immediately and requires a firmware restart.": "Esto detiene la impresora de inmediato y requiere reiniciar el firmware.",
@@ -5181,7 +5180,6 @@
   "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.": "Este 3MF no contiene G-code laminado. Lamínalo en Bambu Studio u OrcaSlicer y sube el archivo laminado.",
   "Sliced plates": "Placas laminadas",
   "No G-code revision yet. Add a revision to capture the settings that worked.": "Todavía no hay revisiones G-code. Añade una revisión para guardar los ajustes que funcionaron.",
-  "No G-code revision": "Sin revisión G-code",
   "No G-code yet": "Sin G-code todavía",
   "Not printed yet": "Todavía no se ha impreso",
   "library.cardOutcome": "{result} {count}× en {printer}",
@@ -5251,5 +5249,8 @@
   "One thumbnail": "Una miniatura",
   "Oblique views": "Vistas oblicuas",
   "Oblique views + top and bottom": "Vistas oblicuas + superior e inferior",
-  "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Empieza con una miniatura para importar más rápido. Activa cuatro vistas oblicuas y, opcionalmente, las vistas superior e inferior. Los modelos existentes se actualizan en segundo plano."
+  "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Empieza con una miniatura para importar más rápido. Activa cuatro vistas oblicuas y, opcionalmente, las vistas superior e inferior. Los modelos existentes se actualizan en segundo plano.",
+  "Add a Revision to keep the settings that worked.": "Añade una revisión para guardar los ajustes que funcionaron.",
+  "None yet": "Aún ninguno",
+  "Details": "Detalles"
 }
