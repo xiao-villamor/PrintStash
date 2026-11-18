@@ -4149,9 +4149,13 @@
   "aiSearch.listView": "Vista de lista",
   "aiSearch.backToLibrary": "Volver a la biblioteca",
   "aiSearch.searchOptions": "Opciones de búsqueda",
-  "aiSearch.resultsShown": {
-    "one": "{count} resultado mostrado",
-    "other": "{count} resultados mostrados"
+  "aiSearch.resultsCount": {
+    "one": "{count} resultado",
+    "other": "{count} resultados"
+  },
+  "aiSearch.resultsCountMore": {
+    "one": "{count}+ resultados",
+    "other": "{count}+ resultados"
   },
   "aiSearch.timeout": "La búsqueda ha tardado demasiado. Inténtalo de nuevo.",
   "aiSearch.setupPermissions": "Permisos de IA",
