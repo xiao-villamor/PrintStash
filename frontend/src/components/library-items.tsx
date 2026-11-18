@@ -20,6 +20,11 @@ import {
   type LibraryReadingRenderer,
 } from "@/features/library/reading-position";
 import { cn } from "@/lib/utils";
+import {
+  clampInspectorWidth,
+  LIBRARY_INSPECTOR_MAX_WIDTH,
+  LIBRARY_INSPECTOR_MIN_WIDTH,
+} from "./use-inspector-motion";
 import "./library-items.css";
 
 const NATIVE_RENDER_LIMIT = 120;
@@ -51,6 +56,8 @@ function fittedTrack(width: number, preferredWidth: number, gap: number) {
 }
 
 export interface LibraryInspectorDock {
+  maxWidth: number;
+  custom: boolean;
   width: number;
   paddingOffset: number;
 }
@@ -67,9 +74,11 @@ interface LibraryItemsProps<T> {
   estimateSize?: number;
   /** Keep the closed grid's tracks while the docked inspector consumes space. */
   freezeInspectorTracks?: boolean;
-  /** Only the Model grid owns the dock's width. */
+  /** Only the Model results measure the dock's width. */
   onInspectorDockChange?: (dock: LibraryInspectorDock | null) => void;
   inspectorDockLocked?: boolean;
+  preferredInspectorWidth?: number | null;
+  appliedInspectorCustomWidth?: boolean;
   /** A production-build comparison can disable the renderer without changing cards or data. */
   virtualize?: boolean;
   className?: string;
@@ -98,6 +107,8 @@ export function LibraryItems<T>({
   freezeInspectorTracks = false,
   onInspectorDockChange,
   inspectorDockLocked = false,
+  preferredInspectorWidth = null,
+  appliedInspectorCustomWidth = false,
   extraColumns = 0,
   minCardWidth,
   onColumnsChange,
@@ -110,8 +121,11 @@ export function LibraryItems<T>({
     width: 0,
     height: 0,
     closedFrameWidth: 0,
+    inspectorMaxWidth: 0,
     inspectorWidth: 0,
+    inspectorCustomWidth: false,
     inspectorPaddingOffset: 0,
+    closedTrack: 0,
     track: 0,
     preferredWidth: 0,
     gap: 0,
@@ -188,9 +202,7 @@ export function LibraryItems<T>({
       const style =
         onInspectorDockChange || freezeInspectorTracks ? getComputedStyle(scroll) : null;
       const dockWidth =
-        freezeInspectorTracks && layout === "grid" && style
-          ? Math.round(parseFloat(style.paddingRight))
-          : 0;
+        freezeInspectorTracks && style ? Math.round(parseFloat(style.paddingRight)) : 0;
       const docked = dockWidth > 0;
       // A scrollbar can appear as the cards rewrap. The outer frame tells us
       // whether the closed layout itself changed or just the open grid did.
@@ -216,34 +228,59 @@ export function LibraryItems<T>({
           previous.closedFrameWidth === closedFrameWidth &&
           previous.preferredWidth === preferredWidth &&
           previous.gap === gap;
-        const nextTrack =
+        const closedTrack =
           layout === "list"
             ? 0
             : frozen
-              ? previous.track
+              ? previous.closedTrack
               : fittedTrack(measuredWidth + dockWidth, preferredWidth, gap);
         let width = measuredWidth;
+        let inspectorMaxWidth = 0;
         let inspectorWidth = 0;
+        let inspectorCustomWidth = false;
         let inspectorPaddingOffset = 0;
-        if (inspector && nextTrack > 0) {
+        if (inspector) {
           const { baseWidth, reservedSpace } = inspector;
+          const maxWidth = Math.min(
+            LIBRARY_INSPECTOR_MAX_WIDTH,
+            Math.floor(closedFrameWidth - reservedSpace - (closedTrack || CARD_WIDTH)),
+          );
+          inspectorMaxWidth = maxWidth;
           const available = closedFrameWidth - baseWidth - reservedSpace;
-          if (available >= nextTrack) {
-            const columns = fittingColumns(available, nextTrack, gap);
-            const gridWidth = columns * nextTrack + (columns - 1) * gap;
-            inspectorWidth = Math.round(closedFrameWidth - reservedSpace - gridWidth);
-            // The scrollbar occupies part of the gap between the cards and panel.
+          if (preferredInspectorWidth !== null && maxWidth >= LIBRARY_INSPECTOR_MIN_WIDTH) {
+            inspectorWidth = clampInspectorWidth(preferredInspectorWidth, maxWidth);
+            inspectorCustomWidth = true;
             inspectorPaddingOffset = reservedSpace - scrollbarWidth;
-            // Commit the row and dock together unless the spring is holding
-            // the applied width until it comes to rest.
-            if (docked && !inspectorDockLocked) width = gridWidth;
+          } else if (layout === "grid" && available >= closedTrack) {
+            const columns = fittingColumns(available, closedTrack, gap);
+            const gridWidth = columns * closedTrack + (columns - 1) * gap;
+            inspectorWidth = Math.round(closedFrameWidth - reservedSpace - gridWidth);
+            inspectorPaddingOffset = reservedSpace - scrollbarWidth;
+          } else {
+            inspectorWidth = baseWidth;
+            inspectorPaddingOffset = 12;
           }
+          // Size the grid and the dock in the same layout pass. During the
+          // spring, the measured row already reflects the locked padding.
+          const fitted = inspectorCustomWidth || (layout === "grid" && available >= closedTrack);
+          if (docked && !inspectorDockLocked && fitted)
+            width = closedFrameWidth - reservedSpace - inspectorWidth;
         }
         const nextColumns =
-          layout === "list" ? 1 : fittingColumns(width, docked ? nextTrack : preferredWidth, gap);
+          layout === "list" ? 1 : fittingColumns(width, docked ? closedTrack : preferredWidth, gap);
+        const customTracks =
+          layout === "grid" &&
+          docked &&
+          (inspectorDockLocked ? appliedInspectorCustomWidth : inspectorCustomWidth);
+        const nextTrack = customTracks
+          ? (width - (nextColumns - 1) * gap) / nextColumns
+          : closedTrack;
         if (
           previous.columns === nextColumns &&
           previous.track === nextTrack &&
+          previous.closedTrack === closedTrack &&
+          previous.inspectorMaxWidth === inspectorMaxWidth &&
+          previous.inspectorCustomWidth === inspectorCustomWidth &&
           previous.closedFrameWidth === closedFrameWidth &&
           previous.inspectorWidth === inspectorWidth &&
           previous.inspectorPaddingOffset === inspectorPaddingOffset &&
@@ -253,7 +290,7 @@ export function LibraryItems<T>({
           Math.abs(previous.margin - margin) < 1 &&
           // Tracks are derived from the measured width, which is never
           // measured while the pane moves (see above).
-          (previous.width === width || layout === "list") &&
+          previous.width === width &&
           previous.height === scroll.clientHeight
         )
           return previous;
@@ -282,7 +319,7 @@ export function LibraryItems<T>({
         const anchor = Array.from(node.querySelectorAll<HTMLElement>("[data-library-key]")).find(
           (candidate) => candidate.getBoundingClientRect().bottom > bounds.top,
         );
-        if (resized && anchor?.dataset.libraryKey)
+        if (resized && !restore.current && anchor?.dataset.libraryKey)
           restore.current = {
             key: anchor.dataset.libraryKey,
             offset: anchor.getBoundingClientRect().top - bounds.top,
@@ -293,8 +330,11 @@ export function LibraryItems<T>({
           width,
           height: scroll.clientHeight,
           closedFrameWidth,
+          inspectorMaxWidth,
           inspectorWidth,
+          inspectorCustomWidth,
           inspectorPaddingOffset,
+          closedTrack,
           track: nextTrack,
           preferredWidth,
           gap,
@@ -339,14 +379,30 @@ export function LibraryItems<T>({
     freezeInspectorTracks,
     onInspectorDockChange,
     inspectorDockLocked,
+    preferredInspectorWidth,
+    appliedInspectorCustomWidth,
   ]);
 
-  const { inspectorWidth, inspectorPaddingOffset } = geometry;
+  const { inspectorMaxWidth, inspectorWidth, inspectorCustomWidth, inspectorPaddingOffset } =
+    geometry;
   useLayoutEffect(() => {
     onInspectorDockChange?.(
-      inspectorWidth ? { width: inspectorWidth, paddingOffset: inspectorPaddingOffset } : null,
+      inspectorWidth
+        ? {
+            width: inspectorWidth,
+            maxWidth: inspectorMaxWidth,
+            custom: inspectorCustomWidth,
+            paddingOffset: inspectorPaddingOffset,
+          }
+        : null,
     );
-  }, [inspectorWidth, inspectorPaddingOffset, onInspectorDockChange]);
+  }, [
+    inspectorMaxWidth,
+    inspectorWidth,
+    inspectorCustomWidth,
+    inspectorPaddingOffset,
+    onInspectorDockChange,
+  ]);
 
   useLayoutEffect(() => {
     return () => onInspectorDockChange?.(null);

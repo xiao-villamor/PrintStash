@@ -5,14 +5,17 @@
   right: 12px;
   bottom: 12px;
   width: var(--workbench-sidebar-width);
-  overflow-y: auto;
-  overflow-anchor: none;
   border: 1px solid var(--border);
   box-shadow: 0 16px 40px var(--dialog-shadow);
   background: var(--card);
   color: var(--foreground);
   font-size: 13px;
   line-height: 1.4;
+}
+.library-inspector-scroll {
+  height: 100%;
+  overflow-y: auto;
+  overflow-anchor: none;
 }
 .library-inspector-header {
   position: sticky;
@@ -216,6 +219,7 @@
   align-items: center;
   justify-content: center;
   aspect-ratio: 4 / 3;
+  max-height: 300px;
   margin-bottom: 12px;
   width: 100%;
   overflow: hidden;
@@ -338,21 +342,15 @@
 /* Docked: the library reserves the inspector's column, so the grid reflows to
    fewer columns instead of disappearing under the panel. Not animated. */
 @media (min-width: 1024px) {
-  main[data-inspector-grid] {
+  main[data-inspector-layout] {
     --library-inspector-inset: 12px;
     --library-inspector-gutter: 24px;
+  }
+  main[data-inspector-grid] {
     scrollbar-gutter: stable;
   }
   .library-model-inspector {
     width: var(--library-inspector-width, var(--workbench-sidebar-width));
-  }
-  .library-inspector-preview {
-    /* Fill the panel width; wide docks stop growing taller at 300px. */
-    aspect-ratio: auto;
-    height: min(
-      300px,
-      calc((var(--library-inspector-width, var(--workbench-sidebar-width)) - 34px) * 0.75)
-    );
   }
   main[data-inspector-open] {
     padding-right: calc(
@@ -361,8 +359,6 @@
     );
   }
 }
-/* Technical values stay on one line in the narrow panel. */
 .library-inspector-section .library-inspector-properties dd {
   font-size: 12px;
-  white-space: nowrap;
 }

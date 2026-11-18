@@ -26,6 +26,10 @@ import {
   type LibraryReadingRenderer,
 } from "@/features/library/reading-position";
 import { LibraryItems, type LibraryInspectorDock } from "@/components/library-items";
+import {
+  LIBRARY_INSPECTOR_MAX_WIDTH,
+  LIBRARY_INSPECTOR_MIN_WIDTH,
+} from "@/components/use-inspector-motion";
 import { PANE_MOVING_EVENT, PANE_SETTLED_EVENT } from "@/components/use-collections-pane-motion";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { useModelOpenIntent } from "@/features/library/model-detail";
@@ -692,6 +696,21 @@ export interface BrowserInitialData {
   models: ModelListItem[];
   tags: TagRead[];
   printers: PrinterRead[];
+}
+
+const INSPECTOR_WIDTH_KEY = "ps-library-inspector-width";
+
+function storedInspectorWidth() {
+  try {
+    const width = Number(localStorage.getItem(INSPECTOR_WIDTH_KEY));
+    return Number.isSafeInteger(width) &&
+      width >= LIBRARY_INSPECTOR_MIN_WIDTH &&
+      width <= LIBRARY_INSPECTOR_MAX_WIDTH
+      ? width
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 type InspectorIntent = { id: number; open: boolean };
@@ -2314,10 +2333,23 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     !authority.authorizationChanged &&
     visibleModels.length > 0;
   const inspectorOpen = inspectorAvailable && !!inspectorIntent?.open;
+  const [preferredInspectorWidth, setPreferredInspectorWidth] = useState(storedInspectorWidth);
+  const chooseInspectorWidth = useCallback((width: number | null) => {
+    setPreferredInspectorWidth(width);
+    try {
+      if (width === null) localStorage.removeItem(INSPECTOR_WIDTH_KEY);
+      else localStorage.setItem(INSPECTOR_WIDTH_KEY, String(width));
+    } catch {
+      // The width remains usable for this session.
+    }
+  }, []);
   const [inspectorDock, setInspectorDock] = useState<LibraryInspectorDock | null>(null);
   const receiveInspectorDock = useCallback((dock: LibraryInspectorDock | null) => {
     setInspectorDock((previous) =>
-      previous?.width === dock?.width && previous?.paddingOffset === dock?.paddingOffset
+      previous?.width === dock?.width &&
+      previous?.paddingOffset === dock?.paddingOffset &&
+      previous?.custom === dock?.custom &&
+      previous?.maxWidth === dock?.maxWidth
         ? previous
         : dock,
     );
@@ -2326,8 +2358,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     open: boolean;
     locked: { dock: LibraryInspectorDock | null } | null;
   }>({ open: inspectorOpen, locked: inspectorOpen ? { dock: null } : null });
-  const gridDock = viewMode === "grid" ? inspectorDock : null;
-  const appliedDock = inspectorMotion.locked ? inspectorMotion.locked.dock : gridDock;
+  const appliedDock = inspectorMotion.locked ? inspectorMotion.locked.dock : inspectorDock;
   if (inspectorMotion.open !== inspectorOpen) {
     // The spring's travel is relative to its width. Hold the current width
     // through the entrance, exit, or a reversal, then apply the latest fit.
@@ -2982,7 +3013,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             className="h-8 w-full gap-2 aria-expanded:bg-accent aria-expanded:text-accent-foreground"
           >
             <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            {uiText("Filters")}
+            <span className="library-toolbar-filter-label">{uiText("Filters")}</span>
             {activeFilterItems.length > Number(!!query.trim()) && (
               <span className="text-xs tabular-nums text-muted-foreground">
                 {activeFilterItems.length - Number(!!query.trim())}
@@ -3393,7 +3424,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           aria-busy={reading.status === "restoring"}
           data-inspector-open={inspectorOpen || undefined}
           data-inspector-grid={(docView === "models" && viewMode === "grid") || undefined}
-          data-inspector-compact-dock={(compact && !!appliedDock) || undefined}
+          data-inspector-layout={docView === "models" ? viewMode : undefined}
+          data-inspector-compact-dock={
+            (viewMode === "grid" && compact && !!appliedDock) || undefined
+          }
           style={inspectorDockStyle}
           className="@container/library relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-background pb-24 md:pb-0"
           onDragEnter={onMainDragEnter}
@@ -4067,6 +4101,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       freezeInspectorTracks={inspectorOpen}
                       onInspectorDockChange={receiveInspectorDock}
                       inspectorDockLocked={inspectorMotion.locked !== null}
+                      preferredInspectorWidth={preferredInspectorWidth}
+                      appliedInspectorCustomWidth={appliedDock?.custom}
                       estimateSize={compact ? 290 : 250}
                       compact={compact}
                     />
@@ -4183,6 +4219,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         readingRenderers={readingRenderers}
                         readingId="models"
                         layout="list"
+                        freezeInspectorTracks={inspectorOpen}
+                        onInspectorDockChange={receiveInspectorDock}
+                        inspectorDockLocked={inspectorMotion.locked !== null}
+                        preferredInspectorWidth={preferredInspectorWidth}
                       />
                     </div>
                     <LoadMore
@@ -4206,6 +4246,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             open={inspectorOpen}
             style={inspectorDockStyle}
             onMotionSettled={settleInspectorDock}
+            resize={
+              appliedDock && appliedDock.maxWidth >= LIBRARY_INSPECTOR_MIN_WIDTH
+                ? {
+                    current: appliedDock.width,
+                    max: appliedDock.maxWidth,
+                    locked: inspectorMotion.locked !== null,
+                    onResize: chooseInspectorWidth,
+                  }
+                : null
+            }
             origin={snapshot?.entry}
             canWrite={auth.isAuthenticated && !authority.authorizationChanged && inspectorOpen}
             onOpenPage={() => reading.rememberAnchor(`/models/${inspectorIntent.id}`)}

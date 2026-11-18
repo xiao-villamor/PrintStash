@@ -340,7 +340,7 @@
 @media (min-width: 1024px) {
   [data-inspector-open][data-inspector-compact-dock]
     :is(.library-collection-header, .library-model-toolbar-wrap) {
-    padding-right: 12px;
+    padding-inline: 12px;
   }
   @container library (720px <= width < 1250px) {
     [data-inspector-open] .library-model-toolbar .library-toolbar-label {
@@ -349,6 +349,10 @@
     [data-inspector-open] .library-model-toolbar button:has(> .library-toolbar-label) {
       width: 32px;
       padding-inline: 0;
+    }
+    /* Compact icons must not move the cards beneath the toolbar. */
+    [data-inspector-open] .library-model-toolbar {
+      min-height: 36px;
     }
     [data-inspector-open] .library-model-toolbar,
     [data-inspector-open] .library-model-toolbar .library-toolbar-filters,
@@ -362,6 +366,12 @@
       flex: 1 1 auto;
       justify-content: flex-end;
       width: auto;
+    }
+    [data-inspector-open]
+      .library-model-toolbar
+      .library-display-controls
+      > :not(.library-folder-search) {
+      flex: none;
     }
     [data-inspector-open] .library-model-toolbar .library-folder-search {
       width: auto;
@@ -385,6 +395,15 @@
       button:not([class*="library-toolbar-sort"]):has(> svg:only-child) {
       width: 32px;
       height: 32px;
+    }
+  }
+  @container library (720px <= width < 800px) {
+    [data-inspector-open] .library-model-toolbar .library-toolbar-filter-label {
+      display: none;
+    }
+    [data-inspector-open] .library-model-toolbar button:has(> .library-toolbar-filter-label) {
+      width: 32px;
+      padding-inline: 0;
     }
   }
   @container library (720px <= width < 960px) {
