@@ -4855,6 +4855,7 @@
   "No files selected": "No files selected",
   "Library destination": "Library destination",
   "Optional. Uses the selected filename when left blank.": "Optional. Uses the selected filename when left blank.",
+  "Uses the filename if blank": "Uses the filename if blank",
   "PrintStash stores existing files. It does not slice Models or verify G-code safety.": "PrintStash stores existing files. It does not slice Models or verify G-code safety.",
   "Add tag": "Add tag",
   "settings.subtitle.trash": "Deleted Models stay restorable until the retention window expires.",

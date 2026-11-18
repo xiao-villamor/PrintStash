@@ -552,7 +552,7 @@ export function UploadModal({
 
           <div
             ref={modeMotion}
-            className="upload-mode-content space-y-5"
+            className={onboarding ? "upload-mode-content space-y-5" : "upload-mode-content"}
             role={onboarding ? undefined : "tabpanel"}
             aria-label={onboarding ? undefined : t(`uploads.mode.${mode}`)}
           >
@@ -595,7 +595,7 @@ export function UploadModal({
                 </p>
               </div>
             ) : mode === "files" ? (
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              <div className="upload-source upload-file-slots">
                 <FileSlot
                   label={uiText("3D model / resin slice")}
                   accept={SOURCE_ACCEPT}
@@ -641,14 +641,20 @@ export function UploadModal({
             )}
 
             {!onboarding && (
-              <h4 className="text-sm font-semibold">{uiText("Library destination")}</h4>
+              <h4 id="upload-destination-heading" className="upload-destination-heading">
+                {uiText("Library destination")}
+              </h4>
             )}
-            <div className={onboarding ? "space-y-5" : "grid grid-cols-1 gap-5 sm:grid-cols-2"}>
+            <div
+              className={onboarding ? "space-y-5" : "upload-destination-grid"}
+              role={onboarding ? undefined : "group"}
+              aria-labelledby={onboarding ? undefined : "upload-destination-heading"}
+            >
               {mode === "files" && (
                 <div>
                   <label
                     htmlFor="upload-model-name"
-                    className="block text-sm font-medium text-on-surface mb-2"
+                    className="upload-field-label block text-sm font-medium text-on-surface mb-2"
                   >
                     {uiText("Model name")}
                   </label>
@@ -656,12 +662,16 @@ export function UploadModal({
                     id="upload-model-name"
                     value={modelName}
                     onChange={(e) => setModelName(e.target.value)}
-                    className="h-10 w-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                    placeholder={uiText("e.g. Bracket v2")}
+                    className="upload-field h-10 w-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    placeholder={
+                      onboarding ? uiText("e.g. Bracket v2") : uiText("Uses the filename if blank")
+                    }
                   />
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {uiText("Optional. Uses the selected filename when left blank.")}
-                  </p>
+                  {onboarding && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {uiText("Optional. Uses the selected filename when left blank.")}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -670,7 +680,7 @@ export function UploadModal({
                 <>
                   {/* Collection */}
                   <div>
-                    <label className="mb-2 block text-sm text-foreground">
+                    <label className="upload-field-label mb-2 block text-sm text-foreground">
                       {uiText("Collection")}
                     </label>
                     <DropdownMenu
@@ -688,7 +698,7 @@ export function UploadModal({
                           aria-haspopup="dialog"
                           aria-expanded={catOpen}
                           title={selectedCollectionLabel || undefined}
-                          className="flex h-10 w-full min-w-0 items-center gap-2 border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          className="upload-field flex w-full min-w-0 items-center gap-2 border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                         >
                           <span
                             className={`min-w-0 flex-1 truncate text-left ${collectionPath ? "" : "text-on-surface-variant/60"}`}
@@ -718,7 +728,7 @@ export function UploadModal({
                   {/* Destination (mounted-source write-back) — only when an eligible source exists */}
                   {sourceMode && (
                     <div>
-                      <label className="mb-2 block text-sm text-foreground">
+                      <label className="upload-field-label mb-2 block text-sm text-foreground">
                         {uiText("Store in")}
                       </label>
                       <select
@@ -727,7 +737,7 @@ export function UploadModal({
                         onChange={(e) =>
                           setTargetLibraryId(e.target.value === "" ? "" : Number(e.target.value))
                         }
-                        className="h-10 w-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                        className="upload-field w-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                       >
                         <option value="">{uiText("Vault storage")}</option>
                         {sourceSelected && !selectedAvailable && (
@@ -754,8 +764,12 @@ export function UploadModal({
                   )}
 
                   {/* Tags */}
-                  <div className={mode === "files" ? "min-w-0" : "min-w-0 sm:col-span-2"}>
-                    <label className="mb-2 block text-sm text-foreground">{uiText("Tags")}</label>
+                  <div
+                    className={mode === "bulk" && sourceMode ? "min-w-0 sm:col-span-2" : "min-w-0"}
+                  >
+                    <label className="upload-field-label mb-2 block text-sm text-foreground">
+                      {uiText("Tags")}
+                    </label>
                     <div className="flex items-start gap-2">
                       <DropdownMenu
                         portal
@@ -785,7 +799,7 @@ export function UploadModal({
                               }
                             }}
                             placeholder={uiText("Search or create — press Enter")}
-                            className="h-10 w-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                            className="upload-field w-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                           />
                         }
                       >
@@ -834,7 +848,7 @@ export function UploadModal({
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-10 shrink-0"
+                        className="upload-field shrink-0"
                         disabled={!tagInput.trim() || pendingTagCount > 0}
                         onClick={() => {
                           const found = tags.find(
@@ -903,15 +917,15 @@ export function UploadModal({
                 )}
               </div>
             )}
+          </div>
+          <div className="upload-dialog-actions flex justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
             {!onboarding && (
-              <p className="pb-1 text-xs text-muted-foreground">
+              <p className="upload-storage-note min-w-0 flex-1 text-xs text-muted-foreground">
                 {uiText(
                   "PrintStash stores existing files. It does not slice Models or verify G-code safety.",
                 )}
               </p>
             )}
-          </div>
-          <div className="upload-dialog-actions flex justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
             <Button type="button" variant="outline" onClick={close} size="sm">
               {uiText("Cancel")}
             </Button>
@@ -980,8 +994,8 @@ function FileSlot({
   // highlight off — only a real leave (depth back to 0) clears it.
   const dragDepth = useRef(0);
   return (
-    <div>
-      <span className="mb-2 block text-sm text-foreground">{label}</span>
+    <div className="upload-file-slot">
+      <span className="upload-field-label mb-2 block text-sm text-foreground">{label}</span>
       <div
         onClick={() => {
           if (!file) inputRef.current?.click();
@@ -1017,7 +1031,7 @@ function FileSlot({
           }
           setFile(dropped);
         }}
-        className={`flex min-h-[104px] items-start justify-between gap-3 border border-dashed px-4 py-3 transition-colors duration-fast ease-out cursor-action ${
+        className={`upload-drop-zone flex flex-col items-center justify-center gap-2 border border-dashed px-4 py-3 text-center transition-colors duration-fast ease-out cursor-action ${
           dragActive
             ? "border-ring bg-muted"
             : file
@@ -1026,7 +1040,7 @@ function FileSlot({
         }`}
       >
         {file ? (
-          <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="flex w-full min-w-0 items-center gap-2">
             <FileIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             <span className="text-xs font-medium text-on-surface truncate">{file.name}</span>
             <span className="font-mono text-3xs text-on-surface-variant flex-shrink-0">
@@ -1046,13 +1060,14 @@ function FileSlot({
           </div>
         ) : (
           <>
-            <Upload className="mt-2 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
+            <Upload className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+            <div className="min-w-0 max-w-full">
+              <div className="flex flex-wrap items-center justify-center gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
+                  className="upload-field"
                   aria-label={uiText("Choose file for {value1}", { value1: label })}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -1152,7 +1167,7 @@ export function BulkFiles({
 
   const compact = items.length > 0 || !!archive;
   return (
-    <div className="space-y-3">
+    <div className="upload-source upload-bulk-source">
       <div
         onDragEnter={(e) => {
           e.preventDefault();
@@ -1171,8 +1186,8 @@ export function BulkFiles({
           }
         }}
         onDrop={handleDrop}
-        className={`flex items-center gap-3 border border-dashed px-4 text-center transition-colors duration-fast ease-out ${
-          compact ? "flex-wrap py-2" : "min-h-[150px] flex-col justify-center py-5"
+        className={`upload-drop-zone flex items-center justify-center gap-3 border border-dashed px-4 text-center transition-colors duration-fast ease-out ${
+          compact ? "flex-wrap content-center py-2" : "flex-col py-5"
         } ${dragActive ? "border-ring bg-muted" : "border-input bg-muted/20"}`}
       >
         <Upload className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
@@ -1182,6 +1197,7 @@ export function BulkFiles({
             type="button"
             variant="outline"
             size="sm"
+            className="upload-field"
             onClick={() => fileInputRef.current?.click()}
           >
             {uiText("Choose files")}
@@ -1190,13 +1206,16 @@ export function BulkFiles({
             type="button"
             variant="outline"
             size="sm"
+            className="upload-field"
             onClick={() => folderInputRef.current?.click()}
           >
             {uiText("Choose folder")}
           </Button>
         </div>
         {!compact && (
-          <p className="text-xs text-muted-foreground">{bulkAccept.replaceAll(",", " ")}</p>
+          <p className="max-w-full break-words text-xs text-muted-foreground">
+            {bulkAccept.replaceAll(",", " ")}
+          </p>
         )}
       </div>
       {!archive && (

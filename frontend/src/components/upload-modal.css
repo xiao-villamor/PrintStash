@@ -7,7 +7,7 @@
 }
 .upload-dialog-standard {
   max-width: 880px;
-  height: min(760px, calc(100dvh - 32px));
+  height: min(640px, calc(100dvh - 32px));
 }
 .upload-dialog-onboarding {
   max-width: 512px;
@@ -78,6 +78,83 @@
   padding: 24px;
   transform-origin: center top;
 }
+.upload-dialog-standard .upload-dialog-heading {
+  padding-block: 16px;
+}
+.upload-dialog-standard .upload-mode-content {
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  /* Keep the form aligned with the tabs and footer even when the queue scrolls. */
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
+  padding: 16px 24px 20px;
+}
+.upload-source,
+.upload-drop-zone {
+  flex: 1 0 auto;
+  min-width: 0;
+}
+.upload-file-slots,
+.upload-destination-grid {
+  display: grid;
+  column-gap: 16px;
+}
+.upload-file-slots {
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  row-gap: 16px;
+}
+.upload-file-slot,
+.upload-bulk-source {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.upload-bulk-source {
+  gap: 12px;
+}
+.upload-drop-zone {
+  min-height: 128px;
+  border-radius: 0;
+}
+.upload-bulk-source .upload-drop-zone {
+  min-height: 72px;
+}
+.upload-destination-heading {
+  margin: 16px 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.upload-destination-grid {
+  flex: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  row-gap: 14px;
+}
+.upload-destination-grid + [role="alert"] {
+  margin-top: 14px;
+}
+.upload-dialog-standard .upload-field-label {
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.upload-dialog-standard .upload-field {
+  height: 36px;
+  border-radius: 0;
+  font-size: 13px;
+}
+.upload-dialog-standard .upload-dialog-actions {
+  align-items: center;
+}
+.upload-dialog-standard .upload-dialog-actions > button {
+  flex-shrink: 0;
+}
+.upload-storage-note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
 .upload-dialog-standard .upload-dialog-actions > button:last-child {
   min-width: 160px;
 }
@@ -87,13 +164,23 @@
   }
 }
 @media (max-width: 639px) {
-  .upload-dialog-heading,
-  .upload-mode-content,
-  .upload-dialog-actions {
+  .upload-dialog-onboarding .upload-dialog-heading,
+  .upload-dialog-onboarding .upload-mode-content,
+  .upload-dialog-onboarding .upload-dialog-actions {
     padding: 16px;
   }
-  .upload-mode-tabs {
-    margin-inline: 16px;
+  .upload-file-slots,
+  .upload-destination-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .upload-dialog-standard .upload-dialog-actions {
+    flex-wrap: wrap;
+  }
+  .upload-storage-note {
+    flex-basis: 100%;
+  }
+  .upload-dialog-standard .upload-dialog-actions > button:last-child {
+    min-width: 0;
   }
   .upload-mode-tab {
     padding-inline: 10px;

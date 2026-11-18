@@ -4855,6 +4855,7 @@
   "No files selected": "Ningún archivo seleccionado",
   "Library destination": "Destino en la biblioteca",
   "Optional. Uses the selected filename when left blank.": "Opcional. Si se deja vacío, se usa el nombre del archivo seleccionado.",
+  "Uses the filename if blank": "Si se deja vacío, se usa el nombre del archivo",
   "PrintStash stores existing files. It does not slice Models or verify G-code safety.": "PrintStash almacena archivos existentes. No lamina modelos ni verifica la seguridad del G-code.",
   "Add tag": "Añadir etiqueta",
   "settings.subtitle.trash": "Los modelos eliminados se pueden restaurar hasta que venza el plazo de conservación.",
