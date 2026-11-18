@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from printstash_core.search.passages import (
     RECIPE_VERSION,
     SearchSubject,
+    SubjectType,
     access_identity,
     render_passages,
 )
@@ -27,9 +28,13 @@ from app.db.models.search import SearchDependency, SearchPassage
 from app.db.projections import ContentSource
 from app.modules.search import lexical_index
 from app.modules.search.configuration import settings
-from app.modules.search.dependencies import extraction_dependencies
+from app.modules.search.dependencies import extraction_dependencies, model_dependencies
 from app.modules.search.invalidation import invalidate_passage
-from app.modules.search.sources import SubjectProjection, project_subject
+from app.modules.search.sources import (
+    SubjectProjection,
+    project_models,
+    project_subject,
+)
 
 
 @dataclass(frozen=True)
@@ -53,15 +58,60 @@ class PreparedSubject:
     dependencies: frozenset[ContentSource]
 
 
-def prepare_subject(session: Session, subject: SearchSubject) -> PreparedSubject:
-    """Read ``subject``'s content projection; writes nothing."""
-    projection = project_subject(session, subject)
-    return PreparedSubject(
-        projection,
-        frozenset(extraction_dependencies(session, subject))
-        if projection
-        else frozenset(),
+def prepare_subjects(
+    session: Session, subjects: tuple[SearchSubject, ...]
+) -> tuple[tuple[SearchSubject, PreparedSubject], ...]:
+    """Read one bounded projection page without writing."""
+    models = project_models(
+        session,
+        tuple(s.subject_id for s in subjects if s.subject_type is SubjectType.MODEL),
     )
+    dependencies = model_dependencies(session, models)
+    prepared = []
+    for subject in subjects:
+        if subject.subject_type is SubjectType.MODEL:
+            model = models.get(subject.subject_id)
+            value = (
+                PreparedSubject(model.projection, dependencies[subject.subject_id])
+                if model is not None
+                else PreparedSubject(None, frozenset())
+            )
+        else:
+            projection = project_subject(session, subject)
+            value = PreparedSubject(
+                projection,
+                frozenset(extraction_dependencies(session, subject))
+                if projection
+                else frozenset(),
+            )
+        prepared.append((subject, value))
+    return tuple(prepared)
+
+
+@dataclass(frozen=True)
+class PassagePolicy:
+    captions_enabled: bool
+    versions: frozenset[int]
+
+
+def passage_policy(session: Session) -> PassagePolicy:
+    """Read shared recipe inputs from the writer transaction once per page."""
+    versions = {RECIPE_VERSION}
+    # A blue/green v2 build needs its passages before inference begins.
+    recipes = session.exec(
+        select(EmbeddingSpace.recipe_json)
+        .join(IndexGeneration, IndexGeneration.space_id == EmbeddingSpace.id)
+        .where(
+            EmbeddingSpace.profile == "semantic_text",
+            IndexGeneration.state.in_(("building", "ready", "active")),
+        )
+    ).all()
+    for recipe in recipes:
+        try:
+            versions.add(TextRecipe(**json.loads(recipe)).passage_version)
+        except TypeError, ValueError:
+            continue
+    return PassagePolicy(settings(session).captions_enabled, frozenset(versions))
 
 
 def sync_subject(
@@ -69,17 +119,18 @@ def sync_subject(
     subject: SearchSubject,
     *,
     prepared: PreparedSubject | None = None,
+    policy: PassagePolicy | None = None,
 ) -> PassageChanges:
     """Replace this recipe only; missing/trashed Subjects lose every recipe.
 
     The caller serializes writes to a Subject and owns commit/rollback. Stable
     passage IDs and hashes let later backfill workers distinguish an indexed
     content edit from unrelated bookkeeping without relying on timestamps.
-    ``prepared`` is that Subject's content read earlier by ``prepare_subject``;
+    ``prepared`` is that Subject's content read earlier by ``prepare_subjects``;
     without it the content is read here, inside the caller's transaction.
     """
     if prepared is None:
-        prepared = prepare_subject(session, subject)
+        ((_, prepared),) = prepare_subjects(session, (subject,))
     projection = prepared.projection
     dependencies = set(prepared.dependencies)
     previous = session.exec(
@@ -145,27 +196,23 @@ def sync_subject(
             caption.version_token = secrets.token_hex(16)
             session.add(caption)
             session.flush()
-    versions = {RECIPE_VERSION}
+    # Periodic reconciliation and direct writes can still repair a missing
+    # lexical entry. A routine projection page only indexes lexical changes.
+    refresh_lexical = policy is None
+    if policy is None:
+        policy = passage_policy(session)
+    versions = set(policy.versions)
     if (
         caption
-        or settings(session).captions_enabled
+        or policy.captions_enabled
         or any(row.recipe_version == 2 for row in rows)
     ):
         versions.add(2)
-    # A blue/green v2 build needs its passages before inference begins.
-    recipes = session.exec(
-        select(EmbeddingSpace.recipe_json)
-        .join(IndexGeneration, IndexGeneration.space_id == EmbeddingSpace.id)
-        .where(
-            EmbeddingSpace.profile == "semantic_text",
-            IndexGeneration.state.in_(("building", "ready", "active")),
-        )
-    ).all()
-    for recipe in recipes:
-        try:
-            versions.add(TextRecipe(**json.loads(recipe)).passage_version)
-        except TypeError, ValueError:
-            continue
+    latest_version = max(versions)
+    previous_latest = max(
+        (row.recipe_version for row in rows if row.recipe_version in versions),
+        default=None,
+    )
     existing = {
         (row.recipe_version, row.visibility_segment_key, row.chunk_index): row
         for row in rows
@@ -218,10 +265,15 @@ def sync_subject(
                     updated += 1
                 row.source_updated_at = projection.source_updated_at
                 session.add(row)
-                session.flush()
-                lexical_index.replace(
-                    session, row, old_lexical, deleted=version != max(versions)
-                )
+                deleted = version != latest_version
+                if (
+                    refresh_lexical
+                    or old_lexical is None
+                    or old_lexical != lexical_index.snapshot(row)
+                    or deleted != (version != previous_latest)
+                ):
+                    session.flush()
+                    lexical_index.replace(session, row, old_lexical, deleted=deleted)
     for row in existing.values():
         invalidate_passage(session, row.id)
         lexical_index.replace(session, row, lexical_index.snapshot(row), deleted=True)

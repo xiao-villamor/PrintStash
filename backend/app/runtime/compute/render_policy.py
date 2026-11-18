@@ -10,6 +10,7 @@ from app.modules.media.gpu_render_layout import (
     FRAME_STRIDE,
     VIEW_WORKSPACE_BYTES,
     upload_bytes,
+    view_bounds_sizes,
 )
 
 from .contracts import ComputeUnavailable, Reason
@@ -21,6 +22,7 @@ class RenderAdmission:
     attachment_bytes: int
     readback_bytes: int
     host_bytes: int
+    view_bounds_bytes: int
 
     @property
     def device_bytes(self) -> int:
@@ -29,6 +31,7 @@ class RenderAdmission:
             + self.attachment_bytes
             + self.readback_bytes
             + VIEW_WORKSPACE_BYTES
+            + self.view_bounds_bytes
         )
 
 
@@ -108,4 +111,9 @@ def admission_decoded(
     )
     readback += status_bytes
     host_bytes += status_bytes
-    return RenderAdmission(projected_bytes, w * h * 8 + extra, readback, host_bytes)
+    view_bounds_bytes = sum(
+        view_bounds_sizes(max(len(prepared.vertices) for prepared, *_ in decoded))
+    )
+    return RenderAdmission(
+        projected_bytes, w * h * 8 + extra, readback, host_bytes, view_bounds_bytes
+    )

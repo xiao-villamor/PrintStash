@@ -34,6 +34,8 @@ def run_worker(tmp_path, monkeypatch):
             "triangle_cap": 2_000_000,
             "output_format": "WEBP",
             "reason": "derivative",
+            # The supervisor always says whether this pass renders views.
+            "views": None,
         }
         spec.update(overrides)
         # An owned descriptor stands in for stdout; main still duplicates and

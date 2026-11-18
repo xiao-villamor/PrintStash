@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from printstash_core.mesh.render_geometry import (
     PreparedRender,
@@ -25,13 +25,18 @@ if TYPE_CHECKING:
 
     IndexArray = NDArray[np.int64] | NDArray[np.uint32]
 
-NORMAL_MODE: Final = "gpu-angle-csr-v1"
+from .compute_geometry_wire import (
+    MAX_FACES,
+    MAX_VERTICES,
+    NORMAL_MODE,
+    VISUAL_NORMAL_MODE,
+    GeometryLayout,
+    _validate_layout,
+)
+
 GPU_NORMALS_MIN_FACES = 20_000
 MAX_DEGREE = 4096
 FACE_CHUNK = 64_000
-MAX_GEOMETRY_BYTES = 48 * 1024**2
-MAX_FACES = 2_000_000
-MAX_VERTICES = 6_000_000
 # Each edge is bounded by 2C, each cross component by 8C², and its
 # squared three-component norm by 192C⁴. Leave margin for rounding.
 MAX_ABS_COORDINATE = (3.402823466e38 / 256.0) ** 0.25
@@ -60,9 +65,6 @@ class DeferredRender:
     @property
     def face_chunks(self):
         return self.geometry.face_chunks
-
-
-VISUAL_NORMAL_MODE: Final = "gpu-visual-v2"
 
 
 @dataclass(frozen=True)
@@ -101,16 +103,21 @@ def defer(geometry: PreparedRenderGeometry) -> DeferredRender:
 
 
 def eligible(prepared: DeferredRender | VisualRender) -> bool:
-    n, f, k = len(prepared.vertices), prepared.face_count, prepared.position_count
-    return (
-        (1 if isinstance(prepared, VisualRender) else GPU_NORMALS_MIN_FACES)
-        <= f
-        <= MAX_FACES
-        and 0 < n <= MAX_VERTICES
-        and 0 < k <= n
-        and n * 20 + f * 24 + k * 24 <= MAX_GEOMETRY_BYTES
-        and n * 16 + f * 12 <= MAX_GEOMETRY_BYTES
-    )
+    if (
+        isinstance(prepared, DeferredRender)
+        and prepared.face_count < GPU_NORMALS_MIN_FACES
+    ):
+        return False
+    try:
+        _validate_layout(
+            GeometryLayout(
+                (len(prepared.vertices), prepared.face_count, prepared.position_count),
+                prepared.normal_mode,
+            )
+        )
+    except ValueError:
+        return False
+    return True
 
 
 def canonical(

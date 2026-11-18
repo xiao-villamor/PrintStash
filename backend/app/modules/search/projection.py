@@ -33,7 +33,12 @@ from app.db.models import (
 from app.db.projections import ContentSource
 from app.db.transactions import begin_write
 from app.modules.library.library_search import effective_tag_pairs
-from app.modules.search.passages import PreparedSubject, prepare_subject, sync_subject
+from app.modules.search.passages import (
+    PreparedSubject,
+    passage_policy,
+    prepare_subjects,
+    sync_subject,
+)
 
 logger = get_logger(__name__)
 PAGE_SIZE = 128
@@ -245,7 +250,7 @@ def prepare_pending(session: Session, *, limit: int = 8) -> PreparedPage | None:
         )
     return PreparedPage(
         tuple(pages),
-        tuple((subject, prepare_subject(session, subject)) for subject in subjects),
+        prepare_subjects(session, tuple(subjects)),
     )
 
 
@@ -282,13 +287,17 @@ def apply_prepared(session: Session, page: PreparedPage) -> int | None:
     prepared = dict(page.subjects)
     applied: set[SearchSubject] = set()
     completed = False
+    policy = None
     for source, request in requests:
         published: set[SearchSubject] = set()
         try:
             with session.begin_nested():
                 for subject in source.subjects:
                     if subject not in applied:
-                        sync_subject(session, subject, prepared=prepared[subject])
+                        current = prepared[subject]
+                        if policy is None and current.projection is not None:
+                            policy = passage_policy(session)
+                        sync_subject(session, subject, prepared=current, policy=policy)
                         published.add(subject)
                 if source.exhausted:
                     session.delete(request)

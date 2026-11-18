@@ -145,6 +145,17 @@ def resume(
         group.definition is JobKind.DERIVATIVES_MESH for group in groups_for(file)
     ):
         raise ValueError("continuation_requires_mesh_source")
+    # The ordinary cover has no continuation. A read that finds no row
+    # changes no authority. A possible match still takes the complete
+    # Job/generation/Model/File locks before locking the continuation itself.
+    for_file = col(MeshFingerprintContinuation.file_id) == file.id
+    if (
+        session.exec(
+            select(MeshFingerprintContinuation.file_id).where(for_file)
+        ).first()
+        is None
+    ):
+        return None
     recipe = recipes_for(file)[DerivativeKind.METADATA]
     regen = records.regenerations(
         session, definitions=[g.definition for g in groups_for(file)]
@@ -161,7 +172,7 @@ def resume(
     records.require_context(session, current)
     row = session.exec(
         select(MeshFingerprintContinuation)
-        .where(MeshFingerprintContinuation.file_id == file.id)
+        .where(for_file)
         .with_for_update()
         .execution_options(populate_existing=True)
     ).first()

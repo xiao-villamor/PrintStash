@@ -16,8 +16,10 @@ from printstash_core.mesh.render_geometry import PreparedRender, PreparedRenderG
 from app.modules.media.gpu_compact import CompactGeometry
 from app.modules.media.gpu_normals import VisualRender
 from app.modules.media.gpu_postprocess import Postprocessor
+from app.modules.media.gpu_render_layout import VIEW_WORKSPACE_BYTES
 from app.modules.media.gpu_visual_normals import VisualNormalPipeline
 from app.modules.media.webgpu_render import Renderer
+from app.runtime.compute.contracts import ComputeUnavailable, Reason
 from tests.fakes.gpu_device import API, Buffer, Device
 
 
@@ -46,6 +48,27 @@ def prepared():
         np.arange(3, dtype=np.int64),
         np.tile([0.0, 0.0, 1.0], (3, 1)),
     )
+
+
+class TestAttachments:
+    def test_refuses_workspace_that_cannot_hold_retained_view_bounds(self, renderer):
+        renderer.attachments(64, 64, 4097)
+        # Only enough to hold the framebuffer, readback and small model's
+        # final bounds. The larger pool is still resident.
+        renderer.workspace_limit = 64 * 64 * 12 + VIEW_WORKSPACE_BYTES + 32
+
+        with pytest.raises(ComputeUnavailable) as exc:
+            renderer.attachments(64, 64, 3)
+
+        assert exc.value.reason is Reason.CAPACITY
+
+    def test_releases_old_view_bounds_when_growing_the_workspace(self, renderer):
+        renderer.attachments(64, 64, 65)
+        previous = renderer.view_bounds.copy()
+
+        renderer.attachments(64, 64, 4097)
+
+        assert all(buffer.destroyed for buffer in previous)
 
 
 class TestExecutePreparedMany:

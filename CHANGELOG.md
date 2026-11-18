@@ -2,9 +2,17 @@
 
 ## Unreleased
 
+### Performance
+
+- Search indexing can start while the final cover thumbnails are still rendering after an import. Cover generation also does less database work per thumbnail.
+
+- Cover and plate work refills in batches during imports. When a GPU is ready to render covers, discovery can start one large cover early in each batch.
+
 ### Changed
 
 - Library cards keep more of the Model visible: preview arrows and selection are smaller, and status sits in the image corner. An expand icon on card hover and in the details panel opens the full page. Model views adds previous and next arrows and centers its view indicator.
+
+- Multi-angle previews render in the same pass as the cover, from the mesh it already loaded, on every native slot. A 60-file import with orbit views finishes in about a third of the time (239 s → 89 s on a 3-CPU host); a cover pass that stops early hands its views back so they are rendered again at once. Views follow the Model image quality setting (Compact, Standard or High) instead of a fixed 480 × 360, and Recreate all images rebuilds them with the covers; existing view sets update once in the background. A top or bottom view that would show only the edge of a plate is left out instead of failing the whole set.
 
 - New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.
 
@@ -64,6 +72,8 @@
 - The default number of simultaneous mesh jobs is now one per usable CPU (it was one more). With admission no longer stalling, the extra job only competed for the CPU: on a 3-CPU, 8 GB install a 60-file archive's thumbnails finish in 38.7 s instead of 44.9 s, at the same CPU cost. `VAULT_MAX_RENDER_JOBS` and *Models processed at once* still override it.
 
 ### Fixed
+
+- GPU-generated Model covers use the same framing as CPU covers, including for rounded and diagonal shapes.
 
 - Saved multipart descriptions stay visible in the overview. Multipart member names wrap without clipping, and the mobile composition editor keeps Add variant and Save changes at the shared touch-target size.
 

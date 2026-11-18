@@ -58,7 +58,6 @@ from .contracts import (
     EngineEvidence,
     EngineStatus,
     ExecutionKind,
-    InteractiveBacklogSource,
     JobDefinition,
     JobOutcome,
     LaneOrder,
@@ -633,11 +632,29 @@ def _discovery_budget(session: Session, definition: JobDefinition) -> DiscoveryB
         for item in catalog.definitions.values()
         if item.lane == definition.lane
     ]
+    lane_jobs = col(Job.kind).in_(definitions)
+    if not definition.batch_interactive_discovery:
+        # Buffered covers and plates may already occupy several waves. Leave
+        # prompt sources (such as an opened viewer) their own shared queue
+        # allowance, while still sharing the single backfill slot.
+        batched = [
+            name
+            for name in definitions
+            if catalog.definition(name).batch_interactive_discovery
+        ]
+        if batched:
+            lane_jobs = and_(
+                lane_jobs,
+                or_(
+                    col(Job.kind).not_in(batched),
+                    col(Job.priority) == WorkPriority.BACKFILL,
+                ),
+            )
     counts = dict(
         session.exec(
             select(Job.priority, func.count(col(Job.id)))
             .where(
-                col(Job.kind).in_(definitions),
+                lane_jobs,
                 active_job_predicate(),
                 or_(
                     col(Job.priority) == WorkPriority.BACKFILL,
@@ -647,7 +664,10 @@ def _discovery_budget(session: Session, definition: JobDefinition) -> DiscoveryB
             .group_by(col(Job.priority))
         ).all()
     )
-    interactive = max(0, lane.concurrency - counts.get(WorkPriority.INTERACTIVE, 0))
+    # Batched sources fill three waves. The first claim that leaves one
+    # wave queued wakes discovery while that reserve can still feed the lane.
+    target = lane.concurrency * (3 if definition.batch_interactive_discovery else 1)
+    interactive = max(0, target - counts.get(WorkPriority.INTERACTIVE, 0))
     backfill = max(0, 1 - counts.get(WorkPriority.BACKFILL, 0))
     return DiscoveryBudget(
         total=min(settings.jobs_reconcile_batch, interactive + backfill),
@@ -672,10 +692,11 @@ def _discover(definition: JobDefinition, *, now: datetime, result: PassResult) -
                 result.count(PassNote.WAITING_FOR_ADDITIONS)
                 return
             result.paced = True
-        if definition.yields_to and _interactive_ahead(
-            session, definition.yields_to, now=now
+        catalog = catalog_module.get_catalog()
+        if any(
+            catalog.interactive_waiting(session, name, now=now)
+            for name in definition.yields_to
         ):
-            # The last of those Jobs to settle nudges this definition.
             result.count(PassNote.YIELDING_TO_INTERACTIVE)
             return
         if isinstance(source, PrioritizedWorkSource):
@@ -739,25 +760,6 @@ def _discover(definition: JobDefinition, *, now: datetime, result: PassResult) -
     finally:
         if lease is not None:
             fences.release(lease.name, holder=lease.holder)
-
-
-def _interactive_ahead(
-    session: Session, definitions: tuple[JobKind, ...], *, now: datetime
-) -> bool:
-    """Whether a person waits on interactive work of ``definitions``.
-
-    Active Jobs alone miss the gap between discovery batches, when the last
-    batch has settled and the next is not created yet: a yielding definition
-    discovered in that gap ran beside the rest of an import's mesh work.
-    """
-    if jobs.any_active(session, definitions, priority=WorkPriority.INTERACTIVE):
-        return True
-    catalog = catalog_module.get_catalog()
-    return any(
-        isinstance(source, InteractiveBacklogSource)
-        and source.owes_interactive(session, now=now)
-        for source in (catalog.definition(name).source for name in definitions)
-    )
 
 
 def _recently_finished(
@@ -870,7 +872,7 @@ def _create_and_submit_all(
                         priority=item.priority,
                         session=session,
                     )
-            except (ActiveJobExists, IntegrityError):
+            except ActiveJobExists, IntegrityError:
                 result.count(PassNote.ALREADY_ACTIVE)
                 continue
             if room is not None:

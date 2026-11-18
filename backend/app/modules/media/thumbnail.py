@@ -25,6 +25,10 @@ class ThumbnailValidationError(ValueError):
     """A decodable candidate failed the canonical thumbnail contract."""
 
 
+class EmptyThumbnailError(ThumbnailValidationError):
+    """The candidate decoded, but not one pixel of it is opaque."""
+
+
 def to_webp(
     data: bytes,
     *,
@@ -66,7 +70,7 @@ def to_webp(
                 rgba = img.convert("RGBA")
                 alpha_bounds = rgba.getchannel("A").getbbox()
                 if alpha_bounds is None:
-                    raise ThumbnailValidationError("thumbnail_empty")
+                    raise EmptyThumbnailError("thumbnail_empty")
 
                 if preserve_frame:
                     # Only the complete renderer owns this frame. Embedded

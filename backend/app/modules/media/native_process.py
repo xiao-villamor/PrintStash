@@ -75,5 +75,5 @@ def native_memory_budget_bytes() -> int:
 
     permit = current_permit()
     if permit is not None:
-        return permit.resources.bytes
+        return permit.hard_bytes
     return native_capacity().bytes

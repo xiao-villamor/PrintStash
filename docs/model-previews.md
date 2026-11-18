@@ -71,8 +71,15 @@ semantic front/back. Ambiguous shapes keep the imported-frame orbit. The oblique
 edge view is 65° from the face. 3MF build/component transforms are applied before
 analysis. No candidates are pruned by silhouette or presumed symmetry.
 
-Recipe 2 produces lossless 480 × 360 WebPs: six views for solids, five for planar
-objects, including Top and Bottom. Sources follow the same limits as covers and
+Recipe 4 renders the views at the **Model image quality** setting in Settings →
+Previews (`VAULT_MODEL_THUMBNAIL_WIDTH`): Compact 320 × 240, Standard 640 × 480
+(the default) or High 1280 × 960, the same size and supersampling as the cover.
+Sets from earlier recipes are 480 × 360 and update once in the background; a
+later change to the setting applies to new views, and **Recreate all images**
+rebuilds existing covers and views together. Four orbit views are rendered, plus
+Top and Bottom when enabled. A pole that would show only the edge of a plate
+standing upright renders empty and is left out of its set; an empty orbit view
+fails the set. Sources follow the same limits as covers and
 every other mesh path: `VAULT_MESH_MAX_LOAD_MB` (default 200) and
 `VAULT_MESH_MAX_RENDER_TRIANGLES` (default 2,000,000). Raise them in your
 environment to include larger files. Output is bounded at 1 MiB per image, 6 MiB
@@ -93,19 +100,32 @@ replacement, cancellation, and retry.
 
 ## Scheduling and reuse
 
-`derivatives.previews` is an independent, durable derivative Job and Work Source.
-It has its own control, **Multi-angle Model card views** in Settings →
-Background work (`VAULT_DERIVATIVES_PREVIEWS_ENABLED`). Views follow covers,
-so they also need mesh processing enabled. It uses backfill priority,
-one queued/running batch at a time, and requires a terminal primary-thumbnail
-attempt. Active mesh/G-code primary work gets a two-minute grace period. That
+Views have their own control, **Multi-angle Model card views** in Settings →
+Background work (`VAULT_DERIVATIVES_PREVIEWS_ENABLED`). They follow covers, so
+they also need mesh processing enabled.
+
+When a mesh Job (`derivatives.mesh`) has a cover or metadata to produce and the
+views are owed, it claims them in the same transaction and renders them in the
+same worker, right after publishing the cover, from the mesh it already loaded.
+The cover is never delayed by its own views, and views run on every native slot
+like covers do. If that pass ends before its views (a crash, a cancellation, a
+superseded attempt), the claim is handed back untouched or recorded as a
+retryable failure, so the views do not wait out the one-hour stale window. A
+replayed mesh Job finishes views its previous execution stranded.
+
+`derivatives.previews` remains an independent, durable derivative Job and Work
+Source for views no cover pass owes: existing libraries, a newly enabled
+setting, and retries. It uses backfill priority, one queued/running batch at a
+time, and requires a terminal primary-thumbnail attempt. Active mesh/G-code primary work gets a two-minute grace period. That
 grace is persisted and does not move when fresh imports arrive; afterwards one
 bounded secondary batch can progress. Running native work is not preempted.
 Cancellation checkpoints and progress updates occur between images. Existing
 libraries use the same bounded discovery cursor, without removing their covers.
 
-The worker loads/composes the mesh once and prepares welded geometry/normals once
-for the entire batch. Each view still pays projection, rasterization and encoding.
+Either way the mesh is loaded/composed once and welded geometry/normals are
+prepared once for every view of the set; both paths share one renderer and
+publish identical bundles. Each view still pays projection, rasterization and
+encoding, roughly in proportion to its pixel count.
 Remote original bytes use the existing Artifact cache; warm, cold, disabled and
 evicted cases follow the normal materialization path. Linked Library sources also
 use the existing descriptor-pinned source boundary.

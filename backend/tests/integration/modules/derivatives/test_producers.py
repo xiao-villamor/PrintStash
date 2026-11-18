@@ -819,15 +819,26 @@ class TestDeriveMesh:
         assert row.next_attempt_at is None
 
     def test_the_thumbnail_represents_its_model(
-        self, db_session: Session, stored
+        self, db_session: Session, stored, make_collection, make_tag, sql_statements
     ) -> None:
         artifact = stored("cube.stl", content.binary_stl())
+        model = db_session.get_one(Model, artifact.model_id)
+        model.collection_id = make_collection().id
+        model.tags = [make_tag()]
+        db_session.commit()
+        file_id, model_id = artifact.id, model.id
 
-        producers.derive_mesh(artifact.id)
+        with sql_statements.recording():
+            producers.derive_mesh(file_id)
 
-        model = db_session.get(Model, artifact.model_id)
-        assert model is not None
-        assert model.thumbnail_file_id == artifact.id
+        db_session.expire_all()
+        assert db_session.get_one(Model, model_id).thumbnail_file_id == file_id
+        assert not [
+            statement.sql
+            for statement in sql_statements.statements
+            if " FROM collections " in f" {' '.join(statement.sql.split())} "
+            or "model_tags" in statement.sql
+        ]
 
     def test_tells_the_models_viewers_what_changed(self, stored, announced) -> None:
         artifact = stored("cube.stl", content.binary_stl())
@@ -1521,6 +1532,46 @@ class TestOutcome:
 
 
 class TestLivePolicy:
+    def test_cover_settlement_does_not_nudge_disabled_previews(
+        self, db_session, stored, work_engine
+    ) -> None:
+        from app.modules.derivatives import policy
+        from app.modules.work.contracts import PassSubmission
+        from app.modules.work.reconciler import run_pass
+
+        policy.update(db_session, {policy.SettingName.PREVIEWS: False})
+        artifact = stored("cover-only.stl", content.binary_stl())
+        work_engine.reset()
+        run_pass(JobKind.DERIVATIVES_MESH)
+        work_engine.drain()
+
+        assert (
+            _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL].state
+            is DerivativeState.READY
+        )
+        assert not any(
+            isinstance(execution.submission, PassSubmission)
+            and execution.submission.source is JobKind.DERIVATIVES_PREVIEWS
+            for execution in work_engine.executions.values()
+        )
+
+    def test_reenabled_previews_find_the_existing_cover(
+        self, db_session, stored, work_engine
+    ) -> None:
+        from app.modules.derivatives import policy
+
+        policy.update(db_session, {policy.SettingName.PREVIEWS: False})
+        artifact = stored("views-later.stl", content.binary_stl())
+        producers.derive_mesh(artifact.id)
+        work_engine.drain()
+        assert DerivativeKind.PREVIEWS not in _rows(db_session, artifact.id)
+
+        policy.update(db_session, {policy.SettingName.PREVIEWS: True})
+        work_engine.drain()
+
+        preview = _rows(db_session, artifact.id)[DerivativeKind.PREVIEWS]
+        assert preview.state is DerivativeState.READY
+
     def test_reenable_processes_missing_outputs_through_the_source(
         self, db_session, stored, work_engine
     ):
@@ -1678,7 +1729,7 @@ class TestBegin:
     def test_commits_what_the_caller_adds_with_the_claims(self, db_session, stored):
         artifact = stored("claimed.gcode", content.gcode())
 
-        def rename(session, file):
+        def rename(session, file, _attempts):
             file.revision_notes = "claimed"
             session.add(file)
 
@@ -1692,7 +1743,7 @@ class TestBegin:
 
         artifact = stored("refused.gcode", content.gcode())
 
-        def refuse(_session, _file):
+        def refuse(_session, _file, _attempts):
             raise RuntimeError("continuation unavailable")
 
         with pytest.raises(RuntimeError, match="continuation unavailable"):
@@ -1703,7 +1754,7 @@ class TestBegin:
     def test_a_claim_with_its_artifact_is_one_transaction(self, stored, transactions):
         artifact = stored("once.gcode", content.gcode())
 
-        def rename(session, file):
+        def rename(session, file, _attempts):
             file.revision_notes = "claimed"
             session.add(file)
 
@@ -1725,7 +1776,7 @@ class TestBegin:
         begun = producers._begin(
             404,
             JobKind.DERIVATIVES_GCODE,
-            claimed=lambda _session, file: called.append(file.id),
+            claimed=lambda _session, file, _attempts: called.append(file.id),
         )
 
         assert (begun, called) == (None, [])

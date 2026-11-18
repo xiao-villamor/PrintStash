@@ -89,9 +89,9 @@ def load_step_mesh(
                     command(
                         "app.modules.media.step_worker",
                         [str(path.absolute()), str(output)],
-                        permit.resources.bytes,
+                        permit.hard_bytes,
                     ),
-                    memory_budget=permit.resources.bytes,
+                    memory_budget=permit.hard_bytes,
                     timeout_seconds=float(settings.mesh_step_timeout_seconds),
                     permit=permit,
                     lifecycle=WorkerLifecycle.GUARDED,

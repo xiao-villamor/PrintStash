@@ -340,7 +340,7 @@ class TestBounds:
         assert _bounds(_write(tmp_path, payload)) is None
 
     def test_refuses_an_unterminated_tag_beyond_the_carry(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(three_mf_package, "_CHUNK_BYTES", 16)
+        monkeypatch.setattr(three_mf_bounds, "_SCAN_CHUNK_BYTES", 16)
         monkeypatch.setattr(three_mf_package, "_MAX_CARRY_BYTES", 32)
         payload = _root(three_mf()).replace(
             b"<item ", b'<item note="' + b"x" * 64 + b'" ', 1
@@ -389,3 +389,69 @@ class TestBounds:
         )
 
         assert _bounds(_write(tmp_path, three_mf()), wall_seconds=1.0) is None
+
+
+class TestArchivePreflight:
+    def test_leaves_oversized_central_directory_for_guarded_reader(self, tmp_path):
+        archive_bytes = io.BytesIO()
+        with zipfile.ZipFile(archive_bytes, "w") as archive:
+            archive.writestr("3D/3dmodel.model", _root(three_mf()))
+            for index in range(33):
+                entry = zipfile.ZipInfo(f"metadata/{index}")
+                entry.comment = b"x" * 65_535
+                archive.writestr(entry, b"")
+        path = _write(tmp_path, archive_bytes.getvalue())
+
+        assert _bounds(path) is None
+
+    @pytest.mark.parametrize(
+        "codec",
+        [
+            pytest.param(zipfile.ZIP_BZIP2, id="bzip2"),
+            pytest.param(zipfile.ZIP_LZMA, id="lzma"),
+        ],
+    )
+    def test_leaves_model_codecs_with_unbounded_decoder_memory_for_the_worker(
+        self, tmp_path, codec
+    ):
+        archive_bytes = io.BytesIO()
+        with zipfile.ZipFile(archive_bytes, "w", compression=codec) as archive:
+            archive.writestr("3D/3dmodel.model", _root(three_mf()))
+
+        assert _bounds(_write(tmp_path, archive_bytes.getvalue())) is None
+
+    def test_leaves_corrupt_deflate_data_for_the_worker(self, tmp_path):
+        path = _write(tmp_path, zip_bytes({"3D/3dmodel.model": _root(three_mf())}))
+        data = bytearray(path.read_bytes())
+        offset = 30 + len("3D/3dmodel.model")
+        data[offset] = 0xFF  # Reserved DEFLATE block type.
+        path.write_bytes(data)
+
+        assert _bounds(path) is None
+
+    def test_streamed_deflate_bounds_match_the_stored_part(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(three_mf_bounds, "_SCAN_CHUNK_BYTES", 97)
+        root = _root(
+            three_mf(assemblies={2: [(1, None), (1, None)]}, build=((2, None),))
+        )
+        entries = {"3D/3dmodel.model": root}
+        stored = _bounds(_write(tmp_path, zip_bytes(entries, compress=False)))
+        deflated = _bounds(_write(tmp_path, zip_bytes(entries)))
+
+        assert deflated == stored
+        assert deflated is not None and deflated.placed_faces >= 8
+
+    def test_rechecks_a_changed_archive_with_the_same_mtime(self, tmp_path):
+        import os
+
+        model = _root(three_mf())
+        path = _write(tmp_path, zip_bytes({"3D/3dmodel.model": model}, compress=False))
+        before = path.stat()
+        assert _bounds(path) is not None
+
+        path.write_bytes(
+            zip_bytes({"3D/3dmodel.model": bytes(len(model))}, compress=False)
+        )
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+        assert _bounds(path) is None

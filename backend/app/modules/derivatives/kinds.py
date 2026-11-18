@@ -36,21 +36,22 @@ from app.db.models import SENTINEL_FILE_HASH, DerivativeKind, File, FileType, Jo
 
 # Recipe versions. Bump rule: see the module docstring.
 MESH_GEOMETRY_RECIPE = 12
-MESH_THUMBNAIL_RECIPE = 17
+MESH_THUMBNAIL_RECIPE = 18
 # 3MF scenes are read through lib3mf in single precision.
 THREE_MF_GEOMETRY_RECIPE = 13
-THREE_MF_THUMBNAIL_RECIPE = 19
+THREE_MF_THUMBNAIL_RECIPE = 20
 THREE_MF_VIEWER_STL_RECIPE = 4
 # STEP is tessellated at 0.05 mm linear deflection.
 STEP_GEOMETRY_RECIPE = 13
-STEP_THUMBNAIL_RECIPE = 18
+STEP_THUMBNAIL_RECIPE = 19
 STEP_VIEWER_STL_RECIPE = 4
 GCODE_METADATA_RECIPE = 8
 GCODE_THUMBNAIL_RECIPE = 4
 TOOLPATH_RECIPE = 1
 VIEWER_STL_RECIPE = 3
 PLATES_RECIPE = 1
-PREVIEWS_RECIPE = 3
+# 4: views follow the Model image quality setting instead of a fixed 480 x 360.
+PREVIEWS_RECIPE = 4
 VIEWER_TYPES = (
     FileType.THREE_MF,
     FileType.OBJ,

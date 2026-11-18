@@ -82,6 +82,25 @@ class TestPacketDispatch:
         assert result.rgba == reply()[13:]
         assert type(result.rgba) is bytes
 
+    def test_admits_maximal_visual_packet(self, gpu):
+        vertices = 6_000_000
+        faces = 2_000_000
+        prefix = packet(
+            "gpu-visual-v2", faces=faces, vertices=vertices, normals=vertices
+        )[:-48]
+        payload = prefix.ljust(len(prefix) + 96_000_000, b"\0")
+
+        assert render(payload).rgba == reply()[13:]
+        request, body = gpu.call_args.args
+        assert request.geometry_bytes == len(body) == 96_000_000
+        assert request.units == 2_000_000
+        assert body.obj is payload
+
+    def test_refuses_a_packet_over_the_face_limit(self, gpu):
+        with pytest.raises(ValueError, match="compute_geometry_shape"):
+            render(packet("gpu-visual-v2", faces=2_000_001))
+        gpu.assert_not_called()
+
     def test_respects_broker_deadline_ceiling(self, gpu, monkeypatch):
         monkeypatch.setattr(time, "monotonic", lambda: 100.0)
 

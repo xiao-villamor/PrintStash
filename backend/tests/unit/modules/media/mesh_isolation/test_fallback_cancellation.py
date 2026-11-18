@@ -43,7 +43,7 @@ class TestFallbackCancellation:
             stopped[0] = stage == "admission"
             active.append(True)
             try:
-                yield SimpleNamespace(resources=amount)
+                yield SimpleNamespace(resources=amount, hard_bytes=amount.bytes)
             finally:
                 active.pop()
 
