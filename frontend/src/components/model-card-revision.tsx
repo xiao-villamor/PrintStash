@@ -41,6 +41,7 @@ export function ModelCardRevision({
   admitted,
   origin,
   dimensions,
+  collectionLabel,
   children,
 }: {
   model: ModelListItem;
@@ -49,6 +50,8 @@ export function ModelCardRevision({
   origin?: LibraryEntry;
   /** Bounding box, e.g. `166 × 166 × 1 mm`; unknown until the card detail loads. */
   dimensions: string | null;
+  /** Shown when the view spans folders; otherwise the card shows its file count. */
+  collectionLabel?: string | null;
   children: ReactNode;
 }) {
   useUiLocale();
@@ -70,6 +73,28 @@ export function ModelCardRevision({
     enabled: sendOpen && canPrint,
   });
   const results = file && history.data ? outcomes(history.data, file) : null;
+  const outcomeLabels = results?.map(({ state, printer, count }) => ({
+    state,
+    printer,
+    label: uiText("library.cardOutcome", {
+      result:
+        state === "completed"
+          ? uiText("OK")
+          : state === "failed"
+            ? uiText("Failed")
+            : state === "cancelled"
+              ? uiText("Cancelled")
+              : uiText("In progress"),
+      count,
+      printer,
+    }),
+  }));
+  const resultText =
+    outcomeLabels === undefined
+      ? uiText("Print results not available")
+      : outcomeLabels.length === 0
+        ? uiText("Not printed yet")
+        : outcomeLabels.map(({ label }) => label).join(" · ");
   const revision = file
     ? uiText("Rev {value1}", { value1: String(file.gcode_revision_number ?? file.version) })
     : uiText("Revision");
@@ -98,9 +123,14 @@ export function ModelCardRevision({
     <div className="library-card-summary-container">
       <div className="library-card-revision-summary">
         {(detail ? !file : !expectsRevision) ? (
-          // No G-code is the common case: it reads as the absence of a revision
-          // line, and the status filter states it explicitly.
-          <span className="sr-only">{uiText("No G-code yet")}</span>
+          <>
+            <span className="sr-only">{uiText("No G-code yet")}</span>
+            <p className="library-card-context" title={collectionLabel ?? undefined}>
+              {collectionLabel
+                ? collectionLabel.slice(collectionLabel.lastIndexOf("/") + 1)
+                : uiText("counts.files", { count: model.file_count })}
+            </p>
+          </>
         ) : (
           <>
             <div className="library-card-revision-line">
@@ -110,8 +140,40 @@ export function ModelCardRevision({
               {file?.is_recommended && (
                 <span className="library-card-recommended">
                   <Star className="h-3 w-3 fill-current shrink-0" aria-hidden />
-                  <span>{uiText("Recommended")}</span>
+                  <span className="sr-only">{uiText("Recommended")}</span>
                 </span>
+              )}
+              <span className="library-card-revision-separator" aria-hidden="true" />
+              {administrator ? (
+                <LibraryItemLink
+                  origin={origin}
+                  href={`/models/${model.id}?tab=history`}
+                  trackPosition={false}
+                  className="library-card-result focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  aria-label={uiText("Print history")}
+                  title={resultText}
+                >
+                  {outcomeLabels?.length
+                    ? outcomeLabels.map(({ state, printer, label }) => (
+                        <span
+                          key={JSON.stringify([state, printer])}
+                          className={
+                            state === "completed"
+                              ? "library-card-outcome"
+                              : state === "failed"
+                                ? "library-card-outcome library-card-outcome-failed"
+                                : undefined
+                          }
+                        >
+                          {label}
+                        </span>
+                      ))
+                    : resultText}
+                </LibraryItemLink>
+              ) : (
+                <p className="library-card-result" title={resultText}>
+                  {resultText}
+                </p>
               )}
               <div className="library-card-revision-actions">
                 {file?.is_recommended && (
@@ -140,47 +202,6 @@ export function ModelCardRevision({
                 )}
               </div>
             </div>
-            {administrator ? (
-              <LibraryItemLink
-                origin={origin}
-                href={`/models/${model.id}?tab=history`}
-                trackPosition={false}
-                className="library-card-result"
-                aria-label={uiText("Print history")}
-              >
-                {results === null
-                  ? uiText("Print results not available")
-                  : results.length === 0
-                    ? uiText("Not printed yet")
-                    : results.map((result) => (
-                        <span
-                          key={`${result.state}:${result.printer}`}
-                          className={
-                            result.state === "completed"
-                              ? "library-card-outcome"
-                              : result.state === "failed"
-                                ? "library-card-outcome library-card-outcome-failed"
-                                : undefined
-                          }
-                        >
-                          {uiText("library.cardOutcome", {
-                            result:
-                              result.state === "completed"
-                                ? uiText("OK")
-                                : result.state === "failed"
-                                  ? uiText("Failed")
-                                  : result.state === "cancelled"
-                                    ? uiText("Cancelled")
-                                    : uiText("In progress"),
-                            count: result.count,
-                            printer: result.printer,
-                          })}
-                        </span>
-                      ))}
-              </LibraryItemLink>
-            ) : (
-              <p className="library-card-result">{uiText("Print results not available")}</p>
-            )}
             {children}
           </>
         )}

@@ -14,25 +14,30 @@
   background-color: var(--plate);
 }
 
-/* The view count stays discoverable; only the arrows reveal on intent. */
-.library-preview-navigation {
+/* Reveal the card preview controls on pointer or keyboard intent. */
+.library-preview-reveal {
   opacity: 1;
   transition: opacity var(--duration-press) var(--ease-out);
 }
 @media (hover: hover) and (pointer: fine) {
-  .library-preview-navigation {
+  .library-preview-reveal {
     opacity: 0;
   }
-  .library-preview-controls[data-hovered] .library-preview-navigation,
-  .library-preview-controls:focus-within .library-preview-navigation {
+  .library-preview-controls[data-hovered] .library-preview-reveal,
+  .library-model-card:focus-within .library-preview-reveal {
     opacity: 1;
   }
+  .library-model-card:not(:focus-within)
+    .library-preview-controls:not([data-hovered])
+    :is(.library-preview-arrow, .library-preview-views, .library-card-open-page) {
+    pointer-events: none;
+  }
 }
-.library-preview-controls:focus-within .library-preview-navigation {
+.library-model-card:focus-within .library-preview-reveal {
   transition: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .library-preview-navigation {
+  .library-preview-reveal {
     transition: none;
   }
 }
@@ -51,30 +56,25 @@
     inset: -6px -4px -6px -12px;
   }
   .library-card-open-page::before {
-    inset: -6px -6px -18px -18px;
+    inset: -14px -6px -6px -14px;
   }
 }
 
 /* Opens the full page from the card corner; a plain click opens the inspector. */
 .library-card-open-page {
   position: absolute;
-  top: 6px;
   right: 6px;
-  z-index: 10;
-  width: 20px;
-  height: 20px;
-  transition: opacity var(--duration-press) var(--ease-out);
+  bottom: 6px;
+  width: 24px;
+  height: 24px;
+  /* Appears and responds in place: no fade or press movement. */
+  transition: none;
 }
-@media (hover: hover) and (pointer: fine) {
-  .library-card-open-page {
-    opacity: 0;
-    pointer-events: none;
-  }
-  .library-model-card:hover .library-card-open-page,
-  .library-model-card:focus-within .library-card-open-page {
-    opacity: 1;
-    pointer-events: auto;
-  }
+.library-model-card .library-card-open-page:active,
+.library-model-card:has(.library-preview-controls :active) {
+  /* Pressing a control over the image does not press the card under it. */
+  scale: none;
+  transform: none;
 }
 
 /* Data and image readiness fill a stationary frame, independently of navigation. */
@@ -95,8 +95,11 @@
   }
 }
 
-.library-card-facts > span + span::before {
+.library-card-facts > span + span::before,
+.library-card-revision-separator::before {
   content: "·";
+}
+.library-card-facts > span + span::before {
   margin-right: 0.375rem;
 }
 .library-card-content {
@@ -130,15 +133,14 @@
 .library-card-standard {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px 14px 8px;
+  gap: 2px;
+  padding: 10px 12px 0;
 }
 .library-card-standard h3 {
   display: flex;
-  align-items: center;
-  min-height: 36px;
+  align-items: flex-start;
   margin: 0;
-  font-size: 14px;
+  font-size: 0.875rem;
   line-height: 1.3;
   font-weight: 600;
   overflow-wrap: anywhere;
@@ -154,25 +156,36 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  background: inherit;
 }
 .library-card-revision-line {
+  position: relative;
+  background: inherit;
   display: flex;
   align-items: center;
   gap: 6px;
   min-height: 28px;
 }
 .library-card-revision-line strong {
+  flex-shrink: 0;
+  white-space: nowrap;
   font: 600 13px/1.4 var(--font-mono);
 }
-.library-card-revision-line > span {
+.library-card-recommended,
+.library-card-revision-separator {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  flex-shrink: 0;
   color: var(--muted-foreground);
   font-size: 12px;
   white-space: nowrap;
 }
+.library-card-context,
 .library-card-result {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
   line-height: 1.4;
   color: var(--muted-foreground);
@@ -187,7 +200,8 @@
 .library-card-summary-container {
   /* Pinned to the card's foot: rows of cards share one footer line. */
   margin-top: auto;
-  padding: 0 14px 12px;
+  padding: 6px 12px 10px;
+  background: inherit;
   min-width: 0;
 }
 .library-card-meta {
@@ -195,7 +209,7 @@
   justify-content: space-between;
   gap: 8px;
   min-height: 17px;
-  margin: 6px 0 0;
+  margin: 2px 0 0;
   color: var(--muted-foreground);
   font: 400 12px/1.4 var(--font-mono);
 }
@@ -211,12 +225,24 @@
 /* Pointer devices reveal per-card actions on intent; touch keeps them visible. */
 @media (hover: hover) {
   .library-card-revision-actions {
+    position: absolute;
+    top: 0;
+    right: 0;
+    padding-left: 6px;
+    background: inherit;
     opacity: 0;
+    pointer-events: none;
     transition: opacity var(--duration-press) var(--ease-out);
   }
   .library-model-card:hover .library-card-revision-actions,
   .library-model-card:focus-within .library-card-revision-actions {
     opacity: 1;
+    pointer-events: auto;
+  }
+  /* The result ends in an ellipsis instead of being cut by the actions. */
+  .library-model-card:hover .library-card-result,
+  .library-model-card:focus-within .library-card-result {
+    padding-right: 68px;
   }
 }
 .library-card-status {
@@ -224,7 +250,6 @@
   right: 6px;
   top: 6px;
   max-width: calc(100% - 56px);
-  transition: transform var(--duration-press) var(--ease-out);
 }
 .library-card-status > span {
   height: 20px;
@@ -233,24 +258,15 @@
   font-weight: 500;
   background: transparent;
 }
-/* The status yields the corner to the full-page action while that action shows. */
-.library-model-card[data-opens-page] .library-card-status {
-  transform: translateX(-24px);
-}
-@media (hover: hover) and (pointer: fine) {
-  .library-model-card[data-opens-page]:not(:hover, :focus-within) .library-card-status {
-    transform: none;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
-  .library-card-status,
-  .library-card-open-page {
+  .library-card-revision-actions {
     transition: none;
   }
 }
 .library-card-revision-actions {
   display: flex;
   gap: 6px;
+  flex-shrink: 0;
   margin-left: auto;
   margin-right: -4px;
 }
@@ -262,20 +278,12 @@
   width: 14px;
   height: 14px;
 }
-.library-card-result {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  min-height: 24px;
-  align-items: center;
-}
 .library-card-outcome {
   color: var(--foreground);
   font: 500 12px/1.4 var(--font-mono);
 }
-.library-card-outcome + .library-card-outcome::before {
-  content: "·";
-  margin-right: 6px;
+.library-card-result > span + span::before {
+  content: " · ";
   color: var(--muted-foreground);
 }
 .library-card-outcome-failed {
@@ -314,8 +322,12 @@
 .library-model-card {
   container-type: inline-size;
 }
-@container (max-width: 240px) {
-  .library-card-recommended > span {
+/* Keep the selected surface opaque beneath the overlapping revision actions. */
+.library-model-card[data-selected]:not([data-favorites]) {
+  background: linear-gradient(var(--accent), var(--accent)), var(--card);
+}
+@container (width < 200px) {
+  .library-preview-views .library-preview-view-label {
     display: none;
   }
 }
@@ -334,7 +346,7 @@
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  padding: 16px 8px 6px;
+  padding: 18px 10px 10px;
   object-fit: contain;
 }
 
@@ -353,8 +365,7 @@
   height: 64px;
   aspect-ratio: auto;
 }
-.collection-card-name,
-.library-card-standard h3 {
+.collection-card-name {
   font-size: 1rem;
 }
 

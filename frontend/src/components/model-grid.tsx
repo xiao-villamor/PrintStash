@@ -190,6 +190,7 @@ import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
 import { Link } from "@/lib/link";
+import { displayModelName } from "@/lib/display-name";
 import { timeAgo } from "@/lib/format";
 import { rememberLastCollection, readLastView, rememberLastView } from "@/lib/last-collection";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
@@ -4068,7 +4069,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                               model={item.value}
                               origin={snapshot?.entry}
                               arriving={arriving.has(`m:${item.value.id}`)}
-                              collectionLabel={item.value.collection_label}
+                              collectionLabel={
+                                includeSubfolders ? item.value.collection_label : null
+                              }
                               selectable={selectMode}
                               selected={selectedIds.has(item.value.id)}
                               onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
@@ -4085,6 +4088,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       readingRenderers={readingRenderers}
                       readingId="models"
                       layout="grid"
+                      estimateSize={compact ? 290 : 250}
                       compact={compact}
                     />
                     <LoadMore
@@ -4539,7 +4543,9 @@ function ModelListRow({
           }
         />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-foreground truncate">{model.name}</p>
+          <p className="text-sm font-medium text-foreground truncate" title={model.name}>
+            {displayModelName(model.name)}
+          </p>
           {model.tags.length > 0 && (
             <div className="flex gap-1 mt-0.5">
               {model.tags.slice(0, 2).map((tag) => (
@@ -4846,7 +4852,7 @@ export function ModelGridSkeleton({
               className="library-model-card overflow-hidden border border-border bg-card"
               aria-hidden
             >
-              <div className="library-preview border-b border-border">
+              <div className="library-preview">
                 <LibraryPreviewPlaceholder />
               </div>
               <LibraryCardDetailsPlaceholder />

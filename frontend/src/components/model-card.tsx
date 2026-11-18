@@ -162,6 +162,7 @@ function ModelCardInner({
   model,
   origin,
   arriving = false,
+  collectionLabel,
   metrics,
   selectable = false,
   selected = false,
@@ -268,8 +269,8 @@ function ModelCardInner({
               }
             }}
             data-favorites={favorites || undefined}
+            data-selected={selected || undefined}
             data-inspected={inspected || undefined}
-            data-opens-page={opensPage || undefined}
             draggable={draggable}
             onDragStart={
               draggable
@@ -400,21 +401,31 @@ function ModelCardInner({
                 </div>
               )}
             </LibraryItemLink>
-            {opensPage && (
-              <Button variant="outline" size="icon-sm" className="library-card-open-page" asChild>
-                <LibraryItemLink
-                  {...keepOffCard}
-                  origin={origin}
-                  href={`/models/${model.id}`}
-                  trackPosition={false}
-                  aria-label={uiText("Open full page")}
-                  title={uiText("Open the full model page")}
-                >
-                  <Maximize2 className="h-3 w-3" aria-hidden />
-                </LibraryItemLink>
-              </Button>
+            {!selectable && (
+              <ModelPreviewControls name={model.name} state={preview}>
+                {opensPage && (
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    className="library-card-open-page library-preview-reveal pointer-events-auto"
+                    asChild
+                  >
+                    <LibraryItemLink
+                      {...keepOffCard}
+                      origin={origin}
+                      href={`/models/${model.id}`}
+                      onPointerEnter={preview.enter}
+                      onPointerLeave={preview.leave}
+                      trackPosition={false}
+                      aria-label={uiText("Open full page")}
+                      title={uiText("Open the full model page")}
+                    >
+                      <Maximize2 className="h-3 w-3" aria-hidden />
+                    </LibraryItemLink>
+                  </Button>
+                )}
+              </ModelPreviewControls>
             )}
-            {!selectable && <ModelPreviewControls name={model.name} state={preview} />}
             {!favorites && (
               <ModelCardRevision
                 model={model}
@@ -422,6 +433,7 @@ function ModelCardInner({
                 admitted={admitted}
                 origin={origin}
                 dimensions={dimensions}
+                collectionLabel={collectionLabel ?? null}
               >
                 <div className="library-card-facts">
                   {factMetrics.map((id) => (

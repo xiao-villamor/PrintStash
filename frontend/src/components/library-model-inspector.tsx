@@ -6,6 +6,7 @@ import { LibraryItemLink } from "@/features/library/navigation";
 import type { LibraryEntry } from "@/features/library/navigation-state";
 import { useModelDetail } from "@/features/library/model-detail";
 import { getSessionVersion } from "@/lib/session-transport";
+import { displayModelName } from "@/lib/display-name";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { userMessage } from "@/lib/errors";
@@ -66,7 +67,7 @@ export function LibraryModelInspector({
     >
       <header className="library-inspector-header">
         <h2 ref={title} tabIndex={-1} title={detail.data?.name}>
-          {detail.data?.name ?? uiText("Model details")}
+          {detail.data ? displayModelName(detail.data.name) : uiText("Model details")}
         </h2>
         <Button variant="ghost" size="icon-sm" asChild>
           <LibraryItemLink
