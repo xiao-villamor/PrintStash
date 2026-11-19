@@ -1,4 +1,4 @@
-/** Mirrors backend `app/schemas/previews.py`; covers never carry a known camera. */
+/** Mirrors backend `app/schemas/previews.py`. */
 export type PreviewViewId =
   | "orbit-0"
   | "orbit-1"
@@ -58,6 +58,8 @@ export interface PreviewImage {
 export interface PublishedPreviews {
   profile: "orbit" | "planar";
   manifest_url: string;
+  /** View whose bytes match the current cover, when a match is known. */
+  cover_view?: PreviewViewId;
   views: PreviewImage[];
 }
 /** The Model has no live mesh Artifact; only its cover can be shown. */
@@ -115,6 +117,7 @@ export function isModelPreviews(wire: ModelPreviews): boolean {
     (published === null ||
       ((published?.profile === "orbit" || published?.profile === "planar") &&
         typeof published.manifest_url === "string" &&
+        (published.cover_view === undefined || PREVIEW_VIEW_IDS.includes(published.cover_view)) &&
         Array.isArray(published.views) &&
         published.views.length >= 1 &&
         published.views.length <= 6 &&

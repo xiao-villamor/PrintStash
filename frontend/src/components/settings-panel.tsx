@@ -398,8 +398,8 @@ function previewModeLabel(mode: PreviewMode): string {
     mode === "single"
       ? "One thumbnail"
       : mode === "oblique"
-        ? "Oblique views"
-        : "Oblique views + top and bottom",
+        ? "Angle views"
+        : "Angle views + top and bottom",
   );
 }
 function preferenceLabel(intent: PreferenceIntent): string {
@@ -5427,7 +5427,7 @@ export function SettingsPanel() {
                         {uiText("Multi-angle previews")}
                         <span className="settings-row-hint">
                           {uiText(
-                            "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.",
+                            "Start with one thumbnail for faster imports. Enable four angle views, optionally adding top and bottom. Existing Models update in the background.",
                           )}
                         </span>
                       </span>

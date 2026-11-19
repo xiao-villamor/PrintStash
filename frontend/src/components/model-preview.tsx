@@ -25,6 +25,13 @@ const labels = {
   edge: "modelPreview.edge",
 } as const satisfies Record<PreviewViewId | "cover", string>;
 
+function previewLabel(state: PreviewCard, id: PreviewViewId | "cover") {
+  const coverView = state.preview.coverView;
+  return id === "cover" && coverView
+    ? `${uiText(labels[coverView.id])} · ${uiText(labels.cover)}`
+    : uiText(labels[id]);
+}
+
 function stop(event: MouseEvent) {
   event.preventDefault();
   event.stopPropagation();
@@ -75,6 +82,7 @@ function PreviewImage({
 function ViewIndicator({ state, className }: { state: PreviewCard; className?: string }) {
   const { navigationViews } = state.preview;
   const shown = state.view?.id ?? "cover";
+  const index = navigationViews.findIndex((view) => view.id === shown);
   if (!state.cover && state.views.length === 0) return null;
   return (
     <div
@@ -85,15 +93,10 @@ function ViewIndicator({ state, className }: { state: PreviewCard; className?: s
       aria-live="polite"
       aria-atomic="true"
     >
-      <span className="library-preview-view-label truncate">{uiText(labels[shown])}</span>
-      {navigationViews.length >= 2 && (
-        <span aria-hidden="true" className="inline-flex shrink-0 gap-1">
-          {navigationViews.map((view) => (
-            <span
-              key={view.id}
-              className={`h-1.5 w-1.5 rounded-full ${shown === view.id ? "bg-foreground" : "bg-muted-foreground/40"}`}
-            />
-          ))}
+      <span className="library-preview-view-label truncate">{previewLabel(state, shown)}</span>
+      {navigationViews.length >= 2 && index >= 0 && (
+        <span className="shrink-0 font-mono">
+          {index + 1}/{navigationViews.length}
         </span>
       )}
     </div>
@@ -172,7 +175,7 @@ function PreviewArrows({ state, size }: { state: PreviewCard; size: "card" | "ga
                     : "right-2",
               )}
               aria-label={uiText(index === 0 ? "modelPreview.previous" : "modelPreview.next")}
-              title={uiText(labels[view.id])}
+              title={previewLabel(state, view.id)}
               onPointerEnter={() => {
                 state.enter();
                 preview.prioritize(view);
@@ -210,7 +213,7 @@ export function ModelPreviewControls({
   const { preview, views } = state;
   const { navigationViews } = preview;
   const shown = state.view?.id ?? "cover";
-  const viewLabel = uiText(labels[shown]);
+  const viewLabel = previewLabel(state, shown);
   const viewIndex = navigationViews.findIndex((view) => view.id === shown);
   const showPosition = navigationViews.length >= 2 && viewIndex >= 0;
   return (
@@ -328,7 +331,7 @@ export function ModelPreviewGallery({
           className="flex gap-2 overflow-x-auto pb-2"
           aria-label={uiText("modelPreview.gallery")}
         >
-          {[...(cover ? [{ id: "cover" as const, url: cover }] : []), ...views].map((view) => (
+          {preview.navigationViews.map((view) => (
             <Button
               key={view.id}
               variant="ghost"
@@ -346,7 +349,7 @@ export function ModelPreviewGallery({
                 className="h-16 w-20"
                 imageClassName="h-full w-full object-contain"
               />
-              <span>{uiText(labels[view.id])}</span>
+              <span>{previewLabel(state, view.id)}</span>
             </Button>
           ))}
         </div>
