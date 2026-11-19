@@ -25,13 +25,17 @@ matrices in the PR description. Review its prose for private report content too.
 
 ## Development Setup
 
+Use Python 3.14+ with `uv` for the backend and Node.js 24 with the
+`pnpm` version pinned in [frontend/package.json](frontend/package.json)
+for the frontend. Use Docker with Compose for container and provider checks.
+
 Backend:
 
 ```bash
 cd backend
 uv sync --extra dev
 
-VAULT_DATA_ROOT=./_data uv run uvicorn app.main:app --reload
+VAULT_DATA_ROOT=./_data VAULT_SETUP_MODE=trusted_network uv run uvicorn app.main:app --reload
 ```
 
 Frontend:
@@ -41,6 +45,13 @@ cd frontend
 pnpm install
 pnpm dev
 ```
+
+Open the URL Vite prints and create a local administrator account on a fresh
+database. Vite proxies API requests to the backend on port 8000 by default.
+Port 3000 serves the published app when the default Compose stack is running.
+Use Vite to see frontend source edits.
+
+See [AGENTS.md](AGENTS.md) for repository conventions and verification guidance.
 
 ## Checks
 

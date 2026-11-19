@@ -12,12 +12,11 @@ Redis/queues/cloud. `AGENTS.md` (layout, commands, hard rules) is binding.
 ## Where we are
 
 <!-- Update this block when a release ships. -->
-Latest shipped: v0.15.0 (faster library browsing and native processing),
-merged to `main`, tagged, and published for amd64 and arm64. Next: gather upgrade
-and hardware feedback. `CHANGELOG.md` `Unreleased` is the canonical summary of
-work not yet assigned to a release; a branch name or roadmap entry is not a release.
-Version 0.15.1 metadata and changelogs are prepared in PR #588; its tag and
-images have not been published. The 0.15.1 changelog records that pending scope.
+Latest shipped: v0.15.1, published for AMD64 and ARM64. Verify the current
+release in [GitHub Releases](https://github.com/xiao-villamor/PrintStash/releases/latest).
+See `CHANGELOG.md` `Unreleased` for work awaiting release, the
+[documentation index](../../../docs/README.md) for installation and operations,
+and [CONTRIBUTING.md](../../../CONTRIBUTING.md) for local development.
 
 Private plans live in `reports/`. They are local-only: never commit, publish,
 or quote them. Older long-range plans may not exist in every checkout; when

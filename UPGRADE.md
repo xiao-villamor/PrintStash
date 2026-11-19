@@ -2,10 +2,9 @@
 
 ## 0.15.1 notes
 
-Version 0.15.1 is being prepared. Wait for its image to appear in
-[GitHub Releases](https://github.com/xiao-villamor/PrintStash/releases) before
-changing a running installation to that tag. The
-[pending changelog](CHANGELOG.md#0151) records the included changes.
+[PrintStash v0.15.1](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.15.1)
+is available for Linux AMD64 and ARM64. Use image tag `0.15.1` when upgrading
+to this release. See the [changelog](CHANGELOG.md#0151) for the included changes.
 
 - Create and verify a backup of the database and managed files. Back up
   Library source originals separately, and retain the previous image.
