@@ -184,8 +184,9 @@ export function InspectorContent({
   const gcodeOnly =
     !sourceFile && toolpathFiles.some((item) => item.sliced_geometry === "gcode_only");
   const previews = model.previews ?? NO_PREVIEWS;
-  const photoCover = coverImageKind(previews, "full") === "photo";
-  const hasImages = photoCover || Boolean(previews.archive_images?.length);
+  const coverKind = coverImageKind(previews, "full");
+  const photoCover = coverKind === "photo";
+  const hasImages = coverKind !== "render" || Boolean(previews.archive_images?.length);
   const hasModel = Boolean(sourceFile) || !hasImages;
   const defaultMode = gcodeOnly ? "gcode" : photoCover ? "images" : "model";
   const viewerMode =

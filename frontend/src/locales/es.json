@@ -5194,6 +5194,7 @@
   "modelCover.reviewFailed": "No se pudo cargar la versión más reciente del modelo.",
   "modelCover.applyReviewed": "Aplicar mi portada a esta versión",
   "modelPreview.photo": "Foto del modelo",
+  "modelPreview.slicerRender": "Vista del laminador",
   "modelPreview.cover": "Portada",
   "modelPreview.orbit0": "Frontal izquierda",
   "modelPreview.orbit1": "Frontal derecha",

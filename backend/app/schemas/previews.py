@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.modules.media.preview_contracts import (
     MAX_VIEWS,
+    PreviewImageKind,
     PreviewManifest,
     ViewId,
     ViewProfile,
@@ -38,11 +39,6 @@ REASONED_STATES = frozenset(
 )
 
 
-class PreviewImageKind(StrEnum):
-    PHOTO = "photo"
-    RENDER = "render"
-
-
 class PreviewImageRead(BaseModel):
     image_kind: Literal[PreviewImageKind.RENDER] = PreviewImageKind.RENDER
     id: ViewId
@@ -64,7 +60,7 @@ class PublishedPreviewRead(BaseModel):
 
 
 class ArchiveImageRead(BaseModel):
-    image_kind: Literal[PreviewImageKind.PHOTO] = PreviewImageKind.PHOTO
+    image_kind: Literal[PreviewImageKind.PHOTO, PreviewImageKind.SLICER_RENDER]
     file_id: int
     url: str
     plate: int | None

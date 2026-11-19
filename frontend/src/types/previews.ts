@@ -50,7 +50,7 @@ export const PREVIEW_STATES: readonly PreviewState[] = [
   "unsupported",
 ];
 
-export type PreviewImageKind = "photo" | "render";
+export type PreviewImageKind = "photo" | "render" | "slicer_render";
 
 export interface PreviewImage {
   image_kind?: "render";
@@ -60,7 +60,7 @@ export interface PreviewImage {
   thumbnail_url?: string;
 }
 export interface ArchivePreviewImage {
-  image_kind?: "photo";
+  image_kind: "photo" | "slicer_render";
   file_id: number;
   url: string;
   plate: number | null;
@@ -147,7 +147,7 @@ export function previewsInFlight(previews: ModelPreviews): boolean {
  * value arrives typed by its declared contract; this confirms it actually holds.
  */
 function isPreviewImageKind(value: PreviewImageKind): boolean {
-  return value === "photo" || value === "render";
+  return value === "photo" || value === "render" || value === "slicer_render";
 }
 
 export function isModelPreviews(wire: ModelPreviews): boolean {
@@ -174,7 +174,7 @@ export function isModelPreviews(wire: ModelPreviews): boolean {
           Number.isSafeInteger(image?.file_id) &&
           image.file_id > 0 &&
           typeof image.url === "string" &&
-          (image.image_kind === undefined || image.image_kind === "photo") &&
+          (image.image_kind === "photo" || image.image_kind === "slicer_render") &&
           (image.plate === null || (Number.isSafeInteger(image.plate) && image.plate > 0)),
       ))
   )

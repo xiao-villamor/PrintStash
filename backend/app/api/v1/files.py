@@ -32,6 +32,7 @@ from app.modules.derivatives.sliced_reads import meshless_archives
 from app.modules.identity import auth, rbac
 from app.modules.library.model_views.thumbnails import thumbnail_version
 from app.modules.media import thumbnail
+from app.modules.media.preview_contracts import PreviewImageKind
 from app.modules.media.sliced_archive import read_archive_image
 from app.modules.media.sliced_gcode import is_container, plate_metadata
 from app.modules.media.three_mf_preview import (
@@ -288,7 +289,7 @@ def archive_image(
         raise HTTPException(status_code=410, detail="file_blob_missing") from exc
     media_type = image.media_type
     name = Path(image.member)
-    if framing == "photo":
+    if framing == "photo" and image.image_kind is PreviewImageKind.PHOTO:
         try:
             payload = thumbnail.to_photo_webp(
                 payload, size=thumbnail.PhotoSize.ORIGINAL

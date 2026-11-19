@@ -10,7 +10,7 @@ import { useModelPreviewCard, type PreviewCard } from "@/lib/use-model-preview-c
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import type { ModelPreviews, PreviewViewId } from "@/types/previews";
+import { coverImageKind, type ModelPreviews, type PreviewViewId } from "@/types/previews";
 
 const labels = {
   cover: "modelPreview.cover",
@@ -34,9 +34,11 @@ function previewLabel(state: PreviewCard, id: PreviewSelection) {
   let label: string | undefined;
   if (view?.role === "archive") {
     label =
-      view.plate === null
-        ? uiText("modelPreview.photo")
-        : uiText("Plate {value1}", { value1: String(view.plate) });
+      view.plate !== null
+        ? uiText("Plate {value1}", { value1: String(view.plate) })
+        : view.image_kind === "slicer_render"
+          ? uiText("modelPreview.slicerRender")
+          : uiText("modelPreview.photo");
   } else {
     const camera = id === "cover" ? (state.previews.large_cover_view ?? view?.id) : view?.id;
     if (camera) label = uiText(labels[camera]);
@@ -71,6 +73,10 @@ function PreviewImage({
   loadingPlaceholder?: ReactNode;
 }) {
   const frameClass = "flex h-full w-full items-center justify-center";
+  const imageClass = cn(
+    imageClassName,
+    state.imageKind === "slicer_render" && "dark:bg-preview-image-matte",
+  );
   return state.view ? (
     <div className={frameClass} data-library-thumbnail="ready">
       <img
@@ -78,7 +84,7 @@ function PreviewImage({
         alt={name}
         data-preview-view={state.view.id}
         draggable={false}
-        className={imageClassName}
+        className={imageClass}
       />
     </div>
   ) : (
@@ -88,7 +94,7 @@ function PreviewImage({
       fade
       previewView="cover"
       className={frameClass}
-      imageClassName={imageClassName}
+      imageClassName={imageClass}
       placeholder={placeholder}
       loadingPlaceholder={loadingPlaceholder}
     />
@@ -150,7 +156,7 @@ export function ModelPreviewFrame({
         imageClassName={
           state.imageKind === "photo"
             ? "h-full w-full object-cover object-center"
-            : favorites
+            : favorites && state.imageKind === "render"
               ? "h-full w-full object-contain"
               : "library-card-thumbnail"
         }
@@ -417,6 +423,8 @@ export function ModelPreviewGallery({
           aria-label={uiText("modelPreview.gallery")}
         >
           {preview.navigationViews.map((view) => {
+            const imageKind =
+              view.id === "cover" ? coverImageKind(previews, "full") : view.image_kind;
             const thumbnail =
               view.id === "cover"
                 ? (previews.large_cover_thumbnail_url ??
@@ -441,11 +449,16 @@ export function ModelPreviewGallery({
                   alt=""
                   eager
                   fade
-                  priority="intent"
+                  priority={
+                    view.id !== "cover" && view.role === "archive" ? "background" : "intent"
+                  }
                   placeholder={<Images className="h-8 w-8 text-muted-foreground" />}
                   loadingPlaceholder={<LibraryPreviewPlaceholder />}
                   className="flex h-16 w-20 items-center justify-center"
-                  imageClassName="h-full w-full object-contain"
+                  imageClassName={cn(
+                    "h-full w-full object-contain",
+                    imageKind === "slicer_render" && "dark:bg-preview-image-matte",
+                  )}
                 />
                 <span>{previewLabel(state, view.id)}</span>
               </Button>

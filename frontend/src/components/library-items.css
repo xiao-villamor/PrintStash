@@ -260,10 +260,15 @@
 }
 .library-model-card:has(.library-preview[data-image-kind="photo"])
   > div
+  > [role="checkbox"]:not([aria-checked="true"]),
+.dark
+  .library-model-card:has(.library-preview[data-image-kind="slicer_render"])
+  > div
   > [role="checkbox"]:not([aria-checked="true"]) {
   border-color: var(--muted-foreground);
 }
-.library-preview[data-image-kind="photo"] .library-card-status > span {
+.library-preview[data-image-kind="photo"] .library-card-status > span,
+.dark .library-preview[data-image-kind="slicer_render"] .library-card-status > span {
   padding-inline: 6px;
   background: var(--card);
   color: var(--card-foreground);

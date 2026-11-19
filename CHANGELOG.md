@@ -82,6 +82,7 @@
 
 ### Fixed
 
+- Embedded slicer renders fit inside Model cards and image previews. In dark mode, a light backing keeps transparent plates visible. The preview API identifies these images as `slicer_render`.
 - Uploaded, source and embedded 3MF photos fill Model cards and the inspector image preview. Generated views keep their margins, and the expanded gallery shows the full image.
 - Expanded galleries use 1280 px generated views and load a separate strip of small thumbnails. Meshless models omit the geometry measurements panel.
 - Meshless sliced 3MFs open directly in the G-code viewer and show available plate estimates and embedded gallery images. Large cover previews use the original cover resolution when available.

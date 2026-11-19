@@ -33,9 +33,7 @@ export function useModelPreviewCard(
   // A selected view replaces the cover only once its own bytes have decoded.
   const view = preview.selected === "cover" ? null : preview.displayed;
   const image = views.find((candidate) => candidate.id === view?.id);
-  const imageKind =
-    image?.image_kind ??
-    (image ? (image.role === "archive" ? "photo" : "render") : coverImageKind(previews, size));
+  const imageKind = image?.image_kind ?? (image ? "render" : coverImageKind(previews, size));
   // Pointer travel between the image and its overlaid controls is one hover.
   function leave(event: { currentTarget: Element; relatedTarget: EventTarget | null }) {
     const next = event.relatedTarget;

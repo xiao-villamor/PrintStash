@@ -27,11 +27,13 @@ from app.modules.derivatives.kinds import MESH_TYPES, PREVIEWS_RECIPE
 from app.modules.derivatives.sliced_reads import meshless_archives
 from app.modules.media.mesh_contracts import ThumbnailStrategy
 from app.modules.media.preview_contracts import (
+    PreviewImageKind,
     PreviewManifest,
     ViewId,
     ViewProfile,
     ViewRole,
 )
+from app.modules.media.sliced_archive import ArchiveImage
 from app.modules.media.sliced_gcode import is_sliced_filename
 from app.schemas.previews import (
     REASONED_STATES,
@@ -39,7 +41,6 @@ from app.schemas.previews import (
     ArtifactPreviews,
     ModelPreviewRead,
     NoPreviewSubject,
-    PreviewImageKind,
     PreviewImageRead,
     PreviewManifestRead,
     PreviewState,
@@ -100,7 +101,11 @@ class CoverInfo:
     image_kind: PreviewImageKind | None
 
 
-def _cover_info(session: Session, model_ids: list[int]) -> dict[int, CoverInfo]:
+def _cover_info(
+    session: Session,
+    model_ids: list[int],
+    archives: dict[int, tuple[int, str, tuple[ArchiveImage, ...]]],
+) -> dict[int, CoverInfo]:
     """Resolve the chosen cover or its published thumbnail and media kind."""
     rows = session.exec(
         select(
@@ -156,8 +161,24 @@ def _cover_info(session: Session, model_ids: list[int]) -> dict[int, CoverInfo]:
                 and is_sliced_filename(filename)
             )
         )
-        if cover_filename is not None or embedded_3mf:
+        if cover_filename is not None:
             kind = PreviewImageKind.PHOTO
+        elif embedded_3mf:
+            image_kind = metadata.get("image_kind")
+            if image_kind is not None:
+                kind = PreviewImageKind(image_kind)
+            else:
+                # Older publications chose the first meshless archive image
+                # when one existed; ordinary embedded thumbnails are renders.
+                archive = (
+                    archives.get(thumbnail_file_id)
+                    if thumbnail_file_id is not None
+                    else None
+                )
+                images = archive[2] if archive is not None else ()
+                kind = (
+                    images[0].image_kind if images else PreviewImageKind.SLICER_RENDER
+                )
         elif thumbnail_file_id or thumbnail_path:
             kind = PreviewImageKind.RENDER
         else:
@@ -171,6 +192,16 @@ def _cover_info(session: Session, model_ids: list[int]) -> dict[int, CoverInfo]:
             image_kind=kind,
         )
     return info
+
+
+def _archive_image_url(
+    file_id: int, index: int, sha256: str, image: ArchiveImage
+) -> str:
+    version = hashlib.sha256(f"{sha256}:{image.member}".encode()).hexdigest()
+    url = f"/api/v1/files/{file_id}/archive-images/{index}?v={version}"
+    if image.image_kind is PreviewImageKind.PHOTO:
+        url += "&framing=photo"
+    return url
 
 
 def summaries(
@@ -198,7 +229,7 @@ def summaries(
             .order_by(col(ArtifactDerivative.recipe_version).desc())
         ).all():
             by_file[row.file_id].append(row)
-    cover_info = _cover_info(session, model_ids)
+    cover_info = _cover_info(session, model_ids, archive_files)
     archive_by_model: dict[int, list[ArchiveImageRead]] = {}
     if root is None:
         for file_id, (model_id, sha256, images) in archive_files.items():
@@ -207,8 +238,9 @@ def summaries(
                 [
                     ArchiveImageRead(
                         file_id=file_id,
-                        url=f"/api/v1/files/{file_id}/archive-images/{index}?v={sha256}&framing=photo",
+                        url=_archive_image_url(file_id, index, sha256, image),
                         plate=image.plate,
+                        image_kind=image.image_kind,
                     )
                     for index, image in enumerate(images)
                 ],
@@ -228,16 +260,23 @@ def summaries(
             else None
         )
         if file is None:
-            photo_url = custom_url or (
-                archive_images[0].url
+            archive_cover = (
+                archive_images[0]
                 if archive_images and custom_filename is None
                 else None
             )
             result[model_id] = NoPreviewSubject(
                 cover_image_kind=cover_kind,
-                large_cover_image_kind=PreviewImageKind.PHOTO if photo_url else None,
+                large_cover_image_kind=(
+                    PreviewImageKind.PHOTO
+                    if custom_url
+                    else archive_cover.image_kind
+                    if archive_cover is not None
+                    else None
+                ),
                 archive_images=archive_images,
-                large_cover_url=photo_url,
+                large_cover_url=custom_url
+                or (archive_cover.url if archive_cover is not None else None),
             )
             continue
         assert file.id is not None

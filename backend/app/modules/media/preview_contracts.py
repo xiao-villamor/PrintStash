@@ -33,6 +33,12 @@ class PreviewLimitError(Exception):
     """A documented generation limit was exceeded; the Artifact stays valid."""
 
 
+class PreviewImageKind(StrEnum):
+    PHOTO = "photo"
+    RENDER = "render"
+    SLICER_RENDER = "slicer_render"
+
+
 class ViewId(StrEnum):
     ORBIT_0 = "orbit-0"
     ORBIT_1 = "orbit-1"

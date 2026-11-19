@@ -9,10 +9,11 @@ import zipfile
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from app.core.native_settings import settings
 from app.modules.media import three_mf_package as package
+from app.modules.media.preview_contracts import PreviewImageKind
 from app.modules.media.sliced_plate_identity import _fields, _xml
 from app.modules.media.three_mf_preview import (
     EmbeddedGcodeError,
@@ -33,6 +34,14 @@ class ArchiveImage:
     plate: int | None
     media_type: str
 
+    @property
+    def image_kind(
+        self,
+    ) -> Literal[PreviewImageKind.PHOTO, PreviewImageKind.SLICER_RENDER]:
+        if self.member.casefold().startswith(_PHOTO_DIRECTORY):
+            return PreviewImageKind.PHOTO
+        return PreviewImageKind.SLICER_RENDER
+
 
 @dataclass(frozen=True)
 class SlicedArchive:
@@ -42,6 +51,12 @@ class SlicedArchive:
     images: tuple[ArchiveImage, ...]
 
 
+_PHOTO_DIRECTORY = "auxiliaries/model pictures/"
+_THUMBNAIL_DIRECTORY = "auxiliaries/.thumbnails/"
+_PLATE_IMAGE = re.compile(
+    r"metadata/(?P<view>plate|top|plate_no_light|pick)_(?P<number>[1-9][0-9]{0,8})(?:_small)?\.png"
+)
+_PLATE_VIEW_PRIORITY = {"plate": 3, "top": 2, "plate_no_light": 1, "pick": 0}
 _MAX_IMAGE_PIXELS = 25_000_000
 _MAX_IMAGE_BYTES = 16 * 1024 * 1024
 _IMAGES = {
@@ -103,6 +118,7 @@ def _images(
 ) -> tuple[ArchiveImage, ...]:
     photos = []
     plate_images = {}
+    archive_thumbnails = []
     for item in archive.infolist():
         name = item.filename
         media_type = _IMAGES.get(Path(name).suffix.lower())
@@ -114,24 +130,35 @@ def _images(
             > max(item.compress_size, 1) * package.MAX_COMPRESSION_RATIO
         ):
             continue
-        is_photo = name.startswith("Auxiliaries/Model Pictures/")
-        match = re.fullmatch(r"Metadata/(?:plate|top)_([1-9][0-9]{0,8})\.png", name)
-        number = int(match[1]) if match else None
-        if not is_photo and number not in plates:
+        path = name.casefold()
+        match = _PLATE_IMAGE.fullmatch(path)
+        number = int(match["number"]) if match else None
+        image = ArchiveImage(name, number, media_type)
+        is_photo = image.image_kind is PreviewImageKind.PHOTO
+        is_thumbnail = (
+            path.startswith(_THUMBNAIL_DIRECTORY) or path == "metadata/thumbnail.png"
+        )
+        if not is_photo and not is_thumbnail and number not in plates:
             continue
         area = _pixel_area(archive, item, media_type)
         if area == 0:
             continue
         if is_photo:
-            photos.append((area, ArchiveImage(name, None, media_type)))
-        elif number is not None:
+            photos.append((area, image))
+        elif match and number is not None:
+            priority = (area, _PLATE_VIEW_PRIORITY[match["view"]])
             prior = plate_images.get(number)
-            if prior is None or area > prior[0]:
-                plate_images[number] = (area, ArchiveImage(name, number, media_type))
+            if prior is None or priority > prior[0]:
+                plate_images[number] = (priority, image)
+        elif is_thumbnail:
+            archive_thumbnails.append((area, image))
     photos.sort(key=lambda item: (-item[0], item[1].member))
-    return tuple(image for _, image in photos[:6]) + tuple(
+    images = tuple(image for _, image in photos[:6]) + tuple(
         plate_images[number][1] for number in sorted(plate_images)
     )
+    if images or not archive_thumbnails:
+        return images
+    return (max(archive_thumbnails, key=lambda item: (item[0], item[1].member))[1],)
 
 
 def inspect_sliced_archive(path: Path) -> SlicedArchive | None:

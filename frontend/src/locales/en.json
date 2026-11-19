@@ -5194,6 +5194,7 @@
   "modelCover.reviewFailed": "The latest Model could not be loaded.",
   "modelCover.applyReviewed": "Apply my cover to this version",
   "modelPreview.photo": "Model photo",
+  "modelPreview.slicerRender": "Slicer preview",
   "modelPreview.cover": "Cover",
   "modelPreview.orbit0": "Front left",
   "modelPreview.orbit1": "Front right",

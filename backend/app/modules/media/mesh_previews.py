@@ -26,7 +26,12 @@ _MAX_3MF_ENTRIES = 4096
 _MAX_3MF_TOTAL_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 _MAX_3MF_COMPRESSION_RATIO = 200
 _MAX_3MF_ENTRY_NAME_BYTES = 1024
-_3MF_THUMBNAIL_DIRS = ("metadata/", "3d/thumbnails/", "thumbnails/")
+_3MF_THUMBNAIL_DIRS = (
+    "metadata/",
+    "3d/thumbnails/",
+    "thumbnails/",
+    "auxiliaries/.thumbnails/",
+)
 
 
 def extract_embedded_3mf_thumbnail(
@@ -111,11 +116,21 @@ def extract_embedded_3mf_thumbnail(
                     return (1, name)
                 if "plate_1" in basename or "plate_01" in basename:
                     return (2, name)
-                return (3, name)
+                auxiliary_order = (
+                    "thumbnail_3mf.png",
+                    "thumbnail_middle.png",
+                    "thumbnail_small.png",
+                )
+                if (
+                    name.startswith("auxiliaries/.thumbnails/")
+                    and basename in auxiliary_order
+                ):
+                    return (3 + auxiliary_order.index(basename), name)
+                return (6, name)
 
             candidates.sort(key=semantic_rank)
             best_rank = semantic_rank(candidates[0])[0]
-            if best_rank == 3 and len(candidates) > 1:
+            if best_rank == 6 and len(candidates) > 1:
                 logger.warning(
                     "mesh_processing: ambiguous embedded 3MF thumbnails",
                     extra={"count": len(candidates)},

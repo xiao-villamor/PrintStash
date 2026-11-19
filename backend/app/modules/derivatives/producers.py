@@ -65,6 +65,7 @@ from app.modules.media.mesh_contracts import (
     ThumbnailStrategy,
 )
 from app.modules.media.mesh_isolation import MeshWorkerError
+from app.modules.media.preview_contracts import PreviewImageKind
 from app.modules.media.sliced_archive import (
     SlicedArchive,
     SlicedGeometry,
@@ -258,13 +259,19 @@ def _publish_thumbnail(
     preserve_frame: bool = False,
     renderer_encoded: bool = False,
     has_embedded_3mf_preview: bool | None = None,
+    embedded_kind: PreviewImageKind = PreviewImageKind.SLICER_RENDER,
 ) -> DerivativeState:
     assert file_row.id is not None
+    embedded_container = strategy == ThumbnailStrategy.EMBEDDED and is_container(
+        file_row
+    )
     try:
-        if strategy == ThumbnailStrategy.EMBEDDED and is_container(file_row):
-            photo = thumbnail.to_photo_webp(image, size=thumbnail.PhotoSize.THUMBNAIL)
-            encoded = photo.data
-            width, height = photo.width, photo.height
+        if embedded_container:
+            source_image = thumbnail.to_photo_webp(
+                image, size=thumbnail.PhotoSize.THUMBNAIL
+            )
+            encoded = source_image.data
+            width, height = source_image.width, source_image.height
         else:
             encoded = thumbnail.to_webp(
                 image,
@@ -320,6 +327,7 @@ def _publish_thumbnail(
                 "height": height,
                 "strategy": strategy,
                 "complete": complete,
+                **({"image_kind": embedded_kind.value} if embedded_container else {}),
             },
             duration_ms=duration_ms,
             peak_rss_bytes=peak_rss_bytes,
@@ -369,11 +377,14 @@ def _sliced_archive(path: Path) -> SlicedArchive | None:
         return None
 
 
-def _sliced_cover(source: Path, sliced: SlicedArchive | None) -> bytes | None:
+def _sliced_cover(
+    source: Path, sliced: SlicedArchive | None
+) -> tuple[bytes, PreviewImageKind] | None:
     if sliced is None or not sliced.images:
         return None
     try:
-        return read_archive_image(source, sliced.images[0])
+        image = sliced.images[0]
+        return read_archive_image(source, image), image.image_kind
     except EmbeddedGcodeError:
         return None
 
@@ -514,6 +525,7 @@ def _derive_mesh(
     )
     embedded_checked = False
     embedded = None
+    embedded_kind = PreviewImageKind.SLICER_RENDER
 
     def publish_embedded(image: bytes) -> None:
         assert cover_attempt is not None
@@ -526,6 +538,7 @@ def _derive_mesh(
                 strategy=ThumbnailStrategy.EMBEDDED.value,
                 complete=True,
                 has_embedded_3mf_preview=True,
+                embedded_kind=embedded_kind,
             )
         published(DerivativeKind.THUMBNAIL, state)
 
@@ -677,9 +690,13 @@ def _derive_mesh(
                 )
                 if check_embedded:
                     with phases.phase("embedded_cover"):
-                        embedded = _sliced_cover(source, sliced) or _embedded_3mf_cover(
-                            source, file_id, file_row.size_bytes
-                        )
+                        archive_cover = _sliced_cover(source, sliced)
+                        if archive_cover is not None:
+                            embedded, embedded_kind = archive_cover
+                        else:
+                            embedded = _embedded_3mf_cover(
+                                source, file_id, file_row.size_bytes
+                            )
                     embedded_checked = True
                     if embedded is not None and not recreate_embedded:
                         publish_embedded(embedded)
@@ -897,6 +914,7 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
     captured = CapturedSettings()
     plate_metadata: list[dict[str, Any]] = []
     image: bytes | None = None
+    embedded_kind = PreviewImageKind.SLICER_RENDER
     sliced = None
     try:
         with resolve(file_row).materialize() as source:
@@ -972,18 +990,18 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
                     outcome[DerivativeKind.METADATA] = DerivativeState.FAILED
             if DerivativeKind.THUMBNAIL in needed:
                 try:
-                    image = (
-                        resin.extract(source)
-                        if file_row.file_type is FileType.RESIN
-                        else (
-                            _sliced_cover(source, sliced)
-                            or mesh_previews.extract_embedded_3mf_thumbnail(
+                    if file_row.file_type is FileType.RESIN:
+                        image = resin.extract(source)
+                    elif is_container(file_row):
+                        archive_cover = _sliced_cover(source, sliced)
+                        if archive_cover is not None:
+                            image, embedded_kind = archive_cover
+                        else:
+                            image = mesh_previews.extract_embedded_3mf_thumbnail(
                                 source, file_type="3mf"
                             )
-                        )
-                        if is_container(file_row)
-                        else thumbnail.extract(source)
-                    )
+                    else:
+                        image = thumbnail.extract(source)
                 except ResinFormatError, EmbeddedGcodeError:
                     _fail(
                         attempts[DerivativeKind.THUMBNAIL],
@@ -1059,9 +1077,10 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
                     image,
                     attempt=attempts[DerivativeKind.THUMBNAIL],
                     normalize=False,
-                    strategy="embedded",
+                    strategy=ThumbnailStrategy.EMBEDDED.value,
                     complete=True,
                     duration_ms=duration_ms,
+                    embedded_kind=embedded_kind,
                 )
     except records.AttemptSuperseded:
         # Earlier kinds committed independently and still deserve their notice.
