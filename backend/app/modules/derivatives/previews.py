@@ -13,7 +13,7 @@ from functools import partial
 
 from app.core.cancellation import checkpoint
 from app.core.config import settings
-from app.db.models import DerivativeKind, DerivativeState, JobKind
+from app.db.models import DerivativeKind, DerivativeState, FileType, JobKind
 from app.db.session import get_session_factory
 from app.modules.media import mesh_isolation
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
@@ -38,7 +38,14 @@ from app.runtime.native_admission import AdmissionTooLarge
 
 from . import policy, records
 from . import preview_publication as publication
-from .producers import Outcome, _announced, _begin, _fail
+from .producers import (
+    Outcome,
+    _announced,
+    _begin,
+    _fail,
+    _skip_meshless,
+    _sliced_archive,
+)
 
 
 def _derive(
@@ -104,6 +111,11 @@ def _derive(
             prepared.materialize(capacity_claimed=True) as sources,
         ):
             (source,) = sources
+            if (
+                file.file_type is FileType.THREE_MF
+                and _sliced_archive(source) is not None
+            ):
+                return Outcome({DerivativeKind.PREVIEWS: _skip_meshless(attempt)})
             with mesh_isolation.prepared_worker_result(
                 "app.modules.media.preview_worker",
                 {

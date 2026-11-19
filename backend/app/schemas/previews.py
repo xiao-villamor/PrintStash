@@ -53,6 +53,12 @@ class PublishedPreviewRead(BaseModel):
     views: list[PreviewImageRead] = Field(min_length=1, max_length=6)
 
 
+class ArchiveImageRead(BaseModel):
+    file_id: int
+    url: str
+    plate: int | None
+
+
 class NoPreviewSubject(BaseModel):
     """The Model has no live mesh Artifact; only its cover can be shown."""
 
@@ -62,6 +68,15 @@ class NoPreviewSubject(BaseModel):
     kind: Literal["none"] = "none"
     # Embedded, source and custom covers carry no known mesh camera.
     cover_camera: Literal["unknown"] = "unknown"
+    large_cover_url: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    large_cover_view: ViewId | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    archive_images: list[ArchiveImageRead] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
 
 
 class ArtifactPreviews(BaseModel):
@@ -71,6 +86,15 @@ class ArtifactPreviews(BaseModel):
 
     kind: Literal["artifact"] = "artifact"
     cover_camera: Literal["unknown"] = "unknown"
+    large_cover_url: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    large_cover_view: ViewId | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    archive_images: list[ArchiveImageRead] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
     file_id: int
     state: PreviewState
     reason: str | None

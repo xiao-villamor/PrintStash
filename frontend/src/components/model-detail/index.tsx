@@ -90,6 +90,7 @@ import { RevisionsTab } from "./revisions-tab";
 import { SendToButtons } from "./send-to-buttons";
 import { ShareDialog } from "./share-dialog";
 import { SettingsTab } from "./settings-tab";
+import { PlateEstimates } from "./plate-estimates";
 import { SourceTab } from "./source-tab";
 import { useContentReveal } from "@/lib/use-content-reveal";
 import { DetailTabLoading } from "./tab-loading";
@@ -736,21 +737,24 @@ function ModelDetailPresentation({
   const printSettingRows = buildPrintSettingRows(meta, metadataPreferences);
   const meshFile = model.files.find(
     (f) =>
-      f.file_type === "stl" ||
-      f.file_type === "3mf" ||
-      f.file_type === "obj" ||
-      f.file_type === "glb" ||
-      f.file_type === "ply" ||
-      f.file_type === "gltf" ||
-      f.file_type === "3dm" ||
-      f.file_type === "fbx" ||
-      f.file_type === "step",
+      f.sliced_geometry !== "gcode_only" &&
+      (f.file_type === "stl" ||
+        f.file_type === "3mf" ||
+        f.file_type === "obj" ||
+        f.file_type === "glb" ||
+        f.file_type === "ply" ||
+        f.file_type === "gltf" ||
+        f.file_type === "3dm" ||
+        f.file_type === "fbx" ||
+        f.file_type === "step"),
   );
   const hasGcode = gcodeFiles.length > 0;
   const { sources: toolpathFiles, availability: toolpathAvailability } =
     useToolpathSources(sortedFiles);
   const hasToolpathPreview = toolpathAvailability === "available";
-  const viewerMode = hasToolpathPreview ? requestedViewerMode : "model";
+  const gcodeOnly =
+    !meshFile && toolpathFiles.some((file) => file.sliced_geometry === "gcode_only");
+  const viewerMode = gcodeOnly ? "gcode" : hasToolpathPreview ? requestedViewerMode : "model";
   const previewSourceId =
     toolpathSource?.modelId === model.id &&
     toolpathSource.revisionId === (inspectedGcode?.id ?? null)
@@ -777,20 +781,32 @@ function ModelDetailPresentation({
     chosenPlate !== null && chosenPlate.fileId === meshFile?.id
       ? (plates.find((plate) => plate.number === chosenPlate.number) ?? null)
       : null;
+  const slicedMetadataFile =
+    !inspectedGcode && previewSource?.sliced_geometry === "gcode_only"
+      ? previewSource
+      : inspectedGcode;
   const slicedEstimates = useGcodePlates(
     model.id,
-    inspectedGcode?.original_filename.toLowerCase().endsWith(".3mf") ? inspectedGcode.id : null,
+    slicedMetadataFile?.original_filename.toLowerCase().endsWith(".3mf")
+      ? slicedMetadataFile.id
+      : null,
   );
   const selectedEstimatePlate =
-    shownPlate && slicedEstimates
-      ? (matchSlicedPlate(shownPlate, plates, slicedEstimates.identities ?? [])?.number ?? null)
-      : null;
+    inspectedSlicedPlate?.fileId === slicedMetadataFile?.id && inspectedSlicedPlate
+      ? inspectedSlicedPlate.number
+      : shownPlate && slicedEstimates
+        ? (matchSlicedPlate(shownPlate, plates, slicedEstimates.identities ?? [])?.number ?? null)
+        : null;
   const dispatchPlate = inspectedSlicedPlate
     ? inspectedSlicedPlate.fileId === inspectedGcode?.id
       ? inspectedSlicedPlate.number
       : null
     : selectedEstimatePlate;
-  const thumbUrl = useAuthenticatedAssetUrl(model.thumbnail_url);
+  const thumbUrl = useAuthenticatedAssetUrl(
+    !meshFile && !hasToolpathPreview
+      ? (model.previews?.large_cover_url ?? model.thumbnail_url)
+      : null,
+  );
   const printerFilesByFileId = useMemo(() => {
     const grouped = new Map<number, ModelPrinterFileRead[]>();
     for (const row of printerFiles) {
@@ -1259,6 +1275,7 @@ function ModelDetailPresentation({
                   <Suspense fallback={ViewerFallback}>
                     <GcodePreview
                       files={toolpathFiles}
+                      archiveImages={model.previews?.archive_images}
                       bedSizeFor={(file) => getBedSize(file.metadata?.printer_model)}
                       selectedFileId={previewSource?.id}
                       onSelectFile={selectToolpathSource}
@@ -1403,6 +1420,7 @@ function ModelDetailPresentation({
                     setViewerMode={setViewerMode}
                     hasGcode={hasToolpathPreview}
                     availability={toolpathAvailability}
+                    gcodeOnly={gcodeOnly}
                     viewerReady={viewerMode === "gcode" ? toolpathReady : viewerReady}
                     filename={
                       viewerMode === "gcode"
@@ -1514,39 +1532,51 @@ function ModelDetailPresentation({
               <div ref={detailTabBody} className="model-detail-tab-body space-y-4">
                 {activeTab === "overview" && (
                   <div className="space-y-4">
-                    <OverviewTab
-                      model={model}
-                      editing={false}
-                      editor={modelMetadataEditor}
-                      revision={{
-                        file: inspectedGcode,
-                        plateEstimates: slicedEstimates,
-                        selectedSlicedPlate: selectedEstimatePlate,
-                        recommended: recommendedGcode,
-                        revisionCount: gcodeFiles.length,
-                        canEdit: canEditModel,
-                        canSend: canViewPrinters,
-                        printerless,
-                        jobs: canViewPrinters && printJobQuery.isSuccess ? printJobs : null,
-                        onRevisions: () => {
-                          setCompareOrigin(null);
-                          selectTab("revisions");
-                        },
-                        onSettings: () => selectTab("settings"),
-                        onHistory: () => selectTab("history"),
-                        onCompare: () => openComparison("overview"),
-                        onInspect: (fileId) => setRevisionSelection({ modelId: model.id, fileId }),
-                        onSend: (mode) => {
-                          setDeliveryMode(mode);
-                          setSendOpen(true);
-                        },
-                        onLogPrint: (state) => {
-                          if (inspectedGcode) setHistoryDraft({ fileId: inspectedGcode.id, state });
-                          selectTab("history");
-                        },
-                        onAddRevision: requestAddRevision,
-                      }}
-                    />
+                    {!inspectedGcode && gcodeOnly ? (
+                      slicedEstimates && (
+                        <PlateEstimates
+                          data={slicedEstimates}
+                          selected={selectedEstimatePlate}
+                          showCost={false}
+                        />
+                      )
+                    ) : (
+                      <OverviewTab
+                        model={model}
+                        editing={false}
+                        editor={modelMetadataEditor}
+                        revision={{
+                          file: inspectedGcode,
+                          plateEstimates: slicedEstimates,
+                          selectedSlicedPlate: selectedEstimatePlate,
+                          recommended: recommendedGcode,
+                          revisionCount: gcodeFiles.length,
+                          canEdit: canEditModel,
+                          canSend: canViewPrinters,
+                          printerless,
+                          jobs: canViewPrinters && printJobQuery.isSuccess ? printJobs : null,
+                          onRevisions: () => {
+                            setCompareOrigin(null);
+                            selectTab("revisions");
+                          },
+                          onSettings: () => selectTab("settings"),
+                          onHistory: () => selectTab("history"),
+                          onCompare: () => openComparison("overview"),
+                          onInspect: (fileId) =>
+                            setRevisionSelection({ modelId: model.id, fileId }),
+                          onSend: (mode) => {
+                            setDeliveryMode(mode);
+                            setSendOpen(true);
+                          },
+                          onLogPrint: (state) => {
+                            if (inspectedGcode)
+                              setHistoryDraft({ fileId: inspectedGcode.id, state });
+                            selectTab("history");
+                          },
+                          onAddRevision: requestAddRevision,
+                        }}
+                      />
+                    )}
                     {!editing && !hasGcode && latestFile?.file_type === "resin" && (
                       <SettingsTab
                         meta={meta}
@@ -1562,7 +1592,7 @@ function ModelDetailPresentation({
                     meta={meta}
                     printSettingRows={printSettingRows}
                     preferences={metadataPreferences}
-                    hasSlicedRevision={gcodeFiles.length > 0}
+                    hasSlicedRevision={gcodeFiles.length > 0 || gcodeOnly}
                     plateEstimates={slicedEstimates}
                     selectedSlicedPlate={selectedEstimatePlate}
                     headerActions={

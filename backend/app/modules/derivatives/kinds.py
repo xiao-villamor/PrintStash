@@ -38,21 +38,21 @@ from app.db.models import SENTINEL_FILE_HASH, DerivativeKind, File, FileType, Jo
 MESH_GEOMETRY_RECIPE = 12
 MESH_THUMBNAIL_RECIPE = 18
 # 3MF scenes are read through lib3mf in single precision.
-THREE_MF_GEOMETRY_RECIPE = 13
+THREE_MF_GEOMETRY_RECIPE = 14
 # 21 selects embedded covers by default and records picture availability.
-THREE_MF_THUMBNAIL_RECIPE = 21
-THREE_MF_VIEWER_STL_RECIPE = 4
+THREE_MF_THUMBNAIL_RECIPE = 22
+THREE_MF_VIEWER_STL_RECIPE = 5
 # STEP is tessellated at 0.05 mm linear deflection.
 STEP_GEOMETRY_RECIPE = 13
 STEP_THUMBNAIL_RECIPE = 19
 STEP_VIEWER_STL_RECIPE = 4
-GCODE_METADATA_RECIPE = 9
-GCODE_THUMBNAIL_RECIPE = 4
+GCODE_METADATA_RECIPE = 10
+GCODE_THUMBNAIL_RECIPE = 5
 TOOLPATH_RECIPE = 1
 VIEWER_STL_RECIPE = 3
 PLATES_RECIPE = 1
 # 4: views follow the Model image quality setting instead of a fixed 480 x 360.
-PREVIEWS_RECIPE = 4
+PREVIEWS_RECIPE = 5
 VIEWER_TYPES = (
     FileType.THREE_MF,
     FileType.OBJ,

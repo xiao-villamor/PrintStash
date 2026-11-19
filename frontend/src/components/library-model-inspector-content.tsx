@@ -166,13 +166,18 @@ export function InspectorContent({
     files,
     active,
   );
-  const toolpath = toolpathFiles.find((item) => item.id === toolpathId) ?? file ?? toolpathFiles[0];
+  const toolpath =
+    toolpathFiles.find((item) => item.id === (toolpathId ?? file?.id)) ?? toolpathFiles[0];
   const [sourceId, setSourceId] = useState<number | null>(null);
   const [fileMenu, setFileMenu] = useState<number | null>(null);
   const viewer = useRef<HTMLDivElement>(null);
-  const sourceFile =
-    files.find((item) => item.id === sourceId && meshTypes.has(item.file_type)) ??
-    files.find((item) => meshTypes.has(item.file_type));
+  const meshFiles = files.filter(
+    (item) => meshTypes.has(item.file_type) && item.sliced_geometry !== "gcode_only",
+  );
+  const sourceFile = meshFiles.find((item) => item.id === sourceId) ?? meshFiles[0];
+  const gcodeOnly =
+    !sourceFile && toolpathFiles.some((item) => item.sliced_geometry === "gcode_only");
+  const viewerMode = gcodeOnly ? "gcode" : toolpath ? preview : "model";
   function download(item: FileRead) {
     void downloadAuthenticatedFile(
       `/api/v1/files/${item.id}/download`,
@@ -441,19 +446,21 @@ export function InspectorContent({
         >
           <ViewerModeSwitch
             compact
-            mode={toolpath ? preview : "model"}
+            mode={viewerMode}
+            gcodeOnly={gcodeOnly}
             onChange={setPreview}
             hasGcode={toolpathAvailability === "available"}
             availability={toolpathAvailability}
           />
           <Suspense fallback={<Loader2 className="h-5 w-5 animate-spin" />}>
-            {preview === "gcode" && toolpath ? (
+            {viewerMode === "gcode" && toolpath ? (
               <GcodePreview
                 files={toolpathFiles}
+                archiveImages={model.previews?.archive_images}
                 selectedFileId={toolpath.id}
                 onSelectFile={setToolpathId}
                 bedSizeFor={() => null}
-                viewerProps={{ showDimensions: false, screenshotName: model.slug }}
+                viewerProps={{ screenshotName: model.slug }}
               />
             ) : sourceFile ? (
               <STLViewer
@@ -462,7 +469,7 @@ export function InspectorContent({
               />
             ) : (
               <ProtectedThumbnail
-                path={model.thumbnail_url}
+                path={model.previews?.large_cover_url ?? model.thumbnail_url}
                 alt={model.name}
                 className="h-full w-full"
                 imageClassName="h-full w-full object-contain"

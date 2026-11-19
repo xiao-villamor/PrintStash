@@ -990,16 +990,20 @@ def patch_model_provenance(
 @router.get("/{model_id}/cover/content", summary="Read the Model's chosen cover")
 def get_model_cover(
     model_id: int,
+    size: Literal["thumbnail", "original"] = "original",
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> Response:
     model = _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    from app.modules.media.thumbnail import to_webp
+
+    data = model_covers.content(model)
     return Response(
-        content=model_covers.content(model),
+        content=to_webp(data, renderer_encoded=True) if size == "thumbnail" else data,
         media_type="image/webp",
         headers={
             "Cache-Control": "private, no-cache",
-            "ETag": f'"model-cover-{model_id}-{model.cover_filename}"',
+            "ETag": f'"model-cover-{model_id}-{model.cover_filename}-{size}"',
             "X-Content-Type-Options": "nosniff",
         },
     )

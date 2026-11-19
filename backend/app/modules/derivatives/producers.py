@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import tempfile
 import time
+import zipfile
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass
@@ -64,6 +65,12 @@ from app.modules.media.mesh_contracts import (
     ThumbnailStrategy,
 )
 from app.modules.media.mesh_isolation import MeshWorkerError
+from app.modules.media.sliced_archive import (
+    SlicedArchive,
+    SlicedGeometry,
+    inspect_sliced_archive,
+    read_archive_image,
+)
 from app.modules.media.sliced_gcode import is_container, plate_toolpath
 from app.modules.media.source_preparation import reserve_sources
 from app.modules.media.three_mf_preview import (
@@ -347,6 +354,64 @@ def _thumbnail_failure(
     return DerivativeState.FAILED
 
 
+def _sliced_archive(path: Path) -> SlicedArchive | None:
+    try:
+        return inspect_sliced_archive(path)
+    except EmbeddedGcodeError, zipfile.BadZipFile:
+        # Keep the ordinary reader's error reporting for unrecognized archives.
+        return None
+
+
+def _sliced_cover(source: Path, sliced: SlicedArchive | None) -> bytes | None:
+    if sliced is None or not sliced.images:
+        return None
+    try:
+        return read_archive_image(source, sliced.images[0])
+    except EmbeddedGcodeError:
+        return None
+
+
+def _sliced_output(file: File, sliced: SlicedArchive) -> dict[str, Any]:
+    return {
+        "geometry": sliced.geometry.value,
+        "source_sha256": file.sha256,
+        "archive_images": [asdict(image) for image in sliced.images],
+    }
+
+
+def _publish_sliced_metadata(
+    file_id: int, attempt: records.DerivativeAttempt, sliced: SlicedArchive
+) -> None:
+    with get_session_factory().scoped_session() as session:
+        file, _ = records.claim_running(session, attempt)
+        records.mark_ready(
+            session,
+            attempt,
+            now=utcnow(),
+            output={
+                **_sliced_output(file, sliced),
+                "plate_metadata": sliced.plate_metadata,
+            },
+        )
+        row = _metadata_row(session, file_id)
+        apply_volume(row, VolumeNotCalculated(VolumeNotCalculatedCause.NOT_APPLICABLE))
+        row.bbox_x_mm = row.bbox_y_mm = row.bbox_z_mm = None
+        row.triangle_count = None
+        for name, value in sliced.metadata.items():
+            setattr(row, name, value)
+        session.add(row)
+        session.commit()
+
+
+def _skip_meshless(attempt: records.DerivativeAttempt) -> DerivativeState:
+    with get_session_factory().scoped_session() as session:
+        records.mark_skipped(
+            session, attempt, SlicedGeometry.GCODE_ONLY.value, now=utcnow()
+        )
+        session.commit()
+    return DerivativeState.SKIPPED
+
+
 def _derive_mesh(
     file_id: int,
     *,
@@ -598,9 +663,14 @@ def _derive_mesh(
                     (source,) = stack.enter_context(
                         prepared.materialize(capacity_claimed=True)
                     )
+                sliced = (
+                    _sliced_archive(source)
+                    if file_row.file_type is FileType.THREE_MF
+                    else None
+                )
                 if check_embedded:
                     with phases.phase("embedded_cover"):
-                        embedded = _embedded_3mf_cover(
+                        embedded = _sliced_cover(source, sliced) or _embedded_3mf_cover(
                             source, file_id, file_row.size_bytes
                         )
                     embedded_checked = True
@@ -610,6 +680,22 @@ def _derive_mesh(
                     cover_attempt is not None
                     and DerivativeKind.THUMBNAIL not in outcome
                 )
+                if sliced is not None:
+                    if authority := attempts.get(DerivativeKind.METADATA):
+                        _publish_sliced_metadata(file_id, authority, sliced)
+                        published(DerivativeKind.METADATA, DerivativeState.READY)
+                    if views is not None:
+                        state = _skip_meshless(views.attempt)
+                        views_settled = True
+                        published(DerivativeKind.PREVIEWS, state)
+                    if need_thumbnail and cover_attempt is not None:
+                        if embedded is not None:
+                            publish_embedded(embedded)
+                        else:
+                            published(
+                                DerivativeKind.THUMBNAIL, _skip_meshless(cover_attempt)
+                            )
+                    return Outcome(outcome)
                 if not (
                     need_thumbnail
                     or DerivativeKind.METADATA in attempts
@@ -804,8 +890,10 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
     captured = CapturedSettings()
     plate_metadata: list[dict[str, Any]] = []
     image: bytes | None = None
+    sliced = None
     try:
         with resolve(file_row).materialize() as source:
+            sliced = _sliced_archive(source) if is_container(file_row) else None
             if DerivativeKind.METADATA in needed:
                 try:
                     if file_row.file_type is FileType.RESIN:
@@ -816,6 +904,19 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
                             for number in plates:
                                 with plate_toolpath(source, number) as toolpath:
                                     parsed = gcode_parser.parse(toolpath)
+                                    if sliced is not None:
+                                        archive_meta = next(
+                                            details["metadata"]
+                                            for details in sliced.plate_metadata
+                                            if details["number"] == number
+                                        )
+                                        parsed.update(
+                                            {
+                                                key: value
+                                                for key, value in archive_meta.items()
+                                                if value is not None
+                                            }
+                                        )
                                     plate_metadata.append(
                                         {"number": number, "metadata": parsed}
                                     )
@@ -867,8 +968,11 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
                     image = (
                         resin.extract(source)
                         if file_row.file_type is FileType.RESIN
-                        else mesh_previews.extract_embedded_3mf_thumbnail(
-                            source, file_type="3mf"
+                        else (
+                            _sliced_cover(source, sliced)
+                            or mesh_previews.extract_embedded_3mf_thumbnail(
+                                source, file_type="3mf"
+                            )
                         )
                         if is_container(file_row)
                         else thumbnail.extract(source)
@@ -899,6 +1003,7 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
                     "slicer": meta.get("slicer_name"),
                     "slicer_settings": asdict(captured),
                     "plate_metadata": plate_metadata,
+                    **(_sliced_output(file_row, sliced) if sliced is not None else {}),
                 },
                 duration_ms=duration_ms,
             )
@@ -1202,6 +1307,11 @@ def _derive_viewer_stl(
         ):
             (source,) = sources
             require_current_execution()
+            if (
+                file.file_type is FileType.THREE_MF
+                and _sliced_archive(source) is not None
+            ):
+                return Outcome({DerivativeKind.VIEWER_STL: _skip_meshless(attempt)})
             with stl_isolation.prepare_stl(
                 source,
                 file_type=file.file_type.value,

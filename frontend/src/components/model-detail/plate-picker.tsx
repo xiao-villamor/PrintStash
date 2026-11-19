@@ -89,7 +89,7 @@ export function PlatePicker({
                   <span>
                     {uiText("Plate {value1}", { value1: String(plate.number).padStart(2, "0") })}
                   </span>
-                  {plate.object_count !== null && (
+                  {plate.object_count !== null && plate.object_count > 0 && (
                     <span>
                       {uiText("Objects: {value1}", { value1: String(plate.object_count) })}
                     </span>

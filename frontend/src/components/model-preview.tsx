@@ -5,7 +5,7 @@ import { Modal } from "@/components/ui/modal";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { LibraryPreviewPlaceholder } from "@/components/library-card-placeholder";
 import { keepOffCard } from "@/lib/card-overlay";
-import { previewTransferPolicy } from "@/lib/use-model-previews";
+import { previewTransferPolicy, type PreviewSelection } from "@/lib/use-model-previews";
 import { useModelPreviewCard, type PreviewCard } from "@/lib/use-model-preview-card";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
@@ -25,11 +25,27 @@ const labels = {
   edge: "modelPreview.edge",
 } as const satisfies Record<PreviewViewId | "cover", string>;
 
-function previewLabel(state: PreviewCard, id: PreviewViewId | "cover") {
-  const coverView = state.preview.coverView;
-  return id === "cover" && coverView
-    ? `${uiText(labels[coverView.id])} · ${uiText(labels.cover)}`
-    : uiText(labels[id]);
+function previewLabel(state: PreviewCard, id: PreviewSelection) {
+  const view =
+    id === "cover"
+      ? (state.preview.coverView ??
+        state.views.find((image) => image.url === state.previews.large_cover_url))
+      : state.views.find((image) => image.id === id);
+  let label: string | undefined;
+  if (view?.role === "archive") {
+    label =
+      view.plate === null
+        ? uiText("modelPreview.photo")
+        : uiText("Plate {value1}", { value1: String(view.plate) });
+  } else {
+    const camera = id === "cover" ? (state.previews.large_cover_view ?? view?.id) : view?.id;
+    if (camera) label = uiText(labels[camera === "face" && id === "cover" ? "top" : camera]);
+  }
+  return id === "cover"
+    ? label
+      ? `${label} · ${uiText(labels.cover)}`
+      : uiText(labels.cover)
+    : (label ?? uiText(labels.cover));
 }
 
 function stop(event: MouseEvent) {
@@ -231,7 +247,7 @@ export function ModelPreviewControls({
             <PreviewArrows state={state} size="card" />
           </div>
         )}
-        {views.length >= 2 && (
+        {(views.length >= 2 || state.previews.large_cover_url) && (
           <div className="library-preview-reveal absolute bottom-1.5 left-1.5">
             <Button
               {...keepOffCard}
@@ -239,7 +255,11 @@ export function ModelPreviewControls({
               size="xs"
               className="library-preview-views pointer-events-auto h-6 px-1.5 py-0 text-2xs"
               aria-label={uiText("modelPreview.gallery")}
-              title={uiText("modelPreview.views", { count: views.length })}
+              title={
+                views.length >= 2
+                  ? uiText("modelPreview.views", { count: views.length })
+                  : uiText("modelPreview.gallery")
+              }
               onPointerEnter={state.enter}
               onPointerLeave={state.leave}
               onClick={(event) => {
@@ -300,7 +320,7 @@ export function ModelPreviewGallery({
   previews: ModelPreviews;
 }) {
   useUiLocale();
-  const [admission, state] = useModelPreviewCard(cover, previews);
+  const [admission, state] = useModelPreviewCard(previews.large_cover_url ?? cover, previews);
   const { preview, views } = state;
   return (
     <>
@@ -326,7 +346,9 @@ export function ModelPreviewGallery({
         )}
       </div>
       <div className="space-y-2">
-        <p className="text-sm text-muted-foreground">{uiText("modelPreview.discrete")}</p>
+        {preview.navigationViews.length > 1 && !previews.archive_images?.length && (
+          <p className="text-sm text-muted-foreground">{uiText("modelPreview.discrete")}</p>
+        )}
         <div
           className="flex gap-2 overflow-x-auto pb-2"
           aria-label={uiText("modelPreview.gallery")}

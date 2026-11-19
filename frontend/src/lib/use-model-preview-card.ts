@@ -11,8 +11,15 @@ import { publishedViews, type ModelPreviews } from "@/types/previews";
 export function useModelPreviewCard(cover: string | null, previews: ModelPreviews) {
   const { ref, admitted } = useViewportAdmission();
   const views = publishedViews(previews);
-  const coverView = previews.kind === "artifact" ? previews.published?.cover_view : undefined;
-  const preview = useModelPreviews(cover, views, admitted, coverView);
+  const coverIsLarge = cover !== null && cover === previews.large_cover_url;
+  const matchingGenerated =
+    previews.kind === "artifact" && (!coverIsLarge || previews.large_cover_view === undefined)
+      ? previews.published?.cover_view
+      : undefined;
+  const matchingArchive = views.find(
+    (view) => view.role === "archive" && view.url === previews.large_cover_url,
+  )?.id;
+  const preview = useModelPreviews(cover, views, admitted, matchingGenerated ?? matchingArchive);
   const [hovered, setHovered] = useState(false);
   const [open, setOpen] = useState(false);
   // A selected view replaces the cover only once its own bytes have decoded.

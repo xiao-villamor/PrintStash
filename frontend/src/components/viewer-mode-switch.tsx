@@ -10,6 +10,7 @@ export function ViewerModeSwitch({
   onChange,
   hasGcode,
   availability,
+  gcodeOnly = false,
   compact = false,
   className,
 }: {
@@ -17,6 +18,7 @@ export function ViewerModeSwitch({
   onChange: (mode: ViewerMode) => void;
   hasGcode: boolean;
   availability?: ToolpathAvailability;
+  gcodeOnly?: boolean;
   compact?: boolean;
   className?: string;
 }) {
@@ -35,6 +37,7 @@ export function ViewerModeSwitch({
         if (
           compact &&
           hasGcode &&
+          !gcodeOnly &&
           ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
         ) {
           event.preventDefault();
@@ -46,38 +49,46 @@ export function ViewerModeSwitch({
         }
       }}
     >
-      {(["model", "gcode"] as const).map((option) => (
-        <Button
-          key={option}
-          size={compact ? "xs" : "sm"}
-          variant="ghost"
-          type="button"
-          role={compact ? "radio" : undefined}
-          data-viewer-mode={option}
-          aria-checked={compact ? mode === option : undefined}
-          aria-pressed={compact ? undefined : mode === option}
-          tabIndex={compact && mode !== option ? -1 : undefined}
-          disabled={option === "gcode" && !hasGcode}
-          aria-description={option === "gcode" && !hasGcode ? reason : undefined}
-          title={option === "gcode" && !hasGcode ? reason : undefined}
-          className={
-            option === "gcode" && !hasGcode
-              ? "disabled:pointer-events-auto"
-              : mode === option
-                ? "bg-accent text-accent-foreground hover:bg-accent"
-                : "hover:bg-muted hover:text-foreground"
-          }
-          onClick={() => onChange(option)}
-        >
-          {!compact &&
-            (option === "model" ? (
-              <Box className="h-4 w-4" aria-hidden />
-            ) : (
-              <Layers className="h-4 w-4" aria-hidden />
-            ))}
-          {option === "model" ? uiText(compact ? "3D" : "3D model") : uiText("G-code")}
-        </Button>
-      ))}
+      {(["model", "gcode"] as const).map((option) => {
+        const unavailable =
+          option === "model" && gcodeOnly
+            ? uiText("G-code only — this file has no 3D mesh")
+            : option === "gcode" && !hasGcode
+              ? reason
+              : undefined;
+        return (
+          <Button
+            key={option}
+            size={compact ? "xs" : "sm"}
+            variant="ghost"
+            type="button"
+            role={compact ? "radio" : undefined}
+            data-viewer-mode={option}
+            aria-checked={compact ? mode === option : undefined}
+            aria-pressed={compact ? undefined : mode === option}
+            tabIndex={compact && mode !== option ? -1 : undefined}
+            disabled={unavailable !== undefined}
+            aria-description={unavailable}
+            title={unavailable}
+            className={
+              unavailable !== undefined
+                ? "disabled:pointer-events-auto"
+                : mode === option
+                  ? "bg-accent text-accent-foreground hover:bg-accent"
+                  : "hover:bg-muted hover:text-foreground"
+            }
+            onClick={() => onChange(option)}
+          >
+            {!compact &&
+              (option === "model" ? (
+                <Box className="h-4 w-4" aria-hidden />
+              ) : (
+                <Layers className="h-4 w-4" aria-hidden />
+              ))}
+            {option === "model" ? uiText(compact ? "3D" : "3D model") : uiText("G-code")}
+          </Button>
+        );
+      })}
     </div>
   );
 }

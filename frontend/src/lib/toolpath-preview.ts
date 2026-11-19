@@ -14,7 +14,10 @@ export function useToolpathSources(files: FileRead[], active = true) {
   const embedded = new Set(
     archives.flatMap((file, index) => (plates[index]?.data?.plates.length ? [file.id] : [])),
   );
-  const sources = files.filter((file) => file.file_type === "gcode" || embedded.has(file.id));
+  const sources = files.filter(
+    (file) =>
+      file.file_type === "gcode" || file.sliced_geometry === "gcode_only" || embedded.has(file.id),
+  );
   const availability: ToolpathAvailability =
     sources.length > 0
       ? "available"

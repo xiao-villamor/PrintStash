@@ -27,8 +27,10 @@ from app.core.security import get_current_user, require_auth, require_user
 from app.db.models import CollectionRole, DerivativeKind, File, Model, User
 from app.db.scopes import live
 from app.db.session import get_session
+from app.modules.derivatives.sliced_reads import meshless_archives
 from app.modules.identity import auth, rbac
 from app.modules.library.model_views.thumbnails import thumbnail_version
+from app.modules.media.sliced_archive import read_archive_image
 from app.modules.media.sliced_gcode import is_container, plate_metadata
 from app.modules.media.three_mf_preview import (
     EmbeddedGcodeError,
@@ -257,6 +259,43 @@ def embedded_gcode(
     return PlainTextResponse(
         content=embedded.content if status_code == 200 else "",
         status_code=status_code,
+        headers=headers,
+    )
+
+
+@router.get("/{file_id}/archive-images/{index}", summary="Read a sliced archive image")
+def archive_image(
+    file_id: int,
+    index: int,
+    request: Request,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+):
+    artifact = _accessible_file(session, file_id, current_user)
+    entry = meshless_archives(session, [artifact.model_id]).get(file_id)
+    if entry is None or not 0 <= index < len(entry[2]):
+        raise HTTPException(status_code=404, detail="archive_image_not_found")
+    image = entry[2][index]
+    try:
+        with resolve(artifact).materialize() as path:
+            payload = read_archive_image(path, image)
+    except EmbeddedGcodeError as exc:
+        raise _embedded_gcode_error(exc) from exc
+    except (FileNotFoundError, ArtifactContentError) as exc:
+        raise HTTPException(status_code=410, detail="file_blob_missing") from exc
+    code, headers = bytes_response_headers(
+        payload,
+        delivery_request(
+            request,
+            Path(image.member).name,
+            image.media_type,
+            DeliveryPurpose.THUMBNAIL,
+        ),
+    )
+    return Response(
+        content=payload if code == 200 else b"",
+        status_code=code,
+        media_type=image.media_type,
         headers=headers,
     )
 

@@ -22,9 +22,11 @@ from app.db.models import (
 from app.db.scopes import live
 from app.modules.derivatives import policy
 from app.modules.derivatives.kinds import MESH_TYPES, PREVIEWS_RECIPE
+from app.modules.derivatives.sliced_reads import meshless_archives
 from app.modules.media.preview_contracts import PreviewManifest, ViewProfile, ViewRole
 from app.schemas.previews import (
     REASONED_STATES,
+    ArchiveImageRead,
     ArtifactPreviews,
     ModelPreviewRead,
     NoPreviewSubject,
@@ -49,7 +51,9 @@ def published(row: ArtifactDerivative, sha256: str) -> PreviewManifest | None:
     return manifest if manifest.source_sha256 == sha256 else None
 
 
-def selected_files(session: Session, model_ids: list[int]) -> dict[int, File]:
+def selected_files(
+    session: Session, model_ids: list[int], *, meshless_ids: tuple[int, ...] = ()
+) -> dict[int, File]:
     ranked = (
         select(
             col(File.id).label("id"),
@@ -63,6 +67,7 @@ def selected_files(session: Session, model_ids: list[int]) -> dict[int, File]:
         .where(
             col(File.model_id).in_(model_ids),
             col(File.file_type).in_(MESH_TYPES),
+            col(File.id).not_in(meshless_ids),
             live(File),
         )
         .subquery()
@@ -77,12 +82,13 @@ def selected_files(session: Session, model_ids: list[int]) -> dict[int, File]:
     }
 
 
-def _cover_digests(session: Session, model_ids: list[int]) -> dict[int, str]:
+def _cover_info(session: Session, model_ids: list[int]):
     """Read hashes of the covers actually served, without opening stored images."""
     rows = session.exec(
         select(
             Model.id,
             Model.cover_filename,
+            Model.thumbnail_file_id,
             ModelCover.sha256,
             ArtifactDerivative.output_json,
         )
@@ -105,16 +111,18 @@ def _cover_digests(session: Session, model_ids: list[int]) -> dict[int, str]:
         )
         .where(col(Model.id).in_(model_ids))
     ).all()
-    digests = {}
-    for model_id, cover_filename, cover_digest, thumbnail in rows:
-        digest = (
-            cover_digest
-            if cover_filename
-            else (json.loads(thumbnail).get("sha256") if thumbnail else None)
-        )
-        if model_id is not None and digest:
-            digests[model_id] = digest
-    return digests
+    info = {}
+    for model_id, cover_filename, thumbnail_file_id, cover_digest, thumbnail in rows:
+        metadata = json.loads(thumbnail) if thumbnail else {}
+        if model_id is not None:
+            info[model_id] = (
+                cover_digest if cover_filename else metadata.get("sha256"),
+                thumbnail_file_id
+                if not cover_filename and metadata.get("strategy") == "full"
+                else None,
+                cover_filename,
+            )
+    return info
 
 
 def summaries(
@@ -125,7 +133,8 @@ def summaries(
         raise ValueError("shared_preview_root_needs_one_model")
     if not model_ids:
         return {}
-    files = selected_files(session, model_ids)
+    archive_files = meshless_archives(session, model_ids)
+    files = selected_files(session, model_ids, meshless_ids=tuple(archive_files))
     enabled = not files or policy.resolve(session)[JobKind.DERIVATIVES_PREVIEWS].enabled
     include_poles = policy.preview_poles(session) if files else False
     by_file: dict[int, list[ArtifactDerivative]] = defaultdict(list)
@@ -141,12 +150,43 @@ def summaries(
             .order_by(col(ArtifactDerivative.recipe_version).desc())
         ).all():
             by_file[row.file_id].append(row)
-    cover_digests = _cover_digests(session, list(files)) if enabled and by_file else {}
+    cover_info = _cover_info(session, model_ids)
+    archive_by_model: dict[int, list[ArchiveImageRead]] = {}
+    if root is None:
+        for file_id, (model_id, sha256, images) in archive_files.items():
+            archive_by_model.setdefault(
+                model_id,
+                [
+                    ArchiveImageRead(
+                        file_id=file_id,
+                        url=f"/api/v1/files/{file_id}/archive-images/{index}?v={sha256}",
+                        plate=image.plate,
+                    )
+                    for index, image in enumerate(images)
+                ],
+            )
     result: dict[int, ModelPreviewRead] = {}
     for model_id in model_ids:
         file = files.get(model_id)
+        digest, automatic_file, custom_filename = cover_info.get(
+            model_id, (None, None, None)
+        )
+        archive_images = archive_by_model.get(model_id, [])
+        custom_url = (
+            f"/api/v1/models/{model_id}/cover/content?v={custom_filename}"
+            if custom_filename is not None and root is None
+            else None
+        )
         if file is None:
-            result[model_id] = NoPreviewSubject()
+            result[model_id] = NoPreviewSubject(
+                archive_images=archive_images,
+                large_cover_url=custom_url
+                or (
+                    archive_images[0].url
+                    if archive_images and not custom_filename
+                    else None
+                ),
+            )
             continue
         assert file.id is not None
         rows = by_file[file.id]
@@ -154,6 +194,31 @@ def summaries(
             (row for row in rows if row.recipe_version == PREVIEWS_RECIPE), None
         )
         release = None
+        large_cover_url = custom_url
+        large_cover_view = None
+        if custom_filename is None:
+            candidates = (
+                (row, view)
+                for row in rows
+                if (manifest := published(row, file.sha256)) is not None
+                for view in manifest.views
+                if view.sha256 == digest
+                or (
+                    file.id == automatic_file
+                    and manifest.profile is ViewProfile.PLANAR
+                    and view.role is ViewRole.FACE
+                )
+            )
+            cover = max(
+                candidates,
+                default=None,
+                key=lambda item: (item[1].width, item[1].role is ViewRole.FACE),
+            )
+            if cover is not None:
+                row, view = cover
+                base = root if root is not None else f"/api/v1/models/{model_id}"
+                large_cover_url = f"{base}/previews/{generation(row)}/{view.id}"
+                large_cover_view = view.id
         for row in rows:
             manifest = published(row, file.sha256)
             if not enabled or manifest is None or manifest.profile != ViewProfile.ORBIT:
@@ -170,11 +235,7 @@ def summaries(
                 profile=manifest.profile,
                 manifest_url=base,
                 cover_view=next(
-                    (
-                        view.id
-                        for view in visible_views
-                        if view.sha256 == cover_digests.get(model_id)
-                    ),
+                    (view.id for view in visible_views if view.sha256 == digest),
                     None,
                 ),
                 views=[
@@ -200,6 +261,9 @@ def summaries(
         else:
             state = PreviewState(current.state.value)
         result[model_id] = ArtifactPreviews(
+            large_cover_url=large_cover_url,
+            large_cover_view=large_cover_view,
+            archive_images=archive_images,
             file_id=file.id,
             state=state,
             reason=current.failure_reason
@@ -217,7 +281,13 @@ def resolve(
         select(Model).where(col(Model.id) == model_id, live(Model))
     ).first()
     file = (
-        selected_files(session, [model_id]).get(model_id) if model is not None else None
+        selected_files(
+            session,
+            [model_id],
+            meshless_ids=tuple(meshless_archives(session, [model_id])),
+        ).get(model_id)
+        if model is not None
+        else None
     )
     if file is not None:
         assert file.id is not None

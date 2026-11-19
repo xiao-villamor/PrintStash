@@ -55,6 +55,22 @@ export interface PreviewImage {
   role: PreviewViewRole;
   url: string;
 }
+export interface ArchivePreviewImage {
+  file_id: number;
+  url: string;
+  plate: number | null;
+}
+export type PreviewImageId = PreviewViewId | `archive-${number}`;
+export type CarouselImage =
+  | PreviewImage
+  | (ArchivePreviewImage & { id: `archive-${number}`; role: "archive" });
+
+interface ModelPreviewMedia {
+  large_cover_url?: string;
+  large_cover_view?: PreviewViewId;
+  archive_images?: ArchivePreviewImage[];
+}
+
 export interface PublishedPreviews {
   profile: "orbit" | "planar";
   manifest_url: string;
@@ -63,12 +79,12 @@ export interface PublishedPreviews {
   views: PreviewImage[];
 }
 /** The Model has no live mesh Artifact; only its cover can be shown. */
-export interface NoPreviewSubject {
+export interface NoPreviewSubject extends ModelPreviewMedia {
   kind: "none";
   cover_camera: "unknown";
 }
 /** The view set of the one mesh Artifact selected for this Model. */
-export interface ArtifactPreviews {
+export interface ArtifactPreviews extends ModelPreviewMedia {
   kind: "artifact";
   cover_camera: "unknown";
   file_id: number;
@@ -82,8 +98,16 @@ export type ModelPreviews = NoPreviewSubject | ArtifactPreviews;
 export const NO_PREVIEWS: NoPreviewSubject = { kind: "none", cover_camera: "unknown" };
 
 /** Published images, or none when no valid generation exists yet. */
-export function publishedViews(previews: ModelPreviews): PreviewImage[] {
-  return previews.kind === "artifact" && previews.published ? previews.published.views : [];
+export function publishedViews(previews: ModelPreviews): CarouselImage[] {
+  const generated = previews.kind === "artifact" ? (previews.published?.views ?? []) : [];
+  return [
+    ...generated,
+    ...(previews.archive_images ?? []).map((image, index) => ({
+      ...image,
+      id: `archive-${index}` as const,
+      role: "archive" as const,
+    })),
+  ];
 }
 
 /** The selected mesh Artifact, so views of different Artifacts never mix. */
@@ -106,6 +130,21 @@ export function previewsInFlight(previews: ModelPreviews): boolean {
 export function isModelPreviews(wire: ModelPreviews): boolean {
   // oxlint-disable anti-slop/no-runtime-typeof -- Foreign HTTP JSON must establish its closed case, Artifact identity and view addresses before it can replace a displayed preview.
   if (wire?.cover_camera !== "unknown") return false;
+  if (wire.large_cover_url !== undefined && typeof wire.large_cover_url !== "string") return false;
+  if (wire.large_cover_view !== undefined && !PREVIEW_VIEW_IDS.includes(wire.large_cover_view))
+    return false;
+  if (
+    wire.archive_images !== undefined &&
+    (!Array.isArray(wire.archive_images) ||
+      !wire.archive_images.every(
+        (image) =>
+          Number.isSafeInteger(image?.file_id) &&
+          image.file_id > 0 &&
+          typeof image.url === "string" &&
+          (image.plate === null || (Number.isSafeInteger(image.plate) && image.plate > 0)),
+      ))
+  )
+    return false;
   if (wire.kind === "none") return true;
   if (wire.kind !== "artifact") return false;
   const published = wire.published;

@@ -27,6 +27,7 @@ export function ViewerToolbar({
   setViewerMode,
   hasGcode,
   availability,
+  gcodeOnly = false,
   viewerReady,
   filename,
   expanded = false,
@@ -46,6 +47,7 @@ export function ViewerToolbar({
   setViewerMode: (mode: ViewerMode) => void;
   hasGcode: boolean;
   availability?: ToolpathAvailability;
+  gcodeOnly?: boolean;
   viewerReady: boolean;
   filename?: string;
   expanded?: boolean;
@@ -79,7 +81,7 @@ export function ViewerToolbar({
             variant="outline"
             size="sm"
             aria-label={uiText("Screenshot")}
-            disabled={!viewerReady}
+            disabled={!viewerReady || gcodeOnly}
             onClick={() => {
               const result = controls.current?.screenshot();
               if (result)
@@ -111,6 +113,7 @@ export function ViewerToolbar({
           onChange={setViewerMode}
           hasGcode={hasGcode}
           availability={availability}
+          gcodeOnly={gcodeOnly}
         />
         <div className="detail-viewer-control-group" role="group" aria-label={uiText("Overlays")}>
           <Button

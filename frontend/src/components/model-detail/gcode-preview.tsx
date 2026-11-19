@@ -13,6 +13,7 @@ import { Localized } from "@/components/ui/localized";
 import { gcodePlatesOptions } from "@/lib/queries/file-plates";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
+import type { ArchivePreviewImage } from "@/types/previews";
 import type { FilePlate, FileRead } from "@/types";
 
 const GcodeViewer = lazy(() =>
@@ -26,6 +27,7 @@ export function GcodePreview({
   selectedFileId,
   onSelectFile,
   sourcePlates = [],
+  archiveImages = [],
   selectedSourcePlate = null,
   onSelectSourcePlate,
   onInspectSlicedPlate,
@@ -39,6 +41,7 @@ export function GcodePreview({
   selectedFileId?: number;
   onSelectFile?: (fileId: number) => void;
   sourcePlates?: FilePlate[];
+  archiveImages?: ArchivePreviewImage[];
   selectedSourcePlate?: number | null;
   onInspectSlicedPlate?: (fileId: number, number: number) => void;
   onSelectSourcePlate?: (number: number | null) => void;
@@ -109,8 +112,15 @@ export function GcodePreview({
         return {
           number,
           name: identity?.name ?? null,
-          object_count: match?.source.object_count ?? identity?.object_count ?? null,
-          image_url: match?.source.image_url ?? null,
+          object_count:
+            file.sliced_geometry === "gcode_only"
+              ? null
+              : (match?.source.object_count ?? identity?.object_count ?? null),
+          image_url:
+            match?.source.image_url ??
+            archiveImages.find((image) => image.file_id === file.id && image.plate === number)
+              ?.url ??
+            null,
         };
       })}
       selected={plate ?? null}

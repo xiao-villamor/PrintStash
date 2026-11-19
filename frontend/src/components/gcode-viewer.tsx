@@ -61,7 +61,7 @@ function GcodeScene({
   onOrbit: () => void;
   screenshotName: string;
 }) {
-  const { camera, gl, scene, size } = useThree();
+  const { camera, gl, invalidate, scene, size } = useThree();
   const orbitRef = useRef<OrbitControlsImpl>(null);
   const interactionStart = useRef<THREE.Quaternion | null>(null);
   const presetRef = useRef<ViewerCameraPreset>("isometric");
@@ -131,7 +131,12 @@ function GcodeScene({
     const count = data.cumulativeVertices[currentLayer + 1] ?? data.extrudePositions.length / 3;
     const start = onlyCurrentLayer ? (data.cumulativeVertices[currentLayer] ?? 0) : 0;
     extrudeGeo.setDrawRange(start, Math.max(count - start, 0));
-  }, [currentLayer, onlyCurrentLayer, data, extrudeGeo]);
+    invalidate();
+  }, [currentLayer, onlyCurrentLayer, data, extrudeGeo, invalidate]);
+
+  useEffect(() => {
+    invalidate();
+  }, [invalidate, showBed, showGrid, showTravel]);
 
   // One array per toolpath: R3F re-applies a changed `position` prop on every
   // render, so a fresh array would snap the camera back to its starting point
@@ -160,11 +165,13 @@ function GcodeScene({
       orbitRef.current?.target.set(0, 0, 0);
       camera.lookAt(0, 0, 0);
       orbitRef.current?.update();
+      invalidate();
     }
     function zoom(factor: number) {
       const target = orbitRef.current?.target ?? new THREE.Vector3();
       camera.position.sub(target).multiplyScalar(factor).add(target);
       orbitRef.current?.update();
+      invalidate();
     }
     setView(presetRef.current);
     onControlsReady({
@@ -192,7 +199,17 @@ function GcodeScene({
       },
     });
     return () => onControlsReady(null);
-  }, [data, camera, gl, scene, screenshotName, onControlsReady, size.width, size.height]);
+  }, [
+    data,
+    camera,
+    gl,
+    invalidate,
+    scene,
+    screenshotName,
+    onControlsReady,
+    size.width,
+    size.height,
+  ]);
 
   const gridHalfSize =
     showBed && printerBedMm
@@ -317,7 +334,7 @@ interface CanvasRendererProps {
 
 function DefaultCanvasRenderer({ children, className, dpr, gl }: CanvasRendererProps) {
   return (
-    <Canvas className={className} dpr={dpr} gl={gl}>
+    <Canvas className={className} dpr={dpr} gl={gl} frameloop="demand">
       {children}
     </Canvas>
   );

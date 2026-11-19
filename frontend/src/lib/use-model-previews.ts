@@ -7,11 +7,11 @@ import {
 } from "@/lib/asset-cache";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
-import { PREVIEW_VIEW_IDS, type PreviewImage, type PreviewViewId } from "@/types/previews";
+import { PREVIEW_VIEW_IDS, type CarouselImage, type PreviewImageId } from "@/types/previews";
 
 export const PREVIEW_INTENT_MS = 350;
-export type PreviewSelection = PreviewViewId | "cover";
-type PreviewDestination = PreviewImage | { id: "cover"; url: string };
+export type PreviewSelection = PreviewImageId | "cover";
+type PreviewDestination = CarouselImage | { id: "cover"; url: string };
 
 interface ConnectionBudget {
   saveData?: boolean;
@@ -48,9 +48,9 @@ async function decode(url: string) {
  */
 export function useModelPreviews(
   cover: string | null,
-  views: PreviewImage[],
+  views: CarouselImage[],
   admitted: boolean,
-  matchingView?: PreviewViewId,
+  matchingView?: PreviewImageId,
 ) {
   const [mountedSession] = useState(getSessionVersion);
   const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
@@ -66,7 +66,10 @@ export function useModelPreviews(
   const warming = useRef(new Map<string, AssetLease>());
   const intent = useRef<ReturnType<typeof setTimeout> | null>(null);
   const orderedViews = views.some((view) => view.role === "orbit")
-    ? PREVIEW_VIEW_IDS.flatMap((id) => views.filter((view) => view.id === id))
+    ? [
+        ...PREVIEW_VIEW_IDS.flatMap((id) => views.filter((view) => view.id === id)),
+        ...views.filter((view) => view.role === "archive"),
+      ]
     : views;
   const coverView =
     cover === null

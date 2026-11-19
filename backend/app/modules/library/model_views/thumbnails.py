@@ -25,7 +25,7 @@ def thumb_url(model: Model) -> Optional[str]:
     ``thumbnail_path`` for rows written before the file-id column existed.
     """
     if model.cover_filename is not None:
-        return f"/api/v1/models/{model.id}/cover/content?v={model.cover_filename}"
+        return f"/api/v1/models/{model.id}/cover/content?v={model.cover_filename}&size=thumbnail"
     if model.thumbnail_file_id:
         url = f"/api/v1/files/{model.thumbnail_file_id}/thumbnail"
         version = thumbnail_version(model.thumbnail_file_id, model.thumbnail_path)
