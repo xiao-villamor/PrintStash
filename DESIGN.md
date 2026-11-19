@@ -231,7 +231,8 @@ new directions, bounce, cascades, or text crossfades for individual features.
 
 Collections, Search, Pending, Saved views and Settings use one shell
 sidebar and one persisted width (`--workbench-sidebar-width`, 320px by default,
-resizable from 280px to 520px). The model inspector uses the same width on desktop.
+resizable down to the measured Collections header width and up to 520px).
+The model inspector has its own width and preview-height preferences.
 Section navigation preserves the sidebar's open state, boundary and workspace
 position. Settings navigation occupies this frame rather than adding another column.
 The border and background belong to the stationary shell, outside animated content.

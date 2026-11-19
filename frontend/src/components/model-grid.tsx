@@ -2472,7 +2472,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   );
   const historyTreeModelId = useLocation({ select: (location) => location.state.treeModelId });
   const [handledTreeEntry, setHandledTreeEntry] = useState<string | null>(null);
-  const [treeReveal, setTreeReveal] = useState<{ id: number; opener: HTMLElement } | null>(null);
+  const [treeReveal, setTreeReveal] = useState<{
+    id: number;
+    entryKey: string;
+    opener: HTMLElement;
+  } | null>(null);
+  const [treeFocus, setTreeFocus] = useState<{ id: number; entryKey: string } | null>(null);
   function openTreeModel(model: OutlinerModelRead, opener: HTMLElement) {
     if (
       docView === "models" &&
@@ -2482,13 +2487,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       model.collection_id === selectedCollectionId &&
       model.collection === selectedCollection
     ) {
-      setTreeReveal({ id: model.id, opener });
+      setTreeReveal({ id: model.id, entryKey: entry.key, opener });
       return;
     }
     router.push(treeModelFolderHref(model, sortKey), { state: { treeModelId: model.id } });
   }
+  const localTreeReveal = treeReveal?.entryKey === entry.key ? treeReveal : null;
   const revealModelId =
-    treeReveal?.id ??
+    localTreeReveal?.id ??
     (handledTreeEntry !== entry.key && Number.isSafeInteger(historyTreeModelId)
       ? historyTreeModelId
       : undefined);
@@ -2511,21 +2517,20 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const id = revealModelId;
     const key = `/models/${id}`;
     const element = startupContent.current;
-    const renderer = readingRenderers.current.get("models");
-    if (!element || !renderer) return;
+    if (!element) return;
     let frame = 0;
     function reveal() {
-      const result = renderer?.reveal(key);
-      const card = element?.querySelector<HTMLElement>(libraryReadingSelector(key));
+      const result = readingRenderers.current.get("models")?.reveal(key);
+      const anchor = element?.querySelector<HTMLElement>(libraryReadingSelector(key));
+      const card = anchor?.closest<HTMLElement>("[data-library-key]") ?? anchor;
       if (result === "pending") {
         frame = requestAnimationFrame(reveal);
         return;
       }
       if (card && result === "mounted") {
         card.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
-        card.classList.add("library-tree-spotlight");
-        window.setTimeout(() => card.classList.remove("library-tree-spotlight"), DURATION.slow);
-        inspectModel(id, treeReveal?.opener ?? card);
+        inspectModel(id, localTreeReveal?.opener ?? anchor ?? null);
+        setTreeFocus({ id, entryKey: entry.key });
       }
       finish();
     }
@@ -2539,9 +2544,47 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     modelQuery,
     revealModelId,
     snapshot,
-    treeReveal,
+    localTreeReveal,
     visibleModels,
   ]);
+
+  // The dock can change the grid's column count and remount the targeted row.
+  // Re-center and highlight the same card once its final geometry is available.
+  useEffect(() => {
+    if (
+      treeFocus?.entryKey !== entry.key ||
+      treeFocus?.id !== inspectorIntent?.id ||
+      !inspectorOpen ||
+      inspectorMotion.locked !== null
+    )
+      return;
+    const key = `/models/${treeFocus.id}`;
+    let frame = 0;
+    let highlightTimer: number | undefined;
+    let highlighted: HTMLElement | undefined;
+    function center() {
+      const anchor = startupContent.current?.querySelector<HTMLElement>(
+        libraryReadingSelector(key),
+      );
+      const card = anchor?.closest<HTMLElement>("[data-library-key]") ?? anchor;
+      if (!card) {
+        if (readingRenderers.current.get("models")?.reveal(key) === "pending") {
+          frame = requestAnimationFrame(center);
+        }
+        return;
+      }
+      card.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+      card.classList.add("library-tree-spotlight");
+      highlighted = card;
+      highlightTimer = window.setTimeout(() => setTreeFocus(null), DURATION.slow);
+    }
+    frame = requestAnimationFrame(center);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(highlightTimer);
+      highlighted?.classList.remove("library-tree-spotlight");
+    };
+  }, [entry.key, inspectorIntent?.id, inspectorMotion.locked, inspectorOpen, treeFocus]);
 
   const closeInspector = useCallback(() => {
     if (inspectorIntent) setInspector({ ...inspectorIntent, open: false });
