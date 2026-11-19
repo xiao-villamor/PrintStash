@@ -139,7 +139,7 @@ export function PreviewAppearance({
         </figcaption>
         <div
           data-preview-theme={theme}
-          className="border border-border bg-background p-3"
+          className="border border-border bg-background p-3 text-foreground"
           role="img"
           aria-label={sampleName}
         >
