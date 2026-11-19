@@ -1,9 +1,8 @@
 # PrintStash guides
 
 These pages are for people installing, using and operating PrintStash.
-Version 0.15.1 is being prepared; check
-[GitHub Releases](https://github.com/xiao-villamor/PrintStash/releases) for
-published images and [upgrade notes](../UPGRADE.md#0151-notes) before updating.
+Check [GitHub Releases](https://github.com/xiao-villamor/PrintStash/releases/latest) for
+published images and [upgrade notes](../UPGRADE.md) before updating.
 The [documentation website](https://www.printstash.org/en/docs/) provides
 the main user guide.
 

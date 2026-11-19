@@ -1,8 +1,7 @@
 # First use from the browser
 
-This guide describes the browser setup flow included since 0.14.0 and used in
-the forthcoming 0.15.1 release. Version 0.13.x images use the earlier
-console-token flow.
+This guide describes the browser setup flow included since 0.14.0. Version
+0.13.x images use the earlier console-token flow.
 
 Start the local Compose deployment on a trusted network, open PrintStash, and
 create your local administrator account. There is no console credential to copy.
