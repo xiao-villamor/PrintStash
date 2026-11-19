@@ -1,5 +1,6 @@
 "use client";
 
+import { requestUpload } from "@/lib/upload-requests";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
@@ -188,6 +189,9 @@ export function TopBar() {
 
   function openUpload() {
     if (!canUpload) return;
+    // The mounted Library opens its dialog in place; a URL change would
+    // re-render the whole browsing surface on every open and close.
+    if (pathname === "/" && requestUpload()) return;
     const target = new URL(
       pathname === "/" ? `/?${searchParams}` : homeHref,
       window.location.origin,

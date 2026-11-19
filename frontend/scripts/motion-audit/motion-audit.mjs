@@ -54,6 +54,8 @@ const TRACKED = [
   ["main h2", (el, i) => `heading:${i}`],
   ["main button[aria-expanded]", (el, i) => `disclosure:${i}`],
   ["main [role=status]", (el, i) => `status:${i}`],
+  [".library-model-inspector", () => "inspector"],
+  ["[role=dialog]", (el, i) => `dialog:${i}`],
 ];
 
 const THRESHOLDS = {
@@ -65,6 +67,12 @@ const THRESHOLDS = {
   longFrameMs: 50,
   burstGapMs: 60, // stillness between two motion bursts that makes them "sequential"
   mismatchPx: 2,
+  // A glide longer than this whose first frame covers more than abruptFraction
+  // of its travel reads as a jump, not a glide.
+  abruptMinPx: 40,
+  abruptFraction: 0.35,
+  // A dialog that takes longer than this from the click to be visible is slow.
+  dialogReadyMs: 300,
 };
 
 /** Injected sampler. Runs in the page; records until stop() resolves. */
@@ -332,6 +340,51 @@ function analyse({ frames, longFrames, shifts }, label) {
       }
     }
   }
+  // Abrupt glides: an element that travels far but covers most of the way in
+  // its first moving frame. Teleports are caught above; this catches curves
+  // that front-load the motion so it reads as a jump.
+  for (const key of keys) {
+    const trace = frames.map((f) => f.elements[key] ?? null);
+    let start = null;
+    for (let i = 1; i <= trace.length; i++) {
+      const prev = trace[i - 1];
+      const cur = trace[i];
+      const moving = prev && cur && Math.hypot(cur.x - prev.x, cur.y - prev.y) > THRESHOLDS.stillPx;
+      if (moving && start === null) start = i - 1;
+      if (!moving && start !== null) {
+        const from = trace[start];
+        const to = trace[i - 1];
+        const second = trace[start + 1];
+        if (!from || !to || !second) {
+          start = null;
+          continue;
+        }
+        const travel = Math.hypot(to.x - from.x, to.y - from.y);
+        const first = Math.hypot(second.x - from.x, second.y - from.y);
+        if (travel > THRESHOLDS.abruptMinPx && first / travel > THRESHOLDS.abruptFraction)
+          add(
+            "abrupt-glide",
+            frames[start + 1].t,
+            `${key} covers ${Math.round((first / travel) * 100)}% of ${Math.round(travel)} px in its first frame (${Math.round(frames[i - 1].t - frames[start].t)} ms total)`,
+          );
+        start = null;
+      }
+    }
+  }
+  // Dialog timing: from the gesture to the first frame a dialog is visible,
+  // and to the frame it reaches full opacity.
+  const dialogShown = frames.find((f) =>
+    Object.entries(f.elements).some(([k, e]) => k.startsWith("dialog") && e.o > 0.05),
+  )?.t;
+  const dialogOpaque = frames.find((f) =>
+    Object.entries(f.elements).some(([k, e]) => k.startsWith("dialog") && e.o > 0.99),
+  )?.t;
+  if (dialogShown !== undefined && dialogShown > THRESHOLDS.dialogReadyMs)
+    add(
+      "slow-dialog",
+      dialogShown,
+      `dialog first visible ${Math.round(dialogShown)} ms after the gesture`,
+    );
   // Rest invariants on the last frame: nothing the user can see is cut by a
   // horizontal clip, and no grid holds more columns than its width.
   const rest = frames.at(-1);
@@ -430,6 +483,13 @@ function analyse({ frames, longFrames, shifts }, label) {
     p95FrameMs: Math.round((dts[Math.floor(dts.length * 0.95)] ?? 0) * 10) / 10,
     motionSettledMs: Math.round(bursts.at(-1)?.end ?? 0),
     phases: phases(frames),
+    dialog:
+      dialogShown === undefined
+        ? null
+        : {
+            shown: Math.round(dialogShown),
+            opaque: dialogOpaque === undefined ? null : Math.round(dialogOpaque),
+          },
     bursts,
     findings: dedupe(findings),
   };
@@ -461,6 +521,25 @@ function phases(frames) {
     medianImage: r(times[Math.floor(times.length / 2)]),
     lastImage: r(times.at(-1)),
     visibleCards: visible.size,
+  };
+}
+
+/** Requests made because of the gesture: count, bytes, and the critical path. */
+function summariseNetwork(network = []) {
+  const byType = {};
+  for (const r of network) {
+    byType[r.type] ??= { count: 0, bytes: 0 };
+    byType[r.type].count++;
+    byType[r.type].bytes += r.size;
+  }
+  const slowest = [...network].sort((a, b) => b.end - b.start - (a.end - a.start)).slice(0, 5);
+  return {
+    requests: network.length,
+    lastEndMs: network.reduce((m, r) => Math.max(m, r.end), 0),
+    byType,
+    slowest: slowest.map(
+      (r) => `${r.path} ${r.end - r.start} ms (${Math.round(r.size / 1024)} KB)`,
+    ),
   };
 }
 
@@ -522,6 +601,22 @@ async function record(page, cdp, name, gesture, settleMs = 1500) {
   page.on("requestfinished", (r) => inflight.delete(r));
   page.on("requestfailed", (r) => inflight.delete(r));
   const shots = [];
+  const network = [];
+  let networkStart = null;
+  const started = new Map();
+  page.on("request", (r) => networkStart !== null && started.set(r, Date.now() - networkStart));
+  page.on("requestfinished", async (r) => {
+    if (!started.has(r)) return;
+    const size = (await r.sizes().catch(() => null))?.responseBodySize ?? 0;
+    const url = new URL(r.url());
+    network.push({
+      path: url.pathname + (url.search.length > 60 ? url.search.slice(0, 60) + "…" : url.search),
+      type: r.resourceType(),
+      start: started.get(r),
+      end: Date.now() - networkStart,
+      size,
+    });
+  });
   let t0 = null;
   const onFrame = async ({ data, metadata, sessionId }) => {
     const t = metadata.timestamp * 1000;
@@ -530,7 +625,7 @@ async function record(page, cdp, name, gesture, settleMs = 1500) {
     await cdp.send("Page.screencastFrameAck", { sessionId }).catch(() => {});
   };
   cdp.on("Page.screencastFrame", onFrame);
-  if (args.cache === "cold" && (name === "load" || name === "folder")) {
+  if (args.cache === "cold" && (name === "load" || name === "folder" || name === "upload-open")) {
     await cdp.send("Network.enable");
     await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
   }
@@ -543,6 +638,7 @@ async function record(page, cdp, name, gesture, settleMs = 1500) {
       TRACKED.map(([s, k]) => [s, k.toString()]),
     );
   const wallStart = Date.now();
+  networkStart = wallStart;
   await plan.gesture();
   // Data scenarios settle when Model cards exist outside any placeholder and
   // no browse request is in flight; then the tail is recorded too.
@@ -567,7 +663,7 @@ async function record(page, cdp, name, gesture, settleMs = 1500) {
   cdp.off("Page.screencastFrame", onFrame);
   // Screencast timestamps are wall-clock seconds; align them to the gesture.
   const aligned = shots.map((s) => ({ ...s, t: s.t - wallStart })).filter((s) => s.t > -100);
-  return { trace, shots: aligned, name };
+  return { trace: { ...trace, network }, shots: aligned, name };
 }
 
 const scenarios = {
@@ -583,6 +679,24 @@ const scenarios = {
     await page.locator('button[aria-label="Toggle sidebar"]').click();
     await page.waitForTimeout(1200);
     return () => page.locator('button[aria-label="Toggle sidebar"]').click();
+  },
+  async "inspector-open"(page) {
+    return () => page.locator('button[aria-label="Show or hide details"]').click();
+  },
+  async "inspector-close"(page) {
+    await page.locator('button[aria-label="Show or hide details"]').click();
+    await page.waitForTimeout(1200);
+    return () => page.locator('button[aria-label="Show or hide details"]').click();
+  },
+  async "upload-open"(page) {
+    // Cold: the first Upload in a session, so its code and reads are not cached.
+    return () => page.getByRole("button", { name: "Upload", exact: true }).click();
+  },
+  async "upload-close"(page) {
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
+    await page.getByRole("dialog").waitFor();
+    await page.waitForTimeout(1200);
+    return () => page.getByRole("dialog").getByRole("button", { name: "Close" }).first().click();
   },
   async load(page, { latency }) {
     // A cold, slow read: the skeleton must appear, then hand over to the cards in place.
@@ -627,6 +741,7 @@ for (const name of args.scenario.split(",")) {
   const settle = 1500;
   const { trace, shots } = await record(page, cdp, name, gesture, settle);
   const result = analyse(trace, name);
+  result.network = summariseNetwork(trace.network);
   const dir = path.join(outRoot, name);
   // A previous run's frames in the same folder would mix two recordings.
   await rm(dir, { recursive: true, force: true });
@@ -661,6 +776,17 @@ for (const r of summary) {
   if (ph.cardsShown !== null)
     lines.push(
       `phases: skeleton ${ph.skeletonShown ?? "—"} ms → cards ${ph.cardsShown} ms → images first ${ph.firstImage} / median ${ph.medianImage} / last ${ph.lastImage} ms (${ph.visibleCards} on screen)`,
+    );
+  if (r.dialog)
+    lines.push(`dialog: visible ${r.dialog.shown} ms · opaque ${r.dialog.opaque ?? "never"} ms`);
+  if (r.network?.requests)
+    lines.push(
+      `network: ${r.network.requests} requests, done ${r.network.lastEndMs} ms · ${Object.entries(
+        r.network.byType,
+      )
+        .map(([t, v]) => `${t} ${v.count} (${Math.round(v.bytes / 1024)} KB)`)
+        .join(", ")}`,
+      ...r.network.slowest.map((x) => `  - ${x}`),
     );
   if (!r.findings.length) lines.push("- no findings");
   for (const f of r.findings)

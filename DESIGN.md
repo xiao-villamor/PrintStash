@@ -318,10 +318,11 @@ mobile. A critically damped spring is sampled into compositor keyframes so previ
 initialization does not drive its frame loop. It uses the fast token as its response; reversing
 open/close preserves its current displacement and velocity. Hide only when the
 spring reaches the closed position, never on a fixed exit timer. When the docked
-inspector reserves or releases its column, cards commit at their reflowed size
-and glide by translation only (`useReflowGlide`, slow timing, `ease-out`) from
-their painted positions; reversals continue from the visible position and reduced
-motion keeps the reflow immediate. Switching Models
+inspector reserves or releases its column, the Library grid reflows exactly as
+it does for the Collections pane: it commits its resting columns once and carries
+each card from its painted position along the inspector spring's own progress, so
+cards and panel share one timeline. Cards entering view fade in on the same
+progress; reduced motion keeps the reflow immediate. Switching Models
 keeps the panel stationary. Closed panels become inert immediately. Reduced motion
 uses immediate visibility changes and retains the existing focus handoff.
 

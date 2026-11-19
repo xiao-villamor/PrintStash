@@ -13,7 +13,8 @@
 - Opening Search keeps the collection and grid you were browsing. The Search sidebar searches the current collection and offers a switch to search the whole library and back. Recent searches can be removed one by one or cleared, and the AI Search status sits in one compact note. Switching sidebar tools no longer stalls the page and settles in 150 ms.
 - The Filters picker leads with quick toggles for Favorites, Printed and similar candidates, then groups the remaining filters into Files and library and Printing with a distinct icon per filter and a summary of each active selection. A filter page can be cleared on its own.
 - Model views fills the dialog with the selected image, separates renders from photos in the thumbnail strip, keeps the selected thumbnail in view, shows full view names and supports the arrow keys.
-- Library cards glide to their new places when the details panel opens or closes instead of jumping a frame ahead of it.
+- Library cards move to their new places on the details panel's own motion when it opens or closes, the same way they follow the Collections sidebar, instead of jumping ahead of it.
+- Upload opens in place without re-rendering the Library, and its code loads in the background once the Library is ready, so the first Upload opens without a wait.
 
 - The Library shows child collection previews in grouped rows, and selecting a collection checks its loaded Model cards. Clicking a Model in the tree reveals its card and opens the inspector.
 - Model previews name each camera angle and mark the cover. The inspector preview can be resized and files can be downloaded or opened in the viewer from their rows.

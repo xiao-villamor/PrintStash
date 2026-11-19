@@ -132,7 +132,7 @@ import { useCollectionReadmeRenderer } from "@/components/use-collection-readme-
 import { MultipartModelTagsDialog } from "@/components/multipart-model-tags-dialog";
 import { MultipartModelCard } from "@/components/multipart-model-card";
 import { useCollectionsPaneOpen } from "@/lib/collections-pane-context";
-import { useReflowGlide } from "@/lib/use-reflow-glide";
+import { subscribeUploadRequests } from "@/lib/upload-requests";
 import { LibraryCollectionsPane, LibraryBreadcrumbs } from "@/components/collections-pane";
 import { FilterSidebar } from "@/components/filter-sidebar";
 import {
@@ -1726,11 +1726,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     else if (error !== null) settleStartup("cards", "failed");
   }, [browseReady, error, settleStartup]);
   const startupContent = useRef<HTMLElement>(null);
-  const [mainElement, setMainElement] = useState<HTMLElement | null>(null);
-  const attachMain = useCallback((node: HTMLElement | null) => {
-    startupContent.current = node;
-    setMainElement(node);
-  }, []);
   const listContent = useRef<HTMLDivElement>(null);
   const readingRenderers = useRef(new Map<string, LibraryReadingRenderer>());
   const reading = useLibraryReadingPosition(
@@ -2453,9 +2448,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     // through the entrance, exit, or a reversal, then apply the latest fit.
     setInspectorMotion({ open: inspectorOpen, locked: { dock: appliedDock } });
   }
-  // The docked inspector reserves its column at once; cards glide to the
-  // reflowed grid alongside the panel instead of jumping a frame ahead of it.
-  useReflowGlide(mainElement, inspectorOpen ? "docked" : "full");
   const settleInspectorDock = useCallback(() => {
     setInspectorMotion((motion) => (motion.locked ? { ...motion, locked: null } : motion));
   }, []);
@@ -2756,6 +2748,22 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const uploadDefaultCollection =
     user?.is_superuser || canWriteCollection(selectedCollectionRow) ? selectedCollection : null;
   const showUpload = uploadOpen || (uploadRequested && canUploadToVault);
+  useEffect(
+    () =>
+      subscribeUploadRequests(() => {
+        setDropPreload(null);
+        setDropCollection(null);
+        setUploadOpen(true);
+      }),
+    [],
+  );
+  // Warm the dialog's code once the Library is usable, so the first Upload
+  // does not wait for its download.
+  useEffect(() => {
+    if (!browseReady || !canUploadToVault) return;
+    const id = window.setTimeout(() => void loadUploadModal(), 1500);
+    return () => window.clearTimeout(id);
+  }, [browseReady, canUploadToVault]);
   function closeUpload() {
     setUploadOpen(false);
     if (uploadRequested) {
@@ -3669,7 +3677,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         {savedViewsHost && auth.isAuthenticated && createPortal(savedViewControl(), savedViewsHost)}
 
         <main
-          ref={attachMain}
+          ref={startupContent}
           tabIndex={-1}
           aria-busy={reading.status === "restoring"}
           data-inspector-open={inspectorOpen || undefined}
