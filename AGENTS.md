@@ -10,11 +10,11 @@ work; that detail lives there, not here, so this file stays small.
 
 ## Skill
 
-`.agents/skills/printstash/` is the repository's only public skill;
-`.claude/skills` is a symlink to `.agents/skills`, and this file is what
-`CLAUDE.md` points at. Invoke **`printstash`** at the start of every task. Its
-routing table discloses the relevant database, test-design, test-running,
-frontend, backend, provider, capture, release, and workflow references.
+`.agents/skills/` holds the project skills and is shared with Claude Code via
+`.claude/skills`. Invoke **`printstash`** at the start of every task and use
+its routing table for the relevant references. For emoji artwork and exports,
+use [Emoji Forge](.agents/skills/emoji-forge/SKILL.md) and the
+[Stashy pack source](branding/emoji/README.md).
 
 ## Agent coordination
 

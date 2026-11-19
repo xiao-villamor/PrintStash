@@ -1,0 +1,63 @@
+{
+  "target": "slack",
+  "preview_ms": 2450,
+  "emojis": [
+    {
+      "name": "printstash",
+      "use": "The original PrintStash badge.",
+      "static": true,
+      "register": false,
+      "script": "stashy.py:badge_cel",
+      "frames": ["../../frontend/public/logo.png"]
+    },
+    {
+      "name": "stashy-wave",
+      "use": "Say hello or welcome someone to PrintStash.",
+      "register": false,
+      "script": "stashy.py",
+      "seam": 0.035
+    },
+    {
+      "name": "stashy-love",
+      "use": "Favorite a model or show appreciation.",
+      "static": true,
+      "register": false,
+      "script": "stashy.py"
+    },
+    {
+      "name": "stashy-thinking",
+      "use": "Wonder about a design, setting, or mystery noise.",
+      "static": true,
+      "register": false,
+      "script": "stashy.py"
+    },
+    {
+      "name": "stashy-approved",
+      "use": "Give a model, idea, or fix the green light.",
+      "static": true,
+      "register": false,
+      "script": "stashy.py"
+    },
+    {
+      "name": "stashy-printing",
+      "use": "A print is in progress.",
+      "register": false,
+      "script": "stashy.py",
+      "seam": 0.035
+    },
+    {
+      "name": "stashy-done",
+      "use": "Celebrate a finished print.",
+      "register": false,
+      "script": "stashy.py",
+      "seam": 0.035
+    },
+    {
+      "name": "stashy-spaghetti",
+      "use": "A failed print turned into a nest of filament.",
+      "register": false,
+      "script": "stashy.py",
+      "seam": 0.035
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+name: Script tests
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    env:
+      FORGE_TEST_CHROME: chrome
+      LIBGL_ALWAYS_SOFTWARE: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install headless OpenGL libraries
+        run: sudo apt-get update -qq && sudo apt-get install -y libegl1 libegl-mesa0 libgl1 libgl1-mesa-dri
+      - name: Install the package and test tools
+        run: python -m pip install '.[gpu,webgl,test]'
+      - name: Test the command-line entry point
+        run: forge --help
+      - name: Run tests
+        run: python -m pytest -q
