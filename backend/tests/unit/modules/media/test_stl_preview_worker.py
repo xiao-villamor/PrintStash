@@ -264,6 +264,10 @@ class TestMain:
     def test_uses_the_canonical_material_colour(self, stl, tmp_path: Path) -> None:
         import numpy as np
         from PIL import Image
+        from printstash_core.mesh.preview_profile import (
+            DEFAULT_APPEARANCE,
+            STUDIO_LOOKS,
+        )
 
         source = stl(_binary_stl([TRIANGLE, SECOND]))
 
@@ -272,7 +276,8 @@ class TestMain:
         pixels = np.asarray(Image.open(tmp_path / "out.png").convert("RGBA"))
         opaque = pixels[:, :, :3][pixels[:, :, 3] > 200].mean(axis=0)
         observed = opaque / opaque.max()
-        expected = np.asarray([0.70, 0.75, 0.84]) / 0.84
+        albedo = np.asarray(STUDIO_LOOKS[DEFAULT_APPEARANCE.look].albedo)
+        expected = albedo / albedo.max()
         np.testing.assert_allclose(observed, expected, atol=0.05)
 
     @pytest.mark.parametrize(

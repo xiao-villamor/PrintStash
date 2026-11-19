@@ -36,7 +36,7 @@ from app.db.models import SENTINEL_FILE_HASH, DerivativeKind, File, FileType, Jo
 
 # Recipe versions. Bump rule: see the module docstring.
 MESH_GEOMETRY_RECIPE = 12
-MESH_THUMBNAIL_RECIPE = 23
+MESH_THUMBNAIL_RECIPE = 24
 # 3MF scenes are read through lib3mf in single precision.
 THREE_MF_GEOMETRY_RECIPE = 15
 # 21 selects embedded covers by default and records picture availability.

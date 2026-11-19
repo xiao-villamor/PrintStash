@@ -10,7 +10,11 @@ from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from printstash_core.mesh.preview_profile import STUDIO_LOOKS, preview_appearance
+from printstash_core.mesh.preview_profile import (
+    PREVIEW_PROFILE,
+    STUDIO_LOOKS,
+    preview_appearance,
+)
 
 from app.modules.media.stl_reader import (
     InvalidSTL,
@@ -272,7 +276,18 @@ def render_stl_thumbnail(
         center = (np.asarray(sampled.bounds_min) + np.asarray(sampled.bounds_max)) * 0.5
         if not np.isfinite(center).all():
             return None
-        rotation = _select_view_rotation(corners - center, np).astype(np.float64)
+        extents = np.ptp(corners, axis=0)
+        broad_extent = float(min(extents[0], extents[1]))
+        # Turning a flat horizontal sample diagonally spends part of the coarse
+        # frame on empty corners. Keep its face aligned to the pixel grid to
+        # preserve coverage on sparse surfaces and the walls of thin rings.
+        horizontal_plate = (
+            broad_extent > 1e-6
+            and float(extents[2]) / broad_extent <= PREVIEW_PROFILE.flat_thickness_ratio
+        )
+        rotation = _select_view_rotation(
+            corners - center, np, reference=horizontal_plate
+        ).astype(np.float64)
         view_corners = (corners - center) @ rotation.T
         if not np.isfinite(rotation).all() or not np.isfinite(view_corners).all():
             return None
