@@ -17,7 +17,15 @@ import type { StartupOutcome } from "@/lib/library-startup-context";
 import { useLibraryStartup } from "@/lib/library-startup-context";
 import { useViewportAdmission } from "@/lib/use-viewport-admission";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useRouter } from "@/lib/navigation";
 import { Link } from "@/lib/link";
 import { useMediaQuery } from "@/lib/use-media-query";
@@ -126,10 +134,12 @@ function DraggableModelLeaf({
   model,
   isDraggingThisModel,
   enabled,
+  onOpen,
 }: {
   model: OutlinerModelRead;
   isDraggingThisModel: boolean;
   enabled: boolean;
+  onOpen?: FilterSidebarProps["onModelOpen"];
 }) {
   "use memo";
   useUiLocale();
@@ -147,21 +157,29 @@ function DraggableModelLeaf({
         ref={setNodeRef}
         {...listeners}
         {...attributes}
+        onClick={(event) => {
+          if (event.detail <= 1) onOpen?.(model, event.currentTarget);
+        }}
         onDoubleClick={() => router.push(`/models/${model.id}`)}
         role="treeitem"
         aria-level={(model.collection?.split("/").length ?? 0) + 1}
         tabIndex={0}
         onKeyDown={(event) => {
-          if (event.key === "Enter") router.push(`/models/${model.id}`);
+          if (event.key === "Enter") {
+            if (onOpen) onOpen(model, event.currentTarget);
+            else router.push(`/models/${model.id}`);
+          }
         }}
         className={`flex items-center gap-2 rounded pl-7 pr-2 py-1 text-xs select-none hover:bg-muted transition-colors ${enabled ? "cursor-grab active:cursor-grabbing" : "cursor-action"} ${
           isDraggingThisModel ? "opacity-30 pointer-events-none" : "text-muted-foreground"
         }`}
-        title={model.name}
+        aria-label={model.name}
         data-outliner-entry={`/models/${model.id}`}
       >
         <Box className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/40" />
-        <span className="truncate">{model.name}</span>
+        <span className="min-w-0 truncate" title={model.name}>
+          {model.name}
+        </span>
       </div>
     </Localized>
   );
@@ -197,10 +215,12 @@ function OutlinerLeaves({
   entries,
   dragging,
   dragEnabled,
+  onModelOpen,
 }: {
   entries: OutlinerEntry[];
   dragging: DragPayload | null;
   dragEnabled: boolean;
+  onModelOpen?: FilterSidebarProps["onModelOpen"];
 }) {
   "use memo";
   return entries.map((entry) =>
@@ -209,6 +229,7 @@ function OutlinerLeaves({
         key={`model-${entry.id}`}
         model={entry}
         enabled={dragEnabled}
+        onOpen={onModelOpen}
         isDraggingThisModel={dragging?.type === "model" && dragging.model.id === entry.id}
       />
     ) : (
@@ -257,6 +278,7 @@ interface TreeContext {
    *  that arrives with its id resolves in one lookup instead of two. */
   onSelect: (path: string | null, id?: number | null) => void;
   onIntent?: (path: string | null) => void;
+  onModelOpen?: FilterSidebarProps["onModelOpen"];
   expanded: Set<string>;
   toggle: (path: string) => void;
   params: OutlinerParams;
@@ -347,7 +369,12 @@ function EntryLevel({ collectionId, ctx }: { collectionId: number | null; ctx: T
   const entries = query.data?.pages.flatMap((page) => page.items) ?? [];
   return (
     <>
-      <OutlinerLeaves entries={entries} dragging={ctx.dragging} dragEnabled={ctx.dragEnabled} />
+      <OutlinerLeaves
+        entries={entries}
+        dragging={ctx.dragging}
+        dragEnabled={ctx.dragEnabled}
+        onModelOpen={ctx.onModelOpen}
+      />
       <PageControls
         query={query}
         initial={query.data === undefined}
@@ -775,6 +802,7 @@ export function FilterSidebarContent({
   selectedPrinterPresence,
   onCollectionChange,
   onCollectionIntent,
+  onModelOpen,
   onTagsChange,
   onPrinterChange,
   onPrinterPresenceChange,
@@ -1079,6 +1107,7 @@ export function FilterSidebarContent({
     selected: selectedCollection,
     onSelect: onCollectionChange,
     onIntent: onCollectionIntent,
+    onModelOpen,
     expanded,
     toggle: toggleExpanded,
     params,
@@ -1540,6 +1569,7 @@ export interface FilterSidebarProps {
   onCollectionChange: (path: string | null, id?: number | null) => void;
   /** Hover/focus on a folder: the parent may warm that folder's data. */
   onCollectionIntent?: (path: string | null) => void;
+  onModelOpen?: (model: OutlinerModelRead, opener: HTMLElement) => void;
   onTagsChange: (tags: string[]) => void;
   onPrinterChange: (printerId: number | null) => void;
   onPrinterPresenceChange: (presence: "any" | "none" | null) => void;
@@ -1576,8 +1606,36 @@ export function FilterSidebar(props: FilterSidebarProps) {
     }
   });
 
-  const sidebarWidth = pane?.width ?? localWidth;
+  const header = useRef<HTMLDivElement>(null);
+  const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const element = header.current;
+    if (!element) return;
+    const measure = () => {
+      const style = getComputedStyle(element);
+      const inner = Array.from(element.children).reduce(
+        (width, child) => width + child.getBoundingClientRect().width,
+        0,
+      );
+      const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      const gap = parseFloat(style.columnGap);
+      const width = Math.ceil(inner + padding + gap);
+      if (Number.isFinite(width) && width > 0) setMeasuredWidth(width);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    for (const child of element.children) observer.observe(child);
+    return () => observer.disconnect();
+  }, [desktop, props.collectionsOnly]);
+
+  const minimumWidth = (props.collectionsOnly ? measuredWidth : null) ?? 180;
+  const sidebarWidth = Math.max(minimumWidth, pane?.width ?? localWidth);
   const setSidebarWidth = pane?.setWidth ?? setLocalWidth;
+  useLayoutEffect(() => {
+    if (desktop && pane && measuredWidth !== null && pane.width < measuredWidth) {
+      pane.setWidth(measuredWidth);
+    }
+  }, [desktop, measuredWidth, pane]);
   useEffect(() => {
     if (pane) return;
     try {
@@ -1590,7 +1648,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
     const startX = e.clientX;
     const startWidth = sidebarWidth;
     const onMove = (ev: MouseEvent) => {
-      setSidebarWidth(Math.min(520, Math.max(180, startWidth + ev.clientX - startX)));
+      setSidebarWidth(Math.min(520, Math.max(minimumWidth, startWidth + ev.clientX - startX)));
     };
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
@@ -1614,11 +1672,14 @@ export function FilterSidebar(props: FilterSidebarProps) {
         className={`${props.collectionsOnly ? "collections-sidebar " : ""}${pane ? "" : "bg-sidebar border-r border-border "} flex min-h-0 flex-col shrink-0 hidden md:flex relative`}
       >
         {props.collectionsOnly && (
-          <div className="flex h-12 shrink-0 items-center justify-between pl-4 pr-2">
-            <h2 className="font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
+          <div
+            ref={header}
+            className="flex h-12 w-full shrink-0 items-center justify-between gap-2 pl-4 pr-2"
+          >
+            <h2 className="shrink-0 whitespace-nowrap font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
               {uiText("Collections")}
             </h2>
-            <div className="flex items-center">
+            <div className="flex shrink-0 items-center">
               <Button
                 variant="ghost"
                 size="icon"
@@ -1737,7 +1798,24 @@ export function FilterSidebar(props: FilterSidebarProps) {
         )}
         {/* Resize handle */}
         <div
+          role="separator"
+          aria-label={uiText("Resize collections sidebar")}
+          aria-orientation="vertical"
+          aria-valuemin={minimumWidth}
+          aria-valuemax={520}
+          aria-valuenow={sidebarWidth}
+          tabIndex={0}
           onMouseDown={handleResizeStart}
+          onKeyDown={(event) => {
+            let width: number;
+            if (event.key === "ArrowLeft") width = sidebarWidth - 16;
+            else if (event.key === "ArrowRight") width = sidebarWidth + 16;
+            else if (event.key === "Home") width = minimumWidth;
+            else if (event.key === "End") width = 520;
+            else return;
+            event.preventDefault();
+            setSidebarWidth(Math.min(520, Math.max(minimumWidth, width)));
+          }}
           className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/50 transition-colors z-50"
         />
       </aside>

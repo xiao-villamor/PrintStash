@@ -38,10 +38,12 @@ import { FileText, Link2, Loader2, Pencil, Star, Trash2 } from "lucide-react";
 import type {
   STLViewerControls,
   ViewerControls,
+  ViewerCameraPreset,
   STLPreviewFeedback,
   ViewerDisplayMode,
 } from "@/components/stl-viewer";
 import type { ViewerMode } from "@/components/model-detail/viewer-toolbar";
+import { hasToolpath } from "@/lib/toolpath-preview";
 import { SlicerOpenButton } from "@/components/slicer-open-button";
 import {
   downloadAuthenticatedFile,
@@ -307,7 +309,8 @@ function ModelDetailPresentation({
   const metadataClient = useQueryClient();
   const [deleteTagTarget, setDeleteTagTarget] = useState<TagRead | null>(null);
   const [deleteTagBusy, setDeleteTagBusy] = useState(false);
-  const [viewerMode, setViewerMode] = useState<ViewerMode>("model");
+  const [cameraPreset, setCameraPreset] = useState<ViewerCameraPreset | null>("isometric");
+  const [requestedViewerMode, setViewerMode] = useState<ViewerMode>("model");
   const [revisionSelection, setRevisionSelection] = useState<{
     modelId: number;
     fileId: number;
@@ -358,7 +361,7 @@ function ModelDetailPresentation({
     !model.files.some((file) => file.file_type === "resin");
   const detailSidebarWidth = clampDetailSidebarWidth(
     preferredDetailSidebarWidth ??
-      (modelFactsInPanel ? DETAIL_SIDEBAR_MIN_WIDTH : Math.min(1000, detailLayoutWidth * 0.45)),
+      (hasGcode ? Math.min(1000, detailLayoutWidth * 0.45) : DETAIL_SIDEBAR_MIN_WIDTH),
     detailLayoutWidth,
   );
   useEffect(() => {
@@ -673,7 +676,8 @@ function ModelDetailPresentation({
       f.file_type === "fbx" ||
       f.file_type === "step",
   );
-  const hasToolpathPreview = hasGcode || sourceFiles.some((file) => file.file_type === "3mf");
+  const hasToolpathPreview = sortedFiles.some(hasToolpath);
+  const viewerMode = hasToolpathPreview ? requestedViewerMode : "model";
   const previewSourceId =
     toolpathSource?.modelId === model.id &&
     toolpathSource.revisionId === (inspectedGcode?.id ?? null)
@@ -682,7 +686,7 @@ function ModelDetailPresentation({
   const previewSource =
     sortedFiles.find((file) => file.id === previewSourceId) ??
     inspectedGcode ??
-    sourceFiles.find((file) => file.file_type === "3mf");
+    sourceFiles.find(hasToolpath);
   function selectToolpathSource(fileId: number) {
     const file = sortedFiles.find((source) => source.id === fileId);
     if (file?.file_type === "gcode") {
@@ -1254,6 +1258,7 @@ function ModelDetailPresentation({
                         viewerControls.current = api;
                       }}
                       onReadyChange={setViewerReady}
+                      onOrbit={() => setCameraPreset(null)}
                       onFailureChange={setPreviewFeedback}
                       displayMode={displayMode}
                       showGrid={showGrid}
@@ -1324,6 +1329,8 @@ function ModelDetailPresentation({
               {(meshFile || hasToolpathPreview) && (
                 <div className="contents">
                   <ViewerToolbar
+                    camera={cameraPreset}
+                    setCamera={setCameraPreset}
                     displayMode={displayMode}
                     setDisplayMode={setDisplayMode}
                     showGrid={showGrid}

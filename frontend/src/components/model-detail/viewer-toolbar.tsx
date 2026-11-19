@@ -10,7 +10,9 @@ import type {
   ViewerCameraPreset,
 } from "@/components/stl-viewer";
 
-export type ViewerMode = "model" | "gcode";
+import { ViewerModeSwitch, type ViewerMode } from "@/components/viewer-mode-switch";
+
+export type { ViewerMode } from "@/components/viewer-mode-switch";
 const DISPLAY_MODES: readonly ViewerDisplayMode[] = ["solid", "xray", "wireframe"];
 const CAMERA_PRESETS: readonly ViewerCameraPreset[] = ["isometric", "front", "top"];
 
@@ -30,6 +32,8 @@ export function ViewerToolbar({
   showDimensions = true,
   onDimensions,
   notifyScreenshotError = toast.error,
+  camera,
+  setCamera,
 }: {
   displayMode: ViewerDisplayMode;
   setDisplayMode: (mode: ViewerDisplayMode) => void;
@@ -46,11 +50,17 @@ export function ViewerToolbar({
   showDimensions?: boolean;
   onDimensions?: (visible: boolean) => void;
   notifyScreenshotError?: (message: string) => void;
+  camera?: ViewerCameraPreset | null;
+  setCamera?: (preset: ViewerCameraPreset) => void;
 }) {
   useUiLocale();
-  const [camera, setCamera] = useState<ViewerCameraPreset>("isometric");
+  const [localCamera, setLocalCamera] = useState<ViewerCameraPreset>("isometric");
+  const activeCamera = camera === undefined ? localCamera : camera;
+  const chooseCamera = setCamera ?? setLocalCamera;
   const buttonClass = (active: boolean) =>
-    active ? "bg-accent text-accent-foreground" : "text-foreground";
+    active
+      ? "bg-accent text-accent-foreground hover:bg-accent"
+      : "text-foreground hover:bg-muted hover:text-foreground";
   return (
     <div className="detail-viewer-controls">
       <div className="detail-preview-heading">
@@ -89,31 +99,10 @@ export function ViewerToolbar({
         </div>
       </div>
       <div className="detail-viewer-commandbar">
-        {hasGcode && (
-          <div className="detail-viewer-control-group">
-            <span>{uiText("Preview")}</span>
-            <div>
-              <Button
-                size="sm"
-                variant="ghost"
-                aria-pressed={viewerMode === "model"}
-                className={buttonClass(viewerMode === "model")}
-                onClick={() => setViewerMode("model")}
-              >
-                {uiText("3D model")}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                aria-pressed={viewerMode === "gcode"}
-                className={buttonClass(viewerMode === "gcode")}
-                onClick={() => setViewerMode("gcode")}
-              >
-                {uiText("Layers")}
-              </Button>
-            </div>
-          </div>
-        )}
+        <div className="detail-viewer-control-group">
+          <span>{uiText("Preview")}</span>
+          <ViewerModeSwitch mode={viewerMode} onChange={setViewerMode} hasGcode={hasGcode} />
+        </div>
         {
           <>
             <div className="detail-viewer-control-group">
@@ -178,11 +167,11 @@ export function ViewerToolbar({
                 size="sm"
                 variant="ghost"
                 disabled={!viewerReady}
-                aria-pressed={camera === preset}
-                className={buttonClass(camera === preset)}
+                aria-pressed={activeCamera === preset}
+                className={buttonClass(activeCamera === preset)}
                 onClick={() => {
                   controls.current?.setView(preset);
-                  setCamera(preset);
+                  chooseCamera(preset);
                 }}
               >
                 {preset === "isometric"
@@ -211,7 +200,7 @@ export function ViewerToolbar({
               aria-label={uiText("Fit to view")}
               onClick={() => {
                 controls.current?.fit();
-                setCamera("isometric");
+                chooseCamera("isometric");
               }}
             >
               {uiText("Fit")}

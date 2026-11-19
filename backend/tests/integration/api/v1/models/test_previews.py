@@ -71,6 +71,22 @@ class TestPreviewReads:
         assert previews["published"]["manifest_url"] == root
         assert previews["file_id"] == file.id
 
+    @pytest.mark.parametrize("matches", [True, False])
+    def test_marks_only_a_byte_identical_model_cover(
+        self, client, auth_headers, gallery, db_session, make_model_cover, matches
+    ):
+        model, _, _, _, images, _ = gallery
+        digest = hashlib.sha256(images[2]).hexdigest() if matches else "b" * 64
+        cover = make_model_cover(model, sha256=digest)
+        model.cover_filename = cover.filename
+        db_session.add(model)
+        db_session.commit()
+
+        response = client.get(f"/api/v1/models/{model.id}", headers=auth_headers)
+        assert response.status_code == 200
+        published = response.json()["previews"]["published"]
+        assert published.get("cover_view") == ("orbit-2" if matches else None)
+
     @pytest.mark.parametrize("suffix", ["", "/orbit-0"])
     def test_denies_unauthenticated_reads(self, client, gallery, suffix):
         assert client.get(gallery[3] + suffix).status_code == 401

@@ -183,3 +183,30 @@ test.describe("viewer STL", () => {
     }
   });
 });
+
+test("redraws the grid before any canvas gesture", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const response = await page.request.post("/api/v1/config/sample-collection");
+  expect(response.status()).toBe(202);
+  let modelId: number | undefined;
+  await expect
+    .poll(async () => {
+      const browse = await page.request.get("/api/v1/models/browse?collection=printstash-samples");
+      const { items } = await browse.json();
+      modelId = items.find(
+        ({ model }: { model?: { name: string } }) => model?.name === "20 mm calibration cube",
+      )?.model.id;
+      return modelId;
+    })
+    .toBeTruthy();
+  await page.goto(`/models/${modelId}`);
+  const grid = page.getByRole("button", { name: "Build plate grid" });
+  await expect(grid).toBeEnabled();
+  const canvas = page.locator(".detail-preview-canvas canvas").first();
+  const shown = await canvas.screenshot();
+  await grid.click();
+  await expect(grid).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(async () => (await canvas.screenshot()).equals(shown)).toBe(false);
+  await grid.click();
+  await expect.poll(async () => (await canvas.screenshot()).equals(shown)).toBe(true);
+});

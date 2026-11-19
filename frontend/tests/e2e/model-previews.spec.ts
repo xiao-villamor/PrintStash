@@ -173,12 +173,12 @@ test.describe("Model preview browsing", () => {
 
   test("cycles the card through the cover in both directions", async ({ page }) => {
     const { card, next } = await library(page);
-    for (const id of ["orbit-1", "orbit-2", "orbit-3", "cover"]) {
+    for (const id of ["orbit-0", "orbit-1", "orbit-2", "orbit-3", "top", "bottom", "cover"]) {
       await next.click();
       await expect(card.locator("img")).toHaveAttribute("data-preview-view", id);
     }
     const previous = card.getByRole("button", { name: "Previous preview", exact: true });
-    for (const id of ["orbit-3", "orbit-2", "orbit-1", "cover"]) {
+    for (const id of ["bottom", "top", "orbit-3", "orbit-2", "orbit-1", "orbit-0", "cover"]) {
       await previous.click();
       await expect(card.locator("img")).toHaveAttribute("data-preview-view", id);
     }
@@ -260,7 +260,7 @@ test.describe("Model preview browsing", () => {
 
     await expect(dialog.locator("img[data-preview-view]")).toHaveAttribute(
       "data-preview-view",
-      "orbit-1",
+      "orbit-0",
     );
   });
 
@@ -319,7 +319,7 @@ test.describe("Model preview browsing", () => {
     await next.focus();
     await expect(card.locator("[data-preview-navigation]")).toHaveCSS("opacity", "1");
     await next.press("Enter");
-    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
   });
 
   test("keeps the preview image above the gallery toolbar", async ({ page }) => {
@@ -369,7 +369,7 @@ test.describe("Model preview browsing", () => {
     await card.hover({ position: { x: 120, y: 30 } });
     await expect.poll(() => secondaries(transferred).length).toBe(2);
     expect(secondaries(transferred)).toEqual(
-      expect.arrayContaining([published.views[1].url, published.views[3].url]),
+      expect.arrayContaining([published.views[0].url, published.views[3].url]),
     );
     await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
   });
@@ -385,14 +385,14 @@ test.describe("Model preview browsing", () => {
   test("prioritizes the focused arrow destination", async ({ page }) => {
     const { next, transferred } = await library(page);
     await next.focus();
-    await expect.poll(() => secondaries(transferred)).toContain(published.views[1].url);
+    await expect.poll(() => secondaries(transferred)).toContain(published.views[0].url);
   });
 
   test("fetches an uncached view on activation", async ({ page }) => {
     const { next, card, transferred } = await library(page);
     await next.dispatchEvent("click");
-    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
-    expect(secondaries(transferred)).toContain(published.views[1].url);
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
+    expect(secondaries(transferred)).toContain(published.views[0].url);
   });
 
   test("retains the image during destination download", async ({ page }) => {
@@ -401,14 +401,14 @@ test.describe("Model preview browsing", () => {
     const pending = new Promise<void>((resolve) => {
       release = resolve;
     });
-    await page.route("**/previews/generation/orbit-1", async (route) => {
+    await page.route("**/previews/generation/orbit-0", async (route) => {
       await pending;
       await fulfillImage(route);
     });
     await next.dispatchEvent("click");
     await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
     release();
-    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
   });
 
   test("retains the image until decoding completes", async ({ page }) => {
@@ -427,31 +427,31 @@ test.describe("Model preview browsing", () => {
     await page.waitForTimeout(150);
     await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
     await page.evaluate(() => window.releasePreviewDecode());
-    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
   });
 
   test("honors the latest rapid selection", async ({ page }) => {
     const { next, card } = await library(page);
-    await page.route("**/previews/generation/orbit-1", async (route) => {
+    await page.route("**/previews/generation/orbit-0", async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 300));
       await fulfillImage(route);
     });
     await next.dispatchEvent("click");
     await next.dispatchEvent("click");
-    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-2");
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
     await page.waitForTimeout(350);
-    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-2");
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
   });
 
   test("keeps a usable image after destination failure", async ({ page }) => {
     const { next, card } = await library(page);
-    await page.route("**/previews/generation/orbit-1", (route) => route.fulfill({ status: 503 }));
+    await page.route("**/previews/generation/orbit-0", (route) => route.fulfill({ status: 503 }));
     await next.dispatchEvent("click");
     await expect(card.getByRole("button", { name: "Retry preview" })).toBeVisible();
     await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
-    await page.unroute("**/previews/generation/orbit-1");
+    await page.unroute("**/previews/generation/orbit-0");
     await card.getByRole("button", { name: "Retry preview" }).click();
-    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
   });
 
   test("respects data saving", async ({ page }) => {
@@ -463,22 +463,22 @@ test.describe("Model preview browsing", () => {
     await page.waitForTimeout(450);
     expect(secondaries(transferred)).toEqual([]);
     await next.dispatchEvent("click");
-    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
-    expect(secondaries(transferred)).toEqual([published.views[1].url]);
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
+    expect(secondaries(transferred)).toEqual([published.views[0].url]);
   });
 
   test("does not transfer geometry while browsing previews", async ({ page }) => {
     const { card, next, transferred } = await library(page);
     await card.hover();
     await next.click();
-    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
     expect(transferred.filter((path) => path.endsWith("/stl"))).toEqual([]);
   });
 
   test("keeps controls separate from card activation", async ({ page }) => {
     const { card, next } = await library(page);
     await next.click();
-    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
     await expect(page).toHaveURL((url) => url.pathname === "/");
     await expect(
       page.getByRole("checkbox", { name: "Select Bracket 1", exact: true }),
@@ -491,7 +491,7 @@ test.describe("Model preview browsing", () => {
     await next.focus();
     await expect(next).toBeFocused();
     await next.press("Enter");
-    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
   });
 
   test("omits controls for a single image", async ({ page }) => {
@@ -519,7 +519,7 @@ test.describe("Model preview browsing", () => {
     const { card } = await library(page);
     await card.getByRole("button", { name: "Model views", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Model views" });
-    await dialog.getByRole("button", { name: "Oblique 1", exact: true }).click();
+    await dialog.getByRole("button", { name: "Front left", exact: true }).click();
     await expect(dialog.locator("img[data-preview-view]")).toHaveAttribute(
       "data-preview-view",
       "orbit-0",
@@ -546,7 +546,7 @@ test.describe("Touch previews", () => {
     await page.waitForTimeout(450);
     expect(secondaries(transferred)).toEqual([]);
     await next.tap();
-    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
     await expect.poll(() => secondaries(transferred).length).toBe(2);
   });
 });

@@ -379,3 +379,29 @@
   border: 1px solid var(--border);
   background: var(--card);
 }
+
+.library-tree-spotlight {
+  position: relative;
+}
+
+.library-tree-spotlight::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+  border: 2px solid var(--primary);
+  content: "";
+  animation: library-tree-spotlight var(--duration-slow) var(--ease-out) both;
+}
+
+@keyframes library-tree-spotlight {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-tree-spotlight::after {
+    animation: none;
+  }
+}

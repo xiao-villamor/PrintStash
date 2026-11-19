@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections import defaultdict
 
-from sqlalchemy import func
+from sqlalchemy import and_, func
 from sqlmodel import Session, col, select
 
 from app.core.errors import ErrorKind, OperationError
@@ -16,6 +17,7 @@ from app.db.models import (
     File,
     JobKind,
     Model,
+    ModelCover,
 )
 from app.db.scopes import live
 from app.modules.derivatives import policy
@@ -75,6 +77,46 @@ def selected_files(session: Session, model_ids: list[int]) -> dict[int, File]:
     }
 
 
+def _cover_digests(session: Session, model_ids: list[int]) -> dict[int, str]:
+    """Read hashes of the covers actually served, without opening stored images."""
+    rows = session.exec(
+        select(
+            Model.id,
+            Model.cover_filename,
+            ModelCover.sha256,
+            ArtifactDerivative.output_json,
+        )
+        .select_from(Model)
+        .outerjoin(
+            ModelCover,
+            and_(
+                col(ModelCover.model_id) == col(Model.id),
+                col(ModelCover.filename) == col(Model.cover_filename),
+            ),
+        )
+        .outerjoin(
+            ArtifactDerivative,
+            and_(
+                col(ArtifactDerivative.file_id) == col(Model.thumbnail_file_id),
+                col(ArtifactDerivative.storage_key) == col(Model.thumbnail_path),
+                col(ArtifactDerivative.kind) == DerivativeKind.THUMBNAIL,
+                col(ArtifactDerivative.state) == DerivativeState.READY,
+            ),
+        )
+        .where(col(Model.id).in_(model_ids))
+    ).all()
+    digests = {}
+    for model_id, cover_filename, cover_digest, thumbnail in rows:
+        digest = (
+            cover_digest
+            if cover_filename
+            else (json.loads(thumbnail).get("sha256") if thumbnail else None)
+        )
+        if model_id is not None and digest:
+            digests[model_id] = digest
+    return digests
+
+
 def summaries(
     session: Session, model_ids: list[int], *, root: str | None = None
 ) -> dict[int, ModelPreviewRead]:
@@ -99,6 +141,7 @@ def summaries(
             .order_by(col(ArtifactDerivative.recipe_version).desc())
         ).all():
             by_file[row.file_id].append(row)
+    cover_digests = _cover_digests(session, list(files)) if enabled and by_file else {}
     result: dict[int, ModelPreviewRead] = {}
     for model_id in model_ids:
         file = files.get(model_id)
@@ -118,15 +161,27 @@ def summaries(
             base = (
                 root if root is not None else f"/api/v1/models/{model_id}"
             ) + f"/previews/{generation(row)}"
+            visible_views = [
+                view
+                for view in manifest.views
+                if include_poles or view.role not in (ViewRole.TOP, ViewRole.BOTTOM)
+            ]
             release = PublishedPreviewRead(
                 profile=manifest.profile,
                 manifest_url=base,
+                cover_view=next(
+                    (
+                        view.id
+                        for view in visible_views
+                        if view.sha256 == cover_digests.get(model_id)
+                    ),
+                    None,
+                ),
                 views=[
                     PreviewImageRead(
                         id=view.id, role=view.role, url=f"{base}/{view.id}"
                     )
-                    for view in manifest.views
-                    if include_poles or view.role not in (ViewRole.TOP, ViewRole.BOTTOM)
+                    for view in visible_views
                 ],
             )
             break

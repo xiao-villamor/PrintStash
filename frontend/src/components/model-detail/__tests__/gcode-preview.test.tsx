@@ -33,6 +33,14 @@ function preview(files = [sliced]) {
 }
 
 describe("GcodePreview", () => {
+  it("keeps mesh-only 3MF files out of the toolpath choices", () => {
+    const mesh = aRevision({ id: 13, file_type: "3mf", original_filename: "mesh.3mf" });
+    renderApp(preview([mesh, revision]));
+
+    expect(screen.queryByRole("combobox", { name: "G-code file" })).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Toolpath" })).toHaveTextContent("/files/12/toolpath");
+  });
+
   it("defaults to the first actual sliced plate", async () => {
     renderApp(preview(), { routes: platesRoute });
 

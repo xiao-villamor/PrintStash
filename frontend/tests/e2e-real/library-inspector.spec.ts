@@ -93,3 +93,39 @@ test.describe("Library inline inspector", () => {
     }
   });
 });
+
+test("reveals a tree model beyond the first listing page", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const response = await page.request.post("/api/v1/config/sample-collection");
+  expect(response.status()).toBe(202);
+  await expect
+    .poll(async () => {
+      const browse = await page.request.get("/api/v1/models/browse?collection=printstash-samples");
+      return (await browse.json()).total;
+    })
+    .toBe(3);
+  await page.goto("/?sort=name-asc");
+  const sidebar = page.getByRole("complementary", { name: "Collections", exact: true });
+  const expand = sidebar.getByRole("button", { name: "Expand PrintStash samples", exact: true });
+  await expand.click();
+  let continuations = 0;
+  await page.route("**/api/v1/models/browse?**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("collection") === "printstash-samples") {
+      if (url.searchParams.has("cursor")) continuations += 1;
+      url.searchParams.set("limit", "1");
+    }
+    await route.continue({ url: url.toString() });
+  });
+  const leaf = sidebar.getByRole("treeitem", { name: "Small parts tray", exact: true });
+  await leaf.click();
+  await expect(page).toHaveURL(/c=printstash-samples/);
+  const drawer = page.getByRole("complementary", { name: "Model details" });
+  await expect(
+    drawer.getByRole("heading", { name: "Small parts tray", exact: true }),
+  ).toBeVisible();
+  await expect(modelCard(page, "Small parts tray")).toBeInViewport();
+  expect(continuations).toBeGreaterThan(0);
+  await leaf.dblclick();
+  await expect(page).toHaveURL(/\/models\/\d+/);
+});

@@ -142,34 +142,53 @@ describe("useModelPreviews", () => {
     await waitFor(() => expect(hook.result.current.displayed?.id).toBe("orbit-1"));
   });
 
-  it("starts the card rotation at the side after the cover", () => {
+  it("starts a distinct cover before the complete orbit", () => {
     const hook = renderHook(() => useModelPreviews("/cover", views, true));
-    expect(hook.result.current.destination(1)?.id).toBe("orbit-1");
-    expect(hook.result.current.destination(-1)?.id).toBe("orbit-3");
+    expect(hook.result.current.destination(1)?.id).toBe("orbit-0");
+    expect(hook.result.current.destination(-1)?.id).toBe("top");
   });
 
   it.each([
-    ["orbit-1", -1],
-    ["orbit-3", 1],
+    ["orbit-0", -1],
+    ["top", 1],
   ] as const)("returns from %s to the cover in direction %s", (id, delta) => {
     const hook = renderHook(() => useModelPreviews("/cover", views, true));
     act(() => hook.result.current.select(id));
     expect(hook.result.current.destination(delta)?.id).toBe("cover");
   });
 
+  it("deduplicates a cover at the same image address", () => {
+    const cover = views[2].url;
+    const hook = renderHook(() => useModelPreviews(cover, [...views].reverse(), true));
+    expect(hook.result.current.coverView?.id).toBe("orbit-2");
+    expect(hook.result.current.navigationViews.map(({ id }) => id)).toEqual([
+      "cover",
+      "orbit-0",
+      "orbit-1",
+      "orbit-3",
+      "top",
+    ]);
+  });
+
+  it("deduplicates a byte-identical cover served from another address", () => {
+    const hook = renderHook(() => useModelPreviews("/cover", views, true, "orbit-0"));
+    expect(hook.result.current.coverView?.id).toBe("orbit-0");
+    expect(hook.result.current.destination(1)?.id).toBe("orbit-1");
+  });
+
   it("retains the complete orbit when there is no cover", () => {
     const hook = renderHook(() => useModelPreviews(null, views, true));
     expect(hook.result.current.selected).toBe("orbit-0");
-    expect(hook.result.current.destination(-1)?.id).toBe("orbit-3");
-    act(() => hook.result.current.select("orbit-3"));
+    expect(hook.result.current.destination(-1)?.id).toBe("top");
+    act(() => hook.result.current.select("top"));
     expect(hook.result.current.destination(1)?.id).toBe("orbit-0");
   });
 
   it("does not fetch the first orbit when the next neighbor is the cover", async () => {
     const hook = renderHook(() => useModelPreviews("/cover", views, true));
-    act(() => hook.result.current.select("orbit-3"));
+    act(() => hook.result.current.select("top"));
     act(() => hook.result.current.prioritize(hook.result.current.destination(1)));
-    await waitFor(() => expect(requested).toEqual(["/hook-previews/orbit-3"]));
+    await waitFor(() => expect(requested).toEqual(["/hook-previews/top"]));
   });
 
   it("has no navigation without generated views", () => {
@@ -211,11 +230,11 @@ describe("useModelPreviews", () => {
     expect(requested).toEqual([]);
     act(() => vi.advanceTimersByTime(1));
     // At most one speculative transfer runs at a time; the other neighbor follows.
-    expect(requested).toEqual(["/hook-previews/orbit-1"]);
+    expect(requested).toEqual(["/hook-previews/orbit-0"]);
     vi.useRealTimers();
-    act(() => respond("/hook-previews/orbit-1"));
+    act(() => respond("/hook-previews/orbit-0"));
     await waitFor(() =>
-      expect(requested).toEqual(["/hook-previews/orbit-1", "/hook-previews/orbit-3"]),
+      expect(requested).toEqual(["/hook-previews/orbit-0", "/hook-previews/top"]),
     );
   });
 

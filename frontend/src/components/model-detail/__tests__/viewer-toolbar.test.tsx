@@ -143,6 +143,13 @@ describe("ViewerToolbar screenshot", () => {
 });
 
 describe("ViewerToolbar selection", () => {
+  it("gives unavailable G-code an accessible explanation", () => {
+    renderToolbar(true, undefined, { hasGcode: false });
+    const layers = screen.getByRole("button", { name: "Layers" });
+    expect(layers).toBeDisabled();
+    expect(layers).toHaveAccessibleDescription("No G-code file");
+  });
+
   it("announces the active preview mode", () => {
     renderToolbar(true, undefined, { hasGcode: true, viewerMode: "gcode" });
 

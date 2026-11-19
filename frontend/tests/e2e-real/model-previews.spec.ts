@@ -60,7 +60,7 @@ test.describe("Generated Model views", () => {
         has: page.locator(`[data-model-preview="${name}"]`),
       });
       await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
-      for (const id of ["orbit-1", "orbit-2", "orbit-3", "cover"]) {
+      for (const id of ["orbit-0", "orbit-1", "orbit-2", "orbit-3", "cover"]) {
         await card.getByRole("button", { name: "Next preview", exact: true }).click();
         await expect(card.locator("img")).toHaveAttribute("data-preview-view", id);
       }
@@ -69,14 +69,14 @@ test.describe("Generated Model views", () => {
       await page.screenshot({ path: testInfo.outputPath("flat-card-2k.png") });
       await card.getByRole("button", { name: "Model views", exact: true }).click();
       const gallery = page.getByRole("dialog", { name: "Model views" });
-      await gallery.getByRole("button", { name: "Oblique 3", exact: true }).click();
+      await gallery.getByRole("button", { name: "Back right", exact: true }).click();
       await expect(gallery.locator("img[data-preview-view]")).toHaveAttribute(
         "data-preview-view",
         "orbit-2",
       );
       await page.screenshot({ path: testInfo.outputPath("flat-gallery-2k.png") });
       await page.setViewportSize({ width: 390, height: 844 });
-      await gallery.getByRole("button", { name: "Oblique 2", exact: true }).click();
+      await gallery.getByRole("button", { name: "Front right", exact: true }).click();
       await expect(gallery.locator("img[data-preview-view]")).toHaveAttribute(
         "data-preview-view",
         "orbit-1",
@@ -193,11 +193,11 @@ test.describe("Generated Model views", () => {
         .filter({ has: page.locator(`[data-model-preview="${name}"]`) });
       await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
       await card.getByRole("button", { name: "Next preview", exact: true }).click();
-      await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+      await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
       await card.getByRole("button", { name: "Next preview", exact: true }).click();
-      await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-2");
-      await card.getByRole("button", { name: "Previous preview", exact: true }).click();
       await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+      await card.getByRole("button", { name: "Previous preview", exact: true }).click();
+      await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
       await card.getByRole("button", { name: "Previous preview", exact: true }).click();
       await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
       await card.getByRole("button", { name: "Model views", exact: true }).click();

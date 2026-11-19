@@ -1234,6 +1234,10 @@ test.describe("model detail route", () => {
     );
 
     const initialWidth = (await sidebar.boundingBox())!.width;
+    await tablist.getByRole("tab", { name: "Files", exact: true }).click();
+    await expect
+      .poll(async () => (await sidebar.boundingBox())!.width)
+      .toBeCloseTo(initialWidth, 0);
     const resizeHandle = page.getByRole("separator", { name: "Resize details panel" });
     const handleBox = await resizeHandle.boundingBox();
     expect(handleBox).not.toBeNull();

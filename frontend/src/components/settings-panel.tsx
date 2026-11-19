@@ -18,7 +18,7 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { setThemeMode, useThemeMode } from "@/lib/theme";
 import { copyText } from "@/lib/clipboard";
-import { parseApiError } from "@/lib/errors";
+import { parseApiError, userMessage } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -143,6 +143,7 @@ import { SpoolmanConnectCard } from "@/components/spoolman-connect-card";
 import { OidcSettingsCard } from "@/components/oidc-settings-card";
 import { AiSearchSettings } from "@/components/ai-search-settings";
 import { MaintenancePanel } from "@/components/maintenance-panel";
+import { addSampleCollection } from "@/lib/api/config";
 import { BackgroundWorkPanel } from "@/components/background-work-panel";
 import {
   downloadModelExport,
@@ -493,6 +494,7 @@ export function SettingsPanel() {
   const sidebar = useCollectionsPane();
   useUiLocale();
   const { user } = useAuth();
+  const [addingSamples, setAddingSamples] = useState(false);
   const { locale, setLocale, t } = useI18n();
   const themeMode = useThemeMode();
   const [storageTab, setStorageTab] = useState<"location" | "usage" | "cache">("location");
@@ -3013,6 +3015,38 @@ export function SettingsPanel() {
                           </div>
                         </dl>
                       </SettingsCard>
+                    )}
+                    {user?.is_superuser && (
+                      <SettingsCard
+                        icon={Boxes}
+                        title={uiText("Sample collection")}
+                        action={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            loading={addingSamples}
+                            onClick={async () => {
+                              setAddingSamples(true);
+                              try {
+                                const { job_id } = await addSampleCollection();
+                                toast.success(
+                                  uiText(
+                                    job_id
+                                      ? "Sample collection queued"
+                                      : "Sample collection already exists",
+                                  ),
+                                );
+                              } catch (error) {
+                                toast.error(userMessage(error));
+                              } finally {
+                                setAddingSamples(false);
+                              }
+                            }}
+                          >
+                            {uiText("Add sample collection")}
+                          </Button>
+                        }
+                      />
                     )}
                     {/* System information */}
                     <SettingsCard

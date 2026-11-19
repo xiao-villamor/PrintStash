@@ -18,7 +18,6 @@ import { useTags } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { FileRead, ModelRead, TrashedSourceFileRead } from "@/types";
 
-import { HashValue } from "./file-hashes";
 import { DerivativeStatus } from "@/components/derivative-status";
 import { SlicerOpenButton } from "@/components/slicer-open-button";
 import { Localized } from "@/components/ui/localized";
@@ -159,28 +158,6 @@ export function FilesTab({
                   {f.file_type.toUpperCase()} · {uiText("v{value1}", { value1: String(f.version) })}{" "}
                   · {formatBytes(f.size_bytes)} · {new Date(f.uploaded_at).toLocaleDateString()}
                 </p>
-                <dl className="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)] items-center gap-x-3 gap-y-2 text-xs min-[1500px]:col-start-2 min-[1500px]:row-start-1 min-[1500px]:row-span-3 min-[1500px]:grid-cols-[125px_minmax(0,1fr)] min-[1500px]:self-start">
-                  <dt className="text-muted-foreground">{uiText("File SHA-256")}</dt>
-                  <dd>
-                    <HashValue
-                      sha={f.sha256}
-                      label={uiText("File SHA-256")}
-                      filename={f.original_filename}
-                    />
-                  </dd>
-                  {f.geometric_sha256 !== null && (
-                    <>
-                      <dt className="text-muted-foreground">{uiText("Geometry SHA-256")}</dt>
-                      <dd>
-                        <HashValue
-                          sha={f.geometric_sha256}
-                          label={uiText("Geometry SHA-256")}
-                          filename={f.original_filename}
-                        />
-                      </dd>
-                    </>
-                  )}
-                </dl>
                 <div className="flex flex-wrap items-center gap-1 min-[1500px]:col-start-1 min-[1500px]:row-start-3 min-[1500px]:mt-1.5">
                   {SLICEABLE_TYPES.has(f.file_type) && (
                     <SlicerOpenButton fileId={f.id} fileType={f.file_type} size="sm" showLabel />
@@ -234,6 +211,20 @@ export function FilesTab({
                     }
                     contentClassName="w-56 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg"
                   >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted focus-visible:bg-muted"
+                      onClick={() => {
+                        setMenuFileId(null);
+                        void navigator.clipboard.writeText(f.sha256).then(
+                          () => toast.success(uiText("modelHashes.copied")),
+                          () => toast.error(uiText("modelHashes.copyFailed")),
+                        );
+                      }}
+                    >
+                      {uiText("Copy SHA-256")}
+                    </button>
                     {f.is_external ? (
                       <p className="px-3 py-2 text-xs text-muted-foreground">
                         {uiText("Linked source files stay in their Library source.")}

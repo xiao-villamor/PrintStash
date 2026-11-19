@@ -509,6 +509,7 @@ export type JobKind =
   | "ingestion.upload_recovery"
   | "ingestion.url"
   | "ingestion.url_selection"
+  | "ingestion.samples"
   | "ingestion.scratch_cleanup"
   | "notifications.deliver"
   | "notifications.retention"

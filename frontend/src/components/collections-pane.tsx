@@ -30,7 +30,7 @@ function storedWidth() {
   try {
     const raw = localStorage.getItem("ps-sidebar-width");
     const width = raw === null ? 320 : Number(raw);
-    return Number.isFinite(width) ? Math.max(280, Math.min(520, width)) : 320;
+    return Number.isFinite(width) ? Math.max(0, Math.min(520, width)) : 320;
   } catch {
     return 320;
   }
@@ -55,7 +55,7 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
   const storageKey = `printstash.collections-pane.${user.id}`;
   const [width, updateWidth] = useState(storedWidth);
   const setWidth = useCallback(
-    (value: number) => updateWidth(Math.max(280, Math.min(520, value))),
+    (value: number) => updateWidth(Math.max(0, Math.min(520, value))),
     [],
   );
   useEffect(() => {

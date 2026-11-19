@@ -119,3 +119,35 @@ test.describe("Library card selection", () => {
     });
   });
 });
+
+test("converts implied selection into the other loaded models", async ({ page }) => {
+  await page.route("**/api/v1/models/browse?**", (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          aModelListItem({ id: 1, name: "Alpha", collection: "workshop", collection_id: 50 }),
+          aModelListItem({ id: 2, name: "Beta", collection: "workshop/nested", collection_id: 51 }),
+          aModelListItem({ id: 3, name: "Gamma", collection: "workshop-other", collection_id: 52 }),
+        ].map((model) => ({ kind: "model", model })),
+        total: 3,
+        next_cursor: null,
+        browse_revision: "r1",
+        authorization_revision: "a1",
+      },
+    }),
+  );
+  await page.goto("/");
+  const folder = page.getByRole("checkbox", { name: "Select folder Workshop", exact: true });
+  await folder.focus();
+  await folder.press("Space");
+  const alpha = page.getByRole("checkbox", { name: "Select Alpha", exact: true });
+  const beta = page.getByRole("checkbox", { name: "Select Beta", exact: true });
+  const gamma = page.getByRole("checkbox", { name: "Select Gamma", exact: true });
+  await expect(alpha).toBeChecked();
+  await expect(beta).toBeChecked();
+  await expect(gamma).not.toBeChecked();
+  await alpha.click();
+  await expect(folder).not.toBeChecked();
+  await expect(alpha).not.toBeChecked();
+  await expect(beta).toBeChecked();
+});

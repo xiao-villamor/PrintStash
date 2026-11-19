@@ -7,7 +7,7 @@ import {
 } from "@/lib/asset-cache";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
-import type { PreviewImage, PreviewViewId } from "@/types/previews";
+import { PREVIEW_VIEW_IDS, type PreviewImage, type PreviewViewId } from "@/types/previews";
 
 export const PREVIEW_INTENT_MS = 350;
 export type PreviewSelection = PreviewViewId | "cover";
@@ -46,7 +46,12 @@ async function decode(url: string) {
  * Owns generated views only; the cover is presented by `ProtectedThumbnail`.
  * The displayed view lease stays until the latest selected view has decoded.
  */
-export function useModelPreviews(cover: string | null, views: PreviewImage[], admitted: boolean) {
+export function useModelPreviews(
+  cover: string | null,
+  views: PreviewImage[],
+  admitted: boolean,
+  matchingView?: PreviewViewId,
+) {
   const [mountedSession] = useState(getSessionVersion);
   const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
   const [selection, setSelection] = useState<PreviewSelection>("cover");
@@ -69,17 +74,17 @@ export function useModelPreviews(cover: string | null, views: PreviewImage[], ad
         : (views[0]?.id ?? "cover");
   const path = selected === "cover" ? null : views.find((view) => view.id === selected)?.url;
   const active = session === mountedSession;
-  // The card uses its cover as the default face. Keep the generated first
-  // face in the gallery, where it is useful for custom/source-image covers.
-  const generatedOrbit = views.filter((view) => view.role === "orbit");
-  const generatedNavigation = generatedOrbit.length > 0 ? generatedOrbit : views;
+  const orderedViews = views.some((view) => view.role === "orbit")
+    ? PREVIEW_VIEW_IDS.flatMap((id) => views.filter((view) => view.id === id))
+    : views;
+  const coverView =
+    cover === null
+      ? undefined
+      : orderedViews.find((view) => view.id === matchingView || view.url === cover);
   const navigationViews: PreviewDestination[] =
-    cover && generatedNavigation.length > 0
-      ? [
-          { id: "cover", url: cover },
-          ...generatedNavigation.filter((view) => view.id !== "orbit-0"),
-        ]
-      : generatedNavigation;
+    cover && orderedViews.length > 0
+      ? [{ id: "cover", url: cover }, ...orderedViews.filter((view) => view !== coverView)]
+      : orderedViews;
 
   useEffect(() => {
     if (!active || !admitted || !path) return;
@@ -185,6 +190,7 @@ export function useModelPreviews(cover: string | null, views: PreviewImage[], ad
   }
   return {
     navigationViews,
+    coverView,
     selected,
     displayed: active && displayed?.session === session ? displayed : null,
     failed: failure !== null && failure.path === path && failure.attempt === attempt,

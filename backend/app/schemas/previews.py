@@ -46,6 +46,10 @@ class PreviewImageRead(BaseModel):
 class PublishedPreviewRead(BaseModel):
     profile: ViewProfile
     manifest_url: str
+    # Only present when the displayed cover and a published view have identical bytes.
+    cover_view: ViewId | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     views: list[PreviewImageRead] = Field(min_length=1, max_length=6)
 
 

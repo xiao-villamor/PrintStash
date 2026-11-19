@@ -466,6 +466,11 @@ def finish(session: Session, config: SystemConfig) -> None:
             )
         bind_backend(backend)
 
+    from app.modules.ingestion import samples
+
+    sample_job = samples.queue_first_run(session, config)
     config.setup_storage_pending = False
     session.add(config)
     session.commit()
+    if sample_job is not None:
+        samples.wake()

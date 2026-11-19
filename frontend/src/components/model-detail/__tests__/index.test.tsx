@@ -1644,12 +1644,14 @@ describe("ModelDetail", () => {
 });
 
 describe("ModelDetail file hashes", () => {
-  it("shows source file hashes in Files without an AI caption panel", async () => {
+  it("offers source file hashes through the Files row menu", async () => {
     const user = userEvent.setup();
     renderDetail();
     await user.click(await screen.findByRole("tab", { name: /Files/ }));
     const hashes = await screen.findByRole("article");
-    expect(within(hashes).getByTitle("a".repeat(64), { exact: true })).toBeVisible();
+    expect(within(hashes).queryByTitle("a".repeat(64), { exact: true })).not.toBeInTheDocument();
+    await user.click(within(hashes).getByRole("button", { name: "Actions for cube.stl" }));
+    expect(screen.getByRole("menuitem", { name: "Copy SHA-256" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "AI caption" })).not.toBeInTheDocument();
   });
 });

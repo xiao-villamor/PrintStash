@@ -60,6 +60,31 @@ async function ready() {
 beforeEach(() => window.localStorage.clear());
 
 describe("Library model inspector", () => {
+  it("persists the viewer height from the keyboard separator", async () => {
+    const user = userEvent.setup();
+    setup();
+    await ready();
+    const separator = screen.getByRole("separator", { name: "Resize preview" });
+    // jsdom has no document layout, so only the lower bound can be reached.
+    separator.focus();
+    await user.keyboard("{Home}");
+    expect(separator).toHaveAttribute("aria-valuenow", "180");
+    expect(localStorage.getItem("printstash.inspector-preview-height")).toBe("180");
+  });
+
+  it("downloads the header's primary file using the authenticated endpoint", async () => {
+    const app = setup({ "GET /api/v1/files/7/download": new Response("G-code") });
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: /^Download$/ }));
+    await waitFor(() =>
+      expect(
+        app
+          .requestsWithMethod("GET")
+          .some((request) => request.url.endsWith("/api/v1/files/7/download")),
+      ).toBe(true),
+    );
+  });
+
   it("logs the focused revision once when a numeric key is held", async () => {
     let created = false;
     const app = setup({
