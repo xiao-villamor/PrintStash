@@ -209,7 +209,7 @@ test.describe("Library motion", () => {
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
   });
 
-  test("Upload opens and closes without replaying the library reveal", async ({ page }) => {
+  test("Upload never replays the library reveal", async ({ page }) => {
     await page.goto("/?c=maraio");
     await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
     await expect.poll(() => page.evaluate(() => window.libraryReveals.length)).toBeGreaterThan(0);

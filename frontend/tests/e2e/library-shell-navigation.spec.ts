@@ -23,7 +23,7 @@ test.describe("Library shell navigation", () => {
     await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
   });
 
-  test("Search keeps the browsed collection and widens on request", async ({ page }) => {
+  test("Search keeps the browsed collection until widened", async ({ page }) => {
     const collection = aCollectionNode({ id: 4, name: "Shop parts", path: "parts" });
     await page.route("**/api/v1/collections/lookup?**", (route) =>
       route.fulfill({ json: { collection, ancestors: [] } }),
