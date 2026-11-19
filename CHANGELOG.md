@@ -10,6 +10,9 @@
 
 ### Changed
 
+- The Library shows child collection previews in grouped rows, and selecting a collection checks its loaded Model cards. Clicking a Model in the tree reveals its card and opens the inspector.
+- Model previews name each camera angle and mark the cover. The inspector preview can be resized and files can be downloaded or opened in the viewer from their rows.
+
 - Library cards keep more of the Model visible: preview arrows and selection are smaller, and status sits in the image corner. An expand icon on card hover and in the details panel opens the full page. Model views adds previous and next arrows and centers its view indicator.
 - 3MF files use their embedded picture as the automatic Model cover by default. Settings → Previews can render these covers instead. Existing automatic 3MF covers update in the background.
 

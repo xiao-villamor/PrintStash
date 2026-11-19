@@ -6,6 +6,7 @@ import type { GcodeViewerProps } from "@/components/gcode-viewer";
 import { Button } from "@/components/ui/button";
 import { Localized } from "@/components/ui/localized";
 import { gcodePlatesOptions } from "@/lib/queries/file-plates";
+import { hasToolpath } from "@/lib/toolpath-preview";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import type { FileRead } from "@/types";
@@ -21,16 +22,18 @@ export function GcodePreview({
   selectedFileId,
   onSelectFile,
   viewerProps,
+  compact = false,
 }: {
   files: FileRead[];
   bedSizeFor: (file: FileRead) => { x: number; y: number } | null;
   ToolpathViewer?: ComponentType<GcodeViewerProps>;
   selectedFileId?: number;
   onSelectFile?: (fileId: number) => void;
+  compact?: boolean;
   viewerProps?: Omit<GcodeViewerProps, "url" | "printerBedMm">;
 }) {
   useUiLocale();
-  const sources = files.filter((file) => file.file_type === "gcode" || file.file_type === "3mf");
+  const sources = files.filter(hasToolpath);
   const [selectedFile, setSelectedFile] = useState<number | null>(null);
   const [selectedPlate, setSelectedPlate] = useState<{ fileId: number; number: number } | null>(
     null,
@@ -56,8 +59,8 @@ export function GcodePreview({
 
   return (
     <Localized>
-      <div className="flex h-full min-h-80 w-full min-w-0 flex-col">
-        <div className="relative min-h-60 flex-1">
+      <div className={`flex h-full w-full min-w-0 flex-col ${compact ? "min-h-0" : "min-h-80"}`}>
+        <div className={`relative flex-1 ${compact ? "min-h-0" : "min-h-60"}`}>
           {embedded && query.isError ? (
             <div
               role="alert"

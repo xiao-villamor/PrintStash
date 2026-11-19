@@ -1,15 +1,19 @@
 "use client";
 
-import { Suspense, useEffect, useLayoutEffect, useRef, type CSSProperties } from "react";
+import { Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { flushSync } from "react-dom";
-import { Loader2, Maximize2, X } from "lucide-react";
+import { Download, Loader2, Maximize2, X } from "lucide-react";
 import { LibraryItemLink } from "@/features/library/navigation";
 import type { LibraryEntry } from "@/features/library/navigation-state";
+import { cardRevisions } from "@/features/library/card-detail";
 import { useModelDetail } from "@/features/library/model-detail";
 import { getSessionVersion } from "@/lib/session-transport";
 import { displayModelName } from "@/lib/display-name";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
+import { downloadAuthenticatedFile } from "@/lib/api";
+import { toast } from "@/lib/toast";
+import { useInspectorPreviewHeight } from "./use-inspector-preview-height";
 import { userMessage } from "@/lib/errors";
 import { lazyImport } from "@/lib/lazy-component";
 import {
@@ -69,6 +73,14 @@ export function LibraryModelInspector({
   // contents in place, so the panel itself only moves when it opens or closes.
   const { panel, present } = useInspectorMotion(open, onMotionSettled);
   const scroll = useRef<HTMLDivElement>(null);
+  const previewSize = useInspectorPreviewHeight(scroll);
+  const [downloading, setDownloading] = useState(false);
+  const revisions = cardRevisions(detail.data);
+  const downloadFile =
+    revisions.find((file) => file.is_recommended) ??
+    revisions[0] ??
+    detail.data?.files.find((file) => file.file_type !== "gcode") ??
+    detail.data?.files[0];
   const drag = useRef<{
     pointerId: number;
     startX: number;
@@ -90,6 +102,71 @@ export function LibraryModelInspector({
   useEffect(() => {
     if (open) title.current?.focus({ preventScroll: true });
   }, [id, open]);
+  function widthHandle(edge: "panel" | "viewer") {
+    if (!resize) return null;
+    return (
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={uiText(edge === "panel" ? "Resize details panel" : "Resize preview width")}
+        aria-valuemin={LIBRARY_INSPECTOR_MIN_WIDTH}
+        aria-valuemax={resize.max}
+        aria-valuenow={clampInspectorWidth(resize.current, resize.max)}
+        aria-disabled={resize.locked || undefined}
+        tabIndex={resize.locked ? -1 : 0}
+        title={uiText("Drag to resize · Double-click to reset")}
+        className="group absolute inset-y-0 -left-1 z-20 hidden w-2 touch-none cursor-col-resize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:block"
+        onPointerDown={(event) => {
+          if (!canResize || event.button !== 0 || drag.current) return;
+          event.preventDefault();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          drag.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startWidth: resize.current,
+            startCursor: document.body.style.cursor,
+            startUserSelect: document.body.style.userSelect,
+          };
+          document.body.style.cursor = "col-resize";
+          document.body.style.userSelect = "none";
+        }}
+        onPointerMove={(event) => {
+          const active = drag.current;
+          if (!canResize || !active || event.pointerId !== active.pointerId) return;
+          const delta = active.startX - event.clientX;
+          if (delta === 0 && resize.current === active.startWidth) return;
+          const width = clampInspectorWidth(active.startWidth + delta, resize.max);
+          flushSync(() => resize.onResize(width));
+        }}
+        onLostPointerCapture={(event) => {
+          if (event.pointerId === drag.current?.pointerId) stopResize();
+        }}
+        onPointerUp={(event) => {
+          if (event.pointerId === drag.current?.pointerId) stopResize();
+        }}
+        onPointerCancel={(event) => {
+          if (event.pointerId === drag.current?.pointerId) stopResize();
+        }}
+        onDoubleClick={() => {
+          if (canResize) resize.onResize(null);
+        }}
+        onKeyDown={(event) => {
+          if (!canResize) return;
+          let width: number;
+          if (event.key === "ArrowLeft") width = resize.current + 16;
+          else if (event.key === "ArrowRight") width = resize.current - 16;
+          else if (event.key === "Home") width = LIBRARY_INSPECTOR_MIN_WIDTH;
+          else if (event.key === "End") width = resize.max;
+          else return;
+          event.preventDefault();
+          resize.onResize(clampInspectorWidth(width, resize.max));
+        }}
+      >
+        <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border group-hover:bg-foreground group-focus-visible:bg-foreground" />
+        <span className="absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 bg-border group-hover:bg-foreground group-focus-visible:bg-foreground" />
+      </div>
+    );
+  }
   return (
     <aside
       ref={panel}
@@ -101,73 +178,36 @@ export function LibraryModelInspector({
       className="library-model-inspector"
       style={style}
     >
-      {resize && (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={uiText("Resize details panel")}
-          aria-valuemin={LIBRARY_INSPECTOR_MIN_WIDTH}
-          aria-valuemax={resize.max}
-          aria-valuenow={clampInspectorWidth(resize.current, resize.max)}
-          aria-disabled={resize.locked || undefined}
-          tabIndex={resize.locked ? -1 : 0}
-          title={uiText("Drag to resize · Double-click to reset")}
-          className="group absolute inset-y-0 -left-1 z-20 hidden w-2 touch-none cursor-col-resize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:block"
-          onPointerDown={(event) => {
-            if (!canResize || event.button !== 0 || drag.current) return;
-            event.preventDefault();
-            event.currentTarget.setPointerCapture(event.pointerId);
-            drag.current = {
-              pointerId: event.pointerId,
-              startX: event.clientX,
-              startWidth: resize.current,
-              startCursor: document.body.style.cursor,
-              startUserSelect: document.body.style.userSelect,
-            };
-            document.body.style.cursor = "col-resize";
-            document.body.style.userSelect = "none";
-          }}
-          onPointerMove={(event) => {
-            const active = drag.current;
-            if (!canResize || !active || event.pointerId !== active.pointerId) return;
-            const delta = active.startX - event.clientX;
-            if (delta === 0 && resize.current === active.startWidth) return;
-            const width = clampInspectorWidth(active.startWidth + delta, resize.max);
-            flushSync(() => resize.onResize(width));
-          }}
-          onLostPointerCapture={(event) => {
-            if (event.pointerId === drag.current?.pointerId) stopResize();
-          }}
-          onPointerUp={(event) => {
-            if (event.pointerId === drag.current?.pointerId) stopResize();
-          }}
-          onPointerCancel={(event) => {
-            if (event.pointerId === drag.current?.pointerId) stopResize();
-          }}
-          onDoubleClick={() => {
-            if (canResize) resize.onResize(null);
-          }}
-          onKeyDown={(event) => {
-            if (!canResize) return;
-            let width: number;
-            if (event.key === "ArrowLeft") width = resize.current + 16;
-            else if (event.key === "ArrowRight") width = resize.current - 16;
-            else if (event.key === "Home") width = LIBRARY_INSPECTOR_MIN_WIDTH;
-            else if (event.key === "End") width = resize.max;
-            else return;
-            event.preventDefault();
-            resize.onResize(clampInspectorWidth(width, resize.max));
-          }}
-        >
-          <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border group-hover:bg-foreground group-focus-visible:bg-foreground" />
-          <span className="absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 bg-border group-hover:bg-foreground group-focus-visible:bg-foreground" />
-        </div>
-      )}
+      {widthHandle("panel")}
       <div ref={scroll} className="library-inspector-scroll">
         <header className="library-inspector-header">
           <h2 ref={title} tabIndex={-1} title={detail.data?.name}>
             {detail.data ? displayModelName(detail.data.name) : uiText("Model details")}
           </h2>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={uiText("Download")}
+            title={uiText("Download")}
+            disabled={!downloadFile}
+            loading={downloading}
+            onClick={async () => {
+              if (!downloadFile || downloading) return;
+              setDownloading(true);
+              try {
+                await downloadAuthenticatedFile(
+                  `/api/v1/files/${downloadFile.id}/download`,
+                  downloadFile.original_filename,
+                );
+              } catch (error) {
+                toast.error(userMessage(error));
+              } finally {
+                setDownloading(false);
+              }
+            }}
+          >
+            <Download className="h-4 w-4" aria-hidden />
+          </Button>
           <Button variant="ghost" size="icon-sm" asChild>
             <LibraryItemLink
               origin={origin}
@@ -212,6 +252,8 @@ export function LibraryModelInspector({
               model={detail.data}
               publish={detail.publish}
               active={open}
+              previewSize={previewSize}
+              widthHandle={widthHandle("viewer")}
               canWrite={canWrite}
               onClose={onClose}
             />

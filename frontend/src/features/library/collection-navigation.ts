@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { collectionLookupOptions, collectionLookupByIdOptions, useQueryApi } from "@/lib/queries";
-import type { CollectionLookupRead } from "@/types";
+import type { CollectionLookupRead, ModelSort, OutlinerModelRead } from "@/types";
 
 const IDENTIFIED_KEY = "ps-recent-folders-identified";
 const LABELLED_KEY = "ps-recent-folders-labelled";
@@ -75,6 +75,20 @@ export function collectionIdentity(params: URLSearchParams): number | null {
   if (!params.get("c") || raw === null || !/^[1-9]\d*$/.test(raw)) return null;
   const id = Number(raw);
   return Number.isSafeInteger(id) ? id : null;
+}
+
+declare module "@tanstack/react-router" {
+  interface HistoryState {
+    treeModelId?: number;
+  }
+}
+
+/** A tree Model always has a card in the unfiltered listing of its collection. */
+export function treeModelFolderHref(model: OutlinerModelRead, sort: ModelSort) {
+  const params = new URLSearchParams({ type: "all", sort, scope: "here" });
+  if (model.collection !== null) params.set("c", model.collection);
+  if (model.collection_id !== null) params.set("cid", String(model.collection_id));
+  return `/?${params}`;
 }
 
 /** A route entry is revalidated even if a previously visited ID is cached. */

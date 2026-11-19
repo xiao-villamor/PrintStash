@@ -64,6 +64,7 @@ export interface STLViewerProps {
   onFailureChange?: (feedback: STLPreviewFeedback) => void;
   /** Largest loaded dimension, before viewer normalization, in source units. */
   onGeometrySize?: (size: number) => void;
+  onOrbit?: () => void;
   displayMode?: ViewerDisplayMode;
   showGrid?: boolean;
   screenshotName?: string;
@@ -169,6 +170,7 @@ function Scene({
   onControlsReady,
   onLoadedChange,
   onGeometrySize,
+  onOrbit,
   displayMode,
   showGrid,
   screenshotName,
@@ -185,13 +187,14 @@ function Scene({
     | "onReadyChange"
     | "onFailureChange"
     | "onGeometrySize"
+    | "onOrbit"
     | "comparison"
     | "comparisonCamera"
     | "overlay"
     | "plate"
   >
 > &
-  Pick<STLViewerProps, "comparison" | "comparisonCamera" | "overlay"> & {
+  Pick<STLViewerProps, "comparison" | "comparisonCamera" | "overlay" | "onOrbit"> & {
     onControlsReady?: (api: STLViewerControls) => void;
     onLoadedChange?: (loaded: boolean) => void;
     onGeometrySize?: (size: number) => void;
@@ -204,6 +207,7 @@ function Scene({
   }) {
   useUiLocale();
   const orbitRef = useRef<OrbitControlsImpl>(null);
+  const interactionStart = useRef<THREE.Quaternion | null>(null);
   const syncing = useRef(false);
   const poseApplied = useRef(false);
   const initialComparisonPose = useRef(restoredPose.current);
@@ -214,6 +218,9 @@ function Scene({
     () => new THREE.Vector3(NORMALIZED_SIZE, NORMALIZED_SIZE, NORMALIZED_SIZE),
   );
   const { loaded, setLoaded } = useViewerReadiness(url);
+  useEffect(() => {
+    invalidate();
+  }, [invalidate, showGrid]);
   const overlayComparison = overlay?.comparison;
   const comparisonSize = useMemo(() => {
     if (!comparison) return null;
@@ -281,8 +288,11 @@ function Scene({
       const cam = cameraRef.current;
       if (!cam || preset === "isometric") return;
       const distance = cam.position.length();
-      cam.up.set(0, preset === "top" ? 0 : 1, preset === "top" ? -1 : 0);
-      cam.position.set(0, preset === "top" ? distance : 0, preset === "front" ? distance : 0);
+      if (preset === "top") {
+        cam.position.set(0, Math.cos(POLE_MARGIN) * distance, Math.sin(POLE_MARGIN) * distance);
+      } else {
+        cam.position.set(0, 0, distance);
+      }
       cam.lookAt(0, 0, 0);
       orbitRef.current?.update();
       invalidate();
@@ -444,8 +454,20 @@ function Scene({
         enableRotate
         minPolarAngle={POLE_MARGIN}
         maxPolarAngle={Math.PI - POLE_MARGIN}
+        onStart={() => {
+          interactionStart.current = cameraRef.current?.quaternion.clone() ?? null;
+        }}
+        onEnd={() => {
+          interactionStart.current = null;
+        }}
         onChange={() => {
           invalidate();
+          const start = interactionStart.current;
+          const orientation = cameraRef.current?.quaternion;
+          if (start && orientation && 1 - Math.abs(start.dot(orientation)) > 1e-8) {
+            interactionStart.current = null;
+            onOrbit?.();
+          }
           if (cameraRef.current && orbitRef.current) {
             const pose = {
               position: cameraRef.current.position.toArray(),
@@ -617,6 +639,7 @@ export function STLViewer({
   onReadyChange,
   onFailureChange,
   onGeometrySize,
+  onOrbit,
   displayMode = "solid",
   showGrid = true,
   screenshotName = "model",
@@ -719,6 +742,7 @@ export function STLViewer({
         onControlsReady={onControlsReady}
         onLoadedChange={setMeshLoaded}
         onGeometrySize={onGeometrySize}
+        onOrbit={onOrbit}
         displayMode={displayMode}
         showGrid={showGrid}
         screenshotName={screenshotName}

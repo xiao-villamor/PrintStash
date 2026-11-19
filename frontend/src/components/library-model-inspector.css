@@ -218,9 +218,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  aspect-ratio: 4 / 3;
-  max-height: 300px;
-  margin-bottom: 12px;
+  flex: none;
   width: 100%;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -274,7 +272,7 @@
   background: var(--muted);
   font: 500 12px var(--font-mono);
 }
-.library-inspector-files li > div {
+.library-inspector-files li > button:first-of-type {
   flex: 1;
   min-width: 0;
 }
@@ -285,16 +283,6 @@
   white-space: nowrap;
   font-size: 12px;
   font-weight: 500;
-}
-.library-inspector-files p {
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-.library-inspector-files li > button {
-  flex: none;
-  max-width: 100px;
-  height: 32px;
 }
 @media (max-width: 767px) {
   .library-model-inspector {

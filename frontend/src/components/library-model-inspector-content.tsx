@@ -2,7 +2,7 @@
 
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Box, Check, ChevronRight, Loader2, X } from "lucide-react";
+import { Box, Check, ChevronRight, Download, Loader2, MoreHorizontal, X } from "lucide-react";
 import {
   modelPrinterFilesOptions,
   useModelDetail,
@@ -21,15 +21,18 @@ import { useAuth } from "@/lib/auth-context";
 import { usePrinters } from "@/lib/queries";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
+import { hasToolpath } from "@/lib/toolpath-preview";
 import { formatBytes, formatDuration, formatGrams, formatNumber, timeAgo } from "@/lib/format";
 import { ApiError, userMessage } from "@/lib/errors";
 import { isTypingTarget, keyboardOverlayOpen } from "@/lib/keyboard-commands";
 import { toast } from "@/lib/toast";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { AddGcodeRevisionModal } from "@/components/model-detail/add-revision-modal";
 import { SendToButtons } from "@/components/model-detail/send-to-buttons";
-import { HashValue } from "@/components/model-detail/file-hashes";
+import { InspectorPreviewResize } from "./inspector-preview-resize";
+import { ViewerModeSwitch, type ViewerMode } from "@/components/viewer-mode-switch";
 import { normalizeRecommendedGcodeFiles } from "@/components/model-detail/presentation";
 import { useRevisionUpdater } from "@/components/model-detail/use-revision-updater";
 import type { FileRead, MetadataRead, ModelRead } from "@/types";
@@ -37,8 +40,8 @@ import type { FileRead, MetadataRead, ModelRead } from "@/types";
 const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
 );
-const GcodeViewer = lazy(() =>
-  import("@/components/gcode-viewer").then((m) => ({ default: m.GcodeViewer })),
+const GcodePreview = lazy(() =>
+  import("@/components/model-detail/gcode-preview").then((m) => ({ default: m.GcodePreview })),
 );
 const meshTypes = new Set(["stl", "3mf", "obj", "step", "glb", "gltf", "ply", "3dm", "fbx"]);
 
@@ -51,12 +54,16 @@ export function InspectorContent({
   active,
   canWrite,
   onClose,
+  previewSize,
+  widthHandle,
 }: {
   model: ModelRead;
   active: boolean;
   publish: ReturnType<typeof useModelDetail>["publish"];
   canWrite: boolean;
   onClose: () => void;
+  previewSize: React.ComponentProps<typeof InspectorPreviewResize>;
+  widthHandle: React.ReactNode;
 }) {
   useUiLocale();
   const { user } = useAuth();
@@ -153,8 +160,24 @@ export function InspectorContent({
     setDescriptionReviewed(null);
     setDescriptionReviewing(false);
   }
-  const [preview, setPreview] = useState<"3d" | "gcode">("3d");
-  const sourceFile = files.find((item) => meshTypes.has(item.file_type));
+  const [preview, setPreview] = useState<ViewerMode>("model");
+  const [toolpathId, setToolpathId] = useState<number | null>(null);
+  const toolpath =
+    files.find((item) => item.id === toolpathId && hasToolpath(item)) ??
+    file ??
+    files.find(hasToolpath);
+  const [sourceId, setSourceId] = useState<number | null>(null);
+  const [fileMenu, setFileMenu] = useState<number | null>(null);
+  const viewer = useRef<HTMLDivElement>(null);
+  const sourceFile =
+    files.find((item) => item.id === sourceId && meshTypes.has(item.file_type)) ??
+    files.find((item) => meshTypes.has(item.file_type));
+  function download(item: FileRead) {
+    void downloadAuthenticatedFile(
+      `/api/v1/files/${item.id}/download`,
+      item.original_filename,
+    ).catch((error) => toast.error(userMessage(error)));
+  }
   const geometry = sourceFile?.metadata;
   const jobs = (history.isError ? [] : (history.data ?? [])).filter(
     (job) => job.file_id === file?.id,
@@ -409,70 +432,46 @@ export function InspectorContent({
 
   return (
     <div className="library-inspector-body fade-in">
-      <div className="library-inspector-preview library-preview">
+      <div ref={viewer} className="relative">
+        {widthHandle}
         <div
-          role="radiogroup"
-          aria-label={uiText("Preview")}
-          onKeyDown={(event) => {
-            if (!["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"].includes(event.key)) return;
-            const controls = Array.from(
-              event.currentTarget.querySelectorAll<HTMLButtonElement>(
-                '[role="radio"]:not(:disabled)',
-              ),
-            );
-            const index = controls.findIndex((button) => button === document.activeElement);
-            if (index < 0) return;
-            event.preventDefault();
-            const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
-            const next = controls[(index + step + controls.length) % controls.length];
-            next?.click();
-            next?.focus();
-          }}
+          className="library-inspector-preview library-preview"
+          style={{ height: previewSize.height }}
         >
-          <Button
-            size="xs"
-            variant="ghost"
-            type="button"
-            role="radio"
-            aria-checked={preview === "3d"}
-            tabIndex={preview === "3d" ? 0 : -1}
-            onClick={() => setPreview("3d")}
-          >
-            {uiText("3D")}
-          </Button>
-          <Button
-            size="xs"
-            variant="ghost"
-            type="button"
-            role="radio"
-            aria-checked={preview === "gcode"}
-            tabIndex={preview === "gcode" ? 0 : -1}
-            disabled={!file}
-            onClick={() => setPreview("gcode")}
-          >
-            {uiText("G-code")}
-          </Button>
+          <ViewerModeSwitch
+            compact
+            mode={toolpath ? preview : "model"}
+            onChange={setPreview}
+            hasGcode={toolpath !== undefined}
+          />
+          <Suspense fallback={<Loader2 className="h-5 w-5 animate-spin" />}>
+            {preview === "gcode" && toolpath ? (
+              <GcodePreview
+                compact
+                files={files}
+                selectedFileId={toolpath.id}
+                onSelectFile={setToolpathId}
+                bedSizeFor={() => null}
+                viewerProps={{ showDimensions: false, screenshotName: model.slug }}
+              />
+            ) : sourceFile ? (
+              <STLViewer
+                url={getAssetUrl(`/api/v1/files/${sourceFile.id}/stl`)}
+                modelId={model.id}
+              />
+            ) : (
+              <ProtectedThumbnail
+                path={model.thumbnail_url}
+                alt={model.name}
+                className="h-full w-full"
+                imageClassName="h-full w-full object-contain"
+                placeholder={<Box className="h-7 w-7 text-muted-foreground" />}
+              />
+            )}
+          </Suspense>
         </div>
-        <Suspense fallback={<Loader2 className="h-5 w-5 animate-spin" />}>
-          {preview === "gcode" && file ? (
-            <GcodeViewer
-              url={`/api/v1/files/${file.id}/toolpath`}
-              showDimensions={false}
-              screenshotName={model.slug}
-            />
-          ) : sourceFile ? (
-            <STLViewer url={getAssetUrl(`/api/v1/files/${sourceFile.id}/stl`)} modelId={model.id} />
-          ) : (
-            <ProtectedThumbnail
-              path={model.thumbnail_url}
-              alt={model.name}
-              className="h-full w-full"
-              imageClassName="h-full w-full object-contain"
-              placeholder={<Box className="h-7 w-7 text-muted-foreground" />}
-            />
-          )}
-        </Suspense>
       </div>
+      <InspectorPreviewResize {...previewSize} />
       {error && (
         <p role="alert" className="mb-3 text-xs text-destructive">
           {error}
@@ -1041,25 +1040,79 @@ export function InspectorContent({
           <h3>
             {uiText("Files")} <span>{files.length}</span>
           </h3>
-          <span className="text-xs text-muted-foreground">{uiText("SHA-256")}</span>
           <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </summary>
         <ul className="library-inspector-files divide-y divide-border">
           {files.map((item) => (
             <li key={item.id}>
               <span className="library-inspector-file-type">{item.file_type.toUpperCase()}</span>
-              <div>
-                <strong title={item.original_filename}>{item.original_filename}</strong>
-                <p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="min-w-0 h-auto flex-col items-start gap-0 py-1"
+                aria-label={`${uiText("Download")} ${item.original_filename}`}
+                onClick={() => download(item)}
+              >
+                <strong className="max-w-full" title={item.original_filename}>
+                  {item.original_filename}
+                </strong>
+                <span className="text-muted-foreground">
                   {formatBytes(item.size_bytes)} ·{" "}
                   {item.file_type === "gcode" ? revisionName(item) : uiText("Source")}
-                </p>
-              </div>
-              <HashValue
-                sha={item.sha256}
-                label={uiText("File SHA-256")}
-                filename={item.original_filename}
-              />
+                </span>
+              </Button>
+              <DropdownMenu
+                open={fileMenu === item.id}
+                onOpenChange={(open) => setFileMenu(open ? item.id : null)}
+                portal
+                trigger={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-haspopup="menu"
+                    aria-expanded={fileMenu === item.id}
+                    aria-label={uiText("Actions for {value1}", { value1: item.original_filename })}
+                    onClick={() => setFileMenu(fileMenu === item.id ? null : item.id)}
+                  >
+                    <MoreHorizontal className="h-4 w-4" aria-hidden />
+                  </Button>
+                }
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+                  onClick={() => {
+                    setFileMenu(null);
+                    download(item);
+                  }}
+                >
+                  <Download className="h-4 w-4" aria-hidden />
+                  {uiText("Download")}
+                </button>
+                {(hasToolpath(item) || meshTypes.has(item.file_type)) && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+                    onClick={() => {
+                      setFileMenu(null);
+                      if (hasToolpath(item)) {
+                        setToolpathId(item.id);
+                        setPreview("gcode");
+                      } else {
+                        setSourceId(item.id);
+                        setPreview("model");
+                      }
+                      viewer.current?.scrollIntoView({ block: "nearest" });
+                    }}
+                  >
+                    <Box className="h-4 w-4" aria-hidden />
+                    {uiText("Open in viewer")}
+                  </button>
+                )}
+              </DropdownMenu>
             </li>
           ))}
         </ul>
