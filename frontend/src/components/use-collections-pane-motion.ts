@@ -3,8 +3,10 @@ import { durationToken } from "@/lib/css-time";
 const KEYFRAME_COUNT = 60;
 
 /** A continuous ease into rest, with no spring response or oscillation.
- * A reversal carries its current velocity through a short, smooth turn. */
-function dockMotion(from: number, velocity: number, target: number, duration: number) {
+ * A reversal carries its current velocity through a short, smooth turn.
+ * Both docked panels (Collections and the Model inspector) move on it, so the
+ * cards reflowing beside either one move the same way. */
+export function dockMotion(from: number, velocity: number, target: number, duration: number) {
   const distance = target - from;
   const tangent = velocity * duration;
   const sample = (seconds: number) => {

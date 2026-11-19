@@ -314,14 +314,14 @@ only for missing or failed assets. Counts update in place without motion.
 
 The Library model inspector is a solid, non-modal surface docked to the right.
 It enters from beyond that edge and returns along the same path, including on
-mobile. A critically damped spring is sampled into compositor keyframes so preview
-initialization does not drive its frame loop. It uses the fast token as its response; reversing
-open/close preserves its current displacement and velocity. Hide only when the
-spring reaches the closed position, never on a fixed exit timer. When the docked
+mobile. It moves on the same dock curve and slow timing as the Collections pane,
+sampled into compositor keyframes so preview initialization does not drive its
+frame loop; reversing open/close preserves its current displacement and velocity.
+Hide only when the motion reaches the closed position, never on a fixed exit timer. When the docked
 inspector reserves or releases its column, the Library grid reflows exactly as
 it does for the Collections pane: it commits its resting columns once and carries
-each card from its painted position along the inspector spring's own progress, so
-cards and panel share one timeline. Cards entering view fade in on the same
+each card from its painted position along the inspector's own progress, so cards
+and panel share one timeline, and cards move identically beside either panel. Cards entering view fade in on the same
 progress; reduced motion keeps the reflow immediate. Switching Models
 keeps the panel stationary. Closed panels become inert immediately. Reduced motion
 uses immediate visibility changes and retains the existing focus handoff.
