@@ -44,7 +44,9 @@ THREE_MF_THUMBNAIL_RECIPE = 29
 THREE_MF_VIEWER_STL_RECIPE = 5
 # STEP is tessellated at 0.05 mm linear deflection.
 STEP_GEOMETRY_RECIPE = 13
-STEP_THUMBNAIL_RECIPE = 24
+# Keep this above the shared thumbnail recipe so a shared row cannot satisfy
+# the STEP-specific producer, even after a shared recipe bump.
+STEP_THUMBNAIL_RECIPE = 25
 STEP_VIEWER_STL_RECIPE = 4
 GCODE_METADATA_RECIPE = 11
 GCODE_THUMBNAIL_RECIPE = 8
