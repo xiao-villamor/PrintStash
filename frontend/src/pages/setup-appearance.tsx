@@ -66,7 +66,7 @@ export default function SetupAppearancePage() {
       }
     >
       <h2 className="text-xl font-semibold text-foreground">{t("Make your library yours")}</h2>
-      <p className="mb-6 mt-2 text-sm text-muted-foreground">
+      <p className="mb-4 mt-2 text-sm text-muted-foreground">
         {t("You can change this any time in Settings")}
       </p>
       {config.isPending && <p role="status">{t("Loading…")}</p>}
@@ -80,6 +80,7 @@ export default function SetupAppearancePage() {
       )}
       {config.data && (
         <PreviewAppearance
+          layout="setup"
           value={draft?.value ?? config.data}
           onChange={({ preview_look, preview_floor_grid }) => {
             if (!config.data) return;

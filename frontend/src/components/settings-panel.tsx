@@ -5483,10 +5483,19 @@ export function SettingsPanel() {
                       )}
                     </p>
                   </div>
-                  {user?.is_superuser && remoteConfigData?.preview_look && (
-                    <PreviewAppearanceSettings config={remoteConfigData} />
-                  )}
                 </SettingsCard>
+
+                {user?.is_superuser && remoteConfigData?.preview_look && (
+                  <PreviewAppearanceSettings
+                    config={remoteConfigData}
+                    disabled={
+                      remoteConfig.isError ||
+                      previewBusy !== null ||
+                      preferenceCommand.blocked ||
+                      backupPolicy.isPending
+                    }
+                  />
+                )}
               </div>
             )}
 

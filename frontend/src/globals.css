@@ -340,7 +340,7 @@
   }
 
   .setup-card-appearance {
-    max-width: 1080px;
+    max-width: 960px;
   }
 
   @media (min-width: 768px) {
@@ -348,6 +348,10 @@
       height: min(600px, 100dvh - 136px);
       grid-template-columns: 220px minmax(0, 1fr);
       grid-template-rows: minmax(0, 1fr);
+    }
+
+    .setup-card-appearance {
+      height: min(680px, 100dvh - 136px);
     }
   }
 

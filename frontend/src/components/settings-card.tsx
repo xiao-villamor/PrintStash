@@ -57,11 +57,13 @@ export function SettingsSwitch({
   checked,
   onChange,
   label,
+  descriptionId,
   disabled = false,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
+  descriptionId?: string;
   disabled?: boolean;
 }) {
   return (
@@ -70,6 +72,7 @@ export function SettingsSwitch({
       checked={checked}
       onChange={onChange}
       label={label}
+      descriptionId={descriptionId}
       disabled={disabled}
       stateLabels={{ on: uiText("On"), off: uiText("Off") }}
     />
