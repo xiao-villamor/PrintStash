@@ -122,6 +122,58 @@ export async function authedContext(
 }
 
 export { expect };
+
+/** Existing-model review: authenticate without setup, then block browser writes. */
+export const modelReviewTest = base.extend({
+  page: async ({ page, baseURL }, use) => {
+    const username = process.env.PRINTSTASH_REVIEW_USERNAME;
+    const password = process.env.PRINTSTASH_REVIEW_PASSWORD;
+    const target = process.env.PRINTSTASH_REVIEW_URL;
+    if (!baseURL || !target || !username || !password)
+      throw new Error(
+        "Set PRINTSTASH_REVIEW_URL, PRINTSTASH_REVIEW_USERNAME and PRINTSTASH_REVIEW_PASSWORD for an existing Model.",
+      );
+    if (!/^\/models\/\d+$/.test(new URL(target).pathname))
+      throw new Error("PRINTSTASH_REVIEW_URL must point to /models/<id>.");
+    const login = await page.request.post(`${baseURL}/api/v1/auth/login`, {
+      data: { username, password },
+    });
+    if (!login.ok()) throw new Error(`Review login failed (${login.status()})`);
+    const { access_token: token }: { access_token: string } = await login.json();
+    await page.context().addCookies([
+      {
+        name: "printstash_session",
+        value: token,
+        url: baseURL,
+        httpOnly: true,
+        sameSite: "Strict",
+      },
+    ]);
+    const me = await page.request.get(`${baseURL}/api/v1/auth/me`);
+    expect(me.ok()).toBe(true);
+    await page.addInitScript(
+      (user) => localStorage.setItem("printstash.user", JSON.stringify(user)),
+      await me.json(),
+    );
+    const blocked: string[] = [];
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      // This POST only mints an in-memory, single-use WebSocket credential.
+      // It authenticates the read stream; no library or printer command runs.
+      const eventsTicket =
+        request.method() === "POST" && new URL(request.url()).pathname === "/api/v1/events/ticket";
+      if (!["GET", "HEAD", "OPTIONS"].includes(request.method()) && !eventsTicket) {
+        blocked.push(`${request.method()} ${new URL(request.url()).pathname}`);
+        await route.abort("blockedbyclient");
+      } else await route.fallback();
+    });
+    try {
+      await use(page);
+    } finally {
+      expect(blocked, "Review must not attempt to change the live deployment").toEqual([]);
+    }
+  },
+});
 // Specs import `test`, `expect` and `Page` from here rather than from
 // `@playwright/test`, so this module has to re-export the type too.
 export type { Page };

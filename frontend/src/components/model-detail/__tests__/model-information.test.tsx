@@ -19,6 +19,8 @@ function show(
       canEdit={canEdit}
       onEdit={() => {}}
       onTags={() => {}}
+      onFiles={() => {}}
+      onRevisions={() => {}}
     />,
   );
 }
@@ -38,6 +40,10 @@ describe("ModelInformation", () => {
       expect(screen.queryByRole("link", { name: "Source model" })).not.toBeInTheDocument();
     },
   );
+  it("labels the geometry as the whole source", () => {
+    show();
+    expect(screen.getByRole("heading", { name: "Whole source geometry" })).toBeInTheDocument();
+  });
   it("keeps unavailable geometry explicit", () => {
     show();
     expect(screen.getAllByText("Not recorded")).toHaveLength(3);
@@ -56,7 +62,7 @@ describe("ModelInformation", () => {
         }),
       }),
     );
-    expect(screen.getByText("0mm × 12mm × 30mm")).toBeInTheDocument();
+    expect(screen.getByText("0 × 12 × 30 mm")).toBeInTheDocument();
     expect(screen.getByText("0 cm³")).toBeInTheDocument();
     expect(screen.queryByText("Not recorded")).not.toBeInTheDocument();
   });

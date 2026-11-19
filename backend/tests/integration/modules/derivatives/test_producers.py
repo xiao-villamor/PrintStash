@@ -1259,15 +1259,59 @@ class TestDeriveGcode:
         assert metadata.slicer_name == "OrcaSlicer"
         assert metadata.estimated_time_s is not None
 
-    @pytest.mark.parametrize("plates", [(1, 2), ()], ids=["multiple", "unsliced"])
-    def test_does_not_publish_one_plates_metadata_as_the_whole_revision(
-        self, db_session, stored, plates
+    def test_keeps_plate_specific_fields_out_of_shared_settings(
+        self, db_session, stored, make_derivative
     ):
+        package = io.BytesIO()
+        with zipfile.ZipFile(package, "w") as archive:
+            for number, duration, weight, nozzle in (
+                (1, "7h 44m 22s", "419.18", "0.4"),
+                (2, "41m 5s", "13.03", "0.6"),
+            ):
+                archive.writestr(
+                    f"Metadata/plate_{number}.gcode",
+                    f"; total estimated time: {duration}\n"
+                    f"; total filament weight [g] : {weight}\n"
+                    "; printer_model = Bambu Lab P1S\n"
+                    "; layer_height = 0.2\n"
+                    f"; nozzle_diameter = {nozzle}\n",
+                )
+        artifact = stored("project.gcode.3mf", package.getvalue())
+        make_derivative(
+            artifact,
+            DerivativeKind.METADATA,
+            recipe_version=kinds.GCODE_METADATA_RECIPE - 1,
+            state=DerivativeState.SKIPPED,
+            failure_reason="per_plate_metadata",
+        )
+        outcome = producers.derive_gcode(artifact.id)
+        metadata = db_session.exec(
+            select(Metadata).where(Metadata.file_id == artifact.id)
+        ).one()
+        assert outcome.kinds[DerivativeKind.METADATA] == DerivativeState.READY
+        assert metadata.printer_model == "Bambu Lab P1S"
+        assert metadata.layer_height_mm == 0.2
+        assert metadata.nozzle_diameter_mm is None
+        assert metadata.estimated_time_s is None
+        assert metadata.filament_weight_g is None
+        output = json.loads(
+            records.rows_for(db_session, artifact)[DerivativeKind.METADATA].output_json
+        )
+        plate_metadata = output["plate_metadata"]
+        assert [plate["number"] for plate in plate_metadata] == [1, 2]
+        assert [plate["metadata"]["estimated_time_s"] for plate in plate_metadata] == [
+            27862,
+            2465,
+        ]
+        assert [plate["metadata"]["filament_weight_g"] for plate in plate_metadata] == [
+            419.18,
+            13.03,
+        ]
+
+    def test_unsliced_archive_metadata_is_skipped(self, db_session, stored):
         from tests.fixtures.three_mf_projects import build_sliced_project
 
-        artifact = stored(
-            "project.gcode.3mf", build_sliced_project(plate_numbers=plates)
-        )
+        artifact = stored("project.gcode.3mf", build_sliced_project(plate_numbers=()))
         outcome = producers.derive_gcode(artifact.id)
         assert outcome.kinds[DerivativeKind.METADATA] == DerivativeState.SKIPPED
         assert (

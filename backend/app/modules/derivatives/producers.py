@@ -802,6 +802,7 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
     started = time.monotonic()
     meta: dict[str, Any] = {}
     captured = CapturedSettings()
+    plate_metadata: list[dict[str, Any]] = []
     image: bytes | None = None
     try:
         with resolve(file_row).materialize() as source:
@@ -811,18 +812,42 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
                         meta = resin.parse(source)
                     elif is_container(file_row):
                         plates = list_embedded_gcode_plates(source)
-                        if len(plates) == 1:
-                            with plate_toolpath(source, plates[0]) as toolpath:
-                                meta = gcode_parser.parse(toolpath)
-                                captured = capture_settings(toolpath)
+                        if plates:
+                            for number in plates:
+                                with plate_toolpath(source, number) as toolpath:
+                                    parsed = gcode_parser.parse(toolpath)
+                                    plate_metadata.append(
+                                        {"number": number, "metadata": parsed}
+                                    )
+                                    if len(plates) == 1:
+                                        captured = capture_settings(toolpath)
+                            if len(plate_metadata) == 1:
+                                meta = plate_metadata[0]["metadata"]
+                            else:
+                                # Estimates describe one plate, even if two happen to match.
+                                per_plate = {
+                                    "estimated_time_s",
+                                    "filament_weight_g",
+                                    "filament_length_mm",
+                                    "filament_cost",
+                                }
+                                first = plate_metadata[0]["metadata"]
+                                meta = {
+                                    key: value
+                                    if key not in per_plate
+                                    and all(
+                                        plate["metadata"][key] == value
+                                        for plate in plate_metadata[1:]
+                                    )
+                                    else None
+                                    for key, value in first.items()
+                                }
                         else:
                             with get_session_factory().scoped_session() as session:
                                 records.mark_skipped(
                                     session,
                                     attempts[DerivativeKind.METADATA],
-                                    "per_plate_metadata"
-                                    if plates
-                                    else "no_sliced_plates",
+                                    "no_sliced_plates",
                                     now=utcnow(),
                                 )
                                 session.commit()
@@ -873,6 +898,7 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
                 output={
                     "slicer": meta.get("slicer_name"),
                     "slicer_settings": asdict(captured),
+                    "plate_metadata": plate_metadata,
                 },
                 duration_ms=duration_ms,
             )

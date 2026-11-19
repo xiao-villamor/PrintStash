@@ -181,6 +181,7 @@ function spoolmanStatus(enabled: boolean): SpoolmanStatus {
 }
 
 interface PanelOptions {
+  preselectPlate?: number;
   initialDeliveryMode?: "send" | "queue";
   open?: boolean;
   preselectPrinterId?: number;
@@ -197,6 +198,7 @@ interface PanelOptions {
 // a cache seeded with fresh data, so nothing refetches and the panel sees the
 // same shapes the API returns.
 function renderPanel({
+  preselectPlate,
   metadata = null,
   spools,
   filename = "cube.gcode",
@@ -221,6 +223,8 @@ function renderPanel({
         <AuthContext.Provider value={adminAuth}>
           <SendToButtons
             commands={commands}
+            preselectFileId={preselectPlate === undefined ? undefined : 42}
+            preselectPlate={preselectPlate}
             initialDeliveryMode={initialDeliveryMode}
             open={open}
             preselectPrinterId={preselectPrinterId}
@@ -233,6 +237,7 @@ function renderPanel({
                   version: 1,
                   gcode_revision_number: 1,
                   revision_label: null,
+                  revision_status: "needs_test",
                   is_recommended: true,
                   metadata,
                 },
@@ -559,6 +564,18 @@ describe("SendToQueue", () => {
 });
 
 describe("SendToButtons sliced archives", () => {
+  it.each(["send", "queue"] as const)("carries the inspected plate into %s", async (mode) => {
+    renderPanel({
+      open: true,
+      preselectPlate: 10,
+      initialDeliveryMode: mode,
+      filename: "project.gcode.3mf",
+      plates: [2, 10],
+    });
+    expect(await screen.findByLabelText("Sliced plate")).toHaveValue("10");
+    await userEvent.selectOptions(screen.getByLabelText("Sliced plate"), "2");
+    expect(screen.getByLabelText("Sliced plate")).toHaveValue("2");
+  });
   it("requires a choice when several plates exist", async () => {
     renderPanel({ open: true, filename: "project.gcode.3mf", plates: [2, 10] });
     expect(await screen.findByLabelText("Sliced plate")).toHaveValue("");
@@ -577,6 +594,24 @@ describe("SendToButtons sliced archives", () => {
         expect.objectContaining({ file_id: 42, plate_index: 10, start_print: false }),
       ),
     );
+  });
+
+  it("keeps invalid quantities out of the queue and allows correction", async () => {
+    renderPanel({ open: true, initialDeliveryMode: "queue" });
+    const copies = screen.getByRole("spinbutton", { name: "Copies" });
+    const submit = screen.getByRole("button", { name: "Add to queue" });
+    for (const value of ["", "0", "-1", "1.5"]) {
+      await userEvent.clear(copies);
+      if (value) await userEvent.type(copies, value);
+      expect(copies).toHaveAttribute("aria-invalid", "true");
+      expect(copies).toHaveAccessibleDescription("Enter a whole number of copies, at least 1.");
+      expect(submit).toBeDisabled();
+    }
+    expect(createFleetBatch).not.toHaveBeenCalled();
+    expect(enqueueFleetJob).not.toHaveBeenCalled();
+    await userEvent.clear(copies);
+    await userEvent.type(copies, "2");
+    expect(submit).toBeEnabled();
   });
 
   it("queues the chosen plate", async () => {

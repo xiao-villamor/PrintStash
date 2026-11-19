@@ -116,7 +116,7 @@ export function FilesTab({
             </span>
           </h2>
           {onCompare && (
-            <Button variant="ghost" size="xs" onClick={onCompare}>
+            <Button variant="ghost" size="xs" data-compare-origin onClick={onCompare}>
               {uiText("Compare")}
             </Button>
           )}
@@ -133,14 +133,14 @@ export function FilesTab({
             <article
               key={f.id}
               aria-label={f.original_filename}
-              className="@container/source-file min-w-0 space-y-3 border-b border-border py-5.5 min-[1500px]:py-5"
+              className="@container/source-file min-w-0 space-y-3 border-b border-border py-5.5 @lg/source-file:py-5"
             >
-              <div className="flex min-w-0 flex-col gap-3 min-[1500px]:grid min-[1500px]:gap-x-6 min-[1500px]:gap-y-1.5">
-                <div className="flex min-w-0 items-start gap-2 min-[1500px]:col-start-1 min-[1500px]:row-start-1">
+              <div className="flex min-w-0 flex-col gap-3 @lg/source-file:grid @lg/source-file:gap-x-6 @lg/source-file:gap-y-1.5">
+                <div className="flex min-w-0 items-start gap-2 @lg/source-file:col-start-1 @lg/source-file:row-start-1">
                   <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
                     <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm text-on-surface font-medium">
-                      <span className="min-w-0 break-all">{f.original_filename}</span>
+                      <span className="min-w-0 wrap-anywhere">{f.original_filename}</span>
                       {f.is_external && (
                         <span
                           title={uiText(
@@ -155,11 +155,11 @@ export function FilesTab({
                     </p>
                   </div>
                 </div>
-                <p className="-mt-1.5 ml-6 text-xs text-muted-foreground min-[1500px]:col-start-1 min-[1500px]:row-start-2 min-[1500px]:mt-0 min-[1500px]:ml-0">
+                <p className="-mt-1.5 ml-6 text-xs text-muted-foreground @lg/source-file:col-start-1 @lg/source-file:row-start-2 @lg/source-file:mt-0 @lg/source-file:ml-6">
                   {f.file_type.toUpperCase()} · {uiText("v{value1}", { value1: String(f.version) })}{" "}
                   · {formatBytes(f.size_bytes)} · {new Date(f.uploaded_at).toLocaleDateString()}
                 </p>
-                <div className="flex flex-wrap items-center gap-1 min-[1500px]:col-start-1 min-[1500px]:row-start-3 min-[1500px]:mt-1.5">
+                <div className="flex flex-wrap items-center gap-1 @lg/source-file:col-start-1 @lg/source-file:col-span-2 @lg/source-file:row-start-3 @lg/source-file:mt-1.5">
                   {SLICEABLE_TYPES.has(f.file_type) && (
                     <SlicerOpenButton fileId={f.id} fileType={f.file_type} size="sm" showLabel />
                   )}

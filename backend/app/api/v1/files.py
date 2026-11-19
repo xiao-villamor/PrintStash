@@ -29,7 +29,7 @@ from app.db.scopes import live
 from app.db.session import get_session
 from app.modules.identity import auth, rbac
 from app.modules.library.model_views.thumbnails import thumbnail_version
-from app.modules.media.sliced_gcode import is_container
+from app.modules.media.sliced_gcode import is_container, plate_metadata
 from app.modules.media.three_mf_preview import (
     EmbeddedGcodeError,
     list_embedded_gcode_plates,
@@ -49,7 +49,7 @@ from app.modules.storage.artifact_delivery import (
 from app.modules.storage.delivery_contracts import content_disposition
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.schemas.jobs import DerivativeRead
-from app.schemas.plates import FilePlatesRead, GcodePlatesRead
+from app.schemas.plates import FilePlatesRead, GcodePlateIdentityRead, GcodePlatesRead
 
 logger = get_logger(__name__)
 
@@ -184,11 +184,25 @@ def gcode_plates(
     try:
         with resolve(artifact).materialize() as path:
             numbers = list_embedded_gcode_plates(path)
+            from app.modules.media.sliced_plate_identity import (
+                read_sliced_plate_identities,
+            )
+
+            identities = read_sliced_plate_identities(path)
     except EmbeddedGcodeError as exc:
         raise _embedded_gcode_error(exc) from exc
     except (FileNotFoundError, ArtifactContentError) as exc:
         raise HTTPException(status_code=410, detail="file_blob_missing") from exc
-    return GcodePlatesRead(plates=list(numbers))
+    return GcodePlatesRead(
+        plates=list(numbers),
+        plate_metadata=plate_metadata(session, artifact),
+        identities=[
+            GcodePlateIdentityRead(
+                number=item.number, name=item.name, object_count=item.object_count
+            )
+            for item in identities
+        ],
+    )
 
 
 @router.get(

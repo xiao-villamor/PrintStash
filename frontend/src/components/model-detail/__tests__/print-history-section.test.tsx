@@ -265,6 +265,16 @@ describe("PrintHistorySection", () => {
       );
     });
 
+    it("offers manual entry when no printer can supply history", async () => {
+      const user = userEvent.setup();
+      renderHistory({
+        seed: [[queryKeys.printers, []]],
+        routes: { "GET /api/v1/printers": json([]) },
+      });
+      await user.click(screen.getByRole("button", { name: "Import from printer" }));
+      await user.click(await screen.findByRole("button", { name: "Add record manually" }));
+      expect(screen.getByRole("dialog", { name: "Add print record" })).toBeVisible();
+    });
     it("cannot import until a printer is chosen", async () => {
       // The import is scoped to one machine, so "which printer?" has no default.
       const user = userEvent.setup();

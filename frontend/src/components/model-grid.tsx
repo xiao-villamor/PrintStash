@@ -117,7 +117,7 @@ import {
 } from "@/types";
 import { ModelCard } from "@/components/model-card";
 import { LibraryModelInspector } from "@/components/library-model-inspector";
-import { CollectionTitleEditor } from "@/components/collection-title-editor";
+import { InlineTitleEditor } from "@/components/inline-title-editor";
 import { CollectionOverviewCard } from "@/components/collection-overview";
 import { CollectionBreadcrumbs } from "@/components/collection-breadcrumbs";
 import { useModelDropTarget } from "@/lib/use-model-drop-target";
@@ -3746,7 +3746,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           <div className="library-collection-header px-4 sm:px-6">
             <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-1">
               <div className="library-collection-identity min-w-0 flex-1">
-                <CollectionTitleEditor
+                <InlineTitleEditor
+                  fieldLabel={uiText("inbox.collectionName")}
+                  maxLength={100}
                   title={
                     unavailableCollection
                       ? uiText("library.collectionUnavailable")

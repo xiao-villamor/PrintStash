@@ -21,7 +21,7 @@ import { useAuth } from "@/lib/auth-context";
 import { usePrinters } from "@/lib/queries";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { hasToolpath } from "@/lib/toolpath-preview";
+import { useToolpathSources } from "@/lib/toolpath-preview";
 import { formatBytes, formatDuration, formatGrams, formatNumber, timeAgo } from "@/lib/format";
 import { ApiError, userMessage } from "@/lib/errors";
 import { isTypingTarget, keyboardOverlayOpen } from "@/lib/keyboard-commands";
@@ -162,10 +162,11 @@ export function InspectorContent({
   }
   const [preview, setPreview] = useState<ViewerMode>("model");
   const [toolpathId, setToolpathId] = useState<number | null>(null);
-  const toolpath =
-    files.find((item) => item.id === toolpathId && hasToolpath(item)) ??
-    file ??
-    files.find(hasToolpath);
+  const { sources: toolpathFiles, availability: toolpathAvailability } = useToolpathSources(
+    files,
+    active,
+  );
+  const toolpath = toolpathFiles.find((item) => item.id === toolpathId) ?? file ?? toolpathFiles[0];
   const [sourceId, setSourceId] = useState<number | null>(null);
   const [fileMenu, setFileMenu] = useState<number | null>(null);
   const viewer = useRef<HTMLDivElement>(null);
@@ -442,13 +443,13 @@ export function InspectorContent({
             compact
             mode={toolpath ? preview : "model"}
             onChange={setPreview}
-            hasGcode={toolpath !== undefined}
+            hasGcode={toolpathAvailability === "available"}
+            availability={toolpathAvailability}
           />
           <Suspense fallback={<Loader2 className="h-5 w-5 animate-spin" />}>
             {preview === "gcode" && toolpath ? (
               <GcodePreview
-                compact
-                files={files}
+                files={toolpathFiles}
                 selectedFileId={toolpath.id}
                 onSelectFile={setToolpathId}
                 bedSizeFor={() => null}
@@ -1043,78 +1044,86 @@ export function InspectorContent({
           <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </summary>
         <ul className="library-inspector-files divide-y divide-border">
-          {files.map((item) => (
-            <li key={item.id}>
-              <span className="library-inspector-file-type">{item.file_type.toUpperCase()}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                className="min-w-0 h-auto flex-col items-start gap-0 py-1"
-                aria-label={`${uiText("Download")} ${item.original_filename}`}
-                onClick={() => download(item)}
-              >
-                <strong className="max-w-full" title={item.original_filename}>
-                  {item.original_filename}
-                </strong>
-                <span className="text-muted-foreground">
-                  {formatBytes(item.size_bytes)} ·{" "}
-                  {item.file_type === "gcode" ? revisionName(item) : uiText("Source")}
-                </span>
-              </Button>
-              <DropdownMenu
-                open={fileMenu === item.id}
-                onOpenChange={(open) => setFileMenu(open ? item.id : null)}
-                portal
-                trigger={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-haspopup="menu"
-                    aria-expanded={fileMenu === item.id}
-                    aria-label={uiText("Actions for {value1}", { value1: item.original_filename })}
-                    onClick={() => setFileMenu(fileMenu === item.id ? null : item.id)}
-                  >
-                    <MoreHorizontal className="h-4 w-4" aria-hidden />
-                  </Button>
-                }
-              >
-                <button
+          {files.map((item) => {
+            const isToolpath = toolpathFiles.some((file) => file.id === item.id);
+            return (
+              <li key={item.id}>
+                <span className="library-inspector-file-type">{item.file_type.toUpperCase()}</span>
+                <Button
                   type="button"
-                  role="menuitem"
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
-                  onClick={() => {
-                    setFileMenu(null);
-                    download(item);
-                  }}
+                  variant="ghost"
+                  size="xs"
+                  className="h-auto min-w-0 justify-between py-1 text-left"
+                  aria-label={`${uiText("Download")} ${item.original_filename}`}
+                  onClick={() => download(item)}
                 >
-                  <Download className="h-4 w-4" aria-hidden />
-                  {uiText("Download")}
-                </button>
-                {(hasToolpath(item) || meshTypes.has(item.file_type)) && (
+                  <span className="flex min-w-0 flex-col items-start">
+                    <strong className="max-w-full" title={item.original_filename}>
+                      {item.original_filename}
+                    </strong>
+                    <span className="text-muted-foreground">
+                      {formatBytes(item.size_bytes)} ·{" "}
+                      {item.file_type === "gcode" ? revisionName(item) : uiText("Source")}
+                    </span>
+                  </span>
+                  <Download className="h-4 w-4 shrink-0" aria-hidden />
+                </Button>
+                <DropdownMenu
+                  open={fileMenu === item.id}
+                  onOpenChange={(open) => setFileMenu(open ? item.id : null)}
+                  portal
+                  trigger={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-haspopup="menu"
+                      aria-expanded={fileMenu === item.id}
+                      aria-label={uiText("Actions for {value1}", {
+                        value1: item.original_filename,
+                      })}
+                      onClick={() => setFileMenu(fileMenu === item.id ? null : item.id)}
+                    >
+                      <MoreHorizontal className="h-4 w-4" aria-hidden />
+                    </Button>
+                  }
+                >
                   <button
                     type="button"
                     role="menuitem"
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
                     onClick={() => {
                       setFileMenu(null);
-                      if (hasToolpath(item)) {
-                        setToolpathId(item.id);
-                        setPreview("gcode");
-                      } else {
-                        setSourceId(item.id);
-                        setPreview("model");
-                      }
-                      viewer.current?.scrollIntoView({ block: "nearest" });
+                      download(item);
                     }}
                   >
-                    <Box className="h-4 w-4" aria-hidden />
-                    {uiText("Open in viewer")}
+                    <Download className="h-4 w-4" aria-hidden />
+                    {uiText("Download")}
                   </button>
-                )}
-              </DropdownMenu>
-            </li>
-          ))}
+                  {(isToolpath || meshTypes.has(item.file_type)) && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+                      onClick={() => {
+                        setFileMenu(null);
+                        if (isToolpath) {
+                          setToolpathId(item.id);
+                          setPreview("gcode");
+                        } else {
+                          setSourceId(item.id);
+                          setPreview("model");
+                        }
+                        viewer.current?.scrollIntoView({ block: "nearest" });
+                      }}
+                    >
+                      <Box className="h-4 w-4" aria-hidden />
+                      {uiText("Open in viewer")}
+                    </button>
+                  )}
+                </DropdownMenu>
+              </li>
+            );
+          })}
         </ul>
       </details>
       {addOpen && canEdit && (

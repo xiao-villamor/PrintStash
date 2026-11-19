@@ -1,3 +1,5 @@
+import { Box, Layers } from "lucide-react";
+import type { ToolpathAvailability } from "@/lib/toolpath-preview";
 import { Button } from "@/components/ui/button";
 import { uiText } from "@/lib/locale";
 
@@ -7,15 +9,26 @@ export function ViewerModeSwitch({
   mode,
   onChange,
   hasGcode,
+  availability,
   compact = false,
+  className,
 }: {
   mode: ViewerMode;
   onChange: (mode: ViewerMode) => void;
   hasGcode: boolean;
+  availability?: ToolpathAvailability;
   compact?: boolean;
+  className?: string;
 }) {
+  const reason =
+    availability === "checking"
+      ? uiText("Checking for G-code…")
+      : availability === "error"
+        ? uiText("Couldn’t load sliced plates")
+        : uiText("No G-code file");
   return (
     <div
+      className={className}
       role={compact ? "radiogroup" : "group"}
       aria-label={uiText("Preview")}
       onKeyDown={(event) => {
@@ -45,20 +58,24 @@ export function ViewerModeSwitch({
           aria-pressed={compact ? undefined : mode === option}
           tabIndex={compact && mode !== option ? -1 : undefined}
           disabled={option === "gcode" && !hasGcode}
-          aria-description={option === "gcode" && !hasGcode ? uiText("No G-code file") : undefined}
-          title={option === "gcode" && !hasGcode ? uiText("No G-code file") : undefined}
+          aria-description={option === "gcode" && !hasGcode ? reason : undefined}
+          title={option === "gcode" && !hasGcode ? reason : undefined}
           className={
             option === "gcode" && !hasGcode
               ? "disabled:pointer-events-auto"
               : mode === option
-                ? "bg-accent text-accent-foreground"
-                : undefined
+                ? "bg-accent text-accent-foreground hover:bg-accent"
+                : "hover:bg-muted hover:text-foreground"
           }
           onClick={() => onChange(option)}
         >
-          {option === "model"
-            ? uiText(compact ? "3D" : "3D model")
-            : uiText(compact ? "G-code" : "Layers")}
+          {!compact &&
+            (option === "model" ? (
+              <Box className="h-4 w-4" aria-hidden />
+            ) : (
+              <Layers className="h-4 w-4" aria-hidden />
+            ))}
+          {option === "model" ? uiText(compact ? "3D" : "3D model") : uiText("G-code")}
         </Button>
       ))}
     </div>

@@ -18,6 +18,11 @@
 
 - Multi-angle previews render in the same pass as the cover, from the mesh it already loaded, on every native slot. A 60-file import with orbit views finishes in about a third of the time (239 s → 89 s on a 3-CPU host); a cover pass that stops early hands its views back so they are rendered again at once. Views follow the Model image quality setting (Compact, Standard or High) instead of a fixed 480 × 360, and Recreate all images rebuilds them with the covers; existing view sets update once in the background. A top or bottom view that would show only the edge of a plate is left out instead of failing the whole set.
 
+- Model details now show the selected G-code revision’s print setup and named plate estimates alongside preview and delivery actions. Overview presents setup, a plate-by-plate comparison and printing actions before recorded prints, with technical file details available on demand. Inspector tabs lead directly into their content, and source-to-revision comparisons prioritize recorded values. Send and Queue carry the inspected plate into confirmation. Queue shows its per-copy estimates and revision test status, validates whole-copy quantities, and keeps the draft open during printer setup. Compare returns to its originating tab and summarizes empty print histories. Libraries without printers offer queueing and printer setup.
+
+- Model-detail reviews have a repeatable desktop Playwright flow using existing Models and their actual files, covering tabs, preview modes, plates, revisions and dialogs with private screenshot, layout and metadata evidence for follow-up design audits.
+- G-code previews use a slicer-style side panel with Layers and View tabs for plate cards, direct layer entry, camera and display controls. Controls fit above the model information, and expanding the preview hides that information to give the viewer more room. Plate choices stay available while loading or retrying a preview.
+
 - New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.
 
 - Flat-model previews now support arrow navigation through all five views and back to the cover. Single-cover and multi-angle cards share a larger image area, and the expanded gallery uses more room on large screens while fitting narrow displays.
@@ -78,6 +83,9 @@
 ### Fixed
 
 - GPU-generated Model covers use the same framing as CPU covers, including for rounded and diagonal shapes.
+- Large sliced plates no longer hit the former one-million-segment preview limit. Arc rendering uses bounded curve error, and typed geometry storage supports up to four million segments without dropping layers.
+- Model detail retains matching plate selection between source and sliced previews, keeps common view controls in reach, and labels measurement scope and illustrative bed placement. Sliced archives now recover shared print settings and per-plate estimates, including when existing metadata is reprocessed.
+- Model detail keeps plate cards in the same place across 3D and G-code, aligns camera viewpoints and preview edges, and groups toolpath view options and bounds for easier comparison.
 
 - Saved multipart descriptions stay visible in the overview. Multipart member names wrap without clipping, and the mobile composition editor keeps Add variant and Save changes at the shared touch-target size.
 

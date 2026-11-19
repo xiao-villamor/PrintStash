@@ -3,6 +3,25 @@ import { describe, expect, it } from "vitest";
 import { arcPoints, type ArcOptions } from "../gcode-arcs";
 
 describe("arcPoints", () => {
+  it.each([1, 10, 100, 1000])("bounds curve approximation error at radius %s", (radius) => {
+    const points = [
+      [radius, 0, 0],
+      ...arcPoints([radius, 0, 0], [radius, 0, 0], {
+        plane: "xy",
+        center: [0, 0, 0],
+        clockwise: false,
+        segmentLimit: 2000,
+      }),
+    ];
+    const errors = points.slice(1).map((point, index) => {
+      const previous = points[index];
+      return radius - Math.hypot((previous[0] + point[0]) / 2, (previous[1] + point[1]) / 2);
+    });
+
+    expect(Math.max(...errors)).toBeLessThanOrEqual(0.02);
+    expect(points.at(-1)).toEqual([radius, 0, 0]);
+  });
+
   it("closes a full circle without losing helical height", () => {
     const points = [
       ...arcPoints([10, 0, 0], [10, 0, 5], {
@@ -14,7 +33,7 @@ describe("arcPoints", () => {
     ];
     expect(points.at(-1)).toEqual([10, 0, 5]);
     expect(Math.min(...points.map((p) => p[0]))).toBeCloseTo(-10, 1);
-    expect(points[Math.floor(points.length / 2)][2]).toBeCloseTo(2.5, 1);
+    expect(points[Math.floor((points.length - 1) / 2)][2]).toBeCloseTo(2.5, 1);
   });
   it("uses the long sweep for a negative radius", () => {
     const options: ArcOptions = {

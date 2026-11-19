@@ -1,12 +1,16 @@
 import { useCallback, useLayoutEffect, useRef } from "react";
+import "./library-header.css";
 import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { uiText } from "@/lib/locale";
 
-/** The collection prototype replaces the heading in place while renaming. */
-export function CollectionTitleEditor({
+/** Model and Collection headings share the same in-place name editor. */
+export function InlineTitleEditor({
   title,
+  fieldLabel,
+  maxLength,
+  saveBlocked = false,
   canEdit,
   open,
   value,
@@ -17,6 +21,9 @@ export function CollectionTitleEditor({
   onSave,
 }: {
   title: string;
+  fieldLabel: string;
+  maxLength?: number;
+  saveBlocked?: boolean;
   canEdit: boolean;
   open: boolean;
   value: string;
@@ -46,7 +53,7 @@ export function CollectionTitleEditor({
 
   async function commit() {
     const generation = edit.current;
-    if (cancelled.current || pending.current === generation || busy) return;
+    if (cancelled.current || pending.current === generation || busy || saveBlocked) return;
     if (!value.trim() || value.trim() === title) {
       onCancel();
       return;
@@ -63,17 +70,17 @@ export function CollectionTitleEditor({
     <div className="library-collection-title flex min-w-0 items-center gap-1.5">
       <h1
         className={`${open ? "invisible" : ""} min-w-0 break-words text-foreground`}
-        onDoubleClick={onOpen}
+        onDoubleClick={canEdit && !open ? onOpen : undefined}
       >
         {title}
       </h1>
       {open && (
         <Input
           ref={focusInput}
-          aria-label={uiText("inbox.collectionName")}
+          aria-label={fieldLabel}
           className="library-collection-name"
           value={value}
-          maxLength={100}
+          maxLength={maxLength}
           readOnly={busy}
           aria-busy={busy}
           onChange={(event) => onValueChange(event.target.value)}

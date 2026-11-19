@@ -6579,9 +6579,278 @@
         "title": "GcApprovalRequest",
         "type": "object"
       },
+      "GcodePlateIdentityRead": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "object_count": {
+            "title": "Object Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "number",
+          "name",
+          "object_count"
+        ],
+        "title": "GcodePlateIdentityRead",
+        "type": "object"
+      },
+      "GcodePlateMetadata": {
+        "properties": {
+          "bed_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bed Temperature C"
+          },
+          "bottom_shell_layers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bottom Shell Layers"
+          },
+          "estimated_time_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Time S"
+          },
+          "filament_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filament Cost"
+          },
+          "filament_length_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filament Length Mm"
+          },
+          "filament_weight_g": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filament Weight G"
+          },
+          "first_layer_height_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Layer Height Mm"
+          },
+          "infill_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Infill Percent"
+          },
+          "layer_height_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layer Height Mm"
+          },
+          "material_brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Brand"
+          },
+          "material_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Type"
+          },
+          "nozzle_diameter_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nozzle Diameter Mm"
+          },
+          "nozzle_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nozzle Temperature C"
+          },
+          "printer_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer Model"
+          },
+          "slicer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slicer Name"
+          },
+          "slicer_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slicer Version"
+          },
+          "support_material": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Support Material"
+          },
+          "top_shell_layers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top Shell Layers"
+          },
+          "wall_loops": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Loops"
+          }
+        },
+        "title": "GcodePlateMetadata",
+        "type": "object"
+      },
+      "GcodePlateMetadataRead": {
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/GcodePlateMetadata"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "number",
+          "metadata"
+        ],
+        "title": "GcodePlateMetadataRead",
+        "type": "object"
+      },
       "GcodePlatesRead": {
         "description": "Numbers of the sliced plates actually present in a 3MF archive.",
         "properties": {
+          "identities": {
+            "items": {
+              "$ref": "#/components/schemas/GcodePlateIdentityRead"
+            },
+            "title": "Identities",
+            "type": "array"
+          },
+          "plate_metadata": {
+            "items": {
+              "$ref": "#/components/schemas/GcodePlateMetadataRead"
+            },
+            "title": "Plate Metadata",
+            "type": "array"
+          },
           "plates": {
             "items": {
               "type": "integer"
@@ -6591,7 +6860,9 @@
           }
         },
         "required": [
-          "plates"
+          "plates",
+          "plate_metadata",
+          "identities"
         ],
         "title": "GcodePlatesRead",
         "type": "object"

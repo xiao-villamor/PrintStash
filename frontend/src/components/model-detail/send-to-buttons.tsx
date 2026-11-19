@@ -10,9 +10,9 @@ import { uiMessage } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "@/lib/link";
-import { Loader2, Printer as PrinterIcon, Send, WifiOff } from "lucide-react";
+import { ExternalLink, Loader2, Printer as PrinterIcon, Send, WifiOff } from "lucide-react";
 
 import {
   checkFleetCompatibility,
@@ -33,6 +33,8 @@ import {
   ModelPrinterFileRead,
   RoutingStrategy,
 } from "@/types";
+import { formatPlateEstimate } from "./format-plate-estimate";
+import { revisionStatusLabel } from "./presentation";
 import { ChoiceField } from "./choice-field";
 import { providerLabel } from "@/lib/printer-providers";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -74,6 +76,7 @@ export function SendToButtons({
   open,
   onOpenChange,
   preselectFileId,
+  preselectPlate,
   preselectPrinterId,
   commands = API_COMMANDS,
   compact = false,
@@ -86,6 +89,7 @@ export function SendToButtons({
     | "original_filename"
     | "version"
     | "gcode_revision_number"
+    | "revision_status"
     | "revision_label"
     | "is_recommended"
     | "metadata"
@@ -93,6 +97,7 @@ export function SendToButtons({
   printerFiles: ModelPrinterFileRead[];
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  preselectPlate?: number | null;
   preselectFileId?: number;
   preselectPrinterId?: number;
   commands?: SendToCommands;
@@ -116,6 +121,14 @@ export function SendToButtons({
   const [plateSelection, setPlateSelection] = useState<{ fileId: number; index: number } | null>(
     null,
   );
+  useEffect(() => {
+    if (showSend)
+      setPlateSelection(
+        preselectFileId != null && preselectPlate != null
+          ? { fileId: preselectFileId, index: preselectPlate }
+          : null,
+      );
+  }, [showSend, preselectFileId, preselectPlate]);
   const plates = platesQuery.data?.plates ?? [];
   const plateIndex = sliced
     ? plateSelection?.fileId === selectedFile && plates.includes(plateSelection.index)
@@ -146,7 +159,13 @@ export function SendToButtons({
     if (showSend) setDeliveryMode(initialDeliveryMode);
   }, [showSend, initialDeliveryMode]);
   const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>("least_busy");
-  const [quantity, setQuantity] = useState(1);
+  const [copies, setCopies] = useState("1");
+  const quantity = Number(copies);
+  const validQuantity = Number.isSafeInteger(quantity) && quantity > 0;
+  const copiesErrorId = useId();
+  const estimate = sliced
+    ? platesQuery.data?.plate_metadata?.find((plate) => plate.number === plateIndex)?.metadata
+    : selectedFileDetails?.metadata;
   const [priority, setPriority] = useState<JobPriority>("normal");
   const [targetGroup, setTargetGroup] = useState("");
   const [compatibility, setCompatibility] = useState<CompatibilityRead | null>(null);
@@ -158,7 +177,7 @@ export function SendToButtons({
   const spoolmanEnabled = useSpoolmanStatus().data?.enabled ?? false;
   const spools = useSpools({ enabled: spoolmanEnabled }).data ?? [];
   const [selectedSpoolId, setSelectedSpoolId] = useState<number | "">("");
-  const printersQuery = usePrinters();
+  const printersQuery = usePrinters({ refetchOnWindowFocus: showSend ? "always" : true });
   // Stable ref so the default-select effect / memos below don't rerun each render.
   const printers = useMemo(() => printersQuery.data ?? [], [printersQuery.data]);
   const printersLoading = printersQuery.isLoading;
@@ -251,7 +270,7 @@ export function SendToButtons({
 
   async function send(allowMismatch = false) {
     const session = getSessionVersion();
-    if (!selectedFile || !plateReady) return;
+    if (!selectedFile || !plateReady || (deliveryMode === "queue" && !validQuantity)) return;
     const targetPrinterIds =
       deliveryMode === "send" || routingStrategy === "manual"
         ? selectedPrinters.map((printer) => printer.id)
@@ -607,15 +626,20 @@ export function SendToButtons({
           }}
           title={
             selectedFileDetails
-              ? uiText("Send Rev {value1} to printer", {
-                  value1: String(
-                    selectedFileDetails.gcode_revision_number ?? selectedFileDetails.version,
-                  ),
-                })
-              : uiText("Send to printer")
+              ? uiText(
+                  deliveryMode === "queue" ? "Queue Rev {value1}" : "Send Rev {value1} to printer",
+                  {
+                    value1: String(
+                      selectedFileDetails.gcode_revision_number ?? selectedFileDetails.version,
+                    ),
+                  },
+                )
+              : uiText(deliveryMode === "queue" ? "Add to queue" : "Send to printer")
           }
           description={uiText(
-            "Upload the selected G-code Revision. Starting a print requires your explicit choice.",
+            deliveryMode === "queue"
+              ? "Choose how this print job will be routed."
+              : "Upload the selected G-code Revision. Starting a print requires your explicit choice.",
           )}
           footer={
             <>
@@ -630,7 +654,7 @@ export function SendToButtons({
                   !plateReady ||
                   (deliveryMode === "send"
                     ? selectedPrinters.length === 0 || (startPrint && !selectedPrintersCanStart)
-                    : quantity < 1 ||
+                    : !validQuantity ||
                       (routingStrategy === "manual" && selectedPrinters.length === 0))
                 }
               >
@@ -709,9 +733,18 @@ export function SendToButtons({
                         className={selectClassName}
                         type="number"
                         min={1}
-                        value={quantity || ""}
-                        onChange={(event) => setQuantity(Number(event.target.value))}
+                        step={1}
+                        value={copies}
+                        aria-label={uiText("Copies")}
+                        aria-invalid={!validQuantity}
+                        aria-describedby={!validQuantity ? copiesErrorId : undefined}
+                        onChange={(event) => setCopies(event.target.value)}
                       />
+                      {!validQuantity && (
+                        <span id={copiesErrorId} className="block text-xs text-destructive">
+                          {uiText("Enter a whole number of copies, at least 1.")}
+                        </span>
+                      )}
                     </label>
                     <ChoiceField<JobPriority>
                       label={uiText("Priority")}
@@ -736,99 +769,124 @@ export function SendToButtons({
                   </div>
                 )}
 
-                {(deliveryMode === "send" || routingStrategy === "manual") && (
-                  <fieldset className="space-y-2">
-                    <legend className="mb-2 text-sm font-medium text-foreground">
-                      {uiText("Choose printers")}
-                    </legend>
-                    <div className="divide-y divide-border">
-                      {printers.map((printer) => {
-                        const formatSupported =
-                          printer.capabilities.accepted_print_formats.includes(selectedFileFormat);
-                        const disabled =
-                          !printer.access.can_print ||
-                          !printer.capabilities.can_upload ||
-                          !formatSupported;
-                        const selected = selectedPrinterIds.includes(printer.id);
-                        const offline =
-                          printer.status === "offline" || printer.status === "unknown";
-                        return (
-                          <div
-                            key={printer.id}
-                            onClick={() => {
-                              if (!disabled && !sending) togglePrinter(printer.id);
-                            }}
-                            className={`flex min-w-0 items-start gap-3 py-4 ${disabled ? "cursor-disabled opacity-60" : "cursor-action"}`}
-                          >
-                            <Checkbox
-                              checked={selected}
-                              onChange={() => togglePrinter(printer.id)}
-                              disabled={disabled || sending}
-                              ariaLabel={uiText("Select {value1}", {
-                                value1: String(printer.name),
-                              })}
-                            />
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-sm font-medium text-foreground">
-                                {printer.name} · {knownUiText(printer.status)}
+                {(deliveryMode === "send" || routingStrategy === "manual") &&
+                  availablePrinters.length > 0 && (
+                    <fieldset className="space-y-2">
+                      <legend className="mb-2 text-sm font-medium text-foreground">
+                        {uiText("Choose printers")}
+                      </legend>
+                      <div className="divide-y divide-border">
+                        {printers.map((printer) => {
+                          const formatSupported =
+                            printer.capabilities.accepted_print_formats.includes(
+                              selectedFileFormat,
+                            );
+                          const disabled =
+                            !printer.access.can_print ||
+                            !printer.capabilities.can_upload ||
+                            !formatSupported;
+                          const selected = selectedPrinterIds.includes(printer.id);
+                          const offline =
+                            printer.status === "offline" || printer.status === "unknown";
+                          return (
+                            <div
+                              key={printer.id}
+                              onClick={() => {
+                                if (!disabled && !sending) togglePrinter(printer.id);
+                              }}
+                              className={`flex min-w-0 items-start gap-3 py-4 ${disabled ? "cursor-disabled opacity-60" : "cursor-action"}`}
+                            >
+                              <Checkbox
+                                checked={selected}
+                                onChange={() => togglePrinter(printer.id)}
+                                disabled={disabled || sending}
+                                ariaLabel={uiText("Select {value1}", {
+                                  value1: String(printer.name),
+                                })}
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-medium text-foreground">
+                                  {printer.name} · {knownUiText(printer.status)}
+                                </span>
+                                <span className="mt-1 flex flex-wrap gap-1">
+                                  <span
+                                    className={
+                                      offline
+                                        ? "text-xs text-muted-foreground"
+                                        : "text-xs text-foreground"
+                                    }
+                                  >
+                                    {providerLabel(printer)} ·
+                                  </span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {!printer.access.can_print
+                                      ? uiText("No print access")
+                                      : !printer.capabilities.can_upload
+                                        ? uiText("Upload unsupported")
+                                        : !formatSupported
+                                          ? uiText("Format unsupported")
+                                          : printer.capabilities.can_start
+                                            ? uiText("Upload + start")
+                                            : uiText("Upload only")}
+                                  </span>
+                                </span>
                               </span>
-                              <span className="mt-1 flex flex-wrap gap-1">
-                                <span
-                                  className={
-                                    offline
-                                      ? "text-xs text-muted-foreground"
-                                      : "text-xs text-foreground"
-                                  }
+                              <span className="flex shrink-0 flex-col items-end gap-2 text-xs text-muted-foreground">
+                                {compatibility?.printers.find(
+                                  (row) => row.printer_id === printer.id,
+                                )?.verdict && (
+                                  <span>
+                                    {knownUiText(
+                                      compatibility.printers.find(
+                                        (row) => row.printer_id === printer.id,
+                                      )!.verdict,
+                                    )}
+                                  </span>
+                                )}
+                                <Link
+                                  href={`/printers/${printer.id}`}
+                                  onClick={(event) => event.stopPropagation()}
+                                  className={buttonVariants({ variant: "outline", size: "xs" })}
                                 >
-                                  {providerLabel(printer)} ·
-                                </span>
-                                <span className="text-xs text-muted-foreground">
-                                  {!printer.access.can_print
-                                    ? uiText("No print access")
-                                    : !printer.capabilities.can_upload
-                                      ? uiText("Upload unsupported")
-                                      : !formatSupported
-                                        ? uiText("Format unsupported")
-                                        : printer.capabilities.can_start
-                                          ? uiText("Upload + start")
-                                          : uiText("Upload only")}
-                                </span>
+                                  {uiText("Printer details")}
+                                </Link>
                               </span>
-                            </span>
-                            <span className="flex shrink-0 flex-col items-end gap-2 text-xs text-muted-foreground">
-                              {compatibility?.printers.find((row) => row.printer_id === printer.id)
-                                ?.verdict && (
-                                <span>
-                                  {knownUiText(
-                                    compatibility.printers.find(
-                                      (row) => row.printer_id === printer.id,
-                                    )!.verdict,
-                                  )}
-                                </span>
-                              )}
-                              <Link
-                                href={`/printers/${printer.id}`}
-                                onClick={(event) => event.stopPropagation()}
-                                className={buttonVariants({ variant: "outline", size: "xs" })}
-                              >
-                                {uiText("Printer details")}
-                              </Link>
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <p className="pt-2 text-[13px] leading-relaxed text-muted-foreground">
-                      {uiText(
-                        "Loaded material and nozzle come from recorded printer state. This is not a G-code safety check, and unknown state does not block sending.",
-                      )}
-                    </p>
-                  </fieldset>
-                )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="pt-2 text-[13px] leading-relaxed text-muted-foreground">
+                        {uiText(
+                          "Loaded material and nozzle come from recorded printer state. This is not a G-code safety check, and unknown state does not block sending.",
+                        )}
+                      </p>
+                    </fieldset>
+                  )}
 
-                {availablePrinters.length === 0 && (
-                  <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-                    {uiText("No configured printer supports Vault upload/send.")}
+                {printersLoading && <p role="status">{uiText("Loading printers…")}</p>}
+                {printersQuery.isSuccess && availablePrinters.length === 0 && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+                    {uiText(
+                      deliveryMode === "queue" && routingStrategy !== "manual"
+                        ? "This job can wait in the queue for an eligible printer."
+                        : printers.length === 0
+                          ? "No printers configured"
+                          : "None of the configured printers can receive this file.",
+                    )}
+                    {printers.length === 0 &&
+                      (deliveryMode === "send" || routingStrategy === "manual") && (
+                        <Button asChild variant="outline" size="sm">
+                          <Link
+                            href="/printers"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={uiText("Opens in a new tab")}
+                          >
+                            {uiText("Manage printers")}
+                            <ExternalLink aria-hidden="true" className="size-3.5" />
+                          </Link>
+                        </Button>
+                      )}
                   </div>
                 )}
               </div>
@@ -837,10 +895,13 @@ export function SendToButtons({
                   <ChoiceField
                     label={uiText("G-code revision")}
                     value={selectedFile}
-                    onChange={setSelectedFile}
+                    onChange={(fileId) => {
+                      setSelectedFile(fileId);
+                      setPlateSelection(null);
+                    }}
                     options={gcodeFiles.map((file) => ({
                       value: file.id,
-                      label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}${file.revision_label ? ` · ${file.revision_label}` : ""}${file.id === defaultFile?.id ? uiText(" · Recommended") : ""}`,
+                      label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}${file.revision_label ? ` · ${file.revision_label}` : ""}${file.is_recommended ? uiText(" · Recommended") : ""}`,
                       description:
                         [
                           file.metadata?.material_type,
@@ -889,21 +950,65 @@ export function SendToButtons({
                             <option value="" disabled>
                               {uiText("Choose a plate")}
                             </option>
-                            {plates.map((index) => (
-                              <option key={index} value={index}>
-                                {uiText("Plate {value1}", {
-                                  value1: String(index).padStart(2, "0"),
-                                })}
-                              </option>
-                            ))}
+                            {plates.map((index) => {
+                              const number = uiText("Plate {value1}", {
+                                value1: String(index).padStart(2, "0"),
+                              });
+                              const name = platesQuery.data?.identities?.find(
+                                (plate) => plate.number === index,
+                              )?.name;
+                              return (
+                                <option key={index} value={index}>
+                                  {name ? `${number} · ${name}` : number}
+                                </option>
+                              );
+                            })}
                           </select>
                         </label>
                       )}
                     </div>
                   )}
-                  <h3 className="border-t border-border pt-5 text-sm font-semibold">
-                    {uiText("Delivery")}
-                  </h3>
+                  {deliveryMode === "queue" && selectedFileDetails && (
+                    <dl
+                      aria-label={uiText("Queue details")}
+                      className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-3 text-sm"
+                    >
+                      <div className="col-span-2">
+                        <dt className="text-xs text-muted-foreground">
+                          {uiText("Revision test status")}
+                        </dt>
+                        <dd>{revisionStatusLabel(selectedFileDetails.revision_status)}</dd>
+                      </div>
+                      {(!sliced || plateIndex !== null) && (
+                        <>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              {uiText("Estimated time per copy")}
+                            </dt>
+                            <dd className="tabular-nums">
+                              {formatPlateEstimate("estimated_time_s", estimate?.estimated_time_s)}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              {uiText("Filament per copy")}
+                            </dt>
+                            <dd className="tabular-nums">
+                              {formatPlateEstimate(
+                                "filament_weight_g",
+                                estimate?.filament_weight_g,
+                              )}
+                            </dd>
+                          </div>
+                        </>
+                      )}
+                    </dl>
+                  )}
+                  {(deliveryMode === "send" || (spoolmanEnabled && spools.length > 0)) && (
+                    <h3 className="border-t border-border pt-5 text-sm font-semibold">
+                      {uiText("Delivery")}
+                    </h3>
+                  )}
                   {spoolmanEnabled && spools.length > 0 && (
                     <ChoiceField<number | "">
                       label={uiText("Spool")}
@@ -946,7 +1051,7 @@ export function SendToButtons({
                     <Checkbox
                       checked={startPrint}
                       onChange={setStartPrint}
-                      disabled={!selectedPrintersCanStart || sending}
+                      disabled={!selectedPrinters.length || !selectedPrintersCanStart || sending}
                       ariaLabel={uiText("Start print immediately")}
                       className="mt-0.5"
                     />
