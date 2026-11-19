@@ -73,7 +73,10 @@ def encode(prepared: RenderInput, width: int, height: int, views, matte: bool) -
         )
     if not deferred:
         assert isinstance(prepared, PreparedRender)
-        arrays.append(np.ascontiguousarray(prepared.corner_normals, dtype="<f4"))
+        normals = np.ascontiguousarray(prepared.corner_normals, dtype="<f4")
+        if normals.size != prepared.face_count * 9:
+            raise ValueError("compute_geometry_size")
+        arrays.append(normals)
     n, f, k = layout
     header = {
         "vertices": n,

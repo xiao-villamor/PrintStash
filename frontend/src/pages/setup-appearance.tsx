@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { PreviewAppearance } from "@/components/preview-appearance";
 import { SetupFrame } from "@/components/setup-frame";
 import { appearanceChanged } from "@/lib/preview-appearance";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { chooseSetupSamples } from "@/lib/api/config";
 import { captureEditingBase } from "@/lib/api/editing";
 import { useAuth } from "@/lib/auth-context";
 import { userMessage } from "@/lib/errors";
@@ -20,6 +22,10 @@ export default function SetupAppearancePage() {
   const router = useRouter();
   const config = useQuery({ ...vaultConfigOptions(), enabled: user?.is_superuser === true });
   const command = useVaultConfigCommand();
+  const samples = useMutation({ mutationFn: chooseSetupSamples });
+  const [includeSamples, setIncludeSamples] = useState(true);
+  const busy = command.isPending || samples.isPending;
+  const sampleLabel = t("Add the PrintStash sample collection");
   const [draft, setDraft] = useState<{ value: Appearance; base: EditingBase } | null>(null);
 
   useEffect(() => {
@@ -28,24 +34,20 @@ export default function SetupAppearancePage() {
 
   if (!user?.is_superuser) return null;
 
-  function finish() {
-    router.replace("/getting-started");
-  }
-
-  async function saveAndContinue() {
-    if (!config.data) return;
-    if (draft && appearanceChanged(config.data, draft.value)) {
-      try {
+  async function finish(skip: boolean) {
+    try {
+      if (!skip && config.data && draft && appearanceChanged(config.data, draft.value)) {
         await command.mutateAsync({
           session: getSessionVersion(),
           base: draft.base,
           payload: draft.value,
         });
-      } catch {
-        return;
       }
+      await samples.mutateAsync(!skip && includeSamples);
+      router.replace("/getting-started");
+    } catch {
+      // Leave the step available so the administrator can retry the choice.
     }
-    finish();
   }
 
   return (
@@ -53,13 +55,10 @@ export default function SetupAppearancePage() {
       step={4}
       actions={
         <>
-          <Button variant="ghost" disabled={command.isPending} onClick={finish}>
+          <Button variant="ghost" disabled={busy} onClick={() => void finish(true)}>
             {t("Skip")}
           </Button>
-          <Button
-            disabled={!config.data || command.isPending}
-            onClick={() => void saveAndContinue()}
-          >
+          <Button disabled={!config.data || busy} onClick={() => void finish(false)}>
             {t("setup.next")}
           </Button>
         </>
@@ -89,12 +88,21 @@ export default function SetupAppearancePage() {
               base: draft?.base ?? captureEditingBase(config.data),
             });
           }}
-          disabled={command.isPending}
+          disabled={busy}
         />
       )}
-      {command.isError && (
+      <label className="mt-4 flex items-center gap-2 border-t border-border pt-3 text-sm">
+        <Checkbox
+          checked={includeSamples}
+          onChange={setIncludeSamples}
+          disabled={busy}
+          ariaLabel={sampleLabel}
+        />
+        <span>{sampleLabel}</span>
+      </label>
+      {(command.isError || samples.isError) && (
         <p role="alert" className="mt-4 text-sm text-destructive">
-          {userMessage(command.error)}
+          {userMessage(samples.error ?? command.error)}
         </p>
       )}
     </SetupFrame>

@@ -225,7 +225,7 @@ export function InspectedPrintCard({
         )}
       </section>
       <details className="detail-overview-block group">
-        <summary className="flex w-fit cursor-pointer items-center gap-2 text-sm font-medium focus-visible:outline-ring">
+        <summary className="flex w-fit items-center gap-2 text-sm font-medium focus-visible:outline-ring">
           <ChevronRight className="size-4 group-open:rotate-90" aria-hidden="true" />
           {uiText("G-code file")}
         </summary>

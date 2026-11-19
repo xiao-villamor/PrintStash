@@ -52,7 +52,7 @@ import {
   useLibraryBrowse,
 } from "@/features/library/browse";
 import { useLibraryThumbnails } from "@/features/library/thumbnails";
-import { modelSelection } from "@/features/library/collection-selection";
+import { modelSelection } from "@/components/library-collection-selection";
 import { useLibraryAuthority } from "@/features/library/authority";
 import { listLibraryPage } from "@/lib/api/library-browse";
 import type { LibraryBrowseParams } from "@/types/library-browse";

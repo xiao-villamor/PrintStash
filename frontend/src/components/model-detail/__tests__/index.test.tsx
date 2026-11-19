@@ -592,7 +592,7 @@ describe("ModelDetail", () => {
         model: aModel({ collection: "parts/brackets", collection_label: "Parts/Brackets" }),
       });
 
-      expect(await screen.findByTitle("Parts/Brackets")).toHaveTextContent("Brackets");
+      expect(await screen.findByText("Parts/Brackets")).toBeVisible();
       expect(
         requests().filter(
           (call) => new URL(call.url, "http://test").pathname === "/api/v1/collections",
@@ -649,29 +649,39 @@ describe("ModelDetail", () => {
       expect(screen.queryByRole("button", { name: "Send to printer" })).not.toBeInTheDocument();
     });
 
-    it("offers G-code preview for a 3MF without ordinary revisions", async () => {
-      const view = renderDetail({
-        model: aModel({
-          files: [aFile({ file_type: "3mf", original_filename: "sliced.gcode.3mf" })],
-        }),
-        routes: { "GET /api/v1/files/10/plates": json({ state: "skipped", plates: [] }) },
-      });
-
-      expect(await screen.findByRole("button", { name: "G-code" })).toBeVisible();
-      expect(view.requests().some(({ url }) => url.endsWith("/gcode-plates"))).toBe(false);
-    });
-
-    it("labels a sliced archive without a separate revision accurately", async () => {
+    it("offers toolpath preview from a sliced 3MF without separate revisions", async () => {
       renderDetail({
         model: aModel({
           files: [aFile({ file_type: "3mf", original_filename: "sliced.gcode.3mf" })],
         }),
-        routes: { "GET /api/v1/files/10/plates": json({ state: "skipped", plates: [] }) },
+        routes: {
+          "GET /api/v1/files/10/plates": json({ state: "skipped", plates: [] }),
+          "GET /api/v1/files/10/gcode-plates": json({ plates: [1] }),
+        },
       });
 
-      expect(
-        await screen.findByText("Add a Revision to keep the settings that worked."),
-      ).toBeVisible();
+      await waitFor(() => expect(screen.getByRole("button", { name: "G-code" })).toBeEnabled());
+    });
+
+    it("opens a meshless sliced archive directly in the toolpath viewer", async () => {
+      renderDetail({
+        model: aModel({
+          files: [
+            aFile({
+              file_type: "3mf",
+              original_filename: "sliced.gcode.3mf",
+              sliced_geometry: "gcode_only",
+            }),
+          ],
+        }),
+        routes: { "GET /api/v1/files/10/gcode-plates": json({ plates: [1] }) },
+      });
+
+      expect(await screen.findByRole("button", { name: "G-code" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByRole("button", { name: "3D model" })).toBeDisabled();
     });
 
     it("offers each plate of a multi-plate 3MF", async () => {
@@ -1673,12 +1683,13 @@ describe("ModelDetail", () => {
 });
 
 describe("ModelDetail file hashes", () => {
-  it("shows source file hashes in Files without an AI caption panel", async () => {
+  it("keeps the source hash behind the Files row menu", async () => {
     const user = userEvent.setup();
     renderDetail();
     await user.click(await screen.findByRole("tab", { name: /Files/ }));
     const hashes = await screen.findByRole("article");
-    expect(within(hashes).getByTitle("a".repeat(64), { exact: true })).toBeVisible();
-    expect(screen.queryByRole("region", { name: "AI caption" })).not.toBeInTheDocument();
+    expect(within(hashes).queryByTitle("a".repeat(64), { exact: true })).not.toBeInTheDocument();
+    await user.click(within(hashes).getByRole("button", { name: "Actions for cube.stl" }));
+    expect(await screen.findByRole("menuitem", { name: "Copy SHA-256" })).toBeVisible();
   });
 });

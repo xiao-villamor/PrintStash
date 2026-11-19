@@ -75,7 +75,10 @@ def _validate_source_cover(data: bytes, content_type: str | None) -> None:
 
 
 def process_source_cover_upload(
-    data: bytes, content_type: str | None
+    data: bytes,
+    content_type: str | None,
+    *,
+    minimum_frame: tuple[int, int] | None = None,
 ) -> ProcessedSourceCover:
     """Retain the uploaded cover's resolution in a metadata-free WebP."""
     from PIL import Image, ImageOps
@@ -86,6 +89,25 @@ def process_source_cover_upload(
             rgba = ImageOps.exif_transpose(image).convert("RGBA")
             if rgba.getchannel("A").getbbox() is None:
                 raise SourceCoverProcessingError
+            if (
+                minimum_frame is not None
+                and all(
+                    actual <= limit
+                    for actual, limit in zip(rgba.size, minimum_frame, strict=True)
+                )
+                and rgba.size != minimum_frame
+            ):
+                # Keep the capture's legacy stored frame without resampling
+                # its photo. Photo delivery trims this transparent padding.
+                canvas = Image.new("RGBA", minimum_frame)
+                canvas.paste(
+                    rgba,
+                    (
+                        (canvas.width - rgba.width) // 2,
+                        (canvas.height - rgba.height) // 2,
+                    ),
+                )
+                rgba = canvas
             encoded = encode_rendered_pixels(
                 RenderedPixels(rgba.width, rgba.height, rgba.tobytes()),
                 output_format="WEBP",

@@ -11,7 +11,7 @@ class TestSummaries:
         file = make_file(model, filename="part.stl")
         make_system_config(derivatives_previews_enabled=False)
 
-        result = summaries(db_session, [model.id])[model.id]
+        result = summaries(db_session, [model])[model.id]
 
         assert result.model_dump() == {
             "kind": "artifact",
@@ -29,7 +29,7 @@ class TestSummaries:
 
         model = make_model()
         make_file(model, filename="part.stl")
-        result = summaries(db_session, [model.id])[model.id]
+        result = summaries(db_session, [model])[model.id]
         assert result.state == "disabled"
         assert result.published is None
         assert preview_activity(db_session).total == 1

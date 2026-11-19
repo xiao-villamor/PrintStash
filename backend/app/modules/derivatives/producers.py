@@ -267,7 +267,7 @@ def _publish_thumbnail(
         file_row
     )
     try:
-        if embedded_container:
+        if embedded_container and embedded_kind is PreviewImageKind.PHOTO:
             source_image = thumbnail.to_photo_webp(
                 image, size=thumbnail.PhotoSize.THUMBNAIL
             )

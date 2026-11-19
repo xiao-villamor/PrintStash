@@ -44,13 +44,13 @@ describe("thumbnail camera", () => {
     expect(viewerPresetDirection("front").toArray()).toEqual([0, 0, 1]);
   });
 
-  it("keeps top-view fitting finite and nearly overhead", () => {
+  it("fits the offset top camera", () => {
     const size = new THREE.Vector3(240, 150, 250);
     const camera = fitCameraToBounds(size, 1.6, 45, viewerPresetDirection("top"));
 
     expect(Number.isFinite(camera.distance)).toBe(true);
     expect(camera.position.y).toBeGreaterThan(0);
-    expect(camera.position.z / camera.position.y).toBeCloseTo(0.001, 5);
+    expect(camera.position.z / camera.position.y).toBeCloseTo(Math.tan(0.02), 5);
   });
 
   it.each([

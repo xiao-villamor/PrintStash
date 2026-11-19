@@ -53,10 +53,14 @@ from .preview_profile import (
     preview_appearance,
 )
 from .render_geometry import (
+    FrozenRender,
     MeshRenderInput,
     PreparedRender,
     SceneRenderInput,
+    prepare_frozen_mesh_render,
+    prepare_frozen_render,
     prepare_mesh_render,
+    prepare_scene,
     prepare_scene_render,
 )
 from .similarity.components import ExpandedScene
@@ -141,7 +145,7 @@ class PreparedRasteriser(DeferredRasteriser, Protocol):
 
     def draw_prepared(
         self,
-        geometry: PreparedRender,
+        geometry: PreparedRender | FrozenRender,
         rotation: FloatArray,
         screen: FloatArray,
         width: int,
@@ -231,11 +235,17 @@ def _render_thumbnail(
         from PIL import Image  # pyright: ignore[reportMissingTypeStubs]
 
         del Image
-        prepared = (
-            prepare_scene_render(source.scene, face_chunk_size=face_chunk_size)
-            if isinstance(source, SceneRenderInput)
-            else prepare_mesh_render(source.mesh, face_chunk_size=face_chunk_size)
-        )
+        if isinstance(source, SceneRenderInput):
+            prepared = (
+                prepare_frozen_render(
+                    prepare_scene(source.scene), face_chunk_size=face_chunk_size
+                )
+                if matte
+                else prepare_scene_render(source.scene, face_chunk_size=face_chunk_size)
+            )
+        else:
+            prepare = prepare_frozen_mesh_render if matte else prepare_mesh_render
+            prepared = prepare(source.mesh, face_chunk_size=face_chunk_size)
         if prepared is None:
             if logger is not None:
                 logger.warning("mesh_render: empty mesh for %s", name)
@@ -267,7 +277,7 @@ def _render_thumbnail(
 
 
 def render_prepared_thumbnail(
-    prepared: PreparedRender,
+    prepared: PreparedRender | FrozenRender,
     name: str,
     width: int = 640,
     height: int = 480,
@@ -402,7 +412,7 @@ def make_preview_shade(albedo: Vector, lighting: PreviewLighting) -> Shade:
 
 
 def render_prepared_pixels(
-    prepared: PreparedRender,
+    prepared: PreparedRender | FrozenRender,
     name: str,
     width: int = 640,
     height: int = 480,
@@ -432,7 +442,12 @@ def render_prepared_pixels(
         return None
 
     try:
+        studio = not (matte or reference_thumbnail)
         geometry = prepared
+        if not studio and isinstance(geometry, PreparedRender):
+            geometry = prepare_frozen_render(geometry, face_chunk_size=face_chunk_size)
+        if studio and isinstance(geometry, FrozenRender):
+            raise ValueError("studio_render_requires_corner_normals")
         verts = geometry.vertices
 
         profile = (
@@ -497,7 +512,6 @@ def render_prepared_pixels(
         rasterise = rasterise_triangles or _rasterise_triangles
 
         # 5. Shade interpolated normals with an albedo and lights in view-space.
-        studio = not (matte or reference_thumbnail)
         appearance = preview_appearance()
         look = STUDIO_LOOKS[appearance.look]
         lighting = (
@@ -528,7 +542,11 @@ def render_prepared_pixels(
             visible_total = start = 0
             for fc in geometry.face_chunks(chunk):
                 end = start + len(fc)
-                corner_n = geometry.corner_normals[start:end]
+                corner_n = (
+                    geometry.normals_for(fc)
+                    if isinstance(geometry, FrozenRender)
+                    else geometry.corner_normals[start:end]
+                )
                 start = end
                 tri = screen[fc]  # (c, 3, 3) screen-space
                 view_tri = view[fc]  # (c, 3, 3) view-space
@@ -607,7 +625,7 @@ def render_prepared_pixels(
         # Alpha = 255 wherever a triangle was painted, 0 elsewhere.
         alpha = np.where(zbuf < np.inf, np.uint8(255), np.uint8(0)).astype(np.uint8)
         rgba = np.dstack([img, alpha])
-        if studio and appearance.floor_grid:
+        if studio and appearance.floor_grid and alpha.any():
             paint_floor_grid(
                 rgba,
                 rotation,

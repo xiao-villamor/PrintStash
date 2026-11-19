@@ -977,6 +977,7 @@ def _attach_capture_cover(
     assert source.id is not None
     backend = get_backend()
     data = backend.read_bytes(cover.storage_key)
+    width = int(settings.model_thumbnail_width)
     result = source_covers.prepare_candidate(
         session,
         backend,
@@ -984,6 +985,7 @@ def _attach_capture_cover(
         actor_id=row.owner_user_id,
         data=data,
         content_type=cover.media_type,
+        minimum_frame=(width, round(width * 3 / 4)),
     )
     # Test doubles and legacy adapters may acknowledge without returning the
     # ownership write; production publication always returns it.

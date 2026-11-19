@@ -52,14 +52,26 @@ def _make_3mf(
 
 
 class TestExtractEmbedded3mfThumbnail:
-    def test_prefers_the_canonical_thumbnail_over_a_larger_plate_image(
+    def test_prefers_the_larger_plate_image_over_the_small_thumbnail(
         self, tmp_path: Path
     ) -> None:
-        p = _make_3mf(
+        from PIL import Image
+
+        small, large = io.BytesIO(), io.BytesIO()
+        Image.new("RGB", (32, 24), "red").save(small, format="PNG")
+        Image.new("RGB", (640, 480), "green").save(large, format="PNG")
+        path = _make_3mf(
             tmp_path,
-            {"Metadata/thumbnail.png": _PNG_SMALL, "Metadata/plate_1.png": _PNG_BIG},
+            {
+                "Metadata/thumbnail.png": small.getvalue(),
+                "Metadata/plate_1.png": large.getvalue(),
+            },
         )
-        assert extract_embedded_3mf_thumbnail(p) == _PNG_SMALL
+
+        assert (
+            extract_embedded_3mf_thumbnail(path, validate_image=True)
+            == large.getvalue()
+        )
 
     @pytest.mark.parametrize("folder", ["Metadata", "3D/thumbnails", "thumbnails"])
     def test_accepts_known_thumbnail_dirs(self, tmp_path: Path, folder: str) -> None:

@@ -56,9 +56,12 @@ def get_shared_model(token: str, session: Session = Depends(get_session)):
     share.record_access(session, link)
     from app.modules.library.model_views import previews
 
-    preview = previews.summaries(
-        session, [link.model_id], root=f"/api/v1/share/{token}"
-    )[link.model_id]
+    model = session.get(Model, link.model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail="not_found")
+    preview = previews.summaries(session, [model], root=f"/api/v1/share/{token}")[
+        link.model_id
+    ]
     if preview.kind == "artifact":
         share.share_file_or_404(session, link, preview.file_id)
     return share.public_detail(session, link, preview)
@@ -73,8 +76,12 @@ def get_shared_thumbnail(
     link = share.resolve_share(session, token)
     model = session.get(Model, link.model_id)
     if model is not None and model.cover_filename is not None:
+        from app.modules.media.thumbnail import PhotoSize, to_photo_webp
+
         return Response(
-            content=model_covers.content(model),
+            content=to_photo_webp(
+                model_covers.content(model), size=PhotoSize.THUMBNAIL
+            ).data,
             media_type="image/webp",
             headers={
                 "Cache-Control": "private, no-store",

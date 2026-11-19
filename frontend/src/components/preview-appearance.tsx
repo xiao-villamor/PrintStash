@@ -19,11 +19,6 @@ const looks = {
 
 const lookOrder: readonly PreviewLook[] = ["sky", "printstash_blue", "slate", "graphite", "sand"];
 
-const themes = [
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-] as const;
-
 function swatchStyle(look: PreviewLook): CSSProperties & { "--preview-swatch": string } {
   return { "--preview-swatch": PREVIEW_LOOK_COLOURS[look] };
 }
@@ -42,6 +37,10 @@ export function PreviewAppearance({
   status?: ReactNode;
 }) {
   const { t } = useI18n();
+  const themes = [
+    { value: "light", label: t("Light") },
+    { value: "dark", label: t("Dark") },
+  ] as const;
   const colourLabel = useId();
   const colourHint = useId();
   const gridHint = useId();
@@ -100,7 +99,7 @@ export function PreviewAppearance({
               <label
                 key={look}
                 title={t(looks[look])}
-                className="relative block cursor-pointer has-disabled:cursor-disabled"
+                className="relative block has-disabled:cursor-disabled"
               >
                 <input
                   type="radio"
@@ -162,7 +161,7 @@ export function PreviewAppearance({
         >
           {themes.map((theme) => (
             <figure key={theme.value} className="m-0 min-w-0 space-y-1.5">
-              <figcaption className="text-xs text-muted-foreground">{t(theme.label)}</figcaption>
+              <figcaption className="text-xs text-muted-foreground">{theme.label}</figcaption>
               <div
                 data-preview-theme={theme.value}
                 className="text-foreground"

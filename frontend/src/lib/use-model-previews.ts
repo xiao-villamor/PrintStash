@@ -178,6 +178,7 @@ export function useModelPreviews(
     if (navigationViews.some((view) => view.id === id)) warm(destination(1, id));
   }
   function destination(delta: -1 | 1, from: PreviewSelection = selected) {
+    if (navigationViews.length < 2) return undefined;
     const index = navigationViews.findIndex((view) => view.id === from);
     return navigationViews[
       index < 0

@@ -596,7 +596,7 @@ describe("SendToButtons sliced archives", () => {
     );
   });
 
-  it("keeps invalid quantities out of the queue and allows correction", async () => {
+  it("accepts a corrected quantity after invalid input", async () => {
     renderPanel({ open: true, initialDeliveryMode: "queue" });
     const copies = screen.getByRole("spinbutton", { name: "Copies" });
     const submit = screen.getByRole("button", { name: "Add to queue" });

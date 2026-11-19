@@ -305,12 +305,11 @@ class TestRenderDispatch:
         from unittest.mock import Mock
 
         import numpy as np
-        from printstash_core.mesh.preview_profile import RASTERIZER_RECIPE
         from printstash_core.mesh.render_geometry import PreparedRender
 
         from app.core.config import _overlay
         from app.modules.media.compute_geometry import decode, encode, split
-        from app.modules.media.compute_render import RECIPE
+        from app.modules.media.compute_render import render_recipe
         from app.runtime.compute.contracts import ComputeUnavailable, Reason
         from app.runtime.compute.protocol import (
             BinaryRenderRequest,
@@ -334,7 +333,7 @@ class TestRenderDispatch:
             deadline=time.monotonic() + 10,
             priority=Priority.BACKGROUND,
             request_id="render",
-            recipe=f"{RECIPE}:{RASTERIZER_RECIPE}:24x24:1:0",
+            recipe=render_recipe(24, 24),
             units=1,
         )
         if binary:

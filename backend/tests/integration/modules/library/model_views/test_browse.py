@@ -100,7 +100,8 @@ class TestThumbnailItems:
         # per page (their derivative rows add one more only when meshes exist).
         assert len(statements) == 5
         assert all(
-            statement.lstrip().upper().startswith("SELECT") for statement in statements
+            statement.lstrip().upper().startswith(("SELECT", "WITH"))
+            for statement in statements
         )
         assert not any(
             "model_tags" in statement or "metadata" in statement

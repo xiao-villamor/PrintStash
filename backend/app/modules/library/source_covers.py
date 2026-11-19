@@ -85,6 +85,7 @@ def prepare_candidate(
     actor_id: int | None,
     data: bytes,
     content_type: str | None,
+    minimum_frame: tuple[int, int] | None = None,
 ) -> SourceCoverCandidate:
     """Publish private bytes without inserting a cover or changing visible bytes.
 
@@ -92,7 +93,9 @@ def prepare_candidate(
     can become visible only through attach_candidate followed by adoption in
     the caller's fenced transaction. Storage probes happen entirely here.
     """
-    processed = process_source_cover_upload(data, content_type)
+    processed = process_source_cover_upload(
+        data, content_type, minimum_frame=minimum_frame
+    )
     with session.no_autoflush:
         existing = get(session, provenance_source_id)
         previous = (

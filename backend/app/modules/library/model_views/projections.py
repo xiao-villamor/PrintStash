@@ -332,7 +332,7 @@ def _hydrate_list_rows(
     tags_by_model = _model_tag_names(session, model_ids)
     from .previews import summaries as preview_summaries
 
-    previews = preview_summaries(session, model_ids)
+    previews = preview_summaries(session, rows)
     similarity = similarity_summaries(session, user, model_ids)
     starred_ids = set(session.exec(stars_query, params=parameters).all())
 

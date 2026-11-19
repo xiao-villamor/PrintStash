@@ -819,7 +819,7 @@ class TestBrowseThumbnails:
             {
                 "model_id": second.id,
                 "thumbnail_url": "/api/v1/files/123/thumbnail",
-                "previews": NO_PREVIEWS,
+                "previews": {**NO_PREVIEWS, "cover_image_kind": "render"},
             },
             {"model_id": first.id, "thumbnail_url": None, "previews": NO_PREVIEWS},
         ]
@@ -905,7 +905,7 @@ class TestBrowseThumbnails:
                 {
                     "model_id": model.id,
                     "thumbnail_url": f"/api/v1/files/{file.id}/thumbnail?v={version}",
-                    "previews": NO_PREVIEWS,
+                    "previews": {**NO_PREVIEWS, "cover_image_kind": "render"},
                 }
             ],
             "authorization_revision": original["authorization_revision"],

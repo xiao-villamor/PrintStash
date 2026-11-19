@@ -66,9 +66,10 @@ class TestPreviewCoverage:
         assert result.bounds_max[0] == pytest.approx(101.0)
         with Image.open(io.BytesIO(result.png)) as image:
             alpha = np.asarray(image.getchannel("A"))
-        assert np.any(alpha[:, :128])
-        assert np.any(alpha[:, -128:])
-        assert not np.any(alpha[:, 192:320])
+        model = alpha == 255  # The floor is translucent, even over empty space.
+        assert np.any(model[:, :128])
+        assert np.any(model[:, -128:])
+        assert not np.any(model[:, 192:320])
 
     def test_preserves_long_appendage(self, tmp_path: Path) -> None:
         import io

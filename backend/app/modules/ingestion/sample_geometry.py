@@ -3,14 +3,39 @@
 from __future__ import annotations
 
 import math
+import struct
+from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image, ImageDraw
-from trimesh import Trimesh
-from trimesh.creation import box
 
 
-def _relief(heights: np.ndarray, layer_edges: tuple[float, ...]) -> Trimesh:
+@dataclass(frozen=True)
+class SampleMesh:
+    vertices: np.ndarray
+    faces: np.ndarray
+
+    def to_stl(self, header: bytes) -> bytes:
+        """Serialize a small generated solid directly as binary STL."""
+        triangles = self.vertices[self.faces]
+        normals = np.cross(
+            triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
+        )
+        normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+        facets = np.zeros(
+            len(triangles),
+            dtype=[
+                ("normal", "<f4", (3,)),
+                ("vertices", "<f4", (3, 3)),
+                ("attributes", "<u2"),
+            ],
+        )
+        facets["normal"] = normals
+        facets["vertices"] = triangles
+        return struct.pack("<80sI", header, len(facets)) + facets.tobytes()
+
+
+def _relief(heights: np.ndarray, layer_edges: tuple[float, ...]) -> SampleMesh:
     """Build the exposed faces of a stepped solid, sharing vertices at seams."""
     faces: list[tuple[int, int, int]] = []
     vertices: dict[tuple[float, float, float], int] = {}
@@ -41,10 +66,12 @@ def _relief(heights: np.ndarray, layer_edges: tuple[float, ...]) -> Trimesh:
                     quad((x, y, low), (x1, y, low), (x1, y, high), (x, y, high))
                 if y1 == depth or heights[x, y1] < index:
                     quad((x, y1, low), (x, y1, high), (x1, y1, high), (x1, y1, low))
-    return Trimesh(vertices=list(vertices), faces=faces, process=False)
+    return SampleMesh(
+        np.asarray(list(vertices), dtype=np.float64), np.asarray(faces, dtype=np.int64)
+    )
 
 
-def _logo_plaque() -> Trimesh:
+def _logo_plaque() -> SampleMesh:
     # Trace the white monogram from frontend/public/logo.svg in its original
     # coordinate system. Sample the arc and cubic filament stroke before extrusion.
     image = Image.new("1", (56, 56))
@@ -90,11 +117,13 @@ def _logo_plaque() -> Trimesh:
     return _relief(heights, (0.0, 2.0, 3.2))
 
 
-def sample_models() -> tuple[tuple[str, Trimesh], ...]:
+def sample_models() -> tuple[tuple[str, SampleMesh], ...]:
     tray = np.ones((48, 32), dtype=np.uint8)
     tray[:2, :] = tray[-2:, :] = tray[:, :2] = tray[:, -2:] = 2
+    unit = _relief(np.ones((1, 1), dtype=np.uint8), (0.0, 20.0))
+    cube = SampleMesh(unit.vertices * (20, 20, 1), unit.faces)
     return (
         ("PrintStash logo plaque", _logo_plaque()),
-        ("20 mm calibration cube", box(extents=(20, 20, 20))),
+        ("20 mm calibration cube", cube),
         ("Small parts tray", _relief(tray, (0.0, 2.0, 8.0))),
     )

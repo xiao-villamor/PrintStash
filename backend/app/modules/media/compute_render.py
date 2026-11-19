@@ -42,16 +42,22 @@ def render_recipe(width: int, height: int, views: int = 1, matte: bool = False) 
 
 
 def appearance_for_recipe(recipe: str) -> PreviewAppearance:
-    _, identity, *_ = recipe.split(":")
+    parts = recipe.split(":")
+    if len(parts) != 5 or parts[0] != RECIPE:
+        raise ValueError("compute_render_identity")
+    identity = parts[1]
     if identity == RASTERIZER_RECIPE:
         return DEFAULT_APPEARANCE
-    prefix, look, grid = identity.rsplit("-", 2)
-    if (
-        prefix != f"{RASTERIZER_RECIPE}-{PREVIEW_PROFILE.recipe_fingerprint}"
-        or grid not in {"0", "1"}
-    ):
+    prefix, _, choice = identity.partition(
+        f"{RASTERIZER_RECIPE}-{PREVIEW_PROFILE.recipe_fingerprint}-"
+    )
+    look, _, grid = choice.rpartition("-")
+    if prefix or grid not in {"0", "1"}:
         raise ValueError("compute_render_identity")
-    return PreviewAppearance(PreviewLook(look), grid == "1")
+    try:
+        return PreviewAppearance(PreviewLook(look), grid == "1")
+    except ValueError as exc:
+        raise ValueError("compute_render_identity") from exc
 
 
 def _require_visible_frame(frame: RenderedPixels) -> RenderedPixels:

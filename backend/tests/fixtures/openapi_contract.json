@@ -120,6 +120,45 @@
         "title": "ApiKeyRead",
         "type": "object"
       },
+      "ArchiveImageRead": {
+        "properties": {
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "image_kind": {
+            "enum": [
+              "photo",
+              "slicer_render"
+            ],
+            "title": "Image Kind",
+            "type": "string"
+          },
+          "plate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_kind",
+          "file_id",
+          "url",
+          "plate"
+        ],
+        "title": "ArchiveImageRead",
+        "type": "object"
+      },
       "ArchiveSelectRequest": {
         "description": "Body for POST /ingest/archive/{archive_id}/select.",
         "properties": {
@@ -245,11 +284,28 @@
       "ArtifactPreviews": {
         "description": "The view set of the one mesh Artifact selected for this Model.",
         "properties": {
+          "archive_images": {
+            "items": {
+              "$ref": "#/components/schemas/ArchiveImageRead"
+            },
+            "title": "Archive Images",
+            "type": "array"
+          },
           "cover_camera": {
             "const": "unknown",
             "default": "unknown",
             "title": "Cover Camera",
             "type": "string"
+          },
+          "cover_image_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewImageKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "file_id": {
             "title": "File Id",
@@ -260,6 +316,48 @@
             "default": "artifact",
             "title": "Kind",
             "type": "string"
+          },
+          "large_cover_image_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewImageKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "large_cover_thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Large Cover Thumbnail Url"
+          },
+          "large_cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Large Cover Url"
+          },
+          "large_cover_view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ViewId"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "published": {
             "anyOf": [
@@ -6226,6 +6324,16 @@
             "title": "Size Bytes",
             "type": "integer"
           },
+          "sliced_geometry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SlicedGeometry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "tags": {
             "default": [],
             "items": {
@@ -8147,6 +8255,7 @@
           "ingestion.upload_recovery",
           "ingestion.url",
           "ingestion.url_selection",
+          "ingestion.samples",
           "ingestion.scratch_cleanup",
           "notifications.deliver",
           "notifications.retention",
@@ -13383,17 +13492,65 @@
       "NoPreviewSubject": {
         "description": "The Model has no live mesh Artifact; only its cover can be shown.",
         "properties": {
+          "archive_images": {
+            "items": {
+              "$ref": "#/components/schemas/ArchiveImageRead"
+            },
+            "title": "Archive Images",
+            "type": "array"
+          },
           "cover_camera": {
             "const": "unknown",
             "default": "unknown",
             "title": "Cover Camera",
             "type": "string"
           },
+          "cover_image_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewImageKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "kind": {
             "const": "none",
             "default": "none",
             "title": "Kind",
             "type": "string"
+          },
+          "large_cover_image_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewImageKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "large_cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Large Cover Url"
+          },
+          "large_cover_view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ViewId"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -15021,13 +15178,39 @@
         "title": "PreviewActivity",
         "type": "object"
       },
+      "PreviewImageKind": {
+        "enum": [
+          "photo",
+          "render",
+          "slicer_render"
+        ],
+        "title": "PreviewImageKind",
+        "type": "string"
+      },
       "PreviewImageRead": {
         "properties": {
           "id": {
             "$ref": "#/components/schemas/ViewId"
           },
+          "image_kind": {
+            "const": "render",
+            "default": "render",
+            "title": "Image Kind",
+            "type": "string"
+          },
           "role": {
             "$ref": "#/components/schemas/ViewRole"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
           },
           "url": {
             "title": "Url",
@@ -15041,6 +15224,25 @@
         ],
         "title": "PreviewImageRead",
         "type": "object"
+      },
+      "PreviewLook": {
+        "enum": [
+          "sky",
+          "printstash_blue",
+          "slate",
+          "graphite",
+          "sand"
+        ],
+        "title": "PreviewLook",
+        "type": "string"
+      },
+      "PreviewSize": {
+        "enum": [
+          "full",
+          "thumbnail"
+        ],
+        "title": "PreviewSize",
+        "type": "string"
       },
       "PreviewState": {
         "enum": [
@@ -18051,6 +18253,16 @@
       },
       "PublishedPreviewRead": {
         "properties": {
+          "cover_view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ViewId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "manifest_url": {
             "title": "Manifest Url",
             "type": "string"
@@ -18062,7 +18274,7 @@
             "items": {
               "$ref": "#/components/schemas/PreviewImageRead"
             },
-            "maxItems": 6,
+            "maxItems": 7,
             "minItems": 1,
             "title": "Views",
             "type": "array"
@@ -19680,6 +19892,19 @@
         "title": "SetupResponse",
         "type": "object"
       },
+      "SetupSampleChoice": {
+        "properties": {
+          "include": {
+            "title": "Include",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "include"
+        ],
+        "title": "SetupSampleChoice",
+        "type": "object"
+      },
       "SetupSessionResponse": {
         "properties": {
           "csrf": {
@@ -20350,6 +20575,13 @@
         ],
         "title": "ShareLinkRead",
         "type": "object"
+      },
+      "SlicedGeometry": {
+        "enum": [
+          "gcode_only"
+        ],
+        "title": "SlicedGeometry",
+        "type": "string"
       },
       "SlicerProfilePage": {
         "properties": {
@@ -22599,6 +22831,13 @@
             "title": "Prefer Rendered 3Mf Preview",
             "type": "boolean"
           },
+          "preview_floor_grid": {
+            "title": "Preview Floor Grid",
+            "type": "boolean"
+          },
+          "preview_look": {
+            "$ref": "#/components/schemas/PreviewLook"
+          },
           "s3_access_key": {
             "default": "",
             "title": "S3 Access Key",
@@ -22695,7 +22934,9 @@
           "derivatives_toolpath_enabled",
           "derivatives_previews_enabled",
           "derivatives_previews_include_poles",
-          "prefer_rendered_3mf_preview"
+          "prefer_rendered_3mf_preview",
+          "preview_look",
+          "preview_floor_grid"
         ],
         "title": "VaultConfigRead",
         "type": "object"
@@ -23072,6 +23313,27 @@
               }
             ],
             "title": "Prefer Rendered 3Mf Preview"
+          },
+          "preview_floor_grid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Floor Grid"
+          },
+          "preview_look": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewLook"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "s3_access_key": {
             "anyOf": [
@@ -28517,6 +28779,123 @@
         ]
       }
     },
+    "/api/v1/config/preview-example": {
+      "get": {
+        "operationId": "preview_example_api_v1_config_preview_example_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "look",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PreviewLook"
+            }
+          },
+          {
+            "in": "query",
+            "name": "floor_grid",
+            "required": true,
+            "schema": {
+              "title": "Floor Grid",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Preview Example",
+        "tags": [
+          "config"
+        ]
+      }
+    },
+    "/api/v1/config/sample-collection": {
+      "post": {
+        "operationId": "add_sample_collection_api_v1_config_sample_collection_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/SetupSampleChoice"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Setup"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Add Sample Collection Api V1 Config Sample Collection Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Add Sample Collection",
+        "tags": [
+          "config"
+        ]
+      }
+    },
     "/api/v1/config/storage-roots/enroll": {
       "post": {
         "operationId": "enroll_storage_root_api_v1_config_storage_roots_enroll_post",
@@ -29451,6 +29830,74 @@
         "summary": "Update a local filament preset",
         "tags": [
           "filament-profiles"
+        ]
+      }
+    },
+    "/api/v1/files/{file_id}/archive-images/{index}": {
+      "get": {
+        "operationId": "archive_image_api_v1_files__file_id__archive_images__index__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "title": "Index",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "framing",
+            "required": false,
+            "schema": {
+              "default": "source",
+              "enum": [
+                "source",
+                "photo"
+              ],
+              "title": "Framing",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read a sliced archive image",
+        "tags": [
+          "files"
         ]
       }
     },
@@ -36890,6 +37337,20 @@
               "title": "Model Id",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": "original",
+              "enum": [
+                "thumbnail",
+                "original"
+              ],
+              "title": "Size",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -37456,6 +37917,15 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/ViewId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PreviewSize",
+              "default": "full"
             }
           }
         ],
@@ -45665,6 +46135,15 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/ViewId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PreviewSize",
+              "default": "full"
             }
           }
         ],

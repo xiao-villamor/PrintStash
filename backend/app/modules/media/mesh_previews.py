@@ -37,7 +37,7 @@ _3MF_THUMBNAIL_DIRS = (
 def extract_embedded_3mf_thumbnail(
     path: Path, *, validate_image: bool = False, file_type: str | None = None
 ) -> Optional[bytes]:
-    """Return one semantically unambiguous PNG preview from a 3MF, or None.
+    """Return the largest admissible embedded PNG preview from a 3MF, or None.
 
     3MF files are ZIP archives; slicers store a rendered plate preview next to
     the mesh. Using it skips the software rasteriser entirely and matches what
@@ -137,7 +137,9 @@ def extract_embedded_3mf_thumbnail(
                 )
                 return None
             aggregate_bytes = 0
+            best: tuple[int, str, bytes] | None = None
             for candidate in candidates:
+                area = 0
                 if candidate.file_size > _MAX_3MF_THUMBNAIL_BYTES:
                     logger.warning(
                         "mesh_processing: embedded 3MF thumbnail exceeds limit",
@@ -171,7 +173,8 @@ def extract_embedded_3mf_thumbnail(
                         png_width, png_height = struct.unpack(">II", data[16:24])
                     except struct.error:
                         continue
-                    if png_width * png_height > 25_000_000:
+                    area = png_width * png_height
+                    if not 0 < area <= 25_000_000:
                         continue
                 elif validate_image:
                     continue
@@ -193,9 +196,15 @@ def extract_embedded_3mf_thumbnail(
                             extra={"entry": candidate.filename},
                         )
                         continue
+                # The candidate list gives precedence for equal-sized images.
+                # A larger preview always wins over a slicer's small companion.
+                if best is None or area > best[0]:
+                    best = (area, candidate.filename, data)
+            if best is not None:
+                _, name, data = best
                 logger.info(
                     "mesh_processing: using embedded 3MF thumbnail %s (%d bytes)",
-                    candidate.filename,
+                    name,
                     len(data),
                 )
                 return data

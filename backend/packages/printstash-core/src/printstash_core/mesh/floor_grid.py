@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
+
+    FloatArray = NDArray[np.floating[Any]]
 
 CELL_SIZES = (1, 2, 5, 10, 20, 50)
 GRID_RGB = (138, 147, 166)
@@ -15,10 +17,10 @@ GRID_ALPHA = 0.8
 
 def paint_floor_grid(
     rgba: NDArray[np.uint8],
-    rotation,
-    bounds_min,
-    bounds_max,
-    view_center,
+    rotation: FloatArray,
+    bounds_min: FloatArray,
+    bounds_max: FloatArray,
+    view_center: tuple[float, float] | FloatArray,
     scale: float,
     *,
     scale_y: float | None = None,

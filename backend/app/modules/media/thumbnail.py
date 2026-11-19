@@ -59,22 +59,24 @@ def to_photo_webp(data: bytes, *, size: PhotoSize) -> PhotoWebP:
                 bounds = rgba.getchannel("A").getbbox()
                 if bounds is None:
                     raise EmptyThumbnailError("thumbnail_empty")
+                width = int(settings.model_thumbnail_width)
+                target = (width, round(width * 3 / 4))
                 # Older chosen and embedded covers had transparent padding baked
                 # into the WebP. Trim only that padding and keep the photo's ratio.
                 if bounds != (0, 0, rgba.width, rgba.height):
                     rgba = rgba.crop(bounds)
                 elif (
-                    size is PhotoSize.ORIGINAL
+                    (
+                        size is PhotoSize.ORIGINAL
+                        or (rgba.width <= target[0] and rgba.height <= target[1])
+                    )
                     and image.format == "WEBP"
                     and oriented.size == image.size
                     and not image.getexif()
                 ):
                     return PhotoWebP(data, rgba.width, rgba.height)
                 if size is PhotoSize.THUMBNAIL:
-                    width = int(settings.model_thumbnail_width)
-                    rgba.thumbnail(
-                        (width, round(width * 3 / 4)), Image.Resampling.LANCZOS
-                    )
+                    rgba.thumbnail(target, Image.Resampling.LANCZOS)
                 encoded = encode_rendered_pixels(
                     RenderedPixels(rgba.width, rgba.height, rgba.tobytes()),
                     output_format="WEBP",

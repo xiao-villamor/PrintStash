@@ -67,7 +67,7 @@ function Controlled({ files = [first, second, source, alternate] }: { files?: Fi
 }
 
 describe("RevisionCompare", () => {
-  it("condenses confirmed empty histories and retains all fields on request", async () => {
+  it("reveals the complete history fields on request", async () => {
     renderApp(
       <RevisionCompare
         left={first}

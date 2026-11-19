@@ -23,6 +23,7 @@ class Geometry:
     faces: Any
     corner_normals: Any
     bounds: Any
+    has_surface: bool
 
     def destroy(self):
         for buffer in (
@@ -94,7 +95,9 @@ class CompactGeometry:
         try:
             for size in sizes:
                 buffers.append(self._buffer(size))
-            geometry = Geometry(*buffers)
+            geometry = Geometry(
+                *buffers, has_surface=bool(prepared.corner_normals.any())
+            )
             self.geometry[key] = geometry
             bound_sizes = bounds_scratch_sizes(len(prepared.vertices))
             scratch_size = sum(bound_sizes)

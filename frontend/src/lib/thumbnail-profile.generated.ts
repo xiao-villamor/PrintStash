@@ -18,9 +18,9 @@ export const THUMBNAIL_PROFILE = {
   },
 } as const;
 export const PREVIEW_LOOK_COLOURS = {
-  "sky": "#9FB8DA",
-  "printstash_blue": "#5E8BCB",
-  "slate": "#8E97A6",
-  "graphite": "#6E737C",
-  "sand": "#CDBCA8"
+  sky: "#9FB8DA",
+  printstash_blue: "#5E8BCB",
+  slate: "#8E97A6",
+  graphite: "#6E737C",
+  sand: "#CDBCA8",
 } as const;

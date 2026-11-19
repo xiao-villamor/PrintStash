@@ -5351,6 +5351,7 @@
   "Millimetre grid under the model.": "Cuadrícula en milímetros bajo el modelo.",
   "Re-rendering images · {remaining} remaining": "Regenerando imágenes · {remaining} pendientes",
   "Sample collection": "Colección de ejemplo",
+  "Add the PrintStash sample collection": "Añadir la colección de ejemplo de PrintStash",
   "Add sample collection": "Añadir colección de ejemplo",
   "Sample collection queued": "Colección de ejemplo en cola",
   "Sample collection already exists": "La colección de ejemplo ya existe"

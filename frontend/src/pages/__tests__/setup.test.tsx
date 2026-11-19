@@ -393,11 +393,11 @@ describe("SetupPage", () => {
     await user.click(await screen.findByRole("button", { name: "Edit storage" }));
     expect(screen.getByLabelText("Data directory")).toHaveValue("/data/files");
   });
-  it("continues the guide with the authenticated administrator", async () => {
+  it("opens Appearance for the authenticated administrator", async () => {
     const user = await reachStorage();
     await continueToReview(user);
     await user.click(screen.getByRole("button", { name: "Create account" }));
-    await waitFor(() => expect(currentPath()).toBe("/getting-started"));
+    await waitFor(() => expect(currentPath()).toBe("/setup-appearance"));
     expect(deps.storeLogin).toHaveBeenCalledWith(
       "token",
       expect.objectContaining({ username: "admin" }),
@@ -410,7 +410,7 @@ describe("SetupPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Create account" }));
 
-    await waitFor(() => expect(currentPath()).toBe("/getting-started"));
+    await waitFor(() => expect(currentPath()).toBe("/setup-appearance"));
     expect(listTasks()).toHaveLength(0);
   });
   it("keeps existing tasks when account creation fails", async () => {
@@ -867,7 +867,7 @@ describe("setup source ownership", () => {
     await continueToReview(user);
 
     await user.click(screen.getByRole("button", { name: "Create account" }));
-    await waitFor(() => expect(currentPath()).toBe("/getting-started"));
+    await waitFor(() => expect(currentPath()).toBe("/setup-appearance"));
 
     const cached = JSON.stringify(
       queryClient

@@ -27,15 +27,24 @@ from app.schemas.editing import EditingBase, EditPrecondition
 router = APIRouter(prefix="/config", tags=["config"])
 
 
+class SetupSampleChoice(BaseModel):
+    include: StrictBool
+
+
 @router.post("/sample-collection", status_code=status.HTTP_202_ACCEPTED)
 def add_sample_collection(
+    setup: SetupSampleChoice | None = None,
     user: User = Depends(require_superuser),
     session: Session = Depends(get_session),
 ) -> dict[str, str | None]:
     from app.modules.ingestion import samples
 
     assert user.id is not None
-    job_id = samples.queue(session, user.id)
+    job_id = (
+        samples.queue(session, user.id)
+        if setup is None
+        else samples.choose_first_run(session, user.id, include=setup.include)
+    )
     session.commit()
     if job_id is not None:
         samples.wake()

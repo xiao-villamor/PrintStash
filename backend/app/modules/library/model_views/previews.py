@@ -7,7 +7,7 @@ import json
 from collections import defaultdict
 from dataclasses import dataclass
 
-from sqlalchemy import and_, func
+from sqlalchemy import Integer, String, and_, column, func, values
 from sqlmodel import Session, col, select
 
 from app.core.errors import ErrorKind, OperationError
@@ -24,7 +24,7 @@ from app.db.models import (
 from app.db.scopes import live
 from app.modules.derivatives import policy
 from app.modules.derivatives.kinds import MESH_TYPES, PREVIEWS_RECIPE
-from app.modules.derivatives.sliced_reads import meshless_archives
+from app.modules.derivatives.sliced_reads import meshless_archive_rows
 from app.modules.media.mesh_contracts import ThumbnailStrategy
 from app.modules.media.preview_contracts import (
     PreviewImageKind,
@@ -62,12 +62,12 @@ def published(row: ArtifactDerivative, sha256: str) -> PreviewManifest | None:
     return manifest if manifest.source_sha256 == sha256 else None
 
 
-def selected_files(
-    session: Session, model_ids: list[int], *, meshless_ids: tuple[int, ...] = ()
-) -> dict[int, File]:
-    ranked = (
+def _ranked_files(model_ids: list[int], meshless_ids):
+    return (
         select(
             col(File.id).label("id"),
+            col(File.model_id).label("model_id"),
+            col(File.sha256).label("sha256"),
             func.row_number()
             .over(
                 partition_by=col(File.model_id),
@@ -83,14 +83,12 @@ def selected_files(
         )
         .subquery()
     )
-    return {
-        file.model_id: file
-        for file in session.exec(
-            select(File)
-            .join(ranked, ranked.c.id == col(File.id))
-            .where(ranked.c.position == 1)
-        ).all()
-    }
+
+
+@dataclass(frozen=True)
+class PreviewFile:
+    id: int
+    sha256: str
 
 
 @dataclass(frozen=True)
@@ -101,46 +99,100 @@ class CoverInfo:
     image_kind: PreviewImageKind | None
 
 
-def _cover_info(
-    session: Session,
-    model_ids: list[int],
-    archives: dict[int, tuple[int, str, tuple[ArchiveImage, ...]]],
-) -> dict[int, CoverInfo]:
-    """Resolve the chosen cover or its published thumbnail and media kind."""
-    rows = session.exec(
+def _preview_sources(session: Session, models: list[Model]):
+    """Read selected mesh, meshless archive and cover data in one bounded query."""
+    requested = (
+        values(
+            column("model_id", Integer),
+            column("cover_filename", String),
+            column("thumbnail_file_id", Integer),
+            column("thumbnail_path", String),
+        )
+        .data(
+            [
+                (
+                    model.id,
+                    model.cover_filename,
+                    model.thumbnail_file_id,
+                    model.thumbnail_path,
+                )
+                for model in models
+            ]
+        )
+        .cte("requested_previews")
+    )
+    model_ids = [model.id for model in models if model.id is not None]
+    archives = meshless_archive_rows(session, model_ids).cte("preview_archives")
+    selected = _ranked_files(model_ids, select(archives.c.file_id))
+    thumbnail = (
+        select(col(ArtifactDerivative.id))
+        .where(
+            col(ArtifactDerivative.file_id) == requested.c.thumbnail_file_id,
+            col(ArtifactDerivative.storage_key) == requested.c.thumbnail_path,
+            col(ArtifactDerivative.kind) == DerivativeKind.THUMBNAIL,
+            col(ArtifactDerivative.state) == DerivativeState.READY,
+        )
+        .order_by(col(ArtifactDerivative.recipe_version).desc())
+        .limit(1)
+        .correlate(requested)
+        .scalar_subquery()
+    )
+    rows = session.execute(
         select(
-            Model.id,
-            Model.cover_filename,
-            Model.thumbnail_file_id,
-            Model.thumbnail_path,
-            ModelCover.sha256,
-            ArtifactDerivative.output_json,
+            requested,
+            col(ModelCover.sha256).label("cover_digest"),
+            col(ArtifactDerivative.output_json).label("thumbnail_output"),
             File.file_type,
             File.original_filename,
+            selected.c.id.label("mesh_id"),
+            selected.c.sha256.label("mesh_sha256"),
+            archives.c.file_id.label("archive_id"),
+            archives.c.sha256.label("archive_sha256"),
+            archives.c.output.label("archive_output"),
         )
-        .select_from(Model)
+        .select_from(requested)
         .outerjoin(
             ModelCover,
             and_(
-                col(ModelCover.model_id) == col(Model.id),
-                col(ModelCover.filename) == col(Model.cover_filename),
+                col(ModelCover.model_id) == requested.c.model_id,
+                col(ModelCover.filename) == requested.c.cover_filename,
             ),
         )
-        .outerjoin(
-            ArtifactDerivative,
-            and_(
-                col(ArtifactDerivative.file_id) == col(Model.thumbnail_file_id),
-                col(ArtifactDerivative.storage_key) == col(Model.thumbnail_path),
-                col(ArtifactDerivative.kind) == DerivativeKind.THUMBNAIL,
-                col(ArtifactDerivative.state) == DerivativeState.READY,
-            ),
-        )
+        .outerjoin(ArtifactDerivative, col(ArtifactDerivative.id) == thumbnail)
         .outerjoin(File, col(File.id) == col(ArtifactDerivative.file_id))
-        .where(col(Model.id).in_(model_ids))
-    ).all()
+        .outerjoin(
+            selected,
+            and_(selected.c.model_id == requested.c.model_id, selected.c.position == 1),
+        )
+        .outerjoin(archives, archives.c.model_id == requested.c.model_id)
+        .order_by(archives.c.file_version.desc(), archives.c.recipe_version.desc())
+    )
+    files: dict[int, PreviewFile] = {}
+    archive_files: dict[int, tuple[int, str, tuple[ArchiveImage, ...]]] = {}
+    covers = {}
+    for row in rows:
+        if row.mesh_id is not None:
+            files[row.model_id] = PreviewFile(row.mesh_id, row.mesh_sha256)
+        if row.archive_id is not None and row.archive_id not in archive_files:
+            data = json.loads(row.archive_output)
+            images = tuple(ArchiveImage(**image) for image in data["archive_images"])
+            archive_files[row.archive_id] = (row.model_id, row.archive_sha256, images)
+        if row.model_id not in covers:
+            covers[row.model_id] = (
+                row.cover_filename,
+                row.thumbnail_file_id,
+                row.thumbnail_path,
+                row.cover_digest,
+                row.thumbnail_output,
+                row.file_type,
+                row.original_filename,
+            )
+    return files, archive_files, _cover_info(covers, archive_files)
+
+
+def _cover_info(covers, archives) -> dict[int, CoverInfo]:
     info = {}
-    for (
-        model_id,
+    for model_id, (
         cover_filename,
         thumbnail_file_id,
         thumbnail_path,
@@ -148,9 +200,7 @@ def _cover_info(
         thumbnail,
         file_type,
         filename,
-    ) in rows:
-        if model_id is None:
-            continue
+    ) in covers.items():
         metadata = json.loads(thumbnail) if thumbnail else {}
         strategy = metadata.get("strategy")
         embedded_3mf = strategy == ThumbnailStrategy.EMBEDDED and (
@@ -205,15 +255,15 @@ def _archive_image_url(
 
 
 def summaries(
-    session: Session, model_ids: list[int], *, root: str | None = None
+    session: Session, models: list[Model], *, root: str | None = None
 ) -> dict[int, ModelPreviewRead]:
     """Batch preview state; *root* addresses one shared Model's delivery routes."""
+    model_ids = [model.id for model in models if model.id is not None]
     if root is not None and len(model_ids) != 1:
         raise ValueError("shared_preview_root_needs_one_model")
     if not model_ids:
         return {}
-    archive_files = meshless_archives(session, model_ids)
-    files = selected_files(session, model_ids, meshless_ids=tuple(archive_files))
+    files, archive_files, cover_info = _preview_sources(session, models)
     enabled = not files or policy.resolve(session)[JobKind.DERIVATIVES_PREVIEWS].enabled
     include_poles = policy.preview_poles(session) if files else False
     by_file: dict[int, list[ArtifactDerivative]] = defaultdict(list)
@@ -229,7 +279,6 @@ def summaries(
             .order_by(col(ArtifactDerivative.recipe_version).desc())
         ).all():
             by_file[row.file_id].append(row)
-    cover_info = _cover_info(session, model_ids, archive_files)
     archive_by_model: dict[int, list[ArchiveImageRead]] = {}
     if root is None:
         for file_id, (model_id, sha256, images) in archive_files.items():
@@ -399,11 +448,7 @@ def resolve(
         select(Model).where(col(Model.id) == model_id, live(Model))
     ).first()
     file = (
-        selected_files(
-            session,
-            [model_id],
-            meshless_ids=tuple(meshless_archives(session, [model_id])),
-        ).get(model_id)
+        _preview_sources(session, [model])[0].get(model_id)
         if model is not None
         else None
     )

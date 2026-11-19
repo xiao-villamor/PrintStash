@@ -1141,8 +1141,13 @@ def stream_model_source_cover(
     cover = source_covers.get(session, source_id)
     if cover is None:
         raise HTTPException(status_code=404, detail="source_cover_not_found")
+    from app.modules.media.thumbnail import PhotoSize, to_photo_webp
+
+    photo = to_photo_webp(
+        get_backend().read_bytes(cover.storage_key), size=PhotoSize.ORIGINAL
+    )
     return Response(
-        content=get_backend().read_bytes(cover.storage_key),
+        content=photo.data,
         media_type="image/webp",
         headers={
             "Cache-Control": "private, max-age=3600",

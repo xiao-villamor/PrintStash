@@ -351,7 +351,7 @@
     }
 
     .setup-card-appearance {
-      height: min(680px, 100dvh - 136px);
+      height: min(736px, 100dvh - 136px);
     }
   }
 

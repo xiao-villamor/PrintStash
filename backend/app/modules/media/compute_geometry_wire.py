@@ -56,13 +56,17 @@ def _validate_layout(layout: GeometryLayout) -> None:
         or (layout.normal_mode == VISUAL_NORMAL_MODE and k != n)
     ):
         raise ValueError("compute_geometry_shape")
-    # The visual layout omits weld identities and normals, so it has room for
-    # the full face limit. Other layouts keep the smaller transfer envelope.
-    if (
-        body_size(layout) > MAX_VISUAL_GEOMETRY_BYTES
+    # Compact visual packets have a separately bounded preparation path.
+    # Legacy deferred packets retain their original canonical-equivalent cap.
+    size = body_size(layout)
+    limit = (
+        MAX_VISUAL_GEOMETRY_BYTES
         if layout.normal_mode == VISUAL_NORMAL_MODE
-        else body_size(layout) > MAX_GEOMETRY_BYTES
-    ):
+        else MAX_GEOMETRY_BYTES
+    )
+    if layout.normal_mode == NORMAL_MODE:
+        size = max(size, n * 20 + f * 24 + k * 24)
+    if size > limit:
         raise ValueError("compute_geometry_budget")
 
 

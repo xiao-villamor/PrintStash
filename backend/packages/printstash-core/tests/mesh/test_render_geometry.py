@@ -108,30 +108,30 @@ def source_mesh():
 
 class TestPrepareMeshRender:
     @pytest.mark.parametrize(
-        ("vertices", "faces", "expected_normal"),
+        ("vertices", "faces", "expected_face_normals"),
         [
             pytest.param(
                 [[0, 0, 0], [10, 0, 0], [0, 10, 0]],
                 [[0, 1, 2]],
-                [0, 0, 1],
+                [[0, 0, 1]],
                 id="plane",
             ),
             pytest.param(
                 [[0, 0, 0], [10, 0, 0], [20, 0, 0]],
                 [[0, 1, 2]],
-                [0, 0, 0],
+                [[0, 0, 0]],
                 id="degenerate-face",
             ),
             pytest.param(
                 [[0, 0, 0], [10, 0, 0], [0, 10, 0]],
                 [[0, 1, 2], [0, 2, 1]],
-                [0, 0, 0],
+                [[0, 0, 1], [0, 0, -1]],
                 id="opposed-faces",
             ),
         ],
     )
-    def test_preserves_normalization_for_zero_lengths(
-        self, vertices, faces, expected_normal
+    def test_preserves_face_normals_across_degenerate_or_opposed_faces(
+        self, vertices, faces, expected_face_normals
     ):
         source = SimpleNamespace(
             vertices=np.asarray(vertices, dtype=np.float64),
@@ -142,7 +142,8 @@ class TestPrepareMeshRender:
 
         assert prepared is not None
         np.testing.assert_array_equal(
-            prepared.smooth_normals, np.tile(expected_normal, (3, 1))
+            prepared.corner_normals,
+            np.repeat(np.asarray(expected_face_normals)[:, None, :], 3, axis=1),
         )
 
     def test_snapshots_source_geometry(self, source_mesh):
@@ -159,7 +160,7 @@ class TestPrepareMeshRender:
 
     @pytest.mark.parametrize(
         "field",
-        ["vertices", "position_ids", "smooth_normals"],
+        ["vertices", "position_ids", "corner_normals"],
         ids=["positions", "weld-ids", "normals"],
     )
     def test_rejects_cached_array_mutation(self, source_mesh, field):
@@ -177,7 +178,7 @@ class TestPrepareMeshRender:
         assert prepared.face_count == 4
         assert prepared.vertices.dtype == np.float32
         assert prepared.position_ids.dtype == np.int64
-        assert prepared.smooth_normals.dtype == np.float64
+        assert prepared.corner_normals.dtype == np.float32
         assert (source_mesh.vertices.tobytes(), source_mesh.faces.tobytes()) == original
 
     @pytest.mark.parametrize(
@@ -270,7 +271,7 @@ class TestDeferredNormalHelpers:
         )
         actual = render_geometry.prepare_normals(geometry, position_ids=identities)
         np.testing.assert_array_equal(actual.position_ids, expected.position_ids)
-        np.testing.assert_array_equal(actual.smooth_normals, expected.smooth_normals)
+        np.testing.assert_array_equal(actual.corner_normals, expected.corner_normals)
 
     @pytest.mark.parametrize(
         "identities", [[0, 1], [-1, 0, 1, 2], [0, 1, 2, 4], [0.0, 1.0, 2.0, 3.0]]

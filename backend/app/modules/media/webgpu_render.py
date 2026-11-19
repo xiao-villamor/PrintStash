@@ -349,7 +349,7 @@ class Renderer:
                 "depth_store_op": "store",
             },
         )
-        if grid:
+        if grid and geometry.has_surface:
             grid_group = self.device.create_bind_group(
                 layout=self.grid_pipeline.get_bind_group_layout(0),
                 entries=[{"binding": 0, "resource": entries[-1]["resource"]}],

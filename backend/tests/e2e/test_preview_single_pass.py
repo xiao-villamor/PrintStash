@@ -61,7 +61,9 @@ class TestPreviewSinglePass:
             "orbit-1",
             "orbit-2",
             "orbit-3",
+            "face",
         ]
+        assert previews["large_cover_url"] == previews["published"]["views"][-1]["url"]
         image = await api.get(previews["published"]["views"][0]["url"], headers=headers)
         assert image.status_code == 200
         assert image.headers["content-type"] == "image/webp"

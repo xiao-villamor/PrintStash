@@ -40,13 +40,17 @@ describe("ModelInformation", () => {
       expect(screen.queryByRole("link", { name: "Source model" })).not.toBeInTheDocument();
     },
   );
-  it("labels the geometry as the whole source", () => {
-    show();
+  it("labels the mesh geometry as the whole source", () => {
+    show(null, aRevision({ file_type: "stl" }));
     expect(screen.getByRole("heading", { name: "Whole source geometry" })).toBeInTheDocument();
   });
-  it("keeps unavailable geometry explicit", () => {
+  it("explains unavailable mesh measurements", () => {
+    show(null, aRevision({ file_type: "stl" }));
+    expect(screen.getByText("Measurement unavailable")).toBeVisible();
+  });
+  it("hides geometry when there is no mesh", () => {
     show();
-    expect(screen.getAllByText("Not recorded")).toHaveLength(3);
+    expect(screen.queryByRole("heading", { name: "Whole source geometry" })).toBeNull();
   });
   it("does not discard recorded zero geometry", () => {
     show(

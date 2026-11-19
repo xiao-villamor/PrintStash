@@ -208,6 +208,8 @@ def _reuse_measurements(
 def _frame(
     bounds_min: tuple[float, float, float],
     bounds_max: tuple[float, float, float],
+    *,
+    reference: bool = False,
 ):
     from itertools import product
 
@@ -221,7 +223,7 @@ def _frame(
     corners = np.asarray(
         list(product(*zip(exact_min, exact_max, strict=True))), dtype=np.float64
     )
-    rotation = _select_view_rotation(corners - center, np)
+    rotation = _select_view_rotation(corners - center, np, reference=reference)
     view_corners = (corners - center) @ rotation.T
     extent_x = max(float(np.ptp(view_corners[:, 0])), 1e-6)
     extent_y = max(float(np.ptp(view_corners[:, 1])), 1e-6)
@@ -248,6 +250,8 @@ def _render(
     limits: _Limits,
     first: _PassStats,
     appearance: PreviewAppearance = DEFAULT_APPEARANCE,
+    *,
+    reference_camera: bool = False,
 ) -> int:
     import io
 
@@ -268,7 +272,7 @@ def _render(
         projected_mid,
         extent_x,
         extent_y,
-    ) = _frame(first.bounds_min, first.bounds_max)
+    ) = _frame(first.bounds_min, first.bounds_max, reference=reference_camera)
     # Every finite source facet contributes to the camera bounds. The standard
     # margin accommodates the complete scene, including small remote components.
     from printstash_core.mesh.floor_grid import paint_floor_grid
@@ -355,6 +359,21 @@ def _render(
         raise _InvalidSTL("source changed between passes")
     finite = np.isfinite(zbuffer)
     if not finite.any() or rendered == 0:
+        # Very small disconnected facets can fall entirely between samples at
+        # the studio angle. Retry with the previous, shallower camera before
+        # declaring the source unrenderable.
+        if not reference_camera and rendered:
+            del image, zbuffer, finite
+            return _render(
+                path,
+                output,
+                width,
+                height,
+                limits,
+                first,
+                appearance,
+                reference_camera=True,
+            )
         raise _InvalidSTL("no visible triangles")
 
     # Reconstruct a smooth normal field from neighbouring depth samples.  The

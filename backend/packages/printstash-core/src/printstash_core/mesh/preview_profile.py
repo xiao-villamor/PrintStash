@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
@@ -230,7 +230,7 @@ def preview_appearance() -> PreviewAppearance:
 
 
 @contextmanager
-def appearance_scope(appearance: PreviewAppearance) -> Iterator[None]:
+def appearance_scope(appearance: PreviewAppearance) -> Generator[None]:
     token = _appearance.set(appearance)
     try:
         yield
@@ -252,20 +252,25 @@ class StudioLook:
     lighting: PreviewLighting
 
 
-_studio_bytes, _studio_config = _read_profile("preview_profile.json")
-_looks = _mapping(_studio_config.get("looks"), "looks")
-if set(_looks) != set(PreviewLook):
-    raise ValueError("preview_profile_invalid_looks")
-STUDIO_LOOKS = {
-    look: StudioLook(
-        _vector(config, "albedo", low=0, high=1),
-        _parse_lighting(_studio_config, config),
-    )
-    for look in PreviewLook
-    for config in (_mapping(_looks[look], look),)
-}
-PREVIEW_PROFILE = _parse_profile(
-    _studio_bytes, _studio_config, STUDIO_LOOKS[PreviewLook.SKY].albedo
+def _parse_studio_profile(
+    payload: bytes, root: Mapping[str, object]
+) -> tuple[PreviewProfile, dict[PreviewLook, StudioLook]]:
+    looks = _mapping(root.get("looks"), "looks")
+    if set(looks) != set(PreviewLook):
+        raise ValueError("preview_profile_invalid_looks")
+    styles = {
+        look: StudioLook(
+            _vector(config, "albedo", low=0, high=1),
+            _parse_lighting(root, config),
+        )
+        for look in PreviewLook
+        for config in (_mapping(looks[look], look),)
+    }
+    return _parse_profile(payload, root, styles[PreviewLook.SKY].albedo), styles
+
+
+PREVIEW_PROFILE, STUDIO_LOOKS = _parse_studio_profile(
+    *_read_profile("preview_profile.json")
 )
 
 # The encoder profiles and their cache identity stay independent of studio lighting.

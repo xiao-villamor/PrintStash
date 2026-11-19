@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, col, select
+from sqlmodel import Session, select
 
 from app.core.cancellation import checkpoint
 from app.core.config import settings
@@ -18,10 +18,10 @@ from app.db.models import (
     JobKind,
     Model,
     SystemConfig,
-    User,
 )
 from app.db.scopes import live
 from app.db.session import get_session_factory
+from app.db.transactions import begin_write
 from app.modules.work.contracts import JobContext, JobOutcome
 from app.modules.work.jobs import ActiveJobExists, jobs
 from app.modules.work.submission import nudge
@@ -58,22 +58,28 @@ def queue(session: Session, user_id: int) -> str | None:
         return active
 
 
-def queue_first_run(session: Session, config: SystemConfig) -> str | None:
-    """Reserve the first-run decision in the same commit that activates storage."""
-    if config.samples_initialized:
+def choose_first_run(session: Session, user_id: int, *, include: bool) -> str | None:
+    """Record the interactive setup choice once, only after storage is ready."""
+    from app.modules.administration.setup_policy import TrustedNetwork, current
+
+    if not isinstance(current(), TrustedNetwork):
+        return None
+    begin_write(session, immediate=True)
+    config = session.exec(
+        select(SystemConfig).where(SystemConfig.id == 1).with_for_update()
+    ).one_or_none()
+    if config is None or config.setup_storage_pending or config.samples_initialized:
         return None
     config.samples_initialized = True
-    if (
+    session.add(config)
+    if not include or (
         session.exec(
             select(Model.id).where(Model.hash != SENTINEL_MODEL_HASH).limit(1)
         ).first()
         is not None
     ):
         return None
-    owner = session.exec(
-        select(User.id).where(col(User.is_superuser)).order_by(col(User.id)).limit(1)
-    ).first()
-    return queue(session, owner) if owner is not None else None
+    return queue(session, user_id)
 
 
 def wake() -> None:
@@ -98,13 +104,10 @@ def ingest(ctx: JobContext) -> None:
             ctx.update(current_item=name, total=len(models), processed=index - 1)
             filename = f"{name}.stl"
             path = Path(staged) / filename
-            data = mesh.export(file_type="stl")
             # A deliberate re-add is a fresh import. The same Job's retries
             # keep the same bytes and ingestion keys.
-            header = f"PrintStash samples {ctx.job_id}".encode("ascii").ljust(
-                80, b"\x00"
-            )
-            path.write_bytes(header + data[80:])
+            header = f"PrintStash samples {ctx.job_id}".encode("ascii")
+            path.write_bytes(mesh.to_stl(header))
             commit_staged_artifact(
                 StagedArtifact(
                     staged_path=path,
