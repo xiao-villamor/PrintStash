@@ -4711,6 +4711,8 @@
   "Revision overview": "Revision overview",
   "About this model": "About this model",
   "{total} total · {sources} source · {revisions} G-code": "{total} total · {sources} source · {revisions} G-code",
+  "Measuring geometry…": "Measuring geometry…",
+  "Measurement unavailable": "Measurement unavailable",
   "Not recorded": "Not recorded",
   "Dimensions": "Dimensions",
   "Recorded prints": "Recorded prints",

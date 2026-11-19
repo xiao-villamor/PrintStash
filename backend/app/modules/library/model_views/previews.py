@@ -23,7 +23,12 @@ from app.db.scopes import live
 from app.modules.derivatives import policy
 from app.modules.derivatives.kinds import MESH_TYPES, PREVIEWS_RECIPE
 from app.modules.derivatives.sliced_reads import meshless_archives
-from app.modules.media.preview_contracts import PreviewManifest, ViewProfile, ViewRole
+from app.modules.media.preview_contracts import (
+    PreviewManifest,
+    ViewId,
+    ViewProfile,
+    ViewRole,
+)
 from app.schemas.previews import (
     REASONED_STATES,
     ArchiveImageRead,
@@ -196,6 +201,7 @@ def summaries(
         release = None
         large_cover_url = custom_url
         large_cover_view = None
+        large_cover_thumbnail_url = None
         if custom_filename is None:
             candidates = (
                 (row, view)
@@ -203,6 +209,7 @@ def summaries(
                 if (manifest := published(row, file.sha256)) is not None
                 for view in manifest.views
                 if view.sha256 == digest
+                or (file.id == automatic_file and view.id == manifest.cover_view)
                 or (
                     file.id == automatic_file
                     and manifest.profile is ViewProfile.PLANAR
@@ -218,7 +225,13 @@ def summaries(
                 row, view = cover
                 base = root if root is not None else f"/api/v1/models/{model_id}"
                 large_cover_url = f"{base}/previews/{generation(row)}/{view.id}"
-                large_cover_view = view.id
+                large_cover_view = (
+                    ViewId.TOP
+                    if view.role is ViewRole.FACE and view.rotation[2][2] < -0.999
+                    else view.id
+                )
+                if view.thumbnail is not None:
+                    large_cover_thumbnail_url = f"{large_cover_url}?size=thumbnail"
         for row in rows:
             manifest = published(row, file.sha256)
             if not enabled or manifest is None or manifest.profile != ViewProfile.ORBIT:
@@ -229,7 +242,12 @@ def summaries(
             visible_views = [
                 view
                 for view in manifest.views
-                if include_poles or view.role not in (ViewRole.TOP, ViewRole.BOTTOM)
+                if (include_poles or view.role not in (ViewRole.TOP, ViewRole.BOTTOM))
+                and not (
+                    view.id == manifest.cover_view
+                    and view.role is ViewRole.FACE
+                    and f"{base}/{view.id}" != large_cover_url
+                )
             ]
             release = PublishedPreviewRead(
                 profile=manifest.profile,
@@ -240,7 +258,12 @@ def summaries(
                 ),
                 views=[
                     PreviewImageRead(
-                        id=view.id, role=view.role, url=f"{base}/{view.id}"
+                        id=view.id,
+                        role=view.role,
+                        url=f"{base}/{view.id}",
+                        thumbnail_url=f"{base}/{view.id}?size=thumbnail"
+                        if view.thumbnail is not None
+                        else None,
                     )
                     for view in visible_views
                 ],
@@ -263,6 +286,7 @@ def summaries(
         result[model_id] = ArtifactPreviews(
             large_cover_url=large_cover_url,
             large_cover_view=large_cover_view,
+            large_cover_thumbnail_url=large_cover_thumbnail_url,
             archive_images=archive_images,
             file_id=file.id,
             state=state,

@@ -1,7 +1,7 @@
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useId, useLayoutEffect, useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatNumber } from "@/lib/format";
+import { meshGeometryFacts, type useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { currentLocale, uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import type { FileRead, ModelRead } from "@/types";
@@ -11,6 +11,7 @@ import { safeHttpUrl } from "./source-url";
 export function ModelInformation({
   model,
   sourceFile,
+  measurement = "unavailable",
   canEdit,
   onEdit,
   onTags,
@@ -19,6 +20,7 @@ export function ModelInformation({
 }: {
   model: ModelRead;
   sourceFile: FileRead | null;
+  measurement?: ReturnType<typeof useMeshGeometryMeasurement>;
   canEdit: boolean;
   onEdit: () => void;
   onTags: () => void;
@@ -27,19 +29,8 @@ export function ModelInformation({
 }) {
   useUiLocale();
   const sourceUrl = model.source_url ? safeHttpUrl(model.source_url) : null;
-  const geometry = sourceFile?.metadata;
+  const geometry = meshGeometryFacts(sourceFile, measurement);
   const gcodeCount = model.files.filter((file) => file.file_type === "gcode").length;
-  const dimensions =
-    geometry &&
-    geometry.bbox_x_mm !== null &&
-    geometry.bbox_y_mm !== null &&
-    geometry.bbox_z_mm !== null
-      ? uiText("{value1} mm", {
-          value1: [geometry.bbox_x_mm, geometry.bbox_y_mm, geometry.bbox_z_mm]
-            .map((value) => formatNumber(value))
-            .join(" × "),
-        })
-      : uiText("Not recorded");
   return (
     <section className="model-information" aria-label={uiText("About this model")}>
       <div className="model-information-about">
@@ -113,27 +104,23 @@ export function ModelInformation({
           <dd>{new Date(model.created_at).toLocaleDateString(currentLocale())}</dd>
         </dl>
       </div>
-      <div className="model-information-geometry">
-        <h2 className="text-sm font-semibold">{uiText("Whole source geometry")}</h2>
-        <dl className="model-information-facts">
-          <dt>{uiText("Dimensions")}</dt>
-          <dd>{dimensions}</dd>
-          <dt>{uiText("Volume")}</dt>
-          <dd>
-            {geometry?.volume_mm3 != null
-              ? uiText("{value} cm³", {
-                  value: formatNumber(geometry.volume_mm3 / 1000, { maximumFractionDigits: 2 }),
-                })
-              : uiText("Not recorded")}
-          </dd>
-          <dt>{uiText("Triangles")}</dt>
-          <dd>
-            {geometry?.triangle_count != null
-              ? formatNumber(geometry.triangle_count)
-              : uiText("Not recorded")}
-          </dd>
-        </dl>
-      </div>
+      {sourceFile && (
+        <div className="model-information-geometry">
+          <h2 className="text-sm font-semibold">{uiText("Whole source geometry")}</h2>
+          {geometry.emptyMessage ? (
+            <p className="mt-2 text-sm text-muted-foreground">{geometry.emptyMessage}</p>
+          ) : (
+            <dl className="model-information-facts">
+              {geometry.facts.map(([label, value]) => (
+                <Fragment key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </Fragment>
+              ))}
+            </dl>
+          )}
+        </div>
+      )}
     </section>
   );
 }

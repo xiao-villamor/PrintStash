@@ -29,6 +29,7 @@ from app.modules.media.mesh_facts import (
     SampledGeometry,
 )
 from app.modules.media.mesh_telemetry import PhaseStats, SupervisionStats
+from app.modules.media.preview_contracts import Matrix
 from app.modules.media.thumbnail_packet import PacketDescriptor
 
 if TYPE_CHECKING:
@@ -160,8 +161,8 @@ class ViewsRequest:
     recipe: int
     include_poles: bool
     source_sha256: str
-    # The Model image quality setting at claim time; the height is its 4:3.
     width: int
+    planar_cover: Matrix | None = None
 
 
 @dataclass(frozen=True)

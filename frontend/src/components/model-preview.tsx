@@ -39,7 +39,7 @@ function previewLabel(state: PreviewCard, id: PreviewSelection) {
         : uiText("Plate {value1}", { value1: String(view.plate) });
   } else {
     const camera = id === "cover" ? (state.previews.large_cover_view ?? view?.id) : view?.id;
-    if (camera) label = uiText(labels[camera === "face" && id === "cover" ? "top" : camera]);
+    if (camera) label = uiText(labels[camera]);
   }
   return id === "cover"
     ? label
@@ -320,7 +320,11 @@ export function ModelPreviewGallery({
   previews: ModelPreviews;
 }) {
   useUiLocale();
-  const [admission, state] = useModelPreviewCard(previews.large_cover_url ?? cover, previews);
+  const [admission, state] = useModelPreviewCard(
+    previews.large_cover_url ?? cover,
+    previews,
+    "full",
+  );
   const { preview, views } = state;
   return (
     <>
@@ -331,7 +335,7 @@ export function ModelPreviewGallery({
         onPointerEnter={state.enter}
         onPointerLeave={state.leave}
       >
-        <PreviewImage name={name} state={state} imageClassName="h-full w-full object-contain" />
+        <PreviewImage name={name} state={state} imageClassName="model-preview-gallery-image" />
         {views.length >= 2 && preview.navigationViews.length >= 2 && (
           <PreviewArrows state={state} size="gallery" />
         )}
@@ -353,27 +357,41 @@ export function ModelPreviewGallery({
           className="flex gap-2 overflow-x-auto pb-2"
           aria-label={uiText("modelPreview.gallery")}
         >
-          {preview.navigationViews.map((view) => (
-            <Button
-              key={view.id}
-              variant="ghost"
-              aria-pressed={preview.selected === view.id}
-              className={`h-auto min-w-24 flex-col p-2 ${preview.selected === view.id ? "bg-accent text-accent-foreground" : ""}`}
-              onFocus={() => preview.prioritize(views.find((image) => image.id === view.id))}
-              onClick={() => preview.select(view.id)}
-            >
-              <ProtectedThumbnail
-                path={
-                  previewTransferPolicy().neighbor || preview.selected === view.id ? view.url : null
-                }
-                alt=""
-                placeholder={<Images className="h-8 w-8" />}
-                className="h-16 w-20"
-                imageClassName="h-full w-full object-contain"
-              />
-              <span>{previewLabel(state, view.id)}</span>
-            </Button>
-          ))}
+          {preview.navigationViews.map((view) => {
+            const thumbnail =
+              view.id === "cover"
+                ? (previews.large_cover_thumbnail_url ??
+                  (previews.large_cover_view ? undefined : cover))
+                : view.role === "archive"
+                  ? undefined
+                  : view.thumbnail_url;
+            const path =
+              thumbnail ??
+              (previewTransferPolicy().neighbor || preview.selected === view.id ? view.url : null);
+            return (
+              <Button
+                key={view.id}
+                variant="ghost"
+                aria-pressed={preview.selected === view.id}
+                className={`h-auto min-w-24 flex-col p-2 ${preview.selected === view.id ? "bg-accent text-accent-foreground" : ""}`}
+                onFocus={() => preview.prioritize(views.find((image) => image.id === view.id))}
+                onClick={() => preview.select(view.id)}
+              >
+                <ProtectedThumbnail
+                  path={path}
+                  alt=""
+                  eager
+                  fade
+                  priority="intent"
+                  placeholder={<Images className="h-8 w-8 text-muted-foreground" />}
+                  loadingPlaceholder={<LibraryPreviewPlaceholder />}
+                  className="flex h-16 w-20 items-center justify-center"
+                  imageClassName="h-full w-full object-contain"
+                />
+                <span>{previewLabel(state, view.id)}</span>
+              </Button>
+            );
+          })}
         </div>
       </div>
     </>

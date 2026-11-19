@@ -106,7 +106,7 @@ from app.modules.library.trash import (
 from app.modules.library.trash import (
     restore_model as trash_restore_model,
 )
-from app.modules.media.preview_contracts import ViewId
+from app.modules.media.preview_contracts import PreviewSize, ViewId
 from app.modules.media.source_cover_processing import MAX_SOURCE_COVER_BYTES
 from app.modules.printing import job_import, print_results
 from app.modules.printing.moonraker import MoonrakerError
@@ -1935,6 +1935,7 @@ def get_model_preview_image(
     model_id: int,
     generation: str,
     view_id: ViewId,
+    size: PreviewSize = PreviewSize.FULL,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ):
@@ -1943,4 +1944,4 @@ def get_model_preview_image(
 
     _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
     row, manifest = previews.resolve(session, model_id, generation)
-    return preview_response(row, manifest, view_id)
+    return preview_response(row, manifest, view_id, size=size)

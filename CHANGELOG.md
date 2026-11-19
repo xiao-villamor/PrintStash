@@ -82,6 +82,7 @@
 
 ### Fixed
 
+- Expanded galleries use 1280 px generated views and load a separate strip of small thumbnails. Meshless models omit the geometry measurements panel.
 - Meshless sliced 3MFs open directly in the G-code viewer and show available plate estimates and embedded gallery images. Large cover previews use the original cover resolution when available.
 - GPU-generated Model covers use the same framing as CPU covers, including for rounded and diagonal shapes.
 - Large sliced plates no longer hit the former one-million-segment preview limit. Arc rendering uses bounded curve error, and typed geometry storage supports up to four million segments without dropping layers.

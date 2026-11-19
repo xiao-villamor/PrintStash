@@ -8,9 +8,17 @@ import { publishedViews, type ModelPreviews } from "@/types/previews";
  * controls overlaid beside it: controls are never nested in an anchor, and the
  * card keeps a single link, reading anchor and named image.
  */
-export function useModelPreviewCard(cover: string | null, previews: ModelPreviews) {
+export function useModelPreviewCard(
+  cover: string | null,
+  previews: ModelPreviews,
+  size: "thumbnail" | "full" = "thumbnail",
+) {
   const { ref, admitted } = useViewportAdmission();
-  const views = publishedViews(previews);
+  const views = publishedViews(previews).map((view) =>
+    size === "thumbnail" && view.role !== "archive" && view.thumbnail_url
+      ? { ...view, url: view.thumbnail_url }
+      : view,
+  );
   const coverIsLarge = cover !== null && cover === previews.large_cover_url;
   const matchingGenerated =
     previews.kind === "artifact" && (!coverIsLarge || previews.large_cover_view === undefined)

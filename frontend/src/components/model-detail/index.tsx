@@ -19,6 +19,7 @@ import { getSessionVersion, requireSessionVersion } from "@/lib/session-transpor
 import { Modal } from "@/components/ui/modal";
 import { InlineTitleEditor } from "@/components/inline-title-editor";
 import { ModelInformation } from "./model-information";
+import { useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { RevisionPicker } from "./revision-picker";
 import { inspectedRevision } from "./inspected-revision";
 import "./model-detail.css";
@@ -748,6 +749,7 @@ function ModelDetailPresentation({
         f.file_type === "fbx" ||
         f.file_type === "step"),
   );
+  const geometryMeasurement = useMeshGeometryMeasurement(meshFile ?? null);
   const hasGcode = gcodeFiles.length > 0;
   const { sources: toolpathFiles, availability: toolpathAvailability } =
     useToolpathSources(sortedFiles);
@@ -1453,6 +1455,7 @@ function ModelDetailPresentation({
             <ModelInformation
               model={model}
               sourceFile={meshFile ?? null}
+              measurement={geometryMeasurement}
               onFiles={() => openInspectorTab("files")}
               onRevisions={() => openInspectorTab("revisions")}
               canEdit={canEditModel}

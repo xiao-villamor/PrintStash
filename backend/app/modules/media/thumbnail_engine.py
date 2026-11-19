@@ -1051,6 +1051,7 @@ class _Generation:
                     width=views.width,
                     recipe=views.recipe,
                     include_poles=views.include_poles,
+                    planar_cover=views.planar_cover,
                 )
             else:
                 mesh = self.visual_mesh if self.visual_mesh is not None else self.mesh
@@ -1075,6 +1076,7 @@ class _Generation:
                     width=views.width,
                     recipe=views.recipe,
                     include_poles=views.include_poles,
+                    planar_cover=views.planar_cover,
                 )
         except RENDER_FAILURES as exc:
             self.emit_views(ViewsRefused(preview_failure_reason(exc), elapsed()))

@@ -20,8 +20,10 @@ from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_isolation import MeshWorkerError
 from app.modules.media.native_budget import MeshSource, RasterCodec, RasterWork
 from app.modules.media.preview_contracts import (
+    GALLERY_WIDTH,
     MAX_BUNDLE_BYTES,
     MAX_MANIFEST_BYTES,
+    MAX_VIEWS,
     PreviewManifest,
     height_for,
 )
@@ -61,8 +63,8 @@ def _derive(
     attempt = attempts[DerivativeKind.PREVIEWS]
     with get_session_factory().scoped_session() as session:
         include_poles = policy.preview_poles(session)
-    # Model image quality: the views match the cover's resolution.
-    width = int(settings.model_thumbnail_width)
+        planar_cover = publication.planar_cover_rotation(session, file)
+    width = GALLERY_WIDTH
     # VAULT_MESH_MAX_LOAD_MB: the same source-size ceiling as every mesh path.
     if file.size_bytes > settings.mesh_max_load_mb * 1024 * 1024:
         _fail(attempt, "resource_limit", deterministic=True)
@@ -84,7 +86,7 @@ def _derive(
                 count, size = int(done), int(total)
             except ValueError as exc:  # UnicodeDecodeError is a ValueError
                 raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED) from exc
-            if prefix != "P" or not completed < count <= size <= 6:
+            if prefix != "P" or not completed < count <= size <= MAX_VIEWS:
                 raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
             completed = count
             checkpoint(force=True)
@@ -125,6 +127,7 @@ def _derive(
                     "recipe": attempt.recipe,
                     "include_poles": include_poles,
                     "width": width,
+                    "planar_cover": planar_cover,
                 },
                 workspace=prepared.directory,
                 sources=(MeshSource(source, file.file_type.value),),

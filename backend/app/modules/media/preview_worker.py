@@ -15,6 +15,7 @@ from app.modules.media.geometry_analysis import _load
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_isolation import MeshWorkerError, read_spec
 from app.modules.media.mesh_resources import load_3mf_within_ram
+from app.modules.media.preview_contracts import Matrix
 from app.modules.media.preview_views import render_views
 from app.modules.media.stl_isolation import FileIdentity, manifest_for
 
@@ -34,6 +35,7 @@ def produce(
     width: int,
     recipe: int = 1,
     include_poles: bool = False,
+    planar_cover: Matrix | None = None,
 ) -> bytes:
     identity = FileIdentity.of(path.stat())
     # The same size and triangle ceilings as every other mesh path.
@@ -62,6 +64,7 @@ def produce(
             max_faces=limit,
             width=width,
             progress=progress,
+            planar_cover=planar_cover,
             recipe=recipe,
             include_poles=include_poles,
         )
@@ -100,6 +103,7 @@ def main(argv: list[str]) -> int:
             width=spec["width"],
             recipe=spec["recipe"],
             include_poles=spec["include_poles"],
+            planar_cover=spec.get("planar_cover"),
         )
     except EXPECTED_FAILURES as exc:
         payload = b"FAIL" + failure_reason(exc).value.encode()

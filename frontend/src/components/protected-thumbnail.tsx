@@ -13,6 +13,7 @@ export function ProtectedThumbnail({
   className,
   imageClassName,
   fade = false,
+  eager = false,
   priority = "primary",
   previewView,
   children,
@@ -25,6 +26,7 @@ export function ProtectedThumbnail({
   className?: string;
   imageClassName?: string;
   fade?: boolean;
+  eager?: boolean;
   /** Collection mosaics are "background": they never delay the cards' own images. */
   priority?: AssetPriority;
   /** Names the presented Model view, when this image is one of several. */
@@ -45,7 +47,7 @@ export function ProtectedThumbnail({
   // Admission gates downloads. Bytes already in memory need no gate: a card
   // remounted by a reflow paints its thumbnail in its first frame, not after
   // an intersection round trip that leaves a blank frame.
-  const admitted = inView || cachedSource.url !== null;
+  const admitted = eager || inView || cachedSource.url !== null;
   const asset = useAuthenticatedAsset(external ? null : path, admitted, priority);
   const url = admitted ? (external ?? asset.url) : null;
   const [decoded, setDecoded] = useState<string | null>(null);
@@ -90,7 +92,7 @@ export function ProtectedThumbnail({
       className={cn(fade && "relative", className)}
       data-library-thumbnail={!path ? "missing" : failed ? "failed" : ready ? "ready" : "pending"}
     >
-      {url ? (
+      {url && !failed ? (
         <img
           key={url}
           src={url}
@@ -103,7 +105,7 @@ export function ProtectedThumbnail({
             imageClassName,
             reveal && "thumbnail-reveal transition-opacity duration-slow ease-out",
             reveal && loadingPlaceholder && "library-thumbnail-fill",
-            fade && (failed || (reveal && !ready) ? "opacity-0" : "opacity-100"),
+            fade && (reveal && !ready ? "opacity-0" : "opacity-100"),
           )}
           onError={(event) => setFailedSource(event.currentTarget.getAttribute("src"))}
           onLoad={(event) => {
@@ -114,13 +116,13 @@ export function ProtectedThumbnail({
       ) : (
         cover
       )}
-      {url && fade && (
+      {url && !failed && fade && (
         <div
           aria-hidden
           className={cn(
             "pointer-events-none absolute inset-0 transition-opacity duration-slow ease-out",
             loadingPlaceholder && "library-thumbnail-fill",
-            failed || (reveal && !ready) ? "opacity-100" : "opacity-0",
+            reveal && !ready ? "opacity-100" : "opacity-0",
           )}
         >
           {cover}

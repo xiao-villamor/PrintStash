@@ -54,6 +54,7 @@ export interface PreviewImage {
   id: PreviewViewId;
   role: PreviewViewRole;
   url: string;
+  thumbnail_url?: string;
 }
 export interface ArchivePreviewImage {
   file_id: number;
@@ -67,6 +68,7 @@ export type CarouselImage =
 
 interface ModelPreviewMedia {
   large_cover_url?: string;
+  large_cover_thumbnail_url?: string;
   large_cover_view?: PreviewViewId;
   archive_images?: ArchivePreviewImage[];
 }
@@ -131,6 +133,11 @@ export function isModelPreviews(wire: ModelPreviews): boolean {
   // oxlint-disable anti-slop/no-runtime-typeof -- Foreign HTTP JSON must establish its closed case, Artifact identity and view addresses before it can replace a displayed preview.
   if (wire?.cover_camera !== "unknown") return false;
   if (wire.large_cover_url !== undefined && typeof wire.large_cover_url !== "string") return false;
+  if (
+    wire.large_cover_thumbnail_url !== undefined &&
+    typeof wire.large_cover_thumbnail_url !== "string"
+  )
+    return false;
   if (wire.large_cover_view !== undefined && !PREVIEW_VIEW_IDS.includes(wire.large_cover_view))
     return false;
   if (
@@ -159,12 +166,13 @@ export function isModelPreviews(wire: ModelPreviews): boolean {
         (published.cover_view === undefined || PREVIEW_VIEW_IDS.includes(published.cover_view)) &&
         Array.isArray(published.views) &&
         published.views.length >= 1 &&
-        published.views.length <= 6 &&
+        published.views.length <= 7 &&
         published.views.every(
           (view) =>
             PREVIEW_VIEW_IDS.includes(view?.id) &&
             PREVIEW_VIEW_ROLES.includes(view.role) &&
-            typeof view.url === "string",
+            typeof view.url === "string" &&
+            (view.thumbnail_url === undefined || typeof view.thumbnail_url === "string"),
         )))
   );
   // oxlint-enable anti-slop/no-runtime-typeof

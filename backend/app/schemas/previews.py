@@ -41,6 +41,9 @@ class PreviewImageRead(BaseModel):
     id: ViewId
     role: ViewRole
     url: str
+    thumbnail_url: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class PublishedPreviewRead(BaseModel):
@@ -94,6 +97,9 @@ class ArtifactPreviews(BaseModel):
     )
     archive_images: list[ArchiveImageRead] = Field(
         default_factory=list, exclude_if=lambda value: not value
+    )
+    large_cover_thumbnail_url: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
     )
     file_id: int
     state: PreviewState

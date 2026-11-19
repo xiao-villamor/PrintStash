@@ -33,6 +33,9 @@
   border-top: 0;
   background: var(--card);
 }
+.model-information:not(:has(.model-information-geometry)) {
+  grid-template-columns: minmax(0, 1fr);
+}
 .model-information-geometry {
   border-left: 1px solid var(--border);
   padding-left: 1rem;

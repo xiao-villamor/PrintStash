@@ -32,6 +32,10 @@ import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { AddGcodeRevisionModal } from "@/components/model-detail/add-revision-modal";
 import { SendToButtons } from "@/components/model-detail/send-to-buttons";
 import { InspectorPreviewResize } from "./inspector-preview-resize";
+import {
+  meshGeometryFacts,
+  useMeshGeometryMeasurement,
+} from "@/components/model-detail/use-mesh-geometry-facts";
 import { ViewerModeSwitch, type ViewerMode } from "@/components/viewer-mode-switch";
 import { normalizeRecommendedGcodeFiles } from "@/components/model-detail/presentation";
 import { useRevisionUpdater } from "@/components/model-detail/use-revision-updater";
@@ -184,7 +188,8 @@ export function InspectorContent({
       item.original_filename,
     ).catch((error) => toast.error(userMessage(error)));
   }
-  const geometry = sourceFile?.metadata;
+  const measurement = useMeshGeometryMeasurement(sourceFile ?? null);
+  const geometry = meshGeometryFacts(sourceFile ?? null, measurement);
   const jobs = (history.isError ? [] : (history.data ?? [])).filter(
     (job) => job.file_id === file?.id,
   );
@@ -1029,20 +1034,29 @@ export function InspectorContent({
           </p>
         )}
       </section>
-      <details className="library-inspector-section">
-        <summary className="library-inspector-section-heading">
-          <h3>{uiText("Geometry")}</h3>
-          <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        </summary>
-        <dl className="library-inspector-properties divide-y divide-border">
-          {geometryFacts(geometry).map(([label, value]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd className="font-mono">{value}</dd>
-            </div>
-          ))}
-        </dl>
-      </details>
+      {sourceFile && (
+        <details className="library-inspector-section">
+          <summary className="library-inspector-section-heading">
+            <h3>{uiText("Geometry")}</h3>
+            <ChevronRight
+              aria-hidden="true"
+              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+            />
+          </summary>
+          {geometry.emptyMessage ? (
+            <p className="text-xs text-muted-foreground">{geometry.emptyMessage}</p>
+          ) : (
+            <dl className="library-inspector-properties divide-y divide-border">
+              {geometry.facts.map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd className="font-mono">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </details>
+      )}
       <details className="library-inspector-section">
         <summary className="library-inspector-section-heading">
           <h3>
@@ -1277,25 +1291,5 @@ function settingFacts(meta: MetadataRead | null): [string, string, boolean?][] {
       true,
     ],
     [uiText("Printer profile"), meta?.printer_model ?? uiText("Not recorded")],
-  ];
-}
-function geometryFacts(meta: MetadataRead | null | undefined): [string, string][] {
-  return [
-    [
-      uiText("Dimensions"),
-      meta?.bbox_x_mm != null && meta.bbox_y_mm != null && meta.bbox_z_mm != null
-        ? `${formatNumber(meta.bbox_x_mm)} × ${formatNumber(meta.bbox_y_mm)} × ${formatNumber(meta.bbox_z_mm)} mm`
-        : uiText("Not recorded"),
-    ],
-    [
-      uiText("Volume"),
-      meta?.volume_mm3 != null
-        ? `${formatNumber(meta.volume_mm3 / 1000)} cm³`
-        : uiText("Not recorded"),
-    ],
-    [
-      uiText("Triangles"),
-      meta?.triangle_count != null ? formatNumber(meta.triangle_count) : uiText("Not recorded"),
-    ],
   ];
 }

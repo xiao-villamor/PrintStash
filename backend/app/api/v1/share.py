@@ -21,7 +21,7 @@ from app.db.models import CollectionRole, FileType, Model, ShareLink, User
 from app.db.session import get_session
 from app.modules.identity import rbac, share
 from app.modules.library import model_covers
-from app.modules.media.preview_contracts import ViewId
+from app.modules.media.preview_contracts import PreviewSize, ViewId
 from app.modules.storage.artifact_delivery import DeliveryPurpose
 from app.schemas.share import ShareLinkCreate, ShareLinkCreated, ShareLinkRead
 
@@ -257,6 +257,7 @@ def get_shared_preview_image(
     token: str,
     generation: str,
     view_id: ViewId,
+    size: PreviewSize = PreviewSize.FULL,
     session: Session = Depends(get_session),
 ):
     from app.api.preview_response import preview_response
@@ -265,4 +266,4 @@ def get_shared_preview_image(
     link = share.resolve_share(session, token)
     row, manifest = previews.resolve(session, link.model_id, generation)
     share.share_file_or_404(session, link, manifest.file_id)
-    return preview_response(row, manifest, view_id, shared=True)
+    return preview_response(row, manifest, view_id, shared=True, size=size)
