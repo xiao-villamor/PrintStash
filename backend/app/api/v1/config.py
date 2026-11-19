@@ -27,6 +27,21 @@ from app.schemas.editing import EditingBase, EditPrecondition
 router = APIRouter(prefix="/config", tags=["config"])
 
 
+@router.post("/sample-collection", status_code=status.HTTP_202_ACCEPTED)
+def add_sample_collection(
+    user: User = Depends(require_superuser),
+    session: Session = Depends(get_session),
+) -> dict[str, str | None]:
+    from app.modules.ingestion import samples
+
+    assert user.id is not None
+    job_id = samples.queue(session, user.id)
+    session.commit()
+    if job_id is not None:
+        samples.wake()
+    return {"job_id": job_id}
+
+
 class VaultConfigRead(EditingBase):
     derivatives_mesh_enabled: bool
     derivatives_gcode_enabled: bool

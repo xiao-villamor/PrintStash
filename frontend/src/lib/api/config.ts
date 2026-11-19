@@ -134,3 +134,7 @@ export async function updateVaultConfig(
   requireEditingReceipt(row, base);
   return row;
 }
+
+export function addSampleCollection(): Promise<{ job_id: string | null }> {
+  return requestApi("/api/v1/config/sample-collection", { method: "POST" });
+}

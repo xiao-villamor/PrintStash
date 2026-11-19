@@ -247,6 +247,9 @@ class SystemConfig(SQLModel, table=True):
     makerworld_token_updated_at: Optional[datetime] = Field(default=None)
 
     configured_at: Optional[datetime] = Field(default=None, index=True)
+    samples_initialized: bool = Field(
+        default=False, sa_column=Column(Boolean, nullable=False, server_default="0")
+    )
     setup_storage_pending: bool = Field(
         default=False, sa_column=Column(Boolean, nullable=False, server_default="0")
     )
