@@ -5,7 +5,10 @@ import time
 from collections.abc import Callable
 from uuid import uuid4
 
-from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, RASTERIZER_RECIPE
+from printstash_core.mesh.preview_profile import (
+    PREVIEW_PROFILE,
+    preview_rasterizer_recipe,
+)
 from printstash_core.mesh.rasterizer import RenderedPixels, postprocess_rgba
 
 from app.core.cancellation import OperationCancelled, checkpoint
@@ -31,7 +34,7 @@ def render_priority() -> Priority:
 
 def render_recipe(width: int, height: int, views: int = 1, matte: bool = False) -> str:
     """One identity for eligibility checks and both render dispatch paths."""
-    return f"{RECIPE}:{RASTERIZER_RECIPE}:{width}x{height}:{views}:{int(matte)}"
+    return f"{RECIPE}:{preview_rasterizer_recipe(matte=matte)}:{width}x{height}:{views}:{int(matte)}"
 
 
 def _require_visible_frame(frame: RenderedPixels) -> RenderedPixels:

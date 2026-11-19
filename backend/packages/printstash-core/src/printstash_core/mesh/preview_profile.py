@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, replace
 from importlib.resources import files
 from typing import Mapping
 
 # Renderer arithmetic participates in derived visual identities independently
 # of camera/material settings and immutable encoder asset manifests.
 RASTERIZER_RECIPE = "qualified-portable-v8"
+
+Vector = tuple[float, float, float]
 
 
 def _mapping(value: object, name: str) -> Mapping[str, object]:
@@ -40,6 +43,52 @@ def _boolean(values: Mapping[str, object], key: str) -> bool:
     return value
 
 
+def _vector(
+    values: Mapping[str, object], key: str, *, low: float, high: float
+) -> Vector:
+    value = values.get(key)
+    if (
+        not isinstance(value, list)
+        or len(value) != 3
+        or not all(
+            isinstance(component, (float, int))
+            and not isinstance(component, bool)
+            and low <= component <= high
+            for component in value
+        )
+    ):
+        raise ValueError(f"preview_profile_invalid_{key}")
+    return (float(value[0]), float(value[1]), float(value[2]))
+
+
+def _light_number(
+    values: Mapping[str, object], key: str, *, positive: bool = False
+) -> float:
+    value = _number(values, key)
+    if not math.isfinite(value) or value < 0 or (positive and value == 0):
+        raise ValueError(f"preview_profile_invalid_{key}")
+    return value
+
+
+@dataclass(frozen=True)
+class DirectionalLight:
+    direction: Vector
+    colour: Vector
+    strength: float
+
+
+@dataclass(frozen=True)
+class PreviewLighting:
+    key: DirectionalLight
+    fill: DirectionalLight
+    rim_colour: Vector
+    rim_strength: float
+    rim_power: float
+    ambient: float
+    specular_strength: float
+    specular_power: float
+
+
 @dataclass(frozen=True)
 class PreviewProfile:
     version: int
@@ -65,10 +114,12 @@ class PreviewProfile:
         return self.supersample_large_factor
 
 
-def _load_profile(filename: str = "preview_profile.json") -> PreviewProfile:
+def _read_profile(filename: str) -> tuple[bytes, Mapping[str, object]]:
     payload = files("printstash_core.mesh").joinpath(filename).read_bytes()
-    raw: object = json.loads(payload)
-    root = _mapping(raw, "root")
+    return payload, _mapping(json.loads(payload), "root")
+
+
+def _parse_profile(payload: bytes, root: Mapping[str, object]) -> PreviewProfile:
     aspect = root.get("aspectRatio")
     if (
         not isinstance(aspect, list)
@@ -81,17 +132,6 @@ def _load_profile(filename: str = "preview_profile.json") -> PreviewProfile:
     supersampling = _mapping(root.get("supersampling"), "supersampling")
     encoding = _mapping(root.get("encoding"), "encoding")
     material = _mapping(root.get("material"), "material")
-    albedo = material.get("albedo")
-    if (
-        not isinstance(albedo, list)
-        or len(albedo) != 3
-        or not all(
-            isinstance(value, (int, float)) and not isinstance(value, bool)
-            for value in albedo
-        )
-        or not all(0 <= float(value) <= 1 for value in albedo)
-    ):
-        raise ValueError("preview_profile_invalid_material_albedo")
     margin = _number(root, "marginFraction")
     if not 0 < margin < 0.5:
         raise ValueError("preview_profile_invalid_margin")
@@ -105,7 +145,7 @@ def _load_profile(filename: str = "preview_profile.json") -> PreviewProfile:
         version=_integer(root, "version"),
         aspect_ratio=(int(aspect[0]), int(aspect[1])),
         margin_fraction=margin,
-        material_albedo=(float(albedo[0]), float(albedo[1]), float(albedo[2])),
+        material_albedo=_vector(material, "albedo", low=0, high=1),
         hero_azimuth_degrees=_number(hero, "azimuthDegrees"),
         hero_elevation_degrees=_number(hero, "elevationDegrees"),
         flat_tilt_degrees=_number(flat, "tiltDegrees"),
@@ -121,8 +161,58 @@ def _load_profile(filename: str = "preview_profile.json") -> PreviewProfile:
     )
 
 
-PREVIEW_PROFILE = _load_profile()
-# Encoder inputs use a fixed profile independent of cover settings.
-REFERENCE_THUMBNAIL_PROFILE = _load_profile("reference_thumbnail_profile.json")
+def _directional_light(config: Mapping[str, object]) -> DirectionalLight:
+    direction = _vector(config, "direction", low=-1, high=1)
+    if not any(direction):
+        raise ValueError("preview_profile_invalid_direction")
+    return DirectionalLight(
+        direction=direction,
+        colour=_vector(config, "colour", low=0, high=1),
+        strength=_light_number(config, "strength"),
+    )
+
+
+def _parse_lighting(root: Mapping[str, object]) -> PreviewLighting:
+    lighting = _mapping(root.get("lighting"), "lighting")
+    rim = _mapping(lighting.get("rim"), "rim")
+    specular = _mapping(lighting.get("specular"), "specular")
+    return PreviewLighting(
+        key=_directional_light(_mapping(lighting.get("key"), "key")),
+        fill=_directional_light(_mapping(lighting.get("fill"), "fill")),
+        rim_colour=_vector(rim, "colour", low=0, high=1),
+        rim_strength=_light_number(rim, "strength"),
+        rim_power=_light_number(rim, "power", positive=True),
+        ambient=_light_number(lighting, "ambient"),
+        specular_strength=_light_number(specular, "strength"),
+        specular_power=_light_number(specular, "power", positive=True),
+    )
+
+
+_studio_bytes, _studio_config = _read_profile("preview_profile.json")
+PREVIEW_PROFILE = _parse_profile(_studio_bytes, _studio_config)
+STUDIO_LIGHTING = _parse_lighting(_studio_config)
+
+# The encoder profiles and their cache identity stay independent of studio lighting.
+REFERENCE_THUMBNAIL_PROFILE = _parse_profile(
+    *_read_profile("reference_thumbnail_profile.json")
+)
+MATTE_LIGHTING = PreviewLighting(
+    key=DirectionalLight((-0.5, 0.65, 1.0), (1.0, 0.98, 0.95), 1.05),
+    fill=DirectionalLight((0.55, -0.25, 0.55), (0.55, 0.62, 0.78), 0.30),
+    rim_colour=(0.85, 0.92, 1.0),
+    rim_strength=0.22,
+    rim_power=3.0,
+    ambient=0.30,
+    specular_strength=0.0,
+    specular_power=32.0,
+)
+REFERENCE_LIGHTING = replace(MATTE_LIGHTING, specular_strength=0.22)
+
+
+def preview_rasterizer_recipe(*, matte: bool) -> str:
+    if matte:
+        return RASTERIZER_RECIPE
+    return f"{RASTERIZER_RECIPE}-{PREVIEW_PROFILE.recipe_fingerprint}"
+
 
 __all__ = ["PREVIEW_PROFILE", "REFERENCE_THUMBNAIL_PROFILE", "PreviewProfile"]

@@ -11,14 +11,25 @@ import math
 from typing import Any
 
 import numpy as np
-from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+from printstash_core.mesh.preview_profile import (
+    MATTE_LIGHTING,
+    PREVIEW_PROFILE,
+    REFERENCE_THUMBNAIL_PROFILE,
+    STUDIO_LIGHTING,
+)
 
 from .gpu_render_layout import BOUND_BYTES, FRAME_BYTES, FRAME_STRIDE
 
 FRAME_STRUCT = """
 struct Frame {
     r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>,
-    projection: vec4<f32>, extent: vec4<f32>, style: vec4<f32>, albedo: vec4<f32>
+    projection: vec4<f32>, extent: vec4<f32>,
+    ambient: f32, specular_strength: f32, specular_power: f32, rim_power: f32,
+    albedo: vec3<f32>, studio: f32,
+    key_direction: vec4<f32>, fill_direction: vec4<f32>,
+    key_colour: vec3<f32>, key_strength: f32,
+    fill_colour: vec3<f32>, fill_strength: f32,
+    rim_colour: vec3<f32>, rim_strength: f32
 };
 fn rotate(value: vec3<f32>, frame: Frame) -> vec3<f32> {
     return vec3(dot(value,frame.r0.xyz), dot(value,frame.r1.xyz), dot(value,frame.r2.xyz));
@@ -179,8 +190,24 @@ def frame_config(rotation: Any, width: int, height: int, matte: bool) -> bytes:
     if rotation is not None:
         rows[:3, :3] = rotation
     rows[3] = (width, height, PREVIEW_PROFILE.margin_fraction, rotation is None)
-    rows[5, 0] = 0.0 if matte else 0.16
-    rows[6, :3] = PREVIEW_PROFILE.material_albedo
+    lighting = MATTE_LIGHTING if matte else STUDIO_LIGHTING
+    albedo = (
+        REFERENCE_THUMBNAIL_PROFILE.material_albedo
+        if matte
+        else PREVIEW_PROFILE.material_albedo
+    )
+    rows[5] = (
+        lighting.ambient,
+        lighting.specular_strength,
+        lighting.specular_power,
+        lighting.rim_power,
+    )
+    rows[6] = (*albedo, not matte)
+    rows[7, :3] = lighting.key.direction
+    rows[8, :3] = lighting.fill.direction
+    rows[9] = (*lighting.key.colour, lighting.key.strength)
+    rows[10] = (*lighting.fill.colour, lighting.fill.strength)
+    rows[11] = (*lighting.rim_colour, lighting.rim_strength)
     return rows.tobytes()
 
 

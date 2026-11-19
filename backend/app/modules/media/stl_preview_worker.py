@@ -264,7 +264,8 @@ def _render(
     ) = _frame(first.bounds_min, first.bounds_max)
     # Every finite source facet contributes to the camera bounds. The standard
     # margin accommodates the complete scene, including small remote components.
-    from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+    from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, STUDIO_LIGHTING
+    from printstash_core.mesh.rasterizer import make_preview_shade
 
     margin = PREVIEW_PROFILE.margin_fraction
     scale = min(
@@ -431,18 +432,16 @@ def _render(
     normal_length = np.linalg.norm(normals, axis=2, keepdims=True)
     normals /= np.maximum(normal_length, 1e-6)
 
-    light = np.asarray([-0.45, 0.6, 1.0], dtype=np.float32)
-    light /= np.linalg.norm(light)
-    diffuse = np.clip(normals @ light, 0.0, 1.0)
-    brightness = 0.30 + diffuse * 0.70
-    # A cool blue-grey surface provides contrast against the light card while
-    # retaining enough range for the reconstructed depth shading to read.
-    albedo = np.asarray(PREVIEW_PROFILE.material_albedo, dtype=np.float32) * 255.0
-    rim = (1.0 - np.clip(normals[:, :, 2], 0.0, 1.0)) ** 2 * 18.0
-    shaded = np.clip(
-        albedo[None, None, :] * brightness[:, :, None] + rim[:, :, None], 0, 255
-    )
-    image[finite] = shaded[finite].astype(np.uint8)
+    shade_surface = make_preview_shade(PREVIEW_PROFILE.material_albedo, STUDIO_LIGHTING)
+    # Reflect into the studio lighting frame. Evaluate only visible pixels in
+    # bounded row blocks so shading does not grow the worker's image workspace.
+    normals[..., :2] *= -1
+    for start in range(0, coverage_height, 32):
+        rows = slice(start, start + 32)
+        visible = finite[rows]
+        image[rows][visible] = (shade_surface(normals[rows][visible]) * 255).astype(
+            np.uint8
+        )
     alpha = np.where(finite, 255, 0).astype(np.uint8)
     rgb = np.asarray(image, dtype=np.uint8)
     alpha = np.asarray(

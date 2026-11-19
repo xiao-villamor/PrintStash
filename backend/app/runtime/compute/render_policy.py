@@ -2,10 +2,10 @@
 
 from dataclasses import dataclass
 
-from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, RASTERIZER_RECIPE
+from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 
 from app.modules.media.compute_geometry import decode
-from app.modules.media.compute_render import RECIPE
+from app.modules.media.compute_render import render_recipe
 from app.modules.media.gpu_render_layout import (
     FRAME_STRIDE,
     VIEW_WORKSPACE_BYTES,
@@ -53,9 +53,7 @@ def admission_decoded(
     for (prepared, width, height, views, matte), recipe, count in zip(
         decoded, recipes, units, strict=True
     ):
-        expected = (
-            f"{RECIPE}:{RASTERIZER_RECIPE}:{width}x{height}:{len(views)}:{int(matte)}"
-        )
+        expected = render_recipe(width, height, len(views), matte)
         if recipe != expected or count != prepared.face_count * len(views):
             raise ValueError("compute_render_identity")
     width, height = next(iter(dimensions))

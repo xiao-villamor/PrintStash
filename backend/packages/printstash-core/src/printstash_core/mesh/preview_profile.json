@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "aspectRatio": [4, 3],
   "background": "transparent",
   "upAxis": "z",
@@ -13,7 +13,29 @@
   },
   "marginFraction": 0.1,
   "material": {
-    "albedo": [0.7, 0.75, 0.84]
+    "albedo": [0.557, 0.592, 0.651]
+  },
+  "lighting": {
+    "key": {
+      "direction": [-0.8, 0.9, 0.65],
+      "colour": [1, 1, 1],
+      "strength": 1.05
+    },
+    "fill": {
+      "direction": [0.55, -0.25, 0.55],
+      "colour": [1, 1, 1],
+      "strength": 0.30
+    },
+    "rim": {
+      "colour": [1, 1, 1],
+      "strength": 0.28,
+      "power": 3
+    },
+    "ambient": 0.22,
+    "specular": {
+      "strength": 0.18,
+      "power": 24
+    }
   },
   "supersampling": {
     "maxOutputWidth": 640,

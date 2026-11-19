@@ -10,7 +10,7 @@ from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, STUDIO_LIGHTING
 
 from app.modules.media.stl_reader import (
     InvalidSTL,
@@ -224,6 +224,7 @@ def render_stl_thumbnail(
     try:
         import numpy as np
         from PIL import Image
+        from printstash_core.mesh.rasterizer import make_preview_shade
         from printstash_core.mesh.render_geometry import (
             PreparedRenderGeometry,
             prepare_normals,
@@ -316,13 +317,8 @@ def render_stl_thumbnail(
         (coverage_height, coverage_width), np.inf, dtype=np.float64
     )
     raster_budget = RasterBudget(limit=_MAX_COVERAGE_CANDIDATES)
-    base_color = np.asarray(PREVIEW_PROFILE.material_albedo, dtype=np.float32) * 255.0
-    light = np.asarray([-0.45, 0.6, 1.0], dtype=np.float32)
-    light /= np.linalg.norm(light)
-
-    def shade(normals):
-        diffuse = np.clip(normals @ light, 0.0, 1.0)[:, None]
-        return np.clip(0.32 + diffuse * 0.68, 0.0, 1.0)
+    base_color = np.full(3, 255, dtype=np.float32)
+    shade = make_preview_shade(PREVIEW_PROFILE.material_albedo, STUDIO_LIGHTING)
 
     coarse_scale_x = coverage_width / width
     coarse_scale_y = coverage_height / height
@@ -367,6 +363,7 @@ def render_stl_thumbnail(
         coarse_screen[:, :, 1] *= coarse_scale_y
         normals = corner_normals[ids] @ rotation.T
         normals = np.where(normals[..., 2:] >= 0, normals, -normals)
+        normals[..., :2] *= -1
 
         # The ordinary rasteriser intentionally tests the true triangle area.
         # For a dense model whose bounded sample contains microfacets that are
