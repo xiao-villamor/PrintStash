@@ -21,6 +21,14 @@ one exists and a short kebab-case slug. Never prefix a branch with `codex/`.
 Merge every branch through its own PR;
 do not aggregate unrelated work on a version-number branch.
 
+**One session, one branch.** Pick the branch at the start of a session and put
+every change there. Do not create a second branch, a fallback name, or a new
+branch that carries earlier changes forward unless the user explicitly asks
+or a named plan explicitly calls for a separate branch. A restarted or
+replacement agent (including a delegate) continues on the same branch, after
+checking what the previous agent already committed or pushed. If the intended
+branch name is already taken, stop and ask instead of choosing another.
+
 A release is assembled from completed PRs already merged to `main`. If branch
 protection requires a PR for the final version/changelog edits, use a
 short-lived `chore/release-X.Y.Z` branch containing release metadata only—no
