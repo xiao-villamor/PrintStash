@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import numpy as np
-from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, preview_appearance
 from printstash_core.mesh.rasterizer import (
     _select_view_rotation,
     render_prepared_thumbnail,
@@ -277,6 +277,7 @@ def render_prepared_views(
         source_sha256=source_sha256,
         recipe=recipe,
         profile=profile,
+        appearance=preview_appearance().fingerprint,
         center=(float(center[0]), float(center[1]), float(center[2])),
         views=tuple(published),
         cover_view=cover_view

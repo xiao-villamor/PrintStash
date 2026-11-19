@@ -20,6 +20,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
+from printstash_core.mesh.preview_profile import (
+    DEFAULT_APPEARANCE,
+    PreviewAppearance,
+    PreviewLook,
+)
+
 from app.modules.media.stl_reader import (
     InvalidSTL as _InvalidSTL,
 )
@@ -241,6 +247,7 @@ def _render(
     height: int,
     limits: _Limits,
     first: _PassStats,
+    appearance: PreviewAppearance = DEFAULT_APPEARANCE,
 ) -> int:
     import io
 
@@ -264,7 +271,8 @@ def _render(
     ) = _frame(first.bounds_min, first.bounds_max)
     # Every finite source facet contributes to the camera bounds. The standard
     # margin accommodates the complete scene, including small remote components.
-    from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, STUDIO_LIGHTING
+    from printstash_core.mesh.floor_grid import paint_floor_grid
+    from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, STUDIO_LOOKS
     from printstash_core.mesh.rasterizer import make_preview_shade
 
     margin = PREVIEW_PROFILE.margin_fraction
@@ -432,7 +440,8 @@ def _render(
     normal_length = np.linalg.norm(normals, axis=2, keepdims=True)
     normals /= np.maximum(normal_length, 1e-6)
 
-    shade_surface = make_preview_shade(PREVIEW_PROFILE.material_albedo, STUDIO_LIGHTING)
+    look = STUDIO_LOOKS[appearance.look]
+    shade_surface = make_preview_shade(look.albedo, look.lighting)
     # Reflect into the studio lighting frame. Evaluate only visible pixels in
     # bounded row blocks so shading does not grow the worker's image workspace.
     normals[..., :2] *= -1
@@ -450,7 +459,17 @@ def _render(
         ),
         dtype=np.uint8,
     )
-    rgba = Image.fromarray(np.dstack((rgb, alpha)), mode="RGBA")
+    pixels = np.dstack((rgb, alpha))
+    if appearance.floor_grid:
+        paint_floor_grid(
+            pixels,
+            rotation,
+            np.asarray(first.bounds_min) - center,
+            np.asarray(first.bounds_max) - center,
+            projected_mid,
+            scale,
+        )
+    rgba = Image.fromarray(pixels, mode="RGBA")
     buffer = io.BytesIO()
     rgba.save(buffer, format="PNG", optimize=True)
     data = buffer.getvalue()
@@ -494,6 +513,12 @@ def main(
     parser.add_argument("--address-space-bytes", type=int, required=True)
     parser.add_argument("--cpu-seconds", type=int, required=True)
     parser.add_argument("--expected-parent-pid", type=int, required=True)
+    parser.add_argument(
+        "--preview-look", type=PreviewLook, default=DEFAULT_APPEARANCE.look
+    )
+    parser.add_argument(
+        "--floor-grid", action=argparse.BooleanOptionalAction, default=True
+    )
     args = parser.parse_args(argv)
     if not (
         1 <= args.width <= _MAX_RENDER_DIMENSION
@@ -563,6 +588,7 @@ def main(
             args.height,
             limits,
             first,
+            PreviewAppearance(args.preview_look, args.floor_grid),
         )
         if snapshot_stl(args.source) != source:
             raise STLSourceChanged("source changed before publication")

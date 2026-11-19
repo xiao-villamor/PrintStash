@@ -9,7 +9,8 @@
 @source "../packages/ui/src";
 
 @layer base {
-  :root {
+  :root,
+  [data-preview-theme="light"] {
     /* Font families (previously injected by next/font; now from @fontsource). */
     --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
     --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
@@ -108,7 +109,8 @@
     --tertiary-fixed-dim: #fb923c;
   }
 
-  .dark {
+  .dark,
+  [data-preview-theme="dark"] {
     color-scheme: dark;
 
     /* Surfaces — distinct contrast steps */
@@ -335,6 +337,10 @@
   .setup-card {
     display: grid;
     max-width: 800px;
+  }
+
+  .setup-card-appearance {
+    max-width: 1080px;
   }
 
   @media (min-width: 768px) {

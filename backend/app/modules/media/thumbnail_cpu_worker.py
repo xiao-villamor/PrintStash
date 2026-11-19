@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-from app.modules.media.mesh_isolation import read_spec
+from app.modules.media.mesh_isolation import read_spec, worker_appearance
 from app.modules.media.thumbnail_packet import PacketDescriptor, read_packet
 
 
@@ -24,10 +24,11 @@ def main(argv: list[str]) -> int:
         directory_identity=tuple(spec["directory_identity"]),
     )
     prepared, width, height, _, _ = decode(payload)
-    image = render_prepared_thumbnail(
-        prepared, "thumbnail", width=width, height=height, output_format="WEBP"
-    )
     try:
+        with worker_appearance(spec):
+            image = render_prepared_thumbnail(
+                prepared, "thumbnail", width=width, height=height, output_format="WEBP"
+            )
         if image is None:
             return 1
         output.write(image)

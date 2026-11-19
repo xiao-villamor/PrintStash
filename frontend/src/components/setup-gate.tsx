@@ -51,7 +51,11 @@ export function SetupGate({ children }: Props) {
   const [retiredAt, setRetiredAt] = useState<number | null>(null);
   const status = probe.data;
   const choiceDecided = Boolean(status?.storage_choice_required) && !auth.loading;
-  const toStorageStep = choiceDecided && isSuperuser && pathname !== "/getting-started";
+  const toStorageStep =
+    choiceDecided &&
+    isSuperuser &&
+    pathname !== "/getting-started" &&
+    pathname !== "/setup-appearance";
   let redirect: "/setup" | "/login" | "/getting-started" | null = null;
   if (!probe.isPending && !probe.error && status) {
     if (!status.configured && pathname !== "/setup") redirect = "/setup";

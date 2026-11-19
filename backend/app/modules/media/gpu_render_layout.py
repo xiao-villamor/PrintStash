@@ -4,7 +4,7 @@ These helpers import no array or GPU libraries. Counts describe validated render
 arrays; they never infer authoritative geometry from a visual allocation.
 """
 
-FRAME_BYTES = 192
+FRAME_BYTES = 208
 FRAME_STRIDE = 256
 MAX_FRAMES = 8
 VIEW_WORKSPACE_BYTES = 2 * FRAME_STRIDE * MAX_FRAMES

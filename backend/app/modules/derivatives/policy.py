@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
+from printstash_core.mesh.preview_profile import DEFAULT_APPEARANCE, PreviewAppearance
 from sqlalchemy import and_, delete, or_
 from sqlmodel import Session, col, select
 
@@ -108,6 +109,12 @@ def effective_setting(config: SystemConfig | None, name: SettingName) -> bool:
     return getattr(settings.frozen, name) if override is None else override
 
 
+def render_appearance(config: SystemConfig | None) -> PreviewAppearance:
+    if config is None:
+        return DEFAULT_APPEARANCE
+    return PreviewAppearance(config.preview_look, config.preview_floor_grid)
+
+
 def preview_poles(session: Session) -> bool:
     override = session.exec(
         select(SystemConfig.derivatives_previews_include_poles).where(
@@ -207,12 +214,22 @@ def _invalidate_embedded_covers(session: Session) -> None:
 
 
 def update(
-    session: Session, changes: dict[SettingName, bool | None], *, commit: bool = True
-) -> None:
+    session: Session,
+    changes: dict[SettingName, bool | None],
+    *,
+    appearance: PreviewAppearance | None = None,
+    commit: bool = True,
+) -> bool:
     """Persist all supplied controls together, then publish latency hints."""
-    if not changes:
-        return
+    if not changes and appearance is None:
+        return False
     config = lock(session)
+    appearance_changed = appearance is not None and appearance != render_appearance(
+        config
+    )
+    if appearance_changed and appearance is not None:
+        config.preview_look = appearance.look
+        config.preview_floor_grid = appearance.floor_grid
     previous_poles = preview_poles(session)
     previous_cover_policy = effective_setting(
         config, SettingName.RECREATE_EMBEDDED_COVERS
@@ -230,10 +247,13 @@ def update(
         or previous_enabled != resolve(session)[JobKind.DERIVATIVES_PREVIEWS].enabled
     ):
         invalidate_library_browse(session)
-    if poles_changed:
-        # Fence in-flight publication and rediscover existing outputs atomically
-        # with the setting, using the same durable authority as regenerate-all.
-        definition, kind = JobKind.DERIVATIVES_PREVIEWS, DerivativeKind.PREVIEWS
+    # Fence in-flight publication with the same durable authority as regenerate-all.
+    regenerate = []
+    if poles_changed or appearance_changed:
+        regenerate.append((JobKind.DERIVATIVES_PREVIEWS, DerivativeKind.PREVIEWS))
+    if appearance_changed:
+        regenerate.append((JobKind.DERIVATIVES_MESH, DerivativeKind.THUMBNAIL))
+    for definition, kind in regenerate:
         request = session.get(DerivativeGroupRegeneration, (definition, kind))
         if request is None:
             request = DerivativeGroupRegeneration(definition=definition, kind=kind)
@@ -245,12 +265,15 @@ def update(
         _invalidate_embedded_covers(session)
     if commit:
         session.commit()
-        publish_changes(changes)
+        publish_changes(changes, appearance_changed=appearance_changed)
+    return appearance_changed
 
 
-def publish_changes(changes: dict[SettingName, bool | None]) -> None:
+def publish_changes(
+    changes: dict[SettingName, bool | None], *, appearance_changed: bool = False
+) -> None:
     """Publish producer wake-up hints only after the caller commits its controls."""
-    if not changes:
+    if not changes and not appearance_changed:
         return
     from app.modules.work.events import derivative_policy_changed
     from app.modules.work.submission import nudge
@@ -259,6 +282,8 @@ def publish_changes(changes: dict[SettingName, bool | None]) -> None:
     for definition, name in SETTINGS.items():
         if (
             name in changes
+            or appearance_changed
+            and definition in (JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_PREVIEWS)
             or (
                 definition == JobKind.DERIVATIVES_PREVIEWS
                 and SettingName.PREVIEW_POLES in changes

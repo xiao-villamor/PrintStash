@@ -25,6 +25,7 @@ from printstash_core.mesh.measurements import (
     VolumeNotCalculated,
     VolumeNotCalculatedCause,
 )
+from printstash_core.mesh.preview_profile import appearance_scope, preview_appearance
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 from printstash_core.resin.reader import ResinFormatError
 from sqlmodel import Session, col, delete, select
@@ -290,6 +291,17 @@ def _publish_thumbnail(
         if abort_on_failure:
             raise
         return DerivativeState.FAILED
+    appearance = (
+        preview_appearance().fingerprint
+        if strategy != ThumbnailStrategy.EMBEDDED
+        else None
+    )
+    recipe_tag = (
+        f"{DerivativeKind.THUMBNAIL}:{attempt.recipe}:{attempt.token}"
+        f":w{settings.model_thumbnail_width}"
+    )
+    if appearance is not None:
+        recipe_tag = f"{recipe_tag}:{appearance}"
     backend = get_backend()
     with get_session_factory().scoped_session() as session:
         try:
@@ -298,7 +310,7 @@ def _publish_thumbnail(
                 backend,
                 file_row,
                 encoded,
-                recipe_tag=f"{DerivativeKind.THUMBNAIL}:{attempt.recipe}:{attempt.token}:w{settings.model_thumbnail_width}",
+                recipe_tag=recipe_tag,
             )
         except ThumbnailPublicationError, OperationError, OSError:
             session.rollback()
@@ -327,6 +339,7 @@ def _publish_thumbnail(
                 "height": height,
                 "strategy": strategy,
                 "complete": complete,
+                **({"appearance": appearance} if appearance is not None else {}),
                 **({"image_kind": embedded_kind.value} if embedded_container else {}),
             },
             duration_ms=duration_ms,
@@ -435,6 +448,7 @@ def _derive_mesh(
     *,
     execution: JobExecution | None = None,
     phases: _ProducePhases,
+    render_scope: ExitStack,
 ) -> Outcome:
     """Publish each fenced basic output before optional fingerprint completion."""
     from app.modules.ingestion.extensions import extraction_options
@@ -501,6 +515,10 @@ def _derive_mesh(
     if begun is None:
         return Outcome({})
     file_row, attempts = begun
+    with get_session_factory().scoped_session() as session:
+        render_scope.enter_context(
+            appearance_scope(policy.render_appearance(session.get(SystemConfig, 1)))
+        )
     outcome: dict[DerivativeKind, DerivativeState] = {}
     if not attempts and pending is None and views is None:
         return Outcome(outcome)
@@ -1222,7 +1240,10 @@ class _ProducePhases:
 def derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outcome:
     phases = _ProducePhases()
     try:
-        return _derive_mesh(file_id, execution=execution, phases=phases)
+        with ExitStack() as scope:
+            return _derive_mesh(
+                file_id, execution=execution, phases=phases, render_scope=scope
+            )
     except records.AttemptSuperseded:
         return Outcome({})
     finally:

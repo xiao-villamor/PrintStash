@@ -9,6 +9,7 @@ import { captureEditingBase } from "@/lib/api/editing";
 import type { EditingBase } from "@/types/editing";
 import type { PreferenceIntent, PreviewMode } from "@/lib/queries/settings-preferences";
 
+import { PreviewAppearanceSettings } from "@/components/preview-appearance-settings";
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 
@@ -5482,6 +5483,9 @@ export function SettingsPanel() {
                       )}
                     </p>
                   </div>
+                  {user?.is_superuser && remoteConfigData?.preview_look && (
+                    <PreviewAppearanceSettings config={remoteConfigData} />
+                  )}
                 </SettingsCard>
               </div>
             )}

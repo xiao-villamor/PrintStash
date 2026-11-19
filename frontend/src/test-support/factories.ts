@@ -848,6 +848,8 @@ export function aVaultConfig(
     derivatives_previews_enabled: false,
     derivatives_previews_include_poles: false,
     prefer_rendered_3mf_preview: false,
+    preview_look: "sky",
+    preview_floor_grid: true,
     storage_backend: "local",
     storage_provider: "local",
     storage_provider_config: {

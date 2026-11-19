@@ -15,7 +15,8 @@ from printstash_core.mesh.preview_profile import (
     MATTE_LIGHTING,
     PREVIEW_PROFILE,
     REFERENCE_THUMBNAIL_PROFILE,
-    STUDIO_LIGHTING,
+    STUDIO_LOOKS,
+    preview_appearance,
 )
 
 from .gpu_render_layout import BOUND_BYTES, FRAME_BYTES, FRAME_STRIDE
@@ -29,7 +30,8 @@ struct Frame {
     key_direction: vec4<f32>, fill_direction: vec4<f32>,
     key_colour: vec3<f32>, key_strength: f32,
     fill_colour: vec3<f32>, fill_strength: f32,
-    rim_colour: vec3<f32>, rim_strength: f32
+    rim_colour: vec3<f32>, rim_strength: f32,
+    floor: vec4<f32>
 };
 fn rotate(value: vec3<f32>, frame: Frame) -> vec3<f32> {
     return vec3(dot(value,frame.r0.xyz), dot(value,frame.r1.xyz), dot(value,frame.r2.xyz));
@@ -120,6 +122,21 @@ fn select_rotation() {
     }
     frame = config;
     frame.r0 = r0; frame.r1 = r1; frame.r2 = r2;
+    let extents = bounds.high.xyz - bounds.low.xyz;
+    var thin = 0u;
+    if extents.y < extents.x { thin = 1u; }
+    if extents.z < extents[thin] { thin = 2u; }
+    let broad = min(extents[(thin+1u)%3u], extents[(thin+2u)%3u]);
+    let planar = broad > 1e-6 && extents[thin] / broad <= FLAT_RATIO;
+    let axis = select(2u, thin, planar);
+    let elevation = select(bounds.low.z, (bounds.low[axis] + bounds.high[axis])*0.5, planar);
+    let target_cell = max(extents[(axis+1u)%3u], extents[(axis+2u)%3u])/5.;
+    let cells = array<f32, 6>(1., 2., 5., 10., 20., 50.);
+    var cell = 50.;
+    for (var i = 0u; i < 6u; i++) {
+        if target_cell <= cells[i] { cell = cells[i]; break; }
+    }
+    frame.floor = vec4(elevation, cell, f32(axis), config.floor.w);
 }
 """
 )
@@ -185,17 +202,17 @@ def _auto_rotations() -> str:
     return "const rotations = array<vec4<f32>,12>(" + rows + ");"
 
 
-def frame_config(rotation: Any, width: int, height: int, matte: bool) -> bytes:
+def frame_config(
+    rotation: Any, width: int, height: int, matte: bool, *, samples: int = 1
+) -> bytes:
     rows = np.zeros((FRAME_STRIDE // 16, 4), dtype="<f4")
     if rotation is not None:
         rows[:3, :3] = rotation
     rows[3] = (width, height, PREVIEW_PROFILE.margin_fraction, rotation is None)
-    lighting = MATTE_LIGHTING if matte else STUDIO_LIGHTING
-    albedo = (
-        REFERENCE_THUMBNAIL_PROFILE.material_albedo
-        if matte
-        else PREVIEW_PROFILE.material_albedo
-    )
+    appearance = preview_appearance()
+    look = STUDIO_LOOKS[appearance.look]
+    lighting = MATTE_LIGHTING if matte else look.lighting
+    albedo = REFERENCE_THUMBNAIL_PROFILE.material_albedo if matte else look.albedo
     rows[5] = (
         lighting.ambient,
         lighting.specular_strength,
@@ -208,6 +225,7 @@ def frame_config(rotation: Any, width: int, height: int, matte: bool) -> bytes:
     rows[9] = (*lighting.key.colour, lighting.key.strength)
     rows[10] = (*lighting.fill.colour, lighting.fill.strength)
     rows[11] = (*lighting.rim_colour, lighting.rim_strength)
+    rows[12, 3] = samples if not matte and appearance.floor_grid else 0
     return rows.tobytes()
 
 

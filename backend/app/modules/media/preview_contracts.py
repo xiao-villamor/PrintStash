@@ -115,6 +115,7 @@ class PreviewManifest(BaseModel):
     recipe: int = Field(default=1, ge=1)
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     profile: ViewProfile
+    appearance: str | None = Field(default=None, exclude_if=lambda value: value is None)
     center: Vector
     views: tuple[PublishedView, ...] = Field(min_length=1, max_length=MAX_VIEWS)
     cover_view: ViewId | None = Field(

@@ -6,7 +6,11 @@ from collections.abc import Callable
 from uuid import uuid4
 
 from printstash_core.mesh.preview_profile import (
+    DEFAULT_APPEARANCE,
     PREVIEW_PROFILE,
+    RASTERIZER_RECIPE,
+    PreviewAppearance,
+    PreviewLook,
     preview_rasterizer_recipe,
 )
 from printstash_core.mesh.rasterizer import RenderedPixels, postprocess_rgba
@@ -35,6 +39,19 @@ def render_priority() -> Priority:
 def render_recipe(width: int, height: int, views: int = 1, matte: bool = False) -> str:
     """One identity for eligibility checks and both render dispatch paths."""
     return f"{RECIPE}:{preview_rasterizer_recipe(matte=matte)}:{width}x{height}:{views}:{int(matte)}"
+
+
+def appearance_for_recipe(recipe: str) -> PreviewAppearance:
+    _, identity, *_ = recipe.split(":")
+    if identity == RASTERIZER_RECIPE:
+        return DEFAULT_APPEARANCE
+    prefix, look, grid = identity.rsplit("-", 2)
+    if (
+        prefix != f"{RASTERIZER_RECIPE}-{PREVIEW_PROFILE.recipe_fingerprint}"
+        or grid not in {"0", "1"}
+    ):
+        raise ValueError("compute_render_identity")
+    return PreviewAppearance(PreviewLook(look), grid == "1")
 
 
 def _require_visible_frame(frame: RenderedPixels) -> RenderedPixels:

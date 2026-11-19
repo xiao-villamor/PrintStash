@@ -173,9 +173,12 @@ def _definition(name: JobKind, lane: LaneName, produce: Producer) -> JobDefiniti
         cancel=cancel,
         on_failure=on_failure,
         retry=retry,
-        completion_nudges=(JobKind.DERIVATIVES_PREVIEWS,)
-        if name in {JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_GCODE}
-        else (),
+        completion_nudges={
+            JobKind.DERIVATIVES_MESH: (JobKind.DERIVATIVES_PREVIEWS,),
+            JobKind.DERIVATIVES_GCODE: (JobKind.DERIVATIVES_PREVIEWS,),
+            # A preview can hold the native backfill slot during a look change.
+            JobKind.DERIVATIVES_PREVIEWS: (JobKind.DERIVATIVES_MESH,),
+        }.get(name, ()),
         batch_interactive_discovery=name
         in {JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_PLATES},
         label=derivative_group.label,

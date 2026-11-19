@@ -9,11 +9,18 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from dataclasses import asdict
 from functools import partial
 
 from app.core.cancellation import checkpoint
 from app.core.config import settings
-from app.db.models import DerivativeKind, DerivativeState, FileType, JobKind
+from app.db.models import (
+    DerivativeKind,
+    DerivativeState,
+    FileType,
+    JobKind,
+    SystemConfig,
+)
 from app.db.session import get_session_factory
 from app.modules.media import mesh_isolation
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
@@ -64,6 +71,7 @@ def _derive(
     with get_session_factory().scoped_session() as session:
         include_poles = policy.preview_poles(session)
         planar_cover = publication.planar_cover_rotation(session, file)
+        appearance = policy.render_appearance(session.get(SystemConfig, 1))
     width = GALLERY_WIDTH
     # VAULT_MESH_MAX_LOAD_MB: the same source-size ceiling as every mesh path.
     if file.size_bytes > settings.mesh_max_load_mb * 1024 * 1024:
@@ -128,6 +136,7 @@ def _derive(
                     "include_poles": include_poles,
                     "width": width,
                     "planar_cover": planar_cover,
+                    "preview_appearance": asdict(appearance),
                 },
                 workspace=prepared.directory,
                 sources=(MeshSource(source, file.file_type.value),),

@@ -10,7 +10,7 @@ from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, STUDIO_LIGHTING
+from printstash_core.mesh.preview_profile import STUDIO_LOOKS, preview_appearance
 
 from app.modules.media.stl_reader import (
     InvalidSTL,
@@ -224,6 +224,7 @@ def render_stl_thumbnail(
     try:
         import numpy as np
         from PIL import Image
+        from printstash_core.mesh.floor_grid import paint_floor_grid
         from printstash_core.mesh.rasterizer import make_preview_shade
         from printstash_core.mesh.render_geometry import (
             PreparedRenderGeometry,
@@ -318,7 +319,9 @@ def render_stl_thumbnail(
     )
     raster_budget = RasterBudget(limit=_MAX_COVERAGE_CANDIDATES)
     base_color = np.full(3, 255, dtype=np.float32)
-    shade = make_preview_shade(PREVIEW_PROFILE.material_albedo, STUDIO_LIGHTING)
+    appearance = preview_appearance()
+    look = STUDIO_LOOKS[appearance.look]
+    shade = make_preview_shade(look.albedo, look.lighting)
 
     coarse_scale_x = coverage_width / width
     coarse_scale_y = coverage_height / height
@@ -427,6 +430,15 @@ def render_stl_thumbnail(
         dtype=np.uint8,
     )
     rgba = np.dstack([image, alpha])
+    if appearance.floor_grid:
+        paint_floor_grid(
+            rgba,
+            rotation,
+            np.asarray(sampled.bounds_min) - center,
+            np.asarray(sampled.bounds_max) - center,
+            view_mid,
+            scale,
+        )
     output = io.BytesIO()
     Image.fromarray(rgba, mode="RGBA").save(output, format="PNG", optimize=True)
     return STLThumbnailResult(

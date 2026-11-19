@@ -15,6 +15,7 @@ import numpy as np
 from printstash_core.mesh import rasterizer as core
 from printstash_core.mesh.preview_profile import (
     PREVIEW_PROFILE,
+    preview_appearance,
     preview_rasterizer_recipe,
 )
 
@@ -85,6 +86,40 @@ fn shade(value: vec3<f32>) -> vec3<f32> {
 )
 
 
+GRID_SHADER = (
+    FRAME_STRUCT
+    + """
+@group(0) @binding(0) var<uniform> frame: Frame;
+@vertex fn grid_vs(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
+    let points = array<vec2<f32>, 3>(vec2(-1., -1.), vec2(3., -1.), vec2(-1., 3.));
+    return vec4(points[index], 1., 1.);
+}
+@fragment fn grid_fs(@builtin(position) pixel: vec4<f32>) -> @location(0) vec4<f32> {
+    let axis = u32(frame.floor.z);
+    let depth = frame.r2.xyz;
+    if frame.floor.w == 0. || abs(depth[axis]) < 0.08 { discard; }
+    let size = frame.extent.xy;
+    let xy = vec2(pixel.x-size.x*0.5, size.y*0.5-pixel.y)/frame.projection.z
+             + frame.projection.xy;
+    let right = frame.r0.xyz - depth*frame.r0[axis]/depth[axis];
+    let up = frame.r1.xyz - depth*frame.r1[axis]/depth[axis];
+    let point = depth*frame.floor.x/depth[axis] + right*xy.x + up*xy.y;
+    let cell = frame.floor.y;
+    let offset = abs(fract(point/cell+0.5)-0.5)*cell;
+    let step = max(sqrt(right*right+up*up)*frame.floor.w/frame.projection.z, vec3(1e-6));
+    let first = (axis+1u)%3u;
+    let second = (axis+2u)%3u;
+    let line = clamp(0.95-min(offset[first]/step[first], offset[second]/step[second]),0.,1.);
+    let radius = length(2.*(pixel.xy/size-0.5));
+    let fade = pow(clamp((0.96-radius)/0.65,0.,1.),1.1);
+    let alpha = floor(line*fade*0.8*255.)/255.;
+    if alpha == 0. { discard; }
+    return vec4(vec3(138.,147.,166.)/255., alpha);
+}
+"""
+)
+
+
 class Renderer:
     def __init__(
         self,
@@ -134,6 +169,21 @@ class Renderer:
             fragment={
                 "module": shader,
                 "entry_point": "fs",
+                "targets": [{"format": "rgba8unorm"}],
+            },
+        )
+        grid = device.create_shader_module(code=GRID_SHADER)
+        self.grid_pipeline = device.create_render_pipeline(
+            layout="auto",
+            vertex={"module": grid, "entry_point": "grid_vs", "buffers": []},
+            depth_stencil={
+                "format": "depth32float",
+                "depth_write_enabled": False,
+                "depth_compare": "always",
+            },
+            fragment={
+                "module": grid,
+                "entry_point": "grid_fs",
                 "targets": [{"format": "rgba8unorm"}],
             },
         )
@@ -244,7 +294,7 @@ class Renderer:
         self.view_bounds.clear()
         self.view_bounds_size = 0
 
-    def draw(self, encoder, prepared, key, frame_index, width, height):
+    def draw(self, encoder, prepared, key, frame_index, width, height, *, grid=False):
         geometry = self.geometry[key]
         vertex_count = len(prepared.vertices)
         levels = len(bounds_scratch_sizes(vertex_count))
@@ -300,6 +350,14 @@ class Renderer:
                 "depth_store_op": "store",
             },
         )
+        if grid:
+            grid_group = self.device.create_bind_group(
+                layout=self.grid_pipeline.get_bind_group_layout(0),
+                entries=[{"binding": 0, "resource": entries[-1]["resource"]}],
+            )
+            frame.set_pipeline(self.grid_pipeline)
+            frame.set_bind_group(0, grid_group)
+            frame.draw(3)
         frame.set_pipeline(self.pipeline)
         frame.set_bind_group(0, draw_group)
         frame.draw(3, prepared.face_count)
@@ -454,7 +512,7 @@ class Renderer:
             if missing:
                 assert self.packer is not None and self.readback is not None
                 configs = b"".join(
-                    frame_config(view, w, h, decoded[i][4])
+                    frame_config(view, w, h, decoded[i][4], samples=factor)
                     for i in missing
                     for view in decoded[i][3]
                 )
@@ -466,11 +524,19 @@ class Renderer:
                 self.upload_calls += self.packer.upload_calls - before[3]
                 self.bounds_vertices += self.packer.bounds_vertices - before[4]
                 for i, key in zip(missing, pinned, strict=True):
-                    prepared, _, _, views, _ = decoded[i]
+                    prepared, _, _, views, matte = decoded[i]
                     spans[i] = (frame_index, len(views))
                     for _ in views:
                         self.frame_offset = frame_index * frame_bytes
-                        self.draw(encoder, prepared, key, frame_index, w, h)
+                        self.draw(
+                            encoder,
+                            prepared,
+                            key,
+                            frame_index,
+                            w,
+                            h,
+                            grid=not matte and preview_appearance().floor_grid,
+                        )
                         frame_index += 1
                 self.device.queue.submit([encoder.finish()])
                 self.submissions += 1

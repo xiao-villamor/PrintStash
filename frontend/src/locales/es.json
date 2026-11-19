@@ -5332,5 +5332,21 @@
   "Oblique views": "Vistas oblicuas",
   "Oblique views + top and bottom": "Vistas oblicuas + superior e inferior",
   "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Empieza con una miniatura para importar más rápido. Activa cuatro vistas oblicuas y, opcionalmente, las vistas superior e inferior. Los modelos existentes se actualizan en segundo plano.",
-  "No configured printer supports Vault upload/send.": "Ninguna impresora configurada admite subir o enviar desde la bóveda."
+  "No configured printer supports Vault upload/send.": "Ninguna impresora configurada admite subir o enviar desde la bóveda.",
+  "setup.stepAppearance": "Aspecto",
+  "Make your library yours": "Personaliza tu biblioteca",
+  "Preview colour": "Color de la vista previa",
+  "Floor grid": "Cuadrícula del suelo",
+  "Example bracket": "Soporte de ejemplo",
+  "Example card": "Tarjeta de ejemplo",
+  "Example theme": "Tema del ejemplo",
+  "You can change this any time in Settings": "Puedes cambiarlo en cualquier momento en Ajustes",
+  "Covers are being re-rendered in the background": "Las portadas se están generando de nuevo en segundo plano",
+  "Cover rendering finished": "Generación de portadas finalizada",
+  "Sky": "Cielo",
+  "PrintStash blue": "Azul PrintStash",
+  "Slate": "Pizarra",
+  "Graphite": "Grafito",
+  "Sand": "Arena",
+  "Skip": "Omitir"
 }

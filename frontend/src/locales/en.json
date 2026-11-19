@@ -5329,5 +5329,21 @@
   "Oblique views": "Oblique views",
   "Oblique views + top and bottom": "Oblique views + top and bottom",
   "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.": "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.",
-  "No configured printer supports Vault upload/send.": "No configured printer supports Vault upload/send."
+  "No configured printer supports Vault upload/send.": "No configured printer supports Vault upload/send.",
+  "setup.stepAppearance": "Appearance",
+  "Make your library yours": "Make your library yours",
+  "Preview colour": "Preview colour",
+  "Floor grid": "Floor grid",
+  "Example bracket": "Example bracket",
+  "Example card": "Example card",
+  "Example theme": "Example theme",
+  "You can change this any time in Settings": "You can change this any time in Settings",
+  "Covers are being re-rendered in the background": "Covers are being re-rendered in the background",
+  "Cover rendering finished": "Cover rendering finished",
+  "Sky": "Sky",
+  "PrintStash blue": "PrintStash blue",
+  "Slate": "Slate",
+  "Graphite": "Graphite",
+  "Sand": "Sand",
+  "Skip": "Skip"
 }

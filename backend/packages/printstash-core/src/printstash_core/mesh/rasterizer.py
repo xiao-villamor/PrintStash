@@ -40,15 +40,17 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, runtime_checkable
 
+from .floor_grid import paint_floor_grid
 from .preview_profile import (
     MATTE_LIGHTING,
     PREVIEW_PROFILE,
     REFERENCE_LIGHTING,
     REFERENCE_THUMBNAIL_PROFILE,
-    STUDIO_LIGHTING,
+    STUDIO_LOOKS,
     PreviewLighting,
     PreviewProfile,
     Vector,
+    preview_appearance,
 )
 from .render_geometry import (
     MeshRenderInput,
@@ -496,18 +498,12 @@ def render_prepared_pixels(
 
         # 5. Shade interpolated normals with an albedo and lights in view-space.
         studio = not (matte or reference_thumbnail)
+        appearance = preview_appearance()
+        look = STUDIO_LOOKS[appearance.look]
         lighting = (
-            STUDIO_LIGHTING
-            if studio
-            else MATTE_LIGHTING
-            if matte
-            else REFERENCE_LIGHTING
+            look.lighting if studio else MATTE_LIGHTING if matte else REFERENCE_LIGHTING
         )
-        albedo = (
-            PREVIEW_PROFILE.material_albedo
-            if studio
-            else REFERENCE_THUMBNAIL_PROFILE.material_albedo
-        )
+        albedo = look.albedo if studio else REFERENCE_THUMBNAIL_PROFILE.material_albedo
         shade = make_preview_shade(albedo, lighting)
 
         # ------------------------------------------------------------------
@@ -611,6 +607,16 @@ def render_prepared_pixels(
         # Alpha = 255 wherever a triangle was painted, 0 elsewhere.
         alpha = np.where(zbuf < np.inf, np.uint8(255), np.uint8(0)).astype(np.uint8)
         rgba = np.dstack([img, alpha])
+        if studio and appearance.floor_grid:
+            paint_floor_grid(
+                rgba,
+                rotation,
+                verts.min(axis=0),
+                verts.max(axis=0),
+                ((x_min + x_max) * 0.5, (y_min + y_max) * 0.5),
+                scale,
+                samples=supersample,
+            )
 
         # ------------------------------------------------------------------
         # 7. Post-process: Lanczos downsample (anti-aliasing) + subtle vignette.
