@@ -106,6 +106,24 @@ export function useCollectionDestination(path: string | null, id: number | null)
   });
 }
 
+/**
+ * The display name of a collection the Library already resolved. A cached
+ * lookup is enough here: labels must not trigger their own revalidation.
+ */
+export function useCollectionName(path: string | null, id: number | null) {
+  const client = useQueryClient();
+  const api = useQueryApi();
+  const lookup = useQuery({
+    ...(id === null
+      ? collectionLookupOptions(path, client, api)
+      : collectionLookupByIdOptions(id, client, api)),
+    enabled: path !== null,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  });
+  return path === null ? null : (lookup.data?.collection.name ?? null);
+}
+
 /** Six persisted identities are resolved only when the menu opens. */
 export function useRecentFolders(current: CollectionLookupRead | undefined, open: boolean) {
   const client = useQueryClient();

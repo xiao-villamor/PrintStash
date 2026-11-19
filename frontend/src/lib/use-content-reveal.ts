@@ -13,12 +13,15 @@ export function useContentReveal<T extends HTMLElement = HTMLDivElement>(
     scroll = "preserve",
     animateOnEnable = false,
     animateOnMount = false,
+    timing = "content",
   }: {
     enabled?: boolean;
     scope?: string;
     scroll?: "self" | "parent" | "preserve";
     animateOnEnable?: boolean;
     animateOnMount?: boolean;
+    /** `press` is the quicker handoff for tool switches inside a stationary frame. */
+    timing?: "content" | "press";
   } = {},
 ) {
   const content = useRef<T>(null);
@@ -72,8 +75,15 @@ export function useContentReveal<T extends HTMLElement = HTMLDivElement>(
       frame = requestAnimationFrame(() => {
         if (finished) return;
         animation = element.animate([{ opacity: from }, { opacity: 1 }], {
-          duration: cssTimeSeconds(tokens.getPropertyValue("--duration-library-enter")) * 1000,
-          easing: tokens.getPropertyValue("--ease-library-enter").trim(),
+          duration:
+            cssTimeSeconds(
+              tokens.getPropertyValue(
+                timing === "press" ? "--duration-press" : "--duration-library-enter",
+              ),
+            ) * 1000,
+          easing: tokens
+            .getPropertyValue(timing === "press" ? "--ease-out" : "--ease-library-enter")
+            .trim(),
           fill: "both",
         });
         animation.onfinish = finish;
@@ -94,7 +104,7 @@ export function useContentReveal<T extends HTMLElement = HTMLDivElement>(
       if (animation) animation.onfinish = null;
       animation?.cancel();
     };
-  }, [identity, enabled, scope, scroll, animateOnEnable]);
+  }, [identity, enabled, scope, scroll, animateOnEnable, timing]);
 
   return content;
 }

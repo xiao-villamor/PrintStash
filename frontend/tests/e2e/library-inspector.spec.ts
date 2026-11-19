@@ -5,6 +5,13 @@ import { aModelListItem } from "../../src/test-support/factories";
 
 useMockApi();
 
+declare global {
+  interface Window {
+    /** Starting transforms of card animations, recorded by the glide test. */
+    cardGlides: string[];
+  }
+}
+
 async function inspect(page: Page) {
   await page.goto("/?c=maraio&type=all");
   const card = page
@@ -115,6 +122,45 @@ test.describe("Library inline inspector", () => {
       await expect(page.getByRole("button", { name: "Refresh library", exact: true })).toBeHidden();
     });
   }
+
+  test("glides reflowed cards beside the docked inspector", async ({ page }) => {
+    const models = Array.from({ length: 12 }, (_, index) =>
+      aModelListItem({ id: index + 1, name: `Part ${index + 1}` }),
+    );
+    await page.route("**/api/v1/models/browse?**", (route) =>
+      route.fulfill({
+        json: {
+          items: models.map((model) => ({ kind: "model", model })),
+          total: models.length,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      }),
+    );
+    await page.addInitScript(() => {
+      window.cardGlides = [];
+      const glides = window.cardGlides;
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (...args) {
+        const result = animate.apply(this, args);
+        const [frames] = args;
+        if (this.matches("main [data-library-key]") && Array.isArray(frames))
+          glides.push(String(frames[0]?.transform ?? "none"));
+        return result;
+      };
+    });
+    await page.goto("/?type=all&sort=date-desc");
+    await expect(page.getByRole("heading", { name: "Part 12", exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Show or hide details", exact: true }).click();
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.cardGlides.some((start) => start.startsWith("translate("))),
+      )
+      .toBe(true);
+  });
 
   test("returns from the explicit full page to the same inspector", async ({ page }) => {
     const problems = await collectPageProblems(page);

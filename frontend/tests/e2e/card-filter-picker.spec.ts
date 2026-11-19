@@ -111,6 +111,22 @@ test.describe("Library filters and card actions", () => {
     await expect(page.getByRole("heading", { name: "PETG", exact: true })).toBeVisible();
   });
 
+  test("applies a quick filter without opening its category", async ({ page }) => {
+    await page.goto("/?c=maraio");
+    const picker = await openFilters(page);
+    const printed = picker.getByRole("group", { name: "Printed", exact: true });
+
+    await printed.getByRole("button", { name: "Not printed", exact: true }).click();
+
+    await expect.poll(() => new URL(page.url()).searchParams.get("printed")).toBe("no");
+    await expect(printed.getByRole("button", { name: "Not printed", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(picker.getByRole("region", { name: "Printing", exact: true })).toBeVisible();
+    expect(new URL(page.url()).searchParams.get("c")).toBe("maraio");
+  });
+
   test("preserves collection scope throughout filter reset", async ({ page }) => {
     await page.goto("/?c=maraio&q=bracket&material_type=PLA&tag=missing");
     const picker = await openFilters(page);

@@ -1,4 +1,4 @@
-import { type MouseEvent, type ReactNode, type Ref } from "react";
+import { Fragment, useEffect, useRef, type MouseEvent, type ReactNode, type Ref } from "react";
 import { Box, ChevronLeft, ChevronRight, FileText, Images } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
@@ -316,9 +316,13 @@ export function ModelPreviewControls({
       <Modal
         open={state.open}
         title={uiText("modelPreview.gallery")}
+        description={
+          navigationViews.length >= 2
+            ? `${name} · ${uiText("modelPreview.views", { count: navigationViews.length })}`
+            : name
+        }
         onClose={() => state.setOpen(false)}
         className="max-w-6xl"
-        bodyClassName="space-y-4"
       >
         <ModelPreviewGallery name={name} cover={state.cover} previews={state.previews} />
       </Modal>
@@ -393,12 +397,34 @@ export function ModelPreviewGallery({
     "full",
   );
   const { preview } = state;
+  const strip = useRef<HTMLDivElement>(null);
+  // The chosen view stays visible in the strip, whichever control chose it.
+  useEffect(() => {
+    strip.current
+      ?.querySelector<HTMLElement>('[aria-pressed="true"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [preview.selected]);
+  // Renders and archive photos are different kinds of evidence; the strip says so.
+  const firstPhoto = preview.navigationViews.findIndex(
+    (view) => view.id !== "cover" && view.role === "archive",
+  );
   return (
-    <>
+    <div
+      className="model-preview-gallery flex min-h-0 flex-col gap-3"
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        if (event.target instanceof HTMLInputElement) return;
+        const next = preview.destination(event.key === "ArrowLeft" ? -1 : 1);
+        if (!next) return;
+        event.preventDefault();
+        preview.select(next.id);
+      }}
+    >
       <div
         ref={admission}
-        className="model-preview-gallery-stage relative bg-muted"
+        className="model-preview-gallery-stage relative overflow-hidden bg-muted"
         data-model-preview={name}
+        data-image-kind={state.imageKind}
         onPointerEnter={state.enter}
         onPointerLeave={state.leave}
       >
@@ -406,66 +432,89 @@ export function ModelPreviewGallery({
         {preview.navigationViews.length >= 2 && <PreviewArrows state={state} size="gallery" />}
         <ViewIndicator
           state={state}
-          className="absolute bottom-2 left-1/2 max-w-full -translate-x-1/2 border border-border"
+          className="absolute bottom-3 left-1/2 max-w-[calc(100%-6rem)] -translate-x-1/2 border border-border"
         />
         {preview.failed && (
-          <Button variant="outline" className="absolute left-1 top-1 h-11" onClick={preview.retry}>
+          <Button variant="outline" className="absolute left-2 top-2" onClick={preview.retry}>
             {uiText("modelPreview.retry")}
           </Button>
         )}
       </div>
-      <div className="space-y-2">
-        {preview.navigationViews.length > 1 && !previews.archive_images?.length && (
-          <p className="text-sm text-muted-foreground">{uiText("modelPreview.discrete")}</p>
-        )}
-        <div
-          className="flex gap-2 overflow-x-auto pb-2"
-          aria-label={uiText("modelPreview.gallery")}
-        >
-          {preview.navigationViews.map((view) => {
-            const imageKind =
-              view.id === "cover" ? coverImageKind(previews, "full") : view.image_kind;
-            const thumbnail =
-              view.id === "cover"
-                ? (previews.large_cover_thumbnail_url ??
-                  (previews.large_cover_view ? undefined : cover))
-                : view.role === "archive"
-                  ? undefined
-                  : view.thumbnail_url;
-            const path =
-              thumbnail ??
-              (previewTransferPolicy().neighbor || preview.selected === view.id ? view.url : null);
-            return (
-              <Button
-                key={view.id}
-                variant="ghost"
-                aria-pressed={preview.selected === view.id}
-                className={`h-auto min-w-24 flex-col p-2 ${preview.selected === view.id ? "bg-accent text-accent-foreground" : ""}`}
-                onFocus={() => preview.prioritize(view)}
-                onClick={() => preview.select(view.id)}
-              >
-                <ProtectedThumbnail
-                  path={path}
-                  alt=""
-                  eager
-                  fade
-                  priority={
-                    view.id !== "cover" && view.role === "archive" ? "background" : "intent"
-                  }
-                  placeholder={<Images className="h-8 w-8 text-muted-foreground" />}
-                  loadingPlaceholder={<LibraryPreviewPlaceholder />}
-                  className="flex h-16 w-20 items-center justify-center"
-                  imageClassName={cn(
-                    "h-full w-full object-contain",
-                    imageKind === "slicer_render" && "dark:bg-preview-image-matte",
+      {preview.navigationViews.length > 1 && (
+        <div className="flex min-w-0 flex-col gap-1.5">
+          {!previews.archive_images?.length && (
+            <p className="text-xs text-muted-foreground">{uiText("modelPreview.discrete")}</p>
+          )}
+          <div
+            ref={strip}
+            role="group"
+            className="model-preview-gallery-strip flex gap-1.5 overflow-x-auto pb-1"
+            aria-label={uiText("modelPreview.gallery")}
+          >
+            {preview.navigationViews.map((view, index) => {
+              const imageKind =
+                view.id === "cover" ? coverImageKind(previews, "full") : view.image_kind;
+              const thumbnail =
+                view.id === "cover"
+                  ? (previews.large_cover_thumbnail_url ??
+                    (previews.large_cover_view ? undefined : cover))
+                  : view.role === "archive"
+                    ? undefined
+                    : view.thumbnail_url;
+              const path =
+                thumbnail ??
+                (previewTransferPolicy().neighbor || preview.selected === view.id
+                  ? view.url
+                  : null);
+              const selected = preview.selected === view.id;
+              const label = previewLabel(state, view.id);
+              return (
+                <Fragment key={view.id}>
+                  {index === firstPhoto && index > 0 && (
+                    <span aria-hidden className="mx-1 w-px shrink-0 self-stretch bg-border" />
                   )}
-                />
-                <span>{previewLabel(state, view.id)}</span>
-              </Button>
-            );
-          })}
+                  <button
+                    type="button"
+                    aria-pressed={selected}
+                    aria-label={label}
+                    title={label}
+                    className={cn(
+                      "model-preview-gallery-tile flex w-24 shrink-0 flex-col gap-1 border p-1 text-left transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      selected
+                        ? "border-foreground/40 bg-accent text-accent-foreground"
+                        : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
+                    )}
+                    onFocus={() => preview.prioritize(view)}
+                    onPointerEnter={() => preview.prioritize(view)}
+                    onClick={() => preview.select(view.id)}
+                  >
+                    <ProtectedThumbnail
+                      path={path}
+                      alt=""
+                      eager
+                      fade
+                      priority={
+                        view.id !== "cover" && view.role === "archive" ? "background" : "intent"
+                      }
+                      placeholder={<Images className="h-6 w-6 text-muted-foreground" />}
+                      loadingPlaceholder={<LibraryPreviewPlaceholder />}
+                      className="flex h-16 w-full items-center justify-center overflow-hidden bg-muted"
+                      imageClassName={cn(
+                        "h-full w-full",
+                        view.id !== "cover" && view.role === "archive"
+                          ? "object-cover"
+                          : "object-contain",
+                        imageKind === "slicer_render" && "dark:bg-preview-image-matte",
+                      )}
+                    />
+                    <span className="block w-full truncate text-2xs">{label}</span>
+                  </button>
+                </Fragment>
+              );
+            })}
+          </div>
         </div>
-      </div>
-    </>
+      )}
+    </div>
   );
 }

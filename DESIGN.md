@@ -248,14 +248,20 @@ on pointer-down and underline feedback stays local.
 Library, advanced Search, Pending and Settings main destinations use this
 same stationary reveal. Sidebar mode changes reveal their inner content, leaving
 the boundary and width stationary. The route outlet waits for its lazy content.
-Ordinary Search opens the sidebar and filters the global Library in place; on
-phones its field appears above the same results. Favorites is a reversible Library
+Ordinary Search opens the sidebar and filters the displayed Library in place:
+opening it never changes the collection or grid being shown. The current
+collection is the search scope, and a two-way scope switch in the sidebar widens
+it to the whole library and back. On phones its field appears above the same
+results. Favorites is a reversible Library
 filter that preserves the query, sidebar, toolbar and card layout, not another
 sidebar mode or main destination. AI and image search retain their explicit tools.
 
 Library Filters uses an anchored, nonmodal picker beside the toolbar. Search
 matches category names and values; categories lead to selectable values in the
-same panel. Selections update the URL and results immediately, remain visible as
+same panel. The category list opens with quick filters that toggle in place
+(Favorites as a `Switch`, two-state filters as Any/Yes/No toggles), then groups
+the remaining categories under mono micro-labels with one icon per category and
+a summary of what each is set to. Selections update the URL and results immediately, remain visible as
 removable chips, and survive reloads. Reset in the picker preserves the folder,
 keyword query and view. Keep loading, retry and empty states inside the picker;
 Escape and the close button return focus to Filters.
@@ -269,6 +275,10 @@ Model context menus show the Model name once above concise, icon-led actions:
 Open page, Model details, Favorites and tags. Details uses the existing inspector;
 tags respects edit permissions. Pointer menus anchor at the click and keyboard
 menus anchor to the card; Escape returns focus to its link.
+
+URL parameters that only open a dialog over the Library (`upload`,
+`newCollection`) are not part of the displayed destination: opening or closing
+those dialogs never replays card or thumbnail entrances.
 
 Library cards use a stationary opacity 0.2→1 reveal over
 `--duration-library-enter` (240ms). The actual card owns this entrance after it
@@ -307,7 +317,11 @@ It enters from beyond that edge and returns along the same path, including on
 mobile. A critically damped spring is sampled into compositor keyframes so preview
 initialization does not drive its frame loop. It uses the fast token as its response; reversing
 open/close preserves its current displacement and velocity. Hide only when the
-spring reaches the closed position, never on a fixed exit timer. Switching Models
+spring reaches the closed position, never on a fixed exit timer. When the docked
+inspector reserves or releases its column, cards commit at their reflowed size
+and glide by translation only (`useReflowGlide`, slow timing, `ease-out`) from
+their painted positions; reversals continue from the visible position and reduced
+motion keeps the reflow immediate. Switching Models
 keeps the panel stationary. Closed panels become inert immediately. Reduced motion
 uses immediate visibility changes and retains the existing focus handoff.
 
@@ -319,8 +333,9 @@ layout width so the sidebar and workspace cannot drift onto separate timelines.
 Retain the outliner DOM, filter, expansion and scroll state while closed; make it
 inert immediately and hide its contents only at rest. Drag resizing remains 1:1,
 initial page layout does not replay entry, and reduced motion settles immediately.
-Local sidebar tool changes use `useContentReveal`: stationary geometry with opacity
-0.55→1 over the library timing. Cross-route navigation keeps the sidebar static.
+Local sidebar tool changes use `useContentReveal` with the press timing: stationary
+geometry with opacity 0.55→1 over 150ms, so switching tools feels immediate.
+Cross-route navigation keeps the sidebar static.
 Reduced motion makes these reveals immediate.
 
 Source, History and Similar loading states use quiet row placeholders aligned to

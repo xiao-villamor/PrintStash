@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { createPortal } from "react-dom";
 import {
   CollectionsPaneContext,
+  CollectionsPaneOpenContext,
   useCollectionsPane,
   type CollectionsPaneState,
 } from "@/lib/collections-pane-context";
@@ -120,10 +121,10 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
       showSearch: () => {
         setPreference(true);
         setRequestedMode({ scope: routeScope, mode: "search" });
+        // Opening the tool keeps the displayed Library: the current collection
+        // stays the search scope until the user widens it in the panel.
+        if (pathname === "/" && searchParams.get("v") !== "docs") return;
         const next = new URLSearchParams(pathname === "/" ? searchParams : "");
-        next.delete("c");
-        next.delete("cid");
-        next.delete("scope");
         next.set("v", "models");
         router.push(`/?${next}`);
       },
@@ -144,9 +145,11 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
   );
   return (
     <CollectionsPaneContext.Provider value={value}>
-      <div className="contents" style={{ "--workbench-sidebar-width": `${width}px` }}>
-        {children}
-      </div>
+      <CollectionsPaneOpenContext.Provider value={open}>
+        <div className="contents" style={{ "--workbench-sidebar-width": `${width}px` }}>
+          {children}
+        </div>
+      </CollectionsPaneOpenContext.Provider>
     </CollectionsPaneContext.Provider>
   );
 }
@@ -242,6 +245,7 @@ export function CollectionsPaneHost() {
   const { viewport, content } = useCollectionsPaneMotion(open);
   const sectionMotion = useContentReveal(`${mode}:${pathname === "/" ? "library" : "navigation"}`, {
     enabled: open,
+    timing: "press",
   });
   return (
     <div
@@ -318,7 +322,15 @@ function SearchSidebar() {
       <h2 className="flex h-12 shrink-0 items-center px-4 font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
         {uiText("Search")}
       </h2>
-      <LibrarySearch placement="sidebar" recent={recent} onSearchCommit={rememberSearch} />
+      <LibrarySearch
+        placement="sidebar"
+        recent={recent}
+        onSearchCommit={rememberSearch}
+        onRecentRemove={(query) =>
+          setRecent((previous) => previous.filter((item) => item !== query))
+        }
+        onRecentClear={() => setRecent([])}
+      />
     </aside>
   );
 }
