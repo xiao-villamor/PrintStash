@@ -451,11 +451,8 @@ def render_prepared_pixels(
         screen = np.stack([px, py, pz], axis=1)  # (N, 3)
 
         # ------------------------------------------------------------------
-        # 4. Reuse welded position identities and smooth object-space normals.
-        #    Preparation computed these once, independently of this camera.
+        # 4. Reuse crease-aware object-space corner normals across cameras.
         # ------------------------------------------------------------------
-        pos_id = geometry.position_ids
-        vsm = geometry.smooth_normals
         rot_T = rotation.T
         chunk = max(int(face_chunk_size), 1)
         rasterise = rasterise_triangles or _rasterise_triangles
@@ -560,8 +557,11 @@ def render_prepared_pixels(
                 geometry, rotation, screen, ss_width, ss_height, matte
             )
         else:
-            visible_total = 0
+            visible_total = start = 0
             for fc in geometry.face_chunks(chunk):
+                end = start + len(fc)
+                corner_n = geometry.corner_normals[start:end]
+                start = end
                 tri = screen[fc]  # (c, 3, 3) screen-space
                 view_tri = view[fc]  # (c, 3, 3) view-space
 
@@ -572,35 +572,6 @@ def render_prepared_pixels(
                 raw_normals = np.cross(edge1, edge2)  # (c, 3)
                 norm_len = np.linalg.norm(raw_normals, axis=1)  # (c,)
 
-                # Object-space face normals for the crease test (the view normals are
-                # flipped toward the camera, which would corrupt smoothing across
-                # silhouettes).
-                f_obj = verts[fc]  # (c, 3, 3)
-                fn = np.cross(f_obj[:, 1] - f_obj[:, 0], f_obj[:, 2] - f_obj[:, 0])
-                fn = fn / np.where(
-                    np.linalg.norm(fn, axis=1, keepdims=True) == 0,
-                    1.0,
-                    np.linalg.norm(fn, axis=1, keepdims=True),
-                )
-
-                corner_smooth = vsm[pos_id[fc]]  # (c, 3, 3) object-space
-                # Blend each corner between its smoothed normal and the flat face
-                # normal by how far the two diverge (a crease measure). A *smooth*
-                # blend (smoothstep), not a hard threshold, is essential: a binary
-                # flip snaps neighbouring corners between smooth and flat, which on
-                # coarse fillets paints a comb of sharp light/dark streaks. The window
-                # cos(41°)=0.75 → cos(23°)=0.92 keeps a 90° edge's 45° half-angle
-                # (cos 0.707, below the window) fully flat so box/mechanical edges stay
-                # crisp, while curved fillets blend gradually and read smooth.
-                cos_crease = np.sum(corner_smooth * fn[:, None, :], axis=2)  # (c, 3)
-                t = np.clip((cos_crease - 0.75) / (0.92 - 0.75), 0.0, 1.0)
-                t = (t * t * (3.0 - 2.0 * t))[..., None]  # smoothstep, (c, 3, 1)
-                corner_n = t * corner_smooth + (1.0 - t) * fn[:, None, :]
-                corner_n = corner_n / np.where(
-                    np.linalg.norm(corner_n, axis=2, keepdims=True) == 0,
-                    1.0,
-                    np.linalg.norm(corner_n, axis=2, keepdims=True),
-                )
                 # The depth camera looks along +Z. Orient normals toward it,
                 # then reflect only Z into the lighting frame (camera at +Z).
                 # Negating the whole vector here reverses left/right and up/down
@@ -624,8 +595,8 @@ def render_prepared_pixels(
                 # chunk's worth of per-face arrays is ever live. No gc.collect() here:
                 # there are no reference cycles in the hot loop, and the per-file
                 # The application mesh policy returns retired arenas to the OS.
-                del view_tri, edge1, edge2, raw_normals, norm_len, f_obj, fn
-                del corner_smooth, cos_crease, corner_n, cvn, tri, valid
+                del view_tri, edge1, edge2, raw_normals, norm_len
+                del corner_n, cvn, tri, valid
 
             if visible_total == 0:
                 # Degenerate / fully back-facing mesh: paint every face flat so the

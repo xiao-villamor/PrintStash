@@ -11,11 +11,16 @@ from typing import Literal, cast
 
 from printstash_core.inference import EmbeddingError, EmbeddingSpace
 from printstash_core.inference.vectors import normalize
-from printstash_core.mesh.preview_profile import REFERENCE_THUMBNAIL_PROFILE
+from printstash_core.mesh.preview_profile import (
+    RASTERIZER_RECIPE,
+    REFERENCE_THUMBNAIL_PROFILE,
+)
 
 VisualProfile = Literal["thumbnail", "multiview"]
 Aggregation = Literal["mean", "max"]
-ENCODER_THUMBNAIL_RECIPE = REFERENCE_THUMBNAIL_PROFILE.recipe_fingerprint + "-w640"
+ENCODER_THUMBNAIL_RECIPE = (
+    f"{REFERENCE_THUMBNAIL_PROFILE.recipe_fingerprint}-w640-{RASTERIZER_RECIPE}"
+)
 
 
 @dataclass(frozen=True)

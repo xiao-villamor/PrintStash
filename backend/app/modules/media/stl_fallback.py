@@ -224,6 +224,10 @@ def render_stl_thumbnail(
     try:
         import numpy as np
         from PIL import Image
+        from printstash_core.mesh.render_geometry import (
+            PreparedRenderGeometry,
+            prepare_normals,
+        )
 
         from app.modules.media.mesh_render import (
             RasterBudget,
@@ -288,6 +292,20 @@ def render_stl_thumbnail(
     except FloatingPointError, ValueError, RuntimeError:
         return None
 
+    indices = np.arange(triangles.size // 3, dtype=np.int64).reshape(-1, 3)
+
+    def face_chunks(size):
+        for start in range(0, len(indices), size):
+            yield indices[start : start + size]
+
+    prepared = prepare_normals(
+        PreparedRenderGeometry(
+            (triangles.reshape(-1, 3) - center).astype(np.float32),
+            len(triangles),
+            face_chunks,
+        )
+    )
+
     # Half-resolution coverage keeps the silhouette detailed while actual
     # triangle tests preserve holes. Small meshes retain the same resolution so
     # tiny facets are not rounded away entirely.
@@ -327,7 +345,7 @@ def render_stl_thumbnail(
         sampled.triangle_count > sampled.sampled_triangles or not sampled.complete
     )
 
-    def accumulate_chunk(chunk) -> None:
+    def accumulate_chunk(chunk, corner_normals) -> None:
         view = (chunk - center) @ rotation.T
         screen = np.empty_like(view)
         screen[:, :, 0] = (view[:, :, 0] - view_mid[0]) * scale + width * 0.5
@@ -347,8 +365,8 @@ def render_stl_thumbnail(
         coarse_screen = screen[ids].copy()
         coarse_screen[:, :, 0] *= coarse_scale_x
         coarse_screen[:, :, 1] *= coarse_scale_y
-        normals = raw_normal[ids] / normal_length[ids, None]
-        normals = np.where(normals[:, 2:3] >= 0, normals, -normals)
+        normals = corner_normals[ids] @ rotation.T
+        normals = np.where(normals[..., 2:] >= 0, normals, -normals)
 
         # The ordinary rasteriser intentionally tests the true triangle area.
         # For a dense model whose bounded sample contains microfacets that are
@@ -377,13 +395,14 @@ def render_stl_thumbnail(
             # for source facets as well.
             splat_triangles = np.stack((top, bottom_right, bottom_left), axis=1)
             coarse_screen = np.concatenate((splat_triangles, coarse_screen), axis=0)
-            normals = np.concatenate((normals, normals), axis=0)
+            centroid_normals = normals.mean(axis=1, keepdims=True)
+            normals = np.concatenate((centroid_normals.repeat(3, axis=1), normals))
 
         _rasterise_triangles(
             coarse_image,
             coarse_zbuffer,
             coarse_screen,
-            normals[:, None, :].repeat(3, axis=1),
+            normals,
             shade,
             base_color,
             coverage_width,
@@ -392,7 +411,8 @@ def render_stl_thumbnail(
         )
 
     for start in range(0, triangles.shape[0], _COVERAGE_CHUNK_TRIANGLES):
-        accumulate_chunk(triangles[start : start + _COVERAGE_CHUNK_TRIANGLES])
+        end = start + _COVERAGE_CHUNK_TRIANGLES
+        accumulate_chunk(triangles[start:end], prepared.corner_normals[start:end])
 
     if not np.isfinite(coarse_zbuffer).any():
         return None

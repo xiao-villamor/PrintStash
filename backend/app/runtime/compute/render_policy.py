@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, RASTERIZER_RECIPE
 
-from app.modules.media.compute_geometry import decode, layout_for
+from app.modules.media.compute_geometry import decode
 from app.modules.media.compute_render import RECIPE
 from app.modules.media.gpu_render_layout import (
     FRAME_STRIDE,
@@ -87,30 +87,15 @@ def admission_decoded(
         # this owner. Retain normal-preparation scratch, shaded output cache,
         # readback and joined frame copies in the renderer reservation.
         host_bytes = readback + width * height * 8 * frames + 96 * 1024**2
-    from app.modules.media.gpu_normals import (
-        DeferredRender,
-        VisualRender,
-        host_scratch_bytes,
-    )
+    from app.modules.media.gpu_normals import host_scratch_bytes
 
-    # CSR construction and any canonical numerical fallback happen sequentially
-    # under this owner's reservation; upload buffers remain in the device ledger.
+    # Prepare one geometry at a time. Grouped staging then retains the converted
+    # inputs, including the shared corner normals, until the upload is encoded.
     host_bytes += max(host_scratch_bytes(prepared) for prepared, *_ in decoded)
-    # Grouped uploads own one host arena plus converted index/normal arrays.
-    # Include every model conservatively, even if its device geometry is cached.
     host_bytes += (
-        2
-        * sum(
-            upload_bytes(*layout_for(p).counts, layout_for(p).normal_mode)
-            for p, *_ in decoded
-        )
+        2 * sum(upload_bytes(len(p.vertices), p.face_count) for p, *_ in decoded)
         + frames * FRAME_STRIDE
     )
-    status_bytes = 4 * sum(
-        isinstance(prepared, (DeferredRender, VisualRender)) for prepared, *_ in decoded
-    )
-    readback += status_bytes
-    host_bytes += status_bytes
     view_bounds_bytes = sum(
         view_bounds_sizes(max(len(prepared.vertices) for prepared, *_ in decoded))
     )

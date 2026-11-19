@@ -35,14 +35,10 @@ class GeometryLayout:
 
 def body_size(layout: GeometryLayout | tuple[int, int, int]) -> int:
     layout = _layout(layout)
-    n, f, k = layout
+    n, f, _ = layout
     if layout.normal_mode == VISUAL_NORMAL_MODE:
         return n * 12 + f * 12
-    return (
-        n * 16 + f * 12
-        if layout.normal_mode == NORMAL_MODE
-        else n * 20 + f * 24 + k * 24
-    )
+    return n * 16 + f * 12 if layout.normal_mode == NORMAL_MODE else n * 20 + f * 60
 
 
 def _layout(value: GeometryLayout | tuple[int, int, int]) -> GeometryLayout:
@@ -60,12 +56,12 @@ def _validate_layout(layout: GeometryLayout) -> None:
         or (layout.normal_mode == VISUAL_NORMAL_MODE and k != n)
     ):
         raise ValueError("compute_geometry_shape")
-    # Canonical and legacy CSR retain the original envelope. The visual
-    # path allocates neither canonical normals nor host CSR scratch.
+    # The visual layout omits weld identities and normals, so it has room for
+    # the full face limit. Other layouts keep the smaller transfer envelope.
     if (
         body_size(layout) > MAX_VISUAL_GEOMETRY_BYTES
         if layout.normal_mode == VISUAL_NORMAL_MODE
-        else n * 20 + f * 24 + k * 24 > MAX_GEOMETRY_BYTES
+        else body_size(layout) > MAX_GEOMETRY_BYTES
     ):
         raise ValueError("compute_geometry_budget")
 

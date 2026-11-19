@@ -125,7 +125,7 @@ def prepare_scene_packet(scene: ExpandedScene) -> RenderInput:
 
 
 def prepare_mesh_render(mesh: RenderableMesh | None) -> RenderInput | None:
-    """Choose the prepared representation before computing CPU smooth normals."""
+    """Choose the prepared representation before computing shared corner normals."""
     geometry = prepare_mesh(mesh)
     return None if geometry is None else _prepare_geometry(geometry)
 

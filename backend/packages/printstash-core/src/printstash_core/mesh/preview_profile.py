@@ -10,7 +10,7 @@ from typing import Mapping
 
 # Renderer arithmetic participates in derived visual identities independently
 # of camera/material settings and immutable encoder asset manifests.
-RASTERIZER_RECIPE = "qualified-portable-v7"
+RASTERIZER_RECIPE = "qualified-portable-v8"
 
 
 def _mapping(value: object, name: str) -> Mapping[str, object]:
@@ -122,7 +122,7 @@ def _load_profile(filename: str = "preview_profile.json") -> PreviewProfile:
 
 
 PREVIEW_PROFILE = _load_profile()
-# Persisted visual spaces depend on the exact v4 encoder thumbnail.
+# Encoder inputs use a fixed profile independent of cover settings.
 REFERENCE_THUMBNAIL_PROFILE = _load_profile("reference_thumbnail_profile.json")
 
 __all__ = ["PREVIEW_PROFILE", "REFERENCE_THUMBNAIL_PROFILE", "PreviewProfile"]
