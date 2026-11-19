@@ -8,18 +8,15 @@ settings you need. For every setting, PostgreSQL or S3, see
 
 ## Install
 
-Install Docker with the Compose plugin, then:
-
-```bash
-mkdir -p printstash && cd printstash
-curl -fsSL https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/docker-compose.yml -o docker-compose.yml
-docker compose up -d
-```
+Install Docker with the Compose plugin, then follow the
+[Quick Start](../README.md#quick-start) to download the Compose file and pin
+the published image. If you already have PrintStash, follow the
+[upgrade guide](../UPGRADE.md) using your existing Compose project and data.
 
 Open `http://localhost:3000` or `http://<server-ip>:3000`. Use a trusted network and create your administrator account in the browser.
 The first person to complete registration owns the installation.
-There is no default account. The API generates a new token on each start until
-setup is complete. Database migrations run automatically at startup.
+There is no default account. Follow [First use from the browser](first-run.md)
+to complete setup. Database migrations run automatically at startup.
 
 From a repository checkout, `docker compose up -d` in the repository root uses
 the same file. The commands below work in either place.

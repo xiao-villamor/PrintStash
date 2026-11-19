@@ -127,6 +127,17 @@ screenshots/gif-frames/
 !/docs/storage-providers.md
 !/docs/vault-maintenance-and-capture.md
 !/docs/webgpu-preview.md
+!/docs/wiki/
+!/docs/wiki/API.md
+!/docs/wiki/Architecture.md
+!/docs/wiki/Browser-extension-compatibility.md
+!/docs/wiki/Configuration.md
+!/docs/wiki/Development.md
+!/docs/wiki/Home.md
+!/docs/wiki/Installation.md
+!/docs/wiki/README.md
+!/docs/wiki/User-guide.md
+!/docs/wiki/_Sidebar.md
 
 # Extension publishing validation is a private work record.
 /browser-extension/STORE-VALIDATION.md
