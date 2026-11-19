@@ -11,14 +11,28 @@ import math
 from typing import Any
 
 import numpy as np
-from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+from printstash_core.mesh.preview_profile import (
+    MATTE_LIGHTING,
+    PREVIEW_PROFILE,
+    REFERENCE_THUMBNAIL_PROFILE,
+    STUDIO_LOOKS,
+    preview_appearance,
+)
 
 from .gpu_render_layout import BOUND_BYTES, FRAME_BYTES, FRAME_STRIDE
 
 FRAME_STRUCT = """
 struct Frame {
     r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>,
-    projection: vec4<f32>, extent: vec4<f32>, style: vec4<f32>, albedo: vec4<f32>
+    projection: vec4<f32>, extent: vec4<f32>,
+    ambient: f32, specular_strength: f32, specular_power: f32, rim_power: f32,
+    albedo: vec3<f32>, studio: f32,
+    key_direction: vec4<f32>, fill_direction: vec4<f32>,
+    key_colour: vec3<f32>, key_strength: f32,
+    fill_colour: vec3<f32>, fill_strength: f32,
+    rim_colour: vec3<f32>, rim_strength: f32,
+    floor: vec4<f32>,
+    footprint: vec4<f32>
 };
 fn rotate(value: vec3<f32>, frame: Frame) -> vec3<f32> {
     return vec3(dot(value,frame.r0.xyz), dot(value,frame.r1.xyz), dot(value,frame.r2.xyz));
@@ -104,11 +118,24 @@ fn select_rotation() {
         let broad = min(extents[(axis+1u)%3u], extents[(axis+2u)%3u]);
         var choice = 3u;
         if broad > 1e-6 && extents[axis] / broad <= FLAT_RATIO { choice = axis; }
+        if choice < 2u && config.studio != 0. { choice += 4u; }
         r0 = rotations[choice*3u]; r1 = rotations[choice*3u+1u];
         r2 = rotations[choice*3u+2u];
     }
     frame = config;
     frame.r0 = r0; frame.r1 = r1; frame.r2 = r2;
+    let extents = bounds.high.xyz - bounds.low.xyz;
+    let target_cell = max(extents.x, extents.y)/5.;
+    let cells = array<f32, 6>(1., 2., 5., 10., 20., 50.);
+    var cell = 50.;
+    for (var i = 0u; i < 6u; i++) {
+        if target_cell <= cells[i] { cell = cells[i]; break; }
+    }
+    frame.floor = vec4(bounds.low.z, cell, 0., config.floor.w);
+    frame.footprint = vec4(
+        (bounds.low.xy + bounds.high.xy)*0.5,
+        extents.xy*0.5 + 1.5*cell
+    );
 }
 """
 )
@@ -166,21 +193,39 @@ def _auto_rotations() -> str:
         ]
     )
     rotations.append(hero_tilt @ bases[1] @ spin)
+    rotations.extend(tilt.T @ base for base in bases[:2])
     rows = ",".join(
         "vec4<f32>(" + ",".join(f"{float(x):.9f}" for x in row) + ",0.)"
         for rotation in rotations
         for row in rotation
     )
-    return "const rotations = array<vec4<f32>,12>(" + rows + ");"
+    return "const rotations = array<vec4<f32>,18>(" + rows + ");"
 
 
-def frame_config(rotation: Any, width: int, height: int, matte: bool) -> bytes:
+def frame_config(
+    rotation: Any, width: int, height: int, matte: bool, *, samples: int = 1
+) -> bytes:
     rows = np.zeros((FRAME_STRIDE // 16, 4), dtype="<f4")
     if rotation is not None:
         rows[:3, :3] = rotation
     rows[3] = (width, height, PREVIEW_PROFILE.margin_fraction, rotation is None)
-    rows[5, 0] = 0.0 if matte else 0.16
-    rows[6, :3] = PREVIEW_PROFILE.material_albedo
+    appearance = preview_appearance()
+    look = STUDIO_LOOKS[appearance.look]
+    lighting = MATTE_LIGHTING if matte else look.lighting
+    albedo = REFERENCE_THUMBNAIL_PROFILE.material_albedo if matte else look.albedo
+    rows[5] = (
+        lighting.ambient,
+        lighting.specular_strength,
+        lighting.specular_power,
+        lighting.rim_power,
+    )
+    rows[6] = (*albedo, not matte)
+    rows[7, :3] = lighting.key.direction
+    rows[8, :3] = lighting.fill.direction
+    rows[9] = (*lighting.key.colour, lighting.key.strength)
+    rows[10] = (*lighting.fill.colour, lighting.fill.strength)
+    rows[11] = (*lighting.rim_colour, lighting.rim_strength)
+    rows[12, 3] = samples if not matte and appearance.floor_grid else 0
     return rows.tobytes()
 
 

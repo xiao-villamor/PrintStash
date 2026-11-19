@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Literal, NoReturn, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from printstash_core.mesh.preview_profile import PreviewAppearance, PreviewLook
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from sqlmodel import Session
 
@@ -26,6 +27,30 @@ from app.schemas.editing import EditingBase, EditPrecondition
 router = APIRouter(prefix="/config", tags=["config"])
 
 
+class SetupSampleChoice(BaseModel):
+    include: StrictBool
+
+
+@router.post("/sample-collection", status_code=status.HTTP_202_ACCEPTED)
+def add_sample_collection(
+    setup: SetupSampleChoice | None = None,
+    user: User = Depends(require_superuser),
+    session: Session = Depends(get_session),
+) -> dict[str, str | None]:
+    from app.modules.ingestion import samples
+
+    assert user.id is not None
+    job_id = (
+        samples.queue(session, user.id)
+        if setup is None
+        else samples.choose_first_run(session, user.id, include=setup.include)
+    )
+    session.commit()
+    if job_id is not None:
+        samples.wake()
+    return {"job_id": job_id}
+
+
 class VaultConfigRead(EditingBase):
     derivatives_mesh_enabled: bool
     derivatives_gcode_enabled: bool
@@ -33,6 +58,8 @@ class VaultConfigRead(EditingBase):
     derivatives_previews_enabled: bool
     derivatives_previews_include_poles: bool
     prefer_rendered_3mf_preview: bool
+    preview_look: PreviewLook
+    preview_floor_grid: bool
     storage_backend: str = "local"
     data_dir: str = ""
     thumb_dir: str = ""
@@ -93,6 +120,8 @@ class VaultConfigUpdate(BaseModel):
     derivatives_previews_enabled: StrictBool | None = None
     derivatives_previews_include_poles: StrictBool | None = None
     prefer_rendered_3mf_preview: StrictBool | None = None
+    preview_look: PreviewLook | None = None
+    preview_floor_grid: StrictBool | None = None
     auto_mark_known_good: Optional[bool] = None
     external_libraries_enabled: Optional[bool] = None
     currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
@@ -133,6 +162,17 @@ class VaultConfigUpdate(BaseModel):
     backup_s3_region: Optional[str] = None
     backup_s3_access_key: Optional[str] = None
     backup_s3_secret_key: Optional[str] = None
+
+
+@router.get("/preview-example", dependencies=[Depends(require_superuser)])
+def preview_example(look: PreviewLook, floor_grid: bool) -> Response:
+    from app.modules.media.preview_example import render_example
+
+    return Response(
+        render_example(PreviewAppearance(look, floor_grid)),
+        media_type="image/webp",
+        headers={"Cache-Control": "private, no-cache"},
+    )
 
 
 class StorageRootEnrollment(BaseModel):
@@ -424,7 +464,19 @@ def update_config(
             for name in policy.SettingName
             if name in body.model_fields_set
         }
-        policy.update(session, changes, commit=False)
+        appearance = (
+            PreviewAppearance(
+                config.preview_look if body.preview_look is None else body.preview_look,
+                config.preview_floor_grid
+                if body.preview_floor_grid is None
+                else body.preview_floor_grid,
+            )
+            if body.preview_look is not None or body.preview_floor_grid is not None
+            else None
+        )
+        appearance_changed = policy.update(
+            session, changes, appearance=appearance, commit=False
+        )
 
         if body.auto_mark_known_good is not None:
             runtime_config.set_auto_mark_known_good(
@@ -511,10 +563,12 @@ def update_config(
                 fields=frozenset(
                     name
                     for name, value in body.model_dump(exclude_unset=True).items()
-                    if value is not None and name not in changes
+                    if value is not None
+                    and name not in changes
+                    and name not in {"preview_look", "preview_floor_grid"}
                 ),
             )
         finally:
             session.rollback()
-        policy.publish_changes(changes)
+        policy.publish_changes(changes, appearance_changed=appearance_changed)
         return receipt

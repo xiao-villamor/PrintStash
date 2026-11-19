@@ -1,9 +1,11 @@
 /** Sliced plate selection shows exactly one toolpath and never reuses another file's plate. */
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import type { GcodeViewerProps } from "@/components/gcode-viewer";
-import { aRevision } from "@/test-support/factories";
+import { GcodeViewer, type GcodeViewerProps } from "@/components/gcode-viewer";
+import { ApiError } from "@/lib/errors";
+import { aFilePlate, aMetadata, aRevision } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
 import { GcodePreview } from "../gcode-preview";
 
@@ -19,9 +21,11 @@ const bedSizeFor = () => null;
 
 function Toolpath({ url }: GcodeViewerProps) {
   return (
-    <p role="img" aria-label="Toolpath">
-      {url}
-    </p>
+    <>
+      <p role="img" aria-label="Toolpath">
+        {url}
+      </p>
+    </>
   );
 }
 
@@ -33,6 +37,83 @@ function preview(files = [sliced]) {
 }
 
 describe("GcodePreview", () => {
+  it("keeps the sliced plate picker outside the toolpath controls", async () => {
+    function WithPlateArea() {
+      const [target, setTarget] = useState<HTMLDivElement | null>(null);
+      return (
+        <>
+          <div data-testid="plate-area" ref={setTarget} />
+          <GcodePreview
+            files={[sliced]}
+            bedSizeFor={bedSizeFor}
+            ToolpathViewer={Toolpath}
+            plateContainer={target}
+          />
+        </>
+      );
+    }
+    renderApp(<WithPlateArea />, { routes: platesRoute });
+    const area = screen.getByTestId("plate-area");
+    const secondPlate = await within(area).findByRole("button", { name: "Plate 10" });
+    expect(
+      within(screen.getByRole("complementary", { name: "Toolpath controls" })).queryByRole(
+        "group",
+        { name: "Sliced plates" },
+      ),
+    ).not.toBeInTheDocument();
+    await userEvent.click(secondPlate);
+    expect(secondPlate).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("img", { name: "Toolpath" })).toHaveTextContent("plate_index=10");
+  });
+  it("opens the corresponding sliced plate using its declared identity", async () => {
+    const sources = [
+      aFilePlate({ number: 1, name: "Shelf", object_count: 5 }),
+      aFilePlate({ number: 2, name: "Wall mount", object_count: 1 }),
+    ];
+    renderApp(
+      <GcodePreview
+        files={[sliced]}
+        bedSizeFor={bedSizeFor}
+        ToolpathViewer={Toolpath}
+        sourcePlates={sources}
+        selectedSourcePlate={2}
+      />,
+      {
+        routes: {
+          "GET /api/v1/files/10/gcode-plates": json({
+            plates: [2, 10],
+            identities: [
+              { number: 10, name: "Wall mount", object_count: 1 },
+              { number: 2, name: "Shelf", object_count: 5 },
+            ],
+          }),
+        },
+      },
+    );
+    expect(await screen.findByRole("button", { name: /Plate 10.*Wall mount/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("img", { name: "Toolpath" })).toHaveTextContent("plate_index=10");
+  });
+
+  it("explains when the selected source plate cannot be mapped", async () => {
+    const source = aFilePlate({ number: 2, name: "Wall mount", object_count: 1 });
+    renderApp(
+      <GcodePreview
+        files={[sliced]}
+        bedSizeFor={bedSizeFor}
+        ToolpathViewer={Toolpath}
+        sourcePlates={[source]}
+        selectedSourcePlate={2}
+      />,
+      { routes: platesRoute },
+    );
+    expect(
+      await screen.findByText("The selected source plate could not be matched to a sliced plate."),
+    ).toBeVisible();
+  });
+
   it("defaults to the first actual sliced plate", async () => {
     renderApp(preview(), { routes: platesRoute });
 
@@ -54,6 +135,64 @@ describe("GcodePreview", () => {
       "/files/10/embedded-gcode?plate_index=10",
     );
     expect(screen.queryByRole("button", { name: "All plates" })).not.toBeInTheDocument();
+  });
+
+  it("switches sliced plates using the keyboard", async () => {
+    const user = userEvent.setup();
+    renderApp(preview(), { routes: platesRoute });
+    const first = await screen.findByRole("button", { name: "Plate 02" });
+    first.focus();
+
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Plate 10" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByRole("button", { name: "Plate 10" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("img", { name: "Toolpath" })).toHaveTextContent("plate_index=10");
+    expect(screen.getByRole("button", { name: "Plate 10" })).toHaveFocus();
+  });
+
+  it("retains plate choice after a metadata refresh", async () => {
+    const view = renderApp(preview(), { routes: platesRoute });
+    await userEvent.click(await screen.findByRole("button", { name: "Plate 10" }));
+
+    view.rerender(preview([{ ...sliced, metadata: aMetadata({ printer_model: "New printer" }) }]));
+
+    expect(screen.getByRole("button", { name: "Plate 10" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("img", { name: "Toolpath" })).toHaveTextContent("plate_index=10");
+  });
+
+  it("keeps plate selection usable when a toolpath cannot be previewed", async () => {
+    renderApp(
+      <GcodePreview
+        files={[sliced]}
+        bedSizeFor={bedSizeFor}
+        ToolpathViewer={GcodeViewer}
+        viewerProps={{
+          privateEventsEnabled: false,
+          toolpathFetcher: async () => {
+            throw new ApiError(422, "toolpath_invalid", "Invalid toolpath");
+          },
+        }}
+      />,
+      { routes: platesRoute },
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be validated");
+
+    await userEvent.click(screen.getByRole("button", { name: "Plate 10" }));
+
+    expect(screen.getByRole("button", { name: "Plate 10" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Plate 02" })).toBeEnabled();
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be validated");
   });
 
   it("resets plate selection when changing files", async () => {

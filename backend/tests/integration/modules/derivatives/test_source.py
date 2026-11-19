@@ -109,6 +109,24 @@ class TestPending:
 
         assert _subjects(db_session, source=source) == [subject_key(artifact.id)]
 
+    def test_requeues_previously_skipped_multi_plate_metadata(
+        self, db_session, make_model, make_file, make_derivative
+    ) -> None:
+        artifact = make_file(
+            make_model(), filename="multi.gcode.3mf", file_type=FileType.GCODE
+        )
+        make_derivative(
+            artifact,
+            DerivativeKind.METADATA,
+            recipe_version=kinds.GCODE_METADATA_RECIPE - 1,
+            state=DerivativeState.SKIPPED,
+            failure_reason="per_plate_metadata",
+        )
+        make_derivative(artifact, DerivativeKind.THUMBNAIL)
+        source = DerivativeSource(group(JobKind.DERIVATIVES_GCODE))
+
+        assert _subjects(db_session, source=source) == [subject_key(artifact.id)]
+
     @pytest.mark.parametrize(
         ("kind", "old_recipe", "other_kind"),
         [

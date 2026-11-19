@@ -19,6 +19,7 @@ const config = {
     extend: {
       width: { rail: "3.3125rem" },
       colors: {
+        "preview-swatch": "var(--preview-swatch)",
         border: "var(--border)",
         input: "var(--input)",
         ring: "var(--ring)",
@@ -53,6 +54,7 @@ const config = {
           DEFAULT: "var(--card)",
           foreground: "var(--card-foreground)",
         },
+        "preview-image-matte": "var(--preview-image-matte)",
         surface: {
           DEFAULT: "var(--surface)",
           container: "var(--surface-container)",

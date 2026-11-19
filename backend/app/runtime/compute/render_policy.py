@@ -2,10 +2,15 @@
 
 from dataclasses import dataclass
 
-from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, RASTERIZER_RECIPE
+from printstash_core.mesh.preview_profile import (
+    DEFAULT_APPEARANCE,
+    PREVIEW_PROFILE,
+    PreviewAppearance,
+    appearance_scope,
+)
 
-from app.modules.media.compute_geometry import decode, layout_for
-from app.modules.media.compute_render import RECIPE
+from app.modules.media.compute_geometry import decode
+from app.modules.media.compute_render import appearance_for_recipe, render_recipe
 from app.modules.media.gpu_render_layout import (
     FRAME_STRIDE,
     VIEW_WORKSPACE_BYTES,
@@ -23,6 +28,7 @@ class RenderAdmission:
     readback_bytes: int
     host_bytes: int
     view_bounds_bytes: int
+    appearance: PreviewAppearance = DEFAULT_APPEARANCE
 
     @property
     def device_bytes(self) -> int:
@@ -50,14 +56,19 @@ def admission_decoded(
     dimensions = {(width, height) for _, width, height, _, _ in decoded}
     if len(dimensions) != 1:
         raise ValueError("compute_batch_dimensions")
+    studio_appearances = set()
     for (prepared, width, height, views, matte), recipe, count in zip(
         decoded, recipes, units, strict=True
     ):
-        expected = (
-            f"{RECIPE}:{RASTERIZER_RECIPE}:{width}x{height}:{len(views)}:{int(matte)}"
-        )
+        appearance = appearance_for_recipe(recipe)
+        if not matte:
+            studio_appearances.add(appearance)
+        with appearance_scope(appearance):
+            expected = render_recipe(width, height, len(views), matte)
         if recipe != expected or count != prepared.face_count * len(views):
             raise ValueError("compute_render_identity")
+    if len(studio_appearances) > 1:
+        raise ValueError("compute_batch_appearance")
     width, height = next(iter(dimensions))
     frames = sum(len(views) for _, _, _, views, _ in decoded)
     if frames > 8:
@@ -87,33 +98,23 @@ def admission_decoded(
         # this owner. Retain normal-preparation scratch, shaded output cache,
         # readback and joined frame copies in the renderer reservation.
         host_bytes = readback + width * height * 8 * frames + 96 * 1024**2
-    from app.modules.media.gpu_normals import (
-        DeferredRender,
-        VisualRender,
-        host_scratch_bytes,
-    )
+    from app.modules.media.gpu_normals import host_scratch_bytes
 
-    # CSR construction and any canonical numerical fallback happen sequentially
-    # under this owner's reservation; upload buffers remain in the device ledger.
+    # Prepare one geometry at a time. Grouped staging then retains the converted
+    # inputs, including the shared corner normals, until the upload is encoded.
     host_bytes += max(host_scratch_bytes(prepared) for prepared, *_ in decoded)
-    # Grouped uploads own one host arena plus converted index/normal arrays.
-    # Include every model conservatively, even if its device geometry is cached.
     host_bytes += (
-        2
-        * sum(
-            upload_bytes(*layout_for(p).counts, layout_for(p).normal_mode)
-            for p, *_ in decoded
-        )
+        2 * sum(upload_bytes(len(p.vertices), p.face_count) for p, *_ in decoded)
         + frames * FRAME_STRIDE
     )
-    status_bytes = 4 * sum(
-        isinstance(prepared, (DeferredRender, VisualRender)) for prepared, *_ in decoded
-    )
-    readback += status_bytes
-    host_bytes += status_bytes
     view_bounds_bytes = sum(
         view_bounds_sizes(max(len(prepared.vertices) for prepared, *_ in decoded))
     )
     return RenderAdmission(
-        projected_bytes, w * h * 8 + extra, readback, host_bytes, view_bounds_bytes
+        projected_bytes,
+        w * h * 8 + extra,
+        readback,
+        host_bytes,
+        view_bounds_bytes,
+        next(iter(studio_appearances), DEFAULT_APPEARANCE),
     )

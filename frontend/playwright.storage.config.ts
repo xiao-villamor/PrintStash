@@ -1,4 +1,5 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
+import { DESKTOP_CHROMIUM } from "./tests/playwright-desktop";
 
 const port = Number(process.env.PLAYWRIGHT_STORAGE_PORT ?? 3320);
 const apiPort = Number(process.env.PLAYWRIGHT_STORAGE_API_PORT ?? 8420);
@@ -40,5 +41,5 @@ export default defineConfig({
       timeout: 120_000,
     },
   ],
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [{ name: "chromium", use: { ...DESKTOP_CHROMIUM } }],
 });

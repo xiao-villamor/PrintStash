@@ -13,8 +13,13 @@ from app.core.config import settings
 from app.modules.media import mesh_policy, preview_views
 from app.modules.media.geometry_analysis import _load
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
-from app.modules.media.mesh_isolation import MeshWorkerError, read_spec
+from app.modules.media.mesh_isolation import (
+    MeshWorkerError,
+    read_spec,
+    worker_appearance,
+)
 from app.modules.media.mesh_resources import load_3mf_within_ram
+from app.modules.media.preview_contracts import Matrix
 from app.modules.media.preview_views import render_views
 from app.modules.media.stl_isolation import FileIdentity, manifest_for
 
@@ -34,6 +39,7 @@ def produce(
     width: int,
     recipe: int = 1,
     include_poles: bool = False,
+    planar_cover: Matrix | None = None,
 ) -> bytes:
     identity = FileIdentity.of(path.stat())
     # The same size and triangle ceilings as every other mesh path.
@@ -62,6 +68,7 @@ def produce(
             max_faces=limit,
             width=width,
             progress=progress,
+            planar_cover=planar_cover,
             recipe=recipe,
             include_poles=include_poles,
         )
@@ -91,16 +98,20 @@ def main(argv: list[str]) -> int:
         os.dup2(sink.fileno(), sys.stdout.fileno())
     spec = read_spec(argv)
     try:
-        payload = produce(
-            Path(spec["path"]),
-            spec["file_type"],
-            spec["expected_sha256"],
-            Path(spec["output_directory"]),
-            progress=lambda done, total: output.write(f"P:{done}:{total}\n".encode()),
-            width=spec["width"],
-            recipe=spec["recipe"],
-            include_poles=spec["include_poles"],
-        )
+        with worker_appearance(spec):
+            payload = produce(
+                Path(spec["path"]),
+                spec["file_type"],
+                spec["expected_sha256"],
+                Path(spec["output_directory"]),
+                progress=lambda done, total: output.write(
+                    f"P:{done}:{total}\n".encode()
+                ),
+                width=spec["width"],
+                recipe=spec["recipe"],
+                include_poles=spec["include_poles"],
+                planar_cover=spec.get("planar_cover"),
+            )
     except EXPECTED_FAILURES as exc:
         payload = b"FAIL" + failure_reason(exc).value.encode()
     output.write(payload)

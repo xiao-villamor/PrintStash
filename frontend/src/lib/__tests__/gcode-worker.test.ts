@@ -40,7 +40,7 @@ describe("toolpath worker", () => {
   });
   it("reports segment refusal without transferring partial geometry", () => {
     boundary.onmessage?.(
-      new MessageEvent("message", { data: { text: "G1 X1000000\nG2 I-1000000 E1" } }),
+      new MessageEvent("message", { data: { text: "G1 X1000000000000\nG2 I-1000000000000 E1" } }),
     );
 
     expect(boundary.postMessage.mock.calls).toEqual([[{ kind: "error", code: "limit" }, []]]);

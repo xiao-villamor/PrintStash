@@ -3,6 +3,7 @@
 import { LibraryStatusFilters } from "@/components/library-status-filters";
 import { CollectionHeaderTags } from "@/components/collection-header-tags";
 import "./library-header.css";
+import { LibraryCollectionGroup } from "@/components/library-collection-group";
 import { LibraryCollectionsRegion } from "@/components/library-collections-region";
 
 import { arrivingKeys, entryKeys } from "@/lib/library-arrivals";
@@ -14,6 +15,7 @@ import { deleteLibraryMultipart } from "@/features/library/multipart";
 import { useLibraryNavigationReads } from "@/features/library/navigation-reads";
 import {
   collectionIdentity,
+  treeModelFolderHref,
   useCollectionDestination,
   useRecentFolders,
 } from "@/features/library/collection-navigation";
@@ -22,6 +24,7 @@ import { useTaxonomyCommands } from "@/features/library/taxonomy";
 import { LibraryBatchRecovery } from "@/components/library-batch-recovery";
 
 import {
+  libraryReadingSelector,
   useLibraryReadingPosition,
   type LibraryReadingRenderer,
 } from "@/features/library/reading-position";
@@ -49,6 +52,7 @@ import {
   useLibraryBrowse,
 } from "@/features/library/browse";
 import { useLibraryThumbnails } from "@/features/library/thumbnails";
+import { modelSelection } from "@/components/library-collection-selection";
 import { useLibraryAuthority } from "@/features/library/authority";
 import { listLibraryPage } from "@/lib/api/library-browse";
 import type { LibraryBrowseParams } from "@/types/library-browse";
@@ -97,12 +101,14 @@ import {
 import { createPortal } from "react-dom";
 import { isCancelledError, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/navigation";
+import { useLocation } from "@tanstack/react-router";
 import {
   CollectionNodeRead,
   CollectionRead,
   CollectionPage,
   ModelBatchResult,
   ModelListItem,
+  OutlinerModelRead,
   ModelSort,
   MultipartModelListItem,
   PrinterRead,
@@ -111,7 +117,7 @@ import {
 } from "@/types";
 import { ModelCard } from "@/components/model-card";
 import { LibraryModelInspector } from "@/components/library-model-inspector";
-import { CollectionTitleEditor } from "@/components/collection-title-editor";
+import { InlineTitleEditor } from "@/components/inline-title-editor";
 import { CollectionOverviewCard } from "@/components/collection-overview";
 import { CollectionBreadcrumbs } from "@/components/collection-breadcrumbs";
 import { useModelDropTarget } from "@/lib/use-model-drop-target";
@@ -1031,13 +1037,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     // before Router can commit the destination and start its critical reads.
     setSelectedIds((current) => (current.size === 0 ? current : new Set()));
     setSelectedMultipartRows((current) => (current.size === 0 ? current : new Map()));
+    router.push(collectionHref(path, id));
+  }
+
+  function collectionHref(path: string | null, id: number | null) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("cid");
     if (id !== null) params.set("cid", String(id));
     if (path) params.set("c", path);
     else params.delete("c");
     const qs = params.toString();
-    router.push(qs ? `/?${qs}` : "/");
+    return qs ? `/?${qs}` : "/";
   }
 
   function handleLibraryViewChange(view: LibraryViewMode) {
@@ -1843,9 +1853,44 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   useLayoutEffect(() => {
     selectionOrder.current = sortedModels;
   }, [sortedModels]);
-  const toggleSelect = useCallback((id: number, range = false) => {
+  const groupedModels = useRef(new Map<number, ModelListItem[]>());
+  const recordGroupedModels = useCallback((id: number, models: ModelListItem[] | null) => {
+    if (models) groupedModels.current.set(id, models);
+    else groupedModels.current.delete(id);
+  }, []);
+  function toggleSelect(id: number, range = false) {
     // Capture this gesture once; React may replay the state updater.
-    const sortedModels = selectionOrder.current;
+    const sortedModels = Array.from(
+      new Map(
+        [...selectionOrder.current, ...Array.from(groupedModels.current.values()).flat()].map(
+          (model) => [model.id, model],
+        ),
+      ).values(),
+    );
+    const clicked = sortedModels.find((model) => model.id === id);
+    const selection = clicked
+      ? modelSelection(clicked, selectedIds, selectedCollectionRows.values())
+      : ({ kind: "none" } as const);
+    if (selection.kind === "implied") {
+      lastSelectedModelId.current = id;
+      const remaining = new Map(selectedCollectionRows);
+      for (const collection of selection.collections) remaining.delete(collection.id);
+      setSelectedCollectionRows(remaining);
+      const explicit = new Set(selectedIds);
+      explicit.delete(id);
+      for (const model of sortedModels) {
+        if (
+          model.id !== id &&
+          modelSelection(model, selectedIds, selection.collections).kind === "implied" &&
+          modelSelection(model, selectedIds, remaining.values()).kind !== "implied"
+        ) {
+          explicit.add(model.id);
+          selectedModelSnapshot.current.set(model.id, model);
+        }
+      }
+      setSelectedIds(explicit);
+      return;
+    }
     const anchor = lastSelectedModelId.current;
     const selectingRange = range && anchor !== null;
     const from = selectingRange ? sortedModels.findIndex((model) => model.id === anchor) : -1;
@@ -1853,17 +1898,21 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const rangeModels =
       from >= 0 && to >= 0 ? sortedModels.slice(Math.min(from, to), Math.max(from, to) + 1) : [];
     lastSelectedModelId.current = id;
-    for (const model of rangeModels) selectedModelSnapshot.current.set(model.id, model);
-    const model = sortedModels.find((item) => item.id === id);
-    if (model) selectedModelSnapshot.current.set(id, model);
+    const explicitRange = rangeModels.filter(
+      (model) =>
+        modelSelection(model, selectedIds, selectedCollectionRows.values()).kind !== "implied",
+    );
+    for (const model of explicitRange) selectedModelSnapshot.current.set(model.id, model);
+    if (clicked) selectedModelSnapshot.current.set(id, clicked);
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (selectingRange) rangeModels.forEach((model) => next.add(model.id));
+      if (selectingRange && rangeModels.length > 0)
+        explicitRange.forEach((model) => next.add(model.id));
       else if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }, []);
+  }
 
   const lastSelectedMultipartId = useRef<number | null>(null);
   function toggleMultipartSelect(id: number, range = false) {
@@ -1886,6 +1935,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function toggleCollectionSelect(id: number) {
     const row = visibleCollections.find((collection) => collection.id === id);
+    if (row && !selectedCollectionRows.has(id)) {
+      const explicit = new Set(selectedIds);
+      for (const modelId of selectedIds) {
+        const model = selectedModelSnapshot.current.get(modelId);
+        if (model && modelSelection(model, selectedIds, [row]).kind === "implied") {
+          explicit.delete(modelId);
+        }
+      }
+      if (explicit.size !== selectedIds.size) setSelectedIds(explicit);
+    }
     setSelectedCollectionRows((prev) => {
       const next = new Map(prev);
       if (next.has(id)) next.delete(id);
@@ -1905,7 +1964,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function selectAllVisible() {
     setSelectedMultipartRows(new Map(visibleMultipartModels.map((item) => [item.id, item])));
-    setSelectedIds(new Set(sortedModels.map((m) => m.id)));
+    setSelectedIds(
+      new Set(
+        sortedModels
+          .filter(
+            (model) => modelSelection(model, selectedIds, visibleCollections).kind !== "implied",
+          )
+          .map((model) => model.id),
+      ),
+    );
     selectedModelSnapshot.current = new Map(sortedModels.map((model) => [model.id, model]));
     setSelectedCollectionRows(
       new Map(visibleCollections.map((collection) => [collection.id, collection])),
@@ -1930,7 +1997,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         all.push(...page.items.flatMap((item) => (item.kind === "model" ? [item.model] : [])));
         cursor = page.next_cursor ?? undefined;
       } while (cursor !== undefined);
-      setSelectedIds(new Set(all.map((model) => model.id)));
+      setSelectedIds(
+        new Set(
+          all
+            .filter(
+              (model) =>
+                modelSelection(model, selectedIds, selectedCollectionRows.values()).kind !==
+                "implied",
+            )
+            .map((model) => model.id),
+        ),
+      );
       setSelectedMultipartRows(new Map(multipart.map((item) => [item.id, item])));
       selectedModelSnapshot.current = new Map(all.map((model) => [model.id, model]));
       toast.info(uiText("library.matchingSelected", { count: all.length + multipart.length }));
@@ -1966,7 +2043,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     [selectedCollectionRows],
   );
   const selectionCount =
-    selectedIds.size + selectedCollectionRows.size + selectedMultipartRows.size;
+    selectedIdList.length + selectedCollectionRows.size + selectedMultipartRows.size;
   // First selection loads the tools; retain their owner afterward so clearing
   // selection can finish the existing exit and dialog lifecycle.
   const [batchToolsActivated, setBatchToolsActivated] = useState(false);
@@ -2331,7 +2408,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     snapshot?.entry === entry &&
     docView === "models" &&
     !authority.authorizationChanged &&
-    visibleModels.length > 0;
+    (visibleModels.length > 0 || inspectorIntent?.open === true);
   const inspectorOpen = inspectorAvailable && !!inspectorIntent?.open;
   const [preferredInspectorWidth, setPreferredInspectorWidth] = useState(storedInspectorWidth);
   const chooseInspectorWidth = useCallback((width: number | null) => {
@@ -2376,7 +2453,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         "--library-inspector-padding-offset": `${appliedDock.paddingOffset}px`,
       }
     : {};
-  const inspectorOpener = useRef<HTMLElement | null>(null);
+  const inspectorKeyboardOpener = useRef<HTMLElement | null>(null);
   const setInspector = useCallback(
     (intent: InspectorIntent) => {
       libraryInspectorIntents.set(inspectorScope, intent);
@@ -2387,16 +2464,133 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     [inspectorScope],
   );
   const inspectModel = useCallback(
-    (id: number, opener: HTMLElement) => {
-      inspectorOpener.current = opener;
+    (id: number, opener: HTMLElement | null) => {
+      // Capture focus modality before the drawer moves focus to its title.
+      inspectorKeyboardOpener.current = opener?.matches(":focus-visible") ? opener : null;
       setInspector({ id, open: true });
     },
     [setInspector],
   );
+  const historyTreeModelId = useLocation({ select: (location) => location.state.treeModelId });
+  const [handledTreeEntry, setHandledTreeEntry] = useState<string | null>(null);
+  const [treeReveal, setTreeReveal] = useState<{
+    id: number;
+    entryKey: string;
+    opener: HTMLElement;
+  } | null>(null);
+  const [treeFocus, setTreeFocus] = useState<{ id: number; entryKey: string } | null>(null);
+  function openTreeModel(model: OutlinerModelRead, opener: HTMLElement) {
+    if (
+      docView === "models" &&
+      libraryView === "all" &&
+      !searchQuery &&
+      !narrowsLibrary(baseFilters) &&
+      model.collection_id === selectedCollectionId &&
+      model.collection === selectedCollection
+    ) {
+      setTreeReveal({ id: model.id, entryKey: entry.key, opener });
+      return;
+    }
+    router.push(treeModelFolderHref(model, sortKey), { state: { treeModelId: model.id } });
+  }
+  const localTreeReveal = treeReveal?.entryKey === entry.key ? treeReveal : null;
+  const revealModelId =
+    localTreeReveal?.id ??
+    (handledTreeEntry !== entry.key && Number.isSafeInteger(historyTreeModelId)
+      ? historyTreeModelId
+      : undefined);
+  useEffect(() => {
+    if (revealModelId === undefined || !browseReady || snapshot?.entry !== entry) return;
+
+    function finish() {
+      setTreeReveal(null);
+      setHandledTreeEntry(entry.key);
+    }
+    if (!visibleModels.some(({ id }) => id === revealModelId)) {
+      if (hasMore && !modelQuery.isFetching && !modelQuery.isFetchNextPageError) {
+        void modelQuery.loadMore();
+      } else if (!hasMore || modelQuery.isFetchNextPageError) {
+        const frame = requestAnimationFrame(finish);
+        return () => cancelAnimationFrame(frame);
+      }
+      return;
+    }
+    const id = revealModelId;
+    const key = `/models/${id}`;
+    const element = startupContent.current;
+    if (!element) return;
+    let frame = 0;
+    function reveal() {
+      const anchor = element?.querySelector<HTMLElement>(libraryReadingSelector(key));
+      const card = anchor?.closest<HTMLElement>("[data-library-key]") ?? anchor;
+      // A mounted card can open while the virtual list is still measuring.
+      if (!card && readingRenderers.current.get("models")?.reveal(key) === "pending") {
+        frame = requestAnimationFrame(reveal);
+        return;
+      }
+      if (card) {
+        card.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+        inspectModel(id, localTreeReveal?.opener ?? anchor ?? null);
+        setTreeFocus({ id, entryKey: entry.key });
+      }
+      finish();
+    }
+    frame = requestAnimationFrame(reveal);
+    return () => cancelAnimationFrame(frame);
+  }, [
+    browseReady,
+    entry,
+    hasMore,
+    inspectModel,
+    modelQuery,
+    revealModelId,
+    snapshot,
+    localTreeReveal,
+    visibleModels,
+  ]);
+
+  // The dock can change the grid's column count and remount the targeted row.
+  // Re-center and highlight the same card once its final geometry is available.
+  useEffect(() => {
+    if (
+      treeFocus?.entryKey !== entry.key ||
+      treeFocus?.id !== inspectorIntent?.id ||
+      !inspectorOpen ||
+      inspectorMotion.locked !== null
+    )
+      return;
+    const key = `/models/${treeFocus.id}`;
+    let frame = 0;
+    let highlightTimer: number | undefined;
+    let highlighted: HTMLElement | undefined;
+    function center() {
+      const anchor = startupContent.current?.querySelector<HTMLElement>(
+        libraryReadingSelector(key),
+      );
+      const card = anchor?.closest<HTMLElement>("[data-library-key]") ?? anchor;
+      if (!card) {
+        if (readingRenderers.current.get("models")?.reveal(key) === "pending") {
+          frame = requestAnimationFrame(center);
+        }
+        return;
+      }
+      card.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+      card.classList.add("library-tree-spotlight");
+      highlighted = card;
+      highlightTimer = window.setTimeout(() => setTreeFocus(null), DURATION.slow);
+    }
+    frame = requestAnimationFrame(center);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(highlightTimer);
+      highlighted?.classList.remove("library-tree-spotlight");
+    };
+  }, [entry.key, inspectorIntent?.id, inspectorMotion.locked, inspectorOpen, treeFocus]);
+
   const closeInspector = useCallback(() => {
     if (inspectorIntent) setInspector({ ...inspectorIntent, open: false });
     requestAnimationFrame(() => {
-      const opener = inspectorOpener.current;
+      const opener = inspectorKeyboardOpener.current;
       if (opener?.isConnected) opener.focus({ preventScroll: true });
       else startupContent.current?.focus({ preventScroll: true });
     });
@@ -2406,7 +2600,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (inspectorOpen) closeInspector();
     else {
       const id = inspectorIntent?.id ?? visibleModels[0]?.id;
-      if (id !== undefined) setInspector({ id, open: true });
+      if (id !== undefined) {
+        const opener = document.activeElement;
+        inspectModel(id, opener instanceof HTMLElement ? opener : null);
+      }
     }
   }, [
     inspectorAvailable,
@@ -2414,7 +2611,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     inspectorIntent,
     visibleModels,
     closeInspector,
-    setInspector,
+    inspectModel,
   ]);
   useEffect(() => {
     window.dispatchEvent(
@@ -3232,6 +3429,42 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     </DropdownMenu>
   );
 
+  const childGroups =
+    displayedCollection && !includeSubfolders && libraryView === "all" && user
+      ? visibleCollections
+          .filter((collection) => collection.model_count > 0)
+          .map((collection) => (
+            <LibraryCollectionGroup
+              key={collection.id}
+              collection={collection}
+              userId={user.id}
+              href={collectionHref(collection.path, collection.id)}
+              sort={sortKey}
+              compact={compact}
+              scrollRef={startupContent}
+              onOpen={(child) => handleCollectionChange(child.path, child.id)}
+              onLoaded={recordGroupedModels}
+              renderModel={(model) => (
+                <ModelCard
+                  model={model}
+                  origin={snapshot?.entry}
+                  selectable={selectMode}
+                  selected={
+                    modelSelection(model, selectedIds, selectedCollectionRows.values()).kind !==
+                    "none"
+                  }
+                  onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
+                  draggable={canUploadToVault && !selectMode}
+                  onEditTags={openTagEditor}
+                  onIntent={warmModel}
+                  onInspect={inspectModel}
+                  inspected={inspectorOpen && inspectorIntent?.id === model.id}
+                />
+              )}
+            />
+          ))
+      : null;
+
   return (
     <Localized>
       <>
@@ -3340,6 +3573,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           selectedPrinterId={selectedPrinterId}
           selectedPrinterPresence={selectedPrinterPresence}
           onCollectionChange={handleCollectionChange}
+          onModelOpen={openTreeModel}
           onTagsChange={setSelectedTags}
           onPrinterChange={setSelectedPrinterId}
           onPrinterPresenceChange={setSelectedPrinterPresence}
@@ -3382,6 +3616,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             selectedPrinterId={selectedPrinterId}
             selectedPrinterPresence={selectedPrinterPresence}
             onCollectionChange={handleCollectionChange}
+            onModelOpen={openTreeModel}
             onCollectionIntent={prefetchFolder}
             onTagsChange={setSelectedTags}
             onPrinterChange={setSelectedPrinterId}
@@ -3558,7 +3793,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           <div className="library-collection-header px-4 sm:px-6">
             <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-1">
               <div className="library-collection-identity min-w-0 flex-1">
-                <CollectionTitleEditor
+                <InlineTitleEditor
+                  fieldLabel={uiText("inbox.collectionName")}
+                  maxLength={100}
                   title={
                     unavailableCollection
                       ? uiText("library.collectionUnavailable")
@@ -4086,7 +4323,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                                 includeSubfolders ? item.value.collection_label : null
                               }
                               selectable={selectMode}
-                              selected={selectedIds.has(item.value.id)}
+                              selected={
+                                modelSelection(
+                                  item.value,
+                                  selectedIds,
+                                  selectedCollectionRows.values(),
+                                ).kind !== "none"
+                              }
                               onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
                               draggable={canUploadToVault && !selectMode}
                               onEditTags={openTagEditor}
@@ -4128,6 +4371,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       failed={modelQuery.isFetchNextPageError}
                       onClick={loadMore}
                     />
+                    {childGroups && childGroups.length > 0 && (
+                      <div className="mt-4 space-y-4">{childGroups}</div>
+                    )}
                   </div>
                 ) : (
                   <div
@@ -4210,7 +4456,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                               origin={snapshot?.entry}
                               collectionLabel={item.value.collection_label}
                               selectable={selectMode}
-                              selected={selectedIds.has(item.value.id)}
+                              selected={
+                                modelSelection(
+                                  item.value,
+                                  selectedIds,
+                                  selectedCollectionRows.values(),
+                                ).kind !== "none"
+                              }
                               onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
                               draggable={canUploadToVault && !selectMode}
                               onInspect={inspectModel}
@@ -4236,6 +4488,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       failed={modelQuery.isFetchNextPageError}
                       onClick={loadMore}
                     />
+                    {childGroups && childGroups.length > 0 && (
+                      <div className="mt-4 space-y-4">{childGroups}</div>
+                    )}
                   </div>
                 )}
               </div>
@@ -4282,7 +4537,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         {docView === "models" && batchToolsActivated && (
           <Suspense fallback={null}>
             <BatchToolbar
-              modelCount={selectedIds.size}
+              modelCount={selectedIdList.length}
               multipartCount={selectedMultipartRows.size}
               selectedCollections={selectedCollections}
               tags={tags}
@@ -4526,6 +4781,7 @@ function ModelListRow({
   return (
     <Localized>
       <LibraryItemLink
+        data-inspected={inspected || undefined}
         origin={origin}
         href={`/models/${model.id}`}
         draggable={draggable}
@@ -4553,9 +4809,9 @@ function ModelListRow({
             onInspect(model.id, e.currentTarget);
           }
         }}
-        className={`flex items-center gap-2 md:gap-3 px-4 py-3 border-b border-border transition-colors group active:bg-muted ${
+        className={`library-model-row flex items-center gap-2 md:gap-3 px-4 py-3 border-b border-border transition-colors duration-press group active:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
           draggable ? "cursor-grab active:cursor-grabbing" : ""
-        } ${selected || inspected ? "bg-accent" : "hover:bg-muted"}`}
+        } ${selected ? "bg-accent" : "hover:bg-muted"}`}
       >
         {onToggleSelect && (
           <Checkbox

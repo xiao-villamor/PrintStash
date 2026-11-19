@@ -748,6 +748,9 @@ def _run_worker(
         if deadline is not None and time.monotonic() >= deadline:
             raise MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
 
+    from printstash_core.mesh.preview_profile import preview_appearance
+
+    spec = {"preview_appearance": asdict(preview_appearance()), **spec}
     check()
     if isinstance(work, (RasterWork, AnalysisWork)):
         warm_render()
@@ -912,15 +915,31 @@ def read_spec(argv: list[str]) -> dict[str, Any]:
     return spec
 
 
+def worker_appearance(spec: dict[str, Any]):
+    """Scope a render to the appearance supplied by its supervising process."""
+    from printstash_core.mesh.preview_profile import (
+        DEFAULT_APPEARANCE,
+        appearance_scope,
+        decode_appearance,
+    )
+
+    appearance = (
+        decode_appearance(spec["preview_appearance"])
+        if "preview_appearance" in spec
+        else DEFAULT_APPEARANCE
+    )
+    return appearance_scope(appearance)
+
+
 def _work_profile(request: ThumbnailRequest) -> WorkProfile:
     raster: RasterWork | None = None
-    if request.views is not None and not request.include_thumbnail:
+    if request.views is not None:
         from app.modules.media.preview_contracts import height_for
 
         # Views are encoded one at a time: one live raster, like the batch.
         width = request.views.width
         raster = RasterWork(width, height_for(width), 1, RasterCodec.WEBP)
-    if request.include_thumbnail:
+    elif request.include_thumbnail:
         width = int(request.width or settings.model_thumbnail_width)
         height = int(request.height or round(width * 3 / 4))
         raster = RasterWork(
@@ -1056,6 +1075,7 @@ def _generate_once(
             "include_poles": request.views.include_poles,
             "source_sha256": request.views.source_sha256,
             "width": request.views.width,
+            "planar_cover": request.views.planar_cover,
         },
     }
     work = _work_profile(request)
@@ -1258,7 +1278,10 @@ def _render_packet_cpu(
     )
     with admission(amount, capacity, checkpoint=handoff.check) as permit:
         handoff.check(force=True)
+        from printstash_core.mesh.preview_profile import preview_appearance
+
         spec = {
+            "preview_appearance": asdict(preview_appearance()),
             "overrides": {**runtime_overrides(), "compute_mode": "cpu"},
             "directory": str(directory),
             "directory_identity": directory_identity,

@@ -7,8 +7,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import numpy as np
-from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
-from printstash_core.mesh.rasterizer import render_prepared_thumbnail
+from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, preview_appearance
+from printstash_core.mesh.rasterizer import (
+    _select_view_rotation,
+    render_prepared_thumbnail,
+)
 from printstash_core.mesh.render_geometry import (
     PreparedRenderGeometry,
     RenderableMesh,
@@ -21,11 +24,15 @@ from printstash_core.mesh.similarity.components import ExpandedScene
 from app.core.cancellation import checkpoint
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.preview_contracts import (
+    GALLERY_WIDTH,
     MAX_IMAGE_BYTES,
+    MAX_STRIP_BYTES,
+    STRIP_WIDTH,
     CameraView,
     Matrix,
     PreviewLimitError,
     PreviewManifest,
+    PreviewSpan,
     PublishedView,
     ViewId,
     ViewProfile,
@@ -118,6 +125,7 @@ def render_views(
     recipe: int = 1,
     include_poles: bool = False,
     progress: Callable[[int, int], None] | None = None,
+    planar_cover: Matrix | None = None,
 ) -> tuple[PreviewManifest, list[bytes]]:
     faces = mesh.faces
     if faces is None:
@@ -137,6 +145,7 @@ def render_views(
         recipe=recipe,
         include_poles=include_poles,
         progress=progress,
+        planar_cover=planar_cover,
     )
 
 
@@ -150,6 +159,7 @@ def render_prepared_views(
     recipe: int,
     include_poles: bool,
     progress: Callable[[int, int], None] | None = None,
+    planar_cover: Matrix | None = None,
 ) -> tuple[PreviewManifest, list[bytes]]:
     """Render the view set from geometry the caller already holds.
 
@@ -161,6 +171,30 @@ def render_prepared_views(
     profile, views = _cameras(
         geometry.face_count, max_faces=max_faces, include_poles=include_poles
     )
+    cover_view = None
+    if width >= GALLERY_WIDTH:
+        rotation = planar_cover
+        # Legacy standing-plate covers could look up from below the bed.
+        if rotation is None or rotation[2][2] >= -1e-6:
+            rotation = _matrix(_select_view_rotation(geometry.vertices))
+        matching = next(
+            (view for view in views if np.allclose(view.rotation, rotation)), None
+        )
+        if matching is not None:
+            cover_view = matching.id
+        else:
+            cover_view = ViewId.FACE
+            views += (
+                CameraView(
+                    id=cover_view,
+                    role=ViewRole.FACE,
+                    rotation=rotation,
+                    azimuth_degrees=None,
+                    elevation_degrees=90
+                    if np.allclose(rotation, _looking_from((0, 0, 1)))
+                    else None,
+                ),
+            )
     # The canonical encoder brings G-code and printer models with it; a cover
     # worker loads it only once it renders views, never at startup.
     from app.modules.media import thumbnail
@@ -209,6 +243,11 @@ def render_prepared_views(
             width * (1 - 2 * PREVIEW_PROFILE.margin_fraction) / extent[0],
             height * (1 - 2 * PREVIEW_PROFILE.margin_fraction) / extent[1],
         )
+        strip = None
+        if width >= GALLERY_WIDTH:
+            strip = thumbnail.to_webp(encoded, width=STRIP_WIDTH, normalize=False)
+            if len(strip) > MAX_STRIP_BYTES:
+                raise PreviewLimitError
         published.append(
             PublishedView(
                 **view.model_dump(),
@@ -219,18 +258,32 @@ def render_prepared_views(
                 offset=offset,
                 size=len(encoded),
                 sha256=hashlib.sha256(encoded).hexdigest(),
+                thumbnail=PreviewSpan(
+                    offset=offset + len(encoded),
+                    size=len(strip),
+                    sha256=hashlib.sha256(strip).hexdigest(),
+                )
+                if strip is not None
+                else None,
             )
         )
         images.append(encoded)
         offset += len(encoded)
+        if strip is not None:
+            images.append(strip)
+            offset += len(strip)
         if progress is not None:
             progress(index, len(views))
     return PreviewManifest(
         source_sha256=source_sha256,
         recipe=recipe,
         profile=profile,
+        appearance=preview_appearance().fingerprint,
         center=(float(center[0]), float(center[1]), float(center[2])),
         views=tuple(published),
+        cover_view=cover_view
+        if any(view.id == cover_view for view in published)
+        else None,
         size=offset,
     ), images
 

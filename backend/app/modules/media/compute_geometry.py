@@ -31,7 +31,7 @@ def layout_for(prepared: RenderInput) -> GeometryLayout:
             prepared.face_count,
             prepared.position_count
             if isinstance(prepared, (DeferredRender, VisualRender))
-            else len(prepared.smooth_normals),
+            else int(prepared.position_ids.max()) + 1,
         ),
         prepared.normal_mode
         if isinstance(prepared, (DeferredRender, VisualRender))
@@ -73,7 +73,10 @@ def encode(prepared: RenderInput, width: int, height: int, views, matte: bool) -
         )
     if not deferred:
         assert isinstance(prepared, PreparedRender)
-        arrays.append(np.ascontiguousarray(prepared.smooth_normals, dtype="<f8"))
+        normals = np.ascontiguousarray(prepared.corner_normals, dtype="<f4")
+        if normals.size != prepared.face_count * 9:
+            raise ValueError("compute_geometry_size")
+        arrays.append(normals)
     n, f, k = layout
     header = {
         "vertices": n,
@@ -146,9 +149,9 @@ def decode_arrays(
     _validate_layout(layout)
     n, f, k = layout
     deferred = layout.normal_mode == NORMAL_MODE
-    sizes = (n * 12, f * 12, n * 4) if deferred else (n * 12, f * 24, n * 8, k * 24)
-    dtypes = ("<f4", "<u4", "<u4") if deferred else ("<f4", "<i8", "<i8", "<f8")
-    shapes = ((n, 3), (f, 3), (n,)) if deferred else ((n, 3), (f, 3), (n,), (k, 3))
+    sizes = (n * 12, f * 12, n * 4) if deferred else (n * 12, f * 24, n * 8, f * 36)
+    dtypes = ("<f4", "<u4", "<u4") if deferred else ("<f4", "<i8", "<i8", "<f4")
+    shapes = ((n, 3), (f, 3), (n,)) if deferred else ((n, 3), (f, 3), (n,), (f, 3, 3))
     if layout.normal_mode == VISUAL_NORMAL_MODE:
         sizes, dtypes, shapes = (n * 12, f * 12), ("<f4", "<u4"), ((n, 3), (f, 3))
     if sum(sizes) != len(body):

@@ -41,7 +41,7 @@ def cube(tmp_path: Path) -> Path:
 @pytest.fixture
 def rendered_result() -> ThumbnailResult:
     return ThumbnailResult(
-        image=content.png(),
+        image=content.rendered_thumbnail(),
         geometry={"volume_mm3": None},
         geometry_outcome=GeometryNotRequested(),
         volume=VolumeNotCalculated(VolumeNotCalculatedCause.NOT_REQUESTED),
@@ -85,7 +85,9 @@ class TestBenchmarkFile:
             rendered_result,
             image=None,
             coverage=MeshCoverage(
-                SourceScanState.NOT_SCANNED, GeometryNotLoaded(), PreviewCoverage.NOT_PRODUCED
+                SourceScanState.NOT_SCANNED,
+                GeometryNotLoaded(),
+                PreviewCoverage.NOT_PRODUCED,
             ),
             failure_reason=ThumbnailFailureReason.INVALID_SOURCE,
             strategy=ThumbnailStrategy.NONE,
@@ -111,7 +113,7 @@ class TestBenchmarkFile:
             ThumbnailEngine, "generate", lambda self, request: rendered_result
         )
 
-        def fail(data: bytes, *, renderer_encoded: bool = False) -> bytes:
+        def fail(data: bytes, *, preserve_frame: bool = False) -> bytes:
             raise ValueError("encoding failed")
 
         monkeypatch.setattr(bench_thumbnails, "to_webp", fail)

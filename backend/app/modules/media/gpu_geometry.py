@@ -1,8 +1,8 @@
 """Portable indexed geometry packing with explicit transient buffer ownership.
 
-Only validated, already centered render arrays enter this owner. Source parsing,
-source-precision measurements remain CPU work. Guarded smooth-normal preparation
-and indexed crease-normal packing share GPU inputs and their completion fence.
+Only validated, already centered render arrays enter this owner. Source parsing
+and source-precision measurements remain CPU work. Indexed packing consumes
+the renderer's shared face-corner normals.
 """
 
 from __future__ import annotations
@@ -19,14 +19,7 @@ from printstash_core.mesh.render_geometry import PreparedRender
 from app.runtime.compute.budget import Residency
 from app.runtime.compute.contracts import ComputeUnavailable, Reason
 
-from .gpu_normals import (
-    DeferredRender,
-    NormalPipeline,
-    NormalPlan,
-    RenderInput,
-    build_csr,
-    canonical,
-)
+from .gpu_normals import RenderInput, canonical
 
 FACE_CHUNK = 64_000
 # Completed warm upload/render measurements on indexed meshes and STL soup
@@ -39,97 +32,50 @@ struct Triangle { a: vec4<f32>, b: vec4<f32>, c: vec4<f32>,
                   na: vec4<f32>, nb: vec4<f32>, nc: vec4<f32> };
 @group(0) @binding(0) var<storage, read> positions: array<f32>;
 @group(0) @binding(1) var<storage, read> faces: array<u32>;
-@group(0) @binding(2) var<storage, read> identities: array<u32>;
-@group(0) @binding(3) var<storage, read> smoothed: array<f32>;
-@group(0) @binding(4) var<storage, read_write> objects: array<Triangle>;
-fn point(index: u32) -> vec3<f32> {
+@group(0) @binding(2) var<storage, read> corner_normals: array<f32>;
+@group(0) @binding(3) var<storage, read_write> objects: array<Triangle>;
+fn point(index: u32) -> vec4<f32> {
     let p = index * 3u;
-    return vec3(positions[p], positions[p+1u], positions[p+2u]);
+    return vec4(positions[p], positions[p+1u], positions[p+2u], 0.0);
 }
-fn normal(index: u32) -> vec3<f32> {
-    let p = identities[index] * 3u;
-    return vec3(smoothed[p], smoothed[p+1u], smoothed[p+2u]);
-}
-fn unit(value: vec3<f32>) -> vec3<f32> {
-    let magnitude = length(value);
-    return value / select(magnitude, 1.0, magnitude == 0.0);
-}
-fn blend(index: u32, flat: vec3<f32>) -> vec4<f32> {
-    let interpolated = normal(index);
-    var t = clamp((dot(interpolated, flat)-0.75)/0.17, 0.0, 1.0);
-    t = t*t*(3.0-2.0*t);
-    return vec4(unit(t*interpolated+(1.0-t)*flat), 0.0);
+fn normal(index: u32) -> vec4<f32> {
+    let p = index * 3u;
+    return vec4(corner_normals[p], corner_normals[p+1u], corner_normals[p+2u], 0.0);
 }
 @compute @workgroup_size(64)
 fn pack(@builtin(global_invocation_id) id: vec3<u32>) {
     if id.x >= arrayLength(&objects) { return; }
     let f = id.x * 3u;
-    let ia = faces[f]; let ib = faces[f+1u]; let ic = faces[f+2u];
-    let a = point(ia); let b = point(ib); let c = point(ic);
-    let u = b-a; let v = c-a;
-    let positive = u.yzx * v.zxy;
-    let negative = u.zxy * v.yzx;
-    var flat = vec3(0.0);
-    // A fused cross(v,v) may leave a tiny residue on some drivers. Comparing
-    // rounded products preserves the CPU's exact-zero rule before normalizing
-    // repeated or collinear positions; no arbitrary area cutoff is introduced.
-    if !all(a==b) && !all(b==c) && !all(c==a) && !all(positive==negative) {
-        flat = unit(positive-negative);
-    }
-    objects[id.x] = Triangle(vec4(a,0.0), vec4(b,0.0), vec4(c,0.0),
-                            blend(ia,flat), blend(ib,flat), blend(ic,flat));
+    objects[id.x] = Triangle(point(faces[f]), point(faces[f+1u]), point(faces[f+2u]),
+                            normal(f), normal(f+1u), normal(f+2u));
 }
 """
 
 
 def input_sizes(prepared: RenderInput) -> tuple[int, ...]:
-    """Exact owned device bytes, including deferred-normal scratch and status."""
-    if isinstance(prepared, DeferredRender):
-        return (
-            len(prepared.vertices) * 12,
-            prepared.face_count * 12,
-            len(prepared.position_ids) * 4,
-            (prepared.position_count + 1) * 4,
-            prepared.face_count * 12,
-            prepared.face_count * 24,
-            prepared.position_count * 12,
-            4,
-        )
     return (
         len(prepared.vertices) * 12,
         prepared.face_count * 12,
-        len(prepared.position_ids) * 4,
-        len(prepared.smooth_normals) * 12,
+        prepared.face_count * 36,
     )
 
 
 def packed_chunks(prepared: PreparedRender) -> Iterator[NDArray[np.float32]]:
     """Canonical CPU packing retained for small work and unavailable GPU setup."""
+    start = 0
     for faces in prepared.face_chunks(FACE_CHUNK):
-        positions = prepared.vertices[faces]
-        flat = np.cross(
-            positions[:, 1] - positions[:, 0], positions[:, 2] - positions[:, 0]
-        )
-        lengths = np.linalg.norm(flat, axis=1, keepdims=True)
-        flat /= np.where(lengths == 0, 1.0, lengths)
-        smooth = prepared.smooth_normals[prepared.position_ids[faces]]
-        t = np.clip((np.sum(smooth * flat[:, None, :], axis=2) - 0.75) / 0.17, 0.0, 1.0)
-        t = (t * t * (3.0 - 2.0 * t))[..., None]
-        normals = t * smooth + (1.0 - t) * flat[:, None, :]
-        lengths = np.linalg.norm(normals, axis=2, keepdims=True)
-        normals /= np.where(lengths == 0, 1.0, lengths)
+        end = start + len(faces)
         values = np.zeros((len(faces), 6, 4), dtype="<f4")
-        values[:, :3, :3] = positions
-        values[:, 3:, :3] = normals
+        values[:, :3, :3] = prepared.vertices[faces]
+        values[:, 3:, :3] = prepared.corner_normals[start:end]
         yield values
+        start = end
 
 
 @dataclass
 class _Pending:
     key: str
     buffers: list[Any]
-    geometry_key: str
-    status: Any = None
 
 
 class CompletionFence:
@@ -192,62 +138,17 @@ class GeometryPacker:
         self.submissions = 0
         self.transferred_bytes = 0
         self.transfer_seconds = 0.0
-        self.normals: NormalPipeline | None = None
-        self.normals_attempted = False
-        self.gpu_normal_uploads = 0
-        self.cpu_normal_fallbacks = 0
-        self.normal_seconds = 0.0
-
-    def _normal_plan(
-        self, prepared: RenderInput
-    ) -> tuple[RenderInput, NormalPlan | None]:
-        if not isinstance(prepared, DeferredRender):
-            return prepared, None
-        started = time.monotonic()
-        try:
-            if not self.normals_attempted:
-                self.normals_attempted = True
-                try:
-                    candidate = NormalPipeline(self.device)
-                    candidate.canary(memory=self.memory, fence=self.fence)
-                    self.normals = candidate
-                except Exception as exc:
-                    from app.core.logging import get_logger
-
-                    get_logger(__name__).warning(
-                        "GPU normal preparation unavailable: %s", exc
-                    )
-            if self.normals is not None:
-                try:
-                    return prepared, build_csr(prepared)
-                except ValueError as exc:
-                    if str(exc) not in {
-                        "compute_normals_valence",
-                        "compute_normals_numeric_range",
-                    }:
-                        raise
-            self.cpu_normal_fallbacks += 1
-            return canonical(prepared), None
-        finally:
-            self.normal_seconds += time.monotonic() - started
-
-    def normal_statuses(self) -> dict[str, Any]:
-        return {
-            item.geometry_key: item.status
-            for item in self.pending
-            if item.status is not None
-        }
 
     def submit(self, prepared: RenderInput, target: Any, key: str) -> None:
         """Queue normals and packing; every input lease survives the frame fence."""
         import wgpu
 
-        prepared, plan = self._normal_plan(prepared)
+        prepared = canonical(prepared)
         sizes = input_sizes(prepared)
         limit = self.device.limits["max-storage-buffer-binding-size"]
         if max(sizes) > limit:
             raise ComputeUnavailable(Reason.CAPACITY)
-        pending = _Pending("packing:" + key, [], key)
+        pending = _Pending("packing:" + key, [])
 
         def release() -> None:
             for buffer in pending.buffers:
@@ -256,7 +157,7 @@ class GeometryPacker:
         self.memory.reserve(pending.key, sum(sizes), release, time.monotonic())
         self.memory.pin(pending.key, time.monotonic())
         try:
-            for size in sizes[:3] if plan is not None else sizes:
+            for size in sizes:
                 pending.buffers.append(
                     self.device.create_buffer(
                         size=size,
@@ -265,54 +166,21 @@ class GeometryPacker:
                 )
             started = time.monotonic()
             self.device.queue.write_buffer(pending.buffers[0], 0, prepared.vertices)
-            if plan is not None:
-                self.device.queue.write_buffer(pending.buffers[1], 0, plan.faces)
-            else:
-                offset = 0
-                for faces in prepared.face_chunks(FACE_CHUNK):
-                    indices = np.asarray(faces, dtype="<u4")
-                    self.device.queue.write_buffer(pending.buffers[1], offset, indices)
-                    offset += indices.nbytes
+            offset = 0
+            for faces in prepared.face_chunks(FACE_CHUNK):
+                indices = np.asarray(faces, dtype="<u4")
+                self.device.queue.write_buffer(pending.buffers[1], offset, indices)
+                offset += indices.nbytes
             self.device.queue.write_buffer(
-                pending.buffers[2], 0, np.asarray(prepared.position_ids, dtype="<u4")
+                pending.buffers[2], 0, prepared.corner_normals
             )
             self.transfer_seconds += time.monotonic() - started
             encoder = self.device.create_command_encoder()
-            if plan is not None:
-                assert self.normals is not None
-                started = time.monotonic()
-                transfer_seconds = self.normals.transfer_seconds
-                generated = self.normals.encode(
-                    plan,
-                    encoder,
-                    positions=pending.buffers[0],
-                    faces=pending.buffers[1],
-                    owned=pending.buffers,
-                )
-                self.normal_seconds += time.monotonic() - started
-                self.transfer_seconds += (
-                    self.normals.transfer_seconds - transfer_seconds
-                )
-                smooth = generated.smooth
-                pending.status = generated.status
-                transferred = sum(sizes[:3]) + plan.offsets.nbytes + plan.corners.nbytes
-                self.gpu_normal_uploads += 1
-            else:
-                assert isinstance(prepared, PreparedRender)
-                smooth = pending.buffers[3]
-                started = time.monotonic()
-                self.device.queue.write_buffer(
-                    smooth, 0, np.asarray(prepared.smooth_normals, dtype="<f4")
-                )
-                self.transfer_seconds += time.monotonic() - started
-                transferred = sum(sizes)
             group = self.device.create_bind_group(
                 layout=self.pipeline.get_bind_group_layout(0),
                 entries=[
                     {"binding": index, "resource": {"buffer": buffer}}
-                    for index, buffer in enumerate(
-                        [*pending.buffers[:3], smooth, target]
-                    )
+                    for index, buffer in enumerate([*pending.buffers, target])
                 ],
             )
             compute = encoder.begin_compute_pass()
@@ -324,7 +192,7 @@ class GeometryPacker:
             self.pending.append(pending)
             self.device.queue.submit([encoder.finish()])
             self.submissions += 1
-            self.transferred_bytes += transferred
+            self.transferred_bytes += sum(sizes)
         except BaseException:
             if pending not in self.pending:
                 self.pending.append(pending)
@@ -356,8 +224,6 @@ class GeometryPacker:
         random = np.random.default_rng(29)
         random_vertices = random.normal(size=(100, 3)).astype(np.float32)
         random_faces = random.integers(0, 100, size=(500, 3), dtype=np.int64)
-        random_normals = random.normal(size=(100, 3))
-        random_normals /= np.linalg.norm(random_normals, axis=1, keepdims=True)
         vertices = np.concatenate(
             (
                 np.asarray(
@@ -382,28 +248,13 @@ class GeometryPacker:
                 random_faces + 6,
             )
         )
-        prepared = PreparedRender(
-            vertices,
-            len(faces),
-            lambda size: iter([faces]),
-            np.concatenate(
-                (
-                    np.asarray([2, 0, 1, 2, 0, 0], dtype=np.int64),
-                    np.arange(3, 103, dtype=np.int64),
-                )
-            ),
-            np.concatenate(
-                (
-                    np.asarray(
-                        [
-                            [np.sqrt(1 - 0.8**2), 0, 0.8],
-                            [0, np.sqrt(1 - 0.75**2), 0.75],
-                            [np.sqrt(1 - 0.92**2), 0, 0.92],
-                        ]
-                    ),
-                    random_normals,
-                )
-            ),
+        from printstash_core.mesh.render_geometry import (
+            PreparedRenderGeometry,
+            prepare_normals,
+        )
+
+        prepared = prepare_normals(
+            PreparedRenderGeometry(vertices, len(faces), lambda size: iter([faces]))
         )
         output_bytes = prepared.face_count * 96
         key = "packing-canary-output"

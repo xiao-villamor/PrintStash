@@ -32,10 +32,12 @@ from app.db.models import (
     User,
 )
 from app.db.scopes import live
+from app.modules.derivatives.sliced_reads import meshless_archives
 from app.modules.identity import rbac
 from app.modules.library import collection_tree
 from app.modules.library.volume_metadata import read_volume
 from app.modules.media.fingerprints import ALGORITHM_VERSION
+from app.modules.media.sliced_archive import SlicedGeometry
 from app.modules.printing.costing import (
     cost_profiles,
     match_cost_profile,
@@ -138,9 +140,11 @@ def _file_reads_with_revisions(
         session,
         [f.id for f, _md in files_with_meta if f.id is not None],
     )
+    meshless = meshless_archives(session, [model_id])
     profiles = cost_profiles(session)
     return [
         FileRead(
+            sliced_geometry=SlicedGeometry.GCODE_ONLY if f.id in meshless else None,
             id=f.id,  # type: ignore[arg-type]
             model_id=f.model_id,
             original_filename=f.original_filename,
@@ -328,7 +332,7 @@ def _hydrate_list_rows(
     tags_by_model = _model_tag_names(session, model_ids)
     from .previews import summaries as preview_summaries
 
-    previews = preview_summaries(session, model_ids)
+    previews = preview_summaries(session, rows)
     similarity = similarity_summaries(session, user, model_ids)
     starred_ids = set(session.exec(stars_query, params=parameters).all())
 

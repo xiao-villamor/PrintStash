@@ -9,6 +9,7 @@ import { captureEditingBase } from "@/lib/api/editing";
 import type { EditingBase } from "@/types/editing";
 import type { PreferenceIntent, PreviewMode } from "@/lib/queries/settings-preferences";
 
+import { PreviewAppearanceSettings } from "@/components/preview-appearance-settings";
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 
@@ -18,7 +19,7 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { setThemeMode, useThemeMode } from "@/lib/theme";
 import { copyText } from "@/lib/clipboard";
-import { parseApiError } from "@/lib/errors";
+import { parseApiError, userMessage } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -143,6 +144,7 @@ import { SpoolmanConnectCard } from "@/components/spoolman-connect-card";
 import { OidcSettingsCard } from "@/components/oidc-settings-card";
 import { AiSearchSettings } from "@/components/ai-search-settings";
 import { MaintenancePanel } from "@/components/maintenance-panel";
+import { addSampleCollection } from "@/lib/api/config";
 import { BackgroundWorkPanel } from "@/components/background-work-panel";
 import {
   downloadModelExport,
@@ -398,8 +400,8 @@ function previewModeLabel(mode: PreviewMode): string {
     mode === "single"
       ? "One thumbnail"
       : mode === "oblique"
-        ? "Oblique views"
-        : "Oblique views + top and bottom",
+        ? "Angle views"
+        : "Angle views + top and bottom",
   );
 }
 function preferenceLabel(intent: PreferenceIntent): string {
@@ -493,6 +495,7 @@ export function SettingsPanel() {
   const sidebar = useCollectionsPane();
   useUiLocale();
   const { user } = useAuth();
+  const [addingSamples, setAddingSamples] = useState(false);
   const { locale, setLocale, t } = useI18n();
   const themeMode = useThemeMode();
   const [storageTab, setStorageTab] = useState<"location" | "usage" | "cache">("location");
@@ -1089,8 +1092,7 @@ export function SettingsPanel() {
     setPreviewBusy("rebuild");
     try {
       // Every current preview stays visible until its replacement is ready.
-      // Views follow Model image quality too. Marking them first lets each
-      // cover pass render them from the same load instead of a second one.
+      // Mark views first so each cover pass can render them from the same mesh load.
       if (selectedPreviewMode !== "single") await regenerateDerivatives("previews", "all");
       await regenerateDerivatives("thumbnail", "all");
       toast.success(uiText("Model preview recreation queued. Follow it in Background work."));
@@ -3013,6 +3015,38 @@ export function SettingsPanel() {
                           </div>
                         </dl>
                       </SettingsCard>
+                    )}
+                    {user?.is_superuser && (
+                      <SettingsCard
+                        icon={Boxes}
+                        title={uiText("Sample collection")}
+                        action={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            loading={addingSamples}
+                            onClick={async () => {
+                              setAddingSamples(true);
+                              try {
+                                const { job_id } = await addSampleCollection();
+                                toast.success(
+                                  uiText(
+                                    job_id
+                                      ? "Sample collection queued"
+                                      : "Sample collection already exists",
+                                  ),
+                                );
+                              } catch (error) {
+                                toast.error(userMessage(error));
+                              } finally {
+                                setAddingSamples(false);
+                              }
+                            }}
+                          >
+                            {uiText("Add sample collection")}
+                          </Button>
+                        }
+                      />
                     )}
                     {/* System information */}
                     <SettingsCard
@@ -5427,7 +5461,7 @@ export function SettingsPanel() {
                         {uiText("Multi-angle previews")}
                         <span className="settings-row-hint">
                           {uiText(
-                            "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.",
+                            "Start with one thumbnail for faster imports. Enable four angle views, optionally adding top and bottom. Existing Models update in the background.",
                           )}
                         </span>
                       </span>
@@ -5484,6 +5518,18 @@ export function SettingsPanel() {
                     </p>
                   </div>
                 </SettingsCard>
+
+                {user?.is_superuser && remoteConfigData?.preview_look && (
+                  <PreviewAppearanceSettings
+                    config={remoteConfigData}
+                    disabled={
+                      remoteConfig.isError ||
+                      previewBusy !== null ||
+                      preferenceCommand.blocked ||
+                      backupPolicy.isPending
+                    }
+                  />
+                )}
               </div>
             )}
 

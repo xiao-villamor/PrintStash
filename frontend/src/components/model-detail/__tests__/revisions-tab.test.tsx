@@ -129,6 +129,13 @@ afterEach(() => {
 });
 
 describe("RevisionsTab", () => {
+  it("shows the selected revision filename once", async () => {
+    renderRevisions({ revisions: [aRevision()] });
+
+    expect(await screen.findByText("part_0.2mm.gcode")).toBeVisible();
+    expect(screen.getAllByText("part_0.2mm.gcode")).toHaveLength(1);
+  });
+
   describe("keyboard revision selection", () => {
     it("moves revision focus with the arrow selection", async () => {
       const user = userEvent.setup();
@@ -370,7 +377,8 @@ describe("RevisionsTab", () => {
       const user = userEvent.setup();
       renderRevisions();
 
-      await user.click((await screen.findAllByRole("button", { name: "Delete revision" }))[0]);
+      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(screen.getByRole("menuitem", { name: "Move to trash" }));
 
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
     });
@@ -380,7 +388,8 @@ describe("RevisionsTab", () => {
       const { requestsWithMethod } = renderRevisions({
         routes: { "DELETE /api/v1/models/1/files/20/revision": json({ id: 1 }) },
       });
-      await user.click((await screen.findAllByRole("button", { name: "Delete revision" }))[0]);
+      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(screen.getByRole("menuitem", { name: "Move to trash" }));
 
       const dialog = await screen.findByRole("dialog");
       await user.click(within(dialog).getByRole("button", { name: /Delete/ }));
@@ -395,7 +404,8 @@ describe("RevisionsTab", () => {
     it("deletes nothing when the user backs out", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderRevisions();
-      await user.click((await screen.findAllByRole("button", { name: "Delete revision" }))[0]);
+      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(screen.getByRole("menuitem", { name: "Move to trash" }));
 
       const dialog = await screen.findByRole("dialog");
       await user.click(within(dialog).getByRole("button", { name: /Cancel|Keep/ }));

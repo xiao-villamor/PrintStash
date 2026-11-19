@@ -539,23 +539,26 @@ class Dispatcher:
 
             renderer = self.renderer
 
+            from printstash_core.mesh.preview_profile import appearance_scope
+
             def execute_render():
-                if binary:
-                    outputs = renderer.execute_prepared_many(
-                        decoded,
-                        ["geometry:" + r.geometry_key for r in binary_requests],
-                        [
-                            hashlib.sha256(
-                                (r.geometry_key + r.header).encode()
-                            ).hexdigest()
-                            for r in binary_requests
-                        ],
-                        raw=True,
-                        gpu_finalize=True,
-                    )
-                    tag = bytes([int(renderer.postprocessor is not None)])
-                    return [tag + output for output in outputs]
-                return renderer.execute_many(payloads)
+                with appearance_scope(requirement.appearance):
+                    if binary:
+                        outputs = renderer.execute_prepared_many(
+                            decoded,
+                            ["geometry:" + r.geometry_key for r in binary_requests],
+                            [
+                                hashlib.sha256(
+                                    (r.geometry_key + r.header + r.recipe).encode()
+                                ).hexdigest()
+                                for r in binary_requests
+                            ],
+                            raw=True,
+                            gpu_finalize=True,
+                        )
+                        tag = bytes([int(renderer.postprocessor is not None)])
+                        return [tag + output for output in outputs]
+                    return renderer.execute_many(payloads)
 
             try:
                 return execute_render()

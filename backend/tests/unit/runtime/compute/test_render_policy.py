@@ -2,11 +2,10 @@
 
 import numpy as np
 import pytest
-from printstash_core.mesh.preview_profile import RASTERIZER_RECIPE
 from printstash_core.mesh.render_geometry import PreparedRender
 
 from app.modules.media.compute_geometry import decode, encode
-from app.modules.media.compute_render import RECIPE
+from app.modules.media.compute_render import render_recipe
 from app.runtime.compute.render_policy import (
     admission,
     admission_decoded,
@@ -23,9 +22,7 @@ def frame():
         np.arange(3, dtype=np.int64),
         np.tile([0.0, 0.0, 1.0], (3, 1)),
     )
-    return encode(
-        prepared, 640, 480, [None], False
-    ), f"{RECIPE}:{RASTERIZER_RECIPE}:640x480:1:0"
+    return encode(prepared, 640, 480, [None], False), render_recipe(640, 480)
 
 
 class TestAdmission:
@@ -64,7 +61,7 @@ class TestAdmission:
                 prepared.face_count,
                 prepared.face_chunks,
                 np.resize(prepared.position_ids, 4097),
-                prepared.smooth_normals,
+                prepared.corner_normals,
             ),
             width,
             height,
@@ -129,13 +126,6 @@ class TestAdmission:
             gpu_finalize=True,
         )
 
-        assert (
-            result.host_bytes
-            == canonical.host_bytes
-            + host_scratch_bytes(deferred)
-            + 8
-            # Two models omit3 f32 normal triples from both host upload copies.
-            - 2 * 2 * 3 * 12
-        )
-        assert result.device_bytes == canonical.device_bytes + 8
-        assert result.readback_bytes == canonical.readback_bytes + 8
+        assert result.host_bytes == canonical.host_bytes + host_scratch_bytes(deferred)
+        assert result.device_bytes == canonical.device_bytes
+        assert result.readback_bytes == canonical.readback_bytes

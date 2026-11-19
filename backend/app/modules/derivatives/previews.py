@@ -9,19 +9,28 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from dataclasses import asdict
 from functools import partial
 
 from app.core.cancellation import checkpoint
 from app.core.config import settings
-from app.db.models import DerivativeKind, DerivativeState, JobKind
+from app.db.models import (
+    DerivativeKind,
+    DerivativeState,
+    FileType,
+    JobKind,
+    SystemConfig,
+)
 from app.db.session import get_session_factory
 from app.modules.media import mesh_isolation
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_isolation import MeshWorkerError
 from app.modules.media.native_budget import MeshSource, RasterCodec, RasterWork
 from app.modules.media.preview_contracts import (
+    GALLERY_WIDTH,
     MAX_BUNDLE_BYTES,
     MAX_MANIFEST_BYTES,
+    MAX_VIEWS,
     PreviewManifest,
     height_for,
 )
@@ -38,7 +47,14 @@ from app.runtime.native_admission import AdmissionTooLarge
 
 from . import policy, records
 from . import preview_publication as publication
-from .producers import Outcome, _announced, _begin, _fail
+from .producers import (
+    Outcome,
+    _announced,
+    _begin,
+    _fail,
+    _skip_meshless,
+    _sliced_archive,
+)
 
 
 def _derive(
@@ -54,8 +70,9 @@ def _derive(
     attempt = attempts[DerivativeKind.PREVIEWS]
     with get_session_factory().scoped_session() as session:
         include_poles = policy.preview_poles(session)
-    # Model image quality: the views match the cover's resolution.
-    width = int(settings.model_thumbnail_width)
+        planar_cover = publication.planar_cover_rotation(session, file)
+        appearance = policy.render_appearance(session.get(SystemConfig, 1))
+    width = GALLERY_WIDTH
     # VAULT_MESH_MAX_LOAD_MB: the same source-size ceiling as every mesh path.
     if file.size_bytes > settings.mesh_max_load_mb * 1024 * 1024:
         _fail(attempt, "resource_limit", deterministic=True)
@@ -77,7 +94,7 @@ def _derive(
                 count, size = int(done), int(total)
             except ValueError as exc:  # UnicodeDecodeError is a ValueError
                 raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED) from exc
-            if prefix != "P" or not completed < count <= size <= 6:
+            if prefix != "P" or not completed < count <= size <= MAX_VIEWS:
                 raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
             completed = count
             checkpoint(force=True)
@@ -104,6 +121,11 @@ def _derive(
             prepared.materialize(capacity_claimed=True) as sources,
         ):
             (source,) = sources
+            if (
+                file.file_type is FileType.THREE_MF
+                and _sliced_archive(source) is not None
+            ):
+                return Outcome({DerivativeKind.PREVIEWS: _skip_meshless(attempt)})
             with mesh_isolation.prepared_worker_result(
                 "app.modules.media.preview_worker",
                 {
@@ -113,6 +135,8 @@ def _derive(
                     "recipe": attempt.recipe,
                     "include_poles": include_poles,
                     "width": width,
+                    "planar_cover": planar_cover,
+                    "preview_appearance": asdict(appearance),
                 },
                 workspace=prepared.directory,
                 sources=(MeshSource(source, file.file_type.value),),

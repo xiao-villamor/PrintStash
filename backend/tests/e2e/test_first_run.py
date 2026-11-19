@@ -54,6 +54,11 @@ class TestEnvironmentAdministrator:
         status = (await api.get("/api/v1/setup/status")).json()
         assert status["storage_choice_required"] is False, status
 
+        samples = await api.post(
+            "/api/v1/config/sample-collection", json={"include": True}, headers=headers
+        )
+        assert samples.json() == {"job_id": None}
+
         # ── The first upload lands in the library ──
         uploaded = await api.post(
             "/api/v1/ingest/orca",

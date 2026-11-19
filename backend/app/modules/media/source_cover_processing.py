@@ -12,10 +12,10 @@ import warnings
 from dataclasses import dataclass
 from typing import Literal
 
-from app.modules.media import thumbnail
+from printstash_core.mesh.rasterizer import RenderedPixels, encode_rendered_pixels
 
 MAX_SOURCE_COVER_BYTES = 15 * 1024 * 1024
-MAX_SOURCE_COVER_PIXELS = 40_000_000
+MAX_SOURCE_COVER_PIXELS = 25_000_000
 
 _CONTENT_TYPE_TO_FORMAT = {
     "image/jpeg": "JPEG",
@@ -67,8 +67,6 @@ def _validate_source_cover(data: bytes, content_type: str | None) -> None:
                     raise SourceCoverProcessingError
                 if image.width * image.height > MAX_SOURCE_COVER_PIXELS:
                     raise SourceCoverProcessingError
-                # Decode validation catches truncated and malformed payloads.
-                # The conversion itself remains exclusively thumbnail.to_webp.
                 image.verify()
     except SourceCoverProcessingError:
         raise
@@ -77,18 +75,46 @@ def _validate_source_cover(data: bytes, content_type: str | None) -> None:
 
 
 def process_source_cover_upload(
-    data: bytes, content_type: str | None
+    data: bytes,
+    content_type: str | None,
+    *,
+    minimum_frame: tuple[int, int] | None = None,
 ) -> ProcessedSourceCover:
-    """Return a metadata-free, size-normalized WebP cover or a safe error.
+    """Retain the uploaded cover's resolution in a metadata-free WebP."""
+    from PIL import Image, ImageOps
 
-    JPEG, PNG, and WebP are accepted only when their declared content type
-    agrees with Pillow's decoded format.  No raw source bytes are returned or
-    persisted; ``thumbnail.to_webp`` is the repository-wide conversion seam
-    and strips metadata by re-encoding the decoded image.
-    """
     _validate_source_cover(data, content_type)
     try:
-        return ProcessedSourceCover(data=thumbnail.to_webp(data))
+        with Image.open(io.BytesIO(data)) as image:
+            rgba = ImageOps.exif_transpose(image).convert("RGBA")
+            if rgba.getchannel("A").getbbox() is None:
+                raise SourceCoverProcessingError
+            if (
+                minimum_frame is not None
+                and all(
+                    actual <= limit
+                    for actual, limit in zip(rgba.size, minimum_frame, strict=True)
+                )
+                and rgba.size != minimum_frame
+            ):
+                # Keep the capture's legacy stored frame without resampling
+                # its photo. Photo delivery trims this transparent padding.
+                canvas = Image.new("RGBA", minimum_frame)
+                canvas.paste(
+                    rgba,
+                    (
+                        (canvas.width - rgba.width) // 2,
+                        (canvas.height - rgba.height) // 2,
+                    ),
+                )
+                rgba = canvas
+            encoded = encode_rendered_pixels(
+                RenderedPixels(rgba.width, rgba.height, rgba.tobytes()),
+                output_format="WEBP",
+            )
+        if len(encoded) > MAX_SOURCE_COVER_BYTES:
+            raise SourceCoverProcessingError
+        return ProcessedSourceCover(data=encoded)
     except Exception as exc:
         # Do not surface decoder messages, source filenames, or binary details.
         raise SourceCoverProcessingError from exc

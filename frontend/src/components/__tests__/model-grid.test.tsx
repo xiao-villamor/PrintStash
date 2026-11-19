@@ -1125,7 +1125,7 @@ describe("ModelBrowser", () => {
       });
       const before = (await screen.findByText("Shared bracket")).closest("[data-library-key]");
       await user.click(await folderCard("parts/brackets"));
-      expect(await screen.findByRole("heading", { name: "Brackets" })).toBeVisible();
+      expect(await screen.findByRole("heading", { name: "Brackets", level: 1 })).toBeVisible();
       await waitFor(() => expect(screen.queryByText("Shelf rig")).not.toBeInTheDocument());
       expect(screen.getByText("Shared bracket").closest("[data-library-key]")).toBe(before);
     });
@@ -1137,22 +1137,32 @@ describe("ModelBrowser", () => {
         at: "/?c=parts",
         collections: PARTS_TREE,
         routes: {
-          "GET /api/v1/models/browse": (url) =>
-            url.includes("parts%2Fbrackets")
-              ? pending.promise.then((response) => response.clone())
-              : json({
-                  items: [{ kind: "model", model: aModelListItem({ name: "Shelf rig" }) }],
-                  total: 1,
-                  next_cursor: null,
-                  browse_revision: "r1",
-                  authorization_revision: "a1",
-                }),
+          "GET /api/v1/models/browse": (url) => {
+            const params = new URL(url, "http://test").searchParams;
+            const childGroup =
+              params.get("collection") === "parts/brackets" && !params.has("direct");
+            if (params.get("collection") === "parts/brackets" && !childGroup)
+              return pending.promise.then((response) => response.clone());
+            return json({
+              items: childGroup
+                ? []
+                : [{ kind: "model", model: aModelListItem({ name: "Shelf rig" }) }],
+              total: childGroup ? 0 : 1,
+              next_cursor: null,
+              browse_revision: "r1",
+              authorization_revision: "a1",
+            });
+          },
         },
       });
       await screen.findByText("Shelf rig");
       await user.click(await folderCard("parts/brackets"));
       await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
+        expect(
+          requestsFor(requests, "/api/v1/models/browse", "parts/brackets").filter(
+            ({ url }) => new URL(url, "http://test").searchParams.get("direct") === "true",
+          ),
+        ).toHaveLength(1),
       );
       expect(screen.getByRole("heading", { name: "Parts" })).toBeVisible();
       expect(screen.getByText("Shelf rig")).toBeVisible();
@@ -1170,8 +1180,8 @@ describe("ModelBrowser", () => {
           authorization_revision: "a1",
         }),
       );
-      expect(await screen.findByRole("heading", { name: "Brackets" })).toBeVisible();
-      expect(screen.getByText("Bracket piece")).toBeVisible();
+      expect(await screen.findByText("Bracket piece")).toBeVisible();
+      expect(screen.getByRole("heading", { name: "Brackets", level: 1 })).toBeVisible();
       expect(screen.queryByText("Shelf rig")).not.toBeInTheDocument();
       expect(
         screen.getByRole("main").querySelector('[data-collection-path="parts/brackets"]'),
@@ -1186,13 +1196,18 @@ describe("ModelBrowser", () => {
         collections: PARTS_TREE,
         routes: {
           "GET /api/v1/models/browse": (url) => {
-            const collection = new URL(url, "http://test").searchParams.get("collection");
+            const params = new URL(url, "http://test").searchParams;
+            const collection = params.get("collection");
+            const childGroup =
+              params.get("collection") === "parts/brackets" && !params.has("direct");
             if (collection === null) return root.promise.then((response) => response.clone());
-            if (collection === "parts/brackets")
+            if (collection === "parts/brackets" && !childGroup)
               return child.promise.then((response) => response.clone());
             return json({
-              items: [{ kind: "model", model: aModelListItem({ name: "Displayed shelf" }) }],
-              total: 1,
+              items: childGroup
+                ? []
+                : [{ kind: "model", model: aModelListItem({ name: "Displayed shelf" }) }],
+              total: childGroup ? 0 : 1,
               next_cursor: null,
               browse_revision: "r1",
               authorization_revision: "a1",
@@ -1215,7 +1230,11 @@ describe("ModelBrowser", () => {
       expect(within(breadcrumb).getByText("Parts")).toBeVisible();
       fireEvent.click(await folderCard("parts/brackets"));
       await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
+        expect(
+          requestsFor(requests, "/api/v1/models/browse", "parts/brackets").filter(
+            ({ url }) => new URL(url, "http://test").searchParams.get("direct") === "true",
+          ),
+        ).toHaveLength(1),
       );
       root.resolve(
         json({
@@ -1244,7 +1263,7 @@ describe("ModelBrowser", () => {
         }),
       );
       await screen.findByText("Current bracket");
-      expect(screen.getByRole("heading", { name: "Brackets" })).toBeVisible();
+      expect(screen.getByRole("heading", { name: "Brackets", level: 1 })).toBeVisible();
       expect(within(breadcrumb).getByText("Brackets")).toBeVisible();
       expect(screen.queryByText("Displayed shelf")).not.toBeInTheDocument();
       expect(screen.queryByText("Late root")).not.toBeInTheDocument();

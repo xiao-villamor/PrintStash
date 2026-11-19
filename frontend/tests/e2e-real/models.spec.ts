@@ -43,15 +43,15 @@ test.describe("model library", () => {
       await openModelPage(page, name);
       const modelUrl = page.url();
       await page.getByRole("button", { name: `Rename ${name}`, exact: true }).click();
-      const titleEditor = page.getByRole("dialog", { name: `Rename ${name}`, exact: true });
+      const titleEditor = page.getByRole("textbox", { name: "Model name", exact: true });
       await expect(
         page.getByRole("button", { name: `Edit tags for ${name}`, exact: true }),
       ).toBeVisible();
       await expect(
         page.getByRole("button", { name: `Add ${name} to favorites`, exact: true }),
       ).toBeVisible();
-      await titleEditor.getByRole("textbox", { name: "Model name", exact: true }).fill(quickName);
-      await titleEditor.getByRole("button", { name: "Save", exact: true }).click();
+      await titleEditor.fill(quickName);
+      await titleEditor.press("Enter");
       await expect(titleEditor).toHaveCount(0);
       await expect(page.getByRole("heading", { name: quickName, exact: true })).toBeVisible();
       await page.reload();

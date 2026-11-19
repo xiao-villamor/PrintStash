@@ -9,9 +9,8 @@ from printstash_core.mesh.render_geometry import PreparedRender, PreparedRenderG
 
 from app.modules.media.gpu_compact import CompactGeometry
 from app.modules.media.gpu_normals import VisualRender
-from app.modules.media.gpu_render_layout import device_geometry_bytes, geometry_sizes
+from app.modules.media.gpu_render_layout import geometry_sizes
 from app.modules.media.gpu_views import ViewPipeline, frame_config
-from app.modules.media.gpu_visual_normals import VisualNormalPipeline
 from app.modules.media.webgpu_render import Renderer
 from app.runtime.compute.budget import Residency
 from tests.fakes.gpu_device import API, Device
@@ -31,7 +30,7 @@ def prepared():
         1,
         lambda size: iter([faces]),
         np.arange(3, dtype=np.int64),
-        np.tile([0.0, 0.0, 1.0], (3, 1)),
+        np.array([[[0, 0, 1]] * 3], dtype=np.float32),
     )
 
 
@@ -55,7 +54,7 @@ class TestCompactGeometry:
         owner.release_completed(fence_complete=True)
         assert all(buffer.destroyed for buffer in staging)
         assert not first.positions.destroyed
-        assert memory.used == 2 * sum(geometry_sizes(3, 1, 3)) + 4
+        assert memory.used == 2 * sum(geometry_sizes(3, 1)) + 4
         owner.close()
         memory.evict_idle()
         assert memory.used == 0
@@ -75,31 +74,6 @@ class TestCompactGeometry:
         assert geometry.positions.data == prepared.vertices.tobytes()
         assert configs.data == expected
         assert device.queue.submissions == 1
-        owner.release_completed(fence_complete=True)
-        owner.close()
-        memory.evict_idle()
-        assert memory.used == 0
-
-    def test_visual_upload_has_no_cpu_identities_or_normals(self, device, prepared):
-        visual = VisualRender(
-            PreparedRenderGeometry(prepared.vertices, 1, prepared.face_chunks)
-        )
-        memory = Residency(1024**2)
-        owner = CompactGeometry(device, memory, ViewPipeline(device))
-        # Inject a qualified provider at the native API boundary. This fake
-        # records commands and cannot execute a physical shader canary.
-        owner.visual_normals = VisualNormalPipeline(device)
-        geometry = owner.acquire(visual, "geometry:visual")
-        configs = device.create_buffer(size=256, usage=64)
-        encoder = device.create_command_encoder()
-        owner.encode(encoder, configs, frame_config(None, 100, 100, False))
-        assert owner.transferred_bytes == 36 + 12 + 256
-        assert owner.upload_calls == 1
-        assert owner.telemetry_keys() == {"geometry:visual"}
-        assert set(owner.normal_statuses()) == {"geometry:visual"}
-        assert len(geometry.identities.data) == 12
-        assert memory.used == device_geometry_bytes(3, 1, 3, "gpu-visual-v2") + 256 + 4
-        device.queue.submit([encoder.finish()])
         owner.release_completed(fence_complete=True)
         owner.close()
         memory.evict_idle()
@@ -132,7 +106,7 @@ class TestNativeBatch:
             (48, 48, 2),
             (48, 48, 1),
         ]
-        assert device.draws == [(3, 1)] * 3
+        assert device.draws == [(3, 1)] * 5  # Three meshes plus two studio grids.
         assert device.queue.submissions == 1
         assert device.queue.maps == 1
         assert device.queue.writes == 0
@@ -148,7 +122,6 @@ class TestNativeBatch:
         ]
         assert camera_offsets == [0, 256, 512]
         assert len({slot["offset"] for slot in device.readbacks}) == 3
-        assert not renderer.unverified_normals
         renderer.close()
 
     def test_render_does_not_rotate_or_reduce_full_vertices_on_cpu(
@@ -170,7 +143,7 @@ class TestNativeBatch:
             prepared.face_count,
             prepared.face_chunks,
             prepared.position_ids,
-            prepared.smooth_normals,
+            prepared.corner_normals,
         )
         before = vertices.tobytes()
         renderer = Renderer(device)
@@ -194,7 +167,7 @@ class TestNativeBatch:
         assert renderer.cache_hits == 1
         assert renderer.bounds_vertices == 3
         assert renderer.submissions == 2
-        assert renderer.transfers == 36 + 12 + 12 + 36 + 2 * 256
+        assert renderer.transfers == 36 + 12 + 36 + 2 * 256
         renderer.close()
 
     @pytest.mark.parametrize("failure", ["submit", "map", "upload"])
@@ -213,7 +186,6 @@ class TestNativeBatch:
                 [(prepared, 24, 24, [None], False)], ["geometry:a"], ["a"], raw=True
             )
         assert renderer.geometry == {}
-        assert renderer.unverified_normals == set()
         assert renderer.packer.pending == []
         assert renderer.packer.staging is None
         assert device.queue.maps >= 1
@@ -238,23 +210,24 @@ class TestNativeBatch:
         renderer.close()
 
 
-class TestDeferredNormalOwnership:
-    def test_releases_csr_staging_after_deferred_normal_encoding(
-        self, device, prepared
-    ):
-        from app.modules.media.gpu_normals import defer
+class TestCornerNormalOwnership:
+    @pytest.mark.parametrize("shape", ["visual", "deferred"])
+    def test_uploads_shared_corner_normals(self, device, prepared, shape):
+        from app.modules.media.gpu_normals import canonical, defer
 
         geometry = PreparedRenderGeometry(prepared.vertices, 1, prepared.face_chunks)
+        source = VisualRender(geometry) if shape == "visual" else defer(geometry)
         memory = Residency(1024**2)
         owner = CompactGeometry(device, memory, ViewPipeline(device))
-        uploaded = owner.acquire(defer(geometry), "geometry:deferred")
+        uploaded = owner.acquire(source, "geometry")
         configs = device.create_buffer(size=256, usage=64)
         encoder = device.create_command_encoder()
         owner.encode(encoder, configs, frame_config(None, 64, 48, False))
-        assert owner.gpu_normal_uploads == 1
-        assert owner.upload_calls == 3
-        assert set(owner.normal_statuses()) == {"geometry:deferred"}
         device.queue.submit([encoder.finish()])
+        assert (
+            uploaded.corner_normals.data == canonical(source).corner_normals.tobytes()
+        )
+        assert owner.transferred_bytes == 36 + 12 + 36 + 256
         owner.release_completed(fence_complete=True)
         owner.close()
         memory.evict_idle()

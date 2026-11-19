@@ -5,14 +5,14 @@ import { useI18n } from "@/lib/i18n";
 import { useContentReveal } from "@/lib/use-content-reveal";
 import { cn } from "@/lib/utils";
 
-const STEPS = ["stepAccount", "stepStorage", "stepReview"] as const;
+const STEPS = ["stepAccount", "stepStorage", "stepReview", "stepAppearance"] as const;
 
 export function SetupFrame({
   step,
   actions,
   children,
 }: {
-  step: 1 | 2 | 3;
+  step: 1 | 2 | 3 | 4;
   actions: ReactNode;
   children: ReactNode;
 }) {
@@ -20,10 +20,13 @@ export function SetupFrame({
   const content = useContentReveal(String(step), { scroll: "parent" });
 
   return (
-    <AuthFrame cardClassName="setup-card" label={t("setup.welcome")}>
+    <AuthFrame
+      cardClassName={cn("setup-card", step === 4 && "setup-card-appearance")}
+      label={t("setup.welcome")}
+    >
       <div className="min-w-0 border-b border-border p-4 md:border-b-0 md:border-r md:p-6">
         <h1 className="text-base font-semibold text-foreground">{t("setup.welcome")}</h1>
-        <ol aria-label={t("setup.progress")} className="mt-4 grid grid-cols-3 gap-1 md:grid-cols-1">
+        <ol aria-label={t("setup.progress")} className="mt-4 grid grid-cols-4 gap-1 md:grid-cols-1">
           {STEPS.map((key, index) => {
             const position = index + 1;
             const current = step === position;

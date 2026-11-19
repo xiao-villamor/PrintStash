@@ -24,6 +24,13 @@ def render_typescript(profile: dict[str, object]) -> str:
     assert isinstance(flat, dict)
     assert isinstance(supersampling, dict)
     assert isinstance(encoding, dict)
+    looks = profile["looks"]
+    assert isinstance(looks, dict)
+    colour_properties = []
+    for look, style in looks.items():
+        albedo = style["albedo"]
+        colour = "#" + "".join(f"{round(channel * 255):02X}" for channel in albedo)
+        colour_properties.append(f"  {look}: {json.dumps(colour)},\n")
     return (
         "// Generated from printstash-core/mesh/preview_profile.json. "
         "Do not edit by hand.\n"
@@ -52,6 +59,9 @@ def render_typescript(profile: dict[str, object]) -> str:
         f"    method: {encoding['method']},\n"
         "  },\n"
         "} as const;\n"
+        "export const PREVIEW_LOOK_COLOURS = {\n"
+        + "".join(colour_properties)
+        + "} as const;\n"
     )
 
 

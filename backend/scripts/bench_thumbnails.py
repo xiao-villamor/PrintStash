@@ -153,7 +153,7 @@ def benchmark_file(path: Path, *, cold_runs: int, warm_runs: int) -> Measurement
                 )
             else:
                 output = to_webp(
-                    result.image, renderer_encoded=strategy is ThumbnailStrategy.FULL
+                    result.image, preserve_frame=strategy is ThumbnailStrategy.FULL
                 )
         except Exception as exc:
             # The benchmark's contract is to retain failed attempts and continue

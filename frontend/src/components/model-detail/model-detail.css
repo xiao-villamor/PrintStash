@@ -26,12 +26,15 @@
 }
 .model-information {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
   gap: 1rem;
   padding: 1rem;
   border: 1px solid var(--border);
   border-top: 0;
   background: var(--card);
+}
+.model-information:not(:has(.model-information-geometry)) {
+  grid-template-columns: minmax(0, 1fr);
 }
 .model-information-geometry {
   border-left: 1px solid var(--border);
@@ -168,25 +171,9 @@
   font-size: 0.875rem;
   font-weight: 600;
 }
-.detail-revision-identity {
-  margin: 16px 0 8px;
-}
-.detail-revision-identity h3 {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
+.detail-revision-identity h2 {
   font-size: 1.25rem;
-}
-.detail-revision-identity h3 > span {
-  font-weight: 400;
-}
-.detail-revision-identity h3 > .detail-recommended {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
+  overflow-wrap: anywhere;
 }
 .detail-artifact-filename {
   margin-top: 4px;
@@ -201,41 +188,51 @@
   font-size: 0.875rem;
   line-height: 1.5;
 }
-.detail-overview-columns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-  padding-top: 18px;
+.detail-overview-block {
+  margin-top: 16px;
   border-top: 1px solid var(--border);
-}
-.detail-overview-columns > div {
-  min-width: 0;
+  padding-top: 12px;
 }
 .detail-overview-facts {
-  margin: 8px 0 0;
-  font-size: 0.875rem;
-  line-height: 1.4;
-}
-.detail-overview-facts > div {
   display: grid;
-  grid-template-columns: minmax(100px, 46%) minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
   gap: 12px;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--border);
+  margin-top: 8px;
+  font-size: 0.875rem;
 }
-.detail-overview-facts dt {
+.detail-overview-facts dt,
+.detail-overview-plates thead th {
+  font-size: 0.75rem;
+  font-weight: 400;
   color: var(--muted-foreground);
 }
 .detail-overview-facts dd {
-  margin: 0;
+  margin-top: 3px;
   overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
 }
-.detail-overview-secondary {
-  margin-top: 24px;
+.detail-overview-plates {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
 }
-.detail-estimates dd {
-  font-weight: 600;
+.detail-overview-plates caption {
+  margin-bottom: 8px;
+  text-align: start;
+}
+.detail-overview-plates th,
+.detail-overview-plates td {
+  padding: 7px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: end;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+.detail-overview-plates th:first-child {
+  width: 48%;
+  text-align: start;
+  overflow-wrap: anywhere;
+  font-weight: 400;
 }
 .detail-print-results {
   width: 100%;
@@ -261,17 +258,6 @@
 .detail-print-results td:last-child {
   text-align: right;
 }
-.detail-manual-label {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin: 14px 0;
-  color: var(--muted-foreground);
-  font-size: 0.8125rem;
-}
-.detail-manual-label span {
-  color: var(--foreground);
-}
 .detail-log-print {
   display: flex;
   flex-wrap: wrap;
@@ -290,9 +276,7 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-  margin-top: 24px;
-  padding-top: 18px;
-  border-top: 1px solid var(--border);
+  margin-top: 12px;
 }
 .detail-printer-status {
   display: flex;
@@ -419,29 +403,6 @@
 .detail-printer-summary [data-status="error"] i {
   background: var(--destructive);
 }
-@container (max-width: 650px) {
-  .detail-overview-columns {
-    grid-template-columns: 1fr;
-  }
-}
-@media (min-width: 1100px) and (max-height: 1000px) {
-  .detail-overview-columns {
-    padding-top: 14px;
-  }
-  .detail-revision-note {
-    margin-bottom: 14px;
-  }
-  .detail-overview-facts > div {
-    padding-block: 7px;
-  }
-  .detail-overview-secondary {
-    margin-top: 18px;
-  }
-  .detail-revision-actions {
-    margin-top: 18px;
-    padding-top: 14px;
-  }
-}
 @media (max-width: 1099px) {
   .model-detail-layout {
     flex-direction: column;
@@ -517,6 +478,9 @@
 .model-detail-layout[data-expanded="true"] .model-detail-inspector {
   display: none;
 }
+.model-detail-layout[data-expanded="true"] .model-information {
+  display: none;
+}
 /* Controls occupy their own rows so loading/error content cannot be covered. */
 .model-detail-preview {
   display: grid;
@@ -528,11 +492,36 @@
 .model-information {
   flex-shrink: 0;
 }
+@media (min-width: 1100px) {
+  .model-detail-layout {
+    overflow: clip;
+  }
+  .model-detail-content {
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+  .model-detail-heading .library-collection-title h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+  /* Reserve intrinsic rows for the dock and complete plate tray. Only the canvas shrinks. */
+  .model-detail-preview {
+    flex: 1 1 0;
+    min-height: 24rem;
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  }
+}
 .detail-preview-canvas {
   grid-row: 3;
   min-width: 0;
   min-height: 0;
   height: 100%;
+}
+/* The grid row owns the canvas height; the shared toolpath layout must not
+   extend its larger standalone minimum into the camera dock. */
+.detail-preview-canvas .toolpath-workspace {
+  min-height: 0;
 }
 .detail-viewer-controls {
   display: contents;
@@ -543,7 +532,8 @@
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  margin: 12px 12px 0;
+  padding: 9px 12px 0;
+  background: var(--card);
 }
 .detail-preview-heading > div:last-child button {
   font-size: 0.8125rem;
@@ -564,32 +554,32 @@
 .detail-viewer-commandbar {
   grid-row: 2;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  justify-self: start;
-  max-width: calc(100% - 24px);
-  margin: 12px 12px 0;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
   background: var(--card);
 }
 .detail-viewer-control-group {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
-.detail-viewer-control-group > span {
-  padding-inline: 6px;
-  margin-bottom: 3px;
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
+.detail-viewer-commandbar .detail-mode-switch {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 2px;
 }
-.detail-viewer-control-group > div {
-  display: flex;
-}
-.detail-viewer-control-group + .detail-viewer-control-group {
-  border-left: 1px solid var(--border);
-  padding-left: 10px;
+.detail-preview-style {
+  margin-left: auto;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  color: var(--foreground);
+  padding: 4px 8px;
+  font-size: 0.8125rem;
 }
 .detail-viewer-commandbar button,
 .detail-viewer-dock button {
@@ -604,9 +594,9 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  margin: 0 12px 12px;
-  padding: 6px;
-  border: 1px solid var(--border);
+  margin: 0;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
   background: var(--card);
 }
 .detail-viewer-dock p {
@@ -813,9 +803,6 @@
   .model-detail-inspector {
     height: 100%;
   }
-  .model-detail-layout[data-model-facts-in-panel="true"] .model-detail-preview {
-    flex: 1 1 0;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .model-detail-tabs [role="tab"]:active {
@@ -860,4 +847,51 @@
 .detail-tab-placeholder .animate-pulse {
   animation: none;
   border-radius: 2px;
+}
+
+.detail-file-link {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 0.2em;
+}
+.detail-file-link:hover,
+.detail-file-link:focus-visible {
+  text-decoration-color: currentColor;
+}
+.model-information-geometry dd {
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.detail-plate-estimate {
+  border-top: 1px solid var(--border);
+  padding-block: 0.625rem;
+}
+.detail-plate-estimate dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-top: 0.5rem;
+}
+.detail-plate-estimate dt {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+.detail-plate-estimate dd {
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+@container estimates (min-width: 35rem) {
+  .detail-plate-estimate {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+    align-items: center;
+    gap: 1rem;
+  }
+  .detail-plate-estimate dl {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(5rem, 1fr));
+    margin: 0;
+  }
 }

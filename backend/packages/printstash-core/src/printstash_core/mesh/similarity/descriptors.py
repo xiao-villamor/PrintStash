@@ -15,7 +15,7 @@ from importlib.resources import files
 from typing import TYPE_CHECKING
 
 from ..rasterizer import RGBBackground, render_prepared_pixels
-from ..render_geometry import prepare_mesh_render
+from ..render_geometry import prepare_frozen_mesh_render
 from .fingerprint import GeometryError, canonical_sample_triangles
 from .geometry import Surface
 from .hull import hull_volume
@@ -216,7 +216,7 @@ def view_hashes(surface: Surface, *, ambiguous_frame: bool) -> bytes:
         vertices=triangles.reshape((-1, 3)),
         faces=np.arange(triangles.size // 3).reshape((-1, 3)),
     )
-    prepared = prepare_mesh_render(mesh)
+    prepared = prepare_frozen_mesh_render(mesh)
     if prepared is None:
         raise GeometryError("view_render_unavailable")
     output = bytearray()

@@ -1,8 +1,8 @@
 {
   "provenance": {
-    "source": "Studio preview recipe; geometry retained from render-prepared-v1.json",
-    "recipe": "qualified-portable-v7",
-    "profile_version": 5,
+    "source": "Studio profile 8 with crease-aware normals and the Sky floor grid. Frozen matte hashes retained from qualified-portable-v7.",
+    "recipe": "qualified-portable-v8",
+    "profile_version": 8,
     "python": "3.14.8",
     "numpy": "2.5.3",
     "pillow": "12.3.0"
@@ -320,11 +320,11 @@
       "views": [
         {
           "frame": null,
-          "png_sha256": "a6e6e2c4f7585b973aca4b613584fdb845adab439cd8e0e2d66662ed38a64ff4",
-          "rgba_sha256": "fb20f832949d6ae8fd896186ba8e329f7ecaa9422759d6bd45702c2cb65bc322",
-          "rgb_ignore_alpha_sha256": "748e408980ca0c440a98693ecedf33b3b53d57a26390079700a0942e031a1afc",
-          "rgb_white_sha256": "02828bb187b0a6fb9448d7836fe02d67f9666928be7019a7e960b4ff34e07be4",
-          "gray_sha256": "a524d3d2b2ecf93ce222c6a23563ce8d766d16d0fb83d69c2bfd4f032ac396bb"
+          "png_sha256": "3bfddb5148310406df010a2ffc5659a457ba4648b89b966e4cbab38ad7204da8",
+          "rgba_sha256": "7872068ceef43c30b0ee2cbb40f107e84352ab98ce725ada3e4ba51719f1dec7",
+          "rgb_ignore_alpha_sha256": "a4f3478ef9ab3cc4db090783a56b7a5bafe031492f9eb94b11979d0c75f6559c",
+          "rgb_white_sha256": "dacd7aef5a10c923271dcc7426d613b2e943220d26600a6116614c085b4e807c",
+          "gray_sha256": "c8750b698715349904f09e7a8906455a5f3951faec2eb243e11ebc9414fe1651"
         }
       ]
     },
@@ -442,11 +442,11 @@
       "views": [
         {
           "frame": null,
-          "png_sha256": "cf1f909c7ebd23c46fda9463f7c7ed98165d41ff2f8fdbd42ec1b8bc275f6e6b",
-          "rgba_sha256": "8cd24139ea7a064ad4400804afe59a10abfed38d269864fe99475dceb2a48314",
-          "rgb_ignore_alpha_sha256": "a42819b4c2733ce666f516cab6d62c30198ddc043ec2d4c03e11d28b5e168648",
-          "rgb_white_sha256": "9100a8dcb6a4bfaf87ac44d359481512c80cd610ae14d21d55e32af69f759036",
-          "gray_sha256": "097be8129881c8f46871ab46236962c7f28f0aaad74aadaf8742ccd75cd9820e"
+          "png_sha256": "e6c2a2d09af5398572bf4b70a139de37a3f6a6dd95943bd479704502e36eb780",
+          "rgba_sha256": "4209fd6ba2a99012f909a830fa39549d5ffcb22673acba07d0d83f98ca163217",
+          "rgb_ignore_alpha_sha256": "d36592ee9b2569569f7f37e63b405f37e749bd072c26598f1a111e54bcc94b2f",
+          "rgb_white_sha256": "0346885bb827ba79cb245706d48003470cc2daa89c9558fe2ab2cf996160df16",
+          "gray_sha256": "3ae693affd53bdaf7cdfce2e1d36143f1f92019249e2e32cf90ad63def92cf0b"
         }
       ]
     },
@@ -2874,11 +2874,11 @@
       "views": [
         {
           "frame": null,
-          "png_sha256": "d25c645ec18edd55c4290165957caa369b09491458b6d1fbbd7e5eba7b6b90d8",
-          "rgba_sha256": "cb440595503cb29c3b0bab9b31cc99b3c6ca2b24d251e8c5d425517e21575cf2",
-          "rgb_ignore_alpha_sha256": "06e1b8429ee204c9b11c091f97b857e3462f3cda3ab1db828c064fc01b350bc9",
-          "rgb_white_sha256": "4260204bab03667a4b49c4873858297ee585d37ce4c49d6e511b25b240e3460e",
-          "gray_sha256": "151a8ddb1f97b90dc904298d9e80a0623a3fb58179d77b38cce78fe02a16f6dc"
+          "png_sha256": "8aece9a6062eda0462c9676f05ed21ba1226aa69fee0126a709869d98270d8d5",
+          "rgba_sha256": "5c2e5e0d633b8cd66dd1ed669dbfea20461966dab531d239f015a05c29ce894d",
+          "rgb_ignore_alpha_sha256": "3024f1adda7b9787ea0a1ca7f1d71e104db60bb4718eead7cb564770943230b5",
+          "rgb_white_sha256": "91777752d77b3a7732004534c050d37318c70e137384b862505bf34f8ac14a9d",
+          "gray_sha256": "23b51bf4e071711faf3558b6a55cd069976f07a4ace7d5ab1948e7adde69f9ba"
         }
       ]
     }

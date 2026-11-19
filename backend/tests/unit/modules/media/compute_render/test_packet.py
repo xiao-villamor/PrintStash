@@ -28,7 +28,7 @@ def packet(mode="canonical", **changes):
     }
     body = struct.pack("<9f", 0, 0, 0, 1, 0, 0, 0, 1, 0)
     if mode == "canonical":
-        body += struct.pack("<6q9d", 0, 1, 2, 0, 1, 2, *([0, 0, 1] * 3))
+        body += struct.pack("<6q9f", 0, 1, 2, 0, 1, 2, *([0, 0, 1] * 3))
     else:
         header["normal_mode"] = mode
         body += struct.pack("<3I", 0, 1, 2)

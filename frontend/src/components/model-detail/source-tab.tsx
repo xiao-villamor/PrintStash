@@ -513,7 +513,7 @@ function SourceTabContent({
   if (editor.denied || (!data && editor.query.isError))
     return (
       <div role="alert" className="space-y-3">
-        <p>{uiText("Couldn’t load this model")}</p>
+        <p>{uiText("Couldn’t load source information.")}</p>
         <Button
           variant="outline"
           loading={editor.reviewing || editor.query.isFetching}
@@ -572,7 +572,7 @@ function SourceTabContent({
         <div className="@container/source space-y-6">
           {editor.query.isError && (
             <div role="alert">
-              <p>{uiText("Couldn’t load this model")}</p>
+              <p>{uiText("Couldn’t load source information.")}</p>
               <Button onClick={editor.retryRead}>{uiText("Retry")}</Button>
             </div>
           )}

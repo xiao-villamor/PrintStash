@@ -198,7 +198,7 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
     ).get(collection_path)
 
     return ModelRead(
-        previews=preview_summaries(session, [model_id])[model_id],
+        previews=preview_summaries(session, [m])[model_id],
         has_custom_cover=m.cover_filename is not None,
         similarity=similarity_summaries(session, user, [model_id]).get(model_id, {}),
         edit_epoch=m.edit_epoch,

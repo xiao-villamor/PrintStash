@@ -1,12 +1,14 @@
 "use client";
 
+import { RevisionDeliveryActions } from "./revision-delivery-actions";
+
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
-import { Star, Wifi } from "lucide-react";
+import { Box, MoreHorizontal, Trash2, Star, Wifi } from "lucide-react";
 
 import {
   batchSetRevisionLabels,
@@ -31,6 +33,9 @@ import { PRINT_JOB_PRESENTATION, revisionStatusLabel } from "./presentation";
 import { ChoiceField } from "./choice-field";
 import { Modal } from "@/components/ui/modal";
 import { RevisionCompare, type ComparisonMode } from "./revision-compare";
+import type { GcodePlates } from "@/lib/api/plates";
+import { PlateEstimates } from "./plate-estimates";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { HashValue } from "./file-hashes";
 import { Localized } from "@/components/ui/localized";
 import { useRevisionUpdater } from "./use-revision-updater";
@@ -85,9 +90,15 @@ export function RevisionsTab({
   onAddRevision,
   canEdit,
   inspectedFileId,
+  plateEstimates,
+  selectedPlate = null,
+  onPreview,
   onInspect,
   startComparing = false,
+  backLabel = "Back to revisions",
+  onReturnToOrigin,
   comparisonMode = "gcode",
+  printerless = false,
   onSend,
   onSettings,
   onLogPrint,
@@ -101,9 +112,15 @@ export function RevisionsTab({
   onAddRevision: () => void;
   canEdit: boolean;
   inspectedFileId?: number;
+  plateEstimates?: GcodePlates | null;
+  selectedPlate?: number | null;
+  onPreview?: (fileId: number) => void;
   onInspect?: (id: number) => void;
   startComparing?: boolean;
+  backLabel?: "Back to revisions" | "Back to overview" | "Back to files" | "Back to print settings";
+  onReturnToOrigin?: () => void;
   comparisonMode?: ComparisonMode;
+  printerless?: boolean;
   onSend?: (mode: "send" | "queue") => void;
   onSettings?: () => void;
   onLogPrint?: (fileId: number, state: "completed" | "failed") => void;
@@ -115,6 +132,23 @@ export function RevisionsTab({
   const [localInspectedId, setLocalInspectedId] = useState(gcodeFiles[0]?.id ?? null);
   const selectedId = inspectedFileId ?? localInspectedId;
   const [comparing, setComparing] = useState(startComparing);
+  const [actionsFileId, setActionsFileId] = useState<number | null>(null);
+  const compareTrigger = useRef<HTMLButtonElement>(null);
+  const returningFromCompare = useRef(false);
+  function closeCompare() {
+    if (onReturnToOrigin) {
+      onReturnToOrigin();
+      return;
+    }
+    returningFromCompare.current = true;
+    setComparing(false);
+  }
+  useEffect(() => {
+    if (!comparing && returningFromCompare.current) {
+      compareTrigger.current?.focus();
+      returningFromCompare.current = false;
+    }
+  }, [comparing]);
   function inspect(id: number) {
     setLocalInspectedId(id);
     onInspect?.(id);
@@ -138,8 +172,11 @@ export function RevisionsTab({
   } | null>(null);
 
   // This owner controls both visible mode and the exact pair used for outcome reads.
-  const [scope, setScope] = useState({ intent: comparisonMode, mode: comparisonMode });
-  if (scope.intent !== comparisonMode) setScope({ intent: comparisonMode, mode: comparisonMode });
+  const scopedCount =
+    comparisonMode === "source" ? allFiles.length - gcodeFiles.length : gcodeFiles.length;
+  const initialMode = scopedCount < 2 && allFiles.length >= 2 ? "all" : comparisonMode;
+  const [scope, setScope] = useState({ intent: comparisonMode, mode: initialMode });
+  if (scope.intent !== comparisonMode) setScope({ intent: comparisonMode, mode: initialMode });
   const mode = scope.intent === comparisonMode ? scope.mode : comparisonMode;
   const candidates = allFiles.filter(
     (file) => mode === "all" || (file.file_type === "gcode") === (mode === "gcode"),
@@ -335,11 +372,19 @@ export function RevisionsTab({
             </h2>
             <div className="flex items-center gap-2">
               {allFiles.length >= 2 && (
-                <Button variant="ghost" size="sm" onClick={() => setComparing((value) => !value)}>
-                  {comparing ? uiText("Back to revisions") : uiText("Compare")}
+                <Button
+                  ref={compareTrigger}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setScope({ intent: comparisonMode, mode: initialMode });
+                    setComparing(true);
+                  }}
+                >
+                  {uiText("Compare")}
                 </Button>
               )}
-              {gcodeFiles.length > 0 && (
+              {gcodeFiles.length > 1 && (
                 <Button
                   type="button"
                   variant="outline"
@@ -388,7 +433,7 @@ export function RevisionsTab({
               </Button>
             </div>
           )}
-          {!comparing && gcodeFiles.length > 0 && (
+          {!comparing && (gcodeFiles.length > 1 || selecting) && (
             <div className="overflow-x-auto">
               <table className="detail-revisions-table">
                 <thead>
@@ -454,14 +499,32 @@ export function RevisionsTab({
                       </td>
                       <td>{file.metadata?.material_type ?? uiText("Not recorded")}</td>
                       <td>{formatMillimeters(file.metadata?.layer_height_mm)}</td>
-                      <td>{formatDuration(file.metadata?.estimated_time_s ?? null)}</td>
-                      <td>{formatGrams(file.metadata?.filament_weight_g)}</td>
+                      <td>
+                        {file.id === selectedId &&
+                        plateEstimates?.plate_metadata.some(
+                          (entry) => entry.metadata.estimated_time_s != null,
+                        ) &&
+                        plateEstimates.plates.length > 1
+                          ? uiText("Per plate")
+                          : formatDuration(file.metadata?.estimated_time_s ?? null)}
+                      </td>
+                      <td>
+                        {file.id === selectedId &&
+                        plateEstimates?.plate_metadata.some(
+                          (entry) => entry.metadata.filament_weight_g != null,
+                        ) &&
+                        plateEstimates.plates.length > 1
+                          ? uiText("Per plate")
+                          : formatGrams(file.metadata?.filament_weight_g)}
+                      </td>
                     </tr>
                     <tr>
                       <td colSpan={6} className="detail-revision-table-note">
-                        {file.revision_notes ?? file.original_filename}
+                        {file.revision_notes}
                         {file.revision_status && (
-                          <span className="ml-2">{revisionStatusLabel(file.revision_status)}</span>
+                          <span className={file.revision_notes ? "ml-2" : undefined}>
+                            {revisionStatusLabel(file.revision_status)}
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -485,25 +548,47 @@ export function RevisionsTab({
                   const fileMeta = f.metadata;
                   const uploadedTo = printerFilesByFileId.get(f.id) ?? [];
                   return (
-                    <div key={f.id} className="detail-inspected-revision space-y-3 pt-5">
+                    <div key={f.id} className="detail-inspected-revision space-y-4">
                       <div className="space-y-2">
-                        <h3 className="flex flex-wrap items-baseline gap-2 text-sm font-semibold">
-                          {uiText("Rev {value1}", {
-                            value1: String(f.gcode_revision_number ?? f.version),
-                          })}
-                          {f.revision_label && (
-                            <span className="font-normal">{f.revision_label}</span>
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <h3
+                            data-revision-id={f.id}
+                            tabIndex={gcodeFiles.length === 1 ? 0 : undefined}
+                            className="flex flex-wrap items-baseline gap-2 text-xl font-semibold"
+                          >
+                            {uiText("Rev {value1}", {
+                              value1: String(f.gcode_revision_number ?? f.version),
+                            })}
+                            {f.revision_status && gcodeFiles.length === 1 && (
+                              <span className="rounded border border-border px-2 py-0.5 text-xs font-medium">
+                                {revisionStatusLabel(f.revision_status)}
+                              </span>
+                            )}
+                            {f.is_recommended && (
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                                <Star className="h-3.5 w-3.5" />
+                                {uiText("Recommended")}
+                              </span>
+                            )}
+                            {f.revision_label && (
+                              <span className="font-normal">{f.revision_label}</span>
+                            )}
+                          </h3>
+                          {onPreview && (
+                            <Button variant="outline" onClick={() => onPreview(f.id)}>
+                              <Box className="h-4 w-4" />
+                              {uiText("Preview G-code")}
+                            </Button>
                           )}
-                        </h3>
-                        <p className="break-all text-sm">{f.original_filename}</p>
+                        </div>
+                        <p className="wrap-anywhere text-sm text-muted-foreground">
+                          {f.original_filename}
+                        </p>
                         <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                           <span>
                             {uiText("Added")} {timeAgo(f.uploaded_at)}
                           </span>
                           <span>{formatBytes(f.size_bytes)}</span>
-                          <span>
-                            {formatMillimeters(fileMeta?.nozzle_diameter_mm)} {uiText("Nozzle")}
-                          </span>
                           <HashValue
                             sha={f.sha256}
                             label={uiText("File SHA-256")}
@@ -524,43 +609,87 @@ export function RevisionsTab({
                           </div>
                         )}
                       </div>
-                      <div className="flex flex-wrap items-center gap-2">
+                      <section
+                        className="border-t border-border pt-3"
+                        aria-label={uiText("Print setup")}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h4 className="text-sm font-semibold">{uiText("Print setup")}</h4>
+                          {onSettings && (
+                            <Button size="xs" variant="ghost" onClick={onSettings}>
+                              {uiText("Full print settings")}
+                            </Button>
+                          )}
+                        </div>
+                        <dl className="mt-2 grid grid-cols-2 gap-3 @lg:grid-cols-4">
+                          {[
+                            [uiText("Printer profile"), fileMeta?.printer_model],
+                            [uiText("Material"), fileMeta?.material_type],
+                            [uiText("Layer height"), formatMillimeters(fileMeta?.layer_height_mm)],
+                            [uiText("Nozzle"), formatMillimeters(fileMeta?.nozzle_diameter_mm)],
+                          ].map(([label, value]) => (
+                            <div key={label}>
+                              <dt className="text-xs text-muted-foreground">{label}</dt>
+                              <dd className="wrap-anywhere text-sm font-medium">
+                                {value ?? uiText("Not recorded")}
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </section>
+                      {plateEstimates && plateEstimates.plates.length > 1 ? (
+                        <PlateEstimates data={plateEstimates} selected={selectedPlate} />
+                      ) : (
+                        <dl className="flex flex-wrap gap-x-6 text-sm">
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              {uiText("Estimated time")}
+                            </dt>
+                            <dd>{formatDuration(fileMeta?.estimated_time_s ?? null)}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              {uiText("Filament weight")}
+                            </dt>
+                            <dd>{formatGrams(fileMeta?.filament_weight_g)}</dd>
+                          </div>
+                        </dl>
+                      )}
+                      {gcodeFiles.length === 1 && (
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                          <RevisionResults fileId={f.id} jobs={jobs} />
+                          {f.revision_notes && (
+                            <p className="w-full wrap-anywhere">{f.revision_notes}</p>
+                          )}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
                         {onSend && (
-                          <>
-                            <Button onClick={() => onSend("send")}>
-                              {uiText("Send to printer")}
-                            </Button>
-                            <Button variant="outline" onClick={() => onSend("queue")}>
-                              {uiText("Add to queue")}
-                            </Button>
-                          </>
+                          <RevisionDeliveryActions printerless={printerless} onSend={onSend} />
                         )}
-                        <Button
-                          variant="outline"
-                          onClick={() =>
-                            void downloadAuthenticatedFile(
-                              `/api/v1/files/${f.id}/download`,
-                              f.original_filename,
-                            ).catch((error) => toast.error(error))
-                          }
-                        >
-                          {uiText("Download")}
-                        </Button>
-                        <SlicerOpenButton
-                          fileId={f.id}
-                          fileType={
-                            f.original_filename.toLowerCase().endsWith(".bgcode")
-                              ? "bgcode"
-                              : f.file_type
-                          }
-                          size="sm"
-                          showLabel
-                        />
-                        {onSettings && (
-                          <Button variant="ghost" onClick={onSettings}>
-                            {uiText("Print settings")}
+                        <div className="ml-auto flex flex-wrap items-center gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={() =>
+                              void downloadAuthenticatedFile(
+                                `/api/v1/files/${f.id}/download`,
+                                f.original_filename,
+                              ).catch((error) => toast.error(error))
+                            }
+                          >
+                            {uiText("Download")}
                           </Button>
-                        )}
+                          <SlicerOpenButton
+                            fileId={f.id}
+                            fileType={
+                              f.original_filename.toLowerCase().endsWith(".bgcode")
+                                ? "bgcode"
+                                : f.file_type
+                            }
+                            size="sm"
+                            showLabel
+                          />
+                        </div>
                       </div>
                       <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
                         <Button
@@ -570,7 +699,7 @@ export function RevisionsTab({
                           disabled={!auth.isAuthenticated || !canEdit}
                           onClick={() => startRevisionEdit(f)}
                         >
-                          {uiText("Edit")}
+                          {uiText("Edit revision")}
                         </Button>
                         <EntityTagsDialog
                           entityLabel={f.original_filename}
@@ -582,37 +711,56 @@ export function RevisionsTab({
                           )}
                           onSave={(tags) => saveArtifactTags(f, tags)}
                         />
-                        {f.is_recommended ? (
-                          <span className="text-xs text-muted-foreground">
-                            {uiText("Recommended revision")}
-                          </span>
-                        ) : (
-                          canEdit && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              disabled={saving === f.id}
-                              onClick={() =>
-                                void update(f, {
-                                  is_recommended: true,
-                                  revision_status: "known_good",
-                                })
-                              }
-                            >
-                              {uiText("Recommend")}
-                            </Button>
-                          )
+                        {!f.is_recommended && canEdit && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={saving === f.id}
+                            onClick={() =>
+                              void update(f, {
+                                is_recommended: true,
+                                revision_status: "known_good",
+                              })
+                            }
+                          >
+                            {uiText("Recommend")}
+                          </Button>
                         )}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="ml-auto text-destructive"
-                          aria-label={uiText("Delete revision")}
-                          disabled={!auth.isAuthenticated || !canEdit || saving === f.id}
-                          onClick={() => deleteRevision(f)}
+                        <DropdownMenu
+                          open={actionsFileId === f.id}
+                          onOpenChange={(open) => setActionsFileId(open ? f.id : null)}
+                          portal
+                          className="ml-auto"
+                          trigger={
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              data-menu-trigger
+                              aria-haspopup="menu"
+                              aria-expanded={actionsFileId === f.id}
+                              onClick={() => setActionsFileId(actionsFileId === f.id ? null : f.id)}
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                              {uiText("nav.more")}
+                            </Button>
+                          }
+                          contentClassName="w-48 rounded-md border border-border bg-popover p-1 shadow-lg"
                         >
-                          {uiText("Move to trash")}
-                        </Button>
+                          <Button
+                            role="menuitem"
+                            size="sm"
+                            variant="ghost"
+                            className="w-full justify-start text-destructive"
+                            disabled={!auth.isAuthenticated || !canEdit || saving === f.id}
+                            onClick={() => {
+                              setActionsFileId(null);
+                              deleteRevision(f);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            {uiText("Move to trash")}
+                          </Button>
+                        </DropdownMenu>
                       </div>
 
                       {isEditingRevision && (
@@ -704,8 +852,8 @@ export function RevisionsTab({
         {comparing && !fallback && (
           <div className="space-y-3">
             <p>{uiText("Add a second file to compare recorded information.")}</p>
-            <Button variant="ghost" onClick={() => setComparing(false)}>
-              {uiText("Back to revisions")}
+            <Button variant="ghost" onClick={closeCompare}>
+              {uiText(backLabel)}
             </Button>
           </div>
         )}
@@ -717,7 +865,8 @@ export function RevisionsTab({
             files={allFiles}
             onSelectLeft={setCompareLeftId}
             onSelectRight={setCompareRightId}
-            onClose={() => setComparing(false)}
+            backLabel={backLabel}
+            onClose={closeCompare}
             mode={mode}
             onModeChange={(next) => setScope({ intent: comparisonMode, mode: next })}
           />

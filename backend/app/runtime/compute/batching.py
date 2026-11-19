@@ -172,16 +172,14 @@ def render_batch_fits(
         )
     except ValueError, ComputeUnavailable:
         return False
-    from app.modules.media.compute_geometry import layout_for
     from app.modules.media.gpu_render_layout import FRAME_STRIDE, device_geometry_bytes
 
     geometry = {}
     frames = 0
     for request in requests:
         prepared, _, _, views, _ = request._decoded
-        layout = layout_for(prepared)
         geometry[request.geometry_key] = device_geometry_bytes(
-            *layout.counts, layout.normal_mode
+            len(prepared.vertices), prepared.face_count
         )
         frames += len(views)
     return (

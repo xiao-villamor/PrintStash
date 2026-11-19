@@ -39,27 +39,7 @@ class TestProcessSourceCoverUpload:
         with Image.open(io.BytesIO(processed.data)) as output:
             assert output.format == "WEBP"
 
-    def test_uses_shared_thumbnail_conversion_seam(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        source = _image_bytes()
-        converted = b"shared-thumbnail-result"
-        calls: list[bytes] = []
-
-        def _to_webp(data: bytes) -> bytes:
-            calls.append(data)
-            return converted
-
-        monkeypatch.setattr(source_cover_processing.thumbnail, "to_webp", _to_webp)
-
-        processed = source_cover_processing.process_source_cover_upload(
-            source, "image/png"
-        )
-
-        assert processed.data == converted
-        assert calls == [source]
-
-    def test_resizes_to_the_configured_thumbnail_width(
+    def test_keeps_source_resolution_for_large_surfaces(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setitem(_overlay, "model_thumbnail_width", 320)
@@ -69,7 +49,7 @@ class TestProcessSourceCoverUpload:
         )
 
         with Image.open(io.BytesIO(processed.data)) as output:
-            assert output.size == (320, 240)
+            assert output.size == (800, 600)
 
     def test_strips_every_metadata_block_from_the_source(
         self, monkeypatch: pytest.MonkeyPatch
@@ -121,9 +101,11 @@ class TestValidateSourceCover:
         self, monkeypatch: pytest.MonkeyPatch, content_type: str | None, payload: bytes
     ) -> None:
         monkeypatch.setattr(
-            source_cover_processing.thumbnail,
-            "to_webp",
-            lambda _data: pytest.fail("invalid source cover reached conversion"),
+            source_cover_processing,
+            "encode_rendered_pixels",
+            lambda *_args, **_kwargs: pytest.fail(
+                "invalid source cover reached conversion"
+            ),
         )
 
         with pytest.raises(source_cover_processing.SourceCoverProcessingError) as exc:
@@ -156,9 +138,11 @@ class TestValidateSourceCover:
     ) -> None:
         monkeypatch.setattr(source_cover_processing, "MAX_SOURCE_COVER_PIXELS", 100)
         monkeypatch.setattr(
-            source_cover_processing.thumbnail,
-            "to_webp",
-            lambda _data: pytest.fail("oversized source cover reached conversion"),
+            source_cover_processing,
+            "encode_rendered_pixels",
+            lambda *_args, **_kwargs: pytest.fail(
+                "oversized source cover reached conversion"
+            ),
         )
 
         with pytest.raises(source_cover_processing.SourceCoverProcessingError) as exc:

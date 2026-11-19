@@ -4,6 +4,11 @@ import sys
 
 import numpy as np
 import pytest
+from printstash_core.mesh.preview_profile import (
+    DEFAULT_APPEARANCE,
+    MATTE_LIGHTING,
+    STUDIO_LOOKS,
+)
 
 from app.modules.media.gpu_render_layout import (
     VIEW_WORKSPACE_BYTES,
@@ -29,7 +34,11 @@ class TestViewPreparation:
         fixed = np.frombuffer(explicit, dtype="<f4").reshape(16, 4)
         np.testing.assert_array_equal(fixed[:3, :3], np.eye(3))
         assert auto[3, 3] == 1 and fixed[3, 3] == 0
-        assert auto[5, 0] > 0 and fixed[5, 0] == 0
+        studio = STUDIO_LOOKS[DEFAULT_APPEARANCE.look].lighting
+        assert auto[5, 0] == pytest.approx(studio.ambient)
+        assert fixed[5, 0] == pytest.approx(MATTE_LIGHTING.ambient)
+        assert auto[6, 3] == 1 and fixed[6, 3] == 0
+        assert auto[12, 3] == 1 and fixed[12, 3] == 0
         assert VIEW_WORKSPACE_BYTES == 8 * 256 * 2
 
     def test_large_reduction_uses_bounded_two_dimensional_dispatch(self, monkeypatch):

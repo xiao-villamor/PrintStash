@@ -120,9 +120,10 @@
   opacity: 1;
 }
 
-.library-model-card[data-inspected] {
-  border-color: var(--foreground);
-  outline: 1px solid var(--foreground);
+.library-model-card[data-inspected],
+.library-model-row[data-inspected] {
+  border-color: var(--ring);
+  outline: 1px solid var(--ring);
   outline-offset: -1px;
 }
 
@@ -258,6 +259,22 @@
   font-weight: 500;
   background: transparent;
 }
+.library-model-card:has(.library-preview[data-image-kind="photo"])
+  > div
+  > [role="checkbox"]:not([aria-checked="true"]),
+.dark
+  .library-model-card:has(.library-preview[data-image-kind="slicer_render"])
+  > div
+  > [role="checkbox"]:not([aria-checked="true"]) {
+  border-color: var(--muted-foreground);
+}
+.library-preview[data-image-kind="photo"] .library-card-status > span,
+.dark .library-preview[data-image-kind="slicer_render"] .library-card-status > span {
+  padding-inline: 6px;
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+}
 @media (prefers-reduced-motion: reduce) {
   .library-card-revision-actions {
     transition: none;
@@ -356,6 +373,14 @@
   max-height: calc(100dvh - 18rem);
 }
 
+.model-preview-gallery-image {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
 /* Preview shape and type stay consistent as the shared track grows. */
 .collection-card-collage {
   aspect-ratio: 2 / 1;
@@ -378,4 +403,30 @@
   height: 60px;
   border: 1px solid var(--border);
   background: var(--card);
+}
+
+.library-tree-spotlight {
+  position: relative;
+}
+
+.library-tree-spotlight::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+  border: 2px solid var(--primary);
+  content: "";
+  animation: library-tree-spotlight var(--duration-slow) var(--ease-out) both;
+}
+
+@keyframes library-tree-spotlight {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-tree-spotlight::after {
+    animation: none;
+  }
 }

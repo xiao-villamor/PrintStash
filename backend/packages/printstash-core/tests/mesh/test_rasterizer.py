@@ -42,6 +42,11 @@ import pytest
 from PIL import Image
 
 from printstash_core.mesh import rasterizer, render_mesh_thumbnail
+from printstash_core.mesh.preview_profile import (
+    RASTERIZER_RECIPE,
+    PreviewAppearance,
+    appearance_scope,
+)
 from printstash_core.mesh.rasterizer import (
     RasterBudget,
     RenderedPixels,
@@ -430,15 +435,17 @@ class TestRenderMeshThumbnail:
 
     def test_compresses_native_rendered_frames(self) -> None:
         mesh = box_mesh()
-        png = render_mesh_thumbnail(mesh, "box.stl", width=640, height=480)
+        # Compare codecs on the model. The grid's fine lines have a different
+        # compression ratio from the shaded surface and are tested separately.
+        with appearance_scope(PreviewAppearance(floor_grid=False)):
+            png = render_mesh_thumbnail(mesh, "box.stl", width=640, height=480)
+            encoded = render_mesh_thumbnail(
+                mesh, "box.stl", width=640, height=480, output_format="WEBP"
+            )
         assert png is not None
         original = Image.open(io.BytesIO(png))
         lossless = io.BytesIO()
         original.save(lossless, format="WEBP", lossless=True, exact=True, method=6)
-
-        encoded = render_mesh_thumbnail(
-            mesh, "box.stl", width=640, height=480, output_format="WEBP"
-        )
 
         assert encoded is not None
         assert len(encoded) < len(lossless.getvalue()) * 0.6
@@ -1285,7 +1292,7 @@ class TestRenderPreparedPixels:
         original = (
             prepared_box.vertices.tobytes(),
             prepared_box.position_ids.tobytes(),
-            prepared_box.smooth_normals.tobytes(),
+            prepared_box.corner_normals.tobytes(),
         )
         first = render_prepared_pixels(
             prepared_box,
@@ -1317,7 +1324,7 @@ class TestRenderPreparedPixels:
         assert (
             prepared_box.vertices.tobytes(),
             prepared_box.position_ids.tobytes(),
-            prepared_box.smooth_normals.tobytes(),
+            prepared_box.corner_normals.tobytes(),
         ) == original
 
     def test_renders_without_image_codec_roundtrip(self, prepared_box, monkeypatch):
@@ -1686,7 +1693,7 @@ class TestFrozenPreparedRender:
     @pytest.mark.parametrize("case,view", _FROZEN_FRAMES)
     def test_preserves_frozen_studio_pixels(self, case, view, frozen_frame):
         mesh, options = frozen_frame
-        assert _FROZEN_RENDER["provenance"]["recipe"] == "qualified-portable-v7"
+        assert _FROZEN_RENDER["provenance"]["recipe"] == RASTERIZER_RECIPE
         assert (
             hashlib.sha256(mesh.vertices.tobytes()).hexdigest()
             == case["vertices_sha256"]

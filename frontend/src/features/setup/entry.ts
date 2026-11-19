@@ -104,7 +104,12 @@ export function completeSetupEntry(
  * Paths whose admission follows the live setup status: the wizard, sign-in and
  * the storage step are where `configured` and `storage_choice_required` change.
  */
-const SETUP_ENTRY_PATHS: readonly string[] = ["/setup", "/login", "/getting-started"];
+const SETUP_ENTRY_PATHS: readonly string[] = [
+  "/setup",
+  "/login",
+  "/setup-appearance",
+  "/getting-started",
+];
 
 /**
  * The subject one setup admission covers. Every application path shares a

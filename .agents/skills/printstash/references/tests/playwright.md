@@ -13,6 +13,29 @@ Branch coverage never goes here — it goes to vitest. A Playwright spec proves
 the marquee flow works end to end; the matrix's other rows live in the unit
 layer.
 
+## Viewport and visual review
+
+- The desktop default comes from `frontend/tests/playwright-desktop.ts`.
+  Every Playwright configuration uses that shared device profile, including
+  performance and startup runs. Set the same viewport in standalone review
+  scripts; use device scale factor 1 for screenshots at the requested pixel size.
+- Collapse the main navigation sidebar before ordinary visual checks or captures.
+  Use the app's Toggle sidebar control and verify `aria-expanded="false"`; wait
+  for the collapse to finish before measuring layout. Real-backend specs can use
+  `collapseNavigationSidebar(page)` from `tests/e2e-real/util.ts`. Open it only
+  when the requested scenario exercises navigation or the user asks for it.
+- Mobile or tablet runs, device emulation, and specs that switch to phone/tablet
+  widths require an explicit user request. Inspect the selected specs before
+  running them: a desktop project can still contain a mobile viewport override.
+  Choose desktop-only cases for ordinary validation.
+- Additional desktop sizes may reproduce a reported layout fault. Keep the
+  default desktop render as the primary review artifact and state the purpose
+  of each explicit override.
+- For layout changes, verify normal and expanded states, relevant tabs, loading
+  and errors. Check that controls fit inside their visible panel and are not
+  covered by adjacent sections or sticky chrome. A passing visibility assertion
+  or an automatically scrolled click alone does not prove the layout fits.
+
 ## Real suite
 
 - **One spec per feature area** (`models.spec.ts`, `collections.spec.ts`,

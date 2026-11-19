@@ -45,7 +45,11 @@ export function PrintHistorySection({
   const [mode, setMode] = useState<PrintHistoryMode>("manual");
 
   // Manual form state
-  const printers = usePrinters().data ?? [];
+  const printersQuery = usePrinters();
+  const printers = printersQuery.data ?? [];
+  const importPrinters = printers.filter(
+    (printer) => printer.provider === "moonraker" && printer.moonraker_url,
+  );
   // `null` is "nothing selected"; the empty-string the <select> needs for that is
   // produced at the JSX boundary, so the ids stay numbers everywhere else.
   const [selectedPrinterId, setSelectedPrinterId] = useState<number | null>(null);
@@ -399,16 +403,43 @@ export function PrintHistorySection({
                     "Fetch recent print history from a Moonraker printer and import jobs matching this model's G-code files.",
                   )}
                 </p>
-                <ChoiceField
-                  label={uiText("Printer")}
-                  value={selectedPrinterId}
-                  options={printers.map((printer) => ({ value: printer.id, label: printer.name }))}
-                  onChange={(value) => {
-                    setSelectedPrinterId(value);
-                    setImportResults([]);
-                    setImportDone(false);
-                  }}
-                />
+                {printersQuery.isPending ? (
+                  <p role="status">{uiText("Loading printers…")}</p>
+                ) : printersQuery.isError ? (
+                  <div role="alert" className="space-y-2">
+                    <p>{uiText("Couldn’t load printers.")}</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void printersQuery.refetch()}
+                    >
+                      {uiText("Retry")}
+                    </Button>
+                  </div>
+                ) : importPrinters.length === 0 ? (
+                  <div className="space-y-3 border-t border-border pt-3">
+                    <p className="text-sm">
+                      {uiText("No Moonraker printer is available to import history.")}
+                    </p>
+                    <Button variant="outline" size="sm" onClick={openAdd}>
+                      {uiText("Add record manually")}
+                    </Button>
+                  </div>
+                ) : (
+                  <ChoiceField
+                    label={uiText("Printer")}
+                    value={selectedPrinterId}
+                    options={importPrinters.map((printer) => ({
+                      value: printer.id,
+                      label: printer.name,
+                    }))}
+                    onChange={(value) => {
+                      setSelectedPrinterId(value);
+                      setImportResults([]);
+                      setImportDone(false);
+                    }}
+                  />
+                )}
                 {importDone && importResults.length > 0 && (
                   <div className="space-y-1">
                     {importResults.map((r) => (

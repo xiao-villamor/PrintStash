@@ -17,6 +17,7 @@ from app.db.models import (
     DerivativeState,
     JobKind,
     JobState,
+    Model,
 )
 from app.db.session import get_session_factory
 from app.modules.derivatives import policy, previews, producers, records
@@ -26,6 +27,11 @@ from app.modules.library.model_views.previews import resolve, summaries
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_utils import ownership_snapshot
 from tests.factories.geometry import three_mf
+
+
+def _summary(session, artifact, *, root=None):
+    model = session.get_one(Model, artifact.model_id)
+    return summaries(session, [model], root=root)[artifact.model_id]
 
 
 @pytest.fixture(autouse=True)
@@ -160,7 +166,7 @@ class TestPreviewPublication:
         policy.update(db_session, {policy.SettingName.PREVIEWS: False}, commit=False)
         db_session.commit()
 
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
 
         assert summary.state == "disabled"
         assert summary.published is None
@@ -174,7 +180,7 @@ class TestPreviewPublication:
             is DerivativeState.FAILED
         )
         db_session.expire_all()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.kind == "artifact"
         assert summary.state == "failed"
         assert summary.published is None
@@ -260,7 +266,7 @@ class TestPreviewPublication:
             now=utcnow(),
         )
         db_session.commit()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.state == "running"
         _, manifest = resolve(
             db_session,
@@ -268,10 +274,15 @@ class TestPreviewPublication:
             summary.published.manifest_url.rsplit("/", 1)[1],
         )
         assert manifest.recipe == PREVIEWS_RECIPE
-        assert len(manifest.views) == 4
+        assert [view.id for view in manifest.views] == [
+            "orbit-0",
+            "orbit-1",
+            "orbit-2",
+            "orbit-3",
+        ]
 
     def test_publishes_known_camera_frames(self, db_session, artifact, ready):
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         _, manifest = resolve(
             db_session,
             artifact.model_id,
@@ -306,7 +317,7 @@ class TestPreviewPublication:
         assert get_backend().read_bytes(artifact.thumbnail_path) == previous
 
     def test_keeps_unknown_cover_camera_explicit(self, db_session, artifact, ready):
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.cover_camera == "unknown"
         assert all(view.role != "cover" for view in summary.published.views)
 
@@ -329,7 +340,7 @@ class TestPreviewPublication:
             db_session, artifact, DerivativeKind.PREVIEWS, PREVIEWS_RECIPE, now=utcnow()
         )
         db_session.commit()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.state == "running"
         assert len(summary.published.views) == 4
         assert get_backend().read_bytes(previous)
@@ -347,7 +358,7 @@ class TestPreviewPublication:
         db_session.commit()
         records.reset(db_session, artifact, {DerivativeKind.PREVIEWS: PREVIEWS_RECIPE})
         db_session.commit()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.state == "queued"
         assert summary.reason is None
         assert len(summary.published.views) == 4
@@ -377,7 +388,7 @@ class TestPreviewPublication:
         from app.db.models import Model
 
         newer = make_file(db_session.get(Model, artifact.model_id), filename="new.stl")
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.file_id == newer.id
         assert summary.state == "pending"
         assert summary.published is None
@@ -386,7 +397,7 @@ class TestPreviewPublication:
         artifact.deleted_at = utcnow()
         db_session.add(artifact)
         db_session.commit()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.kind == "none"
 
     def test_withholds_views_rendered_from_replaced_bytes(
@@ -396,7 +407,7 @@ class TestPreviewPublication:
         artifact.sha256 = "b" * 64
         db_session.add(artifact)
         db_session.commit()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.state == "pending"
         assert summary.published is None
 
@@ -407,20 +418,19 @@ class TestPreviewPublication:
         db_session.add(ready)
         db_session.commit()
         with pytest.raises(ValidationError):
-            summaries(db_session, [artifact.model_id])
+            summaries(db_session, [db_session.get_one(Model, artifact.model_id)])
 
     def test_addresses_shared_delivery_routes(self, db_session, artifact, ready):
         root = "/api/v1/share/token"
-        summary = summaries(db_session, [artifact.model_id], root=root)[
-            artifact.model_id
-        ]
+        summary = _summary(db_session, artifact, root=root)
         assert summary.published.manifest_url.startswith(root + "/previews/")
         assert all(
             view.url.startswith(summary.published.manifest_url + "/")
             for view in summary.published.views
         )
         with pytest.raises(ValueError, match="needs_one_model"):
-            summaries(db_session, [artifact.model_id, 0], root=root)
+            model = db_session.get_one(Model, artifact.model_id)
+            summaries(db_session, [model, model], root=root)
 
     def test_applies_3mf_instance_placement(self, db_session, stored):
         mesh = trimesh.creation.box(extents=(10, 12, 14))
@@ -436,7 +446,7 @@ class TestPreviewPublication:
             previews.derive(file.id).kinds[DerivativeKind.PREVIEWS]
             is DerivativeState.READY
         )
-        summary = summaries(db_session, [file.model_id])[file.model_id]
+        summary = _summary(db_session, file)
         _, manifest = resolve(
             db_session,
             file.model_id,
@@ -630,14 +640,7 @@ class TestPreviewLinkedSources:
 
 class TestPreviewModes:
     def test_mode_changes_replace_existing_views(self, db_session, artifact, ready):
-        assert (
-            len(
-                summaries(db_session, [artifact.model_id])[
-                    artifact.model_id
-                ].published.views
-            )
-            == 4
-        )
+        assert len(_summary(db_session, artifact).published.views) == 4
         policy.update(db_session, {policy.SettingName.PREVIEW_POLES: True})
         assert DerivativeKind.PREVIEWS in records.needed(
             db_session,
@@ -649,7 +652,7 @@ class TestPreviewModes:
             DerivativeKind.PREVIEWS: DerivativeState.READY
         }
         db_session.expire_all()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert [view.id for view in summary.published.views] == [
             "orbit-0",
             "orbit-1",
@@ -660,14 +663,7 @@ class TestPreviewModes:
         ]
         policy.update(db_session, {policy.SettingName.PREVIEW_POLES: False})
         # The smaller selection applies immediately, before replacement finishes.
-        assert (
-            len(
-                summaries(db_session, [artifact.model_id])[
-                    artifact.model_id
-                ].published.views
-            )
-            == 4
-        )
+        assert len(_summary(db_session, artifact).published.views) == 4
         assert previews.derive(artifact.id).kinds == {
             DerivativeKind.PREVIEWS: DerivativeState.READY
         }
@@ -699,7 +695,7 @@ class TestPreviewModes:
         ).model_dump_json()
         db_session.add(ready)
         db_session.commit()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.state == "pending"
         assert summary.published is None
 
@@ -718,7 +714,7 @@ class TestCoverPassViews:
         assert outcome.kinds[DerivativeKind.PREVIEWS] is DerivativeState.READY
         row = _views_row(db_session, artifact)
         assert (row.state, row.attempts) == (DerivativeState.READY, 1)
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert [view.id for view in summary.published.views] == [
             "orbit-0",
             "orbit-1",
@@ -858,7 +854,7 @@ class TestCoverPassViews:
         assert row.storage_key != published
 
     @pytest.mark.parametrize("width", [320, 1280], ids=str)
-    def test_follows_the_model_image_quality(
+    def test_keeps_large_views_independent_of_card_image_quality(
         self, db_session, artifact, monkeypatch, width
     ):
         from app.core.config import _overlay
@@ -869,9 +865,15 @@ class TestCoverPassViews:
         producers.derive_mesh(artifact.id)
 
         manifest = json.loads(_views_row(db_session, artifact).output_json)
-        assert {(v["width"], v["height"]) for v in manifest["views"]} == {
-            (width, width * 3 // 4)
-        }
+        assert {(v["width"], v["height"]) for v in manifest["views"]} == {(1280, 960)}
+        card = db_session.exec(
+            select(ArtifactDerivative).where(
+                ArtifactDerivative.file_id == artifact.id,
+                ArtifactDerivative.kind == DerivativeKind.THUMBNAIL,
+            )
+        ).one()
+        card_output = json.loads(card.output_json)
+        assert (card_output["width"], card_output["height"]) == (width, width * 3 // 4)
 
 
 class TestCoverPassRecovery:

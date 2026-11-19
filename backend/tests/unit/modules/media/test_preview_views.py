@@ -7,7 +7,12 @@ import pytest
 import trimesh
 from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 
-from app.modules.media.preview_views import candidates, render_views
+from app.modules.media.preview_views import (
+    GALLERY_WIDTH,
+    STRIP_WIDTH,
+    candidates,
+    render_views,
+)
 
 # The shared default, VAULT_MESH_MAX_RENDER_TRIANGLES.
 LIMIT = 2_000_000
@@ -187,6 +192,9 @@ class TestResolution:
         assert {(view.width, view.height) for view in manifest.views} == {
             (width, height)
         }
-        assert {Image.open(io.BytesIO(image)).size for image in images} == {
-            (width, height)
-        }
+        expected_sizes = [(width, height)]
+        if width >= GALLERY_WIDTH:
+            expected_sizes.append((STRIP_WIDTH, round(STRIP_WIDTH * 3 / 4)))
+        assert [Image.open(io.BytesIO(image)).size for image in images] == (
+            expected_sizes * len(manifest.views)
+        )

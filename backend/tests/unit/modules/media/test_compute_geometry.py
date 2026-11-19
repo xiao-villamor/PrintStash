@@ -105,15 +105,15 @@ class TestDeferredCodec:
         assert isinstance(result, DeferredRender)
         assert layout.normal_mode == NORMAL_MODE
         assert len(body) == body_size(layout)
-        assert not hasattr(result, "smooth_normals")
+        assert not hasattr(result, "corner_normals")
         faces = next(result.face_chunks(64))
         assert faces.dtype == result.position_ids.dtype == np.uint32
         for array in (result.vertices, faces, result.position_ids):
             assert not array.flags.writeable
             assert np.shares_memory(array, np.frombuffer(payload, dtype=np.uint8))
         np.testing.assert_array_equal(
-            canonical(result).smooth_normals,
-            canonical(deferred_geometry).smooth_normals,
+            canonical(result).corner_normals,
+            canonical(deferred_geometry).corner_normals,
         )
         assert result._canonical is None
         assert len(key) == 64
@@ -199,7 +199,10 @@ def packet_geometry(request):
     vertices[:] = [[-0.5, 0, 0], [2, 0, 0], [0, 3, 0.25]]
     faces = np.asarray([[0, 1, 2], [2, 1, 0]], dtype=">i8")
     identities = np.asarray([0, 1, 2], dtype=">i8")
-    normals = np.asfortranarray([[0, 0, 1], [0, 1, 0], [1, 0, 0]], dtype=">f8")
+    normals = np.asfortranarray(
+        [[[0, 0, 1], [0, 1, 0], [1, 0, 0]], [[0, 0, -1], [0, -1, 0], [-1, 0, 0]]],
+        dtype=">f8",
+    )
     geometry = PreparedRenderGeometry(
         vertices, 2, lambda size: iter((faces[:1], faces[1:]))
     )
@@ -226,7 +229,9 @@ class TestEncode:
         if mode == "canonical":
             body += struct.pack("<6q", 0, 1, 2, 2, 1, 0)
             body += struct.pack("<3q", 0, 1, 2)
-            body += struct.pack("<9d", 0, 0, 1, 0, 1, 0, 1, 0, 0)
+            body += struct.pack(
+                "<18f", 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, -1, 0, -1, 0, -1, 0, 0
+            )
         elif mode == "deferred":
             header += b',"normal_mode":"gpu-angle-csr-v1"'
             body += struct.pack("<6I3I", 0, 1, 2, 2, 1, 0, 0, 1, 2)

@@ -34,6 +34,65 @@ function show(overrides: Partial<ComponentProps<typeof InspectedPrintCard>> = {}
 }
 
 describe("InspectedPrintCard", () => {
+  it("shows the inspected revision's per-plate estimates", () => {
+    show({
+      plateEstimates: {
+        plates: [1, 2],
+        identities: [],
+        plate_metadata: [
+          {
+            number: 1,
+            metadata: { estimated_time_s: 27862, filament_weight_g: 419.18, filament_cost: null },
+          },
+          {
+            number: 2,
+            metadata: { estimated_time_s: 2465, filament_weight_g: 13.03, filament_cost: null },
+          },
+        ],
+      },
+      selectedSlicedPlate: 2,
+    });
+    expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual([
+      "G-code revision 1",
+      "Print setup",
+      "Plate estimates",
+      "Recorded prints",
+    ]);
+    expect(screen.queryByRole("columnheader", { name: "Filament cost" })).toBeNull();
+    const plate = screen.getByRole("row", { name: /Plate 02/ });
+    expect(within(plate).getByText("41m 5s")).toBeVisible();
+    expect(within(plate).getByText("Selected plate")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Print estimate" })).not.toBeInTheDocument();
+  });
+
+  it("shows the cost column when a plate records a cost, including zero", () => {
+    show({
+      plateEstimates: {
+        plates: [1, 2],
+        identities: [],
+        plate_metadata: [
+          {
+            number: 1,
+            metadata: { estimated_time_s: null, filament_weight_g: null, filament_cost: 0 },
+          },
+        ],
+      },
+    });
+    const estimates = screen.getByRole("table", { name: "Plate estimates" });
+    expect(within(estimates).getByRole("columnheader", { name: "Filament cost" })).toBeVisible();
+    const costs = [1, 2].map((number) =>
+      within(
+        within(estimates).getByRole("row", {
+          name: new RegExp(`Plate 0${number}`),
+        }),
+      )
+        .getAllByRole("cell")
+        .at(-1),
+    );
+    expect(costs[0]).toHaveTextContent("0");
+    expect(costs[1]).toHaveTextContent("Not recorded");
+  });
+
   it("groups only the inspected file's recorded results by printer", () => {
     show({
       jobs: [

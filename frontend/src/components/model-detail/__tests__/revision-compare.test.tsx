@@ -67,12 +67,76 @@ function Controlled({ files = [first, second, source, alternate] }: { files?: Fi
 }
 
 describe("RevisionCompare", () => {
+  it("reveals the complete history fields on request", async () => {
+    renderApp(
+      <RevisionCompare
+        left={first}
+        right={second}
+        outcomes={[
+          { ...recordedZero, file_id: first.id },
+          { ...recordedZero, file_id: second.id },
+        ]}
+      />,
+    );
+    expect(screen.getByText("Neither file has recorded prints.")).toBeVisible();
+    expect(screen.queryByRole("row", { name: /^Print count/ })).toBeNull();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Show all comparison fields" }));
+    expect(
+      within(screen.getByRole("row", { name: /^Print count/ })).getAllByText("0"),
+    ).toHaveLength(2);
+  });
+  it("formats slicer names already included in the version only once", () => {
+    renderApp(
+      <RevisionCompare
+        left={{
+          ...first,
+          metadata: aMetadata({
+            slicer_name: "BambuStudio",
+            slicer_version: "BambuStudio 02.08.02.61",
+          }),
+        }}
+        right={second}
+      />,
+    );
+    expect(screen.getByText("BambuStudio 02.08.02.61")).toBeVisible();
+  });
   it("highlights a changed pair of recorded values", () => {
     renderApp(<RevisionCompare left={first} right={second} />);
 
     const walls = within(screen.getByRole("row", { name: /^Walls/ }));
     expect(walls.getAllByRole("mark")).toHaveLength(2);
     expect(walls.getByText("0")).toBeVisible();
+  });
+  it("shows each sliced plate's recorded estimates in its comparison column", async () => {
+    const sliced = { ...second, original_filename: "two.gcode.3mf" };
+    renderApp(<RevisionCompare left={source} right={sliced} />, {
+      routes: {
+        "GET /api/v1/files/2/gcode-plates": json({
+          plates: [1, 2],
+          identities: [],
+          plate_metadata: [
+            {
+              number: 1,
+              metadata: { estimated_time_s: 60, filament_weight_g: 9.15, filament_cost: null },
+            },
+            {
+              number: 2,
+              metadata: { estimated_time_s: 25, filament_weight_g: null, filament_cost: null },
+            },
+          ],
+        }),
+      },
+    });
+    const time = within(await screen.findByRole("row", { name: /^Estimated time/ }));
+    expect(await time.findByText("1m 0s")).toBeVisible();
+    expect(time.getByText("25s")).toBeVisible();
+    expect(time.queryByText("Not recorded")).toBeNull();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Show all comparison fields" }));
+    expect(time.getByText("Not recorded")).toBeVisible();
+    expect(time.queryAllByRole("mark")).toHaveLength(0);
+    const weight = within(screen.getByRole("row", { name: /^Filament weight/ }));
+    expect(weight.getByText("9.15 g")).toBeVisible();
+    expect(weight.getAllByText("Not recorded")).toHaveLength(2);
   });
   it("leaves missing evidence outside the change highlights", () => {
     renderApp(<RevisionCompare left={first} right={{ ...second, metadata: aMetadata() }} />);

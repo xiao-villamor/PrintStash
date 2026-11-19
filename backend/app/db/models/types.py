@@ -214,6 +214,7 @@ class JobKind(StrEnum):
     INGESTION_UPLOAD_RECOVERY = "ingestion.upload_recovery"
     INGESTION_URL = "ingestion.url"
     INGESTION_URL_SELECTION = "ingestion.url_selection"
+    INGESTION_SAMPLES = "ingestion.samples"
     INGESTION_SCRATCH_CLEANUP = "ingestion.scratch_cleanup"
     NOTIFICATIONS_DELIVER = "notifications.deliver"
     NOTIFICATIONS_RETENTION = "notifications.retention"

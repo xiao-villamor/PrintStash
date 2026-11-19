@@ -232,7 +232,11 @@ available builds. Anything marked beta here remains beta.
   Pending Imports accept ZIP only.
 - The G-code toolpath viewer is a browser-side visualization aid. It is not a
   slicer-grade simulator and does not validate firmware-specific macros,
-  acceleration, pressure advance, or printer safety.
+  acceleration, pressure advance, or printer safety. Previews retain all printable
+  layers within a combined budget of four million extrusion and travel segments.
+  Circular arcs use chords with a maximum 0.02 mm approximation error and 5°
+  angular step. Files exceeding the budget remain downloadable in their original
+  form. Rendering speed and memory use depend on the browser and GPU.
 
 ## Notifications
 

@@ -10,7 +10,11 @@ from itertools import product
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+from printstash_core.mesh.preview_profile import (
+    PREVIEW_PROFILE,
+    STUDIO_LOOKS,
+    preview_appearance,
+)
 
 from app.modules.media.stl_reader import (
     InvalidSTL,
@@ -224,6 +228,12 @@ def render_stl_thumbnail(
     try:
         import numpy as np
         from PIL import Image
+        from printstash_core.mesh.floor_grid import paint_floor_grid
+        from printstash_core.mesh.rasterizer import make_preview_shade
+        from printstash_core.mesh.render_geometry import (
+            PreparedRenderGeometry,
+            prepare_normals,
+        )
 
         from app.modules.media.mesh_render import (
             RasterBudget,
@@ -266,9 +276,18 @@ def render_stl_thumbnail(
         center = (np.asarray(sampled.bounds_min) + np.asarray(sampled.bounds_max)) * 0.5
         if not np.isfinite(center).all():
             return None
-        rotation = _select_view_rotation(corners - center, np, reference=True).astype(
-            np.float64
+        extents = np.ptp(corners, axis=0)
+        broad_extent = float(min(extents[0], extents[1]))
+        # Turning a flat horizontal sample diagonally spends part of the coarse
+        # frame on empty corners. Keep its face aligned to the pixel grid to
+        # preserve coverage on sparse surfaces and the walls of thin rings.
+        horizontal_plate = (
+            broad_extent > 1e-6
+            and float(extents[2]) / broad_extent <= PREVIEW_PROFILE.flat_thickness_ratio
         )
+        rotation = _select_view_rotation(
+            corners - center, np, reference=horizontal_plate
+        ).astype(np.float64)
         view_corners = (corners - center) @ rotation.T
         if not np.isfinite(rotation).all() or not np.isfinite(view_corners).all():
             return None
@@ -288,6 +307,20 @@ def render_stl_thumbnail(
     except FloatingPointError, ValueError, RuntimeError:
         return None
 
+    indices = np.arange(triangles.size // 3, dtype=np.int64).reshape(-1, 3)
+
+    def face_chunks(size):
+        for start in range(0, len(indices), size):
+            yield indices[start : start + size]
+
+    prepared = prepare_normals(
+        PreparedRenderGeometry(
+            (triangles.reshape(-1, 3) - center).astype(np.float32),
+            len(triangles),
+            face_chunks,
+        )
+    )
+
     # Half-resolution coverage keeps the silhouette detailed while actual
     # triangle tests preserve holes. Small meshes retain the same resolution so
     # tiny facets are not rounded away entirely.
@@ -298,13 +331,10 @@ def render_stl_thumbnail(
         (coverage_height, coverage_width), np.inf, dtype=np.float64
     )
     raster_budget = RasterBudget(limit=_MAX_COVERAGE_CANDIDATES)
-    base_color = np.asarray(PREVIEW_PROFILE.material_albedo, dtype=np.float32) * 255.0
-    light = np.asarray([-0.45, 0.6, 1.0], dtype=np.float32)
-    light /= np.linalg.norm(light)
-
-    def shade(normals):
-        diffuse = np.clip(normals @ light, 0.0, 1.0)[:, None]
-        return np.clip(0.32 + diffuse * 0.68, 0.0, 1.0)
+    base_color = np.full(3, 255, dtype=np.float32)
+    appearance = preview_appearance()
+    look = STUDIO_LOOKS[appearance.look]
+    shade = make_preview_shade(look.albedo, look.lighting)
 
     coarse_scale_x = coverage_width / width
     coarse_scale_y = coverage_height / height
@@ -327,7 +357,7 @@ def render_stl_thumbnail(
         sampled.triangle_count > sampled.sampled_triangles or not sampled.complete
     )
 
-    def accumulate_chunk(chunk) -> None:
+    def accumulate_chunk(chunk, corner_normals) -> None:
         view = (chunk - center) @ rotation.T
         screen = np.empty_like(view)
         screen[:, :, 0] = (view[:, :, 0] - view_mid[0]) * scale + width * 0.5
@@ -347,8 +377,9 @@ def render_stl_thumbnail(
         coarse_screen = screen[ids].copy()
         coarse_screen[:, :, 0] *= coarse_scale_x
         coarse_screen[:, :, 1] *= coarse_scale_y
-        normals = raw_normal[ids] / normal_length[ids, None]
-        normals = np.where(normals[:, 2:3] >= 0, normals, -normals)
+        normals = corner_normals[ids] @ rotation.T
+        normals = np.where(normals[..., 2:] >= 0, normals, -normals)
+        normals[..., :2] *= -1
 
         # The ordinary rasteriser intentionally tests the true triangle area.
         # For a dense model whose bounded sample contains microfacets that are
@@ -377,13 +408,14 @@ def render_stl_thumbnail(
             # for source facets as well.
             splat_triangles = np.stack((top, bottom_right, bottom_left), axis=1)
             coarse_screen = np.concatenate((splat_triangles, coarse_screen), axis=0)
-            normals = np.concatenate((normals, normals), axis=0)
+            centroid_normals = normals.mean(axis=1, keepdims=True)
+            normals = np.concatenate((centroid_normals.repeat(3, axis=1), normals))
 
         _rasterise_triangles(
             coarse_image,
             coarse_zbuffer,
             coarse_screen,
-            normals[:, None, :].repeat(3, axis=1),
+            normals,
             shade,
             base_color,
             coverage_width,
@@ -392,7 +424,8 @@ def render_stl_thumbnail(
         )
 
     for start in range(0, triangles.shape[0], _COVERAGE_CHUNK_TRIANGLES):
-        accumulate_chunk(triangles[start : start + _COVERAGE_CHUNK_TRIANGLES])
+        end = start + _COVERAGE_CHUNK_TRIANGLES
+        accumulate_chunk(triangles[start:end], prepared.corner_normals[start:end])
 
     if not np.isfinite(coarse_zbuffer).any():
         return None
@@ -410,6 +443,15 @@ def render_stl_thumbnail(
         dtype=np.uint8,
     )
     rgba = np.dstack([image, alpha])
+    if appearance.floor_grid:
+        paint_floor_grid(
+            rgba,
+            rotation,
+            np.asarray(sampled.bounds_min) - center,
+            np.asarray(sampled.bounds_max) - center,
+            view_mid,
+            scale,
+        )
     output = io.BytesIO()
     Image.fromarray(rgba, mode="RGBA").save(output, format="PNG", optimize=True)
     return STLThumbnailResult(

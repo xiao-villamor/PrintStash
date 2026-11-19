@@ -3282,7 +3282,7 @@ describe("SettingsPanel", () => {
       await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
 
       const latest = await screen.findByRole("region", { name: "Latest saved version" });
-      expect(within(latest).getByText("Oblique views")).toBeVisible();
+      expect(within(latest).getByText("Angle views")).toBeVisible();
       expect(toggle).toBeDisabled();
       expect(toggle).toHaveValue("single");
       expect(app.requestsWithMethod("PUT")).toHaveLength(1);

@@ -29,7 +29,7 @@ variable** — `bg-primary`, not `bg-[var(--primary)]`.
 
 ### Color
 
-Every color has a light and a dark value. The base palette is `#F6F7F9` /
+Interface colors have light and dark values; the image matte stays neutral in both themes so dark transparent previews remain visible. The base palette is `#F6F7F9` /
 `#0C0F14`, panels are `#FFFFFF` / `#13171E`, and primary actions use
 `#4D6F9B` in both themes. Neutral selection uses `#EEF0F3` in light and a
 translucent white fill in dark. Use semantic tokens instead of hand-encoding a
@@ -48,6 +48,7 @@ theme swap so colors remain consistent throughout the application.
 | `success`, `warning` | Status only — never as decoration |
 | `border`, `input`, `ring` | Edges and focus rings |
 | `surface-*`, `on-surface*`, `outline*` | The elevation scale, for multi-layer panels |
+| `preview-image-matte` | A theme-independent neutral backing for transparent slicer preview images |
 
 **Pair a background with its `-foreground`.** `bg-primary` takes
 `text-primary-foreground`, which is white in both themes. Keep using the paired
@@ -230,7 +231,8 @@ new directions, bounce, cascades, or text crossfades for individual features.
 
 Collections, Search, Pending, Saved views and Settings use one shell
 sidebar and one persisted width (`--workbench-sidebar-width`, 320px by default,
-resizable from 280px to 520px). The model inspector uses the same width on desktop.
+resizable down to the measured Collections header width and up to 520px).
+The model inspector has its own width and preview-height preferences.
 Section navigation preserves the sidebar's open state, boundary and workspace
 position. Settings navigation occupies this frame rather than adding another column.
 The border and background belong to the stationary shell, outside animated content.

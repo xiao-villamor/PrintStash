@@ -16,7 +16,7 @@ from app.modules.media.mesh_contracts import (
     ThumbnailRequest,
     ViewsRequest,
 )
-from app.modules.media.mesh_isolation import read_spec
+from app.modules.media.mesh_isolation import read_spec, worker_appearance
 from app.modules.media.mesh_protocol import BasicOutput, FingerprintFinal, encode_frame
 from app.modules.media.render_context import background_render_scope
 from app.modules.media.thumbnail_engine import ThumbnailEngine
@@ -51,7 +51,7 @@ def main(argv: list[str]) -> int:
     try:
         # This worker produces asynchronous Artifact outputs. Its Job priority
         # is retained for admission, but renders can share one GPU submission.
-        with background_render_scope():
+        with background_render_scope(), worker_appearance(spec):
             directory = spec.get("prepare_directory")
             generated = (
                 ThumbnailEngine().prepare(

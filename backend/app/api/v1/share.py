@@ -21,7 +21,7 @@ from app.db.models import CollectionRole, FileType, Model, ShareLink, User
 from app.db.session import get_session
 from app.modules.identity import rbac, share
 from app.modules.library import model_covers
-from app.modules.media.preview_contracts import ViewId
+from app.modules.media.preview_contracts import PreviewSize, ViewId
 from app.modules.storage.artifact_delivery import DeliveryPurpose
 from app.schemas.share import ShareLinkCreate, ShareLinkCreated, ShareLinkRead
 
@@ -56,9 +56,12 @@ def get_shared_model(token: str, session: Session = Depends(get_session)):
     share.record_access(session, link)
     from app.modules.library.model_views import previews
 
-    preview = previews.summaries(
-        session, [link.model_id], root=f"/api/v1/share/{token}"
-    )[link.model_id]
+    model = session.get(Model, link.model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail="not_found")
+    preview = previews.summaries(session, [model], root=f"/api/v1/share/{token}")[
+        link.model_id
+    ]
     if preview.kind == "artifact":
         share.share_file_or_404(session, link, preview.file_id)
     return share.public_detail(session, link, preview)
@@ -73,8 +76,12 @@ def get_shared_thumbnail(
     link = share.resolve_share(session, token)
     model = session.get(Model, link.model_id)
     if model is not None and model.cover_filename is not None:
+        from app.modules.media.thumbnail import PhotoSize, to_photo_webp
+
         return Response(
-            content=model_covers.content(model),
+            content=to_photo_webp(
+                model_covers.content(model), size=PhotoSize.THUMBNAIL
+            ).data,
             media_type="image/webp",
             headers={
                 "Cache-Control": "private, no-store",
@@ -257,6 +264,7 @@ def get_shared_preview_image(
     token: str,
     generation: str,
     view_id: ViewId,
+    size: PreviewSize = PreviewSize.FULL,
     session: Session = Depends(get_session),
 ):
     from app.api.preview_response import preview_response
@@ -265,4 +273,4 @@ def get_shared_preview_image(
     link = share.resolve_share(session, token)
     row, manifest = previews.resolve(session, link.model_id, generation)
     share.share_file_or_404(session, link, manifest.file_id)
-    return preview_response(row, manifest, view_id, shared=True)
+    return preview_response(row, manifest, view_id, shared=True, size=size)

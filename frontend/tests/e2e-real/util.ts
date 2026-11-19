@@ -1,8 +1,228 @@
-import { expect, type APIResponse, type Page, type Response } from "@playwright/test";
+import {
+  expect,
+  type APIResponse,
+  type Page,
+  type Response,
+  type TestInfo,
+} from "@playwright/test";
 import { execFile } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { settleLibraryRead } from "../e2e/_library";
+
+/** Default visual review state: the main navigation leaves room for the page. */
+export async function collapseNavigationSidebar(page: Page): Promise<void> {
+  const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+  await expect(toggle).toBeVisible();
+  if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator("#collections-pane")).toHaveCSS("width", "0px");
+}
+
+/** Read original embedded settings verbatim; never synthesize missing print metadata. */
+export async function reviewArchiveSettings(
+  archivePath: string,
+): Promise<Record<string, string[]>> {
+  const { stdout } = await promisify(execFile)("python3", [
+    "-c",
+    `
+import json, sys, zipfile
+keys = ("filament_type =", "layer_height =", "nozzle_diameter =", "printer_model =", "nozzle_temperature =", "bed_temperature =", "wall_loops =", "sparse_infill_density =", "total layer number:", "model printing time:", "total estimated time:", "total filament weight [g]")
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    result = {}
+    for name in archive.namelist():
+        if name.endswith(".gcode"):
+            with archive.open(name) as source:
+                result[name] = [line.decode("utf-8", errors="replace").strip() for line in source if any(line.startswith(("; " + key).encode()) for key in keys)]
+print(json.dumps(result))
+`,
+    archivePath,
+  ]);
+  return JSON.parse(stdout);
+}
+
+/** Private, ordered review evidence. A completed journey is not a clean UI audit. */
+export function detailReviewRecorder(page: Page, info: TestInfo) {
+  const states: { name: string; image: string; evidence: string; semantics: string }[] = [];
+  const diagnostics: { state: string; kind: string; message: string }[] = [];
+  let activeState = "setup";
+  const note = (kind: string, message: string) =>
+    diagnostics.push({ state: activeState, kind, message });
+  const consoleListener = (message: import("@playwright/test").ConsoleMessage) => {
+    if (["error", "warning"].includes(message.type())) note(message.type(), message.text());
+  };
+  const errorListener = (error: Error) => note("pageerror", error.message);
+  const responseListener = (response: Response) => {
+    if (response.status() >= 400)
+      note("http", `${response.status()} ${new URL(response.url()).pathname}`);
+  };
+  const failedListener = (request: import("@playwright/test").Request) =>
+    note("requestfailed", `${new URL(request.url()).pathname}: ${request.failure()?.errorText}`);
+  page.on("console", consoleListener);
+  page.on("pageerror", errorListener);
+  page.on("response", responseListener);
+  page.on("requestfailed", failedListener);
+  const save = async <T extends object>(name: string, value: T) => {
+    await writeFile(info.outputPath(name), JSON.stringify(value, null, 2));
+  };
+  return {
+    save,
+    mark(name: string) {
+      activeState = name;
+    },
+    async capture(name: string) {
+      activeState = name;
+      expect(page.viewportSize()).toEqual({ width: 1920, height: 1080 });
+      expect(await page.evaluate(() => devicePixelRatio)).toBe(1);
+      await expect(
+        page.getByRole("button", { name: "Toggle sidebar", exact: true }),
+      ).toHaveAttribute("aria-expanded", "false");
+      await page.evaluate(() => document.fonts.ready);
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      const stem = `${String(states.length + 1).padStart(2, "0")}-${name}`;
+      await page.screenshot({
+        path: info.outputPath(`${stem}.png`),
+        animations: "disabled",
+        timeout: 90_000,
+      });
+      const evidence = await page.evaluate(() => {
+        // Model detail currently has no <main> landmark. Start from the body
+        // so a missing landmark cannot silently produce an empty inventory.
+        const roots = [document.body];
+        const elements = [
+          ...new Set(
+            roots.flatMap((root) => [
+              ...root.querySelectorAll<HTMLElement>(
+                "button, input, select, a, [role=tab], h1, h2, h3, dt, dd, label, p, th, td",
+              ),
+            ]),
+          ),
+        ];
+        const entries = elements
+          .filter(
+            (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden",
+          )
+          .map((el) => {
+            const box = el.getBoundingClientRect();
+            const style = getComputedStyle(el);
+            const interactive = el.matches('button, input, select, a, [role="tab"]');
+            const clips: string[] = [];
+            const scrolls: string[] = [];
+            for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+              const pstyle = getComputedStyle(parent);
+              const pbox = parent.getBoundingClientRect();
+              const outsideX = box.left < pbox.left - 1 || box.right > pbox.right + 1;
+              const outsideY = box.top < pbox.top - 1 || box.bottom > pbox.bottom + 1;
+              const label = parent.getAttribute("aria-label") ?? parent.tagName;
+              if (
+                (outsideX && /hidden|clip/.test(pstyle.overflowX)) ||
+                (outsideY && /hidden|clip/.test(pstyle.overflowY))
+              )
+                clips.push(label);
+              if (
+                (outsideX && /auto|scroll/.test(pstyle.overflowX)) ||
+                (outsideY && /auto|scroll/.test(pstyle.overflowY))
+              )
+                scrolls.push(label);
+            }
+            const inViewport =
+              box.top >= 0 && box.left >= 0 && box.bottom <= innerHeight && box.right <= innerWidth;
+            const hit =
+              inViewport && interactive
+                ? document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+                : null;
+            return {
+              tag: el.tagName,
+              role: el.getAttribute("role"),
+              text: (el.getAttribute("aria-label") ?? el.textContent ?? "")
+                .trim()
+                .replace(/\s+/g, " "),
+              interactive,
+              disabled: el.matches(":disabled"),
+              pressed: el.getAttribute("aria-pressed"),
+              selected: el.getAttribute("aria-selected"),
+              region:
+                el.closest("[aria-label][role], aside[aria-label]")?.getAttribute("aria-label") ??
+                null,
+              box: { x: box.x, y: box.y, width: box.width, height: box.height },
+              inViewport,
+              clippedBy: clips,
+              outsideScrollport: scrolls,
+              coveredAtCenter:
+                interactive &&
+                inViewport &&
+                !clips.length &&
+                !scrolls.length &&
+                hit !== null &&
+                !el.contains(hit),
+              typography: {
+                size: style.fontSize,
+                weight: style.fontWeight,
+                family: style.fontFamily,
+                color: style.color,
+                lineHeight: style.lineHeight,
+              },
+            };
+          });
+        return {
+          url: location.pathname,
+          dark: document.documentElement.classList.contains("dark"),
+          horizontalOverflow: document.documentElement.scrollWidth > innerWidth,
+          entries,
+        };
+      });
+      expect(evidence.entries.some((entry) => entry.interactive)).toBe(true);
+      await save(`${stem}.json`, evidence);
+      await writeFile(
+        info.outputPath(`${stem}.aria.txt`),
+        await page.locator("body").ariaSnapshot(),
+      );
+      states.push({
+        name,
+        image: `${stem}.png`,
+        evidence: `${stem}.json`,
+        semantics: `${stem}.aria.txt`,
+      });
+      await save("manifest.json", {
+        viewport: { width: 1920, height: 1080, deviceScaleFactor: 1 },
+        states,
+        diagnostics,
+      });
+    },
+    async finish(journeyCompleted: boolean) {
+      page.off("console", consoleListener);
+      page.off("pageerror", errorListener);
+      page.off("response", responseListener);
+      page.off("requestfailed", failedListener);
+      await save("manifest.json", {
+        viewport: { width: 1920, height: 1080, deviceScaleFactor: 1 },
+        states,
+        diagnostics,
+        journeyCompleted,
+      });
+      const escape = (value: string) =>
+        value.replace(
+          /[&<>"']/g,
+          (char) =>
+            ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!,
+        );
+      await writeFile(
+        info.outputPath("index.html"),
+        `<!doctype html><meta charset="utf-8"><title>Model detail review</title><style>body{font:16px system-ui;max-width:1500px;margin:2rem auto;padding:0 1rem}img{width:100%;border:1px solid #888}article{margin:3rem 0}nav{display:flex;gap:1rem;flex-wrap:wrap}a{color:#1674c8}</style><h1>Model detail review</h1><p>1920×1080 · DPR 1 · collapsed navigation. Captures and diagnostics are evidence for human review, not a design or accessibility pass.</p><p><a href="manifest.json">Manifest and runtime diagnostics</a> · <a href="metadata.json">Input metadata and persisted revisions</a></p><nav>${states.map((state) => `<a href="#${escape(state.name)}">${escape(state.name)}</a>`).join("")}</nav>${states.map((state) => `<article id="${escape(state.name)}"><h2>${escape(state.name)}</h2><p><a href="${state.evidence}">Layout and typography</a> · <a href="${state.semantics}">ARIA snapshot</a></p><a href="${state.image}"><img loading="lazy" src="${state.image}" alt="${escape(state.name)}"></a></article>`).join("")}`,
+      );
+      await info.attach("model-detail-review", {
+        path: info.outputPath("index.html"),
+        contentType: "text/html",
+      });
+    },
+  };
+}
 
 /** The new backup, as the finished `backups.create` Job reports it. */
 export interface CreatedBackup {

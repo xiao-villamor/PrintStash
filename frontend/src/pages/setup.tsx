@@ -226,7 +226,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
         is_superuser: true,
       });
       setAccount({ username: "", password: "", confirm: "", email: "" });
-      router.replace("/getting-started");
+      router.replace("/setup-appearance");
     } catch (error) {
       if (!controller.signal.aborted && version === getSessionVersion())
         setError(describeError(error instanceof Error ? error : new Error()));

@@ -66,7 +66,7 @@ export function ModelCoverEditor({
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">{uiText("modelCover.description")}</p>
         <ProtectedThumbnail
-          path={current.thumbnail_url}
+          path={current.previews?.large_cover_url ?? current.thumbnail_url}
           alt={uiText("modelCover.current")}
           placeholder={<ImageIcon className="m-auto h-12 w-12 text-muted-foreground" />}
           className="flex aspect-[4/3] items-center justify-center overflow-hidden rounded-md border bg-muted"

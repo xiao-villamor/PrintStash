@@ -99,7 +99,7 @@ class Pass:
     def dispatch_workgroups(self, *counts):
         self.device.dispatches.append(counts)
 
-    def draw(self, vertices, instances):
+    def draw(self, vertices, instances=1):
         self.device.draws.append((vertices, instances))
 
     def end(self):

@@ -26,6 +26,60 @@ export interface ToolpathData {
   };
 }
 
+// Four million extrusion segments occupy at most 192 MB of final positions
+// and colors. Typed chunks avoid the much larger temporary JS-number arrays.
+const DEFAULT_SEGMENT_LIMIT = 4_000_000;
+const POSITION_CHUNK_SEGMENTS = 16_384;
+
+class PositionBuffer {
+  length = 0;
+  private chunks: Float32Array[] = [];
+  private current: Float32Array | null = null;
+  private used = 0;
+
+  push(x: number, y: number, z: number, nx: number, ny: number, nz: number) {
+    if (this.current === null || this.used === this.current.length) {
+      if (this.current !== null) this.chunks.push(this.current);
+      this.current = new Float32Array(POSITION_CHUNK_SEGMENTS * 6);
+      this.used = 0;
+    }
+    this.current[this.used++] = x;
+    this.current[this.used++] = y;
+    this.current[this.used++] = z;
+    this.current[this.used++] = nx;
+    this.current[this.used++] = ny;
+    this.current[this.used++] = nz;
+    this.length += 6;
+  }
+
+  take(): Float32Array {
+    const result = new Float32Array(this.length);
+    let offset = 0;
+    for (const chunk of this.chunks) {
+      result.set(chunk, offset);
+      offset += chunk.length;
+    }
+    if (this.current !== null) result.set(this.current.subarray(0, this.used), offset);
+    this.chunks = [];
+    this.current = null;
+    this.used = 0;
+    return result;
+  }
+}
+
+function* lines(text: string): Generator<string> {
+  let start = 0;
+  while (start < text.length) {
+    const end = text.indexOf("\n", start);
+    if (end === -1) {
+      yield text.slice(start);
+      return;
+    }
+    yield text.slice(start, end);
+    start = end + 1;
+  }
+}
+
 // ---- G-code Parser ----
 
 function hslToRgb(h: number, s: number, l: number): [number, number, number] {
@@ -37,7 +91,7 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   return [f(0), f(8), f(4)];
 }
 
-export function parseGcode(text: string, segmentLimit = 1_000_000): ToolpathData {
+export function parseGcode(text: string, segmentLimit = DEFAULT_SEGMENT_LIMIT): ToolpathData {
   let position: Point = [0, 0, 0];
   const offset: Point = [0, 0, 0];
   let ce = 0,
@@ -47,8 +101,8 @@ export function parseGcode(text: string, segmentLimit = 1_000_000): ToolpathData
     absoluteCenter = false;
   let plane: Plane = "xy";
   let segments = 0;
-  const extrudeSegs: number[] = [];
-  const travelSegs: number[] = [];
+  const extrudeSegs = new PositionBuffer();
+  const travelSegs = new PositionBuffer();
   const layerRanges: LayerRange[] = [];
   let currentZ = -1,
     layerVertStart = 0;
@@ -77,7 +131,7 @@ export function parseGcode(text: string, segmentLimit = 1_000_000): ToolpathData
     position = next;
   };
 
-  for (const rawLine of text.split("\n")) {
+  for (const rawLine of lines(text)) {
     const line = rawLine
       .split(/[;*]/, 1)[0]
       .replace(/\([^)]*\)/g, "")
@@ -211,8 +265,8 @@ export function parseGcode(text: string, segmentLimit = 1_000_000): ToolpathData
   const centerY = (minY + maxY) / 2; // gcode Y
   const centerZ = (minZ + maxZ) / 2; // gcode Z (height)
 
-  const extArr = new Float32Array(extrudeSegs);
-  const travArr = new Float32Array(travelSegs);
+  const extArr = extrudeSegs.take();
+  const travArr = travelSegs.take();
 
   for (let i = 0; i < extArr.length; i += 3) {
     extArr[i] -= centerX;

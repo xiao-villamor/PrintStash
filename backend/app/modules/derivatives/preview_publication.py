@@ -14,18 +14,31 @@ from dataclasses import dataclass
 from typing import BinaryIO
 
 from pydantic import ValidationError
-from sqlmodel import Session
+from sqlmodel import Session, col, select
 
 from app.core.cancellation import checkpoint
 from app.core.config import settings
 from app.core.time import utcnow
-from app.db.models import DerivativeKind, DerivativeState, File, JobKind
+from app.db.models import (
+    ArtifactDerivative,
+    DerivativeKind,
+    DerivativeState,
+    File,
+    JobKind,
+)
 from app.db.session import get_session_factory
 from app.modules.media import thumbnail
 from app.modules.media.mesh_contracts import ViewsRequest
 from app.modules.media.mesh_isolation import MeshWorkerError
 from app.modules.media.mesh_protocol import ViewsReady, ViewsRefused
-from app.modules.media.preview_contracts import PreviewManifest
+from app.modules.media.preview_contracts import (
+    GALLERY_WIDTH,
+    STRIP_WIDTH,
+    Matrix,
+    PreviewManifest,
+    ViewProfile,
+    ViewRole,
+)
 from app.modules.media.stl_isolation import STLManifest
 from app.modules.storage.capacity import CapacityManager
 from app.modules.storage.capacity_estimates import vault_allocation
@@ -74,6 +87,17 @@ def publish(
         )
         if canonical != image:
             raise ValueError("preview_noncanonical_image")
+        if view.thumbnail is not None:
+            strip = stream.read(view.thumbnail.size)
+            if hashlib.sha256(strip).hexdigest() != view.thumbnail.sha256:
+                raise ValueError("preview_thumbnail_digest_mismatch")
+            if (
+                thumbnail.to_webp(
+                    strip, width=STRIP_WIDTH, preserve_frame=True, renderer_encoded=True
+                )
+                != strip
+            ):
+                raise ValueError("preview_noncanonical_thumbnail")
     stream.seek(0)
     backend = get_backend()
     key = backend.blob_key(
@@ -138,6 +162,31 @@ def reason_for(exc: Exception) -> str:
     )
 
 
+def planar_cover_rotation(session: Session, file: File) -> Matrix | None:
+    """Preserve the camera of a published planar cover during regeneration."""
+    rows = session.exec(
+        select(ArtifactDerivative.output_json)
+        .where(
+            col(ArtifactDerivative.file_id) == file.id,
+            col(ArtifactDerivative.kind) == DerivativeKind.PREVIEWS,
+            col(ArtifactDerivative.storage_key).is_not(None),
+        )
+        .order_by(col(ArtifactDerivative.recipe_version).desc())
+    )
+    for data in rows:
+        manifest = PreviewManifest.model_validate_json(data)
+        if (
+            manifest.source_sha256 == file.sha256
+            and manifest.profile is ViewProfile.PLANAR
+        ):
+            face = next(
+                (view for view in manifest.views if view.role is ViewRole.FACE), None
+            )
+            if face is not None:
+                return face.rotation
+    return None
+
+
 @dataclass(frozen=True)
 class PassClaim:
     """Views a cover pass owns: its attempt, its request, and what it replaced."""
@@ -175,7 +224,8 @@ def claim_for_pass(
             recipe=attempt.recipe,
             include_poles=policy.preview_poles(session),
             source_sha256=file.sha256,
-            width=int(settings.model_thumbnail_width),
+            width=GALLERY_WIDTH,
+            planar_cover=planar_cover_rotation(session, file),
         ),
         prior,
     )

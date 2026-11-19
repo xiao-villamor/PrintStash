@@ -5,11 +5,10 @@ import json
 
 import numpy as np
 import pytest
-from printstash_core.mesh.preview_profile import RASTERIZER_RECIPE
 from printstash_core.mesh.render_geometry import PreparedRender
 
 from app.modules.media.compute_geometry import decode, encode, split
-from app.modules.media.compute_render import RECIPE
+from app.modules.media.compute_render import render_recipe
 from app.runtime.compute.batching import merge
 from app.runtime.compute.protocol import BinaryRenderRequest, InferenceRequest, Priority
 
@@ -29,7 +28,7 @@ def render_request():
         deadline=100,
         priority=Priority.BACKGROUND,
         request_id="render",
-        recipe=f"{RECIPE}:{RASTERIZER_RECIPE}:64x48:4:0",
+        recipe=render_recipe(64, 48, 4),
         units=4,
         geometry_key=key,
         geometry_bytes=len(body),
@@ -135,6 +134,22 @@ class TestRenderBatchFits:
 
         assert not render_batch_fits([render_request] * 3, device_bytes=1024**3)
 
+    def test_keeps_different_preview_looks_in_separate_batches(self, render_request):
+        from printstash_core.mesh.preview_profile import (
+            PreviewAppearance,
+            PreviewLook,
+            appearance_scope,
+        )
+
+        from app.runtime.compute.batching import render_batch_fits
+
+        with appearance_scope(PreviewAppearance(PreviewLook.SLATE)):
+            slate = render_request.model_copy(
+                update={"recipe": render_recipe(64, 48, 4)}
+            )
+
+        assert not render_batch_fits([render_request, slate], device_bytes=1024**3)
+
     def test_respects_device_capacity(self, render_request):
         from app.runtime.compute.batching import render_batch_fits
 
@@ -187,9 +202,9 @@ class TestRenderBatchFits:
             [request.units for request in requests],
             gpu_finalize=True,
         ).device_bytes
-        # Three vertices/one face:128 persistent bytes (including bounds),
-        # 96 input staging, eight256-byte view configs and a4-byte failure fence.
-        bound = workspace + 128 + 96 + 2048 + 4
+        # Three vertices and one face use 116 persistent bytes including
+        # bounds, 84 staging bytes and eight 256-byte camera frames.
+        bound = workspace + 116 + 84 + 2048 + 4
         assert not render_batch_fits(
             requests, device_bytes=bound - 1, packing_min_faces=packing_min_faces
         )
@@ -198,13 +213,10 @@ class TestRenderBatchFits:
         )
 
     @pytest.mark.parametrize(
-        "mode,normal_staging",
-        [("deferred", 152), ("visual", 132)],
-        ids=["legacy-csr", "device-weld"],
+        "mode",
+        ["deferred", "visual"],
     )
-    def test_reserves_normal_scratch_once_for_reused_geometry(
-        self, render_request, mode, normal_staging
-    ):
+    def test_reserves_shared_uploaded_normals_once(self, render_request, mode):
         from printstash_core.mesh.render_geometry import PreparedRenderGeometry
 
         from app.modules.media.gpu_normals import VisualRender, defer
@@ -229,8 +241,8 @@ class TestRenderBatchFits:
             [request.units] * 2,
             gpu_finalize=True,
         ).device_bytes
-        # Shared128-byte geometry; CSR92+upload60 or weld84+upload48.
-        bound = workspace + 128 + normal_staging + 2048 + 4
+        # Both packet shapes expand to the same bounded device geometry.
+        bound = workspace + 116 + 84 + 2048 + 4
         assert not render_batch_fits([request] * 2, device_bytes=bound - 1)
         assert render_batch_fits([request] * 2, device_bytes=bound)
 

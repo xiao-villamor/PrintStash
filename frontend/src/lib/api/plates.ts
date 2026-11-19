@@ -6,8 +6,22 @@ export function getFilePlates(fileId: number, signal?: AbortSignal): Promise<Fil
   return getJson<FilePlates>(`/api/v1/files/${fileId}/plates`, { signal });
 }
 
+export interface GcodePlateIdentity {
+  number: number;
+  name: string;
+  object_count: number;
+}
+
+export interface GcodePlateMetadata {
+  estimated_time_s: number | null;
+  filament_weight_g: number | null;
+  filament_cost: number | null;
+}
+
 export interface GcodePlates {
   plates: number[];
+  identities: GcodePlateIdentity[];
+  plate_metadata: { number: number; metadata: GcodePlateMetadata }[];
 }
 
 /** Sliced plates need neither source geometry nor a derived mesh layout. */

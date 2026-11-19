@@ -2,12 +2,13 @@
 
 Library cards keep one large cover. Use the arrows to browse a Model's views,
 or **Model views** to open a selectable thumbnail strip. Top and Bottom are named
-choices in that gallery; they are outside the horizontal orbit. Planar objects
-cycle through Cover, Face, Reverse, Oblique edge, Top and Bottom with the same arrows.
+choices in that gallery; they are outside the horizontal orbit. A planar cover can sit before the orbit without dropping any of the four angles.
 There is no autoplay or pointer-position scrubbing.
 
 Single-cover and multi-angle cards reserve the same image area and control row.
-The expanded gallery grows with the screen, up to 1152 px wide, while its image
+Chosen and embedded 3MF photos fill the card and inspector image area.
+Generated views keep their surrounding space. The expanded gallery shows the
+whole image and grows with the screen, up to 1152 px wide, while its image
 height stays within the viewport and its thumbnail strip scrolls on narrow screens.
 
 On cards, the cover occupies the default face in the arrow cycle: Cover → 55° →
@@ -75,27 +76,17 @@ other generated cameras retain imported +Z as screen up where possible.
 Camera matrices, orthographic projection scale/offset, source center, dimensions,
 roles, IDs, ordering, recipe, source SHA-256 and image digests are recorded.
 
-Planar classification uses the shared area-weighted surface covariance. Sorted
-eigenvalues must satisfy smallest/middle < 0.04 and middle/largest >= 0.09.
-This separates plates from rods and works after rotation. The broad-face normal
-has a deterministic sign anchored in the imported frame; it does not claim
-semantic front/back. Ambiguous shapes keep the imported-frame orbit. The oblique
-edge view is 65° from the face. 3MF build/component transforms are applied before
-analysis. No candidates are pruned by silhouette or presumed symmetry.
-
-Recipe 4 renders the views at the **Model image quality** setting in Settings →
-Previews (`VAULT_MODEL_THUMBNAIL_WIDTH`): Compact 320 × 240, Standard 640 × 480
-(the default) or High 1280 × 960, the same size and supersampling as the cover.
-Sets from earlier recipes are 480 × 360 and update once in the background; a
-later change to the setting applies to new views, and **Recreate all images**
-rebuilds existing covers and views together. Four orbit views are rendered, plus
-Top and Bottom when enabled. A pole that would show only the edge of a plate
-standing upright renders empty and is left out of its set; an empty orbit view
-fails the set. Sources follow the same limits as covers and
+Generated views use 1280 × 960 images for the expanded gallery. Older sets stay
+available while background work rebuilds them. The gallery centres each image at
+its intrinsic size when the stage has room. Model image quality still controls
+the automatic card cover. Each generated view includes a separate 320 × 240
+thumbnail for the gallery strip and the card's carousel. Four orbit views are
+rendered, plus Top and Bottom when enabled. A saved planar cover keeps its camera.
+An optional view that projects only an edge can be omitted from the set.
+Sources follow the same limits as covers and
 every other mesh path: `VAULT_MESH_MAX_LOAD_MB` (default 200) and
 `VAULT_MESH_MAX_RENDER_TRIANGLES` (default 2,000,000). Raise them in your
-environment to include larger files. Output is bounded at 1 MiB per image, 6 MiB
-per bundle and a 32 KiB manifest. Native memory and timeout admission also apply,
+environment to include larger files. Output is bounded at 1 MiB per full image, 128 KiB per thumbnail, seven views per bundle, and a 32 KiB manifest. Native memory and timeout admission also apply,
 so on small hosts keep `VAULT_MAX_RENDER_JOBS` low. Oversized sources receive an explicit resource-limit
 outcome; optional unavailable converters are unsupported. Neither outcome
 invalidates the original Artifact or its primary thumbnail. These discrete

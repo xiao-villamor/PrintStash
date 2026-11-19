@@ -9,7 +9,8 @@
 @source "../packages/ui/src";
 
 @layer base {
-  :root {
+  :root,
+  [data-preview-theme="light"] {
     /* Font families (previously injected by next/font; now from @fontsource). */
     --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
     --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
@@ -36,6 +37,8 @@
     --border-strong: #cdd3db;
     --overlay-scrim: rgb(16 24 40 / 0.28);
     --plate: #f8fafc;
+    /* Neutral backing for transparent slicer images, independent of theme. */
+    --preview-image-matte: #eef0f3;
     --dialog-shadow: rgb(16 24 40 / 0.12);
     --input: #8190a3;
     --ring: #4d6f9b;
@@ -106,7 +109,8 @@
     --tertiary-fixed-dim: #fb923c;
   }
 
-  .dark {
+  .dark,
+  [data-preview-theme="dark"] {
     color-scheme: dark;
 
     /* Surfaces — distinct contrast steps */
@@ -335,11 +339,19 @@
     max-width: 800px;
   }
 
+  .setup-card-appearance {
+    max-width: 960px;
+  }
+
   @media (min-width: 768px) {
     .setup-card {
       height: min(600px, 100dvh - 136px);
       grid-template-columns: 220px minmax(0, 1fr);
       grid-template-rows: minmax(0, 1fr);
+    }
+
+    .setup-card-appearance {
+      height: min(736px, 100dvh - 136px);
     }
   }
 

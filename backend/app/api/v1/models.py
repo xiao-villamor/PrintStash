@@ -106,7 +106,7 @@ from app.modules.library.trash import (
 from app.modules.library.trash import (
     restore_model as trash_restore_model,
 )
-from app.modules.media.preview_contracts import ViewId
+from app.modules.media.preview_contracts import PreviewSize, ViewId
 from app.modules.media.source_cover_processing import MAX_SOURCE_COVER_BYTES
 from app.modules.printing import job_import, print_results
 from app.modules.printing.moonraker import MoonrakerError
@@ -990,16 +990,20 @@ def patch_model_provenance(
 @router.get("/{model_id}/cover/content", summary="Read the Model's chosen cover")
 def get_model_cover(
     model_id: int,
+    size: Literal["thumbnail", "original"] = "original",
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> Response:
     model = _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    from app.modules.media.thumbnail import PhotoSize, to_photo_webp
+
+    photo = to_photo_webp(model_covers.content(model), size=PhotoSize(size))
     return Response(
-        content=model_covers.content(model),
+        content=photo.data,
         media_type="image/webp",
         headers={
             "Cache-Control": "private, no-cache",
-            "ETag": f'"model-cover-{model_id}-{model.cover_filename}"',
+            "ETag": f'"model-cover-{model_id}-{model.cover_filename}-{size}-photo"',
             "X-Content-Type-Options": "nosniff",
         },
     )
@@ -1137,8 +1141,13 @@ def stream_model_source_cover(
     cover = source_covers.get(session, source_id)
     if cover is None:
         raise HTTPException(status_code=404, detail="source_cover_not_found")
+    from app.modules.media.thumbnail import PhotoSize, to_photo_webp
+
+    photo = to_photo_webp(
+        get_backend().read_bytes(cover.storage_key), size=PhotoSize.ORIGINAL
+    )
     return Response(
-        content=get_backend().read_bytes(cover.storage_key),
+        content=photo.data,
         media_type="image/webp",
         headers={
             "Cache-Control": "private, max-age=3600",
@@ -1931,6 +1940,7 @@ def get_model_preview_image(
     model_id: int,
     generation: str,
     view_id: ViewId,
+    size: PreviewSize = PreviewSize.FULL,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ):
@@ -1939,4 +1949,4 @@ def get_model_preview_image(
 
     _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
     row, manifest = previews.resolve(session, model_id, generation)
-    return preview_response(row, manifest, view_id)
+    return preview_response(row, manifest, view_id, size=size)
