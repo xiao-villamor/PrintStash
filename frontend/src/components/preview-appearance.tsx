@@ -117,9 +117,15 @@ export function PreviewAppearance({
                   aria-hidden
                 >
                   {value.preview_look === look && (
-                    <span className="grid size-4 place-items-center bg-card text-card-foreground">
-                      <Check className="size-3" />
-                    </span>
+                    <Check
+                      strokeWidth={3}
+                      className={cn(
+                        "size-4",
+                        look === "graphite"
+                          ? "text-primary-foreground"
+                          : "text-foreground dark:text-inverse-on-surface",
+                      )}
+                    />
                   )}
                 </span>
               </label>
@@ -151,7 +157,7 @@ export function PreviewAppearance({
         <div
           className={cn(
             "grid grid-cols-2 gap-4",
-            layout === "settings" ? "max-w-[30rem]" : "max-w-[41rem]",
+            layout === "settings" ? "max-w-[30rem]" : "mx-auto max-w-[41rem]",
           )}
         >
           {themes.map((theme) => (

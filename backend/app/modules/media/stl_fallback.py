@@ -272,9 +272,7 @@ def render_stl_thumbnail(
         center = (np.asarray(sampled.bounds_min) + np.asarray(sampled.bounds_max)) * 0.5
         if not np.isfinite(center).all():
             return None
-        rotation = _select_view_rotation(corners - center, np, reference=True).astype(
-            np.float64
-        )
+        rotation = _select_view_rotation(corners - center, np).astype(np.float64)
         view_corners = (corners - center) @ rotation.T
         if not np.isfinite(rotation).all() or not np.isfinite(view_corners).all():
             return None

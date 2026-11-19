@@ -95,23 +95,22 @@ GRID_SHADER = (
     return vec4(points[index], 1., 1.);
 }
 @fragment fn grid_fs(@builtin(position) pixel: vec4<f32>) -> @location(0) vec4<f32> {
-    let axis = u32(frame.floor.z);
     let depth = frame.r2.xyz;
-    if frame.floor.w == 0. || abs(depth[axis]) < 0.08 { discard; }
+    if frame.floor.w == 0. || depth.z >= -1e-6 { discard; }
     let size = frame.extent.xy;
     let xy = vec2(pixel.x-size.x*0.5, size.y*0.5-pixel.y)/frame.projection.z
              + frame.projection.xy;
-    let right = frame.r0.xyz - depth*frame.r0[axis]/depth[axis];
-    let up = frame.r1.xyz - depth*frame.r1[axis]/depth[axis];
-    let point = depth*frame.floor.x/depth[axis] + right*xy.x + up*xy.y;
+    let right = frame.r0.xyz - depth*frame.r0.z/depth.z;
+    let up = frame.r1.xyz - depth*frame.r1.z/depth.z;
+    let point = depth*frame.floor.x/depth.z + right*xy.x + up*xy.y;
     let cell = frame.floor.y;
     let offset = abs(fract(point/cell+0.5)-0.5)*cell;
     let step = max(sqrt(right*right+up*up)*frame.floor.w/frame.projection.z, vec3(1e-6));
-    let first = (axis+1u)%3u;
-    let second = (axis+2u)%3u;
-    let line = clamp(0.95-min(offset[first]/step[first], offset[second]/step[second]),0.,1.);
-    let radius = length(2.*(pixel.xy/size-0.5));
-    let fade = pow(clamp((0.96-radius)/0.65,0.,1.),1.1);
+    let line = clamp(0.95-min(offset.x/step.x, offset.y/step.y),0.,1.);
+    let radial = length((point.xy-frame.footprint.xy)/frame.footprint.zw);
+    let screen = abs(2.*(pixel.xy/size-0.5));
+    let edge = max(screen.x, screen.y);
+    let fade = pow(clamp((1.-radial)/0.6,0.,1.),1.1) * clamp((0.99-edge)/0.11,0.,1.);
     let alpha = floor(line*fade*0.8*255.)/255.;
     if alpha == 0. { discard; }
     return vec4(vec3(138.,147.,166.)/255., alpha);

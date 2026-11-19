@@ -2453,7 +2453,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         "--library-inspector-padding-offset": `${appliedDock.paddingOffset}px`,
       }
     : {};
-  const inspectorOpener = useRef<HTMLElement | null>(null);
+  const inspectorKeyboardOpener = useRef<HTMLElement | null>(null);
   const setInspector = useCallback(
     (intent: InspectorIntent) => {
       libraryInspectorIntents.set(inspectorScope, intent);
@@ -2465,7 +2465,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   );
   const inspectModel = useCallback(
     (id: number, opener: HTMLElement | null) => {
-      inspectorOpener.current = opener;
+      // Capture focus modality before the drawer moves focus to its title.
+      inspectorKeyboardOpener.current = opener?.matches(":focus-visible") ? opener : null;
       setInspector({ id, open: true });
     },
     [setInspector],
@@ -2520,14 +2521,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (!element) return;
     let frame = 0;
     function reveal() {
-      const result = readingRenderers.current.get("models")?.reveal(key);
       const anchor = element?.querySelector<HTMLElement>(libraryReadingSelector(key));
       const card = anchor?.closest<HTMLElement>("[data-library-key]") ?? anchor;
-      if (result === "pending") {
+      // A mounted card can open while the virtual list is still measuring.
+      if (!card && readingRenderers.current.get("models")?.reveal(key) === "pending") {
         frame = requestAnimationFrame(reveal);
         return;
       }
-      if (card && result === "mounted") {
+      if (card) {
         card.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
         inspectModel(id, localTreeReveal?.opener ?? anchor ?? null);
         setTreeFocus({ id, entryKey: entry.key });
@@ -2589,7 +2590,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const closeInspector = useCallback(() => {
     if (inspectorIntent) setInspector({ ...inspectorIntent, open: false });
     requestAnimationFrame(() => {
-      const opener = inspectorOpener.current;
+      const opener = inspectorKeyboardOpener.current;
       if (opener?.isConnected) opener.focus({ preventScroll: true });
       else startupContent.current?.focus({ preventScroll: true });
     });
@@ -2599,7 +2600,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (inspectorOpen) closeInspector();
     else {
       const id = inspectorIntent?.id ?? visibleModels[0]?.id;
-      if (id !== undefined) setInspector({ id, open: true });
+      if (id !== undefined) {
+        const opener = document.activeElement;
+        inspectModel(id, opener instanceof HTMLElement ? opener : null);
+      }
     }
   }, [
     inspectorAvailable,
@@ -2607,7 +2611,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     inspectorIntent,
     visibleModels,
     closeInspector,
-    setInspector,
+    inspectModel,
   ]);
   useEffect(() => {
     window.dispatchEvent(
@@ -4777,6 +4781,7 @@ function ModelListRow({
   return (
     <Localized>
       <LibraryItemLink
+        data-inspected={inspected || undefined}
         origin={origin}
         href={`/models/${model.id}`}
         draggable={draggable}
@@ -4804,9 +4809,9 @@ function ModelListRow({
             onInspect(model.id, e.currentTarget);
           }
         }}
-        className={`flex items-center gap-2 md:gap-3 px-4 py-3 border-b border-border transition-colors group active:bg-muted ${
+        className={`library-model-row flex items-center gap-2 md:gap-3 px-4 py-3 border-b border-border transition-colors duration-press group active:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
           draggable ? "cursor-grab active:cursor-grabbing" : ""
-        } ${selected || inspected ? "bg-accent" : "hover:bg-muted"}`}
+        } ${selected ? "bg-accent" : "hover:bg-muted"}`}
       >
         {onToggleSelect && (
           <Checkbox

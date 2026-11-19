@@ -221,7 +221,7 @@ def _frame(
     corners = np.asarray(
         list(product(*zip(exact_min, exact_max, strict=True))), dtype=np.float64
     )
-    rotation = _select_view_rotation(corners - center, np, reference=True)
+    rotation = _select_view_rotation(corners - center, np)
     view_corners = (corners - center) @ rotation.T
     extent_x = max(float(np.ptp(view_corners[:, 0])), 1e-6)
     extent_y = max(float(np.ptp(view_corners[:, 1])), 1e-6)

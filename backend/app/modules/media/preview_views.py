@@ -174,7 +174,8 @@ def render_prepared_views(
     cover_view = None
     if width >= GALLERY_WIDTH:
         rotation = planar_cover
-        if rotation is None:
+        # Legacy standing-plate covers could look up from below the bed.
+        if rotation is None or rotation[2][2] >= -1e-6:
             rotation = _matrix(_select_view_rotation(geometry.vertices))
         matching = next(
             (view for view in views if np.allclose(view.rotation, rotation)), None

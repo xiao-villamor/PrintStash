@@ -31,7 +31,8 @@ struct Frame {
     key_colour: vec3<f32>, key_strength: f32,
     fill_colour: vec3<f32>, fill_strength: f32,
     rim_colour: vec3<f32>, rim_strength: f32,
-    floor: vec4<f32>
+    floor: vec4<f32>,
+    footprint: vec4<f32>
 };
 fn rotate(value: vec3<f32>, frame: Frame) -> vec3<f32> {
     return vec3(dot(value,frame.r0.xyz), dot(value,frame.r1.xyz), dot(value,frame.r2.xyz));
@@ -117,26 +118,24 @@ fn select_rotation() {
         let broad = min(extents[(axis+1u)%3u], extents[(axis+2u)%3u]);
         var choice = 3u;
         if broad > 1e-6 && extents[axis] / broad <= FLAT_RATIO { choice = axis; }
+        if choice < 2u && config.studio != 0. { choice += 4u; }
         r0 = rotations[choice*3u]; r1 = rotations[choice*3u+1u];
         r2 = rotations[choice*3u+2u];
     }
     frame = config;
     frame.r0 = r0; frame.r1 = r1; frame.r2 = r2;
     let extents = bounds.high.xyz - bounds.low.xyz;
-    var thin = 0u;
-    if extents.y < extents.x { thin = 1u; }
-    if extents.z < extents[thin] { thin = 2u; }
-    let broad = min(extents[(thin+1u)%3u], extents[(thin+2u)%3u]);
-    let planar = broad > 1e-6 && extents[thin] / broad <= FLAT_RATIO;
-    let axis = select(2u, thin, planar);
-    let elevation = select(bounds.low.z, (bounds.low[axis] + bounds.high[axis])*0.5, planar);
-    let target_cell = max(extents[(axis+1u)%3u], extents[(axis+2u)%3u])/5.;
+    let target_cell = max(extents.x, extents.y)/5.;
     let cells = array<f32, 6>(1., 2., 5., 10., 20., 50.);
     var cell = 50.;
     for (var i = 0u; i < 6u; i++) {
         if target_cell <= cells[i] { cell = cells[i]; break; }
     }
-    frame.floor = vec4(elevation, cell, f32(axis), config.floor.w);
+    frame.floor = vec4(bounds.low.z, cell, 0., config.floor.w);
+    frame.footprint = vec4(
+        (bounds.low.xy + bounds.high.xy)*0.5,
+        extents.xy*0.5 + 1.5*cell
+    );
 }
 """
 )
@@ -194,12 +193,13 @@ def _auto_rotations() -> str:
         ]
     )
     rotations.append(hero_tilt @ bases[1] @ spin)
+    rotations.extend(tilt.T @ base for base in bases[:2])
     rows = ",".join(
         "vec4<f32>(" + ",".join(f"{float(x):.9f}" for x in row) + ",0.)"
         for rotation in rotations
         for row in rotation
     )
-    return "const rotations = array<vec4<f32>,12>(" + rows + ");"
+    return "const rotations = array<vec4<f32>,18>(" + rows + ");"
 
 
 def frame_config(

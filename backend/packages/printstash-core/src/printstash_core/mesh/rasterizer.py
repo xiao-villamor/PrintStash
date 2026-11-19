@@ -707,6 +707,9 @@ def _front_rotation_for_thin_axis(
     # 25° tilt rotation around the screen-X axis (tips the model top toward camera).
     profile = REFERENCE_THUMBNAIL_PROFILE if reference else PREVIEW_PROFILE
     tilt = np.radians(profile.flat_tilt_degrees)
+    if not reference and thin_axis != 2:
+        # Photograph standing plates from above the build plane.
+        tilt = -tilt
     ct, st = float(np.cos(tilt)), float(np.sin(tilt))
 
     if thin_axis == 0:

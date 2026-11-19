@@ -120,9 +120,10 @@
   opacity: 1;
 }
 
-.library-model-card[data-inspected] {
-  border-color: var(--foreground);
-  outline: 1px solid var(--foreground);
+.library-model-card[data-inspected],
+.library-model-row[data-inspected] {
+  border-color: var(--ring);
+  outline: 1px solid var(--ring);
   outline-offset: -1px;
 }
 

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .preview_profile import PREVIEW_PROFILE
-
 if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
@@ -30,26 +28,22 @@ def paint_floor_grid(
     import numpy as np
 
     height, width = rgba.shape[:2]
-    limits = np.asarray(bounds_max) - bounds_min
-    thin = int(np.argmin(limits))
-    plane_axes = [axis for axis in range(3) if axis != thin]
-    broad = min(limits[plane_axes])
-    planar = (
-        broad > 1e-6 and limits[thin] / broad <= PREVIEW_PROFILE.flat_thickness_ratio
-    )
-    axis = thin if planar else 2
-    other = [index for index in range(3) if index != axis]
+    footprint = (np.asarray(bounds_max) - bounds_min)[:2]
     depth = rotation[2]
-    if abs(depth[axis]) < 0.08:
+    # View depth increases away from the camera. From below the bed (including
+    # Bottom), the floor would be in front of the model rather than supporting it.
+    if depth[2] >= -1e-6:
         return
-    plane = (bounds_min[axis] + bounds_max[axis]) * 0.5 if planar else bounds_min[2]
+    plane = bounds_min[2]
     cell = next(
-        (size for size in CELL_SIZES if size >= max(limits[other]) / 5), CELL_SIZES[-1]
+        (size for size in CELL_SIZES if size >= max(footprint) / 5), CELL_SIZES[-1]
     )
+    center = (np.asarray(bounds_max)[:2] + np.asarray(bounds_min)[:2]) * 0.5
+    radius = footprint * 0.5 + 1.5 * cell
     sy = scale if scale_y is None else scale_y
-    right = rotation[0] - depth * rotation[0, axis] / depth[axis]
-    up = rotation[1] - depth * rotation[1, axis] / depth[axis]
-    origin = depth * plane / depth[axis]
+    right = rotation[0] - depth * rotation[0, 2] / depth[2]
+    up = rotation[1] - depth * rotation[1, 2] / depth[2]
+    origin = depth * plane / depth[2]
     pixel = np.hypot(right / scale, up / sy) * samples
     columns = np.arange(width, dtype=np.float32) + 0.5
     screen_x = (columns - width * 0.5) / scale + view_center[0]
@@ -57,20 +51,30 @@ def paint_floor_grid(
         tile = rgba[start : start + 48]
         rows = np.arange(start, start + len(tile), dtype=np.float32) + 0.5
         screen_y = (height * 0.5 - rows) / sy + view_center[1]
-        radius = np.hypot(
-            (columns[None, :] / width - 0.5) * 2,
-            (rows[:, None] / height - 0.5) * 2,
-        )
-        fade = np.clip((0.96 - radius) / 0.65, 0, 1) ** 1.1
-        alpha = np.zeros_like(fade)
-        for index in other:
-            point = (
-                origin[index]
-                + screen_x[None, :] * right[index]
-                + screen_y[:, None] * up[index]
+        points = [
+            origin[axis]
+            + screen_x[None, :] * right[axis]
+            + screen_y[:, None] * up[axis]
+            for axis in (0, 1)
+        ]
+        # Fade around the footprint on the floor. A screen-centred grid also
+        # draws far behind tall, narrow models, where it looks suspended.
+        radial = np.hypot(
+            *(
+                (point - c) / r
+                for point, c, r in zip(points, center, radius, strict=True)
             )
+        )
+        edge = np.maximum(
+            np.abs(columns[None, :] / width - 0.5) * 2,
+            np.abs(rows[:, None] / height - 0.5) * 2,
+        )
+        fade = np.clip((1 - radial) / 0.6, 0, 1) ** 1.1
+        fade *= np.clip((0.99 - edge) / 0.11, 0, 1)
+        alpha = np.zeros_like(fade)
+        for axis, point in enumerate(points):
             distance = np.abs(np.remainder(point + cell * 0.5, cell) - cell * 0.5)
-            coverage = np.clip(0.95 - distance / max(pixel[index], 1e-6), 0, 1)
+            coverage = np.clip(0.95 - distance / max(pixel[axis], 1e-6), 0, 1)
             np.maximum(alpha, coverage, out=alpha)
         alpha = (alpha * fade * GRID_ALPHA * 255).astype(np.uint8)
         visible = (tile[..., 3] == 0) & (alpha > 0)
