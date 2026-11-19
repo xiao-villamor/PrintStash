@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import defaultdict
+from dataclasses import dataclass
 
 from sqlalchemy import and_, func
 from sqlmodel import Session, col, select
@@ -15,6 +16,7 @@ from app.db.models import (
     DerivativeKind,
     DerivativeState,
     File,
+    FileType,
     JobKind,
     Model,
     ModelCover,
@@ -23,18 +25,21 @@ from app.db.scopes import live
 from app.modules.derivatives import policy
 from app.modules.derivatives.kinds import MESH_TYPES, PREVIEWS_RECIPE
 from app.modules.derivatives.sliced_reads import meshless_archives
+from app.modules.media.mesh_contracts import ThumbnailStrategy
 from app.modules.media.preview_contracts import (
     PreviewManifest,
     ViewId,
     ViewProfile,
     ViewRole,
 )
+from app.modules.media.sliced_gcode import is_sliced_filename
 from app.schemas.previews import (
     REASONED_STATES,
     ArchiveImageRead,
     ArtifactPreviews,
     ModelPreviewRead,
     NoPreviewSubject,
+    PreviewImageKind,
     PreviewImageRead,
     PreviewManifestRead,
     PreviewState,
@@ -87,15 +92,26 @@ def selected_files(
     }
 
 
-def _cover_info(session: Session, model_ids: list[int]):
-    """Read hashes of the covers actually served, without opening stored images."""
+@dataclass(frozen=True)
+class CoverInfo:
+    digest: str | None
+    automatic_file: int | None
+    custom_filename: str | None
+    image_kind: PreviewImageKind | None
+
+
+def _cover_info(session: Session, model_ids: list[int]) -> dict[int, CoverInfo]:
+    """Resolve the chosen cover or its published thumbnail and media kind."""
     rows = session.exec(
         select(
             Model.id,
             Model.cover_filename,
             Model.thumbnail_file_id,
+            Model.thumbnail_path,
             ModelCover.sha256,
             ArtifactDerivative.output_json,
+            File.file_type,
+            File.original_filename,
         )
         .select_from(Model)
         .outerjoin(
@@ -114,19 +130,46 @@ def _cover_info(session: Session, model_ids: list[int]):
                 col(ArtifactDerivative.state) == DerivativeState.READY,
             ),
         )
+        .outerjoin(File, col(File.id) == col(ArtifactDerivative.file_id))
         .where(col(Model.id).in_(model_ids))
     ).all()
     info = {}
-    for model_id, cover_filename, thumbnail_file_id, cover_digest, thumbnail in rows:
+    for (
+        model_id,
+        cover_filename,
+        thumbnail_file_id,
+        thumbnail_path,
+        cover_digest,
+        thumbnail,
+        file_type,
+        filename,
+    ) in rows:
+        if model_id is None:
+            continue
         metadata = json.loads(thumbnail) if thumbnail else {}
-        if model_id is not None:
-            info[model_id] = (
-                cover_digest if cover_filename else metadata.get("sha256"),
-                thumbnail_file_id
-                if not cover_filename and metadata.get("strategy") == "full"
-                else None,
-                cover_filename,
+        strategy = metadata.get("strategy")
+        embedded_3mf = strategy == ThumbnailStrategy.EMBEDDED and (
+            file_type is FileType.THREE_MF
+            or (
+                file_type is FileType.GCODE
+                and filename is not None
+                and is_sliced_filename(filename)
             )
+        )
+        if cover_filename is not None or embedded_3mf:
+            kind = PreviewImageKind.PHOTO
+        elif thumbnail_file_id or thumbnail_path:
+            kind = PreviewImageKind.RENDER
+        else:
+            kind = None
+        info[model_id] = CoverInfo(
+            digest=cover_digest if cover_filename else metadata.get("sha256"),
+            automatic_file=thumbnail_file_id
+            if not cover_filename and strategy == ThumbnailStrategy.FULL
+            else None,
+            custom_filename=cover_filename,
+            image_kind=kind,
+        )
     return info
 
 
@@ -164,7 +207,7 @@ def summaries(
                 [
                     ArchiveImageRead(
                         file_id=file_id,
-                        url=f"/api/v1/files/{file_id}/archive-images/{index}?v={sha256}",
+                        url=f"/api/v1/files/{file_id}/archive-images/{index}?v={sha256}&framing=photo",
                         plate=image.plate,
                     )
                     for index, image in enumerate(images)
@@ -173,9 +216,11 @@ def summaries(
     result: dict[int, ModelPreviewRead] = {}
     for model_id in model_ids:
         file = files.get(model_id)
-        digest, automatic_file, custom_filename = cover_info.get(
-            model_id, (None, None, None)
-        )
+        cover = cover_info.get(model_id)
+        digest = cover.digest if cover is not None else None
+        automatic_file = cover.automatic_file if cover is not None else None
+        custom_filename = cover.custom_filename if cover is not None else None
+        cover_kind = cover.image_kind if cover is not None else None
         archive_images = archive_by_model.get(model_id, [])
         custom_url = (
             f"/api/v1/models/{model_id}/cover/content?v={custom_filename}"
@@ -183,14 +228,16 @@ def summaries(
             else None
         )
         if file is None:
+            photo_url = custom_url or (
+                archive_images[0].url
+                if archive_images and custom_filename is None
+                else None
+            )
             result[model_id] = NoPreviewSubject(
+                cover_image_kind=cover_kind,
+                large_cover_image_kind=PreviewImageKind.PHOTO if photo_url else None,
                 archive_images=archive_images,
-                large_cover_url=custom_url
-                or (
-                    archive_images[0].url
-                    if archive_images and not custom_filename
-                    else None
-                ),
+                large_cover_url=photo_url,
             )
             continue
         assert file.id is not None
@@ -284,6 +331,14 @@ def summaries(
         else:
             state = PreviewState(current.state.value)
         result[model_id] = ArtifactPreviews(
+            cover_image_kind=cover_kind,
+            large_cover_image_kind=(
+                PreviewImageKind.PHOTO
+                if custom_url
+                else PreviewImageKind.RENDER
+                if large_cover_url
+                else None
+            ),
             large_cover_url=large_cover_url,
             large_cover_view=large_cover_view,
             large_cover_thumbnail_url=large_cover_thumbnail_url,

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useModelPreviews } from "@/lib/use-model-previews";
 import { useViewportAdmission } from "@/lib/use-viewport-admission";
-import { publishedViews, type ModelPreviews } from "@/types/previews";
+import { coverImageKind, publishedViews, type ModelPreviews } from "@/types/previews";
 
 /**
  * One card's preview state, shared by the image inside the card's link and the
@@ -32,6 +32,10 @@ export function useModelPreviewCard(
   const [open, setOpen] = useState(false);
   // A selected view replaces the cover only once its own bytes have decoded.
   const view = preview.selected === "cover" ? null : preview.displayed;
+  const image = views.find((candidate) => candidate.id === view?.id);
+  const imageKind =
+    image?.image_kind ??
+    (image ? (image.role === "archive" ? "photo" : "render") : coverImageKind(previews, size));
   // Pointer travel between the image and its overlaid controls is one hover.
   function leave(event: { currentTarget: Element; relatedTarget: EventTarget | null }) {
     const next = event.relatedTarget;
@@ -51,7 +55,19 @@ export function useModelPreviewCard(
     setHovered(true);
     preview.hover();
   }
-  const state = { views, preview, view, hovered, enter, leave, open, setOpen, cover, previews };
+  const state = {
+    views,
+    preview,
+    view,
+    imageKind,
+    hovered,
+    enter,
+    leave,
+    open,
+    setOpen,
+    cover,
+    previews,
+  };
   return [ref, state] as const;
 }
 export type PreviewCard = ReturnType<typeof useModelPreviewCard>[1];

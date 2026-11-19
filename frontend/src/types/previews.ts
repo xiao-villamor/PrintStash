@@ -50,13 +50,17 @@ export const PREVIEW_STATES: readonly PreviewState[] = [
   "unsupported",
 ];
 
+export type PreviewImageKind = "photo" | "render";
+
 export interface PreviewImage {
+  image_kind?: "render";
   id: PreviewViewId;
   role: PreviewViewRole;
   url: string;
   thumbnail_url?: string;
 }
 export interface ArchivePreviewImage {
+  image_kind?: "photo";
   file_id: number;
   url: string;
   plate: number | null;
@@ -67,6 +71,8 @@ export type CarouselImage =
   | (ArchivePreviewImage & { id: `archive-${number}`; role: "archive" });
 
 interface ModelPreviewMedia {
+  cover_image_kind?: PreviewImageKind;
+  large_cover_image_kind?: PreviewImageKind;
   large_cover_url?: string;
   large_cover_thumbnail_url?: string;
   large_cover_view?: PreviewViewId;
@@ -99,6 +105,17 @@ export type ModelPreviews = NoPreviewSubject | ArtifactPreviews;
 
 export const NO_PREVIEWS: NoPreviewSubject = { kind: "none", cover_camera: "unknown" };
 
+export function coverImageKind(
+  previews: ModelPreviews,
+  size: "thumbnail" | "full",
+): PreviewImageKind {
+  return (
+    (size === "full" ? previews.large_cover_image_kind : undefined) ??
+    previews.cover_image_kind ??
+    "render"
+  );
+}
+
 /** Published images, or none when no valid generation exists yet. */
 export function publishedViews(previews: ModelPreviews): CarouselImage[] {
   const generated = previews.kind === "artifact" ? (previews.published?.views ?? []) : [];
@@ -129,9 +146,18 @@ export function previewsInFlight(previews: ModelPreviews): boolean {
  * Boundary check for wire data that overlays a cached browse snapshot. The
  * value arrives typed by its declared contract; this confirms it actually holds.
  */
+function isPreviewImageKind(value: PreviewImageKind): boolean {
+  return value === "photo" || value === "render";
+}
+
 export function isModelPreviews(wire: ModelPreviews): boolean {
   // oxlint-disable anti-slop/no-runtime-typeof -- Foreign HTTP JSON must establish its closed case, Artifact identity and view addresses before it can replace a displayed preview.
   if (wire?.cover_camera !== "unknown") return false;
+  if (
+    (wire.cover_image_kind !== undefined && !isPreviewImageKind(wire.cover_image_kind)) ||
+    (wire.large_cover_image_kind !== undefined && !isPreviewImageKind(wire.large_cover_image_kind))
+  )
+    return false;
   if (wire.large_cover_url !== undefined && typeof wire.large_cover_url !== "string") return false;
   if (
     wire.large_cover_thumbnail_url !== undefined &&
@@ -148,6 +174,7 @@ export function isModelPreviews(wire: ModelPreviews): boolean {
           Number.isSafeInteger(image?.file_id) &&
           image.file_id > 0 &&
           typeof image.url === "string" &&
+          (image.image_kind === undefined || image.image_kind === "photo") &&
           (image.plate === null || (Number.isSafeInteger(image.plate) && image.plate > 0)),
       ))
   )
@@ -171,6 +198,7 @@ export function isModelPreviews(wire: ModelPreviews): boolean {
           (view) =>
             PREVIEW_VIEW_IDS.includes(view?.id) &&
             PREVIEW_VIEW_ROLES.includes(view.role) &&
+            (view.image_kind === undefined || view.image_kind === "render") &&
             typeof view.url === "string" &&
             (view.thumbnail_url === undefined || typeof view.thumbnail_url === "string"),
         )))

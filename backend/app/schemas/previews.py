@@ -12,6 +12,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.modules.media.preview_contracts import (
+    MAX_VIEWS,
     PreviewManifest,
     ViewId,
     ViewProfile,
@@ -37,7 +38,13 @@ REASONED_STATES = frozenset(
 )
 
 
+class PreviewImageKind(StrEnum):
+    PHOTO = "photo"
+    RENDER = "render"
+
+
 class PreviewImageRead(BaseModel):
+    image_kind: Literal[PreviewImageKind.RENDER] = PreviewImageKind.RENDER
     id: ViewId
     role: ViewRole
     url: str
@@ -53,10 +60,11 @@ class PublishedPreviewRead(BaseModel):
     cover_view: ViewId | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-    views: list[PreviewImageRead] = Field(min_length=1, max_length=6)
+    views: list[PreviewImageRead] = Field(min_length=1, max_length=MAX_VIEWS)
 
 
 class ArchiveImageRead(BaseModel):
+    image_kind: Literal[PreviewImageKind.PHOTO] = PreviewImageKind.PHOTO
     file_id: int
     url: str
     plate: int | None
@@ -71,6 +79,12 @@ class NoPreviewSubject(BaseModel):
     kind: Literal["none"] = "none"
     # Embedded, source and custom covers carry no known mesh camera.
     cover_camera: Literal["unknown"] = "unknown"
+    cover_image_kind: PreviewImageKind | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    large_cover_image_kind: PreviewImageKind | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     large_cover_url: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
@@ -89,6 +103,12 @@ class ArtifactPreviews(BaseModel):
 
     kind: Literal["artifact"] = "artifact"
     cover_camera: Literal["unknown"] = "unknown"
+    cover_image_kind: PreviewImageKind | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    large_cover_image_kind: PreviewImageKind | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     large_cover_url: str | None = Field(
         default=None, exclude_if=lambda value: value is None
     )

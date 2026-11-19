@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import (
@@ -30,6 +31,7 @@ from app.db.session import get_session
 from app.modules.derivatives.sliced_reads import meshless_archives
 from app.modules.identity import auth, rbac
 from app.modules.library.model_views.thumbnails import thumbnail_version
+from app.modules.media import thumbnail
 from app.modules.media.sliced_archive import read_archive_image
 from app.modules.media.sliced_gcode import is_container, plate_metadata
 from app.modules.media.three_mf_preview import (
@@ -268,6 +270,7 @@ def archive_image(
     file_id: int,
     index: int,
     request: Request,
+    framing: Literal["source", "photo"] = "source",
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ):
@@ -283,19 +286,27 @@ def archive_image(
         raise _embedded_gcode_error(exc) from exc
     except (FileNotFoundError, ArtifactContentError) as exc:
         raise HTTPException(status_code=410, detail="file_blob_missing") from exc
+    media_type = image.media_type
+    name = Path(image.member)
+    if framing == "photo":
+        try:
+            payload = thumbnail.to_photo_webp(
+                payload, size=thumbnail.PhotoSize.ORIGINAL
+            ).data
+        except thumbnail.ThumbnailValidationError as exc:
+            raise HTTPException(
+                status_code=410, detail="archive_image_unavailable"
+            ) from exc
+        media_type = "image/webp"
+        name = name.with_suffix(".webp")
     code, headers = bytes_response_headers(
         payload,
-        delivery_request(
-            request,
-            Path(image.member).name,
-            image.media_type,
-            DeliveryPurpose.THUMBNAIL,
-        ),
+        delivery_request(request, name.name, media_type, DeliveryPurpose.THUMBNAIL),
     )
     return Response(
         content=payload if code == 200 else b"",
         status_code=code,
-        media_type=image.media_type,
+        media_type=media_type,
         headers=headers,
     )
 

@@ -140,13 +140,20 @@ export function ModelPreviewFrame({
       ref={admission}
       className="library-preview relative h-36 shrink-0 overflow-hidden"
       data-model-preview={name}
+      data-image-kind={state.imageKind}
       onPointerEnter={state.enter}
       onPointerLeave={state.leave}
     >
       <PreviewImage
         name={name}
         state={state}
-        imageClassName={favorites ? "w-full h-full object-contain" : "library-card-thumbnail"}
+        imageClassName={
+          state.imageKind === "photo"
+            ? "h-full w-full object-cover object-center"
+            : favorites
+              ? "h-full w-full object-contain"
+              : "library-card-thumbnail"
+        }
         loadingPlaceholder={<LibraryPreviewPlaceholder />}
         placeholder={
           <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center">
@@ -174,13 +181,17 @@ function PreviewArrows({ state, size }: { state: PreviewCard; size: "card" | "ga
             <Button
               key={index}
               {...keepOffCard}
-              variant={size === "card" ? "ghost" : "outline"}
+              variant={size === "card" && state.imageKind === "render" ? "ghost" : "outline"}
               size="icon"
               data-side={index === 0 ? "previous" : "next"}
               className={cn(
                 "library-preview-arrow pointer-events-auto absolute top-1/2 -translate-y-1/2",
                 size === "card"
-                  ? "h-8 w-6 text-foreground hover:bg-card hover:text-card-foreground focus-visible:bg-card focus-visible:text-card-foreground"
+                  ? cn(
+                      "h-8 w-6",
+                      state.imageKind === "render" &&
+                        "text-foreground hover:bg-card hover:text-card-foreground focus-visible:bg-card focus-visible:text-card-foreground",
+                    )
                   : "h-11 w-8",
                 index === 0
                   ? size === "card"
@@ -239,7 +250,7 @@ export function ModelPreviewControls({
         data-hovered={state.hovered || undefined}
         className="library-preview-controls pointer-events-none absolute inset-x-0 top-0 z-10"
       >
-        {views.length >= 2 && navigationViews.length >= 2 && (
+        {navigationViews.length >= 2 && (
           <div
             className="library-preview-reveal library-preview-navigation absolute inset-x-0 top-0 bottom-0"
             data-preview-navigation
@@ -247,7 +258,7 @@ export function ModelPreviewControls({
             <PreviewArrows state={state} size="card" />
           </div>
         )}
-        {(views.length >= 2 || state.previews.large_cover_url) && (
+        {(navigationViews.length >= 2 || state.previews.large_cover_url) && (
           <div className="library-preview-reveal absolute bottom-1.5 left-1.5">
             <Button
               {...keepOffCard}
@@ -309,6 +320,56 @@ export function ModelPreviewControls({
   );
 }
 
+/** Images share the inspector with the mesh and toolpath viewers. */
+export function InspectorPreviewImages({
+  name,
+  cover,
+  previews,
+}: {
+  name: string;
+  cover: string | null;
+  previews: ModelPreviews;
+}) {
+  useUiLocale();
+  const [admission, state] = useModelPreviewCard(
+    previews.large_cover_url ?? cover,
+    previews,
+    "full",
+  );
+  return (
+    <div
+      ref={admission}
+      data-inspector-images
+      data-image-kind={state.imageKind}
+      className="relative h-full w-full overflow-hidden"
+    >
+      <PreviewImage
+        name={name}
+        state={state}
+        imageClassName={cn(
+          "h-full w-full object-center",
+          state.imageKind === "photo" ? "object-cover" : "object-contain",
+        )}
+        loadingPlaceholder={<LibraryPreviewPlaceholder />}
+      />
+      {state.preview.navigationViews.length >= 2 && <PreviewArrows state={state} size="gallery" />}
+      <ViewIndicator
+        state={state}
+        className="absolute bottom-2 left-1/2 max-w-full -translate-x-1/2 border border-border"
+      />
+      {state.preview.failed && (
+        <Button
+          variant="outline"
+          className="absolute bottom-2 right-2"
+          onClick={state.preview.retry}
+        >
+          {uiText("modelPreview.retry")}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 /** Expanded quick preview: the large image plus a directly selectable strip. */
 export function ModelPreviewGallery({
   name,
@@ -325,7 +386,7 @@ export function ModelPreviewGallery({
     previews,
     "full",
   );
-  const { preview, views } = state;
+  const { preview } = state;
   return (
     <>
       <div
@@ -336,9 +397,7 @@ export function ModelPreviewGallery({
         onPointerLeave={state.leave}
       >
         <PreviewImage name={name} state={state} imageClassName="model-preview-gallery-image" />
-        {views.length >= 2 && preview.navigationViews.length >= 2 && (
-          <PreviewArrows state={state} size="gallery" />
-        )}
+        {preview.navigationViews.length >= 2 && <PreviewArrows state={state} size="gallery" />}
         <ViewIndicator
           state={state}
           className="absolute bottom-2 left-1/2 max-w-full -translate-x-1/2 border border-border"
@@ -374,7 +433,7 @@ export function ModelPreviewGallery({
                 variant="ghost"
                 aria-pressed={preview.selected === view.id}
                 className={`h-auto min-w-24 flex-col p-2 ${preview.selected === view.id ? "bg-accent text-accent-foreground" : ""}`}
-                onFocus={() => preview.prioritize(views.find((image) => image.id === view.id))}
+                onFocus={() => preview.prioritize(view)}
                 onClick={() => preview.select(view.id)}
               >
                 <ProtectedThumbnail

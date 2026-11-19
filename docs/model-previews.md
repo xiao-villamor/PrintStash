@@ -6,7 +6,9 @@ choices in that gallery; they are outside the horizontal orbit. A planar cover c
 There is no autoplay or pointer-position scrubbing.
 
 Single-cover and multi-angle cards reserve the same image area and control row.
-The expanded gallery grows with the screen, up to 1152 px wide, while its image
+Chosen and embedded 3MF photos fill the card and inspector image area.
+Generated views keep their surrounding space. The expanded gallery shows the
+whole image and grows with the screen, up to 1152 px wide, while its image
 height stays within the viewport and its thumbnail strip scrolls on narrow screens.
 
 On cards, the cover occupies the default face in the arrow cycle: Cover → 55° →

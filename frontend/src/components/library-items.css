@@ -258,6 +258,17 @@
   font-weight: 500;
   background: transparent;
 }
+.library-model-card:has(.library-preview[data-image-kind="photo"])
+  > div
+  > [role="checkbox"]:not([aria-checked="true"]) {
+  border-color: var(--muted-foreground);
+}
+.library-preview[data-image-kind="photo"] .library-card-status > span {
+  padding-inline: 6px;
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+}
 @media (prefers-reduced-motion: reduce) {
   .library-card-revision-actions {
     transition: none;

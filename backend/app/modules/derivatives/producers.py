@@ -261,12 +261,19 @@ def _publish_thumbnail(
 ) -> DerivativeState:
     assert file_row.id is not None
     try:
-        encoded = thumbnail.to_webp(
-            image,
-            normalize=normalize,
-            preserve_frame=preserve_frame,
-            renderer_encoded=renderer_encoded,
-        )
+        if strategy == ThumbnailStrategy.EMBEDDED and is_container(file_row):
+            photo = thumbnail.to_photo_webp(image, size=thumbnail.PhotoSize.THUMBNAIL)
+            encoded = photo.data
+            width, height = photo.width, photo.height
+        else:
+            encoded = thumbnail.to_webp(
+                image,
+                normalize=normalize,
+                preserve_frame=preserve_frame,
+                renderer_encoded=renderer_encoded,
+            )
+            width = int(settings.model_thumbnail_width)
+            height = round(width * 3 / 4)
     except ValueError:
         _fail(
             attempt,
@@ -309,8 +316,8 @@ def _publish_thumbnail(
                 "sha256": published.sha256,
                 "size": published.size,
                 "etag": published.etag,
-                "width": int(settings.model_thumbnail_width),
-                "height": round(int(settings.model_thumbnail_width) * 3 / 4),
+                "width": width,
+                "height": height,
                 "strategy": strategy,
                 "complete": complete,
             },

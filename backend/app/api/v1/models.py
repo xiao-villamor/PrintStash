@@ -995,15 +995,15 @@ def get_model_cover(
     session: Session = Depends(get_session),
 ) -> Response:
     model = _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
-    from app.modules.media.thumbnail import to_webp
+    from app.modules.media.thumbnail import PhotoSize, to_photo_webp
 
-    data = model_covers.content(model)
+    photo = to_photo_webp(model_covers.content(model), size=PhotoSize(size))
     return Response(
-        content=to_webp(data, renderer_encoded=True) if size == "thumbnail" else data,
+        content=photo.data,
         media_type="image/webp",
         headers={
             "Cache-Control": "private, no-cache",
-            "ETag": f'"model-cover-{model_id}-{model.cover_filename}-{size}"',
+            "ETag": f'"model-cover-{model_id}-{model.cover_filename}-{size}-photo"',
             "X-Content-Type-Options": "nosniff",
         },
     )

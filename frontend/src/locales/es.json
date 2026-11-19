@@ -1282,6 +1282,8 @@
   "No editable collections.": "No hay colecciones editables.",
   "No findings in this category.": "No hay hallazgos en esta categoría.",
   "G-code only — this file has no 3D mesh": "Solo G-code — este archivo no contiene una malla 3D",
+  "Images": "Imágenes",
+  "No 3D model": "No hay modelo 3D",
   "No G-code file": "No hay archivo G-code",
   "No importable 3D files in this archive.": "No hay archivos 3D importables en este archivo.",
   "No previewable mesh or G-code in this share.": "No hay malla ni G-code que se pueda previsualizar en este enlace.",

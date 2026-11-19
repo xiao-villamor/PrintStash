@@ -36,7 +36,9 @@ import {
   meshGeometryFacts,
   useMeshGeometryMeasurement,
 } from "@/components/model-detail/use-mesh-geometry-facts";
-import { ViewerModeSwitch, type ViewerMode } from "@/components/viewer-mode-switch";
+import { InspectorPreviewImages } from "@/components/model-preview";
+import { coverImageKind, NO_PREVIEWS } from "@/types/previews";
+import { ViewerModeSwitch, type InspectorViewerMode } from "@/components/viewer-mode-switch";
 import { normalizeRecommendedGcodeFiles } from "@/components/model-detail/presentation";
 import { useRevisionUpdater } from "@/components/model-detail/use-revision-updater";
 import type { FileRead, MetadataRead, ModelRead } from "@/types";
@@ -164,7 +166,7 @@ export function InspectorContent({
     setDescriptionReviewed(null);
     setDescriptionReviewing(false);
   }
-  const [preview, setPreview] = useState<ViewerMode>("model");
+  const [preview, setPreview] = useState<InspectorViewerMode | null>(null);
   const [toolpathId, setToolpathId] = useState<number | null>(null);
   const { sources: toolpathFiles, availability: toolpathAvailability } = useToolpathSources(
     files,
@@ -181,7 +183,17 @@ export function InspectorContent({
   const sourceFile = meshFiles.find((item) => item.id === sourceId) ?? meshFiles[0];
   const gcodeOnly =
     !sourceFile && toolpathFiles.some((item) => item.sliced_geometry === "gcode_only");
-  const viewerMode = gcodeOnly ? "gcode" : toolpath ? preview : "model";
+  const previews = model.previews ?? NO_PREVIEWS;
+  const photoCover = coverImageKind(previews, "full") === "photo";
+  const hasImages = photoCover || Boolean(previews.archive_images?.length);
+  const hasModel = Boolean(sourceFile) || !hasImages;
+  const defaultMode = gcodeOnly ? "gcode" : photoCover ? "images" : "model";
+  const viewerMode =
+    (preview === "images" && hasImages) ||
+    (preview === "gcode" && toolpath) ||
+    (preview === "model" && hasModel && !gcodeOnly)
+      ? preview
+      : defaultMode;
   function download(item: FileRead) {
     void downloadAuthenticatedFile(
       `/api/v1/files/${item.id}/download`,
@@ -453,12 +465,20 @@ export function InspectorContent({
             compact
             mode={viewerMode}
             gcodeOnly={gcodeOnly}
+            hasModel={hasModel}
             onChange={setPreview}
+            onImages={hasImages ? () => setPreview("images") : undefined}
             hasGcode={toolpathAvailability === "available"}
             availability={toolpathAvailability}
           />
           <Suspense fallback={<Loader2 className="h-5 w-5 animate-spin" />}>
-            {viewerMode === "gcode" && toolpath ? (
+            {viewerMode === "images" ? (
+              <InspectorPreviewImages
+                name={model.name}
+                cover={model.thumbnail_url}
+                previews={previews}
+              />
+            ) : viewerMode === "gcode" && toolpath ? (
               <GcodePreview
                 files={toolpathFiles}
                 archiveImages={model.previews?.archive_images}
