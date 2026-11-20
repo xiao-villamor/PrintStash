@@ -10,7 +10,6 @@ import {
   Search,
   Settings,
   SlidersHorizontal,
-  Star,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
@@ -34,7 +33,6 @@ type RailDestination =
   | "library"
   | "search"
   | "inbox"
-  | "favorites"
   | "printers"
   | "profiles"
   | "settings"
@@ -51,7 +49,6 @@ const mainItems: NavItem[] = [
   { id: "library", href: "/", labelKey: "Collections", icon: FolderClosed },
   { id: "search", href: "/search", labelKey: "Search", icon: Search },
   { id: "inbox", href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
-  { id: "favorites", href: "/?favorites=true", labelKey: "Favorites", icon: Star },
 ];
 
 const utilityItems: NavItem[] = [
@@ -110,7 +107,6 @@ export function SidebarNav() {
   const pendingCount = user ? (inbox.data ?? 0) : 0;
   const homeHref = useSyncExternalStore(subscribeLastVaultHref, lastVaultHref);
   const [accountOpen, setAccountOpen] = useState(false);
-  const favorites = pathname === "/" && params.get("favorites") === "true";
 
   async function handleLogout() {
     await logout();
@@ -124,7 +120,6 @@ export function SidebarNav() {
         if (pane?.open) return pane.mode === "collections" && !savedViewsOpen;
         return (
           !savedViewsOpen &&
-          !favorites &&
           (pathname === "/" || /^\/(models|multipart-models|documents)\//.test(pathname))
         );
       case "search":
@@ -133,8 +128,6 @@ export function SidebarNav() {
       case "inbox":
         if (pane?.open && pane.mode === "pending") return true;
         return pathname.startsWith("/inbox");
-      case "favorites":
-        return favorites && !savedViewsOpen;
       case "printers":
         return pathname.startsWith("/printers");
       case "profiles":
@@ -164,25 +157,6 @@ export function SidebarNav() {
     if (item.adminOnly && !user?.is_superuser) return null;
     const label = t(item.labelKey);
     const active = isActive(item.id);
-    if (item.id === "favorites")
-      return (
-        <button
-          key={item.id}
-          type="button"
-          title={label}
-          aria-pressed={favorites}
-          className={railClass(favorites)}
-          onClick={() => {
-            const next = new URLSearchParams(pathname === "/" ? params : "");
-            if (favorites) next.delete("favorites");
-            else next.set("favorites", "true");
-            router.push(next.size ? `/?${next}` : "/");
-          }}
-        >
-          <Star className="h-5 w-5" strokeWidth={1.6} aria-hidden />
-          <span className="sr-only">{label}</span>
-        </button>
-      );
     return (
       <a
         key={item.id}
@@ -232,13 +206,6 @@ export function SidebarNav() {
             return;
           }
           if (pane && (item.id === "library" || item.id === "inbox")) {
-            if (item.id === "library" && favorites) {
-              pane.showCollections();
-              const next = new URLSearchParams(params);
-              next.delete("favorites");
-              router.push(next.size ? `/?${next}` : "/");
-              return;
-            }
             const mode = item.id === "library" ? "collections" : "pending";
             if (pane.open && pane.mode === mode) pane.toggle();
             else if (mode === "collections") pane.showCollections();

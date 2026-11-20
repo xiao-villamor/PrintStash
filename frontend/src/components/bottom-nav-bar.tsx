@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { WorkspaceMenu } from "@/components/workspace-menu";
-import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
+import { usePathname, useRouter } from "@/lib/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { useLibraryStartup } from "@/lib/library-startup-context";
@@ -24,7 +24,6 @@ type NavItem = { href: string; labelKey: MessageKey; icon: LucideIcon };
 export function BottomNavBar() {
   const { t } = useI18n();
   const pathname = usePathname();
-  const params = useSearchParams();
   const router = useRouter();
   const pane = useCollectionsPane();
   const { user, logout } = useAuth();
@@ -46,8 +45,7 @@ export function BottomNavBar() {
       "/settings",
       ...(user?.is_superuser ? ["/profiles"] : []),
       "/library/similar",
-    ].some((path) => pathname.startsWith(path)) ||
-    (pathname === "/" && params.get("favorites") === "true");
+    ].some((path) => pathname.startsWith(path));
   async function handleLogout() {
     await logout();
     setOpenedOnPath(null);

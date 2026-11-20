@@ -1,7 +1,15 @@
 /** Search and Favorites refine one Library; real cards reveal on cold and cached visits. */
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { aModelListItem } from "../../src/test-support/factories";
 import { useMockApi } from "./_setup";
+
+/** Favorites is a Library filter: toggle it in the (non-modal) Filters picker. */
+async function toggleFavorites(page: Page) {
+  const picker = page.getByRole("dialog", { name: "Filter Models" });
+  if (!(await picker.isVisible()))
+    await page.getByRole("button", { name: /^Filters(?: \d+)?$/ }).click();
+  await picker.getByRole("switch", { name: "Favorites", exact: true }).click();
+}
 
 useMockApi();
 declare global {
@@ -80,11 +88,10 @@ test.describe("Global Library search and filters", () => {
       });
     };
     await assertReveal("Library bracket");
-    const rail = page.getByRole("navigation", { name: "Navigation", exact: true });
     for (let visit = 0; visit < 2; visit++) {
-      await rail.getByRole("button", { name: "Favorites", exact: true }).click();
+      await toggleFavorites(page);
       await assertReveal("Favorite bracket");
-      await rail.getByRole("button", { name: "Favorites", exact: true }).click();
+      await toggleFavorites(page);
       await assertReveal("Library bracket");
     }
   });
@@ -100,7 +107,7 @@ test.describe("Global Library search and filters", () => {
     await expect(
       page.getByRole("heading", { name: "Matching bracket", exact: true }),
     ).toBeVisible();
-    await rail.getByRole("button", { name: "Favorites", exact: true }).click();
+    await toggleFavorites(page);
     await expect(
       page.getByRole("heading", { name: "Favorite bracket", exact: true }),
     ).toBeVisible();
@@ -111,7 +118,7 @@ test.describe("Global Library search and filters", () => {
       0,
     );
     await expect(page.locator("article.library-model-card[data-favorites]")).toHaveCount(0);
-    await rail.getByRole("button", { name: "Favorites", exact: true }).click();
+    await toggleFavorites(page);
     await expect(
       page.getByRole("heading", { name: "Matching bracket", exact: true }),
     ).toBeVisible();
@@ -140,8 +147,7 @@ test.describe("Global Library search and filters", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Library bracket", exact: true })).toBeVisible();
-    const rail = page.getByRole("navigation", { name: "Navigation", exact: true });
-    await rail.getByRole("button", { name: "Favorites", exact: true }).click();
+    await toggleFavorites(page);
     await expect(
       page.getByRole("heading", { name: "Favorite bracket", exact: true }),
     ).toBeVisible();
