@@ -149,8 +149,13 @@ export function LibraryItems<T>({
     /** The columns and cell pitch the captured positions were laid out in. */
     columns: number;
     pitch: number;
+    keys: readonly string[];
   } | null>(null);
-  const painted = useRef({ columns: 1, pitch: 0 });
+  const painted = useRef<{ columns: number; pitch: number; keys: readonly string[] }>({
+    columns: 1,
+    pitch: 0,
+    keys: [],
+  });
   const flights = useRef<Animation[]>([]);
   const gap = layout === "list" ? 0 : compact ? 8 : 16;
   const preferredWidth = minCardWidth ?? preferredCardWidth(compact);
@@ -436,6 +441,12 @@ export function LibraryItems<T>({
       virtualizer.measureElement(row);
   }, [columns, track, compact, layout, virtual, virtualizer]);
 
+  // The layout as painted: a pane motion captures it as the cards' origin,
+  // and the reflow below reads it after the resting tracks commit.
+  useLayoutEffect(() => {
+    painted.current = { columns, pitch: track + gap, keys };
+  }, [columns, track, gap, keys]);
+
   // Pane-driven reflow: keep the reading anchor, then fly every card from its
   // captured position to its new cell along the pane's own progress curve.
   useLayoutEffect(() => {
@@ -462,6 +473,7 @@ export function LibraryItems<T>({
         ?.querySelectorAll<HTMLElement>("button,a,input,[tabindex]")
         [focused.index]?.focus({ preventScroll: true });
     const { progress, durationMs } = pending.motion;
+    const { columns, keys } = painted.current;
     const indexes = new Map(keys.map((key, index) => [key, index]));
     const last = progress.length - 1;
     if (last < 1 || durationMs <= 0) return;
@@ -502,10 +514,7 @@ export function LibraryItems<T>({
       }
       flights.current.push(card.animate(keyframes, { duration: durationMs, easing: "linear" }));
     }
-  }, [geometry, scrollRef, keys, columns]);
-  useLayoutEffect(() => {
-    painted.current = { columns, pitch: track + gap };
-  }, [columns, track, gap]);
+  }, [geometry, scrollRef]);
   useEffect(
     () => () => {
       for (const flight of flights.current) flight.cancel();

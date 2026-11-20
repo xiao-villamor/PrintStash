@@ -123,8 +123,8 @@ test.describe("Library inline inspector", () => {
     });
   }
 
-  test("glides reflowed cards beside the docked inspector", async ({ page }) => {
-    const models = Array.from({ length: 12 }, (_, index) =>
+  test("glides reflowed cards beside either panel", async ({ page }) => {
+    const models = Array.from({ length: 92 }, (_, index) =>
       aModelListItem({ id: index + 1, name: `Part ${index + 1}` }),
     );
     await page.route("**/api/v1/models/browse?**", (route) =>
@@ -151,15 +151,20 @@ test.describe("Library inline inspector", () => {
       };
     });
     await page.goto("/?type=all&sort=date-desc");
-    await expect(page.getByRole("heading", { name: "Part 12", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Part 92", exact: true })).toBeVisible();
 
+    const glided = () =>
+      page.evaluate(
+        () => window.cardGlides.filter((start) => start.startsWith("translate(")).length,
+      );
+
+    // Both panels carry the cards the same way: neither may jump them.
     await page.getByRole("button", { name: "Show or hide details", exact: true }).click();
-
-    await expect
-      .poll(() =>
-        page.evaluate(() => window.cardGlides.some((start) => start.startsWith("translate("))),
-      )
-      .toBe(true);
+    await expect.poll(glided).toBeGreaterThan(0);
+    await page.waitForFunction(() => document.documentElement.dataset.paneMoving === undefined);
+    const afterDetails = await glided();
+    await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+    await expect.poll(glided).toBeGreaterThan(afterDetails);
   });
 
   test("returns from the explicit full page to the same inspector", async ({ page }) => {
