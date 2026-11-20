@@ -38,6 +38,8 @@ const NATIVE_RENDER_LIMIT = 120;
 const CARD_WIDTH = 230;
 const COMPACT_CARD_WIDTH = 280;
 const SINGLE_COLUMN_MAX = 400;
+/** Share of pane progress before a wrapped card starts fading into its cell. */
+const FADE_DELAY = 0.4;
 
 /** One width scale for collection and Model rows, independent of item count. */
 function preferredCardWidth(compact: boolean) {
@@ -457,19 +459,28 @@ export function LibraryItems<T>({
       const after = card.getBoundingClientRect();
       const before = pending.before.get(card.dataset.libraryKey!);
       let keyframes: Keyframe[];
-      if (before) {
-        const dx = before.left - after.left;
-        const dy = before.top - after.top;
+      const dx = before ? before.left - after.left : 0;
+      const dy = before ? before.top - after.top : 0;
+      // A card that wraps to another row would fly diagonally across its
+      // neighbours; it settles in its new cell the way a new card does.
+      const wraps = before !== undefined && Math.abs(dy) > after.height / 2;
+      if (before && !wraps) {
         if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
         // Transform only: it runs on the compositor. Animating width would
         // relayout every card on every frame of the pane motion.
         keyframes = progress.map((value, index) => ({
           offset: index / last,
           transform: `translate(${dx * (1 - value)}px, ${dy * (1 - value)}px)`,
+          // Sliding cards pass over a cell a wrapped card is fading into.
+          zIndex: 1,
         }));
       } else {
-        // Newly rendered (e.g. a row the reflow brings into view) fades in.
-        keyframes = progress.map((value, index) => ({ offset: index / last, opacity: value }));
+        // Newly rendered cards and row wraps fade in place, after a sliding
+        // neighbour has mostly cleared the cell they share.
+        keyframes = progress.map((value, index) => ({
+          offset: index / last,
+          opacity: Math.max(0, (value - FADE_DELAY) / (1 - FADE_DELAY)),
+        }));
       }
       flights.current.push(card.animate(keyframes, { duration: durationMs, easing: "linear" }));
     }

@@ -321,8 +321,10 @@ Hide only when the motion reaches the closed position, never on a fixed exit tim
 inspector reserves or releases its column, the Library grid reflows exactly as
 it does for the Collections pane: it commits its resting columns once and carries
 each card from its painted position along the inspector's own progress, so cards
-and panel share one timeline, and cards move identically beside either panel. Cards entering view fade in on the same
-progress; reduced motion keeps the reflow immediate. Switching Models
+and panel share one timeline, and cards move identically beside either panel. Only a card that keeps its row
+slides, above its neighbours; a card that wraps to another row never crosses the
+grid, and fades into its new cell once the sliding neighbour has mostly cleared it,
+as cards entering view do; reduced motion keeps the reflow immediate. Switching Models
 keeps the panel stationary. Closed panels become inert immediately. Reduced motion
 uses immediate visibility changes and retains the existing focus handoff.
 

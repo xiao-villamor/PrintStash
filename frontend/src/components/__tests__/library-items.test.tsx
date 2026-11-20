@@ -1,7 +1,7 @@
 /** The Library grid reflows with the Collections pane as one motion, keeping card identity. */
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { useMemo, useRef, useState } from "react";
 import { LibraryItems } from "@/components/library-items";
 import { PANE_SETTLED_EVENT, PaneMovingEvent } from "@/components/use-collections-pane-motion";
@@ -130,5 +130,52 @@ describe("LibraryItems", () => {
       window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
     });
     expect(grid().style.gridTemplateColumns).toBe("repeat(5, 237px)");
+  });
+
+  it("slides cards that stay in their row and fades cards that wrap", () => {
+    // Cards sit in a 250 x 200 cell grid of the grid's current column count.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        const key = this.dataset.libraryKey;
+        if (!key) return new DOMRect(0, 0, width, 800);
+        const columns = Number(
+          /repeat\((\d+)/.exec(grid()?.style.gridTemplateColumns ?? "")?.[1] ?? 4,
+        );
+        const index = Number(key.slice("item:".length));
+        return new DOMRect((index % columns) * 250, Math.floor(index / columns) * 200, 238, 200);
+      },
+    );
+    const flights = new Map<string, Keyframe[]>();
+    const animate = HTMLElement.prototype.animate;
+    onTestFinished(() => {
+      HTMLElement.prototype.animate = animate;
+    });
+    HTMLElement.prototype.animate = function (this: HTMLElement, keyframes) {
+      if (Array.isArray(keyframes)) flights.set(this.dataset.libraryKey!, keyframes);
+      // SAFETY: the grid only calls cancel() on its flights; jsdom has no Animation.
+      return { cancel() {} } as Animation;
+    };
+    render(<Grid />);
+    act(() => {
+      window.dispatchEvent(
+        new PaneMovingEvent({
+          opening: false,
+          contentDelta: 250,
+          durationMs: 300,
+          progress: [0, 0.5, 1],
+        }),
+      );
+    });
+
+    // 4 → 5 columns: card 5 stays in row 1 and slides one cell left.
+    expect(flights.get("item:5")?.[0]).toMatchObject({ transform: "translate(250px, 0px)" });
+    // Card 4 wraps up to row 0: it fades in its cell instead of crossing the row.
+    const fade = flights.get("item:4")!.map((frame) => Number(frame.opacity));
+    // It stays transparent while its neighbour clears the cell, then fades in.
+    expect(fade[0]).toBe(0);
+    expect(fade[1]).toBeCloseTo(1 / 6);
+    expect(fade[2]).toBe(1);
+    expect(flights.get("item:4")?.[0]).not.toHaveProperty("transform");
+    expect(flights.has("item:0")).toBe(false);
   });
 });
