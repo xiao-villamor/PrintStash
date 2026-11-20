@@ -39,13 +39,12 @@ export function BottomNavBar() {
       ? { href: "/printers", labelKey: "nav.printers", icon: Printer }
       : { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
   ];
-  const moreActive =
-    [
-      "/statistics",
-      "/settings",
-      ...(user?.is_superuser ? ["/profiles"] : []),
-      "/library/similar",
-    ].some((path) => pathname.startsWith(path));
+  const moreActive = [
+    "/statistics",
+    "/settings",
+    ...(user?.is_superuser ? ["/profiles"] : []),
+    "/library/similar",
+  ].some((path) => pathname.startsWith(path));
   async function handleLogout() {
     await logout();
     setOpenedOnPath(null);
