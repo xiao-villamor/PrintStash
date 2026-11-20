@@ -13,6 +13,7 @@ import json
 import secrets
 from datetime import timedelta
 
+from printstash_core.mesh.preview_profile import PreviewLook
 from sqlmodel import Session, select
 
 from app.core.errors import ErrorKind, OperationError
@@ -149,7 +150,10 @@ def record_access(session: Session, link: ShareLink) -> None:
 
 
 def public_detail(
-    session: Session, link: ShareLink, previews: ModelPreviewRead
+    session: Session,
+    link: ShareLink,
+    previews: ModelPreviewRead,
+    preview_look: PreviewLook,
 ) -> PublicModelRead:
     """Build the read-only projection for the model behind *link*."""
     model = session.get(Model, link.model_id)
@@ -204,9 +208,12 @@ def public_detail(
         previews=previews,
         name=model.name,
         description=model.description,
-        has_thumbnail=bool(model.cover_filename or model.thumbnail_file_id or model.thumbnail_path),
+        has_thumbnail=bool(
+            model.cover_filename or model.thumbnail_file_id or model.thumbnail_path
+        ),
         allow_download=link.allow_download,
         files=files,
+        preview_look=preview_look,
     )
 
 

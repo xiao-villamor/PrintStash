@@ -37,6 +37,11 @@ import {
 import { useViewerReadiness } from "@/lib/use-viewer-readiness";
 import { useStlPreview, stlPreviewMessage, type StlPreviewFailure } from "@/lib/use-stl-preview";
 import type { PlateRegion } from "@/types";
+import type { PreviewLook } from "@/types/config";
+import { useQuery } from "@tanstack/react-query";
+import { getPreviewLook } from "@/lib/api/config";
+import { queryKeys } from "@/lib/query-client";
+import { DEFAULT_PREVIEW_LOOK, studioMatcap } from "@/lib/studio-matcap";
 
 export type ViewerDisplayMode = "solid" | "xray" | "wireframe";
 
@@ -80,6 +85,8 @@ export interface STLViewerProps {
   overlay?: { url: string; comparison: MeshComparison };
   /** Show only the geometry over this plate of a multi-plate 3MF. */
   plate?: PlateRegion;
+  /** The generated images' look; read from the library when omitted. */
+  look?: PreviewLook;
 }
 
 // The camera needs both shapes: R3F takes the tuple as a JSX prop, the orbit
@@ -104,7 +111,9 @@ function Mesh({
   onGeometrySize,
   comparison,
   overlay = false,
+  look,
 }: {
+  look: PreviewLook;
   geometry: THREE.BufferGeometry;
   displayMode: ViewerDisplayMode;
   onSized: (size: THREE.Vector3) => void;
@@ -153,15 +162,28 @@ function Mesh({
 
   return (
     <mesh ref={meshRef} geometry={geometry} onAfterRender={onRendered}>
-      <meshStandardMaterial
-        color={overlay ? "#497bbd" : "#8a93a6"}
-        roughness={0.45}
-        metalness={0.1}
-        wireframe={displayMode === "wireframe"}
-        transparent={overlay || displayMode === "xray"}
-        opacity={overlay ? 0.42 : displayMode === "xray" ? 0.3 : 1}
-        depthWrite={!overlay && displayMode !== "xray"}
-      />
+      {overlay ? (
+        <meshStandardMaterial
+          color="#497bbd"
+          roughness={0.45}
+          metalness={0.1}
+          wireframe={displayMode === "wireframe"}
+          transparent
+          opacity={0.42}
+          depthWrite={false}
+        />
+      ) : (
+        // The card thumbnails' studio shade, keyed by the camera-relative
+        // normal, so the 3D view colours every surface like its thumbnail.
+        <meshMatcapMaterial
+          matcap={studioMatcap(look)}
+          toneMapped={false}
+          wireframe={displayMode === "wireframe"}
+          transparent={displayMode === "xray"}
+          opacity={displayMode === "xray" ? 0.3 : 1}
+          depthWrite={displayMode !== "xray"}
+        />
+      )}
     </mesh>
   );
 }
@@ -184,6 +206,7 @@ function Scene({
   comparison,
   comparisonCamera,
   overlay,
+  look,
 }: Required<
   Omit<
     STLViewerProps,
@@ -436,6 +459,7 @@ function Scene({
       <>
         <Mesh
           key={url}
+          look={look}
           geometry={geometry}
           displayMode={displayMode}
           onSized={handleSized}
@@ -445,6 +469,7 @@ function Scene({
         />
         {overlay && overlayGeometry && (
           <Mesh
+            look={look}
             geometry={overlayGeometry}
             displayMode="solid"
             onSized={() => {}}
@@ -657,8 +682,17 @@ export function STLViewer({
   comparisonCamera,
   overlay,
   plate,
+  look,
 }: STLViewerProps) {
   useUiLocale();
+  const libraryLook = useQuery({
+    queryKey: queryKeys.previewLook,
+    queryFn: ({ signal }) => getPreviewLook({ signal }),
+    enabled: look === undefined,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const shownLook = look ?? libraryLook.data?.preview_look ?? DEFAULT_PREVIEW_LOOK;
   // Tracking *which* url has loaded, rather than a bare boolean, makes the url
   // swap reset the overlay during render instead of through a reset effect.
   const previewPreferences = usePreviewPreferences();
@@ -767,6 +801,7 @@ export function STLViewer({
         screenshotScale={previewPreferences.screenshotScale}
         comparison={comparison}
         comparisonCamera={comparisonCamera}
+        look={shownLook}
         overlay={
           overlay !== undefined && overlayPreview.state === "ready"
             ? { ...overlay, url: overlayPreview.url }

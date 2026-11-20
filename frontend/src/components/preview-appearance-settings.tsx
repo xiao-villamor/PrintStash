@@ -1,8 +1,9 @@
-import { useEffect, useEffectEvent, useState } from "react";
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Palette } from "lucide-react";
 import { PreviewAppearance } from "@/components/preview-appearance";
 import { SettingsCard } from "@/components/settings-card";
+import { Button } from "@/components/ui/button";
 import { captureEditingBase } from "@/lib/api/editing";
 import { getPreviewActivity } from "@/lib/api/work";
 import { userMessage } from "@/lib/errors";
@@ -15,10 +16,13 @@ import type { PreviewAppearance as Appearance, VaultConfigRead } from "@/types/c
 import type { EditingBase } from "@/types/editing";
 
 const activityKey = ["work", "preview-activity"];
-const CHANGE_DELAY_MS = 250;
 
 type AppearanceEdit = { value: Appearance; base: EditingBase };
 
+/**
+ * Trying a colour or the floor grid only changes the sample cards below.
+ * Existing images re-render once, when the administrator applies the look.
+ */
 export function PreviewAppearanceSettings({
   config,
   disabled,
@@ -36,33 +40,21 @@ export function PreviewAppearanceSettings({
     retry: false,
     refetchInterval: (query) => (query.state.data?.remaining ? 4000 : false),
   });
+  const pending = draft !== null && appearanceChanged(config, draft.value);
 
-  const apply = useEffectEvent(async (edit: AppearanceEdit) => {
-    if (edit !== draft || disabled || command.isPending) return;
-    if (!appearanceChanged(config, edit.value)) {
-      setDraft(null);
-      return;
-    }
+  async function apply() {
+    if (!draft || !pending || disabled || command.isPending) return;
     const session = getSessionVersion();
     try {
-      const receipt = await command.mutateAsync({ session, base: edit.base, payload: edit.value });
-      setDraft((latest) =>
-        latest && latest !== edit ? { ...latest, base: captureEditingBase(receipt) } : null,
-      );
+      await command.mutateAsync({ session, base: draft.base, payload: draft.value });
+      setDraft(null);
       void client.invalidateQueries({ queryKey: activityKey });
+      void client.invalidateQueries({ queryKey: queryKeys.previewLook, exact: true });
     } catch {
       if (getSessionVersion() !== session) return;
-      setDraft(null);
       void client.invalidateQueries({ queryKey: queryKeys.vaultConfig, exact: true });
     }
-  });
-
-  // Let keyboard and pointer bursts settle before advancing the render generation.
-  useEffect(() => {
-    if (!draft || command.isPending || disabled) return;
-    const timeout = setTimeout(() => void apply(draft), CHANGE_DELAY_MS);
-    return () => clearTimeout(timeout);
-  }, [draft, command.isPending, disabled]);
+  }
 
   return (
     <SettingsCard
@@ -70,8 +62,30 @@ export function PreviewAppearanceSettings({
       className="settings-preview-look"
       title={t("Preview look")}
       description={t(
-        "Colour and floor of generated Model images. Changes re-render existing images in the background.",
+        "Colour and floor of generated Model images. Try a look in the preview; applying it re-renders existing images in the background.",
       )}
+      footer={
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setDraft(null)}
+            disabled={!pending || command.isPending}
+          >
+            {t("Discard")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => void apply()}
+            loading={command.isPending}
+            disabled={!pending || disabled}
+          >
+            {t("Apply look")}
+          </Button>
+        </div>
+      }
     >
       <PreviewAppearance
         layout="settings"
@@ -82,9 +96,14 @@ export function PreviewAppearanceSettings({
             value: { preview_look, preview_floor_grid },
           }))
         }
-        disabled={disabled}
+        disabled={disabled || command.isPending}
         status={
           <>
+            {pending && (
+              <p role="status" className="text-muted-foreground">
+                {t("Not applied yet. Existing images keep their current look.")}
+              </p>
+            )}
             {activity.data && activity.data.remaining > 0 && (
               <p role="status" className="text-muted-foreground">
                 {t("Re-rendering images · {remaining} remaining", {

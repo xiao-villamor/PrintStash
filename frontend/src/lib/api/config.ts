@@ -13,6 +13,7 @@ import {
   StorageRootEnrollmentRead,
   StorageRootRole,
 } from "@/types";
+import type { PreviewLook } from "@/types/config";
 
 export function getSetupStatus(options?: GetJsonOptions): Promise<SetupStatus> {
   return getJson<SetupStatus>("/api/v1/setup/status", options);
@@ -77,6 +78,13 @@ export function completeSetup(
 
 export function getVaultConfig(options: GetJsonOptions = {}): Promise<VaultConfigRead> {
   return getJson<VaultConfigRead>("/api/v1/config", { ...options });
+}
+
+/** The look generated Model images use; readable by every signed-in viewer. */
+export function getPreviewLook(
+  options: GetJsonOptions = {},
+): Promise<{ preview_look: PreviewLook }> {
+  return getJson<{ preview_look: PreviewLook }>("/api/v1/config/preview-look", { ...options });
 }
 
 export function getHealthDetails<T>(options: GetJsonOptions = {}): Promise<T> {

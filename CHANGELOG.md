@@ -14,6 +14,8 @@
 - The Filters picker leads with quick toggles for Favorites, Printed and similar candidates, then groups the remaining filters into Files and library and Printing with a distinct icon per filter and a summary of each active selection. A filter page can be cleared on its own.
 - Model views fills the dialog with the selected image, separates renders from photos in the thumbnail strip, keeps the selected thumbnail in view, shows full view names and supports the arrow keys.
 - Library cards move to their new places on the details panel's own motion when it opens or closes, the same way they follow the Collections sidebar, instead of jumping ahead of it. A card that moves to another row now slides in from the edge of that row instead of crossing the others.
+- The 3D viewer shades Models in the library's preview look, with the same studio lighting as the card thumbnails, so a Model looks the same in its card and in 3D. Shared links use the look too.
+- Settings → Previews → Preview look lets you try a colour or the floor grid in its sample cards without saving. Existing images re-render only when you select Apply look, and Discard returns to the saved look.
 - Upload opens in place without re-rendering the Library, and its code loads in the background once the Library is ready, so the first Upload opens without a wait.
 
 - The Library shows child collection previews in grouped rows, and selecting a collection checks its loaded Model cards. Clicking a Model in the tree reveals its card and opens the inspector.

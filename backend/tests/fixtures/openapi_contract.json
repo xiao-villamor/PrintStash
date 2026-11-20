@@ -15236,6 +15236,19 @@
         "title": "PreviewLook",
         "type": "string"
       },
+      "PreviewLookRead": {
+        "description": "The look generated Model images currently use.",
+        "properties": {
+          "preview_look": {
+            "$ref": "#/components/schemas/PreviewLook"
+          }
+        },
+        "required": [
+          "preview_look"
+        ],
+        "title": "PreviewLookRead",
+        "type": "object"
+      },
       "PreviewSize": {
         "enum": [
           "full",
@@ -28827,6 +28840,33 @@
           }
         ],
         "summary": "Preview Example",
+        "tags": [
+          "config"
+        ]
+      }
+    },
+    "/api/v1/config/preview-look": {
+      "get": {
+        "description": "Lets every signed-in viewer shade interactive 3D views like the cards.",
+        "operationId": "get_preview_look_api_v1_config_preview_look_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewLookRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get the look generated Model images use",
         "tags": [
           "config"
         ]

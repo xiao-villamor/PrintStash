@@ -1,5 +1,6 @@
 import type { ModelPreviews } from "./previews";
 import type { EditingBase } from "./editing";
+import type { PreviewLook } from "./config";
 import type {
   PrintJobIdentityRead,
   PrintJobReportedMetadataRead,
@@ -851,6 +852,8 @@ export interface PublicModelRead {
   has_thumbnail: boolean;
   allow_download: boolean;
   files: PublicFileRead[];
+  /** The look generated images use, so the 3D view is shaded to match. */
+  preview_look: PreviewLook;
 }
 
 export interface ShareLinkRead {
