@@ -140,6 +140,31 @@ test.describe("model detail route", () => {
     expect(image.length).toBeGreaterThan(1000);
   });
 
+  test("hides one slicer feature of the rendered toolpath", async ({ page }) => {
+    const gcode = await readFile(
+      new URL("../../../backend/tests/fixtures/real_orca_ender3_benchy.gcode", import.meta.url),
+      "utf8",
+    );
+    await page.route("**/api/v1/files/2/toolpath", (route) =>
+      route.fulfill({ contentType: "text/plain", body: gcode }),
+    );
+    await page.goto("/models/1");
+    const preview = page.getByRole("region", { name: "Preview", exact: true });
+    await preview.getByRole("button", { name: "G-code", exact: true }).click();
+    const features = preview.getByRole("region", { name: "Features", exact: true });
+    await expect(features.getByRole("button", { name: "Outer wall", exact: true })).toBeVisible();
+    // This fixture prints walls only.
+    await expect(features.getByRole("button", { name: "Inner wall", exact: true })).toBeVisible();
+    const canvas = preview.locator("canvas");
+    const all = await canvas.screenshot();
+
+    await features.getByRole("button", { name: "Outer wall", exact: true }).click();
+    await expect.poll(async () => (await canvas.screenshot()).equals(all)).toBe(false);
+
+    await features.getByRole("button", { name: "Show all", exact: true }).click();
+    await expect.poll(async () => (await canvas.screenshot()).equals(all)).toBe(true);
+  });
+
   test("changes the rendered toolpath camera to the top view", async ({ page }) => {
     const preview = await openToolpath(page);
     const canvas = preview.locator("canvas");

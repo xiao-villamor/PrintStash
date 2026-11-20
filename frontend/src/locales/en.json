@@ -5370,5 +5370,16 @@
   "Add the PrintStash sample collection": "Add the PrintStash sample collection",
   "Add sample collection": "Add sample collection",
   "Sample collection queued": "Sample collection queued",
-  "Sample collection already exists": "Sample collection already exists"
+  "Sample collection already exists": "Sample collection already exists",
+  "Features": "Features",
+  "Outer wall": "Outer wall",
+  "Inner wall": "Inner wall",
+  "Overhang wall": "Overhang wall",
+  "Top and bottom": "Top and bottom",
+  "Solid infill": "Solid infill",
+  "Sparse infill": "Sparse infill",
+  "Bridge": "Bridge",
+  "Support": "Support",
+  "Skirt and brim": "Skirt and brim",
+  "Other": "Other"
 }

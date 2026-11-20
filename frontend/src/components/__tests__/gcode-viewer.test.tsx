@@ -55,6 +55,47 @@ beforeEach(() => {
 });
 
 describe("GcodeViewer", () => {
+  it("toggles one slicer feature from its legend", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(
+      textResponse(
+        "M83\nG1 Z0.2\n;TYPE:External perimeter\nG1 X10 E1\n;TYPE:Internal infill\nG1 Y10 E1\n",
+      ),
+    );
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    const features = await screen.findByRole("region", { name: "Features" });
+    const infill = within(features).getByRole("button", { name: "Sparse infill" });
+    expect(
+      within(features)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Outer wall", "Sparse infill"]);
+
+    await user.click(infill);
+    expect(infill).toHaveAttribute("aria-pressed", "false");
+    await user.click(within(features).getByRole("button", { name: "Show all" }));
+    expect(infill).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("offers no feature legend for G-code without slicer markers", async () => {
+    fetchMock.mockResolvedValue(textResponse(THREE_LAYERS));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    await screen.findByRole("slider", { name: "Current layer" });
+    expect(screen.queryByRole("region", { name: "Features" })).toBeNull();
+  });
+
   it("jumps directly to a printable layer", async () => {
     const user = userEvent.setup();
     fetchMock.mockResolvedValue(textResponse(THREE_LAYERS));

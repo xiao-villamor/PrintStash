@@ -5370,5 +5370,16 @@
   "Add the PrintStash sample collection": "Añadir la colección de ejemplo de PrintStash",
   "Add sample collection": "Añadir colección de ejemplo",
   "Sample collection queued": "Colección de ejemplo en cola",
-  "Sample collection already exists": "La colección de ejemplo ya existe"
+  "Sample collection already exists": "La colección de ejemplo ya existe",
+  "Features": "Características",
+  "Outer wall": "Pared exterior",
+  "Inner wall": "Pared interior",
+  "Overhang wall": "Pared en voladizo",
+  "Top and bottom": "Superior e inferior",
+  "Solid infill": "Relleno sólido",
+  "Sparse infill": "Relleno disperso",
+  "Bridge": "Puente",
+  "Support": "Soporte",
+  "Skirt and brim": "Falda y borde",
+  "Other": "Otro"
 }
