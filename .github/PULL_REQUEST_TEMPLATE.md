@@ -23,7 +23,7 @@ code happens to do reproduces its bugs as "expected".
 Every row ends at ✅ `<tier dir>/<file>::<test>`, ❌ missing, or ⏭️ N/A — reason.
 Zero unexplained ❌ is the definition of done.
 
-Format: .agents/skills/printstash/references/testing.md -->
+Format: .agents/skills/create-tests/references/testing.md -->
 
 | # | Behaviour | Category | Precondition / input | Observable outcome | Tier | Status |
 |---|-----------|----------|----------------------|--------------------|------|--------|
@@ -51,7 +51,7 @@ Format: .agents/skills/printstash/references/testing.md -->
 <!-- `tests/factories/` is the only place that knows how library state is
 encoded. A hand-built row that encodes it wrongly inserts cleanly and is then
 invisible to the code under test — the test passes against nothing.
-Rules: .agents/skills/printstash/references/tests/fixtures.md -->
+Rules: .agents/skills/create-tests/references/tests/fixtures.md -->
 
 - [ ] Rows come from the `make_*` fixtures — nothing assembled inline, no new
       module-local `_make_*` helper, no hard-coded value in a unique column

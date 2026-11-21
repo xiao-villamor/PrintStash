@@ -41,7 +41,7 @@ The release commit bumps every manifest to the new version; the version test fai
 until it does. Once the tag is published and the image
 `ghcr.io/xiao-villamor/printstash:X.Y.Z` exists for `amd64` and `arm64`, each store
 is updated as below. The release procedure in
-`.agents/skills/printstash/references/release.md` runs these steps. Opening a pull
+`.agents/skills/create-printstash-release/references/release.md` runs these steps. Opening a pull
 request in another project's repository is public, so the release confirms the list
 with the maintainer first.
 
@@ -92,7 +92,7 @@ vendored `templates/library/` is not kept here; the catalog's `devbox run
 copy-lib` generates it from `lib_version`. The release order, including that step,
 the metadata regeneration and the two things the template pins (container port
 `3000` and the `PUID`/`PGID` identity), is in
-[`.agents/skills/printstash/references/release.md`](../.agents/skills/printstash/references/release.md),
+[`.agents/skills/create-printstash-release/references/release.md`](../.agents/skills/create-printstash-release/references/release.md),
 section "TrueNAS community catalog, every release", and
 `tests/repo/test_catalogue_manifests.py` checks the fields that must follow a
 release.

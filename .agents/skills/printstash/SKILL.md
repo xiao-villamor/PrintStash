@@ -1,129 +1,22 @@
 ---
 name: printstash
-description: Work on PrintStash implementation, testing, releases, providers, capture, UI, or roadmap decisions. Invoke at the start of every PrintStash task, then follow the routing table to load only the references the task needs.
+description: >
+  Start here for any PrintStash task. Routes project workflows and identifies the sources for roadmap and release status.
 ---
 
 # PrintStash
 
-Self-hosted 3D print library (Models, G-code Revisions, printers, filament).
-Local-first: SQLite + local FS default; Postgres/S3 optional; no hard deps on
-Redis/queues/cloud. `AGENTS.md` (layout, commands, hard rules) is binding.
+Use [AGENTS.md](../../../AGENTS.md) for binding repository rules and task routing.
+Load the matching workflow and engineering rows. Read any narrower `AGENTS.md`
+before working in that scope.
 
-## Where we are
-
-<!-- Update this block when a release ships. -->
-Latest shipped: v0.15.1, published for AMD64 and ARM64. Verify the current
-release in [GitHub Releases](https://github.com/xiao-villamor/PrintStash/releases/latest).
-See `CHANGELOG.md` `Unreleased` for work awaiting release, the
-[documentation index](../../../docs/README.md) for installation and operations,
-and [CONTRIBUTING.md](../../../CONTRIBUTING.md) for local development.
-
-Private plans live in `reports/`. They are local-only: never commit, publish,
-or quote them. Older long-range plans may not exist in every checkout; when
-`reports/14-implementation-plan-to-1.0.0.md` or
-`reports/15-cloud-implementation-plan.md` is absent, use the public roadmap
-and changelog instead of reconstructing their contents.
-
-## Before changing anything
-
-1. Inspect the current branch and `git status`. Preserve user and concurrent
-   edits. If the requested change is already in progress, continue in its
-   existing branch and ownership boundary; create a branch only for a genuinely
-   new standalone change.
-2. Read the canonical doc for the domain you're touching (binding language):
-   - Library / trash / storage code → `CONTEXT.md`
-   - Any UI work → `DESIGN.md` (tokens, motion scale, `components/ui/` primitives)
-3. Trace the real flow in code before editing — e.g. artifact writes go through
-   `modules/ingestion/ingestion.persist_artifact`, Model→response mapping through
-   `modules/library/model_views`, live/trashed queries through `app.db.scopes`.
-   Single-owner seams like these are the norm; don't re-implement one.
-4. Feature claims: check `docs/provider-support.md` (stable/beta levels),
-   `docs/known-limitations.md`, and `docs/roadmap.md` before stating something
-   is supported. Roadmap ≠ shipped.
-
-## Task routing
-
-| Task | Read |
-| --- | --- |
-| Branch, commit, PR, changelog | [references/conventions.md](references/conventions.md) |
-| Cut / publish a release, version bump | [references/release.md](references/release.md) |
-| Any code change (types, errors, fallbacks) | [references/code-principles.md](references/code-principles.md) — invalid states unrepresentable, no free strings, no magic fallbacks |
-| Backend, config | [references/backend.md](references/backend.md) |
-| Background work: Job definitions, sources, lanes, derivative kinds, recipe bumps | [references/background-work.md](references/background-work.md) |
-| Schema change, migration, soft-delete query | [references/database.md](references/database.md) — autogenerate only; SQLite constraint work needs `op.batch_alter_table` |
-| Write, change, or audit tests (any layer) | [references/testing.md](references/testing.md) — coverage matrix mandatory; then its per-runtime reference |
-| Run the suites, chase a failure, move a coverage floor | [references/running-tests.md](references/running-tests.md) |
-| Frontend / UI change | [references/frontend.md](references/frontend.md) |
-| Pending Imports, URL capture, provenance, provider connections, or browser extension | [references/capture.md](references/capture.md) plus backend/frontend reference(s) for the layers changed |
-| Printer providers (new or changed) | [references/providers.md](references/providers.md) |
-| Implement work from a named private plan | The named file in `reports/`; read only its shared constraints and the relevant work card |
-| "What's next" / roadmap planning | `reports/14-implementation-plan-to-1.0.0.md` when present (needed section only), otherwise `docs/roadmap.md` + `CHANGELOG.md` |
-
-## Workflow for any change
-
-1. For a new standalone change, branch from an up-to-date `main` and name the
-   branch for its purpose (`feat/<issue>-<slug>`, `fix/<issue>-<slug>`,
-   `docs/<slug>`, etc.). In an existing task branch or shared worktree, stay on
-   that branch and keep to the assigned files.
-2. Implement at the owning seam. Data-integrity/security fixes get a red test
-   first. Every new feature gets focused unit/integration coverage and one e2e
-   test for its headline capability.
-3. Run focused checks while iterating, then the applicable gate:
-   - Backend: run the affected tests locally, plus `uv run ruff check app/ tests/`
-     and `uv run pyright` when feasible. Use **Deep CI's backend partitions and
-     combined coverage gate** on the final commit for the full backend handoff
-     gate: its parallel `full-ordinary` and `full-resources` partitions cover
-     the same backend tests as `full`, with
-     coverage checks added. After committing and pushing, reuse a run for that
-     exact SHA or dispatch `gh workflow run deep-ci.yml --ref <branch>` and
-     verify those jobs passed. Report the overall workflow result too, including
-     any failures outside that backend gate. Do not duplicate it with local
-     `full` or `coverage`;
-     see [references/running-tests.md](references/running-tests.md) for scope
-     selection and local fallbacks.
-   - Frontend: `cd frontend && pnpm format:check && pnpm lint && pnpm typecheck`;
-     run the affected Vitest files for logic and the applicable Playwright spec
-     for a headline UI flow. A localized UI change does not call for the full
-     frontend test or coverage suite; follow
-     [references/running-tests.md](references/running-tests.md) to choose scope.
-   - Browser extension: use [references/capture.md](references/capture.md).
-   PostgreSQL-affecting changes also run the supported-server contract suite.
-   Report only checks actually run and preserve failure output.
-4. Update the changelog and repository docs the change invalidates. Public site
-   docs that live in `printstash-landing` are a separate repository change;
-   identify it without editing another repository unless that scope was assigned.
-5. Never leave task-owned changes uncommitted or unpushed when handing off.
-   This applies to every repository change, including documentation and skills,
-   without requiring a separate request to commit or push. Use conventional
-   commits and the repository's configured identity; include only task-owned
-   changes and preserve unrelated edits. Push the task branch, open or update
-   its PR, and verify required CI is green on the latest commit before declaring
-   completion. Report the PR URL, final commit, and verified CI result.
-   If a concrete blocker prevents committing, pushing, or completing CI, preserve
-   the work and report the blocker and remaining unpublished changes explicitly;
-   do not claim completion. This rule does not authorize merging a PR.
-6. When explicitly asked to cut a release, first confirm that each completed PR
-   is independently merged to `main` and CI is green, then follow
-   [references/release.md](references/release.md). Never collect feature work on
-   a version-number branch.
-
-## Common mistakes to avoid
-
-- Free strings for closed sets (kinds, states, lanes, roles), `Optional`/`?:`
-  on always-present fields, sentinels (`""`, `0`, `"{}"`) and fallbacks
-  (`or ""`, `?? "unknown"`, `str(exc) or …`, `[:N]`) that hide an invalid
-  state. Model it in the type and raise on the impossible; see
-  [references/code-principles.md](references/code-principles.md).
-- Claiming beta/roadmap features are supported (provider support levels are
-  explicit in `docs/provider-support.md`).
-- Hand-rolling UI: raw durations, `[var(--…)]` colors, custom overlays — the
-  zero-counts in `DESIGN.md` are load-bearing.
-- Editing/deleting a merged Alembic migration (self-hosters upgrade from old
-  releases) — always add a new one.
-- Writing `deleted_at.is_(None)` by hand instead of `scopes.live()`.
-- Secrets, printer access codes, or real API keys in code, fixtures, tests,
-  logs, or issue text.
-- Treating a dirty/shared worktree as disposable, overwriting concurrent edits,
-  or silently widening an assigned file set.
-- Committing gitignored material (`reports/`, `docs/internal/`) or generated
-  files; bumping versions outside a release commit.
+- **Current behavior:** code and maintained [guides](../../../docs/README.md).
+  Verify claims against [provider support](../../../docs/provider-support.md)
+  and [known limitations](../../../docs/known-limitations.md).
+- **What shipped:** GitHub Releases for published versions, and
+  [CHANGELOG.md](../../../CHANGELOG.md) for release notes and Unreleased changes.
+- **What is next:** [pick up an issue](../pickup-printstash/SKILL.md) or consult
+  the [roadmap](../../../docs/roadmap.md). For named private plans, use the
+  shared constraints and relevant work card in the specified `reports/` file.
+  If a private plan is absent, use public sources and identify any missing input.
+- **Release:** [create-printstash-release](../create-printstash-release/SKILL.md).
