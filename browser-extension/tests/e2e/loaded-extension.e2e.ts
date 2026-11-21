@@ -35,6 +35,7 @@ interface LoadedExtensionElement {
 
 interface LoadedExtensionBrowser {
   $(selector: string): LoadedExtensionElement;
+  keys(value: string): Promise<void>;
   webExtensionInstall(parameters: {
     extensionData: { type: "path"; path: string };
   }): Promise<{ extension: string }>;
@@ -103,6 +104,30 @@ describe("loaded extension", () => {
     }));
 
     assert.deepEqual(apis, { permissions: "function", scripting: "function" });
+  });
+
+  it("switches credential fields using the keyboard", async () => {
+    await browser.waitUntil(
+      async () => (await browser.$("#connection-title").getText()) === "Not connected",
+    );
+    await browser.execute(() =>
+      document.querySelector<HTMLInputElement>("#pairing-method")?.focus(),
+    );
+
+    await browser.keys("ArrowRight");
+
+    const fields = await browser.execute(() => ({
+      active: document.activeElement?.id,
+      pairing: document.querySelector("#pairing-code")?.checkVisibility(),
+      username: document.querySelector("#username")?.checkVisibility(),
+      key: document.querySelector("#key")?.checkVisibility(),
+    }));
+    assert.deepEqual(fields, {
+      active: "api-key-method",
+      pairing: false,
+      username: true,
+      key: true,
+    });
   });
 
   it("opens packaged help from the installed popup", async () => {
@@ -188,6 +213,7 @@ describe("loaded extension", () => {
       let heldResponse: ServerResponse | undefined;
       let heldRequestClosed = false;
       let healthReads = 0;
+      let rejectCapture = false;
       const server = createServer((request, response) => {
         const path = request.url || "";
         if (path === "/api/v1/health") healthReads += 1;
@@ -204,6 +230,10 @@ describe("loaded extension", () => {
         }
         response.setHeader("Content-Type", "application/json");
         if (path === "/second/api/v1/inbox") {
+          if (rejectCapture) {
+            response.writeHead(503).end(JSON.stringify({ detail: "Import unavailable." }));
+            return;
+          }
           response.end(JSON.stringify({ id: 2 }));
           return;
         }
@@ -243,6 +273,20 @@ describe("loaded extension", () => {
         await browser.waitUntil(
           async () => (await browser.$("#connection-title").getText()) === "Connected",
         );
+        assert.deepEqual(
+          await browser.execute(() =>
+            [...document.querySelectorAll("#capture-preferences :is(input, select, button)")]
+              .filter((control) => control.checkVisibility())
+              .map((control) => control.id),
+          ),
+          [
+            "collection-query",
+            "find-collection",
+            "capture-collection",
+            "capture-tags",
+            "capture-cover",
+          ],
+        );
         await browser.$("#capture").click();
         await browser.waitUntil(async () => heldResponse !== undefined);
         assert.deepEqual(writes, [{ path: "/api/v1/inbox", authorization: "Bearer device-a" }]);
@@ -266,10 +310,9 @@ describe("loaded extension", () => {
         assert.equal(state.inboxHidden, true);
         await browser.$("#capture").click();
         await browser.waitUntil(
-          async () =>
-            (await browser.$("#status-message").getText()) ===
-            "Model from Direct file sent to Pending Imports.",
+          async () => (await browser.$("#status-title").getText()) === "Sent to Pending Imports",
         );
+        assert.equal(await browser.$("#open-inbox").getText(), "Review");
         const inboxUrl = await browser.execute(
           () => document.querySelector<HTMLElement>("#open-inbox")?.dataset.url,
         );
@@ -279,6 +322,11 @@ describe("loaded extension", () => {
           { path: "/second/api/v1/browser-pairings/claim", authorization: undefined },
           { path: "/second/api/v1/inbox", authorization: "Bearer device-b" },
         ]);
+        rejectCapture = true;
+        await browser.$("#capture").click();
+        await browser.waitUntil(
+          async () => (await browser.$("#status-details").getText()) === "Code: capture_failed",
+        );
       } finally {
         heldResponse?.destroy();
         server.closeAllConnections();

@@ -156,6 +156,10 @@ type VisibleCaptureResult = {
 };
 
 const vaultInput = requiredElement("#vault", HTMLInputElement);
+const pairingMethod = requiredElement("#pairing-method", HTMLInputElement);
+const apiKeyMethod = requiredElement("#api-key-method", HTMLInputElement);
+const pairingFields = requiredElement("#pairing-fields", HTMLElement);
+const apiKeyFields = requiredElement("#api-key-fields", HTMLElement);
 const pairingCodeInput = requiredElement("#pairing-code", HTMLInputElement);
 const deviceNameInput = requiredElement("#device-name", HTMLInputElement);
 const usernameInput = requiredElement("#username", HTMLInputElement);
@@ -163,11 +167,12 @@ const keyInput = requiredElement("#key", HTMLInputElement);
 const runtimeMarker = requiredElement("#runtime-marker", HTMLElement);
 const pageLabel = requiredElement("#page", HTMLElement);
 const pageContext = requiredElement("#page-context", HTMLElement);
+const sourceActions = requiredElement("#source-actions", HTMLElement);
 const sourceLabel = requiredElement("#source", HTMLElement);
 const statusLabel = requiredElement("#status", HTMLElement);
 const statusTitle = requiredElement("#status-title", HTMLElement);
 const statusMessage = requiredElement("#status-message", HTMLElement);
-const statusDetails = requiredElement("#status-details", HTMLDetailsElement);
+const statusDetails = requiredElement("#status-details", HTMLElement);
 const statusCode = requiredElement("#status-code", HTMLElement);
 const preferenceFields = requiredElement("#capture-preferences", HTMLFieldSetElement);
 const collectionQuery = requiredElement("#collection-query", HTMLInputElement);
@@ -188,6 +193,8 @@ const manualFileInput = requiredElement("#manual-file", HTMLInputElement);
 const connectionStatus = requiredElement("#connection-status", HTMLElement);
 const connectionTitle = requiredElement("#connection-title", HTMLElement);
 const connectionDetail = requiredElement("#connection-detail", HTMLElement);
+const connectionHostLabel = requiredElement("#connection-host", HTMLElement);
+const connectionFeedback = requiredElement("#connection-feedback", HTMLElement);
 const connectionPanel = requiredElement("#connection-panel", HTMLElement);
 const connectionForm = requiredElement("#connection-form", HTMLFormElement);
 const connectButton = requiredElement("#connect", HTMLButtonElement);
@@ -419,11 +426,11 @@ function showStatus(
   providerCode?: string,
 ) {
   if (!message) {
+    inboxButton.textContent = "Open Pending Imports";
     statusLabel.hidden = true;
     statusTitle.textContent = "";
     statusMessage.textContent = "";
     statusDetails.hidden = true;
-    statusDetails.open = false;
     statusCode.textContent = "";
     delete statusLabel.dataset.kind;
     return;
@@ -436,11 +443,12 @@ function showStatus(
   });
   statusLabel.hidden = false;
   statusTitle.textContent = presentation.title ?? "";
-  statusTitle.hidden = !presentation.title;
+  statusTitle.hidden = kind !== "success";
   statusMessage.textContent = presentation.message;
+  statusMessage.hidden = kind === "success";
   statusDetails.hidden = !presentation.technicalCode;
-  statusDetails.open = false;
   statusCode.textContent = presentation.technicalCode ?? "";
+  inboxButton.textContent = kind === "success" ? "Review" : "Open Pending Imports";
   if (kind) statusLabel.dataset.kind = kind;
   else delete statusLabel.dataset.kind;
 }
@@ -492,14 +500,14 @@ function clearCandidateSelection() {
   pendingThingiverseLinks.clear();
   candidatePanel.hidden = true;
   candidateList.replaceChildren();
-  captureButton.textContent = "Send to Pending Imports";
+  captureButton.textContent = "Send to PrintStash";
 }
 
 function clearManualFileSelection() {
   pendingManualCapture = null;
   manualFileInput.value = "";
   manualFilePanel.hidden = true;
-  captureButton.textContent = "Send to Pending Imports";
+  captureButton.textContent = "Send to PrintStash";
 }
 
 function renderManualFileSelection(capture: BrowserCaptureMessage) {
@@ -560,20 +568,28 @@ function renderCandidateSelection(capture: BrowserCaptureMessage) {
     input.type = "checkbox";
     input.checked = capture.source.provider !== "makerworld";
     input.dataset.candidateIndex = String(index);
+    const copy = document.createElement("span");
+    copy.className = "candidate-copy";
     const filename = document.createElement("span");
+    filename.className = "candidate-filename";
     filename.textContent = candidate.filename;
+    filename.title = candidate.filename;
+    copy.append(filename);
     if (candidate.profile) {
       const facts = document.createElement("small");
+      facts.className = "candidate-facts";
       facts.textContent = profileSummary(candidate.profile);
-      filename.append(document.createElement("br"), facts);
+      facts.title = facts.textContent;
+      copy.append(facts);
     }
-    label.append(input, filename);
+    label.append(input, copy);
     candidateList.append(label);
   });
   gallerySelection?.remove();
   gallerySelection = document.createElement("fieldset");
   const legend = document.createElement("legend");
   legend.textContent = `Publication gallery (${pendingGallery.length} images)`;
+  legend.hidden = pendingGallery.length === 0;
   gallerySelection.append(legend);
   for (const [index, image] of pendingGallery.entries()) {
     const label = document.createElement("label");
@@ -587,10 +603,10 @@ function renderCandidateSelection(capture: BrowserCaptureMessage) {
   }
   const note = document.createElement("small");
   note.textContent = galleryUnavailable
-    ? "The publication gallery could not be read. Reopen the page to retry, or continue with files only and add images later."
+    ? "Gallery unavailable. Reopen the page to retry, or add images later."
     : pendingGallery.length
-      ? "Selected images are saved with the model. Choose another cover in PrintStash. GIF images are saved as a still image."
-      : "No publication images were captured. You can attach a cover below.";
+      ? "GIFs are saved as still images. Change the cover in PrintStash."
+      : "No gallery images. You can add a cover below.";
   gallerySelection.append(note);
   candidatePanel.after(gallerySelection);
   candidatePanel.hidden = false;
@@ -627,16 +643,27 @@ function setConnectionFormBusy(busy: boolean) {
 
 function configFromForm() {
   const vault = normalizeVault(vaultInput.value);
-  const pairingCode = pairingCodeInput.value.trim();
-  if (pairingCode) {
+  if (pairingMethod.checked) {
+    const pairingCode = pairingCodeInput.value.trim();
+    if (!pairingCode) throw new Error("Enter a pairing code.");
     if (!deviceNameInput.value.trim()) throw new Error("Enter a name for this browser.");
     return { vault, pairingCode };
   }
   const username = usernameInput.value.trim();
   const apiKey = keyInput.value.trim();
-  if (!username || !apiKey)
-    throw new Error("Enter a pairing code, or a username and named API key.");
+  if (!username || !apiKey) throw new Error("Enter your username and named API key.");
   return { vault, username, apiKey };
+}
+
+function renderCredentialFields() {
+  pairingFields.hidden = apiKeyMethod.checked;
+  apiKeyFields.hidden = pairingMethod.checked;
+  connectButton.textContent = connectionActionLabel();
+}
+
+function connectionActionLabel() {
+  if (editingConnection) return "Update connection";
+  return pairingMethod.checked ? "Pair browser" : "Connect with API key";
 }
 
 function fillConnectionForm(config: Config | null) {
@@ -644,6 +671,9 @@ function fillConnectionForm(config: Config | null) {
   pairingCodeInput.value = "";
   usernameInput.value = config?.username || "";
   keyInput.value = config?.apiKey || "";
+  const method = config?.username && config.apiKey ? apiKeyMethod : pairingMethod;
+  method.checked = true;
+  renderCredentialFields();
 }
 
 function permissionOrigin(config: Config) {
@@ -674,6 +704,7 @@ function renderImportAvailability() {
   importPanel.hidden = !readyConnection;
   preferenceFields.disabled = importBusy || !readyConnection;
   captureButton.disabled = importBusy || !readyConnection || !activeSource;
+  importHint.hidden = !importBusy && Boolean(activeSource) && !pendingManualCapture;
   if (importBusy) {
     importHint.textContent =
       new URL(location.href).searchParams.get("panel") === "1"
@@ -684,9 +715,7 @@ function renderImportAvailability() {
   } else if (!activeSource) {
     importHint.textContent = "Open a supported model page or direct model file first.";
   } else if (pendingManualCapture) {
-    importHint.textContent = "Choose a downloaded file. Provider download has not been verified.";
-  } else {
-    importHint.textContent = `${activeSource} page detected. Files will remain reviewable before import.`;
+    importHint.textContent = "Automatic download was unavailable.";
   }
 }
 
@@ -709,16 +738,22 @@ function renderConnection(
     const role = profile ? ` · ${profile.is_superuser ? "Admin" : "Member"}` : "";
     connectionDetail.textContent = `${identity} · ${connectionHost(config)}${role}`;
   } else if (state === "checking") {
-    connectionTitle.textContent = "Checking connection…";
+    connectionTitle.textContent = "Checking…";
     connectionDetail.textContent =
       detail || (config ? connectionHost(config) : "Reading saved settings");
   } else if (state === "error") {
-    connectionTitle.textContent = "Connection failed";
+    connectionTitle.textContent = "Connection problem";
     connectionDetail.textContent = detail || "Review the URL and credentials below.";
   } else {
     connectionTitle.textContent = "Not connected";
     connectionDetail.textContent = detail || "Connect a PrintStash vault to start importing.";
   }
+  connectionStatus.title = connectionDetail.textContent;
+  connectionHostLabel.hidden = !config;
+  connectionHostLabel.textContent = config ? connectionHost(config) : "";
+  connectionHostLabel.title = connectionHostLabel.textContent;
+  connectionFeedback.hidden = state !== "error";
+  connectionFeedback.textContent = state === "error" ? connectionDetail.textContent : "";
 
   const showConnectedActions = state === "connected";
   pageContext.hidden = !showConnectedActions;
@@ -742,11 +777,8 @@ function renderActivePage() {
       ? classified
       : null;
   pageLabel.textContent = activePage?.title || activePage?.url || "No active page";
-  sourceLabel.textContent = activeSource
-    ? activeSource === "Direct file"
-      ? "Direct model file detected"
-      : `${activeSource} page detected`
-    : "Open a supported marketplace model page, or a direct model file";
+  pageLabel.title = pageLabel.textContent;
+  sourceLabel.textContent = activeSource ? `${activeSource} · Supported` : "Unsupported source";
   sourceLabel.dataset.supported = activeSource ? "true" : "false";
   renderImportAvailability();
 }
@@ -883,7 +915,7 @@ async function establishConnection(
   } finally {
     connectionAttempt = null;
     lockConnection(false);
-    connectButton.textContent = editingConnection ? "Update connection" : "Connect";
+    connectButton.textContent = connectionActionLabel();
   }
 }
 
@@ -1530,6 +1562,9 @@ async function takePreparedSetup(page: Page) {
   }
 }
 
+pairingMethod.addEventListener("change", renderCredentialFields);
+apiKeyMethod.addEventListener("change", renderCredentialFields);
+
 connectionForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (connectionLocked) return;
@@ -1555,7 +1590,7 @@ editButton.addEventListener("click", () => {
   editButton.hidden = true;
   cancelButton.hidden = false;
   disconnectButton.hidden = false;
-  connectButton.textContent = "Update connection";
+  connectButton.textContent = connectionActionLabel();
   renderImportAvailability();
   showStatus();
   vaultInput.focus();
@@ -1569,7 +1604,6 @@ cancelButton.addEventListener("click", () => {
   connectionPanel.hidden = Boolean(connectedConfig);
   cancelButton.hidden = true;
   disconnectButton.hidden = true;
-  connectButton.textContent = "Connect";
   renderConnection("connected", {
     config: connectedConfig ?? undefined,
     profile: connectedProfile,
@@ -1605,14 +1639,13 @@ disconnectButton.addEventListener("click", async () => {
   connectedProfile = null;
   accessToken = null;
   editingConnection = false;
-  keyInput.value = "";
+  fillConnectionForm({ vault: vaultInput.value });
   clearInboxAction();
   clearCandidateSelection();
   clearManualFileSelection();
   connectionPanel.hidden = false;
   cancelButton.hidden = true;
   disconnectButton.hidden = true;
-  connectButton.textContent = "Connect";
   renderConnection("disconnected");
   lockConnection(false);
   showStatus(
@@ -2120,10 +2153,11 @@ inboxButton.addEventListener("click", () => {
 const enablePanel = document.createElement("button");
 enablePanel.type = "button";
 enablePanel.textContent = "Enable panel on this site";
-enablePanel.className = "secondary";
+enablePanel.className = "text-button";
 enablePanel.hidden = true;
-pageContext.append(enablePanel);
+sourceActions.append(enablePanel);
 const captureHistory = document.createElement("section");
+captureHistory.className = "capture-history";
 captureHistory.hidden = true;
 pageContext.append(captureHistory);
 async function refreshCaptureHistory() {
@@ -2138,13 +2172,13 @@ async function refreshCaptureHistory() {
     captureHistory.replaceChildren();
     const summary = document.createElement("p");
     summary.textContent = items.length
-      ? "Your captures of this publication (not a file-identity check):"
-      : "No previous captures of this publication in your capture history.";
+      ? "Your previous captures of this page"
+      : "No previous captures of this page.";
     captureHistory.append(summary);
     for (const item of items) {
       const link = document.createElement("button");
       link.type = "button";
-      link.className = "secondary";
+      link.className = "text-button";
       link.textContent = `${captureHistoryLabel(item)} · #${item.id}`;
       link.addEventListener("click", () =>
         browser.tabs.create({ url: captureReviewUrl(config.vault, item) }),
@@ -2212,10 +2246,10 @@ async function initialize() {
     renderConnection("disconnected", {
       detail: "Setup received from this PrintStash tab.",
     });
-    connectButton.textContent = "Finish setup";
     const origins = [permissionOrigin(prepared)];
     const alreadyAllowed = await browser.permissions.contains({ origins }).catch(() => false);
     lockConnection(false);
+    connectButton.textContent = "Finish setup";
     if (alreadyAllowed) {
       try {
         await establishConnection(prepared, { requestPermission: false, persist: true });
@@ -2258,7 +2292,6 @@ initialize().catch((error) => {
   lockConnection(false);
   connectionPanel.hidden = false;
   renderConnection("error", { detail: messageFrom(error) });
-  showStatus(messageFrom(error), "error");
 });
 
 // Escape hides the embedded panel; the transfer owner remains mounted.

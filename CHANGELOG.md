@@ -4,6 +4,8 @@
 
 ### Changed
 
+- The browser extension popup puts pairing and capture first, with connection status in the header, a choice of pairing code or API key, and a direct review action after sending files.
+
 - Settings sections now read as one centered column with the section name as the page title, open rows and a single interface font. Dropdown arrows stay inside their fields, and switches throughout the app are solid when on and empty when off.
 
 - Model descriptions render Markdown in detail, inspection and shared views, with an edit preview. Browser capture can retain up to 64 publication photos, show them in the card gallery, and choose any captured image as the cover. Gallery transfers recover verified images, preserve source provenance, and remain included in Vault backups and portable exports.

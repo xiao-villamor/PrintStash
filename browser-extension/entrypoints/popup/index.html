@@ -5,60 +5,52 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PrintStash</title>
   </head>
-  <body>
+  <body class="popup">
     <main>
       <header class="header">
-        <img class="brand-mark" src="/icon.svg" alt="" width="36" height="36" />
-        <div>
-          <p class="eyebrow">Browser extension</p>
+        <img class="brand-mark" src="/icon.svg" alt="" width="24" height="24" />
+        <div class="brand-copy">
           <h1>PrintStash</h1>
-          <p class="release-version" id="runtime-marker">Version</p>
+          <p id="connection-host" class="connection-host" hidden></p>
         </div>
+        <section
+          id="connection-status"
+          class="connection-status"
+          data-state="checking"
+          aria-live="polite"
+        >
+          <span class="connection-indicator" aria-hidden="true"></span>
+          <span id="connection-title">Checking…</span>
+          <span id="connection-detail" class="visually-hidden">Reading saved settings</span>
+        </section>
+        <button id="edit-connection" class="text-button" type="button" hidden>Edit</button>
       </header>
 
-      <section
-        id="connection-status"
-        class="connection-status"
-        data-state="checking"
-        aria-live="polite"
-      >
-        <span class="connection-indicator" aria-hidden="true"></span>
-        <div class="connection-copy">
-          <p id="connection-title" class="connection-title">Checking connection…</p>
-          <p id="connection-detail" class="connection-detail">Reading saved settings</p>
-        </div>
-        <button id="edit-connection" class="text-button" type="button" hidden>Edit</button>
-      </section>
-
-      <section id="page-context" class="page-context" aria-labelledby="current-page-label" hidden>
-        <p id="current-page-label" class="section-label">Current page</p>
-        <p id="page" class="page-title">Reading current page…</p>
-        <p id="source" class="source">Detecting a supported model source…</p>
-      </section>
-
-      <section
-        id="status"
-        class="status"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        hidden
-      >
-        <p id="status-title" class="status-title" hidden></p>
-        <p id="status-message" class="status-message"></p>
-        <details id="status-details" class="status-details" hidden>
-          <summary>Technical details</summary>
-          <code id="status-code"></code>
-        </details>
-      </section>
+      <div class="feedback">
+        <section
+          id="status"
+          class="status"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          hidden
+        >
+          <p id="status-title" class="status-title" hidden></p>
+          <p id="status-message" class="status-message"></p>
+          <p id="status-details" class="status-details" hidden>
+            Code: <code id="status-code"></code>
+          </p>
+        </section>
+        <button id="open-inbox" class="text-button" type="button" hidden>
+          Open Pending Imports
+        </button>
+      </div>
 
       <section id="connection-panel" class="connection-panel" aria-labelledby="connection-label">
         <div class="section-heading">
           <div>
-            <p id="connection-label" class="section-label">Connect PrintStash</p>
-            <p class="section-description">
-              Pair this browser without saving your PrintStash login.
-            </p>
+            <h2 id="connection-label">Connect to PrintStash</h2>
+            <p class="section-description">Connect this browser to send models to your server.</p>
           </div>
           <div class="connection-actions">
             <button id="disconnect" class="text-button destructive" type="button" hidden>
@@ -67,126 +59,157 @@
             <button id="cancel-edit" class="text-button" type="button" hidden>Cancel</button>
           </div>
         </div>
+        <p id="connection-feedback" class="connection-feedback" hidden></p>
         <form id="connection-form">
-          <label
-            ><span>Vault URL</span
-            ><input
+          <label>
+            Server URL
+            <input
               id="vault"
               type="text"
               inputmode="url"
               autocomplete="url"
               spellcheck="false"
               placeholder="https://prints.example.com"
-              aria-describedby="vault-help"
               required
-          /></label>
-          <p id="vault-help" class="credential-help">
-            Your PrintStash address, for example localhost:8000 or a server on your network.
-          </p>
-          <label
-            ><span>Pairing code</span
-            ><input
-              id="pairing-code"
-              type="password"
-              autocomplete="one-time-code"
-              spellcheck="false"
-              placeholder="Code from PrintStash Settings"
-          /></label>
-          <p class="credential-help">
-            In PrintStash, open Settings → Imports and create a pairing code. It expires after five
-            minutes.
-          </p>
-          <label
-            ><span>Browser name</span
-            ><input
+            />
+          </label>
+          <label>
+            Browser name
+            <input
               id="device-name"
               type="text"
               maxlength="128"
               value="Browser extension"
               autocomplete="off"
-              aria-describedby="device-name-help"
-          /></label>
-          <p id="device-name-help" class="credential-help">
-            Choose a distinct name for this browser so you can recognize or revoke it in PrintStash.
-          </p>
-          <details class="credential-help">
-            <summary>Use legacy API-key setup</summary>
-            <label
-              ><span>Username</span
-              ><input
+            />
+          </label>
+          <fieldset class="credential-method">
+            <legend class="visually-hidden">Connection method</legend>
+            <label>
+              <input
+                id="pairing-method"
+                class="visually-hidden"
+                name="credential-method"
+                type="radio"
+                checked
+              />
+              <span>Pairing code</span>
+            </label>
+            <label>
+              <input
+                id="api-key-method"
+                class="visually-hidden"
+                name="credential-method"
+                type="radio"
+              />
+              <span>API key</span>
+            </label>
+          </fieldset>
+          <div id="pairing-fields" class="option-fields">
+            <label>
+              Pairing code
+              <input
+                id="pairing-code"
+                type="password"
+                autocomplete="one-time-code"
+                spellcheck="false"
+                placeholder="Code from PrintStash"
+                aria-describedby="pairing-hint"
+              />
+            </label>
+            <ol id="pairing-hint" class="section-description">
+              <li>In PrintStash, go to Settings → Imports.</li>
+              <li>Create a pairing code. It expires in 5 min.</li>
+            </ol>
+          </div>
+          <div id="api-key-fields" class="option-fields" hidden>
+            <label>
+              Username
+              <input
                 id="username"
                 type="text"
                 autocomplete="username"
                 spellcheck="false"
-                placeholder="your username" /></label
-            ><label
-              ><span>Named API key</span
-              ><input
+                placeholder="your username"
+              />
+            </label>
+            <label>
+              Named API key
+              <input
                 id="key"
                 type="password"
                 autocomplete="off"
                 spellcheck="false"
                 placeholder="psk_…"
-            /></label>
-          </details>
-          <div class="setup-actions">
-            <button id="open-api-settings" class="secondary" type="button">Open settings</button>
-            <button id="connect" type="submit">Pair browser</button>
+              />
+            </label>
           </div>
+          <button id="open-api-settings" class="text-button" type="button">
+            Open PrintStash settings
+          </button>
+          <button id="connect" class="primary" type="submit">Pair browser</button>
         </form>
       </section>
 
       <section id="import-panel" class="import-panel" aria-labelledby="import-label" hidden>
-        <div>
-          <p id="import-label" class="section-label">Pending Imports</p>
-          <p id="import-hint" class="section-description">
-            Connect PrintStash to enable importing.
-          </p>
-        </div>
-        <fieldset id="candidate-panel" class="candidate-panel" hidden>
+        <section id="page-context" class="page-context" aria-labelledby="page" hidden>
+          <p id="import-label" class="visually-hidden">Current page</p>
+          <h2 id="page" class="page-title">Reading current page…</h2>
+          <div id="source-actions" class="source-actions">
+            <p id="source" class="source">Checking source…</p>
+          </div>
+        </section>
+        <p id="import-hint" class="section-description" hidden></p>
+        <fieldset id="candidate-panel" hidden>
           <legend>Select Printables files</legend>
           <div id="candidate-list" class="candidate-list"></div>
         </fieldset>
-        <fieldset id="manual-file-panel" class="candidate-panel" hidden>
-          <legend>Attach downloaded model file</legend>
+        <fieldset id="manual-file-panel" hidden>
+          <legend><label for="manual-file">Attach a downloaded model file</label></legend>
           <input
             id="manual-file"
             type="file"
             accept=".3mf,.stl,.obj,.step,.stp,.gcode,.g,.gco,.bgcode,.zip"
           />
         </fieldset>
-        <details id="capture-options">
-          <summary>Collection, tags and cover</summary>
-          <fieldset id="capture-preferences" class="candidate-panel">
-            <legend>Suggestions for review</legend>
-            <label
-              >Find a collection <input id="collection-query" type="search" maxlength="128"
-            /></label>
-            <button id="find-collection" class="secondary" type="button">Find collections</button>
-            <label for="capture-collection">Collection</label>
+        <fieldset id="capture-preferences" class="suggestions">
+          <legend>Suggestions for review</legend>
+          <div class="collection-search">
+            <label for="collection-query" class="visually-hidden">Find a collection</label>
+            <input
+              id="collection-query"
+              type="search"
+              maxlength="128"
+              placeholder="Find a collection"
+            />
+            <button id="find-collection" class="secondary" type="button">Find</button>
+          </div>
+          <label class="suggestion-row">
+            Collection
             <select id="capture-collection">
               <option value="">Choose in Pending Imports</option>
             </select>
-            <label>Tags, separated by commas <input id="capture-tags" type="text" /></label>
-            <label
-              >Optional cover
-              <input id="capture-cover" type="file" accept="image/jpeg,image/png,image/webp"
-            /></label>
-            <p class="section-description">
-              Choose a JPEG, PNG or WebP up to 15 MiB. Cover bytes stay in memory until transferred.
-            </p>
-            <p class="section-description">
-              Files use managed storage. Choosing a collection does not move existing files. Confirm
-              these suggestions in Pending Imports.
-            </p>
-          </fieldset>
-        </details>
-        <button id="capture" class="wide" type="button" disabled>Send to Pending Imports</button>
+          </label>
+          <label class="suggestion-row">
+            Tags
+            <input id="capture-tags" type="text" placeholder="Separate with commas" />
+          </label>
+          <label class="suggestion-row">
+            Cover
+            <input
+              id="capture-cover"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              aria-describedby="cover-hint"
+            />
+          </label>
+          <p id="cover-hint" class="section-description">Cover: JPEG, PNG or WebP, up to 15 MiB.</p>
+        </fieldset>
+        <button id="capture" class="primary" type="button" disabled>Send to PrintStash</button>
       </section>
-      <button id="open-inbox" class="secondary wide" hidden>Open Pending Imports</button>
       <footer class="popup-footer">
-        <span>Imports go to your PrintStash server.</span>
         <a id="help-link" href="help.html" target="_blank" rel="noopener">Help &amp; privacy</a>
+        <span id="runtime-marker">Version</span>
       </footer>
     </main>
     <script type="module" src="./main.ts"></script>

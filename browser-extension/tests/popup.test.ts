@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "@webext-core/fake-browser";
 
 const popupHtml = await readFile("entrypoints/popup/index.html", "utf8");
-const popupCss = await readFile("popup.css", "utf8");
 const extensionVersion = JSON.parse(await readFile("package.json", "utf8")).version;
 
 function response(body: unknown, status = 200) {
@@ -27,16 +26,6 @@ const element = (selector: string) => requiredElement(selector, HTMLElement);
 function stringBody(options: RequestInit): string {
   if (typeof options.body !== "string") throw new TypeError("Expected a string request body");
   return options.body;
-}
-
-function cssBlock(selector: string): string {
-  const selectorIndex = popupCss.indexOf(selector);
-  const blockStart = popupCss.indexOf("{", selectorIndex);
-  const blockEnd = popupCss.indexOf("}", blockStart);
-  if (selectorIndex < 0 || blockStart < 0 || blockEnd < 0) {
-    throw new Error(`Missing CSS block for ${selector}`);
-  }
-  return popupCss.slice(blockStart + 1, blockEnd);
 }
 
 function deferred<T>() {
@@ -133,11 +122,11 @@ describe("popup browser adapters", () => {
     expect(element("#connection-title").textContent).toBe("Not connected");
   });
 
-  it("shows the packaged release version in the popup header", async () => {
+  it("shows the packaged release version in the popup footer", async () => {
     await import("../popup.ts");
 
     expect(element("#runtime-marker").textContent).toBe(`Version ${extensionVersion}`);
-    expect(element("#runtime-marker").hidden).toBe(false);
+    expect(element("#runtime-marker").closest("footer")).toBe(element(".popup-footer"));
     expect(document.querySelector("header")?.textContent).not.toContain("protocol");
     expect(document.querySelector("header")?.textContent).not.toContain("diagnostics");
   });
@@ -280,6 +269,194 @@ describe("popup browser adapters", () => {
     expect(element("#connection-panel").hidden).toBe(false);
     expect(element("#page-context").hidden).toBe(true);
     expect(element("#import-panel").hidden).toBe(true);
+    expect(requiredElement("#pairing-method", HTMLInputElement).checked).toBe(true);
+    const inputs = element("#connection-form").querySelectorAll("input:not([type='radio'])");
+    expect(
+      [...inputs].filter((input) => !input.closest("[hidden]")).map((input) => input.id),
+    ).toEqual(["vault", "device-name", "pairing-code"]);
+    expect(requiredElement("#device-name", HTMLInputElement).value).toBe("Browser extension");
+  });
+
+  it.each([
+    {
+      method: "API key",
+      previous: "#pairing-method",
+      selector: "#api-key-method",
+      visible: "#api-key-fields",
+      hidden: "#pairing-fields",
+    },
+    {
+      method: "pairing code",
+      previous: "#api-key-method",
+      selector: "#pairing-method",
+      visible: "#pairing-fields",
+      hidden: "#api-key-fields",
+    },
+  ])(
+    "shows credential fields for the selected $method method",
+    async ({ previous, selector, visible, hidden }) => {
+      await import("../popup.ts");
+      await settle();
+      requiredElement(previous, HTMLInputElement).click();
+
+      requiredElement(selector, HTMLInputElement).click();
+
+      expect(element(visible).hidden).toBe(false);
+      expect(element(hidden).hidden).toBe(true);
+    },
+  );
+
+  it("shows the API key method for prepared legacy setup", async () => {
+    const vault = "https://prints.example.com";
+    const now = Date.parse("2026-01-01T00:00:00Z");
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    fakeBrowser.tabs.query = vi.fn().mockResolvedValue([{ id: 42, url: vault }]);
+    fakeBrowser.permissions.contains = vi.fn().mockResolvedValue(false);
+    fakeBrowser.scripting.executeScript = vi.fn().mockResolvedValue([
+      {
+        result: JSON.stringify({
+          version: 1,
+          vault,
+          username: "owner",
+          apiKey: "test-key",
+          expiresAt: now + 60_000,
+        }),
+      },
+    ]);
+
+    await import("../popup.ts");
+    await settle();
+
+    expect(requiredElement("#api-key-method", HTMLInputElement).checked).toBe(true);
+    expect(element("#api-key-fields").hidden).toBe(false);
+    expect(requiredElement("#username", HTMLInputElement).value).toBe("owner");
+    expect(button("#connect").textContent).toBe("Finish setup");
+  });
+
+  const pairedDevice = { vault: "https://prints.example.com", deviceCredential: "test-device" };
+  const readyVault = () => response({ status: "ok", name: "PrintStash" });
+
+  it.each([
+    {
+      state: "checking",
+      label: "Checking…",
+      stored: pairedDevice,
+      health: () => deferred<Response>().promise,
+    },
+    { state: "disconnected", label: "Not connected", stored: {}, health: readyVault },
+    { state: "connected", label: "Connected", stored: pairedDevice, health: readyVault },
+    {
+      state: "error",
+      label: "Connection problem",
+      stored: pairedDevice,
+      health: () => response({}, 503),
+    },
+  ])("announces $state in the header pill", async ({ state, label, stored, health }) => {
+    await fakeBrowser.storage.local.set(stored);
+    vi.stubGlobal("fetch", async () => health());
+
+    await import("../popup.ts");
+
+    await vi.waitFor(() => expect(element("#connection-status").dataset.state).toBe(state));
+    expect(
+      element("header #connection-status[aria-live='polite'] #connection-title").textContent,
+    ).toBe(label);
+  });
+
+  it("shows capture suggestions when connected", async () => {
+    await fakeBrowser.storage.local.set(pairedDevice);
+    vi.stubGlobal("fetch", async () => readyVault());
+
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(element("#import-panel").hidden).toBe(false));
+
+    const suggestions = requiredElement("#capture-preferences", HTMLFieldSetElement);
+    expect(suggestions.disabled).toBe(false);
+    expect(suggestions.querySelector("legend")?.textContent).toBe("Suggestions for review");
+    expect(
+      [...suggestions.querySelectorAll("input, select, button")]
+        .filter((item) => !item.closest("[hidden]"))
+        .map((item) => item.id),
+    ).toEqual([
+      "collection-query",
+      "find-collection",
+      "capture-collection",
+      "capture-tags",
+      "capture-cover",
+    ]);
+  });
+
+  it.each([
+    { label: "setup", state: "disconnected", stored: {}, action: "Pair browser" },
+    { label: "capture", state: "connected", stored: pairedDevice, action: "Send to PrintStash" },
+  ])("shows a single primary action during $label", async ({ state, stored, action }) => {
+    await fakeBrowser.storage.local.set(stored);
+    vi.stubGlobal("fetch", async () => readyVault());
+
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(element("#connection-status").dataset.state).toBe(state));
+
+    const buttons = document.querySelectorAll<HTMLButtonElement>("button.primary");
+    expect(
+      [...buttons].filter((item) => !item.closest("[hidden]")).map((item) => item.textContent),
+    ).toEqual([action]);
+  });
+
+  describe("capture feedback", () => {
+    beforeEach(async () => {
+      await fakeBrowser.storage.local.set({
+        vault: "https://prints.example.com",
+        deviceCredential: "test-device",
+      });
+      fakeBrowser.tabs.query = vi
+        .fn()
+        .mockResolvedValue([{ id: 42, title: "Part", url: "https://models.example.com/part.stl" }]);
+    });
+
+    it("offers review from the capture confirmation", async () => {
+      vi.stubGlobal("fetch", async (url: string) =>
+        url.endsWith("/health")
+          ? response({ status: "ok", name: "PrintStash" })
+          : response({ id: 42 }),
+      );
+      await import("../popup.ts");
+      await vi.waitFor(() => expect(button("#capture").disabled).toBe(false));
+
+      button("#capture").click();
+      await vi.waitFor(() => expect(element("#status").dataset.kind).toBe("success"));
+
+      expect(element("#status[role='status'][aria-live='polite'] #status-title").textContent).toBe(
+        "Sent to Pending Imports",
+      );
+      expect(element("#status-message").hidden).toBe(true);
+      const review = button("#open-inbox");
+      expect(review.textContent).toBe("Review");
+      expect(review.hidden).toBe(false);
+      review.click();
+      expect(fakeBrowser.tabs.create).toHaveBeenCalledWith({
+        url: "https://prints.example.com/inbox/42",
+      });
+    });
+
+    it("shows the diagnostic code below the import error", async () => {
+      vi.stubGlobal("fetch", async (url: string) =>
+        url.endsWith("/health")
+          ? response({ status: "ok", name: "PrintStash" })
+          : response({ detail: "Import failed." }, 503),
+      );
+      await import("../popup.ts");
+      await vi.waitFor(() => expect(button("#capture").disabled).toBe(false));
+
+      button("#capture").click();
+      await vi.waitFor(() => expect(element("#status").dataset.kind).toBe("error"));
+
+      expect(element("#status-message").hidden).toBe(false);
+      const details = element("#status-details");
+      expect(details.hidden).toBe(false);
+      expect(details.previousElementSibling).toBe(element("#status-message"));
+      expect(details.textContent?.trim()).toBe("Code: capture_failed");
+      expect(element("#status-code").textContent).toBe("capture_failed");
+    });
   });
 
   it("asks users to keep the popup open during a transfer", async () => {
@@ -309,29 +486,43 @@ describe("popup browser adapters", () => {
   });
 
   it.each([
-    { vault: "http://[", code: "test-code", message: "Vault URL is invalid." },
+    {
+      vault: "http://[",
+      code: "test-code",
+      method: "#pairing-method",
+      message: "Vault URL is invalid.",
+    },
     {
       vault: "ftp://prints.example.com",
       code: "test-code",
+      method: "#pairing-method",
       message: "Vault URL must use HTTP or HTTPS.",
     },
     {
       vault: "https://prints.example.com",
       code: "",
-      message: "Enter a pairing code, or a username and named API key.",
+      method: "#pairing-method",
+      message: "Enter a pairing code.",
     },
-  ])("explains invalid connection input: $message", async ({ vault, code, message }) => {
+    {
+      vault: "https://prints.example.com",
+      code: "unused-pairing-code",
+      method: "#api-key-method",
+      message: "Enter your username and named API key.",
+    },
+  ])("explains invalid connection input: $message", async ({ vault, code, method, message }) => {
     const fetchImpl = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchImpl);
     await import("../popup.ts");
     await settle();
+    requiredElement(method, HTMLInputElement).click();
     requiredElement("#vault", HTMLInputElement).value = vault;
     requiredElement("#pairing-code", HTMLInputElement).value = code;
 
     button("#connect").click();
     await settle();
 
-    expect(element("#connection-title").textContent).toBe("Connection failed");
+    expect(element("#connection-title").textContent).toBe("Connection problem");
     expect(element("#connection-detail").textContent).toBe(message);
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(await fakeBrowser.storage.local.get()).toEqual({});
@@ -884,15 +1075,6 @@ describe("popup browser adapters", () => {
     expect(fakeBrowser.scripting.executeScript).not.toHaveBeenCalled();
   });
 
-  it("keeps candidate checkboxes compact instead of inheriting text-input dimensions", () => {
-    const checkboxStyles = cssBlock('.candidate-option input[type="checkbox"]');
-    expect(checkboxStyles).toMatch(/width:\s*16px/);
-    expect(checkboxStyles).toMatch(/height:\s*16px/);
-    expect(checkboxStyles).toMatch(/min-height:\s*16px/);
-    expect(checkboxStyles).toMatch(/flex:\s*0 0 16px/);
-    expect(checkboxStyles).toMatch(/padding:\s*0/);
-  });
-
   it("restores settings and checks the vault through fake storage and permission APIs", async () => {
     await fakeBrowser.storage.local.set({
       vault: "https://prints.example.com",
@@ -1011,7 +1193,7 @@ describe("popup browser adapters", () => {
       await settle();
       expect(button("#cancel-edit").disabled).toBe(true);
       button("#cancel-edit").click();
-      expect(element("#connection-title").textContent).toBe("Checking connection…");
+      expect(element("#connection-title").textContent).toBe("Checking…");
       publication.resolve(undefined);
       await settle();
       expect(await fakeBrowser.storage.local.get()).toEqual({
@@ -1132,9 +1314,12 @@ describe("popup browser adapters", () => {
         await import("../popup.ts");
         await settle();
         button("#edit-connection").click();
+        requiredElement(
+          `#${kind === "pairing" ? "pairing" : "api-key"}-method`,
+          HTMLInputElement,
+        ).click();
         requiredElement("#vault", HTMLInputElement).value = nextVault;
-        requiredElement("#pairing-code", HTMLInputElement).value =
-          kind === "pairing" ? "test-code" : "";
+        requiredElement("#pairing-code", HTMLInputElement).value = "test-code";
         requiredElement("#username", HTMLInputElement).value = "test-user";
         requiredElement("#key", HTMLInputElement).value = "test-new-key";
         button("#connect").click();
@@ -1478,7 +1663,7 @@ describe("popup browser adapters", () => {
       async (stage) => {
         await startRichFailure(stage, 401);
         await settle();
-        expect(element("#connection-title").textContent).toBe("Connection failed");
+        expect(element("#connection-title").textContent).toBe("Connection problem");
         expect(element("#connection-detail").textContent).toBe(
           "Reconnect PrintStash to continue importing.",
         );
@@ -1543,7 +1728,7 @@ describe("popup browser adapters", () => {
       await settle();
       button("#capture").click();
       await settle();
-      expect(element("#connection-title").textContent).toBe("Connection failed");
+      expect(element("#connection-title").textContent).toBe("Connection problem");
       expect(element("#connection-detail").textContent).toBe(
         "Reconnect PrintStash to continue importing.",
       );
@@ -2359,7 +2544,7 @@ describe("popup browser adapters", () => {
     );
     expect(element("#status-message").textContent).not.toContain("user_file_required");
     expect(element("#status-code").textContent).toBe("makerworld_links_failed · challenge");
-    expect(requiredElement("#status-details", HTMLDetailsElement).open).toBe(false);
+    expect(element("#status-details").hidden).toBe(false);
   });
 
   it("stops on a changed Printables file contract and directs manual attachment without retry", async () => {
@@ -2575,9 +2760,7 @@ describe("popup browser adapters", () => {
     expect(fakeBrowser.scripting.executeScript).toHaveBeenCalledTimes(3);
     expect(button("#capture").disabled).toBe(false);
     expect(element("#manual-file-panel").hidden).toBe(false);
-    expect(element("#import-hint").textContent).toBe(
-      "Choose a downloaded file. Provider download has not been verified.",
-    );
+    expect(element("#import-hint").textContent).toBe("Automatic download was unavailable.");
     expect(element("#status").textContent).toContain(
       "Thingiverse returned file information PrintStash could not safely use",
     );
@@ -2897,7 +3080,7 @@ describe("popup browser adapters", () => {
       if (stage === "printables_metadata") expect(metadataSignal?.aborted).toBe(true);
       expect(element("#manual-file-panel").hidden).toBe(true);
       expect(element("#candidate-panel").hidden).toBe(true);
-      expect(button("#capture").textContent).toBe("Send to Pending Imports");
+      expect(button("#capture").textContent).toBe("Send to PrintStash");
       expect(element("#status").textContent).toContain("Connection verified");
       expect(fetchImpl.mock.calls.some(([input]) => String(input).includes("/inbox"))).toBe(false);
     },

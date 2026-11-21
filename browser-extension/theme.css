@@ -28,6 +28,19 @@
   --error-soft: #fef2f2;
   --radius: 6px;
   --radius-lg: 8px;
+  --radius-pill: 999px;
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --popup-width: 380px;
+  --popup-heading: 16px;
+  --popup-text: 13px;
+  --popup-secondary: 12px;
+  --popup-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --popup-regular: 500;
+  --popup-strong: 650;
+  --control-height: 36px;
   --duration-press: 150ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
