@@ -77,6 +77,7 @@
 
 ### Fixed
 
+- The browser extension popup improves contrast, puts credentials before the browser name, and provides keyboard-accessible file selectors that show the selected filename.
 - Partial imports show every file result and its failure reason. Expired browser staging prompts a fresh capture, and collection selection is distinguished from physical storage.
 - Slicer handoff remembers the current user's browser preference, retains a download fallback for the selected Artifact and distinguishes a requested launch from a confirmed opening.
 

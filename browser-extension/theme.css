@@ -13,7 +13,7 @@
   --foreground: #1e293b;
   --card: #ffffff;
   --muted: #f1f5f9;
-  --muted-foreground: #64748b;
+  --muted-foreground: #5b6b82;
   --accent: #eff6ff;
   --accent-foreground: #1e40af;
   --primary: #2563eb;
@@ -34,7 +34,8 @@
   --space-12: 12px;
   --space-16: 16px;
   --popup-width: 380px;
-  --popup-heading: 16px;
+  --popup-heading: 17px;
+  --popup-brand: 14px;
   --popup-text: 13px;
   --popup-secondary: 12px;
   --popup-mono: ui-monospace, SFMono-Regular, Consolas, monospace;

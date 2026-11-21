@@ -171,6 +171,7 @@ const sourceActions = requiredElement("#source-actions", HTMLElement);
 const sourceLabel = requiredElement("#source", HTMLElement);
 const statusLabel = requiredElement("#status", HTMLElement);
 const statusTitle = requiredElement("#status-title", HTMLElement);
+const statusTitleText = requiredElement("#status-title-text", HTMLElement);
 const statusMessage = requiredElement("#status-message", HTMLElement);
 const statusDetails = requiredElement("#status-details", HTMLElement);
 const statusCode = requiredElement("#status-code", HTMLElement);
@@ -178,6 +179,7 @@ const preferenceFields = requiredElement("#capture-preferences", HTMLFieldSetEle
 const collectionQuery = requiredElement("#collection-query", HTMLInputElement);
 const collectionSelect = requiredElement("#capture-collection", HTMLSelectElement);
 const coverInput = requiredElement("#capture-cover", HTMLInputElement);
+const coverFileName = requiredElement("#capture-cover-name", HTMLElement);
 const tagsInput = requiredElement("#capture-tags", HTMLInputElement);
 const findCollection = requiredElement("#find-collection", HTMLButtonElement);
 const suggestionOperations = new CaptureOperationOwner();
@@ -190,6 +192,7 @@ const candidateLegend = requiredElement("#candidate-panel legend", HTMLElement);
 const candidateList = requiredElement("#candidate-list", HTMLElement);
 const manualFilePanel = requiredElement("#manual-file-panel", HTMLFieldSetElement);
 const manualFileInput = requiredElement("#manual-file", HTMLInputElement);
+const manualFileName = requiredElement("#manual-file-name", HTMLElement);
 const connectionStatus = requiredElement("#connection-status", HTMLElement);
 const connectionTitle = requiredElement("#connection-title", HTMLElement);
 const connectionDetail = requiredElement("#connection-detail", HTMLElement);
@@ -428,7 +431,7 @@ function showStatus(
   if (!message) {
     inboxButton.textContent = "Open Pending Imports";
     statusLabel.hidden = true;
-    statusTitle.textContent = "";
+    statusTitleText.textContent = "";
     statusMessage.textContent = "";
     statusDetails.hidden = true;
     statusCode.textContent = "";
@@ -442,7 +445,7 @@ function showStatus(
     providerCode,
   });
   statusLabel.hidden = false;
-  statusTitle.textContent = presentation.title ?? "";
+  statusTitleText.textContent = presentation.title ?? "";
   statusTitle.hidden = kind !== "success";
   statusMessage.textContent = presentation.message;
   statusMessage.hidden = kind === "success";
@@ -458,6 +461,12 @@ function showDiagnosticStatus(error: unknown, fallbackMessage?: string) {
   showStatus(diagnostic.message, "error", diagnostic.diagnosticCode, diagnostic.providerCode);
 }
 
+function renderFileName(input: HTMLInputElement, display: HTMLElement) {
+  const file = input.files?.[0];
+  display.textContent = file ? file.name : "No file selected";
+  display.title = file ? file.name : "";
+}
+
 function retireCapture() {
   captureOperations.retire();
   suggestionOperations.retire();
@@ -465,6 +474,7 @@ function retireCapture() {
   collectionSelect.replaceChildren(new Option("Choose in Pending Imports", ""));
   tagsInput.value = "";
   coverInput.value = "";
+  renderFileName(coverInput, coverFileName);
   findCollection.disabled = false;
   importBusy = false;
   setButtonBusy(captureButton, false);
@@ -506,6 +516,7 @@ function clearCandidateSelection() {
 function clearManualFileSelection() {
   pendingManualCapture = null;
   manualFileInput.value = "";
+  renderFileName(manualFileInput, manualFileName);
   manualFilePanel.hidden = true;
   captureButton.textContent = "Send to PrintStash";
 }
@@ -746,7 +757,7 @@ function renderConnection(
     connectionDetail.textContent = detail || "Review the URL and credentials below.";
   } else {
     connectionTitle.textContent = "Not connected";
-    connectionDetail.textContent = detail || "Connect a PrintStash vault to start importing.";
+    connectionDetail.textContent = detail || "Connect a PrintStash server to start importing.";
   }
   connectionStatus.title = connectionDetail.textContent;
   connectionHostLabel.hidden = !config;
@@ -791,8 +802,8 @@ async function ensureVaultPermission(config: Config, requestPermission: boolean)
   if (!granted) {
     throw new Error(
       requestPermission
-        ? "Permission to contact this PrintStash vault was not granted."
-        : "Reconnect this vault to restore its browser permission.",
+        ? "Permission to contact this PrintStash server was not granted."
+        : "Reconnect this server to restore its browser permission.",
     );
   }
 }
@@ -1564,6 +1575,8 @@ async function takePreparedSetup(page: Page) {
 
 pairingMethod.addEventListener("change", renderCredentialFields);
 apiKeyMethod.addEventListener("change", renderCredentialFields);
+manualFileInput.addEventListener("change", () => renderFileName(manualFileInput, manualFileName));
+coverInput.addEventListener("change", () => renderFileName(coverInput, coverFileName));
 
 connectionForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1650,10 +1663,10 @@ disconnectButton.addEventListener("click", async () => {
   lockConnection(false);
   showStatus(
     permissionStillGranted
-      ? "Disconnected and removed the stored browser credential, but Chrome kept the vault permission. Remove it from the extension's site access settings."
+      ? "Disconnected and removed the stored browser credential, but Chrome kept the server permission. Remove it from the extension's site access settings."
       : builtInPermission
         ? "Disconnected. The stored browser credential was removed; built-in loopback access contains no credentials."
-        : "Disconnected. The stored browser credential and vault permission were removed from this browser.",
+        : "Disconnected. The stored browser credential and server permission were removed from this browser.",
     permissionStillGranted ? "error" : "success",
   );
 });
@@ -2057,13 +2070,6 @@ captureButton.addEventListener("click", async () => {
         "capture_candidate_render_failed",
         "The provider files could not be shown. Choose a downloaded file to attach it in Pending Imports.",
       );
-      showStatus(
-        visibleCapture.source.provider === "makerworld"
-          ? "Select MakerWorld packages, then confirm the upload."
-          : visibleCapture.source.provider === "thingiverse"
-            ? "Select Thingiverse files, then confirm the upload."
-            : "Review the selected files, then confirm the upload.",
-      );
       return;
     }
     const pageUrl = activePage?.url;
@@ -2258,7 +2264,7 @@ async function initialize() {
         showStatus();
       }
     } else {
-      showStatus("Setup received. Choose Finish setup to approve access to this vault.");
+      showStatus("Setup received. Choose Finish setup to approve access to this server.");
     }
     return;
   }

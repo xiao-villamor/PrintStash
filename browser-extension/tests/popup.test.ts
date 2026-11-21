@@ -270,11 +270,32 @@ describe("popup browser adapters", () => {
     expect(element("#page-context").hidden).toBe(true);
     expect(element("#import-panel").hidden).toBe(true);
     expect(requiredElement("#pairing-method", HTMLInputElement).checked).toBe(true);
-    const inputs = element("#connection-form").querySelectorAll("input:not([type='radio'])");
+    expect(requiredElement("#device-name", HTMLInputElement).value).toBe("Browser extension");
+  });
+
+  it.each([
+    { method: "pairing", selector: "#pairing-method", credentials: ["pairing-code"] },
+    { method: "API key", selector: "#api-key-method", credentials: ["username", "key"] },
+  ])("puts the browser name last in $method setup", async ({ selector, credentials }) => {
+    await import("../popup.ts");
+    await settle();
+
+    requiredElement(selector, HTMLInputElement).click();
+
+    const inputs = element("#connection-form").querySelectorAll("input");
     expect(
       [...inputs].filter((input) => !input.closest("[hidden]")).map((input) => input.id),
-    ).toEqual(["vault", "device-name", "pairing-code"]);
-    expect(requiredElement("#device-name", HTMLInputElement).value).toBe("Browser extension");
+    ).toEqual(["vault", "pairing-method", "api-key-method", ...credentials, "device-name"]);
+  });
+
+  it("describes the disconnected state using server terminology", async () => {
+    await import("../popup.ts");
+
+    await vi.waitFor(() =>
+      expect(element("#connection-detail").textContent).toBe(
+        "Connect a PrintStash server to start importing.",
+      ),
+    );
   });
 
   it.each([
@@ -331,10 +352,42 @@ describe("popup browser adapters", () => {
     expect(element("#api-key-fields").hidden).toBe(false);
     expect(requiredElement("#username", HTMLInputElement).value).toBe("owner");
     expect(button("#connect").textContent).toBe("Finish setup");
+    expect(element("#status-message").textContent).toBe(
+      "Setup received. Choose Finish setup to approve access to this server.",
+    );
   });
 
   const pairedDevice = { vault: "https://prints.example.com", deviceCredential: "test-device" };
   const readyVault = () => response({ status: "ok", name: "PrintStash" });
+
+  it("identifies the server when connection permission is denied", async () => {
+    fakeBrowser.permissions.request = vi.fn().mockResolvedValue(false);
+    await import("../popup.ts");
+    await settle();
+    requiredElement("#vault", HTMLInputElement).value = pairedDevice.vault;
+    requiredElement("#pairing-code", HTMLInputElement).value = "test-pairing-code";
+
+    button("#connect").click();
+
+    await vi.waitFor(() =>
+      expect(element("#connection-feedback").textContent).toBe(
+        "Permission to contact this PrintStash server was not granted.",
+      ),
+    );
+  });
+
+  it("asks to reconnect the server when a saved permission is missing", async () => {
+    await fakeBrowser.storage.local.set(pairedDevice);
+    fakeBrowser.permissions.contains = vi.fn().mockResolvedValue(false);
+
+    await import("../popup.ts");
+
+    await vi.waitFor(() =>
+      expect(element("#connection-feedback").textContent).toBe(
+        "Reconnect this server to restore its browser permission.",
+      ),
+    );
+  });
 
   it.each([
     {
@@ -386,6 +439,61 @@ describe("popup browser adapters", () => {
     ]);
   });
 
+  it("visibly labels each suggestion input", async () => {
+    await fakeBrowser.storage.local.set(pairedDevice);
+    vi.stubGlobal("fetch", async () => readyVault());
+
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(element("#import-panel").hidden).toBe(false));
+
+    const controls = document.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
+      "#capture-preferences input, #capture-preferences select",
+    );
+
+    expect(
+      [...controls].map((control) =>
+        [...(control.labels ?? [])]
+          .filter((label) => !label.closest("[hidden], .visually-hidden"))
+          .map((label) => label.textContent?.trim()),
+      ),
+    ).toEqual([["Search"], ["Collection"], ["Tags"], ["Add cover"]]);
+  });
+
+  describe.each([
+    { id: "manual-file", nameId: "manual-file-name", action: "Choose file", ext: "stl" },
+    { id: "capture-cover", nameId: "capture-cover-name", action: "Add cover", ext: "png" },
+  ])("$id picker", ({ id, nameId, action, ext }) => {
+    it("labels the visually hidden native input", () => {
+      const input = requiredElement(`#${id}.visually-hidden[type="file"]`, HTMLInputElement);
+
+      expect(input.labels?.item(0)?.textContent).toBe(action);
+    });
+
+    it("shows the selected filename as text", async () => {
+      await import("../popup.ts");
+      const input = requiredElement(`#${id}`, HTMLInputElement);
+      const file = new File(["file"], `<part>.${ext}`);
+      Object.defineProperty(input, "files", { value: [file] });
+
+      input.dispatchEvent(new Event("change"));
+
+      expect(element(`#${nameId}`).textContent).toBe(file.name);
+    });
+
+    it("restores the empty filename after the selection clears", async () => {
+      await import("../popup.ts");
+      const input = requiredElement(`#${id}`, HTMLInputElement);
+      const files = [new File(["file"], `part.${ext}`)];
+      Object.defineProperty(input, "files", { value: files });
+      input.dispatchEvent(new Event("change"));
+
+      files.pop();
+      input.dispatchEvent(new Event("change"));
+
+      expect(element(`#${nameId}`).textContent).toBe("No file selected");
+    });
+  });
+
   it.each([
     { label: "setup", state: "disconnected", stored: {}, action: "Pair browser" },
     { label: "capture", state: "connected", stored: pairedDevice, action: "Send to PrintStash" },
@@ -425,9 +533,9 @@ describe("popup browser adapters", () => {
       button("#capture").click();
       await vi.waitFor(() => expect(element("#status").dataset.kind).toBe("success"));
 
-      expect(element("#status[role='status'][aria-live='polite'] #status-title").textContent).toBe(
-        "Sent to Pending Imports",
-      );
+      expect(
+        element("#status[role='status'][aria-live='polite'] #status-title").textContent?.trim(),
+      ).toBe("Sent to Pending Imports");
       expect(element("#status-message").hidden).toBe(true);
       const review = button("#open-inbox");
       expect(review.textContent).toBe("Review");
@@ -436,6 +544,21 @@ describe("popup browser adapters", () => {
       expect(fakeBrowser.tabs.create).toHaveBeenCalledWith({
         url: "https://prints.example.com/inbox/42",
       });
+    });
+
+    it("renders a decorative SVG check on success", async () => {
+      vi.stubGlobal("fetch", async (url: string) =>
+        url.endsWith("/health") ? readyVault() : response({ id: 42 }),
+      );
+      await import("../popup.ts");
+      await vi.waitFor(() => expect(button("#capture").disabled).toBe(false));
+
+      button("#capture").click();
+      await vi.waitFor(() => expect(element("#status").dataset.kind).toBe("success"));
+
+      expect(
+        document.querySelector('#status-title:not([hidden]) > svg[aria-hidden="true"] path'),
+      ).toBeInstanceOf(SVGElement);
     });
 
     it("shows the diagnostic code below the import error", async () => {
@@ -1523,7 +1646,7 @@ describe("popup browser adapters", () => {
         origins: [origin],
       });
       expect(element("#status-message").textContent).toBe(
-        "Disconnected. The stored browser credential and vault permission were removed from this browser.",
+        "Disconnected. The stored browser credential and server permission were removed from this browser.",
       );
     });
 
@@ -1567,7 +1690,7 @@ describe("popup browser adapters", () => {
           origins: ["http://192.168.1.20/*"],
         });
         expect(element("#status-message").textContent).toBe(
-          "Disconnected and removed the stored browser credential, but Chrome kept the vault permission. Remove it from the extension's site access settings.",
+          "Disconnected and removed the stored browser credential, but Chrome kept the server permission. Remove it from the extension's site access settings.",
         );
       },
     );
@@ -2538,7 +2661,7 @@ describe("popup browser adapters", () => {
     for (let attempt = 0; attempt < 6; attempt += 1) await settle();
 
     expect(element("#manual-file-panel").hidden).toBe(false);
-    expect(element("#status-title").textContent).toBe("Automatic download blocked");
+    expect(element("#status-title").textContent?.trim()).toBe("Automatic download blocked");
     expect(element("#status-message").textContent).toBe(
       "MakerWorld did not authorize the automatic download. Download the selected 3MF from MakerWorld, then attach it below.",
     );
@@ -2684,7 +2807,7 @@ describe("popup browser adapters", () => {
 
     expect(fakeBrowser.scripting.executeScript).toHaveBeenCalledTimes(4);
     expect(button("#capture").disabled).toBe(false);
-    expect(element("#status").textContent).toContain("Select Thingiverse files");
+    expect(element("#status").hidden).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect(element("#candidate-panel").hidden).toBe(false);
     expect(element("#candidate-panel legend").textContent).toBe("Select Thingiverse files");

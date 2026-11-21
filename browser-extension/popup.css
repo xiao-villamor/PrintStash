@@ -30,13 +30,11 @@ main {
 }
 
 p,
-h1,
-h2 {
+h1 {
   margin: 0;
 }
 
-h1,
-h2 {
+h1 {
   font-size: var(--popup-heading);
   font-weight: var(--popup-strong);
   line-height: 1.25;
@@ -76,10 +74,16 @@ a {
   min-width: 0;
 }
 
+.brand-name {
+  font-size: var(--popup-brand);
+  font-weight: var(--popup-strong);
+}
+
 .connection-host,
 .page-title,
 .candidate-filename,
-.candidate-facts {
+.candidate-facts,
+.file-picker-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -126,8 +130,7 @@ a {
 .section-description,
 .popup-footer,
 legend,
-small,
-.status-details {
+small {
   color: var(--muted-foreground);
   font-size: var(--popup-secondary);
 }
@@ -161,7 +164,7 @@ small,
   gap: var(--space-4);
 }
 
-.section-heading h2 {
+.section-heading h1 {
   margin-bottom: var(--space-4);
 }
 
@@ -268,10 +271,15 @@ small,
 }
 
 .suggestion-row {
-  grid-template-columns: 1fr 3fr;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
   align-items: center;
   gap: var(--space-8);
   color: var(--muted-foreground);
+  font-size: var(--popup-secondary);
+}
+
+.suggestion-row > label {
   font-weight: var(--popup-regular);
 }
 
@@ -304,7 +312,8 @@ label {
 
 input,
 select,
-button {
+button,
+label.file-picker-button {
   min-height: var(--control-height);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -325,24 +334,33 @@ input::placeholder {
   color: var(--muted-foreground);
 }
 
-input[type="file"] {
-  padding: var(--space-4);
-  cursor: pointer;
+.file-picker {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
 }
 
-#manual-file {
-  border-style: dashed;
-}
-
-input::file-selector-button {
-  margin-inline-end: var(--space-8);
+.file-picker input {
+  min-height: 0;
   border: 0;
-  border-radius: var(--radius);
-  padding: var(--space-4) var(--space-8);
-  background: var(--muted);
-  color: var(--foreground);
-  cursor: pointer;
-  font: inherit;
+  padding: 0;
+}
+
+.file-picker-button {
+  place-items: center;
+}
+
+.file-picker input:focus-visible + .file-picker-button {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.file-picker-name {
+  color: var(--muted-foreground);
+  font-size: var(--popup-secondary);
 }
 
 .candidate-list {
@@ -362,7 +380,8 @@ input::file-selector-button {
 }
 
 .candidate-option:hover,
-.secondary:hover:not(:disabled) {
+.secondary:hover:not(:disabled),
+.file-picker input:enabled + .file-picker-button:hover {
   background: var(--muted);
 }
 
@@ -381,7 +400,9 @@ input::file-selector-button {
   min-width: 0;
 }
 
-button {
+button,
+label.file-picker-button {
+  font-size: var(--popup-text);
   font-weight: var(--popup-strong);
   cursor: pointer;
 }
@@ -412,7 +433,8 @@ button.destructive {
   color: var(--error);
 }
 
-button:disabled {
+button:disabled,
+.file-picker input:disabled + .file-picker-button {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -469,8 +491,8 @@ button:disabled {
   gap: var(--space-8);
 }
 
-.status[data-kind="success"] .status-title::before {
-  content: "✓" / "";
+.status-title svg {
+  flex: none;
 }
 
 .popup-footer {
