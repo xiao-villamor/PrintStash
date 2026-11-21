@@ -7,6 +7,7 @@ import {
   claimBrowserPairing,
   classifyModelPage,
   isLocalVault,
+  modelTitleFromPageTitle,
   normalizeVault,
   parseBrowserExtensionSetup,
   verifyVaultConnection,
@@ -626,4 +627,36 @@ it.each([
         body === undefined ? new Response("unreadable") : Response.json(body, { status }),
     }),
   ).rejects.toThrow("That URL is not a PrintStash server.");
+});
+
+describe("model title from a marketplace tab title", () => {
+  it.each([
+    [
+      "3D BENCHY by Prusa Research | Download free STL model | Printables.com",
+      "Printables",
+      "3D BENCHY by Prusa Research",
+    ],
+    [
+      "Liberty's Torch Planter - Free 3D Print Model - MakerWorld",
+      "MakerWorld",
+      "Liberty's Torch Planter",
+    ],
+    [
+      "#3DBenchy - The jolly 3D printing torture-test by CreativeTools.se by CreativeTools - Thingiverse",
+      "Thingiverse",
+      "#3DBenchy - The jolly 3D printing torture-test by CreativeTools.se by CreativeTools",
+    ],
+  ])("drops the site suffix from %s", (title, source, expected) => {
+    expect(modelTitleFromPageTitle(title, source)).toBe(expected);
+  });
+
+  it("keeps separators that belong to the model name", () => {
+    expect(modelTitleFromPageTitle("Gear - Herringbone | Printables.com", "Printables")).toBe(
+      "Gear - Herringbone",
+    );
+  });
+
+  it("keeps a single-segment title unchanged", () => {
+    expect(modelTitleFromPageTitle("Calibration cube", "Thingiverse")).toBe("Calibration cube");
+  });
 });

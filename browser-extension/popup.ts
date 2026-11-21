@@ -86,6 +86,7 @@ import {
   claimBrowserPairing,
   classifyModelPage,
   isLocalVault,
+  modelTitleFromPageTitle,
   normalizeVault,
   parseBrowserExtensionSetup,
   verifyVaultReachability,
@@ -1103,7 +1104,9 @@ function renderActivePage() {
     pageHost.textContent = url.host;
     pageHost.hidden = false;
   } else {
-    pageLabel.textContent = activePage?.title || activePage?.url || "No active page";
+    pageLabel.textContent = activePage?.title
+      ? modelTitleFromPageTitle(activePage.title, activeSource ?? "")
+      : activePage?.url || "No active page";
   }
   pageLabel.title = pageLabel.textContent;
   sourceLabel.textContent = activeSource ? `${activeSource} · Supported` : "Unsupported source";

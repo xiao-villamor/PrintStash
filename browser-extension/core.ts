@@ -186,6 +186,31 @@ export function classifyModelPage(value: string) {
   return DIRECT_FILE_PATH.test(parsed.pathname) ? "Direct file" : null;
 }
 
+const TITLE_SEPARATOR = /\s+[|–—-]\s+/;
+const SITE_BOILERPLATE = /\b(?:download|free|3d print(?:able)?|stl|model)\b/i;
+
+/**
+ * The model's name from a marketplace tab title, without the site's own suffix
+ * ("3D BENCHY by Prusa Research | Download free STL model | Printables.com").
+ * Trailing segments are dropped only while they name the source or are site
+ * boilerplate, so a title that legitimately contains a separator is kept.
+ */
+export function modelTitleFromPageTitle(title: string, source: string): string {
+  const segments = title.trim().split(TITLE_SEPARATOR);
+  const siteName = source.toLowerCase().replace(/[^a-z0-9]/g, "");
+  while (segments.length > 1) {
+    const last = segments.at(-1) as string;
+    const compact = last.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const namesSite = siteName.length > 0 && compact.startsWith(siteName);
+    if (!namesSite && !SITE_BOILERPLATE.test(last)) break;
+    segments.pop();
+  }
+  const separators = title.trim().match(new RegExp(TITLE_SEPARATOR, "g")) ?? [];
+  return segments.reduce((kept, segment, index) =>
+    index === 0 ? segment : `${kept}${separators[index - 1]}${segment}`,
+  );
+}
+
 export function captureUrlForVault(value: string): string {
   const parsed = new URL(value);
   parsed.username = "";
