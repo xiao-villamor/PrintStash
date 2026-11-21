@@ -16,9 +16,10 @@ with a note on what remains. -->
 
 <!-- Required whenever tests were added or changed — a one-line assertion edit
 counts. One row per observable behaviour, which is also one test function.
-Derive the rows from requirements (the issue, CONTEXT.md, docs/provider-support.md,
-the router contract), never from reading the implementation: matrixing what the
-code happens to do reproduces its bugs as "expected".
+Derive expected outcomes from requirements (the issue, CONTEXT.md,
+docs/provider-support.md, the router contract). Walk the implementation for
+additional paths. Use current observable behavior as the baseline when an
+explicit behavior-preserving refactor needs characterization.
 
 Every row ends at ✅ `<tier dir>/<file>::<test>`, ❌ missing, or ⏭️ N/A — reason.
 Zero unexplained ❌ is the definition of done.

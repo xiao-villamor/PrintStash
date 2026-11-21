@@ -8,7 +8,9 @@ description: >
 
 Use [AGENTS.md](../../../AGENTS.md) for binding repository rules and task routing.
 Load the matching workflow and engineering rows. Read any narrower `AGENTS.md`
-before working in that scope.
+before working in that scope. A cross-layer change loads integration and
+both engineering owners. A test change loads the test-design policy before
+choosing an execution lane.
 
 - **Current behavior:** code and maintained [guides](../../../docs/README.md).
   Verify claims against [provider support](../../../docs/provider-support.md)

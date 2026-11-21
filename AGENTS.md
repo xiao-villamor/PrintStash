@@ -53,6 +53,12 @@ Rows are cumulative. Revisit the relevant routes if the scope grows.
 | Design, write, change, delete, or audit tests | [create-tests](.agents/skills/create-tests/SKILL.md), including its mandatory coverage matrix |
 | Run suites, diagnose CI, or adjust coverage floors | [run-tests](.agents/skills/run-tests/SKILL.md) |
 
+Before placing or restructuring production code, apply the [code organization
+assessment](.agents/skills/implementation-principles/SKILL.md#code-organization).
+Repeat it across the full affected owners before review. Put durable reasoning
+for non-obvious invariants, ordering, and recovery at the owning seam, with
+rationale in the maintained decision record or guide when appropriate.
+
 ## Agent skills
 
 - Issue tracker: upstream GitHub Issues. See [issue-tracker.md](docs/agents/issue-tracker.md).

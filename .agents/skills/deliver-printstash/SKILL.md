@@ -28,3 +28,33 @@ workflow delivers through an open PR. Merging requires separate authorization.
 
 Report the PR URL, head SHA, and verified check result. Keep private evidence
 under `reports/`.
+
+## Preflight the actual delivery state
+
+For a resumed task, compare the working tree, local HEAD, remote branch, and
+PR head. Inspect existing review decisions and check evidence before
+declaring any requirement complete. Confirm the declared base is current
+enough for the check under review. If the base moved or conflicts appeared,
+use the repository's branch conventions to sync, preserve unrelated work,
+and rerun checks affected by the integration. Avoid rewriting published
+history when extending an existing task.
+
+Review the staged diff for unrelated content, private plans, and generated
+outputs. Verify guide references, commands, and contract changes. For a
+hard-to-reverse architecture decision, check that the owning documentation
+records the rationale or link to the existing record through
+[settle-printstash](../settle-printstash/SKILL.md).
+
+## Make the PR's evidence usable
+
+Describe the delivered result and why it matters. List the actual commands,
+their outcomes, and relevant URLs. Use the test matrix to show what observable
+assertions prove the behavior. Label gaps and external prerequisites
+directly. For a versioned API or schema change call out compatibility and
+upgrade behavior. Never publish private audit or plan contents.
+
+Use the result of [run-tests](../run-tests/SKILL.md) to distinguish a failed
+test, failed environment, known inherited failure, missing run, and pending
+run. Fix task-owned failures before delivery. A successful run for an older
+head is evidence for that commit only. If an external prerequisite prevents
+the final gate, report the exact check and what remains.

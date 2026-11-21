@@ -1,35 +1,69 @@
 ---
 name: coordinate-printstash
-description: >
-  Coordinate PrintStash implementation or review when the user explicitly requests subagents. Assign ownership, integrate handbacks, and verify the final result.
+description: Coordinate PrintStash implementation or review when the user explicitly requests subagents. Assign ownership, integrate handbacks, and verify the final result.
 ---
 
 # Coordinate PrintStash
 
-The current thread owns decisions, integration, and delivery. Read
-[AGENTS.md](../../../AGENTS.md#agent-coordination) first. Apply this skill only
-when the current request explicitly authorizes subagents. It changes staffing
-for [implement-printstash](../implement-printstash/SKILL.md) and
-[review-printstash](../review-printstash/SKILL.md), while their completion
-criteria still apply.
+Read [AGENTS.md](../../../AGENTS.md#agent-coordination). This route applies
+when the current request explicitly authorizes subagents. The coordinator
+keeps the user dialogue, plan, decision records, publication, and delivery.
+This skill changes staffing for [implement-printstash](../implement-printstash/SKILL.md)
+and [review-printstash](../review-printstash/SKILL.md). Their scope and
+completion evidence still apply.
 
-1. **Plan the split.** Use the approved plan to select the fewest useful
-   workers. Assign one owner per file, schema, migration chain, registry, or
-   generated contract. Define shared interfaces and acceptance evidence
-   before either side starts. Sequence any work that needs the same unfinished
-   build inputs. Use the harness's authorized tooling and user-selected models.
-2. **Write brief and checkpoint.** Give each worker its objective, owned
-   files, phase, contracts, applicable skills, expected checks, and handback
-   format. Keep a private roster under `reports/` with handles, file ownership,
-   statuses, and result SHAs or diffs. Keep the task's delivery branch and PR
-   under coordinator ownership. Use separate review contexts only if authorized.
-3. **Integrate.** Compare each handback to its brief. Resolve interface and
-   test mismatches before starting dependent work. Run the checks that span
-   workers on the integrated result. Review lanes work read-only against one
-   pinned diff and return evidence under Standards or Spec.
-4. **Close.** Apply task-owned fixes and re-review the affected contracts.
-   Resolve user decisions in the coordinator thread. Settle docs and deliver
-   through the single task PR when the full contract and checks are satisfied.
+## Establish availability and ownership
 
-A worker reports changed files, acceptance evidence, tests, and blockers.
-Coordinator verification determines the status of the integrated result.
+Check the harness's supported delegation tools and any user-chosen model,
+tier, count, or access restrictions. Surface a requested capability that
+is unavailable before staffing dependent work. Honor the authorized branch,
+workspace, and execution mode.
+
+Pick the fewest workers that can deliver the approved steps. Use one worker
+for a long, tightly coupled implementation. Split work when each part has
+a written interface and disjoint ownership. Assign exactly one writer to
+shared contracts, schema history, registries, generated files, and docs.
+Sequence workers whose changes must compile or migrate together. Agree on
+wire shape, canonical names, and verification before the first edit.
+
+Keep a private roster under `reports/` with plan steps, worker/lane
+identifiers, ownership, status, and returned SHA or diff. Update it when a
+handoff changes any of those facts.
+
+## Brief workers on their actual scope
+
+Each brief includes the objective and accepted scope, exact owned paths,
+available dependencies and contracts, the applicable skill routes, expected
+focused test matrix and commands, what decisions to escalate, and handback
+format. Include all necessary context in the brief where the worker starts
+fresh. A worker needs neither credentials nor the rest of the conversation.
+
+In a shared workspace, use path-scoped edits and staging. Coordinate
+commits so a worker cannot capture a sibling's staged changes. The
+coordinator owns tree-wide Git operations and branch delivery. Workers
+raise material decisions to the coordinator, and work outside assigned
+files is a suggestion unless reassigned.
+
+## Integrate and verify
+
+On each handback, check the diff, actual commits, and test output against
+the brief. Reconcile contracts before dependent work starts. A worker's
+stated success is provisional until the coordinator checks its evidence.
+Relay material decisions and their confirmed outcomes to the affected
+workers. Batch related fixes for the same owner.
+
+After all writers stop, review the coherent integrated state. Apply the
+implementation-principles organization assessment to the whole change.
+Run the checks that span workers, especially integration and contract
+tests whose assumptions were split across them.
+
+## Review and close
+
+Review lanes read one pinned diff and hold named Standards or Spec duties.
+Keep them read-only. Ask each to state coverage and gaps, then verify
+findings against the code and accepted contract in the coordinator session.
+Route fixes to their owners and re-review the result after writes stop.
+Close idle work and record every final result before PR delivery.
+
+The coordinator reports the integrated verification and retains ownership
+of user decisions, documentation settlement, and the single task PR.

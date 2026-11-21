@@ -100,7 +100,9 @@ prove the exhaustive bar is met instead of asserting it.
 - **Derive rows from requirements, never from the implementation.** Reading
   the source and matrixing what it happens to do reproduces its bugs as
   "expected." Requirements live in the issue, `CONTEXT.md`,
-  `docs/provider-support.md`, and the PR summary.
+  `docs/provider-support.md`, and the PR summary. Walk code paths to discover
+  cases, then set their expected outcomes from intent. The documented exception
+  is [pre-refactor characterization](../SKILL.md#characterize-behavior-before-a-refactor).
 - **No blank cells.** Every row has a Status; a behaviour with no test is
   `❌ missing`, not omitted.
 

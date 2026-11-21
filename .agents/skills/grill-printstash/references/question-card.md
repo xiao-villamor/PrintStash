@@ -15,3 +15,18 @@ can point to one question even after the discussion has moved on.
 Present independent cards in one round. Hold dependent cards until earlier
 answers give them concrete inputs. A request for more detail keeps the card
 open. Update the next round from confirmed answers.
+
+## Example
+
+**Q1. Which edit should win when two people change the same Model label?**
+
+- **Context** The label editor starts from a versioned snapshot. Another
+  authorized session can rename the Model while the first draft is dirty.
+- **Options** Require the first editor to review the new version, or accept
+  its changed label against the latest Model automatically. The latter
+  can overwrite a label the first editor never saw.
+- **Recommendation** Preserve the first draft and show a stale edit
+  conflict. The user can see both values before submitting again.
+- **Record** Add the stale-edit outcome and test case to the selected
+  issue's acceptance criteria. Confirm the implementation uses the
+  existing conditional editing flow.
