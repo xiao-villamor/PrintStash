@@ -16,11 +16,46 @@ afterEach(() => {
 });
 
 describe("Thingiverse browser capture", () => {
+  it("reads the public Files view when the file APIs are challenged", async () => {
+    vi.stubGlobal("location", { href: "https://www.thingiverse.com/thing:100" });
+    vi.stubGlobal("fetch", async () => new Response(null, { status: 429 }));
+    const filesView = document.implementation.createHTMLDocument("Thingiverse files");
+    const url = "https://www.thingiverse.com/thing:100/files";
+    Object.defineProperty(filesView, "URL", { value: url });
+    filesView.body.innerHTML =
+      '<a href="https://www.thingiverse.com/download:200" download="cube.stl">Download</a>';
+    const frame = document.createElement("iframe");
+    Object.defineProperty(frame, "contentDocument", { get: () => filesView });
+    const create = vi.spyOn(document, "createElement").mockReturnValue(frame);
+    try {
+      const result = await requestThingiverseFilesInMainWorld({
+        sourceItemId: "100",
+        endpoint: "https://www.thingiverse.com/api/v2/things/100/complete",
+        maxResponseBytes: 1024,
+      });
+      expect(frame.src).toBe(url);
+      expect(frame.isConnected).toBe(false);
+      expect(result).toEqual({
+        ok: true,
+        files: [
+          {
+            id: "200",
+            filename: "cube.stl",
+            fileType: "stl",
+            url: "https://www.thingiverse.com/download:200",
+          },
+        ],
+      });
+    } finally {
+      create.mockRestore();
+    }
+  });
+
   it("reads publication-bound native file props", async () => {
     vi.stubGlobal("fetch", async () => {
       throw Error("Native file list must not require another request");
     });
-    vi.stubGlobal("location", { hostname: "www.thingiverse.com", pathname: "/thing:100/files" });
+    vi.stubGlobal("location", { href: "https://www.thingiverse.com/thing:100/files" });
     document.body.innerHTML = '<button aria-label="Download cube.stl">Download</button>';
     Object.defineProperty(document.querySelector("button"), "__reactFiber$test", {
       enumerable: true,
@@ -78,7 +113,7 @@ describe("Thingiverse browser capture", () => {
       ],
     },
   ])("rejects native $label", async ({ files }) => {
-    vi.stubGlobal("location", { hostname: "www.thingiverse.com", pathname: "/thing:100/files" });
+    vi.stubGlobal("location", { href: "https://www.thingiverse.com/thing:100/files" });
     document.body.innerHTML = '<button aria-label="Download cube.stl">Download</button>';
     Object.defineProperty(document.querySelector("button"), "__reactFiber$test", {
       enumerable: true,
@@ -93,7 +128,7 @@ describe("Thingiverse browser capture", () => {
     ).toEqual({ ok: false, code: "contract_changed" });
   });
   it("rejects stale native publication props", async () => {
-    vi.stubGlobal("location", { hostname: "www.thingiverse.com", pathname: "/thing:100/files" });
+    vi.stubGlobal("location", { href: "https://www.thingiverse.com/thing:100/files" });
     document.body.innerHTML = '<button aria-label="Download cube.stl">Download</button>';
     Object.defineProperty(document.querySelector("button"), "__reactFiber$test", {
       enumerable: true,

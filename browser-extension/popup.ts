@@ -1,3 +1,4 @@
+import { defaultCaptureSelection, type CaptureSelection } from "./capture-selection.ts";
 import {
   canResumeCapture,
   captureAccount,
@@ -126,6 +127,7 @@ import {
 import {
   MAKERWORLD_MAX_RESPONSE_BYTES,
   MAKERWORLD_METADATA_FIXTURE_VERSION,
+  MakerWorldSignInError,
   makerWorldCaptureFromMetadata,
   makerWorldFailureMessage,
   downloadMakerWorldCandidate,
@@ -232,6 +234,11 @@ const importAgainButton = requiredElement("#import-again", HTMLButtonElement);
 const inboxButton = requiredElement("#open-inbox", HTMLButtonElement);
 const importPanel = requiredElement("#import-panel", HTMLElement);
 const importHint = requiredElement("#import-hint", HTMLElement);
+const captureContent = requiredElement("#capture-content", HTMLElement);
+const fileSummary = requiredElement("#file-summary", HTMLElement);
+const fileCount = requiredElement("#file-count", HTMLElement);
+const changeFiles = requiredElement("#change-files", HTMLButtonElement);
+const selectionMessage = requiredElement("#selection-message", HTMLElement);
 const candidatePanel = requiredElement("#candidate-panel", HTMLFieldSetElement);
 const candidateLegend = requiredElement("#candidate-panel legend", HTMLElement);
 const candidateList = requiredElement("#candidate-list", HTMLElement);
@@ -330,6 +337,8 @@ let pendingThingiverseLinks = new Map<string, string>();
 let pendingGallery: SourceGalleryImage[] = [];
 let galleryUnavailable = false;
 let gallerySelection: HTMLFieldSetElement | null = null;
+let galleryCoverId: string | null = null;
+let includeGallery = true;
 type ManualCapture =
   | { kind: "publication"; draft: BrowserCaptureMessage }
   | { kind: "direct"; url: string };
@@ -607,6 +616,11 @@ function clearCandidateSelection() {
   galleryUnavailable = false;
   gallerySelection?.remove();
   gallerySelection = null;
+  galleryCoverId = null;
+  includeGallery = true;
+  fileCount.textContent = "Files";
+  setFilePickerVisible(false);
+  selectionMessage.hidden = true;
   pendingMarketplaceCapture = null;
   pendingPrintablesCapture = null;
   pendingMakerWorldCapture = null;
@@ -759,12 +773,7 @@ function renderManualFileSelection(draft: BrowserCaptureMessage) {
 }
 
 function offerManualFile(capture: ManualCapture) {
-  pendingPrintablesCapture = null;
-  pendingMakerWorldCapture = null;
-  pendingThingiverseCapture = null;
-  pendingThingiverseLinks.clear();
-  candidatePanel.hidden = true;
-  candidateList.replaceChildren();
+  clearCandidateSelection();
   pendingManualCapture = capture;
   manualFilePanel.hidden = false;
   captureButton.textContent = "Upload selected file";
@@ -781,7 +790,79 @@ function selectedManualFile(sourceItemId: string | null): BrowserCaptureFile {
   };
 }
 
-function renderCandidateSelection(capture: BrowserCaptureMessage) {
+function setFilePickerVisible(visible: boolean) {
+  candidatePanel.hidden = !visible;
+  changeFiles.setAttribute("aria-expanded", String(visible));
+  changeFiles.textContent = visible ? "Done" : "Change";
+}
+
+function renderGallery() {
+  gallerySelection?.remove();
+  if (!pendingGallery.length && !galleryUnavailable) return;
+  gallerySelection = document.createElement("fieldset");
+  gallerySelection.className = "publication-gallery";
+  const legend = document.createElement("legend");
+  gallerySelection.append(legend);
+  if (!pendingGallery.length) {
+    legend.textContent = "Gallery unavailable";
+    candidatePanel.after(gallerySelection);
+    return;
+  }
+  const [defaultCover] = pendingGallery;
+  galleryCoverId = defaultCover.id;
+  const strip = document.createElement("div");
+  strip.className = "gallery-strip";
+  strip.setAttribute("role", "group");
+  strip.setAttribute("aria-label", "Choose a cover image");
+  const toggleLabel = document.createElement("label");
+  toggleLabel.className = "gallery-toggle";
+  const toggle = document.createElement("input");
+  toggle.type = "checkbox";
+  toggleLabel.append(toggle, "Don’t include images");
+  function updateCover() {
+    const cover = pendingGallery.findIndex((image) => image.id === galleryCoverId);
+    const count = pendingGallery.length;
+    legend.textContent = includeGallery
+      ? `${count} ${count === 1 ? "image" : "images"} · cover: image ${cover + 1}`
+      : "Gallery excluded";
+    strip.hidden = !includeGallery;
+    for (const button of strip.querySelectorAll("button")) {
+      button.setAttribute("aria-pressed", String(button.dataset.imageId === galleryCoverId));
+    }
+  }
+  toggle.addEventListener("change", () => {
+    includeGallery = !toggle.checked;
+    updateCover();
+  });
+  for (const [index, image] of pendingGallery.entries()) {
+    const button = document.createElement("button");
+    const label = `Use image ${index + 1} as cover`;
+    button.type = "button";
+    button.dataset.imageId = image.id;
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    const thumbnail = document.createElement("img");
+    thumbnail.alt = "";
+    thumbnail.loading = "lazy";
+    thumbnail.referrerPolicy = "no-referrer";
+    thumbnail.src = image.url;
+    button.append(thumbnail);
+    button.addEventListener("click", () => {
+      galleryCoverId = image.id;
+      updateCover();
+    });
+    strip.append(button);
+  }
+  gallerySelection.append(strip, toggleLabel);
+  candidatePanel.after(gallerySelection);
+  updateCover();
+}
+
+function renderCandidateSelection(
+  capture: BrowserCaptureMessage,
+  defaults: CaptureSelection,
+  showPicker: boolean,
+) {
   pendingMarketplaceCapture = null;
   if (capture.source.provider === "makerworld") {
     pendingMakerWorldCapture = capture;
@@ -809,13 +890,16 @@ function renderCandidateSelection(capture: BrowserCaptureMessage) {
         ? "Select Thingiverse files"
         : `Select ${activeSource} files`;
   candidateList.replaceChildren();
+  const selected = new Set(
+    defaults.kind === "selected" ? defaults.files.map((file) => file.id) : [],
+  );
   candidateList.onchange = renderImportAvailability;
   capture.candidates.forEach((candidate, index) => {
     const label = document.createElement("label");
     label.className = "candidate-option";
     const input = document.createElement("input");
     input.type = "checkbox";
-    input.checked = capture.source.provider !== "makerworld";
+    input.checked = selected.has(candidate.id);
     input.dataset.candidateIndex = String(index);
     const copy = document.createElement("span");
     copy.className = "candidate-copy";
@@ -834,39 +918,34 @@ function renderCandidateSelection(capture: BrowserCaptureMessage) {
     label.append(input, copy);
     candidateList.append(label);
   });
-  gallerySelection?.remove();
-  gallerySelection = document.createElement("fieldset");
-  const legend = document.createElement("legend");
-  legend.textContent = `Publication gallery (${pendingGallery.length} images)`;
-  legend.hidden = pendingGallery.length === 0;
-  gallerySelection.append(legend);
-  for (const [index, image] of pendingGallery.entries()) {
-    const label = document.createElement("label");
-    label.className = "candidate-option";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = true;
-    input.dataset.imageId = image.id;
-    label.append(input, `Image ${index + 1}${index === 0 ? " · default cover" : ""}`);
-    gallerySelection.append(label);
-  }
-  const note = document.createElement("small");
-  note.textContent = galleryUnavailable
-    ? "Gallery unavailable. Reopen the page to retry, or add images later."
-    : pendingGallery.length
-      ? "GIFs are saved as still images. Change the cover in PrintStash."
-      : "No gallery images. You can add a cover below.";
-  gallerySelection.append(note);
-  candidatePanel.after(gallerySelection);
-  candidatePanel.hidden = false;
+  selectionMessage.hidden = defaults.kind !== "ambiguous";
+  if (defaults.kind === "ambiguous") selectionMessage.textContent = defaults.message;
+  setFilePickerVisible(showPicker || defaults.kind !== "selected");
+  renderGallery();
   captureButton.textContent = "Confirm and upload selected files";
+  renderImportAvailability();
 }
 
-function selectedPrintablesCandidates(capture: BrowserCaptureMessage) {
+function pendingDraft() {
+  return (
+    pendingPrintablesCapture ??
+    pendingMakerWorldCapture ??
+    pendingThingiverseCapture ??
+    pendingMarketplaceCapture
+  );
+}
+
+function selectedCandidates(capture: BrowserCaptureMessage) {
   const indexes = [...candidateList.querySelectorAll<HTMLInputElement>("input:checked")].map(
     (input) => Number(input.dataset.candidateIndex),
   );
   return indexes.flatMap((index) => capture.candidates[index] ?? []);
+}
+
+function selectedGallery() {
+  if (!includeGallery) return [];
+  const cover = pendingGallery.find((image) => image.id === galleryCoverId);
+  return cover ? [cover, ...pendingGallery.filter((image) => image.id !== cover.id)] : [];
 }
 
 function setButtonBusy(button: HTMLButtonElement, busy: boolean, busyLabel = "Working…") {
@@ -993,7 +1072,24 @@ function renderImportAvailability() {
   preferenceFields.disabled = importBusy || !canCapture;
   coverPicker.hidden = activeSource === "Direct file";
   captureButton.hidden = !canCapture;
-  captureButton.disabled = importBusy || checkingImportContext || !canCapture;
+  const draft = pendingDraft();
+  const count = draft ? selectedCandidates(draft).length : 0;
+  const packageSource = activeSource === "MakerWorld" || activeSource === "Creality Cloud";
+  const unit = packageSource ? "package" : "file";
+  fileSummary.hidden =
+    !canCapture ||
+    Boolean(pendingManualCapture) ||
+    !(draft || (importIntentSupported && isRichProvider(activeSource)));
+  fileCount.textContent = draft ? `Files: ${count} ${unit}${count === 1 ? "" : "s"}` : "Files";
+  changeFiles.disabled = importBusy || checkingImportContext;
+  candidatePanel.disabled = importBusy;
+  if (gallerySelection) gallerySelection.disabled = importBusy;
+  if (count > 0) selectionMessage.hidden = true;
+  captureButton.disabled =
+    importBusy ||
+    checkingImportContext ||
+    !canCapture ||
+    Boolean(draft && !count && importIntentSupported);
   if (!importBusy && importIntentSupported) {
     const legend = preferenceFields.querySelector("legend");
     if (legend) {
@@ -1001,24 +1097,21 @@ function renderImportAvailability() {
         ? "Suggestions for review"
         : "Import options";
     }
-    const count = candidateList.querySelectorAll("input:checked").length;
-    captureButton.textContent = resumingImport
-      ? "Resume import"
-      : reviewBeforeImporting.checked
-        ? "Send to Pending Imports"
-        : count > 1
-          ? `Import ${count} files`
-          : "Import";
+    captureButton.textContent = pendingManualCapture
+      ? "Upload selected file"
+      : resumingImport
+        ? "Resume import"
+        : reviewBeforeImporting.checked
+          ? "Send to Pending Imports"
+          : count > 1
+            ? `Import ${count} files`
+            : "Import";
   }
   importHint.hidden = !importBusy && (!pendingManualCapture || needsDirectFile);
   if (importBusy) {
-    const activity =
-      importIntentSupported && !reviewBeforeImporting.checked
-        ? "Importing into PrintStash…"
-        : "Sending to Pending Imports…";
     importHint.textContent = panelMode
-      ? `${activity} You can hide this panel; keep the source tab open.`
-      : `${activity} Keep this popup open until it finishes.`;
+      ? "You can hide this panel. Keep the source tab open."
+      : "Keep this popup open until it finishes.";
   } else if (pendingManualCapture) {
     importHint.textContent = "Automatic download was unavailable.";
   }
@@ -2093,12 +2186,23 @@ async function rememberCaptureDefaults(config: Config, tags: string[]) {
     .catch(() => {});
 }
 
-captureButton.addEventListener("click", async () => {
+captureButton.addEventListener("click", () => void runCapture("import"));
+changeFiles.addEventListener("click", () => {
+  if (pendingDraft()) {
+    const open = candidatePanel.hidden === true;
+    setFilePickerVisible(open);
+    if (open) candidatePanel.querySelector("input")?.focus();
+  } else {
+    void runCapture("choose");
+  }
+});
+
+async function runCapture(mode: "import" | "choose") {
   if (!connectedConfig || connectionState !== "connected") {
     showStatus("Connect PrintStash before importing.", "error");
     return;
   }
-  if (captureButton.disabled) return;
+  if (importBusy || checkingImportContext || (mode === "import" && captureButton.disabled)) return;
   if (!coverError.hidden) {
     coverInput.focus();
     return;
@@ -2112,6 +2216,7 @@ captureButton.addEventListener("click", async () => {
   collection.close();
   const capture = captureOperations.begin(config, authorization);
   const runStage = vaultStage(capture);
+  let focusCandidates = false;
   importBusy = true;
   setButtonBusy(captureButton, true, "Sending…");
   renderImportAvailability();
@@ -2213,17 +2318,12 @@ captureButton.addEventListener("click", async () => {
       return;
     }
     async function uploadSelection(draft: BrowserCaptureMessage) {
-      const selectedImages = pendingGallery.filter(
-        (image) =>
-          gallerySelection?.querySelector<HTMLInputElement>(`input[data-image-id="${image.id}"]`)
-            ?.checked,
-      );
+      const selectedImages = selectedGallery();
       const imageOrigins = [
         ...new Set(selectedImages.map((image) => `${new URL(image.url).origin}/*`)),
       ];
-      if (imageOrigins.length) await ensureOriginPermissions(imageOrigins);
       capture.assertCurrent();
-      const selected = selectedPrintablesCandidates(draft);
+      const selected = selectedCandidates(draft);
       if (selected.length === 0) {
         showStatus("Select at least one file to upload.", "error");
         return;
@@ -2239,6 +2339,20 @@ captureButton.addEventListener("click", async () => {
           printablesLinks.map((link) => link.url),
           capture.signal,
         );
+      }
+      const makerWorldLinks =
+        draft.source.provider === "makerworld" && onReady
+          ? await resolveMakerWorldLinks(draft, selected, capture.signal)
+          : null;
+      if (makerWorldLinks) {
+        await ensureOriginPermissions([
+          ...new Set([
+            ...imageOrigins,
+            ...makerWorldLinks.map((link) => `${new URL(link.url).origin}/*`),
+          ]),
+        ]);
+      } else if (imageOrigins.length) {
+        await ensureOriginPermissions(imageOrigins);
       }
       const receipt = await capture.run((signal) =>
         captureSequentialFiles({
@@ -2275,7 +2389,9 @@ captureButton.addEventListener("click", async () => {
               return downloadPrintablesCandidate(candidate, link, signal, progress);
             }
             if (draft.source.provider === "makerworld") {
-              const links = await resolveMakerWorldLinks(draft, [candidate], capture.signal);
+              const links =
+                makerWorldLinks ??
+                (await resolveMakerWorldLinks(draft, [candidate], capture.signal));
               const link = links.find((link) => link.id === candidate.id)?.url;
               if (!link) throw new Error("MakerWorld link mapping changed.");
               return downloadMakerWorldCandidate({
@@ -2423,11 +2539,7 @@ captureButton.addEventListener("click", async () => {
       await rememberCaptureDefaults(capture.config, preferences.tags);
       await confirmCapture(captureReviewUrl(capture.config.vault, receipt), capture, onReady);
     }
-    const draft =
-      pendingPrintablesCapture ??
-      pendingMakerWorldCapture ??
-      pendingThingiverseCapture ??
-      pendingMarketplaceCapture;
+    const draft = pendingDraft();
     if (draft) {
       await uploadSelection(draft);
       return;
@@ -2476,16 +2588,17 @@ captureButton.addEventListener("click", async () => {
         }
         capture.assertCurrent();
       }
+      if (!activePage?.url) throw new Error("The active tab has no capture URL.");
+      const defaults = defaultCaptureSelection(visibleCapture, activePage.url);
       runCaptureSyncStage(
-        () => renderCandidateSelection(visibleCapture),
+        () => renderCandidateSelection(visibleCapture, defaults, mode === "choose" || !onReady),
         "capture_candidate_render_failed",
         "The provider files could not be shown. Choose a downloaded file to attach it in Pending Imports.",
       );
-      if (
-        onReady === "import" &&
-        ["printables", "thingiverse"].includes(visibleCapture.source.provider)
-      ) {
+      if (mode === "import" && onReady && defaults.kind === "selected") {
         await uploadSelection(visibleCapture);
+      } else if (mode === "choose" || defaults.kind === "ambiguous") {
+        focusCandidates = true;
       }
       return;
     }
@@ -2539,7 +2652,15 @@ captureButton.addEventListener("click", async () => {
       }
       return;
     }
+    if (error instanceof MakerWorldSignInError) {
+      showStatus(error.message, "error");
+      return;
+    }
     if (error instanceof CaptureDiagnosticError) {
+      if (error.provider === "MakerWorld" && error.fallbackCode === "auth_required") {
+        showStatus(makerWorldFailureMessage("auth_required"), "error");
+        return;
+      }
       const fallback =
         pendingPrintablesCapture ||
         pendingMakerWorldCapture ||
@@ -2594,9 +2715,10 @@ captureButton.addEventListener("click", async () => {
         captureButton.textContent = "Upload selected file";
       }
       renderImportAvailability();
+      if (focusCandidates) candidatePanel.querySelector("input")?.focus();
     }
   }
-});
+}
 
 inboxButton.addEventListener("click", () => {
   if (inboxButton.dataset.url) browser.tabs.create({ url: inboxButton.dataset.url });
@@ -2780,11 +2902,14 @@ function measurePanelHeight(page: Page | null) {
   const origin = new URL(page.url).origin;
   const observer = new ResizeObserver(() => {
     const height = Math.ceil(
-      Math.max(document.body.scrollHeight, document.body.getBoundingClientRect().height),
+      Math.max(document.body.scrollHeight, document.body.getBoundingClientRect().height) +
+        Math.max(0, captureContent.scrollHeight - captureContent.clientHeight),
     );
     if (height > 0) window.parent.postMessage({ type: "printstash-panel-height", height }, origin);
   });
   observer.observe(document.body);
+  observer.observe(captureContent);
+  observer.observe(importPanel);
 }
 
 async function captureTabs(): Promise<Page[]> {

@@ -153,6 +153,48 @@ describe("loaded extension", () => {
     });
   });
 
+  it("keeps capture status and Import visible with a tall picker", async () => {
+    const layout = await browser.execute(async () => {
+      function measure(doc: Document) {
+        const content = doc.querySelector<HTMLElement>("#capture-content")!;
+        const capture = doc.querySelector<HTMLElement>("#capture")!;
+        const status = doc.querySelector<HTMLElement>("#status")!;
+        const tallPicker = doc.createElement("div");
+        tallPicker.style.blockSize = "1200px";
+        content.append(tallPicker);
+        capture.hidden = false;
+        status.hidden = false;
+        const bottom = doc.body.getBoundingClientRect().bottom;
+        const initial = capture.getBoundingClientRect().bottom;
+        content.scrollTop = content.scrollHeight;
+        const result = {
+          scrolls: content.scrollTop > 0,
+          fixed: capture.getBoundingClientRect().bottom === initial && initial < bottom,
+          statusVisible:
+            status.getBoundingClientRect().bottom > content.getBoundingClientRect().bottom,
+        };
+        tallPicker.remove();
+        capture.hidden = true;
+        status.hidden = true;
+        return result;
+      }
+      const toolbar = measure(document);
+      const frame = document.createElement("iframe");
+      frame.style.height = "400px";
+      frame.src = new URL("?panel=1", location.href).href;
+      const loaded = new Promise<void>((resolve) =>
+        frame.addEventListener("load", () => resolve()),
+      );
+      document.body.append(frame);
+      await loaded;
+      const panel = measure(frame.contentDocument!);
+      frame.remove();
+      return { toolbar, panel };
+    });
+    const visible = { scrolls: true, fixed: true, statusVisible: true };
+    assert.deepEqual(layout, { toolbar: visible, panel: visible });
+  });
+
   it("switches credential fields using the keyboard", async () => {
     await browser.waitUntil(
       async () => (await browser.$("#connection-title").getText()) === "Not connected",

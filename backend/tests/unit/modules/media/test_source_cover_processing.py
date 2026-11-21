@@ -212,3 +212,26 @@ class TestGalleryGifProcessing:
                 (image.width // 2, image.height // 2)
             )
             assert red > 200 and green < 30 and blue < 30
+
+
+def test_multipicture_jpeg_uses_the_primary_photo():
+    source = _image_bytes(
+        "MPO",
+        size=(8, 8),
+        save_all=True,
+        append_images=[Image.new("RGB", (8, 8), "yellow")],
+    )
+    with Image.open(io.BytesIO(source)) as input_image:
+        assert input_image.format == "MPO"
+
+    processed = source_cover_processing.process_source_cover_upload(
+        source, "image/jpeg"
+    )
+
+    with Image.open(io.BytesIO(processed.data)) as output:
+        assert output.format == "WEBP"
+        assert getattr(output, "n_frames", 1) == 1
+        red, green, blue = output.convert("RGB").getpixel(
+            (output.width // 2, output.height // 2)
+        )
+        assert blue > 90 and red < 30 and green < 30

@@ -35,6 +35,12 @@ export type MakerWorldFailureCode =
   | "too_many_files"
   | "request_failed";
 
+export class MakerWorldSignInError extends Error {
+  constructor() {
+    super("Sign in to MakerWorld in this browser, then try again");
+  }
+}
+
 export interface MakerWorldPackageFile {
   profile?: CaptureProfile;
   id: string;
@@ -623,6 +629,7 @@ export async function downloadMakerWorldCandidate({
     signal,
   });
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403) throw new MakerWorldSignInError();
     throw new Error(
       "user_file_required: MakerWorld could not provide the selected package. Download it normally, then attach it in Pending Imports.",
     );
@@ -1001,7 +1008,7 @@ export async function requestMakerWorldLinksInMainWorld(args: {
 export function makerWorldFailureMessage(code: MakerWorldFailureCode | undefined): string {
   switch (code) {
     case "auth_required":
-      return "user_file_required: Sign in to MakerWorld in this tab, or choose a downloaded MakerWorld package to attach it in Pending Imports.";
+      return "Sign in to MakerWorld in this browser, then try again";
     case "challenge":
       return "user_file_required: MakerWorld did not authorize the automatic download. Download the selected 3MF from MakerWorld, then attach it below.";
     case "contract_changed":

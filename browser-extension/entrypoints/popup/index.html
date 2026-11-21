@@ -58,11 +58,107 @@
       </div>
 
       <section id="view-capture" class="popup-view" role="tabpanel" aria-labelledby="tab-capture">
-        <div id="capture-setup"></div>
-        <p id="capture-editor-hint" class="section-description" hidden>
-          Finish updating the connection in Settings to resume capture.
-        </p>
-        <div class="feedback">
+        <div id="capture-content">
+          <div id="capture-setup"></div>
+          <p id="capture-editor-hint" class="section-description" hidden>
+            Finish updating the connection in Settings to resume capture.
+          </p>
+
+          <section id="import-panel" class="import-panel" aria-labelledby="import-label" hidden>
+            <section id="page-context" class="page-context" aria-labelledby="page" hidden>
+              <p id="import-label" class="visually-hidden">Current page</p>
+              <h1 id="page" class="page-title">Reading current page…</h1>
+              <p id="page-host" class="section-description" hidden></p>
+              <div id="source-actions" class="source-actions">
+                <p id="source" class="source">Checking source…</p>
+              </div>
+            </section>
+            <section id="unsupported-page" hidden>
+              <h1>This page can’t be captured</h1>
+              <p class="section-description">
+                Open a supported model listing, such as Thingiverse or Printables, or a direct model
+                file.
+              </p>
+            </section>
+            <p id="import-hint" class="section-description" hidden></p>
+            <div id="file-summary" class="capture-row" hidden>
+              <span id="file-count">Files</span>
+              <button
+                id="change-files"
+                class="text-button text-action"
+                type="button"
+                aria-expanded="false"
+                aria-controls="candidate-panel"
+              >
+                Change
+              </button>
+            </div>
+            <p id="selection-message" class="section-description" hidden></p>
+            <fieldset id="candidate-panel" hidden>
+              <legend>Select Printables files</legend>
+              <div id="candidate-list" class="candidate-list"></div>
+            </fieldset>
+            <fieldset id="manual-file-panel" hidden>
+              <legend>Attach a downloaded model file</legend>
+              <div class="file-picker">
+                <input
+                  id="manual-file"
+                  class="visually-hidden"
+                  type="file"
+                  accept=".3mf,.stl,.obj,.step,.stp,.gcode,.g,.gco,.bgcode,.zip"
+                  aria-describedby="status-message manual-file-name"
+                />
+                <label for="manual-file" class="file-picker-button">Choose file</label>
+                <span id="manual-file-name" class="file-picker-name">No file selected</span>
+              </div>
+            </fieldset>
+            <fieldset id="capture-preferences" class="suggestions">
+              <legend>Suggestions for review</legend>
+              <div class="collection-field">
+                <label for="capture-collection">Collection</label>
+                <input
+                  id="capture-collection"
+                  type="text"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-controls="collection-options"
+                  maxlength="128"
+                  aria-expanded="false"
+                  autocomplete="off"
+                  placeholder="Choose in Pending Imports"
+                />
+                <ul id="collection-options" role="listbox" aria-label="Collections" hidden></ul>
+                <p id="collection-feedback" class="section-description" role="status" hidden></p>
+              </div>
+              <label>
+                Tags
+                <input id="capture-tags" type="text" placeholder="Separate with commas" />
+              </label>
+              <div id="cover-picker" class="file-picker cover-picker">
+                <input
+                  id="capture-cover"
+                  class="visually-hidden"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  aria-describedby="cover-hint cover-error"
+                />
+                <label for="capture-cover" class="file-picker-button text-action"
+                  >Add cover image</label
+                >
+                <span id="capture-cover-name" class="file-picker-name" hidden></span>
+                <button id="remove-cover" class="text-button text-action" type="button" hidden>
+                  Remove
+                </button>
+                <p id="cover-hint" class="visually-hidden">
+                  Choose a JPEG, PNG or WebP image up to 15 MiB.
+                </p>
+              </div>
+
+              <p id="cover-error" class="connection-feedback" role="alert" hidden></p>
+            </fieldset>
+          </section>
+        </div>
+        <div id="capture-action-bar" class="feedback capture-action-bar">
           <section
             id="status"
             class="status"
@@ -88,91 +184,10 @@
               Code: <code id="status-code"></code>
             </p>
           </section>
+          <button id="capture" class="primary" type="button" disabled>Send to PrintStash</button>
           <button id="open-inbox" class="primary" type="button" hidden>Review in PrintStash</button>
           <button id="import-again" class="text-button" type="button" hidden>Import again</button>
         </div>
-
-        <section id="import-panel" class="import-panel" aria-labelledby="import-label" hidden>
-          <section id="page-context" class="page-context" aria-labelledby="page" hidden>
-            <p id="import-label" class="visually-hidden">Current page</p>
-            <h1 id="page" class="page-title">Reading current page…</h1>
-            <p id="page-host" class="section-description" hidden></p>
-            <div id="source-actions" class="source-actions">
-              <p id="source" class="source">Checking source…</p>
-            </div>
-          </section>
-          <section id="unsupported-page" hidden>
-            <h1>This page can’t be captured</h1>
-            <p class="section-description">
-              Open a supported model listing, such as Thingiverse or Printables, or a direct model
-              file.
-            </p>
-          </section>
-          <p id="import-hint" class="section-description" hidden></p>
-          <fieldset id="candidate-panel" hidden>
-            <legend>Select Printables files</legend>
-            <div id="candidate-list" class="candidate-list"></div>
-          </fieldset>
-          <fieldset id="manual-file-panel" hidden>
-            <legend>Attach a downloaded model file</legend>
-            <div class="file-picker">
-              <input
-                id="manual-file"
-                class="visually-hidden"
-                type="file"
-                accept=".3mf,.stl,.obj,.step,.stp,.gcode,.g,.gco,.bgcode,.zip"
-                aria-describedby="manual-file-name"
-              />
-              <label for="manual-file" class="file-picker-button">Choose file</label>
-              <span id="manual-file-name" class="file-picker-name">No file selected</span>
-            </div>
-          </fieldset>
-          <fieldset id="capture-preferences" class="suggestions">
-            <legend>Suggestions for review</legend>
-            <div class="collection-field">
-              <label for="capture-collection">Collection</label>
-              <input
-                id="capture-collection"
-                type="text"
-                role="combobox"
-                aria-autocomplete="list"
-                aria-controls="collection-options"
-                maxlength="128"
-                aria-expanded="false"
-                autocomplete="off"
-                placeholder="Choose in Pending Imports"
-              />
-              <ul id="collection-options" role="listbox" aria-label="Collections" hidden></ul>
-              <p id="collection-feedback" class="section-description" role="status" hidden></p>
-            </div>
-            <label>
-              Tags
-              <input id="capture-tags" type="text" placeholder="Separate with commas" />
-            </label>
-            <div id="cover-picker" class="file-picker cover-picker">
-              <input
-                id="capture-cover"
-                class="visually-hidden"
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                aria-describedby="cover-hint cover-error"
-              />
-              <label for="capture-cover" class="file-picker-button text-action"
-                >Add cover image</label
-              >
-              <span id="capture-cover-name" class="file-picker-name" hidden></span>
-              <button id="remove-cover" class="text-button text-action" type="button" hidden>
-                Remove
-              </button>
-              <p id="cover-hint" class="visually-hidden">
-                Choose a JPEG, PNG or WebP image up to 15 MiB.
-              </p>
-            </div>
-
-            <p id="cover-error" class="connection-feedback" role="alert" hidden></p>
-          </fieldset>
-          <button id="capture" class="primary" type="button" disabled>Send to PrintStash</button>
-        </section>
       </section>
 
       <section

@@ -18,10 +18,10 @@ MAX_SOURCE_COVER_BYTES = 15 * 1024 * 1024
 MAX_SOURCE_COVER_PIXELS = 40_000_000
 
 _CONTENT_TYPE_TO_FORMAT = {
-    "image/jpeg": "JPEG",
-    "image/png": "PNG",
-    "image/webp": "WEBP",
-    "image/gif": "GIF",
+    "image/jpeg": ("JPEG", "MPO"),
+    "image/png": ("PNG",),
+    "image/webp": ("WEBP",),
+    "image/gif": ("GIF",),
 }
 
 
@@ -50,8 +50,8 @@ def _validate_source_cover(data: bytes, content_type: str | None) -> None:
     normalized_content_type = _normalized_content_type(content_type)
     if normalized_content_type is None:
         raise SourceCoverProcessingError
-    expected_format = _CONTENT_TYPE_TO_FORMAT.get(normalized_content_type)
-    if expected_format is None or not data or len(data) > MAX_SOURCE_COVER_BYTES:
+    expected_formats = _CONTENT_TYPE_TO_FORMAT.get(normalized_content_type)
+    if expected_formats is None or not data or len(data) > MAX_SOURCE_COVER_BYTES:
         raise SourceCoverProcessingError
 
     try:
@@ -62,7 +62,7 @@ def _validate_source_cover(data: bytes, content_type: str | None) -> None:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(data)) as image:
-                if image.format != expected_format:
+                if image.format not in expected_formats:
                     raise SourceCoverProcessingError
                 if image.width <= 0 or image.height <= 0:
                     raise SourceCoverProcessingError
@@ -82,8 +82,9 @@ def process_source_cover_upload(
 ) -> ProcessedSourceCover:
     """Return a metadata-free, size-normalized WebP cover or a safe error.
 
-    JPEG, PNG, WebP, and the first frame of GIF are accepted only when their declared content type
-    agrees with Pillow's decoded format.  No raw source bytes are returned or
+    JPEG (including the primary image in an MPO), PNG, WebP, and the first frame
+    of GIF are accepted only when their declared content type agrees with
+    Pillow's decoded format. No raw source bytes are returned or
     persisted; ``thumbnail.to_webp`` is the repository-wide conversion seam
     and strips metadata by re-encoding the decoded image.
     """

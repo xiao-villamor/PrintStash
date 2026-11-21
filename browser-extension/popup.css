@@ -33,6 +33,88 @@ body {
   line-height: 1.4;
 }
 
+.popup:has(#view-capture:not([hidden])) {
+  display: flex;
+  flex-direction: column;
+  max-height: 600px;
+}
+
+html[data-panel] .popup:has(#view-capture:not([hidden])) {
+  max-height: 100dvh;
+}
+
+.popup:has(#view-capture:not([hidden])) main,
+#view-capture {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#capture-content {
+  display: grid;
+  gap: var(--space-12);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.popup-tabs,
+.capture-action-bar,
+.popup-footer {
+  flex-shrink: 0;
+}
+
+.capture-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.gallery-strip {
+  display: flex;
+  gap: var(--space-4);
+  overflow-x: auto;
+  padding: var(--space-4);
+}
+
+.gallery-strip button {
+  flex: 0 0 var(--gallery-thumbnail-size);
+  block-size: var(--gallery-thumbnail-size);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--muted);
+  padding: 1px;
+  cursor: pointer;
+}
+
+.gallery-strip button[aria-pressed="true"] {
+  outline: 2px solid var(--ring);
+}
+
+.gallery-strip img {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  border-radius: calc(var(--radius) - 2px);
+  object-fit: cover;
+}
+
+.gallery-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-height: var(--control-height);
+  cursor: pointer;
+}
+
+.gallery-toggle input {
+  min-height: 0;
+  inline-size: auto;
+  flex: none;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
 main {
   display: grid;
   gap: var(--space-12);
