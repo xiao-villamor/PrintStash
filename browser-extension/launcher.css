@@ -1,0 +1,155 @@
+.launcher {
+  position: relative;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8);
+  width: var(--launcher-size);
+  height: var(--launcher-size);
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--launcher-border);
+  border-radius: var(--radius-pill);
+  background: var(--launcher-background);
+  color: var(--foreground);
+  font:
+    var(--popup-strong) var(--popup-text) / 1.4 Inter,
+    system-ui,
+    sans-serif;
+  box-shadow: var(--launcher-shadow);
+  cursor: pointer;
+  transition: transform var(--duration-press) var(--ease-out);
+}
+
+.launcher:hover,
+.launcher:focus-visible {
+  border-color: var(--ring);
+  background: var(--launcher-hover);
+}
+
+.launcher:active {
+  transform: scale(0.98);
+}
+
+.launcher:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+.launcher-mark {
+  flex: none;
+  display: block;
+}
+
+.launcher-close {
+  display: none;
+  font-size: var(--popup-heading);
+  line-height: 1;
+}
+
+.launcher-label {
+  display: none;
+}
+
+.launcher-hint {
+  position: absolute;
+  inset-inline-end: calc(100% + var(--space-8));
+  inset-block-start: 50%;
+  padding: var(--space-8) var(--space-12);
+  border: 1px solid var(--launcher-border);
+  border-radius: var(--radius-pill);
+  background: var(--launcher-background);
+  color: var(--foreground);
+  box-shadow: var(--launcher-shadow);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+  transform: translate(6px, -50%);
+  transition:
+    transform var(--duration-press) var(--ease-out),
+    opacity var(--duration-press) var(--ease-out),
+    visibility var(--duration-press);
+}
+
+[data-corner$="left"] .launcher-hint {
+  inset-inline-start: calc(100% + var(--space-8));
+  inset-inline-end: auto;
+  transform: translate(-6px, -50%);
+}
+
+[data-variant="icon-and-label"] .launcher:not([aria-expanded="true"]) {
+  width: auto;
+  padding-inline: var(--space-12) var(--space-16);
+}
+
+[data-variant="icon-and-label"] .launcher:not([aria-expanded="true"]) .launcher-label {
+  display: inline;
+}
+
+[data-variant="edge-tab"] .launcher:not([aria-expanded="true"]) {
+  width: var(--control-height);
+  border-inline-end: 0;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+}
+
+[data-variant="edge-tab"][data-corner$="left"] .launcher:not([aria-expanded="true"]) {
+  border-inline-end: 1px solid var(--launcher-border);
+  border-inline-start: 0;
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+}
+
+[data-variant="edge-tab"] .launcher-hint {
+  display: flex;
+  align-items: center;
+  inset-inline-end: calc(100% - 1px);
+  height: calc(100% + 2px);
+  padding-block: 0;
+  border-color: var(--ring);
+  border-inline-end: 0;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  background: var(--launcher-hover);
+}
+
+[data-variant="edge-tab"][data-corner$="left"] .launcher-hint {
+  inset-inline-end: auto;
+  inset-inline-start: calc(100% - 1px);
+  border-inline-start: 0;
+  border-inline-end: 1px solid var(--ring);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+}
+
+[data-variant="edge-tab"] .launcher:not([aria-expanded="true"]):is(:hover, :focus-visible) {
+  border-radius: 0;
+}
+
+[data-variant="icon"]
+  .launcher:not([aria-expanded="true"]):is(:hover, :focus-visible)
+  .launcher-hint,
+[data-variant="edge-tab"]
+  .launcher:not([aria-expanded="true"]):is(:hover, :focus-visible)
+  .launcher-hint {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+.launcher[aria-expanded="true"] .launcher-mark {
+  display: none;
+}
+
+.launcher[aria-expanded="true"] .launcher-close {
+  display: inline;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .launcher,
+  .launcher-hint {
+    transition: none;
+  }
+
+  .launcher:active {
+    transform: none;
+  }
+}

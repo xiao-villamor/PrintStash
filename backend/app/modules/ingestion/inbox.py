@@ -1544,7 +1544,13 @@ def _create_browser_upload(
     clean_url = sanitize_source_url(source_url)
     source = _parse_capture_source(capture_source, clean_url)
     provider = import_resolvers.classify_page(clean_url)
-    if source is None and provider != "makerworld":
+    # A direct-file URL is provenance only. This path stages explicit local bytes
+    # and keeps the public-address rule on the separate URL download route.
+    source_suffix = Path(urlsplit(clean_url).path).suffix.lower()
+    direct_file = provider is None and (
+        source_suffix == ".zip" or source_suffix in SUFFIX_TO_FILE_TYPE
+    )
+    if source is None and provider != "makerworld" and not direct_file:
         raise importer.ImportError_("makerworld_model_page_required")
     if source is not None and provider != source.provider:
         raise importer.ImportError_("capture_source_provider_url_mismatch")

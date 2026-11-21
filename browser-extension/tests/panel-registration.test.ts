@@ -1,6 +1,8 @@
+import { fakeBrowser } from "@webext-core/fake-browser";
 /** Site activation survives extension updates without activating other granted hosts. */
 import { describe, expect, it } from "vitest";
 import {
+  marketplacePanelActivation,
   registerMarketplacePanel,
   restoreMarketplacePanels,
   type PanelRegistrationApi,
@@ -61,5 +63,40 @@ describe("restoreMarketplacePanels", () => {
     await restoreMarketplacePanels(api);
     expect([...scripts.values()]).toEqual([]);
     expect(values).toEqual({});
+  });
+});
+
+describe("marketplacePanelActivation", () => {
+  it("activates the current site after permission arrives without the toolbar popup", async () => {
+    fakeBrowser.reset();
+    const origin = "https://www.thingiverse.com/*";
+    const granted: string[] = [];
+    const { api, scripts } = registrationFixture(granted);
+    const injected: string[] = [];
+    const activation = marketplacePanelActivation(
+      api,
+      fakeBrowser.storage.session,
+      async (site) => {
+        injected.push(site);
+      },
+    );
+
+    expect(await activation.request(origin)).toBe(false);
+    granted.push(origin);
+    await activation.permissionAdded(granted);
+
+    expect(injected).toEqual([origin]);
+    expect([...scripts.values()].map((entry) => entry.matches)).toEqual([[origin]]);
+  });
+
+  it("does not activate a grant without a matching user request", async () => {
+    fakeBrowser.reset();
+    const origin = "https://www.thingiverse.com/*";
+    const { api, scripts } = registrationFixture([origin]);
+    const activation = marketplacePanelActivation(api, fakeBrowser.storage.session, async () => {});
+
+    await activation.permissionAdded([origin]);
+
+    expect(scripts.size).toBe(0);
   });
 });

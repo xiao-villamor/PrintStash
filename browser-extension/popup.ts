@@ -6,6 +6,7 @@ import {
   type SourceGalleryImage,
 } from "./source-gallery.ts";
 import { captureTransferFetch, progressLabel, type ByteProgress } from "./transfer-progress.ts";
+import { collectionCombobox } from "./collection-combobox.ts";
 import { captureDestinations, captureTags, selectedCaptureCover } from "./capture-preferences.ts";
 import {
   requestCultsInMainWorld,
@@ -44,7 +45,17 @@ import {
 } from "./thangs-capture.ts";
 import { type SourceProviderLabel } from "./source-providers.ts";
 import { marketplaceOrigin } from "./marketplace-panel.ts";
-import { captureSequentialFiles, CaptureRecoveryError } from "./sequential-capture.ts";
+import { isMarketplacePanelEnabled } from "./panel-registration.ts";
+import { launcherButton, positionLauncher } from "./launcher.ts";
+import {
+  defaultLauncherPreferences,
+  launcherPreferences,
+  LAUNCHER_CORNERS,
+  LAUNCHER_VARIANTS,
+  type LauncherStorage,
+} from "./launcher-preferences.ts";
+import { POPUP_TABS, popupTabs, type PopupTab } from "./popup-tabs.ts";
+import { captureSequentialFiles } from "./sequential-capture.ts";
 import { captureReviewUrl } from "./capture-result.ts";
 import { previousCaptures, captureHistoryLabel } from "./source-history.ts";
 import {
@@ -56,6 +67,9 @@ import {
 import {
   BROWSER_EXTENSION_SETUP_STORAGE_KEY,
   CaptureAuthenticationError,
+  CaptureResponseError,
+  PairingValidationError,
+  captureUrlForVault,
   captureModelPage,
   claimBrowserPairing,
   classifyModelPage,
@@ -90,8 +104,8 @@ import {
   type PrintablesSelectedFile,
 } from "./printables-capture.ts";
 import {
-  CaptureCapacityError,
   captureRichFiles,
+  captureDirectFile,
   type BrowserCaptureFile,
   type CaptureStageRunner,
   type CaptureUploadStage,
@@ -135,9 +149,12 @@ function requiredElement<T extends Element>(selector: string, constructor: { new
   return element;
 }
 
-const browser: BrowserProviderAdapter = createBrowserProviderAdapter(
-  chrome as unknown as BrowserExtensionApi,
-);
+const extensionApi = chrome as BrowserExtensionApi & { storage: LauncherStorage };
+const browser: BrowserProviderAdapter = createBrowserProviderAdapter(extensionApi);
+const launcherStore = launcherPreferences(extensionApi.storage);
+const panelMode = new URL(location.href).searchParams.get("panel") === "1";
+document.documentElement.toggleAttribute("data-panel", panelMode);
+
 type Page = { id?: number; title?: string; url?: string };
 type Source = SourceProviderLabel | "Direct file" | null;
 type Config = {
@@ -146,6 +163,7 @@ type Config = {
   username?: string;
   apiKey?: string;
   deviceCredential?: string;
+  deviceName?: string;
 };
 type Profile = { username: string; is_superuser: boolean };
 type ConnectionState = "checking" | "connected" | "error" | "disconnected";
@@ -161,11 +179,14 @@ const apiKeyMethod = requiredElement("#api-key-method", HTMLInputElement);
 const pairingFields = requiredElement("#pairing-fields", HTMLElement);
 const apiKeyFields = requiredElement("#api-key-fields", HTMLElement);
 const pairingCodeInput = requiredElement("#pairing-code", HTMLInputElement);
+const deviceNameError = requiredElement("#device-name-error", HTMLElement);
 const deviceNameInput = requiredElement("#device-name", HTMLInputElement);
 const usernameInput = requiredElement("#username", HTMLInputElement);
 const keyInput = requiredElement("#key", HTMLInputElement);
 const runtimeMarker = requiredElement("#runtime-marker", HTMLElement);
 const pageLabel = requiredElement("#page", HTMLElement);
+const pageHost = requiredElement("#page-host", HTMLElement);
+const unsupportedPage = requiredElement("#unsupported-page", HTMLElement);
 const pageContext = requiredElement("#page-context", HTMLElement);
 const sourceActions = requiredElement("#source-actions", HTMLElement);
 const sourceLabel = requiredElement("#source", HTMLElement);
@@ -176,13 +197,20 @@ const statusMessage = requiredElement("#status-message", HTMLElement);
 const statusDetails = requiredElement("#status-details", HTMLElement);
 const statusCode = requiredElement("#status-code", HTMLElement);
 const preferenceFields = requiredElement("#capture-preferences", HTMLFieldSetElement);
-const collectionQuery = requiredElement("#collection-query", HTMLInputElement);
-const collectionSelect = requiredElement("#capture-collection", HTMLSelectElement);
+const coverPicker = requiredElement("#cover-picker", HTMLElement);
 const coverInput = requiredElement("#capture-cover", HTMLInputElement);
 const coverFileName = requiredElement("#capture-cover-name", HTMLElement);
+const coverError = requiredElement("#cover-error", HTMLElement);
+const removeCover = requiredElement("#remove-cover", HTMLButtonElement);
 const tagsInput = requiredElement("#capture-tags", HTMLInputElement);
-const findCollection = requiredElement("#find-collection", HTMLButtonElement);
 const suggestionOperations = new CaptureOperationOwner();
+const collection = collectionCombobox(
+  requiredElement("#capture-collection", HTMLInputElement),
+  requiredElement("#collection-options", HTMLElement),
+  requiredElement("#collection-feedback", HTMLElement),
+  searchCollections,
+  () => suggestionOperations.retire(),
+);
 const captureButton = requiredElement("#capture", HTMLButtonElement);
 const inboxButton = requiredElement("#open-inbox", HTMLButtonElement);
 const importPanel = requiredElement("#import-panel", HTMLElement);
@@ -204,10 +232,51 @@ const connectButton = requiredElement("#connect", HTMLButtonElement);
 const editButton = requiredElement("#edit-connection", HTMLButtonElement);
 const cancelButton = requiredElement("#cancel-edit", HTMLButtonElement);
 const disconnectButton = requiredElement("#disconnect", HTMLButtonElement);
+const captureSetup = requiredElement("#capture-setup", HTMLElement);
+const captureEditorHint = requiredElement("#capture-editor-hint", HTMLElement);
+const settingsConnection = requiredElement("#settings-connection", HTMLElement);
+const connectionOverview = requiredElement("#connection-overview", HTMLElement);
+const settingsServer = requiredElement("#settings-server", HTMLElement);
+const settingsDevice = requiredElement("#settings-device", HTMLElement);
+const settingsEdit = requiredElement("#settings-edit-connection", HTMLButtonElement);
+const historyMessage = requiredElement("#history-message", HTMLElement);
+const historyList = requiredElement("#history-list", HTMLElement);
+const launcherEnabled = requiredElement("#launcher-enabled", HTMLInputElement);
+const launcherPreview = requiredElement("#launcher-preview", HTMLElement);
+const launcherSite = requiredElement("#launcher-site", HTMLButtonElement);
+const launcherError = requiredElement("#launcher-settings-error", HTMLElement);
 const apiSettingsButton = requiredElement("#open-api-settings", HTMLButtonElement);
 
 runtimeMarker.textContent = `Version ${browser.runtime.getManifest().version}`;
 
+const tabs = popupTabs(
+  {
+    capture: requiredElement("#tab-capture", HTMLButtonElement),
+    history: requiredElement("#tab-history", HTMLButtonElement),
+    settings: requiredElement("#tab-settings", HTMLButtonElement),
+  },
+  {
+    capture: requiredElement("#view-capture", HTMLElement),
+    history: requiredElement("#view-history", HTMLElement),
+    settings: requiredElement("#view-settings", HTMLElement),
+  },
+  (tab, persist) => {
+    activeTab = tab;
+    if (persist) {
+      tabTouched = true;
+      void browser.storage.set({ popupTab: tab }).catch(() => {});
+    }
+    renderTabContent();
+    if (tab === "history") void refreshCaptureHistory();
+  },
+);
+
+let activeTab: PopupTab = "capture";
+let tabTouched = false;
+let tabBeforeEdit: PopupTab = "capture";
+let historyRequest = 0;
+let launcher = defaultLauncherPreferences();
+let permittedSite: string | null = null;
 let activePage: Page | null = null;
 let activeSource: Source = null;
 let connectionState = "checking";
@@ -238,7 +307,10 @@ let pendingThingiverseLinks = new Map<string, string>();
 let pendingGallery: SourceGalleryImage[] = [];
 let galleryUnavailable = false;
 let gallerySelection: HTMLFieldSetElement | null = null;
-let pendingManualCapture: BrowserCaptureMessage | null = null;
+type ManualCapture =
+  | { kind: "publication"; draft: BrowserCaptureMessage }
+  | { kind: "direct"; url: string };
+let pendingManualCapture: ManualCapture | null = null;
 
 declare global {
   var __PRINTSTASH_CAPTURE_TIMEOUT_MS__: number | undefined;
@@ -323,7 +395,8 @@ async function runCaptureStage<T>(
     if (
       error instanceof CaptureDiagnosticError ||
       error instanceof CaptureRetiredError ||
-      error instanceof CaptureAuthenticationError
+      error instanceof CaptureAuthenticationError ||
+      (error instanceof CaptureResponseError && error.diagnosticCode !== undefined)
     )
       throw error;
     const message = messageFrom(error);
@@ -363,7 +436,7 @@ function diagnosticStatus(error: unknown, fallbackMessage = "Capture could not b
 
 function safeCaptureMessage(error: unknown) {
   if (
-    error instanceof CaptureRecoveryError ||
+    error instanceof CaptureResponseError ||
     error instanceof ThangsCaptureError ||
     error instanceof MarketplaceDownloadError
   )
@@ -399,15 +472,7 @@ function vaultStage(capture: CaptureOperation<Config>): CaptureStageRunner {
           ? "capture_vault_slot_upload_failed"
           : "capture_vault_finalize_failed";
     return runCaptureStage(
-      async (signal) => {
-        try {
-          return await operation(signal);
-        } catch (error) {
-          if (error instanceof CaptureCapacityError)
-            throw new CaptureDiagnosticError(failureCode, error.message);
-          throw error;
-        }
-      },
+      operation,
       timeoutCode,
       failureCode,
       "PrintStash could not finish the selected file upload. Try again from Pending Imports.",
@@ -429,7 +494,6 @@ function showStatus(
   providerCode?: string,
 ) {
   if (!message) {
-    inboxButton.textContent = "Open Pending Imports";
     statusLabel.hidden = true;
     statusTitleText.textContent = "";
     statusMessage.textContent = "";
@@ -447,11 +511,10 @@ function showStatus(
   statusLabel.hidden = false;
   statusTitleText.textContent = presentation.title ?? "";
   statusTitle.hidden = kind !== "success";
-  statusMessage.textContent = presentation.message;
+  statusMessage.textContent = kind === "success" ? "" : presentation.message;
   statusMessage.hidden = kind === "success";
   statusDetails.hidden = !presentation.technicalCode;
   statusCode.textContent = presentation.technicalCode ?? "";
-  inboxButton.textContent = kind === "success" ? "Review" : "Open Pending Imports";
   if (kind) statusLabel.dataset.kind = kind;
   else delete statusLabel.dataset.kind;
 }
@@ -467,15 +530,28 @@ function renderFileName(input: HTMLInputElement, display: HTMLElement) {
   display.title = file ? file.name : "";
 }
 
+function renderCover() {
+  coverError.hidden = true;
+  coverInput.removeAttribute("aria-invalid");
+  try {
+    selectedCaptureCover(coverInput.files?.[0]);
+  } catch (error) {
+    coverError.textContent = messageFrom(error);
+    coverError.hidden = false;
+    coverInput.setAttribute("aria-invalid", "true");
+  }
+  renderFileName(coverInput, coverFileName);
+  const hasCover = Boolean(coverInput.files?.length);
+  coverFileName.hidden = !hasCover;
+  removeCover.hidden = !hasCover;
+}
+
 function retireCapture() {
   captureOperations.retire();
-  suggestionOperations.retire();
-  collectionQuery.value = "";
-  collectionSelect.replaceChildren(new Option("Choose in Pending Imports", ""));
+  collection.reset();
   tagsInput.value = "";
   coverInput.value = "";
-  renderFileName(coverInput, coverFileName);
-  findCollection.disabled = false;
+  renderCover();
   importBusy = false;
   setButtonBusy(captureButton, false);
   clearCandidateSelection();
@@ -521,7 +597,19 @@ function clearManualFileSelection() {
   captureButton.textContent = "Send to PrintStash";
 }
 
-function renderManualFileSelection(capture: BrowserCaptureMessage) {
+function confirmCapture(url: string) {
+  inboxButton.dataset.url = url;
+  inboxButton.hidden = false;
+  showStatus("Sent to Pending Imports", "success");
+  renderImportAvailability();
+  inboxButton.focus();
+}
+
+function renderManualFileSelection(draft: BrowserCaptureMessage) {
+  offerManualFile({ kind: "publication", draft });
+}
+
+function offerManualFile(capture: ManualCapture) {
   pendingPrintablesCapture = null;
   pendingMakerWorldCapture = null;
   pendingThingiverseCapture = null;
@@ -533,11 +621,11 @@ function renderManualFileSelection(capture: BrowserCaptureMessage) {
   captureButton.textContent = "Upload selected file";
 }
 
-function selectedManualFile(capture: BrowserCaptureMessage): BrowserCaptureFile {
+function selectedManualFile(sourceItemId: string | null): BrowserCaptureFile {
   const file = manualFileInput.files?.item(0);
   if (!file) throw new Error("Choose a downloaded model file before uploading.");
   return {
-    id: stableCaptureFileId(capture.source.source_item_id, file.name),
+    id: stableCaptureFileId(sourceItemId, file.name),
     file,
     filename: file.name,
     mediaType: file.type || "application/octet-stream",
@@ -658,7 +746,7 @@ function configFromForm() {
     const pairingCode = pairingCodeInput.value.trim();
     if (!pairingCode) throw new Error("Enter a pairing code.");
     if (!deviceNameInput.value.trim()) throw new Error("Enter a name for this browser.");
-    return { vault, pairingCode };
+    return { vault, pairingCode, deviceName: deviceNameInput.value.trim() };
   }
   const username = usernameInput.value.trim();
   const apiKey = keyInput.value.trim();
@@ -666,7 +754,39 @@ function configFromForm() {
   return { vault, username, apiKey };
 }
 
+function defaultBrowserName({ userAgent, platform }: Navigator) {
+  const browserName = /Edg(?:A|iOS)?\//.test(userAgent)
+    ? "Edge"
+    : /Firefox|FxiOS/.test(userAgent)
+      ? "Firefox"
+      : /Chromium/.test(userAgent)
+        ? "Chromium"
+        : /Chrome|CriOS/.test(userAgent)
+          ? "Chrome"
+          : "Browser";
+  const platformName = [
+    [/CrOS/, "ChromeOS"],
+    [/Android/, "Android"],
+    [/iPhone|iPad|iPod/, "iOS"],
+    [/Win/, "Windows"],
+    [/Mac/, "macOS"],
+    [/Linux/, "Linux"],
+  ] as const;
+  const os = platformName.find(([pattern]) => pattern.test(`${userAgent} ${platform}`))?.[1];
+  return os ? `${browserName} on ${os}` : browserName;
+}
+
+const preferredBrowserName = defaultBrowserName(navigator);
+deviceNameInput.value = preferredBrowserName;
+
+function clearPairingError() {
+  deviceNameError.hidden = true;
+  deviceNameInput.removeAttribute("aria-invalid");
+  pairingCodeInput.removeAttribute("aria-invalid");
+}
+
 function renderCredentialFields() {
+  clearPairingError();
   pairingFields.hidden = apiKeyMethod.checked;
   apiKeyFields.hidden = pairingMethod.checked;
   connectButton.textContent = connectionActionLabel();
@@ -679,6 +799,7 @@ function connectionActionLabel() {
 
 function fillConnectionForm(config: Config | null) {
   vaultInput.value = config?.vault || "";
+  deviceNameInput.value = config?.deviceName ?? preferredBrowserName;
   pairingCodeInput.value = "";
   usernameInput.value = config?.username || "";
   keyInput.value = config?.apiKey || "";
@@ -712,22 +833,41 @@ function connectionHost(config: Config) {
 function renderImportAvailability() {
   const connected = connectionState === "connected" && connectedConfig;
   const readyConnection = connected && !editingConnection;
-  importPanel.hidden = !readyConnection;
-  preferenceFields.disabled = importBusy || !readyConnection;
-  captureButton.disabled = importBusy || !readyConnection || !activeSource;
-  importHint.hidden = !importBusy && Boolean(activeSource) && !pendingManualCapture;
+  const hasReceipt = Boolean(inboxButton.dataset.url);
+  const canCapture = Boolean(readyConnection && activeSource && !hasReceipt);
+  const needsDirectFile = pendingManualCapture?.kind === "direct";
+  importPanel.hidden = !readyConnection || hasReceipt;
+  pageContext.hidden = !canCapture;
+  unsupportedPage.hidden = !readyConnection || Boolean(activeSource);
+  preferenceFields.hidden = !canCapture || needsDirectFile;
+  preferenceFields.disabled = importBusy || !canCapture;
+  coverPicker.hidden = activeSource === "Direct file";
+  captureButton.hidden = !canCapture;
+  captureButton.disabled = importBusy || !canCapture;
+  importHint.hidden = !importBusy && (!pendingManualCapture || needsDirectFile);
   if (importBusy) {
-    importHint.textContent =
-      new URL(location.href).searchParams.get("panel") === "1"
-        ? "Sending to your review inbox… You can hide this panel; keep the source tab open."
-        : "Sending to your review inbox… Keep this popup open until it finishes.";
-  } else if (!connected) {
-    importHint.textContent = "Connect PrintStash to enable importing.";
-  } else if (!activeSource) {
-    importHint.textContent = "Open a supported model page or direct model file first.";
+    importHint.textContent = panelMode
+      ? "Sending to your review inbox… You can hide this panel; keep the source tab open."
+      : "Sending to your review inbox… Keep this popup open until it finishes.";
   } else if (pendingManualCapture) {
     importHint.textContent = "Automatic download was unavailable.";
   }
+}
+
+function renderTabContent() {
+  const showOverview = connectionState === "connected" && !editingConnection;
+  const showSetupInCapture =
+    activeTab === "capture" && connectionState !== "connected" && !editingConnection;
+  const target = showSetupInCapture ? captureSetup : settingsConnection;
+  if (connectionPanel.parentElement !== target) target.append(connectionPanel);
+  connectionOverview.hidden = !showOverview;
+  editButton.hidden = !showOverview || activeTab === "settings";
+  captureEditorHint.hidden = !editingConnection;
+  if (showOverview && connectedConfig) {
+    settingsServer.textContent = connectedConfig.vault;
+    settingsDevice.textContent = connectedConfig.deviceName ?? preferredBrowserName;
+  }
+  renderImportAvailability();
 }
 
 function renderConnection(
@@ -735,10 +875,6 @@ function renderConnection(
   { config, profile, detail }: { config?: Config; profile?: Profile | null; detail?: string } = {},
 ) {
   connectionState = state;
-  if (state !== "connected") {
-    captureHistory.replaceChildren();
-    captureHistory.hidden = true;
-  }
   connectionStatus.dataset.state = state;
 
   if (state === "connected") {
@@ -767,10 +903,9 @@ function renderConnection(
   connectionFeedback.textContent = state === "error" ? connectionDetail.textContent : "";
 
   const showConnectedActions = state === "connected";
-  pageContext.hidden = !showConnectedActions;
-  editButton.hidden = !showConnectedActions || editingConnection;
   disconnectButton.hidden = !showConnectedActions || !editingConnection;
-  renderImportAvailability();
+  renderTabContent();
+  if (activeTab === "history") void refreshCaptureHistory();
 }
 
 function renderActivePage() {
@@ -787,7 +922,20 @@ function renderActivePage() {
     classified === "Direct file"
       ? classified
       : null;
-  pageLabel.textContent = activePage?.title || activePage?.url || "No active page";
+  pageHost.hidden = true;
+  if (activeSource === "Direct file" && activePage?.url) {
+    const url = new URL(activePage.url);
+    const filename = url.pathname.split("/").at(-1) ?? "";
+    try {
+      pageLabel.textContent = decodeURIComponent(filename);
+    } catch {
+      pageLabel.textContent = filename;
+    }
+    pageHost.textContent = url.host;
+    pageHost.hidden = false;
+  } else {
+    pageLabel.textContent = activePage?.title || activePage?.url || "No active page";
+  }
   pageLabel.title = pageLabel.textContent;
   sourceLabel.textContent = activeSource ? `${activeSource} · Supported` : "Unsupported source";
   sourceLabel.dataset.supported = activeSource ? "true" : "false";
@@ -841,12 +989,16 @@ async function establishConnection(
         fetchImpl,
         vault: config.vault,
         code: config.pairingCode,
-        name: deviceNameInput.value.trim(),
+        name: config.deviceName,
       });
-      normalized = { vault: verified.base, deviceCredential: verified.deviceCredential };
+      normalized = {
+        vault: verified.base,
+        deviceCredential: verified.deviceCredential,
+        deviceName: config.deviceName,
+      };
     } else if (config.deviceCredential) {
       verified = await verifyVaultReachability({ vault: config.vault, fetchImpl });
-      normalized = { vault: verified.base, deviceCredential: config.deviceCredential };
+      normalized = { ...config, vault: verified.base };
     } else {
       verified = await verifyVaultConnection({
         fetchImpl,
@@ -875,6 +1027,9 @@ async function establishConnection(
         username: credentials.username ?? null,
         apiKey: credentials.apiKey ?? null,
         deviceCredential: credentials.deviceCredential ?? null,
+        ...(credentials.deviceName || previous?.config.deviceName
+          ? { deviceName: credentials.deviceName ?? null }
+          : {}),
       });
     }
 
@@ -889,13 +1044,14 @@ async function establishConnection(
     connectedProfile = verifiedConnection.user || null;
     accessToken = verifiedConnection.accessToken || null;
     if (previous && previous.config.vault !== normalized.vault) clearInboxAction();
+    const wasEditing = editingConnection;
     editingConnection = false;
     connectionPanel.hidden = true;
     cancelButton.hidden = true;
     disconnectButton.hidden = true;
     fillConnectionForm(normalized);
     renderConnection("connected", { config: normalized, profile: verifiedConnection.user });
-    if (new URL(location.href).searchParams.get("panel") === "1") void refreshCaptureHistory();
+    if (wasEditing) tabs.select(tabBeforeEdit);
     return true;
   } catch (error) {
     let failedOrigin = null;
@@ -919,7 +1075,9 @@ async function establishConnection(
       connectedConfig = null;
       connectedProfile = null;
       accessToken = null;
-      renderConnection("error", { detail: messageFrom(error) });
+      renderConnection(error instanceof PairingValidationError ? "disconnected" : "error", {
+        detail: messageFrom(error),
+      });
     }
     connectionPanel.hidden = false;
     throw error;
@@ -1575,39 +1733,75 @@ async function takePreparedSetup(page: Page) {
 
 pairingMethod.addEventListener("change", renderCredentialFields);
 apiKeyMethod.addEventListener("change", renderCredentialFields);
-manualFileInput.addEventListener("change", () => renderFileName(manualFileInput, manualFileName));
-coverInput.addEventListener("change", () => renderFileName(coverInput, coverFileName));
+manualFileInput.addEventListener("change", () => {
+  renderFileName(manualFileInput, manualFileName);
+  renderImportAvailability();
+});
+coverInput.addEventListener("change", renderCover);
+removeCover.addEventListener("click", () => {
+  coverInput.value = "";
+  renderCover();
+  coverInput.focus();
+});
+deviceNameInput.addEventListener("input", clearPairingError);
+pairingCodeInput.addEventListener("input", clearPairingError);
+
+function showConnectionFeedback(message: string) {
+  connectionFeedback.textContent = message;
+  connectionFeedback.hidden = false;
+}
 
 connectionForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (connectionLocked) return;
+  clearPairingError();
+  connectionFeedback.hidden = true;
+  let config: Config;
   try {
-    const config = configFromForm();
+    config = configFromForm();
+  } catch (error) {
+    showConnectionFeedback(messageFrom(error));
+    return;
+  }
+  try {
     if (await establishConnection(config, { requestPermission: true, persist: true })) {
       showStatus("Connection verified. This browser is ready to import.");
     }
   } catch (error) {
-    if (connectionState === "connected") {
+    if (error instanceof PairingValidationError) {
+      const field = error.field === "name" ? deviceNameInput : pairingCodeInput;
+      field.setAttribute("aria-invalid", "true");
+      if (error.field === "name") {
+        deviceNameError.textContent = error.message;
+        deviceNameError.hidden = false;
+      } else {
+        showConnectionFeedback(error.message);
+      }
+      field.focus();
+    } else if (connectionState === "connected") {
       showStatus(`Connection was not updated. ${messageFrom(error)}`, "error");
-    } else {
-      showStatus();
-      renderConnection("error", { detail: messageFrom(error) });
     }
   }
 });
 
-editButton.addEventListener("click", () => {
+function openConnectionEditor() {
   if (connectionLocked) return;
+  tabBeforeEdit = activeTab;
   editingConnection = true;
+  collection.close();
+  clearInboxAction();
   connectionPanel.hidden = false;
   editButton.hidden = true;
   cancelButton.hidden = false;
   disconnectButton.hidden = false;
   connectButton.textContent = connectionActionLabel();
-  renderImportAvailability();
+  tabs.select("settings");
   showStatus();
   vaultInput.focus();
-});
+}
+
+editButton.addEventListener("click", openConnectionEditor);
+settingsEdit.addEventListener("click", openConnectionEditor);
 
 cancelButton.addEventListener("click", () => {
   if (connectionLocked && connectionAttempt?.phase !== "verifying") return;
@@ -1621,6 +1815,7 @@ cancelButton.addEventListener("click", () => {
     config: connectedConfig ?? undefined,
     profile: connectedProfile,
   });
+  tabs.select(tabBeforeEdit);
   showStatus();
 });
 
@@ -1631,7 +1826,7 @@ disconnectButton.addEventListener("click", async () => {
   retireCapture();
   const builtInPermission = previous ? hasBuiltInVaultPermission(previous) : false;
   try {
-    await browser.storage.remove(["apiKey", "username", "deviceCredential"]);
+    await browser.storage.remove(["apiKey", "username", "deviceCredential", "deviceName"]);
   } catch (error) {
     showStatus(`Couldn't remove the stored browser credential. ${messageFrom(error)}`, "error");
     lockConnection(false);
@@ -1667,7 +1862,7 @@ disconnectButton.addEventListener("click", async () => {
       : builtInPermission
         ? "Disconnected. The stored browser credential was removed; built-in loopback access contains no credentials."
         : "Disconnected. The stored browser credential and server permission were removed from this browser.",
-    permissionStillGranted ? "error" : "success",
+    permissionStillGranted ? "error" : "",
   );
 });
 
@@ -1680,54 +1875,43 @@ apiSettingsButton.addEventListener("click", () => {
   }
 });
 
-findCollection.addEventListener("click", async () => {
-  if (importBusy || !connectedConfig || connectionState !== "connected") return;
-  const authorization = accessToken || connectedConfig.deviceCredential;
-  if (!authorization) return;
-  suggestionOperations.retire();
+async function searchCollections(query: string) {
+  const authorization = accessToken || connectedConfig?.deviceCredential;
+  if (importBusy || !connectedConfig || !authorization) throw new CaptureRetiredError();
   const operation = suggestionOperations.begin(connectedConfig, authorization);
-  findCollection.disabled = true;
   try {
-    const destinations = await operation.run((signal) =>
-      captureDestinations({
-        vault: operation.config.vault,
-        authorization,
-        query: collectionQuery.value,
-        signal,
-      }),
-    );
-    collectionSelect.replaceChildren(
-      new Option("Choose in Pending Imports", ""),
-      ...destinations.map((destination) => new Option(destination.label, String(destination.id))),
-    );
-    showStatus(
-      destinations.length
-        ? "Choose a collection suggestion for review."
-        : "No editable collections match this search.",
+    return await operation.run((signal) =>
+      captureDestinations({ vault: operation.config.vault, authorization, query, signal }),
     );
   } catch (error) {
-    if (!suggestionOperations.isCurrent(operation)) return;
-    if (error instanceof CaptureAuthenticationError) recoverCaptureConnection();
-    else showStatus(messageFrom(error), "error");
+    if (!suggestionOperations.isCurrent(operation)) throw new CaptureRetiredError();
+    if (error instanceof CaptureAuthenticationError) {
+      recoverCaptureConnection();
+      throw new CaptureRetiredError();
+    }
+    throw error;
   } finally {
-    if (suggestionOperations.finish(operation)) findCollection.disabled = false;
+    suggestionOperations.finish(operation);
   }
-});
+}
 
 captureButton.addEventListener("click", async () => {
   if (!connectedConfig || connectionState !== "connected") {
     showStatus("Connect PrintStash before importing.", "error");
     return;
   }
-  if (importBusy) return;
+  if (captureButton.disabled) return;
+  if (!coverError.hidden) {
+    coverInput.focus();
+    return;
+  }
   const config = { ...connectedConfig };
   const authorization = accessToken || config.deviceCredential;
   if (!authorization) {
     showStatus("The browser connection expired. Connect PrintStash again.", "error");
     return;
   }
-  suggestionOperations.retire();
-  findCollection.disabled = false;
+  collection.close();
   const capture = captureOperations.begin(config, authorization);
   const runStage = vaultStage(capture);
   importBusy = true;
@@ -1742,7 +1926,7 @@ captureButton.addEventListener("click", async () => {
       );
     });
     const preferences = {
-      ...(collectionSelect.value ? { collectionId: Number(collectionSelect.value) } : {}),
+      collectionId: collection.id,
       tags: captureTags(tagsInput.value),
       cover: selectedCaptureCover(coverInput.files?.[0]),
     };
@@ -1796,26 +1980,33 @@ captureButton.addEventListener("click", async () => {
     }
     capture.assertCurrent();
     if (pendingManualCapture) {
-      const draft = pendingManualCapture;
-      const file = selectedManualFile(draft);
-      const receipt = await capture.run(() =>
-        captureRichFiles({
-          ...preferences,
-          fetchImpl: transferFetch,
-          vault: capture.config.vault,
-          authorization,
-          sourceUrl: draft.source.canonical_url,
-          title: activePage?.title,
-          captureSource: draft.source,
-          files: [file],
-          runStage,
-        }),
+      const manual = pendingManualCapture;
+      const title = pageLabel.textContent;
+      const receipt = await capture.run((signal) =>
+        manual.kind === "direct"
+          ? captureDirectFile({
+              vault: capture.config.vault,
+              authorization,
+              sourceUrl: manual.url,
+              title,
+              file: selectedManualFile(null),
+              fetchImpl: transferFetch,
+              signal,
+            })
+          : captureRichFiles({
+              ...preferences,
+              fetchImpl: transferFetch,
+              vault: capture.config.vault,
+              authorization,
+              sourceUrl: manual.draft.source.canonical_url,
+              title,
+              captureSource: manual.draft.source,
+              files: [selectedManualFile(manual.draft.source.source_item_id)],
+              runStage,
+            }),
       );
-      const inboxUrl = captureReviewUrl(normalizeVault(capture.config.vault), receipt);
       clearManualFileSelection();
-      inboxButton.hidden = false;
-      inboxButton.dataset.url = inboxUrl;
-      showStatus("Selected file and source metadata sent to Pending Imports.", "success");
+      confirmCapture(captureReviewUrl(capture.config.vault, receipt));
       return;
     }
     const draft =
@@ -2007,18 +2198,7 @@ captureButton.addEventListener("click", async () => {
         }),
       );
       clearCandidateSelection();
-      inboxButton.hidden = false;
-      inboxButton.dataset.url = captureReviewUrl(capture.config.vault, receipt);
-      showStatus(
-        draft.source.provider === "makerworld"
-          ? "Selected MakerWorld packages sent to Pending Imports. Review before importing."
-          : draft.source.provider === "printables"
-            ? "Selected Printables files sent to Pending Imports. Review before importing."
-            : draft.source.provider === "thingiverse"
-              ? "Selected Thingiverse files sent to Pending Imports. Review before importing."
-              : "Selected files sent to Pending Imports. Review before importing.",
-        "success",
-      );
+      confirmCapture(captureReviewUrl(capture.config.vault, receipt));
       return;
     }
     const visibleCapture =
@@ -2080,17 +2260,35 @@ captureButton.addEventListener("click", async () => {
         accessToken: capture.authorization,
         signal,
         pageUrl,
-        title: activePage?.title ?? undefined,
+        title: pageLabel.textContent,
+        collectionId: preferences.collectionId,
+        tags: preferences.tags,
         captureSource: visibleCapture?.source,
       }),
     );
-    inboxButton.hidden = false;
-    inboxButton.dataset.url = result.inboxUrl;
-    showStatus(`Model from ${result.source} sent to Pending Imports.`, "success");
+    confirmCapture(result.inboxUrl);
   } catch (error) {
     if (!captureOperations.isCurrent(capture) || error instanceof CaptureRetiredError) return;
     if (error instanceof CaptureAuthenticationError) {
       recoverCaptureConnection();
+      return;
+    }
+    if (error instanceof CaptureResponseError) {
+      if (error.diagnosticCode === "url_target_not_public" && !pendingManualCapture) {
+        const fallback = fallbackVisibleCapture();
+        if (fallback) {
+          renderManualFileSelection(fallback);
+        } else if (activeSource === "Direct file" && activePage?.url) {
+          offerManualFile({ kind: "direct", url: captureUrlForVault(activePage.url) });
+        }
+        showStatus(
+          "PrintStash can't download from local or private addresses. Download the file and attach it instead.",
+          "error",
+          error.diagnosticCode,
+        );
+      } else {
+        showStatus(safeCaptureMessage(error), "error", error.diagnosticCode ?? "capture_failed");
+      }
       return;
     }
     if (error instanceof CaptureDiagnosticError) {
@@ -2159,49 +2357,142 @@ inboxButton.addEventListener("click", () => {
 const enablePanel = document.createElement("button");
 enablePanel.type = "button";
 enablePanel.textContent = "Enable panel on this site";
-enablePanel.className = "text-button";
+enablePanel.className = "text-button text-action";
 enablePanel.hidden = true;
 sourceActions.append(enablePanel);
-const captureHistory = document.createElement("section");
-captureHistory.className = "capture-history";
-captureHistory.hidden = true;
-pageContext.append(captureHistory);
 async function refreshCaptureHistory() {
+  const request = ++historyRequest;
   const config = connectedConfig;
   const authorization = accessToken || config?.deviceCredential;
-  if (!config || !authorization || !activePage?.url || !marketplaceOrigin(activePage.url)) return;
-  captureHistory.hidden = false;
-  captureHistory.textContent = "Checking your previous captures…";
+  const url = activePage?.url;
+  historyList.replaceChildren();
+  historyList.hidden = true;
+  historyMessage.hidden = false;
+  if (!config || !authorization) {
+    historyMessage.textContent = "Connect to PrintStash to see previous captures.";
+    return;
+  }
+  if (!url || !activeSource || !marketplaceOrigin(url)) {
+    historyMessage.textContent = "No capture history for this page.";
+    return;
+  }
+  historyMessage.textContent = "Loading previous captures…";
   try {
-    const items = await previousCaptures(config.vault, authorization, activePage.url);
-    if (connectedConfig !== config) return;
-    captureHistory.replaceChildren();
-    const summary = document.createElement("p");
-    summary.textContent = items.length
-      ? "Your previous captures of this page"
-      : "No previous captures of this page.";
-    captureHistory.append(summary);
+    const items = await previousCaptures(config.vault, authorization, url);
+    if (historyRequest !== request) return;
+    if (!items.length) {
+      historyMessage.textContent = "No previous captures of this page.";
+      return;
+    }
+    historyMessage.hidden = true;
+    historyList.hidden = false;
     for (const item of items) {
-      const link = document.createElement("button");
-      link.type = "button";
-      link.className = "text-button";
-      link.textContent = `${captureHistoryLabel(item)} · #${item.id}`;
-      link.addEventListener("click", () =>
+      const row = document.createElement("li");
+      const facts = document.createElement("div");
+      const identifier = document.createElement("strong");
+      identifier.textContent = `#${item.id}`;
+      const state = document.createElement("span");
+      state.className = "history-state";
+      state.textContent = captureHistoryLabel(item);
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "text-button";
+      open.textContent = "Open";
+      open.setAttribute("aria-label", `Open capture #${item.id}`);
+      open.addEventListener("click", () =>
         browser.tabs.create({ url: captureReviewUrl(config.vault, item) }),
       );
-      captureHistory.append(link);
+      facts.append(identifier, state);
+      row.append(facts, open);
+      historyList.append(row);
     }
   } catch {
-    if (connectedConfig === config)
-      captureHistory.textContent =
-        "Previous captures could not be checked. You can still capture this model.";
+    if (historyRequest === request) historyMessage.textContent = "Capture history is unavailable.";
   }
 }
+
+function pageMarketplace() {
+  return activeSource && activePage?.url ? marketplaceOrigin(activePage.url) : null;
+}
+
+const preview = launcherButton("/icon.svg");
+launcherPreview.append(preview);
+const variantFields = LAUNCHER_VARIANTS.map((value) =>
+  requiredElement(`[name="launcher-variant"][value="${value}"]`, HTMLInputElement),
+);
+const cornerFields = LAUNCHER_CORNERS.map((value) =>
+  requiredElement(`[name="launcher-corner"][value="${value}"]`, HTMLInputElement),
+);
+
+function renderLauncherPreferences() {
+  launcherEnabled.checked = launcher.enabled;
+  variantFields.forEach((input) => (input.checked = input.value === launcher.variant));
+  cornerFields.forEach((input) => (input.checked = input.value === launcher.corner));
+  positionLauncher(launcherPreview, launcher.corner, launcher.variant);
+
+  const origin = pageMarketplace();
+  const siteHidden = Boolean(origin && launcher.hiddenSites.has(origin));
+  launcherSite.hidden = !origin || (!siteHidden && permittedSite !== origin);
+  launcherSite.textContent = siteHidden ? "Show on this site" : "Hide on this site";
+  enablePanel.hidden = panelMode || !origin || permittedSite === origin;
+}
+
+function showLauncherError() {
+  launcherError.textContent = "Launcher settings could not be saved. Try again.";
+  launcherError.hidden = false;
+  renderLauncherPreferences();
+}
+
+function updateLauncher(write: Promise<void>) {
+  launcherError.hidden = true;
+  void write.catch(showLauncherError);
+}
+
+variantFields.forEach((input, index) =>
+  input.addEventListener("change", () =>
+    updateLauncher(launcherStore.setVariant(LAUNCHER_VARIANTS[index])),
+  ),
+);
+cornerFields.forEach((input, index) =>
+  input.addEventListener("change", () =>
+    updateLauncher(launcherStore.setCorner(LAUNCHER_CORNERS[index])),
+  ),
+);
+launcherEnabled.addEventListener("change", () =>
+  updateLauncher(launcherStore.setEnabled(launcherEnabled.checked)),
+);
+launcherSite.addEventListener("click", () => {
+  const origin = pageMarketplace();
+  if (origin)
+    updateLauncher(launcherStore.setSiteHidden(origin, !launcher.hiddenSites.has(origin)));
+});
+
+const stopLauncherUpdates = launcherStore.subscribe((value) => {
+  launcher = value;
+  renderLauncherPreferences();
+}, showLauncherError);
+window.addEventListener(
+  "pagehide",
+  (event) => {
+    if (!event.persisted) stopLauncherUpdates();
+  },
+  { once: true },
+);
+
 enablePanel.addEventListener("click", async () => {
   const origin = activePage?.url ? marketplaceOrigin(activePage.url) : null;
   if (!origin) return;
+  const message = { type: "printstash-enable-panel", origin };
+  // The native permission prompt can close the toolbar popup. Hand off the
+  // activation before requesting permission so the background can finish it.
+  const activation = browser.runtime.sendMessage(message).catch(() => false);
   if (!(await browser.permissions.request({ origins: [origin] }))) return;
-  const enabled = await browser.runtime.sendMessage({ type: "printstash-enable-panel", origin });
+  const enabled =
+    (await activation) || (await browser.runtime.sendMessage(message).catch(() => false));
+  if (enabled) {
+    permittedSite = origin;
+    renderLauncherPreferences();
+  }
   showStatus(
     enabled
       ? "Panel enabled. Open PrintStash on the page; hiding it keeps transfers running. Reloading the tab requires recovery."
@@ -2211,8 +2502,7 @@ enablePanel.addEventListener("click", async () => {
 });
 
 async function captureTabs(): Promise<Page[]> {
-  if (new URL(location.href).searchParams.get("panel") !== "1")
-    return browser.tabs.query({ active: true, currentWindow: true });
+  if (!panelMode) return browser.tabs.query({ active: true, currentWindow: true });
   const tab = await browser.runtime.sendMessage({ type: "printstash-panel-context" });
   if (
     typeof tab !== "object" ||
@@ -2235,16 +2525,31 @@ async function captureTabs(): Promise<Page[]> {
 
 async function initialize() {
   lockConnection(true);
-  const [stored, tabs] = await Promise.all([
-    browser.storage.get(["vault", "username", "apiKey", "deviceCredential"]),
+  const [stored, openTabs] = await Promise.all([
+    browser.storage.get([
+      "vault",
+      "username",
+      "apiKey",
+      "deviceCredential",
+      "deviceName",
+      "popupTab",
+    ]),
     captureTabs(),
   ]);
-  activePage = tabs[0] || null;
-  enablePanel.hidden =
-    !activePage?.url ||
-    !marketplaceOrigin(activePage.url) ||
-    new URL(location.href).searchParams.get("panel") === "1";
+  activePage = openTabs[0] || null;
   renderActivePage();
+  if (!tabTouched) {
+    const saved = POPUP_TABS.find((tab) => tab === stored.popupTab);
+    tabs.select(activeSource ? "capture" : (saved ?? "capture"));
+  }
+  const origin = pageMarketplace();
+  if (
+    origin &&
+    (panelMode || (await isMarketplacePanelEnabled(browser.storage, origin).catch(() => false)))
+  ) {
+    permittedSite = origin;
+  }
+  renderLauncherPreferences();
   const prepared = await takePreparedSetup(activePage);
   if (prepared) {
     fillConnectionForm(prepared);
@@ -2270,6 +2575,7 @@ async function initialize() {
   }
   const storedConfig: Config = {
     vault: typeof stored.vault === "string" ? stored.vault : "",
+    ...(typeof stored.deviceName === "string" ? { deviceName: stored.deviceName } : {}),
     ...(typeof stored.username === "string" ? { username: stored.username } : {}),
     ...(typeof stored.apiKey === "string" ? { apiKey: stored.apiKey } : {}),
     ...(typeof stored.deviceCredential === "string"
@@ -2302,7 +2608,7 @@ initialize().catch((error) => {
 
 // Escape hides the embedded panel; the transfer owner remains mounted.
 document.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape" || new URL(location.href).searchParams.get("panel") !== "1") return;
+  if (event.key !== "Escape" || !panelMode) return;
   const origin = activePage?.url ? new URL(activePage.url).origin : null;
   if (origin) window.parent.postMessage({ type: "printstash-hide-panel" }, origin);
 });

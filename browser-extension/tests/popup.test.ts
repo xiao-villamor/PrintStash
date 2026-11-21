@@ -86,16 +86,17 @@ describe("popup browser adapters", () => {
     });
     await import("../popup.ts");
     await settle();
-    requiredElement("#collection-query", HTMLInputElement).value = "Parts";
-    button("#find-collection").click();
-    await settle();
+    const collection = requiredElement("#capture-collection", HTMLInputElement);
+    collection.value = "Parts";
+    collection.dispatchEvent(new Event("input"));
+    await vi.waitFor(() => expect(element("#collection-options").children).toHaveLength(2));
     expect(requests).toContain("https://vault.test/api/v1/inbox/capture-destinations?q=Parts");
-    const select = requiredElement("#capture-collection", HTMLSelectElement);
-    expect([...select.options].map((option) => option.textContent)).toEqual([
+    const list = element("#collection-options");
+    expect([...list.children].map((option) => option.textContent)).toEqual([
       "Choose in Pending Imports",
       "Parts / <img src=x>",
     ]);
-    expect(select.querySelector("img")).toBeNull();
+    expect(list.querySelector("img")).toBeNull();
     expect(JSON.stringify(await fakeBrowser.storage.local.get(null))).not.toContain("Parts");
   });
 
@@ -105,21 +106,244 @@ describe("popup browser adapters", () => {
       deviceCredential: "device-secret",
     });
     const pending = deferred<Response>();
+    const lookup = deferred<void>();
     vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
-      if (String(input).includes("/capture-destinations?")) return pending.promise;
+      if (String(input).includes("/capture-destinations?")) {
+        lookup.resolve();
+        return pending.promise;
+      }
       if (String(input).endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       return response({});
     });
     await import("../popup.ts");
     await settle();
-    button("#find-collection").click();
-    await settle();
+    requiredElement("#capture-collection", HTMLInputElement).focus();
+    await lookup.promise;
+    button("#edit-connection").click();
     button("#disconnect").click();
     await settle();
     pending.resolve(response([{ id: 7, label: "Old account" }]));
     await settle();
-    expect(requiredElement("#capture-collection", HTMLSelectElement).options).toHaveLength(1);
+    expect(element("#collection-options").children).toHaveLength(0);
     expect(element("#connection-title").textContent).toBe("Not connected");
+  });
+
+  it("submits the keyboard-selected collection ID from the debounced combobox", async () => {
+    const pageUrl = "https://models.example.com/bracket.stl";
+    fakeBrowser.tabs.query = vi.fn().mockResolvedValue([{ url: pageUrl }]);
+    await fakeBrowser.storage.local.set(pairedDevice);
+    const searches: string[] = [];
+    const writes: unknown[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/health")) return readyVault();
+      if (url.pathname.endsWith("/capture-destinations")) {
+        searches.push(url.searchParams.get("q") ?? "");
+        return response([{ id: 7, label: "Parts / Brackets" }]);
+      }
+      if (init) writes.push(JSON.parse(stringBody(init)));
+      return response({ id: 42 });
+    });
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(button("#capture").disabled).toBe(false));
+    const input = requiredElement("#capture-collection", HTMLInputElement);
+    expect(input.placeholder).toBe("Choose in Pending Imports");
+    input.focus();
+    for (const query of ["P", "Pa", "Parts"]) {
+      input.value = query;
+      input.dispatchEvent(new Event("input"));
+    }
+    await vi.waitFor(() => expect(element("#collection-options").children).toHaveLength(2));
+    expect(searches).toEqual(["Parts"]);
+    for (const key of ["ArrowDown", "ArrowDown", "Enter"]) {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    }
+    expect(input.value).toBe("Parts / Brackets");
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    button("#capture").click();
+    await vi.waitFor(() => expect(writes).toEqual([expect.objectContaining({ collection_id: 7 })]));
+  });
+
+  it("shows only a compact empty state for an unsupported page", async () => {
+    fakeBrowser.tabs.query = vi.fn().mockResolvedValue([{ url: "https://example.com" }]);
+    await fakeBrowser.storage.local.set(pairedDevice);
+    vi.stubGlobal("fetch", async () => readyVault());
+
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(element("#import-panel").hidden).toBe(false));
+
+    expect(element("#unsupported-page").hidden).toBe(false);
+    expect(element("#unsupported-page").textContent).toContain("Thingiverse or Printables");
+    expect(element("#page-context").hidden).toBe(true);
+    expect(element("#capture-preferences").hidden).toBe(true);
+    expect(button("#capture").hidden).toBe(true);
+  });
+
+  it("puts the panel action beside the marketplace source badge", async () => {
+    await fakeBrowser.storage.local.set(pairedDevice);
+    vi.stubGlobal("fetch", async () => readyVault());
+
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(element("#source-actions button").hidden).toBe(false));
+
+    expect(element("#source").parentElement).toBe(element("#source-actions"));
+    expect(element("#source-actions button").textContent).toBe("Enable panel on this site");
+    expect(document.querySelector("details, summary")).toBeNull();
+  });
+
+  it("defaults the browser name from Chrome and the platform", async () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (X11; Linux x86_64) Chrome/154.0",
+    );
+    await import("../popup.ts");
+
+    expect(requiredElement("#device-name", HTMLInputElement).value).toBe("Chrome on Linux");
+  });
+
+  it("focuses the inline browser-name conflict while remaining disconnected", async () => {
+    vi.stubGlobal("fetch", async (url: string) =>
+      url.endsWith("/claim")
+        ? response({ detail: "browser_device_name_in_use" }, 409)
+        : readyVault(),
+    );
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Not connected"));
+    requiredElement("#vault", HTMLInputElement).value = pairedDevice.vault;
+    requiredElement("#pairing-code", HTMLInputElement).value = "test-code";
+    const name = requiredElement("#device-name", HTMLInputElement);
+
+    button("#connect").click();
+    await vi.waitFor(() => expect(element("#device-name-error").hidden).toBe(false));
+
+    expect(element("#device-name-error").textContent).toContain("name is already paired");
+    expect(name.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(name);
+    expect(element("#connection-title").textContent).toBe("Not connected");
+    expect(await fakeBrowser.storage.local.get()).toEqual({});
+    name.dispatchEvent(new Event("input"));
+    expect(element("#device-name-error").hidden).toBe(true);
+  });
+
+  it("moves the selected popup tab with arrow keys", async () => {
+    await import("../popup.ts");
+    await settle();
+    const capture = button("#tab-capture");
+    const history = button("#tab-history");
+
+    capture.focus();
+    capture.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+
+    expect(history.getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(history);
+    expect(element("#view-history").hidden).toBe(false);
+    expect(element("#view-capture").hidden).toBe(true);
+    expect(capture.tabIndex).toBe(-1);
+  });
+
+  it("persists an explicitly selected popup tab", async () => {
+    await import("../popup.ts");
+    await settle();
+
+    button("#tab-settings").click();
+
+    await vi.waitFor(async () =>
+      expect(await fakeBrowser.storage.local.get("popupTab")).toEqual({ popupTab: "settings" }),
+    );
+  });
+
+  it("restores the last selected tab on an unsupported page", async () => {
+    fakeBrowser.tabs.query = vi.fn().mockResolvedValue([{ url: "https://example.com/" }]);
+    await fakeBrowser.storage.local.set({ popupTab: "settings" });
+
+    await import("../popup.ts");
+
+    await vi.waitFor(() =>
+      expect(button("#tab-settings").getAttribute("aria-selected")).toBe("true"),
+    );
+  });
+
+  it("opens Capture first on a supported page", async () => {
+    await fakeBrowser.storage.local.set({ ...pairedDevice, popupTab: "settings" });
+    vi.stubGlobal("fetch", async () => readyVault());
+
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Connected"));
+
+    expect(button("#tab-capture").getAttribute("aria-selected")).toBe("true");
+    expect(await fakeBrowser.storage.local.get("popupTab")).toEqual({ popupTab: "settings" });
+  });
+
+  it("opens the listed capture from toolbar History", async () => {
+    await fakeBrowser.storage.local.set(pairedDevice);
+    vi.stubGlobal("fetch", async (url: string) =>
+      url.endsWith("/health")
+        ? readyVault()
+        : response([{ id: 47, state: "review", completion: null }]),
+    );
+
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Connected"));
+    button("#tab-history").click();
+    await vi.waitFor(() => expect(element("#history-list").hidden).toBe(false));
+
+    expect(element("#history-list").textContent).toContain("#47Pending");
+    button('#history-list button[aria-label="Open capture #47"]').click();
+    expect(fakeBrowser.tabs.create).toHaveBeenCalledWith({
+      url: "https://prints.example.com/inbox/47",
+    });
+  });
+
+  it("explains when the current model has no capture history", async () => {
+    await fakeBrowser.storage.local.set(pairedDevice);
+    vi.stubGlobal("fetch", async (url: string) =>
+      url.endsWith("/health") ? readyVault() : response([]),
+    );
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Connected"));
+
+    button("#tab-history").click();
+
+    await vi.waitFor(() =>
+      expect(element("#history-message").textContent).toBe("No previous captures of this page."),
+    );
+    expect(element("#history-list").hidden).toBe(true);
+  });
+
+  it("updates the launcher preview from Settings", async () => {
+    await import("../popup.ts");
+    await settle();
+    button("#tab-settings").click();
+
+    requiredElement('[name="launcher-variant"][value="edge-tab"]', HTMLInputElement).click();
+    requiredElement('[name="launcher-corner"][value="top-left"]', HTMLInputElement).click();
+
+    const preview = element("#launcher-preview");
+    await vi.waitFor(() => expect(preview.dataset.variant).toBe("edge-tab"));
+    expect(preview.dataset.corner).toBe("top-left");
+  });
+
+  it("restores a hidden site from Settings", async () => {
+    const origin = "https://www.thingiverse.com/*";
+    fakeBrowser.tabs.query = vi
+      .fn()
+      .mockResolvedValue([{ url: "https://www.thingiverse.com/thing:763622" }]);
+    await fakeBrowser.storage.local.set({
+      ...pairedDevice,
+      "panel-enabled:printstash-www.thingiverse.com": true,
+    });
+    const { launcherPreferences } = await import("../launcher-preferences.ts");
+    const preferences = launcherPreferences(fakeBrowser.storage);
+    await preferences.setSiteHidden(origin, true);
+    vi.stubGlobal("fetch", async () => readyVault());
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(button("#launcher-site").hidden).toBe(false));
+    button("#tab-settings").click();
+    expect(button("#launcher-site").textContent).toBe("Show on this site");
+
+    button("#launcher-site").click();
+
+    await vi.waitFor(() => expect(button("#launcher-site").textContent).toBe("Hide on this site"));
+    expect((await preferences.read()).hiddenSites.has(origin)).toBe(false);
   });
 
   it("shows the packaged release version in the popup footer", async () => {
@@ -270,7 +494,6 @@ describe("popup browser adapters", () => {
     expect(element("#page-context").hidden).toBe(true);
     expect(element("#import-panel").hidden).toBe(true);
     expect(requiredElement("#pairing-method", HTMLInputElement).checked).toBe(true);
-    expect(requiredElement("#device-name", HTMLInputElement).value).toBe("Browser extension");
   });
 
   it.each([
@@ -430,13 +653,7 @@ describe("popup browser adapters", () => {
       [...suggestions.querySelectorAll("input, select, button")]
         .filter((item) => !item.closest("[hidden]"))
         .map((item) => item.id),
-    ).toEqual([
-      "collection-query",
-      "find-collection",
-      "capture-collection",
-      "capture-tags",
-      "capture-cover",
-    ]);
+    ).toEqual(["capture-collection", "capture-tags", "capture-cover"]);
   });
 
   it("visibly labels each suggestion input", async () => {
@@ -456,12 +673,12 @@ describe("popup browser adapters", () => {
           .filter((label) => !label.closest("[hidden], .visually-hidden"))
           .map((label) => label.textContent?.trim()),
       ),
-    ).toEqual([["Search"], ["Collection"], ["Tags"], ["Add cover"]]);
+    ).toEqual([["Collection"], ["Tags"], ["Add cover image"]]);
   });
 
   describe.each([
     { id: "manual-file", nameId: "manual-file-name", action: "Choose file", ext: "stl" },
-    { id: "capture-cover", nameId: "capture-cover-name", action: "Add cover", ext: "png" },
+    { id: "capture-cover", nameId: "capture-cover-name", action: "Add cover image", ext: "png" },
   ])("$id picker", ({ id, nameId, action, ext }) => {
     it("labels the visually hidden native input", () => {
       const input = requiredElement(`#${id}.visually-hidden[type="file"]`, HTMLInputElement);
@@ -490,8 +707,51 @@ describe("popup browser adapters", () => {
       files.pop();
       input.dispatchEvent(new Event("change"));
 
-      expect(element(`#${nameId}`).textContent).toBe("No file selected");
+      if (id === "capture-cover") {
+        expect(element(`#${nameId}`).hidden).toBe(true);
+        expect(button("#remove-cover").hidden).toBe(true);
+      } else {
+        expect(element(`#${nameId}`).textContent).toBe("No file selected");
+      }
     });
+  });
+
+  it("clears the cover through its Remove action", async () => {
+    await fakeBrowser.storage.local.set(pairedDevice);
+    vi.stubGlobal("fetch", async () => readyVault());
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(button("#capture").disabled).toBe(false));
+    const input = requiredElement("#capture-cover", HTMLInputElement);
+    const files = [new File(["image"], "cover.png", { type: "image/png" })];
+    Object.defineProperty(input, "files", { value: files });
+    const clear = vi.spyOn(input, "value", "set").mockImplementation(() => {
+      files.length = 0;
+    });
+    input.dispatchEvent(new Event("change"));
+    expect(button("#remove-cover").hidden).toBe(false);
+
+    button("#remove-cover").click();
+
+    expect(clear).toHaveBeenCalledWith("");
+    expect(button("#remove-cover").hidden).toBe(true);
+    expect(element("#capture-cover-name").hidden).toBe(true);
+  });
+
+  it("shows the allowed cover formats when validation fails", async () => {
+    await import("../popup.ts");
+    await settle();
+    const input = requiredElement("#capture-cover", HTMLInputElement);
+    Object.defineProperty(input, "files", {
+      value: [new File(["mesh"], "part.stl", { type: "model/stl" })],
+    });
+
+    input.dispatchEvent(new Event("change"));
+
+    expect(element("#cover-error").hidden).toBe(false);
+    expect(element("#cover-error").textContent).toBe(
+      "Choose a JPEG, PNG or WebP cover up to 15 MiB.",
+    );
+    expect(input.getAttribute("aria-invalid")).toBe("true");
   });
 
   it.each([
@@ -521,6 +781,57 @@ describe("popup browser adapters", () => {
         .mockResolvedValue([{ id: 42, title: "Part", url: "https://models.example.com/part.stl" }]);
     });
 
+    it("shows the direct filename with its host as a subtitle", async () => {
+      fakeBrowser.tabs.query = vi.fn().mockResolvedValue([
+        {
+          title: "Browser-generated page title",
+          url: "https://models.example.com/my%20part.stl",
+        },
+      ]);
+      vi.stubGlobal("fetch", async () => readyVault());
+      await import("../popup.ts");
+      await vi.waitFor(() => expect(element("#page-context").hidden).toBe(false));
+
+      expect(element("#page").textContent).toBe("my part.stl");
+      expect(element("#page-host").textContent).toBe("models.example.com");
+      expect(element("#page-host").hidden).toBe(false);
+    });
+
+    it("offers manual attachment when PrintStash refuses a private direct URL", async () => {
+      const privateUrl = "http://192.168.1.42/part.stl";
+      fakeBrowser.tabs.query = vi.fn().mockResolvedValue([{ url: privateUrl }]);
+      const uploads: FormData[] = [];
+      vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/health")) return readyVault();
+        if (url.endsWith("/browser-upload") && init?.body instanceof FormData) {
+          uploads.push(init.body);
+          return response({ id: 53 }, 201);
+        }
+        return response({ detail: "url_target_not_public" }, 400);
+      });
+      await import("../popup.ts");
+      await vi.waitFor(() => expect(button("#capture").disabled).toBe(false));
+
+      button("#capture").click();
+      await vi.waitFor(() => expect(element("#manual-file-panel").hidden).toBe(false));
+      expect(element("#status-message").textContent).toBe(
+        "PrintStash can't download from local or private addresses. Download the file and attach it instead.",
+      );
+      expect(element("#status-code").textContent).toBe("url_target_not_public");
+
+      const input = requiredElement("#manual-file", HTMLInputElement);
+      const file = new File(["mesh"], "part.stl", { type: "model/stl" });
+      Object.defineProperty(input, "files", { value: { item: () => file, 0: file, length: 1 } });
+      input.dispatchEvent(new Event("change"));
+      button("#capture").click();
+      await vi.waitFor(() =>
+        expect(button("#open-inbox").dataset.url).toBe("https://prints.example.com/inbox/53"),
+      );
+      expect(uploads).toHaveLength(1);
+      expect(uploads[0].get("source_url")).toBe(privateUrl);
+      expect(await (uploads[0].get("file") as File).text()).toBe("mesh");
+    });
+
     it("offers review from the capture confirmation", async () => {
       vi.stubGlobal("fetch", async (url: string) =>
         url.endsWith("/health")
@@ -538,7 +849,10 @@ describe("popup browser adapters", () => {
       ).toBe("Sent to Pending Imports");
       expect(element("#status-message").hidden).toBe(true);
       const review = button("#open-inbox");
-      expect(review.textContent).toBe("Review");
+      expect(review.textContent).toBe("Review in PrintStash");
+      expect(element("#import-panel").hidden).toBe(true);
+      expect(button("#capture").hidden).toBe(true);
+      expect(document.activeElement).toBe(review);
       expect(review.hidden).toBe(false);
       review.click();
       expect(fakeBrowser.tabs.create).toHaveBeenCalledWith({
@@ -561,11 +875,15 @@ describe("popup browser adapters", () => {
       ).toBeInstanceOf(SVGElement);
     });
 
-    it("shows the diagnostic code below the import error", async () => {
+    it.each([
+      ["capture_not_pending", "capture_not_pending"],
+      ["Import failed.", "capture_failed"],
+      [["validation detail"], "capture_failed"],
+    ])("shows the safe server diagnostic for %s", async (detailValue, expectedCode) => {
       vi.stubGlobal("fetch", async (url: string) =>
         url.endsWith("/health")
           ? response({ status: "ok", name: "PrintStash" })
-          : response({ detail: "Import failed." }, 503),
+          : response({ detail: detailValue }, 503),
       );
       await import("../popup.ts");
       await vi.waitFor(() => expect(button("#capture").disabled).toBe(false));
@@ -577,8 +895,8 @@ describe("popup browser adapters", () => {
       const details = element("#status-details");
       expect(details.hidden).toBe(false);
       expect(details.previousElementSibling).toBe(element("#status-message"));
-      expect(details.textContent?.trim()).toBe("Code: capture_failed");
-      expect(element("#status-code").textContent).toBe("capture_failed");
+      expect(details.textContent?.trim()).toBe(`Code: ${expectedCode}`);
+      expect(element("#status-code").textContent).toBe(expectedCode);
     });
   });
 
@@ -645,8 +963,8 @@ describe("popup browser adapters", () => {
     button("#connect").click();
     await settle();
 
-    expect(element("#connection-title").textContent).toBe("Connection problem");
-    expect(element("#connection-detail").textContent).toBe(message);
+    expect(element("#connection-title").textContent).toBe("Not connected");
+    expect(element("#connection-feedback").textContent).toBe(message);
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(await fakeBrowser.storage.local.get()).toEqual({});
   });
@@ -1322,6 +1640,7 @@ describe("popup browser adapters", () => {
       expect(await fakeBrowser.storage.local.get()).toEqual({
         vault: nextVault,
         deviceCredential: "device-b",
+        deviceName: "Browser",
       });
       expect(element("#connection-detail").textContent).toContain("vault-b.example.com");
     });
@@ -1449,7 +1768,7 @@ describe("popup browser adapters", () => {
         await settle();
         const expected =
           kind === "pairing"
-            ? { vault: nextVault, deviceCredential: "device-b" }
+            ? { vault: nextVault, deviceCredential: "device-b", deviceName: "Browser" }
             : { vault: nextVault, username: "test-user", apiKey: "test-new-key" };
         expect(await fakeBrowser.storage.local.get()).toEqual(expected);
         vi.resetModules();
@@ -1483,7 +1802,9 @@ describe("popup browser adapters", () => {
         await settle();
         expect(await fakeBrowser.storage.local.get()).toEqual(previous);
         expect(element("#connection-detail").textContent).toContain("vault-a.example.com");
-        expect(element("#status").textContent).toContain("Connection was not updated.");
+        expect(
+          granted ? element("#connection-feedback").textContent : element("#status").textContent,
+        ).toContain(granted ? "pairing code is invalid" : "Connection was not updated.");
         expect(button("#connect").disabled).toBe(false);
         expect(button("#cancel-edit").disabled).toBe(false);
       },
@@ -1772,10 +2093,12 @@ describe("popup browser adapters", () => {
       }
       await sendManualFile();
       await vi.waitFor(() =>
-        expect(element("#status").textContent).toContain("sent to Pending Imports"),
+        expect(element("#status").textContent).toContain("Sent to Pending Imports"),
       );
       expect(button("#open-inbox").hidden).toBe(false);
       rejectionEnabled = true;
+      button("#edit-connection").click();
+      button("#cancel-edit").click();
       await sendManualFile();
       await vi.waitFor(() => expect(rejectionReached).toBe(true));
       return { held, requests };
@@ -1805,7 +2128,7 @@ describe("popup browser adapters", () => {
         await startRichFailure(stage, 403);
         await settle();
         expect(element("#connection-title").textContent).toBe("Connected");
-        expect(element("#status").textContent).toContain("capture_vault_");
+        expect(element("#status").textContent).toContain("insufficient_scope");
         expect(button("#capture").disabled).toBe(false);
         expect(element("#manual-file-panel").hidden).toBe(false);
         expect(await fakeBrowser.storage.local.get()).toEqual(stored);
@@ -1963,7 +2286,7 @@ describe("popup browser adapters", () => {
       "https://prints.example.com/api/v1/inbox/capture-upload-slots/slot-printables-manual",
       "https://prints.example.com/api/v1/inbox/22/capture-upload-finalize",
     ]);
-    expect(element("#status").textContent).toContain("sent to Pending Imports");
+    expect(element("#status").textContent).toContain("Sent to Pending Imports");
   });
 
   it("fails closed to a local Printables file when capture acquisition is unusable", async () => {
@@ -2262,7 +2585,7 @@ describe("popup browser adapters", () => {
     expect(fetchImpl.mock.calls.some(([url]) => url.endsWith("/capture-upload-finalize"))).toBe(
       true,
     );
-    expect(element("#status").textContent).toContain("sent to Pending Imports");
+    expect(element("#status").textContent).toContain("Sent to Pending Imports");
     expect(element("#status").textContent).not.toContain("code:");
   });
 
@@ -2387,7 +2710,7 @@ describe("popup browser adapters", () => {
 
     expect(fileHostRequests).toEqual(alreadyGranted ? [] : [["https://files.printables.com/*"]]);
     if (grant || alreadyGranted) {
-      expect(element("#status").textContent).toContain("sent to Pending Imports");
+      expect(element("#status").textContent).toContain("Sent to Pending Imports");
     } else {
       expect(element("#status").textContent).toContain("Permission to download");
       expect(fetchImpl.mock.calls.some(([url]) => url.endsWith("/capture-upload-slots"))).toBe(
@@ -2543,7 +2866,7 @@ describe("popup browser adapters", () => {
     });
     expect(createBody).not.toContain("signed-secret");
     expect(JSON.stringify(await fakeBrowser.storage.local.get())).not.toContain("signed-secret");
-    expect(element("#status").textContent).toContain("MakerWorld packages sent to Pending Imports");
+    expect(element("#status").textContent).toContain("Sent to Pending Imports");
     expect(element("#status").textContent).not.toContain("code:");
   });
 
@@ -2832,9 +3155,7 @@ describe("popup browser adapters", () => {
       "https://www.thingiverse.com/download:991002",
       expect.anything(),
     );
-    expect(element("#status").textContent).toContain(
-      "Selected Thingiverse files sent to Pending Imports",
-    );
+    expect(element("#status").textContent).toContain("Sent to Pending Imports");
   });
 
   it("offers manual Thingiverse attachment when file links are unavailable", async () => {
@@ -3130,7 +3451,7 @@ describe("popup browser adapters", () => {
       "https://prints.example.com/api/v1/inbox/capture-upload-slots/slot-cults",
       "https://prints.example.com/api/v1/inbox/62/capture-upload-finalize",
     ]);
-    expect(element("#status").textContent).toContain("sent to Pending Imports");
+    expect(element("#status").textContent).toContain("Sent to Pending Imports");
   });
 
   it.each(["visible_page", "thingiverse_files", "printables_metadata"])(
@@ -3295,7 +3616,7 @@ describe("popup browser adapters", () => {
     ).toEqual([]);
     expect(downloads[0]?.signal?.aborted).toBe(true);
     expect(element("#connection-detail").textContent).toContain("vault-b.example.com");
-    expect(element("#status").textContent).not.toContain("sent to Pending Imports");
+    expect(element("#status").textContent).not.toContain("Sent to Pending Imports");
     expect(element("#status").textContent).toContain("Connection verified");
   });
 

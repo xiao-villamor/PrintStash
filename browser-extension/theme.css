@@ -33,7 +33,12 @@
   --space-8: 8px;
   --space-12: 12px;
   --space-16: 16px;
-  --popup-width: 380px;
+  --launcher-size: 48px;
+  --launcher-background: #f3f7ff;
+  --launcher-hover: #e8f0ff;
+  --launcher-border: #b7cdf6;
+  --launcher-shadow: 0 5px 16px rgb(35 70 139 / 0.24);
+  --popup-width: 360px;
   --popup-heading: 17px;
   --popup-brand: 14px;
   --popup-text: 13px;
@@ -49,6 +54,10 @@
 @media (prefers-color-scheme: dark) {
   :root,
   :host {
+    --launcher-background: #172337;
+    --launcher-hover: #20314a;
+    --launcher-border: #42618a;
+    --launcher-shadow: 0 5px 16px rgb(8 22 50 / 0.55);
     --background: #0b1017;
     --foreground: #e3eaf3;
     --card: #131b26;

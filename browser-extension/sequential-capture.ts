@@ -1,6 +1,6 @@
 import { validateCaptureProfile } from "./print-profile.ts";
 import type { CaptureSourceDraft, BrowserCaptureMessage } from "./capture-adapter.ts";
-import { CaptureAuthenticationError } from "./core.ts";
+import { CaptureAuthenticationError, CaptureResponseError } from "./core.ts";
 import {
   CAPTURE_MAX_FILE_SIZE_BYTES,
   CAPTURE_MAX_TOTAL_SIZE_BYTES,
@@ -11,7 +11,16 @@ import {
 } from "./capture-transport.ts";
 
 export type CaptureCandidate = BrowserCaptureMessage["candidates"][number];
-export class CaptureRecoveryError extends Error {}
+export class CaptureRecoveryError extends CaptureResponseError {
+  constructor(message: string, code?: string) {
+    super(message, code);
+  }
+
+  static override async from(response: Response, message: string) {
+    const error = await super.from(response, message);
+    return new CaptureRecoveryError(error.message, error.diagnosticCode);
+  }
+}
 interface CaptureSession {
   item: { id: number; state: string };
   slots: Array<{
@@ -176,7 +185,10 @@ export async function captureSequentialFiles(options: {
     return { id: result.id };
   }
   if (!capability.ok)
-    throw new CaptureRecoveryError(`PrintStash readiness check failed (${capability.status}).`);
+    throw await CaptureRecoveryError.from(
+      capability,
+      `PrintStash readiness check failed (${capability.status}).`,
+    );
   const supportsPreferences =
     typeof support === "object" &&
     support !== null &&
@@ -274,7 +286,8 @@ export async function captureSequentialFiles(options: {
     }),
   });
   if (!created.ok)
-    throw new CaptureRecoveryError(
+    throw await CaptureRecoveryError.from(
+      created,
       `PrintStash could not recover this capture (${created.status}). Reopen Pending Imports to inspect the previous capture.`,
     );
   const session = sessionReceipt(await created.json());
@@ -348,7 +361,8 @@ export async function captureSequentialFiles(options: {
       }),
     });
     if (!declared.ok)
-      throw new CaptureRecoveryError(
+      throw await CaptureRecoveryError.from(
+        declared,
         `PrintStash could not reserve the next file (${declared.status}). Confirmed files remain available until staging expires.`,
       );
     const slot: unknown = await declared.json();
@@ -379,7 +393,8 @@ export async function captureSequentialFiles(options: {
       body: upload.file,
     });
     if (!uploaded.ok)
-      throw new CaptureRecoveryError(
+      throw await CaptureRecoveryError.from(
+        uploaded,
         `Transfer interrupted (${uploaded.status}). Reopen this source to recover confirmed files.`,
       );
   }
@@ -415,7 +430,8 @@ export async function captureSequentialFiles(options: {
         }),
       });
       if (!reserved.ok)
-        throw new CaptureRecoveryError(
+        throw await CaptureRecoveryError.from(
+          reserved,
           `Could not reserve gallery image (${reserved.status}). Confirmed files are preserved.`,
         );
       const slot: unknown = await reserved.json();
@@ -446,7 +462,8 @@ export async function captureSequentialFiles(options: {
         body: upload.file,
       });
       if (!uploaded.ok)
-        throw new CaptureRecoveryError(
+        throw await CaptureRecoveryError.from(
+          uploaded,
           `Gallery transfer interrupted (${uploaded.status}). Reopen this source to recover confirmed files.`,
         );
     }
@@ -462,7 +479,8 @@ export async function captureSequentialFiles(options: {
       },
     );
     if (!uploaded.ok)
-      throw new CaptureRecoveryError(
+      throw await CaptureRecoveryError.from(
+        uploaded,
         `Cover transfer interrupted (${uploaded.status}). Confirmed model files are preserved.`,
       );
   }
@@ -471,7 +489,8 @@ export async function captureSequentialFiles(options: {
     method: "POST",
   });
   if (!finalized.ok)
-    throw new CaptureRecoveryError(
+    throw await CaptureRecoveryError.from(
+      finalized,
       `Could not confirm review (${finalized.status}). Reopen this source to recover the capture.`,
     );
   await storage.remove(key);

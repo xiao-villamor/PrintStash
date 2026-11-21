@@ -1,4 +1,4 @@
-import { registerMarketplacePanel, restoreMarketplacePanels } from "../panel-registration.ts";
+import { marketplacePanelActivation, restoreMarketplacePanels } from "../panel-registration.ts";
 import { defineBackground } from "wxt/utils/define-background";
 import { browser } from "wxt/browser";
 import { marketplaceOrigin } from "../marketplace-panel.ts";
@@ -9,6 +9,24 @@ export default defineBackground(() => {
     permissions: browser.permissions,
     scripting: browser.scripting,
   };
+  const activation = marketplacePanelActivation(
+    panelApi,
+    browser.storage.session,
+    async (origin) => {
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id && tab.url && marketplaceOrigin(tab.url) === origin) {
+        await browser.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ["/marketplace.js"],
+        });
+      }
+    },
+  );
+  browser.permissions.onAdded.addListener(({ origins }) => {
+    void activation
+      .permissionAdded(origins ?? [])
+      .catch(() => console.warn("PrintStash launcher could not be activated."));
+  });
   void restoreMarketplacePanels(panelApi).catch(() =>
     console.warn("PrintStash site controls could not be restored."),
   );
@@ -40,20 +58,7 @@ export default defineBackground(() => {
       return false;
     const origin = marketplaceOrigin(message.origin.replace(/\*$/, ""));
     if (!origin) return false;
-    void (async () => {
-      if (!(await registerMarketplacePanel(panelApi, origin))) {
-        sendResponse(false);
-        return;
-      }
-      const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-      const tab = tabs[0];
-      if (tab?.id && tab.url && marketplaceOrigin(tab.url) === origin)
-        await browser.scripting.executeScript({
-          target: { tabId: tab.id },
-          files: ["/marketplace.js"],
-        });
-      sendResponse(true);
-    })().catch(() => sendResponse(false));
+    void activation.request(origin).then(sendResponse, () => sendResponse(false));
     return true;
   });
 });

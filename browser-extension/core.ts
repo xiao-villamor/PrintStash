@@ -282,15 +282,30 @@ async function responseDetail(response: Response, fallback: string): Promise<str
   return fallback;
 }
 
-async function browserPairingClaimError(response: Response): Promise<string> {
+export class PairingValidationError extends Error {
+  constructor(
+    message: string,
+    readonly field: "code" | "name",
+  ) {
+    super(message);
+  }
+}
+
+async function browserPairingClaimError(response: Response): Promise<Error> {
   const body = await response.json().catch(() => null);
   if (response.status === 400) {
-    return "That pairing code is invalid or expired. Create a new one in PrintStash.";
+    return new PairingValidationError(
+      "That pairing code is invalid or expired. Create a new one in PrintStash.",
+      "code",
+    );
   }
   if (response.status === 409 && body?.detail === "browser_device_name_in_use") {
-    return "A browser with this name is already paired. Revoke it in PrintStash or choose a different device name.";
+    return new PairingValidationError(
+      "A browser with this name is already paired. Choose a different name.",
+      "name",
+    );
   }
-  return "PrintStash could not complete pairing. Try again.";
+  return new Error("PrintStash could not complete pairing. Try again.");
 }
 
 function requireCredentials(username: unknown, apiKey: unknown) {
@@ -388,7 +403,7 @@ export async function claimBrowserPairing({
     }),
   });
   if (!claimed.ok) {
-    throw new Error(await browserPairingClaimError(claimed));
+    throw await browserPairingClaimError(claimed);
   }
   const payload = await claimed.json().catch(() => null);
   if (!payload || typeof payload.credential !== "string" || !payload.credential) {
@@ -455,6 +470,28 @@ export class CaptureAuthenticationError extends Error {
   }
 }
 
+export class CaptureResponseError extends Error {
+  constructor(
+    message: string,
+    readonly diagnosticCode: string | undefined,
+  ) {
+    super(message);
+  }
+
+  static async from(response: Response, message: string) {
+    const body = await response.json().catch(() => null);
+    const detail: unknown = body?.detail;
+    const code =
+      typeof detail === "string" && /^[a-z][a-z0-9_]{0,127}$/.test(detail) ? detail : undefined;
+    return new CaptureResponseError(
+      code === "insufficient_scope"
+        ? "This PrintStash user does not have import permission."
+        : message,
+      code,
+    );
+  }
+}
+
 export async function captureModelPage({
   fetchImpl = fetch,
   vault,
@@ -465,6 +502,8 @@ export async function captureModelPage({
   pageUrl,
   title,
   captureSource,
+  collectionId,
+  tags,
   signal,
 }: {
   fetchImpl?: typeof fetch;
@@ -476,6 +515,8 @@ export async function captureModelPage({
   pageUrl: string;
   title?: string;
   captureSource?: CaptureSourceDraft;
+  collectionId?: number;
+  tags?: string[];
   signal?: AbortSignal;
 }) {
   const base = normalizeVault(vault);
@@ -511,6 +552,8 @@ export async function captureModelPage({
       url: sourceUrl,
       title: String(title ?? "").trim() || null,
       source_kind: "browser",
+      ...(collectionId !== undefined ? { collection_id: collectionId } : {}),
+      ...(tags?.length ? { tags } : {}),
       ...(captureSource
         ? { capture_source: validatedCaptureSource(captureSource, source.toLocaleLowerCase()) }
         : {}),
@@ -518,7 +561,7 @@ export async function captureModelPage({
   });
   if (captured.status === 401) throw new CaptureAuthenticationError();
   if (!captured.ok) {
-    throw new Error(await responseDetail(captured, `PrintStash returned ${captured.status}.`));
+    throw await CaptureResponseError.from(captured, "Capture could not be completed.");
   }
   const item = await captured.json();
   return { source, item, inboxUrl: captureReviewUrl(base, item) };

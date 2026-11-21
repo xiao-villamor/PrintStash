@@ -104,7 +104,7 @@ test("explains how to resolve a duplicate browser device name", async () => {
     (error: Error) => {
       assert.equal(
         error.message,
-        "A browser with this name is already paired. Revoke it in PrintStash or choose a different device name.",
+        "A browser with this name is already paired. Choose a different name.",
       );
       assert.equal(error.message.includes("pairing-secret"), false);
       return true;
@@ -588,6 +588,7 @@ describe("capture authentication boundary", () => {
     ).rejects.toMatchObject({
       name: "Error",
       message: "This PrintStash user does not have import permission.",
+      diagnosticCode: "insufficient_scope",
     });
   });
 });

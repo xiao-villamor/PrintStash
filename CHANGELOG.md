@@ -5,6 +5,7 @@
 ### Changed
 
 - The browser extension popup puts pairing and capture first, with connection status in the header, a choice of pairing code or API key, and a direct review action after sending files.
+- The Chrome toolbar popup has a consistent width, a searchable collection field, and a compact unsupported-page state. The new History and Settings tabs show previous captures and let users choose the on-page launcher style, position, and visibility. Pairing name conflicts appear beside the browser name, and the extension can attach explicitly selected files when a private URL cannot be downloaded.
 
 - Settings sections now read as one centered column with the section name as the page title, open rows and a single interface font. Dropdown arrows stay inside their fields, and switches throughout the app are solid when on and empty when off.
 

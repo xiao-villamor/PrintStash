@@ -63,8 +63,13 @@ concurrency. Capture code does not log provider payloads or credentials.
 
 ## Recovering individual browser captures
 
-Enable the marketplace panel independently for each supported site. Hiding it
-keeps the transfer running; reloading the page requires recovery. With a compatible
+Choose **Enable panel on this site** in the extension's **Capture** tab to turn
+on the launcher for a supported marketplace. **Settings** lets you select the
+launcher's style and corner or hide it globally or just for the current site.
+Use toolbar **Settings** to show it again. The **History** tab lists previous
+captures of the current publication.
+
+Hiding the panel keeps the transfer running; reloading the page requires recovery. With a compatible
 server, reselecting the same files recovers verified uploads until their staging
 leases expire. Provider metadata may have changed in the meantime: recovery keeps
 the original capture snapshot. It never persists signed download links or model

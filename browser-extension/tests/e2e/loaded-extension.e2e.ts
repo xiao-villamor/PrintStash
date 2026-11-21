@@ -106,6 +106,53 @@ describe("loaded extension", () => {
     assert.deepEqual(apis, { permissions: "function", scripting: "function" });
   });
 
+  it("uses a fixed toolbar width with a fluid embedded panel", async () => {
+    const layouts = await browser.execute(async () => {
+      const frame = document.createElement("iframe");
+      frame.style.width = "300px";
+      frame.style.height = "650px";
+      frame.style.border = "0";
+      frame.src = new URL("?panel=1", location.href).href;
+      const loaded = new Promise<void>((resolve) =>
+        frame.addEventListener("load", () => resolve()),
+      );
+      document.body.append(frame);
+      await loaded;
+      const panel = frame.contentDocument;
+      const width = (element: HTMLElement | null | undefined) =>
+        element?.getBoundingClientRect().width;
+      const result = {
+        toolbar: [width(document.documentElement), width(document.body)],
+        toolbarMinimum: [document.documentElement, document.body].map(
+          (el) => getComputedStyle(el).minWidth,
+        ),
+        toolbarMaximum: [document.documentElement, document.body].map(
+          (el) => getComputedStyle(el).maxWidth,
+        ),
+        panel: [width(panel?.documentElement), width(panel?.body)],
+        titleLines: getComputedStyle(document.querySelector("#page") as HTMLElement)
+          .webkitLineClamp,
+        headerDivider: getComputedStyle(document.querySelector("header") as HTMLElement)
+          .borderBottomWidth,
+        panelBorder: getComputedStyle(document.querySelector("#connection-panel") as HTMLElement)
+          .borderTopWidth,
+        hasDisclosure: Boolean(document.querySelector("details, summary")),
+      };
+      frame.remove();
+      return result;
+    });
+    assert.deepEqual(layouts, {
+      toolbar: [360, 360],
+      toolbarMinimum: ["360px", "360px"],
+      toolbarMaximum: ["none", "none"],
+      panel: [300, 300],
+      titleLines: "2",
+      headerDivider: "1px",
+      panelBorder: "0px",
+      hasDisclosure: false,
+    });
+  });
+
   it("switches credential fields using the keyboard", async () => {
     await browser.waitUntil(
       async () => (await browser.$("#connection-title").getText()) === "Not connected",
@@ -128,6 +175,36 @@ describe("loaded extension", () => {
       username: true,
       key: true,
     });
+  });
+
+  it("selects launcher settings with the keyboard in the installed popup", async () => {
+    await browser.execute(() => document.querySelector<HTMLButtonElement>("#tab-capture")?.focus());
+    await browser.keys("ArrowRight");
+    await browser.keys("ArrowRight");
+    assert.equal(await browser.execute(() => document.activeElement?.id), "tab-settings");
+
+    await browser.$('label:has([name="launcher-variant"][value="icon-and-label"])').click();
+    await browser.$('label:has([name="launcher-corner"][value="bottom-left"])').click();
+    await browser.waitUntil(() =>
+      browser.execute(() => {
+        const preview = document.querySelector<HTMLElement>("#launcher-preview");
+        return (
+          preview?.dataset.variant === "icon-and-label" &&
+          preview.dataset.corner === "bottom-left" &&
+          document.body.scrollWidth === 360
+        );
+      }),
+    );
+    await browser.$('label:has([name="launcher-variant"][value="edge-tab"])').click();
+    await browser.waitUntil(() =>
+      browser.execute(() => {
+        return (
+          document.querySelector<HTMLElement>("#launcher-preview")?.dataset.variant ===
+            "edge-tab" && document.body.scrollWidth === 360
+        );
+      }),
+    );
+    await browser.$("#tab-capture").click();
   });
 
   it("opens packaged help from the installed popup", async () => {
@@ -279,13 +356,7 @@ describe("loaded extension", () => {
               .filter((control) => control.checkVisibility())
               .map((control) => control.id),
           ),
-          [
-            "collection-query",
-            "find-collection",
-            "capture-collection",
-            "capture-tags",
-            "capture-cover",
-          ],
+          ["capture-collection", "capture-tags"],
         );
         await browser.$("#capture").click();
         await browser.waitUntil(async () => heldResponse !== undefined);
@@ -312,7 +383,13 @@ describe("loaded extension", () => {
         await browser.waitUntil(
           async () => (await browser.$("#status-title").getText()) === "Sent to Pending Imports",
         );
-        assert.equal(await browser.$("#open-inbox").getText(), "Review");
+        assert.equal(await browser.$("#open-inbox").getText(), "Review in PrintStash");
+        assert.equal(
+          await browser.execute(() =>
+            document.querySelector("#capture-preferences")?.checkVisibility(),
+          ),
+          false,
+        );
         const inboxUrl = await browser.execute(
           () => document.querySelector<HTMLElement>("#open-inbox")?.dataset.url,
         );
@@ -323,6 +400,8 @@ describe("loaded extension", () => {
           { path: "/second/api/v1/inbox", authorization: "Bearer device-b" },
         ]);
         rejectCapture = true;
+        await browser.$("#edit-connection").click();
+        await browser.$("#cancel-edit").click();
         await browser.$("#capture").click();
         await browser.waitUntil(
           async () => (await browser.$("#status-details").getText()) === "Code: capture_failed",
