@@ -32,7 +32,8 @@ import {
   VIEWER_POLE_MARGIN,
 } from "@/lib/thumbnail-camera";
 import { bedCentre, type ToolpathData } from "@/lib/gcode";
-import { TOOLPATH_FEATURE_COLOURS, featureIndex, type ToolpathFeature } from "@/lib/gcode-features";
+import { TOOLPATH_FEATURE_COLOURS, type ToolpathFeature } from "@/lib/gcode-features";
+import { createToolpathLines } from "@/lib/toolpath-lines";
 import { parseGcodeInWorker, ToolpathParseError } from "@/lib/gcode-worker-client";
 
 import type { ViewerControls, ViewerCameraPreset } from "@/components/stl-viewer";
@@ -88,12 +89,7 @@ function GcodeScene({
   const interactionStart = useRef<THREE.Quaternion | null>(null);
   const presetRef = useRef<ViewerCameraPreset>("isometric");
 
-  const extrudeGeo = useMemo(() => {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(data.extrudePositions, 3));
-    geo.setAttribute("color", new THREE.BufferAttribute(data.extrudeColors, 4, true));
-    return geo;
-  }, [data]);
+  const extrusions = useMemo(() => createToolpathLines(data), [data]);
 
   const travelGeo = useMemo(() => {
     const geo = new THREE.BufferGeometry();
@@ -101,27 +97,12 @@ function GcodeScene({
     return geo;
   }, [data]);
 
-  // A hidden feature's vertices carry alpha 0; the cutoff drops them without
-  // blending, so visible lines keep writing depth.
-  const extrudeMat = useMemo(() => {
-    const material = new THREE.LineBasicMaterial({ vertexColors: true, alphaTest: 0.5 });
-    // three compiles the cutoff for line materials but never uploads its
-    // uniform (it stays 0), so set it once on the compiled shader.
-    material.onBeforeCompile = (shader) => {
-      shader.uniforms.alphaTest = { value: material.alphaTest };
-    };
-    return material;
-  }, []);
   const travelMat = useMemo(
     () => new THREE.LineBasicMaterial({ color: "#94a3b8", transparent: true, opacity: 0.2 }),
     [],
   );
 
   // Stable LineSegments objects — must be memoized so <primitive> identity is stable across renders
-  const extrudeLines = useMemo(
-    () => new THREE.LineSegments(extrudeGeo, extrudeMat),
-    [extrudeGeo, extrudeMat],
-  );
   const travelLines = useMemo(
     () => new THREE.LineSegments(travelGeo, travelMat),
     [travelGeo, travelMat],
@@ -136,20 +117,9 @@ function GcodeScene({
 
   // R3F does not own <primitive> resources. Release the previous plate's GPU
   // buffers when switching plates, including when the next preview fails.
-  useEffect(
-    () => () => {
-      extrudeGeo.dispose();
-      travelGeo.dispose();
-    },
-    [extrudeGeo, travelGeo],
-  );
-  useEffect(
-    () => () => {
-      extrudeMat.dispose();
-      travelMat.dispose();
-    },
-    [extrudeMat, travelMat],
-  );
+  useEffect(() => () => extrusions.dispose(), [extrusions]);
+  useEffect(() => () => travelGeo.dispose(), [travelGeo]);
+  useEffect(() => () => travelMat.dispose(), [travelMat]);
   useEffect(
     () => () => {
       bedGeo?.dispose();
@@ -158,28 +128,22 @@ function GcodeScene({
     [bedGeo, bedEdgesGeo],
   );
 
-  // Update drawRange directly on the stable geometry — no ref gymnastics needed
+  // Layers are counted in vertices; the tubes are drawn per segment (two vertices).
   useEffect(() => {
-    const count = data.cumulativeVertices[currentLayer + 1] ?? data.extrudePositions.length / 3;
+    const end = data.cumulativeVertices[currentLayer + 1] ?? data.extrudePositions.length / 3;
     const start = onlyCurrentLayer ? (data.cumulativeVertices[currentLayer] ?? 0) : 0;
-    extrudeGeo.setDrawRange(start, Math.max(count - start, 0));
+    extrusions.showSegments(start / 2, Math.max(end, start) / 2);
     invalidate();
-  }, [currentLayer, onlyCurrentLayer, data, extrudeGeo, invalidate]);
+  }, [currentLayer, onlyCurrentLayer, data, extrusions, invalidate]);
 
   useEffect(() => {
     invalidate();
   }, [invalidate, showBed, showGrid, showTravel]);
 
   useEffect(() => {
-    const hidden = new Set([...hiddenFeatures].map(featureIndex));
-    // The scene owns the uploaded colours; only their alpha follows the legend.
-    const attribute = extrudeGeo.getAttribute("color");
-    const colours = attribute.array;
-    for (let vertex = 0; vertex < data.extrudeFeatures.length; vertex++)
-      colours[vertex * 4 + 3] = hidden.has(data.extrudeFeatures[vertex]!) ? 0 : 255;
-    attribute.needsUpdate = true;
+    extrusions.hideFeatures(hiddenFeatures);
     invalidate();
-  }, [hiddenFeatures, data, extrudeGeo, invalidate]);
+  }, [hiddenFeatures, extrusions, invalidate]);
 
   // One array per toolpath: R3F re-applies a changed `position` prop on every
   // render, so a fresh array would snap the camera back to its starting point
@@ -271,7 +235,7 @@ function GcodeScene({
         position={initialCameraPosition}
       />
       <ambientLight intensity={0.8} />
-      <primitive object={extrudeLines} />
+      <primitive object={extrusions.lines} />
       {showTravel && data.travelPositions.length > 0 && <primitive object={travelLines} />}
 
       {/* Bed platform (only in bed-fit mode) */}

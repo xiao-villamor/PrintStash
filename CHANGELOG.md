@@ -15,6 +15,7 @@
 - Model views fills the dialog with the selected image, separates renders from photos in the thumbnail strip, keeps the selected thumbnail in view, shows full view names and supports the arrow keys.
 - Library cards move to their new places on the details panel's own motion when it opens or closes, the same way they follow the Collections sidebar, instead of jumping ahead of it. A card that moves to another row now slides in from the edge of that row instead of crossing the others.
 - G-code previews colour each line by what the slicer says it prints (outer and inner walls, infill, top and bottom, bridges, support, skirt and brim) instead of a rainbow by height. A legend under Layers hides or shows each feature. G-code without slicer feature markers is shaded in one hue by height.
+- G-code previews draw each printed line as a shaded tube as wide as the line itself, so a print reads as a solid object with visible layers instead of faint one-pixel lines.
 - Favorites leaves the navigation rail: it is a Library filter, at the top of the Filters picker, and Collections no longer clears it.
 - The 3D viewer shades Models in the library's preview look, with the same studio lighting as the card thumbnails, so a Model looks the same in its card and in 3D. Shared links use the look too.
 - Settings → Previews → Preview look lets you try a colour or the floor grid in its sample cards without saving. Existing images re-render only when you select Apply look, and Discard returns to the saved look.

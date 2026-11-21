@@ -21,7 +21,7 @@ interface LayerRange {
 
 export interface ToolpathData {
   extrudePositions: Float32Array;
-  /** Linear RGBA per vertex; alpha 0 hides a vertex's feature. */
+  /** Linear RGBA per vertex (opaque); the viewer reads its RGB. */
   extrudeColors: Uint8Array;
   /** `TOOLPATH_FEATURES` index per vertex. */
   extrudeFeatures: Uint8Array;

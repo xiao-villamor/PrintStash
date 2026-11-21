@@ -150,7 +150,12 @@ test.describe("model detail route", () => {
     );
     await page.goto("/models/1");
     const preview = page.getByRole("region", { name: "Preview", exact: true });
-    await preview.getByRole("button", { name: "G-code", exact: true }).click();
+    const toolpath = preview.getByRole("button", { name: "G-code", exact: true });
+    // A cold dev server can still be hydrating the preview when it first shows.
+    await expect(async () => {
+      await toolpath.click();
+      await expect(toolpath).toHaveAttribute("aria-pressed", "true", { timeout: 1000 });
+    }).toPass();
     const features = preview.getByRole("region", { name: "Features", exact: true });
     await expect(features.getByRole("button", { name: "Outer wall", exact: true })).toBeVisible();
     // This fixture prints walls only.
