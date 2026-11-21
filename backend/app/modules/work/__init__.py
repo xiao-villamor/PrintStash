@@ -1,7 +1,7 @@
 """Background work: an engine-agnostic model of Jobs, lanes, sources and steps.
 
-See ``.agents/skills/printstash/references/background-work.md`` for how to add or
-change a job. The short version:
+See ``.agents/skills/backend-engineering/references/background-work.md``
+for how to add or change a job.
 
 - The application database records intent; the engine only executes.
 - The reconciler pulls pending work from domain state and is what guarantees
