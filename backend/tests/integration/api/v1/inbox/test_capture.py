@@ -86,6 +86,20 @@ class TestCapture:
         completed = client.get(path, headers=headers).json()
         assert completed["state"] == "completed", completed
         assert completed["resulting_model_id"] is not None
+        if on_ready == "import":
+            repeated = client.post(
+                "/api/v1/inbox",
+                headers=headers,
+                json={"url": source, "on_ready": "import"},
+            )
+            assert repeated.status_code == 202, repeated.text
+            assert repeated.json()["review_reason"] == "already_imported"
+            work_engine.drain()
+            pending = client.get(
+                f"/api/v1/inbox/{repeated.json()['id']}", headers=headers
+            ).json()
+            assert pending["state"] == "review"
+            assert pending["resulting_model_id"] is None
 
     def test_explicit_resend_flags_existing_pending_capture(
         self, client: TestClient, auth_headers, no_egress
@@ -105,6 +119,23 @@ class TestCapture:
             item["id"]
             for item in client.get("/api/v1/inbox", headers=auth_headers).json()
         ] == [created.json()["id"]]
+
+    def test_unavailable_destination_stays_available_for_review(
+        self, client: TestClient, auth_headers, no_egress
+    ) -> None:
+        created = client.post(
+            "/api/v1/inbox",
+            headers=auth_headers,
+            json={
+                "url": "https://files.example.com/bracket.stl",
+                "collection_id": 99999,
+                "on_ready": "import",
+            },
+        )
+        assert created.status_code == 202, created.text
+        assert created.json()["review_reason"] == "destination_not_editable"
+        assert created.json()["target_collection_id"] is None
+        assert created.json()["resulting_model_id"] is None
 
     def test_strips_a_secret_from_the_url_it_stores(
         self, client: TestClient, user_headers, no_egress

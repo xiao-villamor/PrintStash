@@ -34,6 +34,16 @@ describe("ApiError", () => {
 
 describe("getErrorMessage", () => {
   it.each([
+    ["url_target_not_public", /download the file and attach it/i],
+    ["staging_expired", /capture the source again/i],
+    ["provider_auth_failed", /reconnect the provider in settings/i],
+    ["browser_device_name_in_use", /choose a different name/i],
+    ["resolve_failed", /check access or attach/i],
+  ] as const)("offers recovery for capture error %s", (code, action) => {
+    expect(getErrorMessage(code)).toMatch(action);
+  });
+
+  it.each([
     [
       "document_import_result_missing",
       "A saved guide was removed. Review or restore it before retrying.",

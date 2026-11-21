@@ -56,6 +56,7 @@ from app.db.models import (
     JobKind,
     JobState,
     ModelProvenanceSource,
+    ModelSourceCover,
     StagingLease,
     StorageDeleteIntent,
     User,
@@ -337,6 +338,23 @@ def list_visible(
     by_item: dict[int, list[InboxItemResult]] = {}
     for result in all_results:
         by_item.setdefault(result.inbox_item_id, []).append(result)
+    provenance_ids = {
+        result.provenance_source_id
+        for result in all_results
+        if result.provenance_source_id is not None
+    }
+    saved_covers = (
+        set(
+            session.exec(
+                select(ModelSourceCover.provenance_source_id).where(
+                    col(ModelSourceCover.provenance_source_id).in_(provenance_ids),
+                    ModelSourceCover.position == 0,
+                )
+            ).all()
+        )
+        if provenance_ids
+        else set()
+    )
     cover_ids = (
         {
             slot.inbox_item_id
@@ -350,9 +368,21 @@ def list_visible(
     output = []
     for row in rows:
         assert row.id is not None
-        response = read(row, results=by_item.get(row.id, []))
+        results = by_item.get(row.id, [])
+        response = read(row, results=results)
         if row.id in cover_ids:
             response.thumbnail_url = f"/api/v1/inbox/{row.id}/thumbnail"
+        else:
+            for result in results:
+                if (
+                    result.model_id is not None
+                    and result.provenance_source_id in saved_covers
+                ):
+                    response.thumbnail_url = (
+                        f"/api/v1/models/{result.model_id}/provenance/"
+                        f"{result.provenance_source_id}/cover/content"
+                    )
+                    break
         output.append(response)
     return output
 
@@ -472,6 +502,9 @@ def _require_target(session: Session, user: User, collection_id: int | None) -> 
             )
         return
     rbac.require_collection_role(session, user, collection_id, CollectionRole.EDIT)
+    collection = session.get(Collection, collection_id)
+    if collection is None or collection.deleted_at is not None:
+        raise OperationError("collection_not_found", kind=ErrorKind.NOT_FOUND)
 
 
 def _capture_intent(
@@ -640,9 +673,14 @@ def create_capture_upload_slots(
 ) -> tuple[InboxItem, list[CaptureUploadSlot]]:
     if user.id is None:
         raise ValueError("not_authenticated")
+    excluded = {"request_key"}
+    if payload.on_ready is None:
+        excluded.add("on_ready")
+    if not payload.import_again:
+        excluded.add("import_again")
     request_hash = hashlib.sha256(
         json.dumps(
-            payload.model_dump(mode="json", exclude={"request_key"}),
+            payload.model_dump(mode="json", exclude=excluded),
             sort_keys=True,
             separators=(",", ":"),
         ).encode()

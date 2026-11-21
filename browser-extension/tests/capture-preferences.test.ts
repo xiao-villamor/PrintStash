@@ -1,9 +1,37 @@
 /** Capture suggestions are bounded, literal labels from the importer-only endpoint. */
 import { describe, expect, it } from "vitest";
-import { captureDestinations, captureTags, selectedCaptureCover } from "../capture-preferences.ts";
+import {
+  captureDestinations,
+  capturePreferences,
+  captureTags,
+  selectedCaptureCover,
+} from "../capture-preferences.ts";
 import { CaptureAuthenticationError } from "../core.ts";
 
 describe("capture preferences", () => {
+  it("keeps the last choices separate by server and account", async () => {
+    const values = new Map<string, unknown>();
+    const preferences = capturePreferences({
+      async get(keys) {
+        return Object.fromEntries(keys.map((key) => [key, values.get(key)]));
+      },
+      async set(changes) {
+        for (const [key, value] of Object.entries(changes)) values.set(key, value);
+      },
+    });
+    const vault = "https://vault.example";
+    const empty = { collection: null, tags: [] };
+    expect(await preferences.reviewBeforeImporting()).toBe(false);
+    expect(await preferences.defaults(vault, 7)).toEqual(empty);
+    const defaults = { collection: { id: 13, label: "Brackets" }, tags: ["repair"] };
+    await preferences.saveDefaults(vault, 7, defaults);
+    await preferences.setReviewBeforeImporting(true);
+    expect(await preferences.reviewBeforeImporting()).toBe(true);
+    expect(await preferences.defaults(vault, 7)).toEqual(defaults);
+    expect(await preferences.defaults(vault, 8)).toEqual(empty);
+    expect(await preferences.defaults("https://other.example", 7)).toEqual(empty);
+  });
+
   it("accepts only an explicitly selected bounded image", () => {
     expect(selectedCaptureCover(undefined)).toBeUndefined();
     const file = new File(["png"], "chosen.png", { type: "image/png" });

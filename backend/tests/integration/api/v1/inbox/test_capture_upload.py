@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from contextlib import contextmanager
 from threading import get_ident
 
@@ -43,6 +44,7 @@ from app.db.models import (
 )
 from app.db.session import get_session_factory, override_session_factory
 from app.modules.ingestion import inbox
+from app.schemas.inbox import CaptureUploadSlotsCreate
 from tests.fakes.thread_sessions import ThreadBoundSessionFactory
 from tests.integration.api.v1.inbox.conftest import CANONICAL_URL, capture_source
 
@@ -1669,14 +1671,47 @@ class TestIncrementalCoverCapacity:
         )
 
 
+def test_replays_an_upload_created_before_import_intents(
+    client, user_headers, db_session, staging
+):
+    headers = user_headers("legacy-capture-replay")
+    payload = {**_create_payload(), "request_key": "legacy-request"}
+    created = client.post(
+        "/api/v1/inbox/capture-upload-slots", headers=headers, json=payload
+    )
+    assert created.status_code == 201, created.text
+    item_id = created.json()["item"]["id"]
+    row = db_session.get(InboxItem, item_id)
+    assert row is not None
+    old_payload = CaptureUploadSlotsCreate.model_validate(payload).model_dump(
+        mode="json", exclude={"request_key", "on_ready", "import_again"}
+    )
+    row.capture_request_hash = hashlib.sha256(
+        json.dumps(old_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    db_session.add(row)
+    db_session.commit()
+
+    resumed = client.post(
+        "/api/v1/inbox/capture-upload-slots", headers=headers, json=payload
+    )
+    assert resumed.status_code == 201, resumed.text
+    assert resumed.json()["item"]["id"] == item_id
+
+
+@pytest.mark.parametrize("partial", [False, True])
 def test_finalized_capture_publishes_an_import_job(
-    client, user_headers, staging, local_storage, work_engine
+    client, user_headers, staging, local_storage, work_engine, partial
 ):
     from tests.factories.content import binary_stl
 
     body = binary_stl()
     payload = _create_payload(body)
     payload["files"][0].update(filename="bracket.stl", media_type="model/stl")
+    if partial:
+        payload["files"].append(
+            {**payload["files"][0], "id": "missing", "filename": "missing.stl"}
+        )
     payload.update(on_ready="import", title="Quick capture")
     headers = user_headers("quick-capture", is_superuser=True)
     created = client.post(
@@ -1695,6 +1730,14 @@ def test_finalized_capture_publishes_an_import_job(
         f"/api/v1/inbox/{item_id}/capture-upload-finalize", headers=headers
     )
     assert ready.status_code == 200, ready.text
+    if partial:
+        item = ready.json()
+        assert item["state"] == "review"
+        assert item["review_reason"] == "files_need_review"
+        assert item["error_code"] == "capture_upload_slots_incomplete"
+        assert item["job_id"] is None
+        assert [file["name"] for file in item["manifest"]["files"]] == ["bracket.stl"]
+        return
     assert ready.json()["state"] in {"importing", "completed"}
     work_engine.drain()
     completed = client.get(
@@ -1764,6 +1807,15 @@ class TestMultipleModelCaptureCover:
         assert result["state"] == "completed"
         assert result["retryable"] is False
         assert len(result["results"]) == 2
+        completed = client.get("/api/v1/inbox", headers=headers).json()
+        preview = next(
+            item["thumbnail_url"] for item in completed if item["id"] == item_id
+        )
+        first = result["results"][0]
+        assert preview == (
+            f"/api/v1/models/{first['model_id']}/provenance/"
+            f"{first['provenance_source_id']}/cover/content"
+        )
         for entry in result["results"]:
             cover = client.get(
                 f"/api/v1/models/{entry['model_id']}/provenance/{entry['provenance_source_id']}/cover/content",

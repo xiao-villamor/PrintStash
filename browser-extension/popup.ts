@@ -138,6 +138,7 @@ import {
 } from "./makerworld-capture.ts";
 import {
   THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+  THINGIVERSE_PERMISSION_ORIGINS,
   downloadThingiverseCandidate,
   requestThingiverseFilesInMainWorld,
   thingiverseFailureMessage,
@@ -1284,8 +1285,16 @@ async function ensureOriginPermission(origin: string) {
 
 async function ensureOriginPermissions(origins: string[]) {
   if (await browser.permissions.contains({ origins })) return;
+  const missing = (
+    await Promise.all(
+      origins.map(async (origin) =>
+        (await browser.permissions.contains({ origins: [origin] })) ? null : origin,
+      ),
+    )
+  ).filter((origin) => origin !== null);
+  if (!missing.length) return;
   try {
-    if (await browser.permissions.request({ origins })) return;
+    if (await browser.permissions.request({ origins: missing })) return;
   } catch {
     throw new MarketplaceDownloadError(
       "The browser could not request file access. Click import again to grant access.",
@@ -2124,6 +2133,19 @@ captureButton.addEventListener("click", async () => {
       cover: selectedCaptureCover(coverInput.files?.[0]),
     };
     const downloadOrigins: string[] = [];
+    // Get the provider's known grants while the import click can still open
+    // Chrome's permission prompt. Discovering hosts during transfer can retire
+    // a native toolbar popup or run after its user activation has expired.
+    if (onReady && !pendingManualCapture) {
+      if (activeSource === "Printables")
+        downloadOrigins.push(
+          PRINTABLES_METADATA_PERMISSION_ORIGIN,
+          "https://files.printables.com/*",
+          "https://media.printables.com/*",
+        );
+      if (activeSource === "Thingiverse")
+        downloadOrigins.push(...THINGIVERSE_PERMISSION_ORIGINS, "https://resize.thingiverse.com/*");
+    }
     if (pendingMarketplaceCapture?.source.provider === "cults")
       downloadOrigins.push(...CULTS_DOWNLOAD_ORIGINS);
     if (pendingMarketplaceCapture?.source.provider === "myminifactory")
@@ -2132,19 +2154,6 @@ captureButton.addEventListener("click", async () => {
       downloadOrigins.push("https://acop-prod-private.s3-accelerate.amazonaws.com/*");
     if (downloadOrigins.length) await ensureOriginPermissions([...new Set(downloadOrigins)]);
     capture.assertCurrent();
-    // Ask while the import click still carries user activation, before provider verification.
-    if (pendingMarketplaceCapture?.source.provider === "cults") {
-      await ensureOriginPermissions(CULTS_DOWNLOAD_ORIGINS);
-      capture.assertCurrent();
-    }
-    if (pendingMarketplaceCapture?.source.provider === "myminifactory") {
-      await ensureOriginPermissions(MYMINIFACTORY_DOWNLOAD_ORIGINS);
-      capture.assertCurrent();
-    }
-    if (pendingMarketplaceCapture?.source.provider === "makeronline") {
-      await ensureOriginPermission("https://acop-prod-private.s3-accelerate.amazonaws.com/*");
-      capture.assertCurrent();
-    }
     if (activeSource === "Printables" && !pendingPrintablesCapture && !pendingManualCapture) {
       try {
         await ensureMetadataPermission(
@@ -2235,7 +2244,7 @@ captureButton.addEventListener("click", async () => {
           vault: capture.config.vault,
           authorization: capture.authorization,
           source: draft.source,
-          title: activePage?.title,
+          title: draft.source.fields.title?.value.slice(0, 255) || activePage?.title,
           candidates: selected,
           gallery: selectedImages.map((image) => ({
             id: image.id,
@@ -2722,7 +2731,9 @@ enablePanel.addEventListener("click", async () => {
   // The native permission prompt can close the toolbar popup. Hand off the
   // activation before requesting permission so the background can finish it.
   const activation = browser.runtime.sendMessage(message).catch(() => false);
-  if (!(await browser.permissions.request({ origins: [origin] }))) return;
+  const requested = { origins: [origin] };
+  const allowed = await browser.permissions.contains(requested).catch(() => false);
+  if (!allowed && !(await browser.permissions.request(requested).catch(() => false))) return;
   const enabled =
     (await activation) || (await browser.runtime.sendMessage(message).catch(() => false));
   if (enabled) {

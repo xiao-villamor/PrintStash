@@ -49,6 +49,10 @@ the extension opens the review flow. Turn on **Review before importing** in
 extension Settings to send captures to Pending Imports for review by default.
 The extension remembers your last collection and tags for that Vault account.
 An existing capture offers **Open** before you send the same source again.
+The first capture from Printables or Thingiverse may ask Chrome for
+access to the provider's file and image hosts. PrintStash requests missing
+access together and uses the saved grants on later imports. If Chrome closes
+the toolbar popup after granting access, reopen it to continue.
 
 | Source | Capture path and current boundary |
 | --- | --- |

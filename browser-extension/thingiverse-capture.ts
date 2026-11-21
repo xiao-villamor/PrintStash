@@ -11,7 +11,7 @@ const THINGIVERSE_DOWNLOAD_HOSTS = new Set([
   "api.thingiverse.com",
   "cdn.thingiverse.com",
 ]);
-const THINGIVERSE_PERMISSION_ORIGINS = [
+export const THINGIVERSE_PERMISSION_ORIGINS = [
   "https://thingiverse.com/*",
   "https://www.thingiverse.com/*",
   "https://cdn.thingiverse.com/*",

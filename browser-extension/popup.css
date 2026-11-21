@@ -594,6 +594,16 @@ button:disabled,
   gap: var(--space-12);
 }
 
+#view-settings,
+.launcher-settings {
+  gap: var(--space-8);
+}
+
+main:has(#view-settings:not([hidden])) {
+  gap: var(--space-8);
+  padding-bottom: var(--space-8);
+}
+
 #capture-setup:empty {
   display: none;
 }

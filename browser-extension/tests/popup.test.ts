@@ -181,6 +181,7 @@ describe("popup browser adapters", () => {
 
   it("puts the panel action beside the marketplace source badge", async () => {
     await fakeBrowser.storage.local.set(pairedDevice);
+    const sendMessage = vi.spyOn(fakeBrowser.runtime, "sendMessage").mockResolvedValue(true);
     vi.stubGlobal("fetch", async () => readyVault());
 
     await import("../popup.ts");
@@ -189,6 +190,14 @@ describe("popup browser adapters", () => {
     expect(element("#source").parentElement).toBe(element("#source-actions"));
     expect(element("#source-actions button").textContent).toBe("Enable panel on this site");
     expect(document.querySelector("details, summary")).toBeNull();
+
+    button("#source-actions button").click();
+    await vi.waitFor(() => expect(button("#source-actions button").hidden).toBe(true));
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: "printstash-enable-panel",
+      origin: "https://www.printables.com/*",
+    });
+    expect(fakeBrowser.permissions.request).not.toHaveBeenCalled();
   });
 
   it("defaults the browser name from Chrome and the platform", async () => {
@@ -422,6 +431,40 @@ describe("popup browser adapters", () => {
     await vi.waitFor(() => expect(button("#capture").textContent).toBe("Resume import"));
     expect(button("#capture").disabled).toBe(false);
     expect(button("#open-inbox").hidden).toBe(true);
+  });
+
+  it("requests the missing Printables hosts together before starting a transfer", async () => {
+    fakeBrowser.tabs.query = vi
+      .fn()
+      .mockResolvedValue([
+        { id: 42, title: "3D Benchy", url: "https://www.printables.com/model/3161-3d-benchy" },
+      ]);
+    await fakeBrowser.storage.local.set(pairedDevice);
+    const ungranted = ["https://files.printables.com/*", "https://media.printables.com/*"];
+    fakeBrowser.permissions.contains = vi.fn(async ({ origins }: { origins: string[] }) =>
+      origins.every((origin) => !ungranted.includes(origin)),
+    );
+    fakeBrowser.permissions.request = vi.fn().mockResolvedValue(false);
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/health"))
+        return response({ status: "ok", name: "PrintStash", capture_import_intent: true });
+      if (path.endsWith("/capture-capabilities")) return response({ owner_user_id: 9 });
+      return response([]);
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(button("#capture").disabled).toBe(false));
+
+    button("#capture").click();
+    await vi.waitFor(() => expect(button("#capture").disabled).toBe(false));
+
+    expect(fakeBrowser.permissions.request).toHaveBeenCalledExactlyOnceWith({
+      origins: ungranted,
+    });
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).includes("/capture-sessions"))).toBe(
+      false,
+    );
   });
 
   it("shows the packaged release version in the popup footer", async () => {

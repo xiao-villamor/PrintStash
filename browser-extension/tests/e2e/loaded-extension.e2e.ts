@@ -258,6 +258,14 @@ describe("loaded extension", () => {
         await browser.waitUntil(
           async () => (await browser.$("#connection-title").getText()) === "Connected",
         );
+        await browser.$("#tab-settings").click();
+        const settingsSize = await browser.execute(() => ({
+          width: document.body.scrollWidth,
+          height: document.body.scrollHeight,
+        }));
+        assert.equal(settingsSize.width, 360);
+        assert.ok(settingsSize.height <= 600, "Settings and its footer fit the toolbar popup");
+        await browser.$("#tab-capture").click();
         await browser.$("#edit-connection").click();
         await browser.$("#vault").setValue(`${vault}/second`);
         await browser.$("#pairing-code").setValue("test-cancelled-code");
