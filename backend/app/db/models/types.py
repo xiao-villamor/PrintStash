@@ -121,6 +121,17 @@ class InboxSourceKind(str, Enum):
     EXTERNAL = "external"
 
 
+class InboxImportIntent(str, Enum):
+    REVIEW = "review"
+    IMPORT = "import"
+
+
+class InboxReviewReason(str, Enum):
+    FILES_NEED_REVIEW = "files_need_review"
+    DESTINATION_NOT_EDITABLE = "destination_not_editable"
+    ALREADY_IMPORTED = "already_imported"
+
+
 class InboxItemState(str, Enum):
     CAPTURED = "captured"
     RESOLVING = "resolving"

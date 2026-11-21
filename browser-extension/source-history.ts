@@ -1,3 +1,4 @@
+import { captureUrlForVault } from "./core.ts";
 import { readBoundedMetadataResponse } from "./capture-adapter.ts";
 
 const states = [
@@ -12,6 +13,7 @@ const states = [
 type CaptureState = (typeof states)[number];
 export interface PreviousCapture {
   id: number;
+  resulting_model_id?: number;
   state: CaptureState;
   completion: "complete" | "partial" | null;
 }
@@ -21,11 +23,9 @@ export async function previousCaptures(
   sourceUrl: string,
   fetchImpl = fetch,
 ): Promise<PreviousCapture[]> {
-  const source = new URL(sourceUrl);
-  source.hash = "";
-  source.search = "";
+  const source = captureUrlForVault(sourceUrl);
   const response = await fetchImpl(
-    `${vault.replace(/\/$/, "")}/api/v1/inbox/capture-source-status?${new URLSearchParams({ source_url: source.href, limit: "5" })}`,
+    `${vault.replace(/\/$/, "")}/api/v1/inbox/capture-source-status?${new URLSearchParams({ source_url: source, limit: "5" })}`,
     {
       headers: { Authorization: `Bearer ${authorization}` },
       signal: AbortSignal.timeout(10_000),
@@ -50,6 +50,12 @@ export async function previousCaptures(
       throw new Error("Invalid capture history.");
     return {
       id: item.id,
+      ...("resulting_model_id" in item &&
+      typeof item.resulting_model_id === "number" &&
+      Number.isSafeInteger(item.resulting_model_id) &&
+      item.resulting_model_id > 0
+        ? { resulting_model_id: item.resulting_model_id }
+        : {}),
       state: item.state as CaptureState,
       completion: item.completion as PreviousCapture["completion"],
     };

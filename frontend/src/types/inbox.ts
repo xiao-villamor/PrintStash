@@ -21,6 +21,8 @@ export interface InboxManifestV1 {
   schema_version?: 1;
   kind: "direct" | "archive" | "model_files" | "collection" | "browser_file";
   title?: string;
+  filename?: string;
+  size?: number;
   selected_ids?: string[];
   entries?: InboxManifestFile[];
   files?: InboxManifestFile[];
@@ -87,6 +89,10 @@ export interface InboxItem {
   display_title: string | null;
   source_hostname: string | null;
   state: InboxItemState;
+  on_ready?: "import" | "review";
+  review_reason?: "files_need_review" | "destination_not_editable" | "already_imported" | null;
+  thumbnail_url?: string | null;
+
   manifest: InboxManifest;
   target_collection_id: number | null;
   requested_tags: string[];

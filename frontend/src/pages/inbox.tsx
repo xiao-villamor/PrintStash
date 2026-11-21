@@ -1,3 +1,6 @@
+import { inboxFiles, inboxProviderLabel, inboxCanImport } from "./inbox-summary";
+import { ProtectedThumbnail } from "@/components/protected-thumbnail";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useMemo, useState } from "react";
 import {
   CheckCircle2,
@@ -61,6 +64,9 @@ function ImportList({
   retry,
   deletingId,
   onDelete,
+  selected,
+  onSelect,
+  onImport,
 }: {
   label: string;
   items: InboxItem[];
@@ -69,13 +75,16 @@ function ImportList({
   retry: typeof retryPendingImport;
   deletingId: number | null;
   onDelete: (item: InboxItem) => void;
+  selected: number[];
+  onSelect: (id: number) => void;
+  onImport: (ids: number[]) => void;
 }) {
   return (
     <ul aria-label={label} className="divide-y divide-border">
       {items.map((item) => {
         const title = capturedTitle(item) || item.source_hostname || t("inbox.pendingImport");
-        const provider = providerLabel(item) || t("inbox.sourcePreparing");
-        const fileCount = manifestFiles(item).length;
+        const provider = inboxProviderLabel(item) || t("inbox.sourcePreparing");
+        const fileCount = inboxFiles(item).length;
         const StateIcon = stateIcon(item);
         return (
           <li
@@ -83,6 +92,24 @@ function ImportList({
             className="flex min-w-0 flex-wrap items-center justify-between gap-3 px-5 py-4"
           >
             <div className="flex min-w-0 flex-1 basis-64 items-start gap-3">
+              {inboxCanImport(item) && (
+                <div className="pt-1">
+                  <Checkbox
+                    checked={selected.includes(item.id)}
+                    onChange={() => onSelect(item.id)}
+                    ariaLabel={t("inbox.selectFile", { name: title })}
+                  />
+                </div>
+              )}
+              {item.thumbnail_url && (
+                <ProtectedThumbnail
+                  path={item.thumbnail_url}
+                  alt=""
+                  placeholder={null}
+                  className="size-12 shrink-0 overflow-hidden rounded-md bg-muted"
+                  imageClassName="size-full object-cover"
+                />
+              )}
               <span className="sr-only">
                 <StateIcon className={stateIconClass(item)} aria-hidden="true" />
               </span>
@@ -115,6 +142,11 @@ function ImportList({
             </div>
             <div className="flex min-w-0 shrink-0 items-center justify-between gap-3 border-t border-border pt-3 sm:justify-end sm:border-0 sm:pt-0">
               <div className="flex flex-wrap justify-end gap-2">
+                {inboxCanImport(item) && (
+                  <Button size="xs" onClick={() => onImport([item.id])}>
+                    {t("inbox.import")}
+                  </Button>
+                )}
                 {item.state === "failed" && item.retryable && (
                   <Button
                     size="xs"
@@ -139,7 +171,7 @@ function ImportList({
                 item.completion !== "partial" &&
                 item.results.length <= 1 &&
                 item.resulting_model_id ? (
-                  <Button size="xs" variant="outline" asChild>
+                  <Button size="xs" asChild>
                     <Link href={`/models/${item.resulting_model_id}`}>{t("inbox.openModel")}</Link>
                   </Button>
                 ) : (
@@ -180,34 +212,6 @@ function capturedTitle(item: InboxItem): string | null {
   return item.display_title?.trim() || null;
 }
 
-function manifestFiles(item: InboxItem) {
-  if (item.manifest.kind === "archive") return item.manifest.entries ?? [];
-  if (item.manifest.kind === "model_files") return item.manifest.files ?? [];
-  return [];
-}
-
-function providerLabel(item: InboxItem): string | null {
-  const provider =
-    item.manifest.schema_version === 2
-      ? item.manifest.source.provider
-      : item.source_hostname?.replace(/^www\./, "").split(".")[0];
-  if (!provider) return null;
-  switch (provider.toLowerCase()) {
-    case "cults3d":
-      return "Cults3D";
-    case "makerworld":
-      return "MakerWorld";
-    case "myminifactory":
-      return "MyMiniFactory";
-    case "printables":
-      return "Printables";
-    case "thingiverse":
-      return "Thingiverse";
-    default:
-      return provider.charAt(0).toUpperCase() + provider.slice(1);
-  }
-}
-
 function stateIcon(item: InboxItem): LucideIcon {
   if (item.state === "completed") return CheckCircle2;
   if (item.state === "failed") return CircleAlert;
@@ -246,6 +250,7 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
   const commands = useInboxCommands({ ...inboxApi, ...deps });
   const items = snapshot.data ?? EMPTY_INBOX;
   const loading = snapshot.isPending;
+  const [selected, setSelected] = useState<number[]>([]);
   const [activeTab, setActiveTab] = useState<InboxTab>("queue");
   const [deleteTarget, setDeleteTarget] = useState<InboxItem | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -258,6 +263,34 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
     }),
     [items],
   );
+
+  const selectedReady = groups.queue.filter(
+    (item) => selected.includes(item.id) && inboxCanImport(item),
+  );
+  async function importItems(ids: number[]) {
+    const session = getSessionVersion();
+    try {
+      const results = await commands.batch.mutateAsync({
+        session,
+        payload: {
+          item_ids: ids,
+          action: "import",
+          use_default_destination: true,
+        },
+      });
+      if (getSessionVersion() === session) {
+        const started = new Set(
+          results
+            .filter((item) => item.state === "importing" || item.state === "completed")
+            .map((item) => item.id),
+        );
+        setSelected((current) => current.filter((id) => !started.has(id)));
+        if (results.some((item) => item.state === "review")) toast.error(t("inbox.needsReview"));
+      }
+    } catch (error) {
+      if (getSessionVersion() === session) toast.error(error);
+    }
+  }
 
   async function deleteImport() {
     if (!deleteTarget) return;
@@ -363,6 +396,14 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             tabClassName={tabClass}
             activeTabClassName="border-foreground font-semibold"
           />
+          {activeTab === "queue" && selectedReady.length > 0 && (
+            <Button
+              size="xs"
+              onClick={() => void importItems(selectedReady.map((item) => item.id))}
+            >
+              {t("inbox.importSelected")}
+            </Button>
+          )}
           {groups.done.length > 0 && activeTab === "completed" && (
             <Button
               type="button"
@@ -404,6 +445,13 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
               retry={(id) => commands.retry.mutateAsync({ id, session: getSessionVersion() })}
               deletingId={deletingId}
               onDelete={setDeleteTarget}
+              selected={selected}
+              onSelect={(id) =>
+                setSelected((current) =>
+                  current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+                )
+              }
+              onImport={(ids) => void importItems(ids)}
             />
           ) : (
             <EmptyState
@@ -420,11 +468,6 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             />
           )}
         </>
-        <p className="border-t border-border px-5 py-4 text-xs text-muted-foreground">
-          {uiText(
-            "Captures stay in the Inbox until you choose their destination. Removing a capture does not delete Models already imported into your Library.",
-          )}
-        </p>
       </Card>
       <ConfirmModal
         open={deleteTarget !== null}

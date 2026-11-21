@@ -91,11 +91,6 @@ describe("InboxPage", () => {
       "href",
       "/?upload=1",
     );
-    expect(
-      screen.getByText(
-        "Captures stay in the Inbox until you choose their destination. Removing a capture does not delete Models already imported into your Library.",
-      ),
-    ).toBeVisible();
   });
 
   it("localizes Inbox UI while preserving dynamic source data", async () => {

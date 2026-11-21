@@ -367,6 +367,9 @@ from .types import (
     GcRunState as GcRunState,
 )
 from .types import (
+    InboxImportIntent as InboxImportIntent,
+)
+from .types import (
     InboxItemCompletion as InboxItemCompletion,
 )
 from .types import (
@@ -374,6 +377,9 @@ from .types import (
 )
 from .types import (
     InboxItemState as InboxItemState,
+)
+from .types import (
+    InboxReviewReason as InboxReviewReason,
 )
 from .types import (
     InboxSourceKind as InboxSourceKind,

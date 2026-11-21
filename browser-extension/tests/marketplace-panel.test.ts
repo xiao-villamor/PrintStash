@@ -51,6 +51,38 @@ describe("marketplace panel", () => {
     expect(root.querySelector("iframe")!.hidden).toBe(false);
   });
 
+  it("accepts content height from its own extension iframe", () => {
+    mount();
+    const root = host().shadowRoot!;
+    root.querySelector("button")!.click();
+    const frame = root.querySelector("iframe")!;
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: "chrome-extension://test",
+        source: frame.contentWindow,
+        data: { type: "printstash-panel-height", height: 350 },
+      }),
+    );
+
+    expect(frame.style.getPropertyValue("--panel-content-height")).toBe("352px");
+  });
+
+  it("ignores a size message from the marketplace itself", () => {
+    mount();
+    const root = host().shadowRoot!;
+    root.querySelector("button")!.click();
+    const frame = root.querySelector("iframe")!;
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: "https://www.thingiverse.com",
+        source: window,
+        data: { type: "printstash-panel-height", height: 400 },
+      }),
+    );
+
+    expect(frame.style.getPropertyValue("--panel-content-height")).toBe("");
+  });
+
   it("keeps the same extension iframe alive while hidden", () => {
     const url = "chrome-extension://test/popup.html?panel=1";
     mount(url);

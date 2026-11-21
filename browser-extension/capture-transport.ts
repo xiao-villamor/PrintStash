@@ -1,3 +1,4 @@
+import type { ImportIntent } from "./import-status.ts";
 import { runCaptureRequest } from "./capture-operation.ts";
 import { CaptureAuthenticationError, CaptureResponseError } from "./core.ts";
 
@@ -203,6 +204,8 @@ export async function captureRichFiles({
   sourceUrl,
   title,
   collectionId,
+  onReady,
+  importAgain,
   tags,
   captureSource,
   files,
@@ -216,6 +219,8 @@ export async function captureRichFiles({
   sourceUrl: string;
   title?: string;
   collectionId?: number;
+  onReady?: ImportIntent;
+  importAgain?: boolean;
   tags?: string[];
   captureSource: CaptureSourceDraft;
   files: BrowserCaptureFile[];
@@ -264,6 +269,7 @@ export async function captureRichFiles({
       signal,
       body: JSON.stringify({
         source_url: sourceUrl,
+        ...(onReady ? { on_ready: onReady, import_again: importAgain === true } : {}),
         title: title || null,
         collection_id: collectionId ?? null,
         tags: tags ?? [],

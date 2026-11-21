@@ -61,7 +61,7 @@ iframe {
     )
   );
   height: min(
-    660px,
+    max(160px, var(--panel-content-height, 260px)),
     calc(
       100dvh - var(--launcher-offset) - 2 * var(--launcher-gutter) - env(safe-area-inset-top) -
         env(safe-area-inset-bottom)

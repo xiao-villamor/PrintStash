@@ -1,3 +1,4 @@
+import type { ImportIntent } from "./import-status.ts";
 import { validateCaptureProfile } from "./print-profile.ts";
 import type { CaptureSourceDraft, BrowserCaptureMessage } from "./capture-adapter.ts";
 import { CaptureAuthenticationError, CaptureResponseError } from "./core.ts";
@@ -122,6 +123,8 @@ export async function captureSequentialFiles(options: {
   source: CaptureSourceDraft;
   title?: string;
   collectionId?: number;
+  onReady?: ImportIntent;
+  importAgain?: boolean;
   tags?: string[];
   cover?: BrowserCaptureFile;
   gallery?: Array<{
@@ -171,6 +174,7 @@ export async function captureSequentialFiles(options: {
     for (const candidate of candidates) files.push(await options.download(candidate, signal));
     const result = await captureRichFiles({
       ...options,
+      onReady: undefined,
       sourceUrl: source.canonical_url,
       captureSource: source,
       files,
@@ -265,6 +269,13 @@ export async function captureSequentialFiles(options: {
     method: "POST",
     body: JSON.stringify({
       request_key: requestKey,
+      ...(options.onReady &&
+      typeof support === "object" &&
+      support !== null &&
+      "import_intent" in support &&
+      support.import_intent === true
+        ? { on_ready: options.onReady, import_again: options.importAgain === true }
+        : {}),
       ...(images
         ? { gallery: images.map((image) => ({ id: image.id, name: image.filename })) }
         : preparedCover

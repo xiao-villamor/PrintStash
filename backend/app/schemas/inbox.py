@@ -12,7 +12,13 @@ from pydantic import (
     model_validator,
 )
 
-from app.db.models import InboxItemCompletion, InboxItemState, InboxSourceKind
+from app.db.models import (
+    InboxImportIntent,
+    InboxItemCompletion,
+    InboxItemState,
+    InboxReviewReason,
+    InboxSourceKind,
+)
 
 
 class CaptureFieldDraft(BaseModel):
@@ -48,6 +54,9 @@ class CaptureSourceDraft(BaseModel):
 class InboxItemCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    on_ready: InboxImportIntent | None = None
+    import_again: bool = False
+
     url: str = Field(min_length=1, max_length=2048)
     title: str | None = Field(default=None, max_length=255)
     source_kind: InboxSourceKind = InboxSourceKind.URL
@@ -68,6 +77,9 @@ class CaptureUploadFileDeclaration(BaseModel):
 
 class CaptureUploadSlotsCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    on_ready: InboxImportIntent | None = None
+    import_again: bool = False
 
     request_key: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
     source_url: str = Field(min_length=1, max_length=2048)
@@ -122,6 +134,7 @@ class InboxBatchRequest(BaseModel):
 
     item_ids: list[int] = Field(min_length=1, max_length=500)
     action: str
+    use_default_destination: bool = False
     collection_id: int | None = Field(default=None, gt=0)
     tags: list[str] = Field(default_factory=list, max_length=100)
 
@@ -221,7 +234,10 @@ class InboxItemRead(BaseModel):
     source_url: str | None = None
     display_title: str | None = None
     source_hostname: str | None = None
+    thumbnail_url: str | None = None
     state: InboxItemState
+    on_ready: InboxImportIntent
+    review_reason: InboxReviewReason | None = None
     manifest: InboxManifestRead = Field(default_factory=LegacyInboxManifestRead)
     target_collection_id: int | None = None
     requested_tags: list[str] = Field(default_factory=list)
@@ -252,6 +268,17 @@ class CaptureSourceStatusRead(BaseModel):
     state: InboxItemState
     completion: InboxItemCompletion | None
     updated_at: datetime
+    resulting_model_id: int | None = None
+
+
+class CaptureStatusRead(BaseModel):
+    id: int
+    state: InboxItemState
+    review_reason: InboxReviewReason | None
+    error_code: str | None
+    resulting_model_id: int | None
+    collection_name: str | None
+    completion: InboxItemCompletion | None
 
 
 class CaptureCapabilitiesRead(BaseModel):
@@ -264,6 +291,8 @@ class CaptureCapabilitiesRead(BaseModel):
     capture_preferences: bool
     resumable_cover: bool
     resumable_gallery: bool
+    import_intent: bool = True
+    owner_user_id: int
 
 
 class CaptureDestinationRead(BaseModel):
@@ -280,6 +309,9 @@ class CaptureImageIntent(BaseModel):
 
 class CaptureSessionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    on_ready: InboxImportIntent | None = None
+    import_again: bool = False
 
     gallery: list[CaptureImageIntent] | None = Field(
         default=None, min_length=1, max_length=64

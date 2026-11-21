@@ -89,6 +89,7 @@
             </p>
           </section>
           <button id="open-inbox" class="primary" type="button" hidden>Review in PrintStash</button>
+          <button id="import-again" class="text-button" type="button" hidden>Import again</button>
         </div>
 
         <section id="import-panel" class="import-panel" aria-labelledby="import-label" hidden>
@@ -330,6 +331,17 @@
           </section>
         </div>
 
+        <label class="launcher-switch">
+          <span>Review before importing</span>
+          <input
+            id="review-before-importing"
+            class="visually-hidden"
+            type="checkbox"
+            role="switch"
+          />
+          <span class="switch-track" aria-hidden="true"></span>
+          <span class="switch-state" aria-hidden="true"><span>Off</span><span>On</span></span>
+        </label>
         <section class="launcher-settings" aria-labelledby="launcher-heading">
           <div class="section-heading">
             <h2 id="launcher-heading">On-page launcher</h2>

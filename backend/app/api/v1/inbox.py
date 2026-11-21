@@ -24,13 +24,16 @@ from app.api.command_actor import (
     CommandActor,
     command_session,
     require_capture_actor,
+    require_command_user,
     require_command_writer,
 )
 from app.api.command_execution import bounded_command, run_command
 from app.core.config import settings
 from app.core.security import require_auth, require_user
 from app.db.models import (
+    Collection,
     CollectionRole,
+    InboxItem,
     InboxItemState,
     InboxSourceKind,
     JobKind,
@@ -46,6 +49,7 @@ from app.schemas.inbox import (
     CaptureRecoveryRead,
     CaptureSessionCreate,
     CaptureSourceStatusRead,
+    CaptureStatusRead,
     CaptureUploadFileDeclaration,
     CaptureUploadSlotRead,
     CaptureUploadSlotsCreate,
@@ -126,6 +130,7 @@ def capture_capabilities(
 ) -> CaptureCapabilitiesRead:
     with command_session(actor):
         return CaptureCapabilitiesRead(
+            owner_user_id=actor.user_id,
             schema_versions=[1, 2, 3],
             resumable_slots=True,
             capture_preferences=True,
@@ -174,6 +179,31 @@ def capture_source_status(
             return inbox.capture_source_status(session, user, source_url, limit=limit)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{item_id}/capture-status", response_model=CaptureStatusRead)
+@bounded_command
+def capture_status(
+    item_id: int, actor: CommandActor = Depends(require_capture_actor)
+) -> CaptureStatusRead:
+    with command_session(actor) as (session, user):
+        row = session.get(InboxItem, item_id)
+        if row is None or row.owner_user_id != user.id:
+            raise HTTPException(status_code=404, detail="pending_import_not_found")
+        collection = (
+            session.get(Collection, row.target_collection_id)
+            if row.target_collection_id is not None
+            else None
+        )
+        return CaptureStatusRead(
+            id=item_id,
+            state=row.state,
+            review_reason=row.review_reason,
+            error_code=row.error_code,
+            resulting_model_id=row.resulting_model_id,
+            collection_name=collection.name if collection is not None else None,
+            completion=row.completion,
+        )
 
 
 @router.get("/{item_id}/capture-upload", response_model=CaptureRecoveryRead)
@@ -480,12 +510,35 @@ def batch_items(
             elif payload.action == "import":
                 if row.state != InboxItemState.REVIEW:
                     continue
-                _start_import(session, row, [])
+                if payload.use_default_destination:
+                    inbox.begin_ready_import(session, row)
+                else:
+                    _start_import(session, row, [])
             else:
                 inbox.dismiss(session, row)
             session.refresh(row)
             output.append(inbox.read(row, session))
         return output
+
+
+@router.get("/{item_id}/thumbnail")
+@bounded_command
+def capture_thumbnail(
+    item_id: int, actor: CommandActor = Depends(require_command_user)
+) -> Response:
+    with command_session(actor) as (session, user):
+        row = inbox.require_visible(session, user, item_id)
+        thumbnail = inbox.capture_thumbnail(session, row)
+        if thumbnail is None:
+            raise HTTPException(status_code=404, detail="capture_thumbnail_not_found")
+        return Response(
+            thumbnail[0],
+            media_type=thumbnail[1],
+            headers={
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
 
 @router.get("/{item_id}", response_model=InboxItemRead)

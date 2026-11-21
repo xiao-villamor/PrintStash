@@ -42,11 +42,13 @@ from app.db.models import (
     CaptureUploadSlotState,
     Collection,
     CollectionRole,
+    InboxImportIntent,
     InboxItem,
     InboxItemCompletion,
     InboxItemResult,
     InboxItemResultState,
     InboxItemState,
+    InboxReviewReason,
     InboxSourceKind,
     IngestionEntryState,
     IngestionScratchWindow,
@@ -68,7 +70,7 @@ from app.modules.ingestion import (
     staging_leases,
 )
 from app.modules.ingestion.batch_contracts import ArchiveSource, EntryRecord, EntrySpec
-from app.modules.library import source_covers
+from app.modules.library import source_covers, taxonomy
 from app.modules.media.source_cover_processing import process_source_cover_upload
 from app.modules.storage import storage
 from app.modules.storage.capacity import CapacityManager, CapacityResource
@@ -94,6 +96,7 @@ from app.modules.work import service as work_service
 from app.modules.work.contracts import JobContext, JobExecution, JobOutcome
 from app.modules.work.jobs import TERMINAL_STATES, failure_of, safe_error, safe_item
 from app.modules.work.jobs import jobs as registry
+from app.modules.work.submission import nudge_after_commit
 from app.schemas.inbox import (
     CaptureImageIntent,
     CaptureRecoveryRead,
@@ -260,6 +263,8 @@ def read(
         display_title=row.display_title,
         source_hostname=row.source_hostname,
         state=row.state,
+        on_ready=row.on_ready,
+        review_reason=row.review_reason,
         manifest=manifest,
         target_collection_id=row.target_collection_id,
         requested_tags=requested_tags(row.requested_tags_json),
@@ -281,6 +286,30 @@ def require_visible(session: Session, user: User, item_id: int) -> InboxItem:
     if row is None or (not user.is_superuser and row.owner_user_id != user.id):
         raise OperationError("pending_import_not_found", kind=ErrorKind.NOT_FOUND)
     return row
+
+
+def _cover_slots():
+    return select(CaptureUploadSlot).where(
+        CaptureUploadSlot.role == "cover",
+        CaptureUploadSlot.state == CaptureUploadSlotState.UPLOADED,
+        col(CaptureUploadSlot.storage_key).is_not(None),
+        or_(
+            col(CaptureUploadSlot.image_position).is_(None),
+            CaptureUploadSlot.image_position == 0,
+        ),
+    )
+
+
+def capture_thumbnail(session: Session, row: InboxItem) -> tuple[bytes, str] | None:
+    cover = session.exec(
+        _cover_slots().where(CaptureUploadSlot.inbox_item_id == row.id)
+    ).first()
+    if not cover or not cover.storage_key or row.state == InboxItemState.DISMISSED:
+        return None
+    try:
+        return get_backend().read_bytes(cover.storage_key), cover.media_type
+    except FileNotFoundError:
+        return None
 
 
 def list_visible(
@@ -308,7 +337,24 @@ def list_visible(
     by_item: dict[int, list[InboxItemResult]] = {}
     for result in all_results:
         by_item.setdefault(result.inbox_item_id, []).append(result)
-    return [read(row, results=by_item.get(row.id or -1, [])) for row in rows]
+    cover_ids = (
+        {
+            slot.inbox_item_id
+            for slot in session.exec(
+                _cover_slots().where(col(CaptureUploadSlot.inbox_item_id).in_(item_ids))
+            ).all()
+        }
+        if item_ids
+        else set()
+    )
+    output = []
+    for row in rows:
+        assert row.id is not None
+        response = read(row, results=by_item.get(row.id, []))
+        if row.id in cover_ids:
+            response.thumbnail_url = f"/api/v1/inbox/{row.id}/thumbnail"
+        output.append(response)
+    return output
 
 
 def prune_history(retention_days: int = 30) -> int:
@@ -428,6 +474,53 @@ def _require_target(session: Session, user: User, collection_id: int | None) -> 
     rbac.require_collection_role(session, user, collection_id, CollectionRole.EDIT)
 
 
+def _capture_intent(
+    session: Session,
+    user: User,
+    source_url: str,
+    collection_id: int | None,
+    intent: InboxImportIntent | None,
+    import_again: bool,
+) -> tuple[InboxImportIntent, InboxReviewReason | None]:
+    reason = None
+    if intent is not None:
+        # Serialize the publication check with creation, including on SQLite.
+        session.exec(
+            sql_update(User)
+            .where(col(User.id) == user.id)
+            .values(updated_at=col(User.updated_at))
+            .execution_options(synchronize_session=False)
+        )
+        matches = col(InboxItem.source_url) == source_url
+        identity = _publication_key(source_url)
+        if identity:
+            matches = or_(matches, col(InboxItem.source_identity_key) == identity)
+        previous = session.exec(
+            select(InboxItem.state).where(
+                InboxItem.owner_user_id == user.id,
+                matches,
+                col(InboxItem.state).not_in(
+                    [InboxItemState.DISMISSED, InboxItemState.FAILED]
+                ),
+            )
+        ).all()
+        if any(state != InboxItemState.COMPLETED for state in previous):
+            raise OperationError("capture_already_pending", kind=ErrorKind.CONFLICT)
+        if previous and not import_again and intent == InboxImportIntent.IMPORT:
+            reason = InboxReviewReason.ALREADY_IMPORTED
+    if collection_id is not None:
+        try:
+            _require_target(session, user, collection_id)
+        except OperationError as error:
+            if intent != InboxImportIntent.IMPORT or error.kind not in {
+                ErrorKind.FORBIDDEN,
+                ErrorKind.NOT_FOUND,
+            }:
+                raise
+            reason = InboxReviewReason.DESTINATION_NOT_EDITABLE
+    return intent or InboxImportIntent.REVIEW, reason
+
+
 def create(session: Session, user: User, payload: InboxItemCreate) -> InboxItem:
     if user.id is None:
         raise ValueError("not_authenticated")
@@ -436,17 +529,27 @@ def create(session: Session, user: User, payload: InboxItemCreate) -> InboxItem:
     source_url = sanitize_source_url(payload.url)
     source = _capture_source_draft(payload.capture_source, source_url)
     importer.validate_public_url(source_url)
-    if payload.collection_id is not None:
-        _require_target(session, user, payload.collection_id)
+    intent, reason = _capture_intent(
+        session,
+        user,
+        source_url,
+        payload.collection_id,
+        payload.on_ready,
+        payload.import_again,
+    )
     title = safe_item(payload.title) if payload.title else None
     row = InboxItem(
+        on_ready=intent,
+        review_reason=reason,
         owner_user_id=user.id,
         source_kind=payload.source_kind,
         source_url=source_url,
         source_identity_key=_publication_key(source_url),
         source_hostname=urlsplit(source_url).hostname,
         display_title=title,
-        target_collection_id=payload.collection_id,
+        target_collection_id=None
+        if reason == InboxReviewReason.DESTINATION_NOT_EDITABLE
+        else payload.collection_id,
         requested_tags_json=json.dumps(payload.tags[:100]),
         manifest_json=json.dumps(
             {"kind": "capture_upload_pending", "source": source.to_dict()}
@@ -553,8 +656,14 @@ def create_capture_upload_slots(
     source_url = sanitize_source_url(payload.source_url)
     source = _capture_source_draft(payload.capture_source, source_url)
     assert source is not None
-    if payload.collection_id is not None:
-        _require_target(session, user, payload.collection_id)
+    intent, reason = _capture_intent(
+        session,
+        user,
+        source_url,
+        payload.collection_id,
+        payload.on_ready,
+        payload.import_again,
+    )
     files = [
         {
             "id": item.id,
@@ -577,6 +686,8 @@ def create_capture_upload_slots(
     except CaptureContractError as exc:
         raise importer.ImportError_("capture_manifest_invalid") from exc
     row = InboxItem(
+        on_ready=intent,
+        review_reason=reason,
         capture_request_key=payload.request_key,
         capture_request_hash=request_hash if payload.request_key is not None else None,
         owner_user_id=user.id,
@@ -587,7 +698,9 @@ def create_capture_upload_slots(
         display_title=safe_item(payload.title) if payload.title else None,
         state=InboxItemState.CAPTURED,
         manifest_json=json.dumps(manifest, separators=(",", ":")),
-        target_collection_id=payload.collection_id,
+        target_collection_id=None
+        if reason == InboxReviewReason.DESTINATION_NOT_EDITABLE
+        else payload.collection_id,
         requested_tags_json=json.dumps(payload.tags[:100]),
     )
     try:
@@ -753,11 +866,21 @@ def start_capture_session(
     if replay is not None:
         _check_capture_cover_replay(replay[1], payload.cover)
         return replay[0]
-    if payload.collection_id is not None:
-        _require_target(session, user, payload.collection_id)
+    intent, reason = _capture_intent(
+        session,
+        user,
+        source_url,
+        payload.collection_id,
+        payload.on_ready,
+        payload.import_again,
+    )
     row = InboxItem(
+        on_ready=intent,
+        review_reason=reason,
         owner_user_id=user.id,
-        target_collection_id=payload.collection_id,
+        target_collection_id=None
+        if reason == InboxReviewReason.DESTINATION_NOT_EDITABLE
+        else payload.collection_id,
         requested_tags_json=json.dumps(payload.tags),
         source_kind=InboxSourceKind.BROWSER,
         source_url=source_url,
@@ -1006,6 +1129,7 @@ def capture_source_status(
             state=row.state,
             completion=row.completion,
             updated_at=row.updated_at,
+            resulting_model_id=row.resulting_model_id,
         )
         for row in rows
         if row.id is not None
@@ -1475,20 +1599,45 @@ def finalize_capture_upload(session: Session, user: User, item_id: int) -> Inbox
     image_positions = {
         slot.image_position for slot in slots if slot.image_position is not None
     }
-    if image_positions != set(range(len(gallery))):
-        raise OperationError("capture_upload_slots_incomplete", kind=ErrorKind.CONFLICT)
-    if expected_ids != actual_ids:
-        raise OperationError("capture_upload_slots_incomplete", kind=ErrorKind.CONFLICT)
-    if not slots or any(
-        (slot.role == "file" or slot.image_position is not None)
-        and slot.state != CaptureUploadSlotState.UPLOADED
+    images_complete = image_positions == set(range(len(gallery))) and all(
+        slot.image_position is None or slot.state == CaptureUploadSlotState.UPLOADED
         for slot in slots
+    )
+    uploaded_ids = {
+        slot.source_file_id
+        for slot in slots
+        if slot.role == "file" and slot.state == CaptureUploadSlotState.UPLOADED
+    }
+    if (
+        not images_complete
+        or actual_ids != expected_ids
+        or uploaded_ids != expected_ids
     ):
-        raise OperationError("capture_upload_slots_incomplete", kind=ErrorKind.CONFLICT)
+        if (
+            row.on_ready != InboxImportIntent.IMPORT
+            or not images_complete
+            or not uploaded_ids
+        ):
+            raise OperationError(
+                "capture_upload_slots_incomplete", kind=ErrorKind.CONFLICT
+            )
+        partial = manifest.to_dict()
+        partial["files"] = [
+            file for file in partial["files"] if file["id"] in uploaded_ids
+        ]
+        partial["selected_ids"] = [file["id"] for file in partial["files"]]
+        if partial.get("profiles") is not None:
+            partial["profiles"] = {
+                key: profile
+                for key, profile in partial["profiles"].items()
+                if key in uploaded_ids
+            }
+        row.manifest_json = json.dumps(parse_capture_manifest(partial).to_dict())
+        row.review_reason = InboxReviewReason.FILES_NEED_REVIEW
+        row.error_code = "capture_upload_slots_incomplete"
     row.state = InboxItemState.REVIEW
     row.updated_at = utcnow()
-    session.add(row)
-    session.commit()
+    _finish_ready_capture(session, row)
     session.refresh(row)
     return row
 
@@ -1867,7 +2016,10 @@ def _finish_resolve(
         if result.rowcount != 1:  # type: ignore[attr-defined]
             session.rollback()
             _discard_resolve_staging(session, item_id, managed)
-        session.commit()
+            session.commit()
+            return
+        session.refresh(row)
+        _finish_ready_capture(session, row)
 
 
 def _discard_resolve_staging(
@@ -2025,9 +2177,14 @@ async def resolve(
                                 _prepare_archive, item_id, staged, filename
                             )
                         else:
+                            size = staged.stat().st_size
                             staged.unlink(missing_ok=True)
                             managed = None
-                            manifest = {"kind": "direct", "title": safe_item(filename)}
+                            manifest = {
+                                "kind": "direct",
+                                "title": safe_item(filename),
+                                "size": size,
+                            }
         await asyncio.to_thread(_finish_resolve, item_id, manifest, managed)
     except Exception as exc:
         await asyncio.to_thread(_fail_item, item_id, exc, "resolve_failed")
@@ -2916,8 +3073,75 @@ async def _run_import(
         _fail_import(item_id, exc, session_factory, job_context)
 
 
+def begin_ready_import(session: Session, row: InboxItem) -> None:
+    """Validate a saved capture and queue it without asking for the choices again."""
+    manifest = _json_dict(row.manifest_json)
+    kind = manifest.get("kind")
+    names = (
+        [manifest.get("title")]
+        if kind == "direct"
+        else [
+            entry.get("name")
+            for entry in manifest.get("files", [])
+            if isinstance(entry, dict)
+        ]
+        if kind == "model_files"
+        else [manifest.get("filename")]
+        if kind == "browser_file"
+        else []
+    )
+    if row.review_reason is None:
+        if (
+            manifest.get("warnings")
+            or not names
+            or any(
+                not isinstance(name, str)
+                or Path(name).suffix.lower() not in SUFFIX_TO_FILE_TYPE
+                for name in names
+            )
+        ):
+            row.review_reason = InboxReviewReason.FILES_NEED_REVIEW
+        else:
+            owner = session.get(User, row.owner_user_id)
+            if owner is None:
+                raise OperationError(
+                    "pending_import_owner_missing", kind=ErrorKind.GONE
+                )
+            try:
+                with session.begin_nested():
+                    _require_target(session, owner, row.target_collection_id)
+                    if row.target_collection_id is None:
+                        assert row.id is not None
+                        name = (row.display_title or f"Import {row.id}").replace(
+                            "/", " "
+                        )
+                        collection = (
+                            taxonomy.resolve_or_create_collection_in_transaction(
+                                session, name
+                            )
+                        )
+                        if collection is None:
+                            raise OperationError("invalid_collection_name")
+                        row.target_collection_id = collection.id
+            except OperationError, IntegrityError:
+                row.review_reason = InboxReviewReason.DESTINATION_NOT_EDITABLE
+            else:
+                begin_import(session, row, [], notify=True)
+                return
+    session.add(row)
+    session.commit()
+
+
+def _finish_ready_capture(session: Session, row: InboxItem) -> None:
+    if row.on_ready == InboxImportIntent.IMPORT:
+        begin_ready_import(session, row)
+    else:
+        session.add(row)
+        session.commit()
+
+
 def begin_import(
-    session: Session, row: InboxItem, selected_ids: list[str]
+    session: Session, row: InboxItem, selected_ids: list[str], *, notify: bool = False
 ) -> str | None:
     """Accept an import: REVIEW becomes IMPORTING under a new queued Job.
 
@@ -2940,6 +3164,7 @@ def begin_import(
     row.manifest_json = json.dumps(manifest, separators=(",", ":"))
     row.state = InboxItemState.IMPORTING
     row.error_code = None
+    row.review_reason = None
     row.retryable = False
     row.updated_at = utcnow()
     job_id = work_service.request(
@@ -2949,7 +3174,7 @@ def begin_import(
         owner_user_id=row.owner_user_id,
     )
     row.job_id = job_id
-    if row.source_kind == InboxSourceKind.BROWSER:
+    if row.source_kind == InboxSourceKind.BROWSER and manifest.get("kind") != "direct":
         try:
             has_slots = (
                 session.exec(
@@ -2981,6 +3206,8 @@ def begin_import(
             session.commit()
             return None
     session.add(row)
+    if notify:
+        nudge_after_commit(session, JobKind.INGESTION_INBOX_IMPORT)
     session.commit()
     return job_id
 

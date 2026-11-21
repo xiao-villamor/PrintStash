@@ -1,3 +1,4 @@
+import type { ImportIntent } from "./import-status.ts";
 import { sourcePublication, SOURCE_PROVIDERS } from "./source-providers.ts";
 import { captureReviewUrl } from "./capture-result.ts";
 const SOURCE_RULES = [
@@ -377,6 +378,7 @@ async function verifyVaultHealth({ fetchImpl, base }: { fetchImpl: typeof fetch;
   if (!health.ok || healthBody?.status !== "ok" || healthBody?.name !== "PrintStash") {
     throw new Error("That URL is not a PrintStash server.");
   }
+  return healthBody.capture_import_intent === true ? { importIntent: true as const } : {};
 }
 
 export async function claimBrowserPairing({
@@ -392,7 +394,7 @@ export async function claimBrowserPairing({
 }) {
   const base = normalizeVault(vault);
   if (!String(code ?? "").trim()) throw new Error("Enter the pairing code from PrintStash.");
-  await verifyVaultHealth({ fetchImpl, base });
+  const capabilities = await verifyVaultHealth({ fetchImpl, base });
   const claimed = await fetchVault(fetchImpl, base, "/api/v1/browser-pairings/claim", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -409,7 +411,12 @@ export async function claimBrowserPairing({
   if (!payload || typeof payload.credential !== "string" || !payload.credential) {
     throw new Error("PrintStash did not return a browser credential.");
   }
-  return { base, deviceCredential: payload.credential, device: payload.device || null };
+  return {
+    base,
+    ...capabilities,
+    deviceCredential: payload.credential,
+    device: payload.device || null,
+  };
 }
 
 /** Check public server reachability; paired credentials are authenticated when used for capture. */
@@ -421,8 +428,8 @@ export async function verifyVaultReachability({
   vault: string;
 }) {
   const base = normalizeVault(vault);
-  await verifyVaultHealth({ fetchImpl, base });
-  return { base };
+  const capabilities = await verifyVaultHealth({ fetchImpl, base });
+  return { base, ...capabilities };
 }
 
 export async function verifyVaultConnection({
@@ -439,7 +446,7 @@ export async function verifyVaultConnection({
   const base = normalizeVault(vault);
   requireCredentials(username, apiKey);
 
-  await verifyVaultHealth({ fetchImpl, base });
+  const capabilities = await verifyVaultHealth({ fetchImpl, base });
 
   const accessToken = await vaultLogin({ fetchImpl, base, username, apiKey });
   const profile = await fetchVault(fetchImpl, base, "/api/v1/auth/me", {
@@ -459,7 +466,7 @@ export async function verifyVaultConnection({
   if (!user || typeof user.username !== "string" || typeof user.is_superuser !== "boolean") {
     throw new Error("PrintStash returned an invalid user profile.");
   }
-  return { base, accessToken, user };
+  return { base, ...capabilities, accessToken, user };
 }
 
 /** A capture endpoint rejected the current browser or access credential. */
@@ -503,6 +510,8 @@ export async function captureModelPage({
   title,
   captureSource,
   collectionId,
+  onReady,
+  importAgain,
   tags,
   signal,
 }: {
@@ -516,6 +525,8 @@ export async function captureModelPage({
   title?: string;
   captureSource?: CaptureSourceDraft;
   collectionId?: number;
+  onReady?: ImportIntent;
+  importAgain?: boolean;
   tags?: string[];
   signal?: AbortSignal;
 }) {
@@ -552,6 +563,7 @@ export async function captureModelPage({
       url: sourceUrl,
       title: String(title ?? "").trim() || null,
       source_kind: "browser",
+      ...(onReady ? { on_ready: onReady, import_again: importAgain === true } : {}),
       ...(collectionId !== undefined ? { collection_id: collectionId } : {}),
       ...(tags?.length ? { tags } : {}),
       ...(captureSource

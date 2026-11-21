@@ -22,9 +22,11 @@ from app.db.enum_columns import EnumText, enum_check
 from .base import SQLModel
 from .types import (
     CaptureUploadSlotState,
+    InboxImportIntent,
     InboxItemCompletion,
     InboxItemResultState,
     InboxItemState,
+    InboxReviewReason,
     InboxSourceKind,
     IngestionEntryState,
     IngestRequestKind,
@@ -225,6 +227,8 @@ class InboxItem(SQLModel, table=True):
 
     __tablename__ = "inbox_items"
     __table_args__ = (
+        enum_check("on_ready", InboxImportIntent),
+        enum_check("review_reason", InboxReviewReason),
         UniqueConstraint(
             "owner_user_id", "capture_request_key", name="uq_capture_request_owner"
         ),
@@ -232,6 +236,15 @@ class InboxItem(SQLModel, table=True):
         Index("ix_inbox_owner_publication", "owner_user_id", "source_identity_key"),
     )
 
+    on_ready: InboxImportIntent = Field(
+        default=InboxImportIntent.REVIEW,
+        sa_column=Column(
+            EnumText(InboxImportIntent), nullable=False, server_default="review"
+        ),
+    )
+    review_reason: InboxReviewReason | None = Field(
+        default=None, sa_column=Column(EnumText(InboxReviewReason), nullable=True)
+    )
     capture_request_key: Optional[str] = Field(default=None, max_length=64)
     source_identity_key: Optional[str] = Field(default=None, max_length=64)
     capture_request_hash: Optional[str] = Field(default=None, max_length=64)

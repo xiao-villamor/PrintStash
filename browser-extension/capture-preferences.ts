@@ -81,3 +81,54 @@ export function selectedCaptureCover(file: File | undefined) {
     throw new Error("Choose a JPEG, PNG or WebP cover up to 15 MiB.");
   return { id: "cover", filename: file.name, mediaType: type, file };
 }
+
+interface SavedCaptureDefaults {
+  collection: CaptureDestination | null;
+  tags: string[];
+}
+
+export function capturePreferences(storage: {
+  get(keys: string[]): Promise<Record<string, unknown>>;
+  set(values: Record<string, unknown>): Promise<void>;
+}) {
+  const reviewKey = "capture.review-before-importing";
+  const defaultsKey = (vault: string, userId: number) =>
+    `capture.defaults:${JSON.stringify([vault, userId])}`;
+  return {
+    async reviewBeforeImporting() {
+      return (await storage.get([reviewKey]))[reviewKey] === true;
+    },
+    setReviewBeforeImporting(value: boolean) {
+      return storage.set({ [reviewKey]: value });
+    },
+    async defaults(vault: string, userId: number): Promise<SavedCaptureDefaults> {
+      const key = defaultsKey(vault, userId);
+      const value = (await storage.get([key]))[key];
+      if (typeof value !== "object" || value === null || !("tags" in value)) {
+        return { collection: null, tags: [] };
+      }
+      const collection = "collection" in value ? value.collection : null;
+      return {
+        tags: Array.isArray(value.tags)
+          ? value.tags
+              .filter((tag): tag is string => typeof tag === "string" && tag.length <= 128)
+              .slice(0, 100)
+          : [],
+        collection:
+          collection &&
+          typeof collection === "object" &&
+          "id" in collection &&
+          typeof collection.id === "number" &&
+          Number.isSafeInteger(collection.id) &&
+          collection.id > 0 &&
+          "label" in collection &&
+          typeof collection.label === "string"
+            ? { id: collection.id, label: collection.label }
+            : null,
+      };
+    },
+    saveDefaults(vault: string, userId: number, value: SavedCaptureDefaults) {
+      return storage.set({ [defaultsKey(vault, userId)]: value });
+    },
+  };
+}

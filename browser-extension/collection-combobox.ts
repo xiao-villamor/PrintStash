@@ -11,6 +11,7 @@ export function collectionCombobox(
   search: (query: string) => Promise<CaptureDestination[]>,
   retireSearch: () => void,
 ) {
+  let defaultLabel = DEFAULT_DESTINATION;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let selected: CaptureDestination | null = null;
   let activeIndex = -1;
@@ -42,7 +43,7 @@ export function collectionCombobox(
         option.id = `collection-option-${index}`;
         option.role = "option";
         option.ariaSelected = "false";
-        option.textContent = destination?.label ?? DEFAULT_DESTINATION;
+        option.textContent = destination?.label ?? defaultLabel;
         option.addEventListener("click", () => choose(destination));
         return option;
       }),
@@ -102,6 +103,14 @@ export function collectionCombobox(
   });
 
   return {
+    choose,
+    setDefaultLabel(label: string) {
+      defaultLabel = label;
+      input.placeholder = label;
+    },
+    get destination() {
+      return selected;
+    },
     get id() {
       return selected?.id;
     },

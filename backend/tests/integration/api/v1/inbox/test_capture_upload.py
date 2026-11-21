@@ -1669,6 +1669,42 @@ class TestIncrementalCoverCapacity:
         )
 
 
+def test_finalized_capture_publishes_an_import_job(
+    client, user_headers, staging, local_storage, work_engine
+):
+    from tests.factories.content import binary_stl
+
+    body = binary_stl()
+    payload = _create_payload(body)
+    payload["files"][0].update(filename="bracket.stl", media_type="model/stl")
+    payload.update(on_ready="import", title="Quick capture")
+    headers = user_headers("quick-capture", is_superuser=True)
+    created = client.post(
+        "/api/v1/inbox/capture-upload-slots", headers=headers, json=payload
+    )
+    assert created.status_code == 201, created.text
+    item_id = created.json()["item"]["id"]
+    slot = created.json()["slots"][0]
+    uploaded = client.put(
+        f"/api/v1/inbox/capture-upload-slots/{slot['id']}",
+        headers={**headers, "Content-Type": slot["media_type"]},
+        content=body,
+    )
+    assert uploaded.status_code == 200
+    ready = client.post(
+        f"/api/v1/inbox/{item_id}/capture-upload-finalize", headers=headers
+    )
+    assert ready.status_code == 200, ready.text
+    assert ready.json()["state"] in {"importing", "completed"}
+    work_engine.drain()
+    completed = client.get(
+        f"/api/v1/inbox/{item_id}/capture-status", headers=headers
+    ).json()
+    assert completed["state"] == "completed", completed
+    assert completed["collection_name"] == "Quick capture"
+    assert completed["resulting_model_id"] is not None
+
+
 class TestMultipleModelCaptureCover:
     def test_attaches_the_selected_cover_to_every_resulting_source(
         self, client, user_headers, staging, local_storage, work_engine
@@ -1710,6 +1746,11 @@ class TestMultipleModelCaptureCover:
             ).status_code
             == 200
         )
+        pending = client.get("/api/v1/inbox", headers=headers).json()
+        preview = next(
+            item["thumbnail_url"] for item in pending if item["id"] == item_id
+        )
+        assert client.get(preview, headers=headers).content == image
         assert (
             client.post(
                 f"/api/v1/inbox/{item_id}/import",

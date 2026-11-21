@@ -346,6 +346,84 @@ describe("popup browser adapters", () => {
     expect((await preferences.read()).hiddenSites.has(origin)).toBe(false);
   });
 
+  it("imports a direct URL through the supported server without opening review", async () => {
+    const url = "https://models.example.com/clean.stl";
+    fakeBrowser.tabs.query = vi.fn().mockResolvedValue([{ url, title: "clean.stl" }]);
+    await fakeBrowser.storage.local.set(pairedDevice);
+    const writes: Record<string, unknown>[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/health"))
+        return response({ status: "ok", name: "PrintStash", capture_import_intent: true });
+      if (path.endsWith("/capture-capabilities")) return response({ owner_user_id: 9 });
+      if (path.endsWith("/capture-source-status")) return response([]);
+      if (path.endsWith("/capture-status"))
+        return response({
+          state: "completed",
+          completion: "complete",
+          resulting_model_id: 37,
+          collection_name: "Brackets",
+        });
+      if (init) writes.push(JSON.parse(stringBody(init)));
+      return response({ id: 12 });
+    });
+    await import("../popup.ts");
+    await vi.waitFor(() => {
+      expect(button("#capture").textContent).toBe("Import");
+      expect(button("#capture").disabled).toBe(false);
+    });
+
+    button("#capture").click();
+    await vi.waitFor(() => expect(button("#open-inbox").textContent).toBe("Open in PrintStash"));
+
+    expect(writes).toEqual([expect.objectContaining({ url, on_ready: "import" })]);
+    expect(element("#status-title-text").textContent).toBe("Imported to Brackets");
+    expect(button("#open-inbox").dataset.url).toBe("https://prints.example.com/models/37");
+  });
+
+  it("opens an already imported capture before sending another", async () => {
+    fakeBrowser.tabs.query = vi
+      .fn()
+      .mockResolvedValue([{ url: "https://models.example.com/clean.stl" }]);
+    await fakeBrowser.storage.local.set(pairedDevice);
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/health"))
+        return response({ status: "ok", name: "PrintStash", capture_import_intent: true });
+      if (path.endsWith("/capture-capabilities")) return response({ owner_user_id: 9 });
+      return response([
+        { id: 12, state: "completed", completion: "complete", resulting_model_id: 37 },
+      ]);
+    });
+    await import("../popup.ts");
+    await vi.waitFor(() =>
+      expect(element("#status-title-text").textContent).toBe("Already in PrintStash"),
+    );
+
+    expect(button("#capture").hidden).toBe(true);
+    expect(button("#open-inbox").dataset.url).toBe("https://prints.example.com/models/37");
+    expect(button("#import-again").hidden).toBe(false);
+  });
+
+  it("offers to resume an interrupted browser upload without creating a duplicate", async () => {
+    fakeBrowser.tabs.query = vi
+      .fn()
+      .mockResolvedValue([{ url: "https://www.printables.com/model/3161-3d-benchy" }]);
+    await fakeBrowser.storage.local.set(pairedDevice);
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/health"))
+        return response({ status: "ok", name: "PrintStash", capture_import_intent: true });
+      if (path.endsWith("/capture-capabilities")) return response({ owner_user_id: 9 });
+      if (path.endsWith("/12/capture-upload")) return response({ recoverable: true });
+      return response([{ id: 12, state: "captured", completion: null }]);
+    });
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(button("#capture").textContent).toBe("Resume import"));
+    expect(button("#capture").disabled).toBe(false);
+    expect(button("#open-inbox").hidden).toBe(true);
+  });
+
   it("shows the packaged release version in the popup footer", async () => {
     await import("../popup.ts");
 

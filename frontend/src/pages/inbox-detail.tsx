@@ -1,3 +1,4 @@
+import { inboxFiles, inboxProviderLabel } from "./inbox-summary";
 import { ProfileFacts } from "@/components/model-detail/profile-facts";
 import { CaptureSourceSummary } from "@/components/model-detail/source-summary";
 import { useTaxonomyCommands } from "@/features/library/taxonomy";
@@ -34,7 +35,7 @@ import { useRouter } from "@/lib/navigation";
 import { useCollectionLookupById } from "@/lib/queries";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { toast } from "@/lib/toast";
-import type { CollectionNodeRead, InboxManifestFile, InboxItem } from "@/types";
+import type { CollectionNodeRead, InboxItem } from "@/types";
 import { safeHttpUrl } from "@/components/model-detail/source-url";
 
 export interface InboxDetailApi {
@@ -60,14 +61,6 @@ const defaultInboxDetailApi: InboxDetailApi = {
 const NEW_COLLECTION = "new";
 const NO_COLLECTION = "none";
 const PICK_COLLECTION = "pick";
-
-function files(item: InboxItem): InboxManifestFile[] {
-  return item.manifest.kind === "archive"
-    ? (item.manifest.entries ?? [])
-    : item.manifest.kind === "model_files"
-      ? (item.manifest.files ?? [])
-      : [];
-}
 
 function statusLabel(item: InboxItem, t: ReturnType<typeof useI18n>["t"]): string {
   if (item.completion === "partial") return t("inbox.partial");
@@ -108,27 +101,6 @@ function capturedTitle(item: InboxItem): string | null {
   return item.display_title?.trim() || null;
 }
 
-function providerLabel(item: InboxItem): string {
-  const provider =
-    item.manifest.schema_version === 2 || item.manifest.schema_version === 3
-      ? item.manifest.source.provider
-      : item.source_hostname?.split(".").at(-2);
-  if (!provider) return uiText("Web");
-  switch (provider.toLowerCase()) {
-    case "cults3d":
-      return "Cults3D";
-    case "makerworld":
-      return "MakerWorld";
-    case "myminifactory":
-      return "MyMiniFactory";
-    case "printables":
-      return "Printables";
-    case "thingiverse":
-      return "Thingiverse";
-  }
-  return provider.charAt(0).toUpperCase() + provider.slice(1);
-}
-
 export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?: InboxDetailApi }) {
   const { locale, t } = useI18n();
   const { id } = useParams({ strict: false });
@@ -156,6 +128,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
     pickedCollection: CollectionNodeRead | null;
     collectionName: string;
   };
+  const [editingDestinationId, setEditingDestinationId] = useState<number | null>(null);
   const [draft, setDraft] = useState<ReviewDraft | null>(null);
   const review =
     draft?.id === inboxId
@@ -164,7 +137,11 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
         ? {
             id: item.id,
             base: item,
-            selected: item.manifest.selected_ids ?? [],
+            selected:
+              item.manifest.kind === "direct" || item.manifest.kind === "browser_file"
+                ? inboxFiles(item).map((file) => file.id)
+                : (item.manifest.selected_ids ??
+                  (inboxFiles(item).length === 1 ? inboxFiles(item).map((file) => file.id) : [])),
             tags: item.requested_tags.join(", "),
             destination:
               item.target_collection_id === null
@@ -203,7 +180,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
   const confirmDelete = confirmDeleteId === inboxId;
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const deleting = deletingId === inboxId;
-  const choices = useMemo(() => (item ? files(item) : []), [item]);
+  const choices = useMemo(() => (item ? inboxFiles(item) : []), [item]);
   if (remote.isError && !item)
     return (
       <PageContainer>
@@ -339,12 +316,17 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
       )}
       <PageHeader
         title={t("inbox.title")}
-        description={uiText("Review captured files and choose their destination.")}
+        description={t("inbox.detailDescription")}
         actions={
           <>
             <Button variant="outline" size="sm" asChild>
               <Link href="/inbox">{t("inbox.back")}</Link>
             </Button>
+            {item.state === "completed" && item.resulting_model_id && (
+              <Button size="sm" asChild>
+                <Link href={`/models/${item.resulting_model_id}`}>{t("inbox.openModel")}</Link>
+              </Button>
+            )}
             {sourceUrl && (
               <Button variant="outline" size="sm" asChild>
                 <a href={sourceUrl} target="_blank" rel="noreferrer">
@@ -360,7 +342,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
           <div className="min-w-0">
             <h2 className="break-words text-sm font-semibold">{title}</h2>
             <p className="mt-2 text-xs text-muted-foreground">
-              {providerLabel(item)} · {item.source_hostname || t("inbox.sourcePreparing")} ·{" "}
+              {inboxProviderLabel(item) || t("inbox.sourcePreparing")} ·{" "}
               <time
                 dateTime={item.created_at}
                 title={new Date(item.created_at).toLocaleString(locale)}
@@ -407,13 +389,18 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
             )}
           </div>
         )}
+        {item.review_reason && item.state === "review" && (
+          <p role="status" className="px-5 text-sm text-muted-foreground">
+            {getErrorMessage(item.review_reason)}
+          </p>
+        )}
         {item.state === "importing" && (
           <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
             {t("inbox.importing")}
           </p>
         )}
         {item.state === "review" && (
-          <div className="grid gap-5 px-5 pb-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,1fr)] lg:items-start">
+          <div className="grid gap-4 px-5 pb-5">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0 p-5 pb-3">
                 <div>
@@ -455,7 +442,9 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
                             )}
                         </div>
                         <span className="shrink-0 text-xs uppercase text-muted-foreground">
-                          {file.file_type} · {formatBytes(file.size)}
+                          {[file.file_type, file.size === null ? null : formatBytes(file.size)]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </span>
                       </label>
                     ))}
@@ -464,86 +453,108 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
               </CardContent>
             </Card>
 
-            <Card className="lg:sticky lg:top-6">
-              <CardHeader className="p-5 pb-3">
-                <div>
-                  <h2 className="text-sm font-semibold">{t("inbox.importSettings")}</h2>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {t("inbox.importSettingsDescription")}
-                </p>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 p-5 pb-3">
+                <h2 className="text-sm font-semibold">{t("inbox.destination")}</h2>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() =>
+                    setEditingDestinationId(editingDestinationId === inboxId ? null : inboxId)
+                  }
+                >
+                  {editingDestinationId === inboxId
+                    ? t("inbox.doneEditing")
+                    : t("inbox.editDestination")}
+                </Button>
               </CardHeader>
-              <CardContent className="space-y-5 p-5">
-                <label className="block text-sm font-medium">
-                  {uiText("Collection")}
-                  <select
-                    value={destination}
-                    onChange={(event) => setDestination(event.target.value)}
-                    className="mt-1.5 block h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  >
-                    <option value={NEW_COLLECTION}>{t("inbox.newCollectionFromTitle")}</option>
-                    <option value={NO_COLLECTION}>{t("inbox.noCollection")}</option>
-                    <option value={PICK_COLLECTION}>{uiText("Choose existing collection")}</option>
-                    {destinationId !== null && (
-                      <option value={destinationId}>
-                        {destinationCollection?.display_path ??
-                          uiText("Collection #{value1}", { value1: String(destinationId) })}
-                      </option>
-                    )}
-                  </select>
-                </label>
-                {destination === PICK_COLLECTION && (
-                  <CollectionPicker
-                    minRole="edit"
-                    selectedPath={null}
-                    emptyLabel={uiText("No editable collections.")}
-                    onSelect={(collection) => {
-                      if (collection === null) throw new Error("A collection is required");
-                      editReview({
-                        pickedCollection: collection,
-                        destination: String(collection.id),
-                      });
-                    }}
-                  />
-                )}
-                {destinationId !== null && savedCollection.isError && (
-                  <p role="alert" className="text-sm text-destructive">
-                    {uiText("Folders could not be loaded.")}
-                  </p>
-                )}
-                {destination === NEW_COLLECTION && (
-                  <div>
-                    <label htmlFor={collectionNameId} className="block text-sm font-medium">
-                      {t("inbox.collectionName")}
+              <CardContent className="space-y-4 p-5 pt-0">
+                {editingDestinationId !== inboxId ? (
+                  <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
+                    <dt className="text-muted-foreground">{uiText("Collection")}</dt>
+                    <dd className="break-words">
+                      {destination === NEW_COLLECTION
+                        ? collectionName
+                        : destination === NO_COLLECTION
+                          ? t("inbox.noCollection")
+                          : (destinationCollection?.display_path ?? t("inbox.destination"))}
+                    </dd>
+                    <dt className="text-muted-foreground">{t("inbox.tags")}</dt>
+                    <dd className="break-words">{tags || t("inbox.noTags")}</dd>
+                  </dl>
+                ) : (
+                  <>
+                    <label className="block text-sm font-medium">
+                      {uiText("Collection")}
+                      <select
+                        value={destination}
+                        onChange={(event) => setDestination(event.target.value)}
+                        className="mt-1.5 block h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      >
+                        <option value={NEW_COLLECTION}>{t("inbox.newCollectionFromTitle")}</option>
+                        <option value={NO_COLLECTION}>{t("inbox.noCollection")}</option>
+                        <option value={PICK_COLLECTION}>
+                          {uiText("Choose existing collection")}
+                        </option>
+                        {destinationId !== null && (
+                          <option value={destinationId}>
+                            {destinationCollection?.display_path ??
+                              uiText("Collection #{value1}", { value1: String(destinationId) })}
+                          </option>
+                        )}
+                      </select>
                     </label>
-                    <Input
-                      id={collectionNameId}
-                      aria-describedby={collectionNameHintId}
-                      className="mt-1.5"
-                      value={collectionName}
-                      onChange={(event) => setCollectionName(event.target.value)}
-                      maxLength={255}
-                    />
-                    <p
-                      id={collectionNameHintId}
-                      className="mt-1.5 text-xs font-normal text-muted-foreground"
-                    >
-                      {t("inbox.collectionNameHint")}
-                    </p>
-                  </div>
+                    {destination === PICK_COLLECTION && (
+                      <CollectionPicker
+                        minRole="edit"
+                        selectedPath={null}
+                        emptyLabel={uiText("No editable collections.")}
+                        onSelect={(collection) => {
+                          if (collection === null) throw new Error("A collection is required");
+                          editReview({
+                            pickedCollection: collection,
+                            destination: String(collection.id),
+                          });
+                        }}
+                      />
+                    )}
+                    {destinationId !== null && savedCollection.isError && (
+                      <p role="alert" className="text-sm text-destructive">
+                        {uiText("Folders could not be loaded.")}
+                      </p>
+                    )}
+                    {destination === NEW_COLLECTION && (
+                      <div>
+                        <label htmlFor={collectionNameId} className="block text-sm font-medium">
+                          {t("inbox.collectionName")}
+                        </label>
+                        <Input
+                          id={collectionNameId}
+                          aria-describedby={collectionNameHintId}
+                          className="mt-1.5"
+                          value={collectionName}
+                          onChange={(event) => setCollectionName(event.target.value)}
+                          maxLength={255}
+                        />
+                        <p
+                          id={collectionNameHintId}
+                          className="mt-1.5 text-xs font-normal text-muted-foreground"
+                        >
+                          {t("inbox.collectionNameHint")}
+                        </p>
+                      </div>
+                    )}
+                    <label className="block text-sm font-medium">
+                      <span>{t("inbox.tags")}</span>
+                      <Input
+                        className="mt-1.5"
+                        value={tags}
+                        onChange={(event) => setTags(event.target.value)}
+                        placeholder={t("inbox.commaSeparated")}
+                      />
+                    </label>
+                  </>
                 )}
-                <p className="text-xs text-muted-foreground">
-                  {uiText("Storage: managed Vault. Changing the collection does not move files.")}
-                </p>
-                <label className="block text-sm font-medium">
-                  <span>{t("inbox.tags")}</span>
-                  <Input
-                    className="mt-1.5"
-                    value={tags}
-                    onChange={(event) => setTags(event.target.value)}
-                    placeholder={t("inbox.commaSeparated")}
-                  />
-                </label>
                 <div className="border-t border-border/70 pt-4">
                   <div className="mb-4 flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">{t("inbox.selected")}</span>
@@ -562,7 +573,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
                     }
                     loading={busy}
                   >
-                    {t("inbox.importSelected")}
+                    {t("inbox.import")}
                   </Button>
                 </div>
               </CardContent>
@@ -588,14 +599,15 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
                         : uiText("Return to the source and capture the files again")}
                     </p>
                   )}
-                  {result.model_id && (
-                    <Link
-                      className="text-primary hover:underline"
-                      href={`/models/${result.model_id}`}
-                    >
-                      {t("inbox.openModel")}
-                    </Link>
-                  )}
+                  {result.model_id &&
+                    (item.results.length > 1 || result.model_id !== item.resulting_model_id) && (
+                      <Link
+                        className="text-primary hover:underline"
+                        href={`/models/${result.model_id}`}
+                      >
+                        {t("inbox.openModel")}
+                      </Link>
+                    )}
                 </div>
               ))}
               {item.completion === "partial" &&

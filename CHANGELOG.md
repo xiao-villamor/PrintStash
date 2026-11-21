@@ -4,6 +4,10 @@
 
 ### Changed
 
+- Web captures can import directly from the browser extension. Pending Imports retains the result and opens the resulting Model. Captures that need a decision stay available for review. The extension remembers collection and tag choices and can be set to always review.
+- Pending Imports shows saved destinations, simpler review controls, and single or bulk import actions for ready captures. Direct files appear as one selected file. The on-page panel fits its content and uses the marketplace title when available.
+
+
 - The browser extension popup puts pairing and capture first, with connection status in the header, a choice of pairing code or API key, and a direct review action after sending files.
 - The Chrome toolbar popup has a consistent width, a searchable collection field, and a compact unsupported-page state. The new History and Settings tabs show previous captures and let users choose the on-page launcher style, position, and visibility. Pairing name conflicts appear beside the browser name, and the extension can attach explicitly selected files when a private URL cannot be downloaded.
 

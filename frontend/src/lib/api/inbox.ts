@@ -156,6 +156,7 @@ export function dismissPendingImport(id: number): Promise<void> {
 export function batchPendingImports(payload: {
   item_ids: number[];
   action: "set_collection" | "add_tags" | "retry" | "import" | "dismiss";
+  use_default_destination?: boolean;
   collection_id?: number | null;
   tags?: string[];
 }): Promise<InboxItem[]> {

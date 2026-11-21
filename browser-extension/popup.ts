@@ -1,4 +1,11 @@
 import {
+  canResumeCapture,
+  captureAccount,
+  captureProgress,
+  captureRecoveryMessage,
+  type ImportIntent,
+} from "./import-status.ts";
+import {
   readSourceGalleryInMainWorld,
   readPrintablesGallery,
   sourceGallery,
@@ -7,7 +14,12 @@ import {
 } from "./source-gallery.ts";
 import { captureTransferFetch, progressLabel, type ByteProgress } from "./transfer-progress.ts";
 import { collectionCombobox } from "./collection-combobox.ts";
-import { captureDestinations, captureTags, selectedCaptureCover } from "./capture-preferences.ts";
+import {
+  captureDestinations,
+  capturePreferences,
+  captureTags,
+  selectedCaptureCover,
+} from "./capture-preferences.ts";
 import {
   requestCultsInMainWorld,
   cultsCaptureFromPage,
@@ -152,6 +164,7 @@ function requiredElement<T extends Element>(selector: string, constructor: { new
 const extensionApi = chrome as BrowserExtensionApi & { storage: LauncherStorage };
 const browser: BrowserProviderAdapter = createBrowserProviderAdapter(extensionApi);
 const launcherStore = launcherPreferences(extensionApi.storage);
+const importPreferences = capturePreferences(browser.storage);
 const panelMode = new URL(location.href).searchParams.get("panel") === "1";
 document.documentElement.toggleAttribute("data-panel", panelMode);
 
@@ -212,6 +225,8 @@ const collection = collectionCombobox(
   () => suggestionOperations.retire(),
 );
 const captureButton = requiredElement("#capture", HTMLButtonElement);
+const reviewBeforeImporting = requiredElement("#review-before-importing", HTMLInputElement);
+const importAgainButton = requiredElement("#import-again", HTMLButtonElement);
 const inboxButton = requiredElement("#open-inbox", HTMLButtonElement);
 const importPanel = requiredElement("#import-panel", HTMLElement);
 const importHint = requiredElement("#import-hint", HTMLElement);
@@ -297,6 +312,12 @@ function lockConnection(locked: boolean) {
   disconnectButton.disabled = locked;
   cancelButton.disabled = locked;
 }
+let importAccount: number | null = null;
+let importIntentSupported = false;
+let importAgain = false;
+let resumingImport = false;
+let checkingImportContext = false;
+let importContext: AbortController | null = null;
 let importBusy = false;
 const captureOperations = new CaptureOperationOwner();
 let pendingPrintablesCapture: BrowserCaptureMessage | null = null;
@@ -548,6 +569,10 @@ function renderCover() {
 
 function retireCapture() {
   captureOperations.retire();
+  importContext?.abort();
+  checkingImportContext = false;
+  importAccount = null;
+  importAgain = false;
   collection.reset();
   tagsInput.value = "";
   coverInput.value = "";
@@ -571,6 +596,7 @@ function recoverCaptureConnection() {
 
 function clearInboxAction() {
   inboxButton.hidden = true;
+  importAgainButton.hidden = true;
   delete inboxButton.dataset.url;
 }
 
@@ -597,13 +623,134 @@ function clearManualFileSelection() {
   captureButton.textContent = "Send to PrintStash";
 }
 
-function confirmCapture(url: string) {
+function showCaptureOutcome(
+  message: string,
+  url: string,
+  action: string,
+  kind: StatusKind = "success",
+) {
+  inboxButton.textContent = action;
   inboxButton.dataset.url = url;
   inboxButton.hidden = false;
-  showStatus("Sent to Pending Imports", "success");
+  showStatus(message, kind);
+  if (kind === "success") statusTitleText.textContent = message;
   renderImportAvailability();
   inboxButton.focus();
 }
+
+async function confirmCapture(
+  url: string,
+  capture: CaptureOperation<Config>,
+  onReady: ImportIntent | undefined,
+) {
+  if (onReady === "import") {
+    const itemId = Number(new URL(url).pathname.split("/").at(-1));
+    showStatus("Importing into PrintStash…");
+    const deadline = Date.now() + 90_000;
+    while (Date.now() < deadline) {
+      let item;
+      try {
+        item = await capture.run((signal) =>
+          captureProgress(capture.config.vault, capture.authorization, itemId, signal),
+        );
+      } catch (error) {
+        if (error instanceof CaptureRetiredError || error instanceof CaptureAuthenticationError)
+          throw error;
+        break;
+      }
+      if (item.state === "completed" && item.completion !== "partial") {
+        const model = item.resulting_model_id;
+        showCaptureOutcome(
+          item.collection_name ? `Imported to ${item.collection_name}` : "Imported",
+          Number.isSafeInteger(model) && Number(model) > 0
+            ? `${capture.config.vault}/models/${model}`
+            : url,
+          "Open in PrintStash",
+        );
+        return;
+      }
+      if (
+        item.state === "review" ||
+        item.state === "failed" ||
+        item.state === "completed" ||
+        item.state === "dismissed"
+      ) {
+        const reason = captureRecoveryMessage(
+          item.review_reason ?? item.error_code,
+          "Check this capture in Pending Imports.",
+        );
+        showCaptureOutcome(`Needs review: ${reason}`, url, "Review", "error");
+        return;
+      }
+      await capture.run(() => new Promise((resolve) => setTimeout(resolve, 650)));
+    }
+    showCaptureOutcome(
+      "Import started. Open PrintStash to check its progress.",
+      url,
+      "Open in PrintStash",
+      "",
+    );
+    return;
+  }
+  showCaptureOutcome("Sent to Pending Imports", url, "Review in PrintStash");
+}
+
+async function primeImportContext(config: Config, authorization: string) {
+  const controller = new AbortController();
+  importContext?.abort();
+  importContext = controller;
+  checkingImportContext = true;
+  resumingImport = false;
+  renderImportAvailability();
+  try {
+    const account = await captureAccount(config.vault, authorization, controller.signal);
+    const defaults = await importPreferences.defaults(config.vault, account);
+    if (controller.signal.aborted) return;
+    importAccount = account;
+    collection.choose(defaults.collection);
+    tagsInput.value = defaults.tags.join(", ");
+    if (!activePage?.url || !activeSource) return;
+    const items = await previousCaptures(config.vault, authorization, activePage.url);
+    if (controller.signal.aborted) return;
+    const previous = items.find((item) => item.state !== "failed" && item.state !== "dismissed");
+    if (previous) {
+      if (
+        previous.state === "captured" &&
+        (await canResumeCapture(config.vault, authorization, previous.id, controller.signal))
+      ) {
+        if (!controller.signal.aborted) resumingImport = true;
+        return;
+      }
+      if (controller.signal.aborted) return;
+      const url = previous.resulting_model_id
+        ? `${config.vault}/models/${previous.resulting_model_id}`
+        : captureReviewUrl(config.vault, previous);
+      showCaptureOutcome("Already in PrintStash", url, "Open");
+      importAgainButton.hidden = false;
+    }
+  } catch {
+    // The server still checks for an existing Pending Import at creation.
+  } finally {
+    if (importContext === controller) {
+      checkingImportContext = false;
+      renderImportAvailability();
+    }
+  }
+}
+
+importAgainButton.addEventListener("click", () => {
+  importAgain = true;
+  clearInboxAction();
+  showStatus();
+  renderImportAvailability();
+  captureButton.focus();
+  captureButton.click();
+});
+
+reviewBeforeImporting.addEventListener("change", () => {
+  void importPreferences.setReviewBeforeImporting(reviewBeforeImporting.checked);
+  renderImportAvailability();
+});
 
 function renderManualFileSelection(draft: BrowserCaptureMessage) {
   offerManualFile({ kind: "publication", draft });
@@ -660,6 +807,7 @@ function renderCandidateSelection(capture: BrowserCaptureMessage) {
         ? "Select Thingiverse files"
         : `Select ${activeSource} files`;
   candidateList.replaceChildren();
+  candidateList.onchange = renderImportAvailability;
   capture.candidates.forEach((candidate, index) => {
     const label = document.createElement("label");
     label.className = "candidate-option";
@@ -843,12 +991,32 @@ function renderImportAvailability() {
   preferenceFields.disabled = importBusy || !canCapture;
   coverPicker.hidden = activeSource === "Direct file";
   captureButton.hidden = !canCapture;
-  captureButton.disabled = importBusy || !canCapture;
+  captureButton.disabled = importBusy || checkingImportContext || !canCapture;
+  if (!importBusy && importIntentSupported) {
+    const legend = preferenceFields.querySelector("legend");
+    if (legend) {
+      legend.textContent = reviewBeforeImporting.checked
+        ? "Suggestions for review"
+        : "Import options";
+    }
+    const count = candidateList.querySelectorAll("input:checked").length;
+    captureButton.textContent = resumingImport
+      ? "Resume import"
+      : reviewBeforeImporting.checked
+        ? "Send to Pending Imports"
+        : count > 1
+          ? `Import ${count} files`
+          : "Import";
+  }
   importHint.hidden = !importBusy && (!pendingManualCapture || needsDirectFile);
   if (importBusy) {
+    const activity =
+      importIntentSupported && !reviewBeforeImporting.checked
+        ? "Importing into PrintStash…"
+        : "Sending to Pending Imports…";
     importHint.textContent = panelMode
-      ? "Sending to your review inbox… You can hide this panel; keep the source tab open."
-      : "Sending to your review inbox… Keep this popup open until it finishes.";
+      ? `${activity} You can hide this panel; keep the source tab open.`
+      : `${activity} Keep this popup open until it finishes.`;
   } else if (pendingManualCapture) {
     importHint.textContent = "Automatic download was unavailable.";
   }
@@ -1040,7 +1208,15 @@ async function establishConnection(
     }
 
     connectedConfig = normalized;
-    const verifiedConnection = verified as { user?: Profile; accessToken?: string };
+    const verifiedConnection = verified as {
+      user?: Profile;
+      accessToken?: string;
+      importIntent?: true;
+    };
+    importIntentSupported = verifiedConnection.importIntent === true;
+    collection.setDefaultLabel(
+      importIntentSupported ? "New collection from title" : "Choose in Pending Imports",
+    );
     connectedProfile = verifiedConnection.user || null;
     accessToken = verifiedConnection.accessToken || null;
     if (previous && previous.config.vault !== normalized.vault) clearInboxAction();
@@ -1052,6 +1228,9 @@ async function establishConnection(
     fillConnectionForm(normalized);
     renderConnection("connected", { config: normalized, profile: verifiedConnection.user });
     if (wasEditing) tabs.select(tabBeforeEdit);
+    const captureAuthorization = accessToken ?? normalized.deviceCredential;
+    if (importIntentSupported && captureAuthorization)
+      void primeImportContext(normalized, captureAuthorization);
     return true;
   } catch (error) {
     let failedOrigin = null;
@@ -1895,6 +2074,13 @@ async function searchCollections(query: string) {
   }
 }
 
+async function rememberCaptureDefaults(config: Config, tags: string[]) {
+  if (importAccount === null) return;
+  await importPreferences
+    .saveDefaults(config.vault, importAccount, { collection: collection.destination, tags })
+    .catch(() => {});
+}
+
 captureButton.addEventListener("click", async () => {
   if (!connectedConfig || connectionState !== "connected") {
     showStatus("Connect PrintStash before importing.", "error");
@@ -1925,19 +2111,19 @@ captureButton.addEventListener("click", async () => {
         `Transferring to PrintStash: ${progressLabel(loaded, total)}${total !== null && loaded === total ? " · awaiting confirmation" : ""}`,
       );
     });
+    const onReady: ImportIntent | undefined = importIntentSupported
+      ? reviewBeforeImporting.checked
+        ? "review"
+        : "import"
+      : undefined;
     const preferences = {
+      onReady,
+      importAgain,
       collectionId: collection.id,
       tags: captureTags(tagsInput.value),
       cover: selectedCaptureCover(coverInput.files?.[0]),
     };
-    const selectedImages = pendingGallery.filter(
-      (image) =>
-        gallerySelection?.querySelector<HTMLInputElement>(`input[data-image-id="${image.id}"]`)
-          ?.checked,
-    );
-    const downloadOrigins = [
-      ...new Set(selectedImages.map((image) => `${new URL(image.url).origin}/*`)),
-    ];
+    const downloadOrigins: string[] = [];
     if (pendingMarketplaceCapture?.source.provider === "cults")
       downloadOrigins.push(...CULTS_DOWNLOAD_ORIGINS);
     if (pendingMarketplaceCapture?.source.provider === "myminifactory")
@@ -2006,26 +2192,48 @@ captureButton.addEventListener("click", async () => {
             }),
       );
       clearManualFileSelection();
-      confirmCapture(captureReviewUrl(capture.config.vault, receipt));
+      await rememberCaptureDefaults(capture.config, preferences.tags);
+      await confirmCapture(
+        captureReviewUrl(capture.config.vault, receipt),
+        capture,
+        manual.kind === "direct" ? undefined : onReady,
+      );
       return;
     }
-    const draft =
-      pendingPrintablesCapture ??
-      pendingMakerWorldCapture ??
-      pendingThingiverseCapture ??
-      pendingMarketplaceCapture;
-    if (draft) {
+    async function uploadSelection(draft: BrowserCaptureMessage) {
+      const selectedImages = pendingGallery.filter(
+        (image) =>
+          gallerySelection?.querySelector<HTMLInputElement>(`input[data-image-id="${image.id}"]`)
+            ?.checked,
+      );
+      const imageOrigins = [
+        ...new Set(selectedImages.map((image) => `${new URL(image.url).origin}/*`)),
+      ];
+      if (imageOrigins.length) await ensureOriginPermissions(imageOrigins);
+      capture.assertCurrent();
       const selected = selectedPrintablesCandidates(draft);
       if (selected.length === 0) {
         showStatus("Select at least one file to upload.", "error");
         return;
+      }
+      // Chrome can close a toolbar popup when it opens a native access prompt.
+      // Obtain access before creating a capture session with durable slots.
+      const printablesLinks =
+        draft.source.provider === "printables" && onReady === "import"
+          ? await resolvePrintablesLinks(draft, selected, capture.signal)
+          : null;
+      if (printablesLinks) {
+        await ensurePrintablesFilePermissions(
+          printablesLinks.map((link) => link.url),
+          capture.signal,
+        );
       }
       const receipt = await capture.run((signal) =>
         captureSequentialFiles({
           ...preferences,
           fetchImpl: transferFetch,
           vault: capture.config.vault,
-          authorization,
+          authorization: capture.authorization,
           source: draft.source,
           title: activePage?.title,
           candidates: selected,
@@ -2046,10 +2254,12 @@ captureButton.addEventListener("click", async () => {
               showStatus(`Downloading ${candidate.filename}: ${progressLabel(loaded, total)}`);
             };
             if (draft.source.provider === "printables") {
-              const links = await resolvePrintablesLinks(draft, [candidate], capture.signal);
+              const links =
+                printablesLinks ??
+                (await resolvePrintablesLinks(draft, [candidate], capture.signal));
               const link = links.find((link) => link.id === candidate.id)?.url;
               if (!link) throw new Error("Printables link mapping changed.");
-              await ensurePrintablesFilePermissions([link], capture.signal);
+              if (!printablesLinks) await ensurePrintablesFilePermissions([link], capture.signal);
               return downloadPrintablesCandidate(candidate, link, signal, progress);
             }
             if (draft.source.provider === "makerworld") {
@@ -2198,7 +2408,16 @@ captureButton.addEventListener("click", async () => {
         }),
       );
       clearCandidateSelection();
-      confirmCapture(captureReviewUrl(capture.config.vault, receipt));
+      await rememberCaptureDefaults(capture.config, preferences.tags);
+      await confirmCapture(captureReviewUrl(capture.config.vault, receipt), capture, onReady);
+    }
+    const draft =
+      pendingPrintablesCapture ??
+      pendingMakerWorldCapture ??
+      pendingThingiverseCapture ??
+      pendingMarketplaceCapture;
+    if (draft) {
+      await uploadSelection(draft);
       return;
     }
     const visibleCapture =
@@ -2250,6 +2469,12 @@ captureButton.addEventListener("click", async () => {
         "capture_candidate_render_failed",
         "The provider files could not be shown. Choose a downloaded file to attach it in Pending Imports.",
       );
+      if (
+        onReady === "import" &&
+        ["printables", "thingiverse"].includes(visibleCapture.source.provider)
+      ) {
+        await uploadSelection(visibleCapture);
+      }
       return;
     }
     const pageUrl = activePage?.url;
@@ -2263,10 +2488,13 @@ captureButton.addEventListener("click", async () => {
         title: pageLabel.textContent,
         collectionId: preferences.collectionId,
         tags: preferences.tags,
+        onReady,
+        importAgain,
         captureSource: visibleCapture?.source,
       }),
     );
-    confirmCapture(result.inboxUrl);
+    await rememberCaptureDefaults(capture.config, preferences.tags);
+    await confirmCapture(result.inboxUrl, capture, onReady);
   } catch (error) {
     if (!captureOperations.isCurrent(capture) || error instanceof CaptureRetiredError) return;
     if (error instanceof CaptureAuthenticationError) {
@@ -2274,6 +2502,10 @@ captureButton.addEventListener("click", async () => {
       return;
     }
     if (error instanceof CaptureResponseError) {
+      if (error.diagnosticCode === "capture_already_pending") {
+        await primeImportContext(capture.config, capture.authorization);
+        if (inboxButton.dataset.url) return;
+      }
       if (error.diagnosticCode === "url_target_not_public" && !pendingManualCapture) {
         const fallback = fallbackVisibleCapture();
         if (fallback) {
@@ -2287,7 +2519,11 @@ captureButton.addEventListener("click", async () => {
           error.diagnosticCode,
         );
       } else {
-        showStatus(safeCaptureMessage(error), "error", error.diagnosticCode ?? "capture_failed");
+        showStatus(
+          captureRecoveryMessage(error.diagnosticCode, safeCaptureMessage(error)),
+          "error",
+          error.diagnosticCode ?? "capture_failed",
+        );
       }
       return;
     }
@@ -2501,6 +2737,42 @@ enablePanel.addEventListener("click", async () => {
   );
 });
 
+function pageTitleIsUrl(title: string | undefined, url: string) {
+  return !title?.trim() || title === url || title === url.replace(/^https?:\/\/(?:www\.)?/, "");
+}
+
+async function resolvePageTitle(page: Page) {
+  const { id, url, title } = page;
+  if (id === undefined || !url || !marketplaceOrigin(url) || !pageTitleIsUrl(title, url)) return;
+  try {
+    const [{ result } = {}] = await browser.scripting.executeScript({
+      target: { tabId: id },
+      func: () =>
+        document.querySelector<HTMLMetaElement>('meta[property="og:title"]')?.content.trim() ||
+        document.querySelector("main h1")?.textContent?.trim() ||
+        document.title.trim(),
+    });
+    if (typeof result === "string" && !pageTitleIsUrl(result, url)) {
+      page.title = result;
+      renderActivePage();
+    }
+  } catch {
+    // Tab permissions or the source document may have changed while opening PrintStash.
+  }
+}
+
+function measurePanelHeight(page: Page | null) {
+  if (!panelMode || !page?.url) return;
+  const origin = new URL(page.url).origin;
+  const observer = new ResizeObserver(() => {
+    const height = Math.ceil(
+      Math.max(document.body.scrollHeight, document.body.getBoundingClientRect().height),
+    );
+    if (height > 0) window.parent.postMessage({ type: "printstash-panel-height", height }, origin);
+  });
+  observer.observe(document.body);
+}
+
 async function captureTabs(): Promise<Page[]> {
   if (!panelMode) return browser.tabs.query({ active: true, currentWindow: true });
   const tab = await browser.runtime.sendMessage({ type: "printstash-panel-context" });
@@ -2536,8 +2808,13 @@ async function initialize() {
     ]),
     captureTabs(),
   ]);
+  reviewBeforeImporting.checked = await importPreferences
+    .reviewBeforeImporting()
+    .catch(() => false);
   activePage = openTabs[0] || null;
   renderActivePage();
+  measurePanelHeight(activePage);
+  if (activePage) void resolvePageTitle(activePage);
   if (!tabTouched) {
     const saved = POPUP_TABS.find((tab) => tab === stored.popupTab);
     tabs.select(activeSource ? "capture" : (saved ?? "capture"));

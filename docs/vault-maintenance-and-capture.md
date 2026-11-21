@@ -40,8 +40,15 @@ the Vault URL and a device name. It verifies the PrintStash service and
 authenticated user before exchanging the code for a browser-only credential,
 rechecks the connection when opened, and removes that credential and the Vault
 host permission on disconnect. Existing username/API-key setups remain a legacy
-migration path; new setups should use pairing. Every capture remains reviewable
-in Pending Imports before ingestion.
+migration path; new setups should use pairing.
+
+On a model page, open PrintStash and choose **Import**. PrintStash queues the
+import and the extension shows **Open in PrintStash** when it finishes. Pending
+Imports retains the receipt. If a capture needs a file or destination decision,
+the extension opens the review flow. Turn on **Review before importing** in
+extension Settings to send captures to Pending Imports for review by default.
+The extension remembers your last collection and tags for that Vault account.
+An existing capture offers **Open** before you send the same source again.
 
 | Source | Capture path and current boundary |
 | --- | --- |

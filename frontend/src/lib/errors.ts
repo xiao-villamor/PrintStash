@@ -168,7 +168,17 @@ const ERROR_MESSAGES = {
   url_scheme_not_allowed: "Only http(s) URLs can be imported.",
   url_host_missing: "That URL has no host.",
   url_dns_resolution_failed: "Couldn't resolve that host.",
-  url_target_not_public: "That URL points to a private or local address.",
+  url_target_not_public:
+    "PrintStash cannot download from private or local addresses. Download the file and attach it instead.",
+  staging_expired: "These files expired before they could be imported. Capture the source again.",
+  resolve_failed:
+    "PrintStash could not read this source. Check access or attach a downloaded file.",
+  browser_device_name_in_use:
+    "A browser with this name is already paired. Choose a different name.",
+  files_need_review: "Check the files and choose what to import.",
+  destination_not_editable: "Choose a collection you can edit.",
+  already_imported: "A capture from this source was already imported.",
+  capture_already_pending: "Open the existing item in Pending Imports to continue.",
   url_too_many_redirects: "The URL redirected too many times.",
   url_redirect_without_location: "The server redirected without a destination.",
   download_too_large: "The download exceeds the size limit.",

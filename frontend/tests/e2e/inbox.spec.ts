@@ -11,31 +11,25 @@
  * library. And a new import defaults its collection to the captured title, which
  * is the decision that makes a browser capture one click rather than three.
  */
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { collectPageProblems, useMockApi } from "./_setup";
 
 useMockApi();
 
+async function seedCapture(page: Page) {
+  const response = await page.request.post("/api/v1/inbox", {
+    data: { url: "https://www.printables.com/model/41-capture-bracket" },
+  });
+  expect(response.status()).toBe(201);
+}
+
 test.describe("pending imports", () => {
   test("pending imports render as a responsive review queue", async ({ page }) => {
     const problems = await collectPageProblems(page);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/");
-    await page.getByRole("button", { name: "Upload", exact: true }).click();
-    await page.getByRole("tab", { name: "From URL" }).click();
-    await page
-      .getByPlaceholder("Model page, collection, or direct .stl/.zip link")
-      .fill("https://www.printables.com/model/41-capture-bracket");
-    await page.getByRole("button", { name: "Capture for review" }).click();
-    await expect(page).toHaveURL(/\/inbox\/\d+$/);
-    // Move off the notification so its hover pause cannot cover the next action.
-    await page.mouse.move(0, 0);
-    await expect(
-      page.getByText("Captured URL. Review it before importing.", { exact: true }),
-    ).toBeHidden();
-    await expect(page).toHaveURL(/\/inbox\/41$/);
-    await page.getByRole("link", { name: "Back to inbox" }).click();
+    await seedCapture(page);
+    await page.goto("/inbox");
 
     const queue = page.getByRole("list", { name: "Captures" });
     await expect(queue.getByRole("heading", { name: "Capture bracket" })).toBeVisible();
@@ -49,19 +43,7 @@ test.describe("pending imports", () => {
   });
 
   test("pending imports can be deleted and completed jobs can be cleared", async ({ page }) => {
-    await page.goto("/");
-    await page.getByRole("button", { name: "Upload", exact: true }).click();
-    await page.getByRole("tab", { name: "From URL" }).click();
-    await page
-      .getByPlaceholder("Model page, collection, or direct .stl/.zip link")
-      .fill("https://www.printables.com/model/41-capture-bracket");
-    await page.getByRole("button", { name: "Capture for review" }).click();
-    await expect(page).toHaveURL(/\/inbox\/\d+$/);
-    // Move off the notification so its hover pause cannot cover the next action.
-    await page.mouse.move(0, 0);
-    await expect(
-      page.getByText("Captured URL. Review it before importing.", { exact: true }),
-    ).toBeHidden();
+    await seedCapture(page);
     await page.goto("/inbox");
 
     await page.getByRole("button", { name: "Delete import" }).click();
@@ -71,20 +53,9 @@ test.describe("pending imports", () => {
       .click();
     await expect(page.getByText("No imports in the queue")).toBeVisible();
 
-    await page.goto("/");
-    await page.getByRole("button", { name: "Upload", exact: true }).click();
-    await page.getByRole("tab", { name: "From URL" }).click();
-    await page
-      .getByPlaceholder("Model page, collection, or direct .stl/.zip link")
-      .fill("https://www.printables.com/model/41-capture-bracket");
-    await page.getByRole("button", { name: "Capture for review" }).click();
-    await expect(page).toHaveURL(/\/inbox\/\d+$/);
-    // Move off the notification so its hover pause cannot cover the next action.
-    await page.mouse.move(0, 0);
-    await expect(
-      page.getByText("Captured URL. Review it before importing.", { exact: true }),
-    ).toBeHidden();
-    await page.getByRole("button", { name: "Import selected" }).click();
+    await seedCapture(page);
+    await page.goto("/inbox/41");
+    await page.getByRole("button", { name: "Import", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Results" })).toBeVisible();
     await page.goto("/inbox");
 
@@ -95,6 +66,21 @@ test.describe("pending imports", () => {
       .getByRole("button", { name: "Clear completed" })
       .click();
     await expect(page.getByText("No completed imports")).toBeVisible();
+  });
+
+  test("imports a selection from the queue using its saved choices", async ({ page }) => {
+    await seedCapture(page);
+    await page.goto("/inbox");
+    const queue = page.getByRole("list", { name: "Captures" });
+    await queue.getByRole("checkbox").check();
+    await page.getByRole("button", { name: "Import selected" }).click();
+    await expect(page.getByText("No imports in the queue")).toBeVisible();
+    await page.getByRole("tab", { name: /Completed/ }).click();
+    await expect(page.getByRole("heading", { name: "Capture bracket" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "View", exact: true })).toHaveAttribute(
+      "href",
+      "/inbox/41",
+    );
   });
 
   test("pending import defaults its collection to the captured title", async ({ page }) => {
@@ -114,13 +100,14 @@ test.describe("pending imports", () => {
       page.getByText("Captured URL. Review it before importing.", { exact: true }),
     ).toBeHidden();
 
+    await page.getByRole("button", { name: "Edit destination" }).click();
     await expect(page.getByRole("combobox", { name: "Collection", exact: true })).toHaveValue(
       "new",
     );
     await expect(page.getByRole("textbox", { name: "Collection name" })).toHaveValue(
       "Capture bracket",
     );
-    await page.getByRole("button", { name: "Import selected" }).click();
+    await page.getByRole("button", { name: "Import", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Results" })).toBeVisible();
     expect(problems).toEqual([]);
   });

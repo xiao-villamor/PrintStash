@@ -8,6 +8,62 @@ import { claimBrowserPairing } from "../../../browser-extension/core";
 // The provider returns controlled STL bytes; extension transport, persistence,
 // pairing, recovery, review UI and ingestion all run against the real backend.
 test.describe("inbox-capture", () => {
+  test("imports the browser capture after transfer without opening review", async ({ page }) => {
+    const api = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}`;
+    const publication = String(Date.now());
+    const { code } = await (await page.request.post(`${api}/api/v1/browser-pairings`)).json();
+    const device = await claimBrowserPairing({
+      vault: api,
+      code,
+      name: `Quick capture ${publication}`,
+    });
+    const saved = new Map<string, unknown>();
+    const candidate = { id: "bracket", filename: "bracket.stl", fileType: "stl" as const };
+    const result = await captureSequentialFiles({
+      vault: api,
+      authorization: device.deviceCredential,
+      source: {
+        provider: "printables",
+        canonical_url: `https://www.printables.com/model/${publication}-bracket`,
+        source_item_id: publication,
+        source_revision: null,
+        adapter_version: "controlled-e2e",
+        tags: [],
+        fields: {},
+      },
+      title: `Quick capture ${publication}`,
+      onReady: "import",
+      candidates: [candidate],
+      storage: {
+        get: async () => Object.fromEntries(saved),
+        set: async (values) => {
+          for (const [key, value] of Object.entries(values)) saved.set(key, value);
+        },
+        remove: async (keys) => {
+          for (const key of [keys].flat()) saved.delete(key);
+        },
+      },
+      progress: () => {},
+      download: async () => ({
+        id: candidate.id,
+        filename: candidate.filename,
+        mediaType: "model/stl",
+        file: new Blob([stlFor(publication)]),
+      }),
+    });
+    const read = async () => (await page.request.get(`${api}/api/v1/inbox/${result.id}`)).json();
+    await expect.poll(async () => (await read()).state, { timeout: 30000 }).toBe("completed");
+    const item = await read();
+    expect(item.resulting_model_id).toBeGreaterThan(0);
+    await page.goto("/inbox");
+    await page.getByRole("tab", { name: /Completed/ }).click();
+    const row = page.locator("li").filter({ hasText: `Quick capture ${publication}` });
+    await expect(row.getByRole("link", { name: "Open model" })).toHaveAttribute(
+      "href",
+      `/models/${item.resulting_model_id}`,
+    );
+  });
+
   test("recovers a browser transfer before reviewing every resulting Model", async ({ page }) => {
     const api = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}`;
     const suffix = randomUUID();
@@ -69,12 +125,10 @@ test.describe("inbox-capture", () => {
     const receipt = await captureSequentialFiles(options);
     expect(downloads).toEqual(["first", "second", "second"]);
     await page.goto(`/inbox/${receipt.id}`);
-    await expect(
-      page.getByText("Storage: managed Vault. Changing the collection does not move files."),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit destination" })).toBeVisible();
     await expect(page.getByText("Provider estimate", { exact: true })).toHaveCount(2);
-    await page.getByRole("button", { name: "Import selected", exact: true }).click();
-    await expect(page.getByRole("link", { name: "Open model", exact: true })).toHaveCount(2, {
+    await page.getByRole("button", { name: "Import", exact: true }).click();
+    await expect(page.getByRole("link", { name: "Open model", exact: true })).toHaveCount(3, {
       timeout: 30000,
     });
     const result = await (await page.request.get(`${api}/api/v1/inbox/${receipt.id}`)).json();

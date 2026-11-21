@@ -67,6 +67,13 @@ export function mountMarketplacePanel(
       )
         return;
       if (event.data?.type === "printstash-hide-panel") setOpen(false);
+      if (
+        event.data?.type === "printstash-panel-height" &&
+        Number.isSafeInteger(event.data.height) &&
+        event.data.height > 0
+      ) {
+        frame.style.setProperty("--panel-content-height", `${event.data.height + 2}px`);
+      }
     },
     { signal: listeners.signal },
   );
