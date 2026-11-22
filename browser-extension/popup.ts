@@ -61,7 +61,7 @@ import {
 } from "./source-providers.ts";
 import { ALL_MARKETPLACE_ACCESS_ORIGINS, marketplaceAccessOrigins } from "./marketplace-access.ts";
 import { marketplaceOrigin } from "./marketplace-panel.ts";
-import { isMarketplacePanelEnabled } from "./panel-registration.ts";
+import { isMarketplacePanelEnabled, requestPanelsOnGrant } from "./panel-registration.ts";
 import { launcherButton, positionLauncher } from "./launcher.ts";
 import {
   defaultLauncherPreferences,
@@ -163,8 +163,12 @@ import {
 import { browserCaptureRoute } from "./capture-routing.ts";
 import {
   clearConnectionDraft,
+  holdPendingConnection,
+  PENDING_CONNECTION_MS,
   readConnectionDraft,
   saveConnectionDraft,
+  takePendingConnection,
+  type PendingConnection,
 } from "./connection-draft.ts";
 import { buildStatusPresentation, type StatusKind } from "./status-presentation.ts";
 
@@ -178,6 +182,12 @@ function requiredElement<T extends Element>(selector: string, constructor: { new
 const extensionApi = chrome as BrowserExtensionApi & { storage: LauncherStorage };
 const browser: BrowserProviderAdapter = createBrowserProviderAdapter(extensionApi);
 const launcherStore = launcherPreferences(extensionApi.storage);
+/** Memory-only storage shared by this extension's pages, never content scripts. */
+const sessionStore = (
+  extensionApi.storage as unknown as {
+    session: Parameters<typeof holdPendingConnection>[0];
+  }
+).session;
 const importPreferences = capturePreferences(browser.storage);
 const panelMode = new URL(location.href).searchParams.get("panel") === "1";
 document.documentElement.toggleAttribute("data-panel", panelMode);
@@ -1252,10 +1262,7 @@ async function answeringCandidate(candidates: string[], fetchImpl: typeof fetch)
 
 /** Ask the background to add the page button once marketplace access arrives. */
 function requestMarketplacePanels() {
-  for (const origin of MARKETPLACE_ORIGINS)
-    void browser.runtime
-      .sendMessage({ type: "printstash-enable-panel", origin })
-      .catch(() => false);
+  void requestPanelsOnGrant(sessionStore, MARKETPLACE_ORIGINS).catch(() => {});
 }
 
 async function establishConnection(
@@ -1265,6 +1272,7 @@ async function establishConnection(
     persist,
     candidates = [config.vault],
     marketplaces = false,
+    resumed = false,
   }: {
     requestPermission: boolean;
     persist: boolean;
@@ -1272,6 +1280,8 @@ async function establishConnection(
     candidates?: string[];
     /** Grant every supported marketplace in the same browser prompt. */
     marketplaces?: boolean;
+    /** Finishing an attempt whose popup Chrome closed for the prompt. */
+    resumed?: boolean;
   },
 ) {
   if (connectionLocked) return false;
@@ -1295,15 +1305,33 @@ async function establishConnection(
   showStatus();
   renderOpenServer(null);
   const candidateOrigins = [...new Set(candidates.map((vault) => permissionOrigin({ vault })))];
+  const ownsPermissions = requestPermission || resumed;
+  let held: Promise<void> = Promise.resolve();
   try {
-    if (requestPermission && marketplaces) requestMarketplacePanels();
+    if (requestPermission) {
+      if (marketplaces) requestMarketplacePanels();
+      // Not awaited yet: the prompt must open within this click's activation.
+      held = holdPendingConnection(sessionStore, {
+        ...config,
+        candidates,
+        expiresAt: Date.now() + PENDING_CONNECTION_MS,
+      }).catch(() => {});
+    }
     // One prompt: every address to try, plus the marketplaces when chosen.
-    await ensureVaultPermission(
-      requestPermission && marketplaces
-        ? [...candidateOrigins, ...ALL_MARKETPLACE_ACCESS_ORIGINS]
-        : candidateOrigins,
-      requestPermission,
-    );
+    try {
+      await ensureVaultPermission(
+        requestPermission && marketplaces
+          ? [...candidateOrigins, ...ALL_MARKETPLACE_ACCESS_ORIGINS]
+          : candidateOrigins,
+        requestPermission,
+      );
+    } finally {
+      // The popup survived the prompt, so nothing needs finishing later.
+      if (requestPermission) {
+        await held;
+        await takePendingConnection(sessionStore).catch(() => null);
+      }
+    }
     signal.throwIfAborted();
     if (candidates.length > 1) {
       config = { ...config, vault: await answeringCandidate(candidates, fetchImpl) };
@@ -1372,7 +1400,7 @@ async function establishConnection(
         origin !== permissionOrigin(normalized) &&
         (!previous || origin !== permissionOrigin(previous.config)),
     );
-    if (requestPermission && unused.length)
+    if (ownsPermissions && unused.length)
       await browser.permissions.remove({ origins: unused }).catch(() => false);
 
     connectedConfig = normalized;
@@ -1408,7 +1436,9 @@ async function establishConnection(
       // Invalid legacy settings have no origin permission to clean up.
     }
     const failedOrigins = candidateOrigins.filter((origin) => origin !== previousOrigin);
-    if (requestPermission && failedOrigins.length) {
+    // A sign-in page or an unaccepted certificate is fixed in a tab and then
+    // retried; keep that server's grant so the retry needs no second prompt.
+    if (ownsPermissions && failedOrigins.length && !(error instanceof VaultAccessError)) {
       await browser.permissions.remove({ origins: failedOrigins }).catch(() => false);
     }
     if (signal.aborted) return false;
@@ -2133,6 +2163,31 @@ function renderOpenServer(error: unknown) {
 openServerButton.addEventListener("click", () => {
   if (openServerUrl) void browser.tabs.create({ url: openServerUrl });
 });
+
+/** Finish a connection whose popup Chrome closed while asking for access. */
+async function resumePendingConnection(pending: PendingConnection) {
+  const { candidates, expiresAt: _expiresAt, ...config } = pending;
+  const origins = [...new Set(candidates.map((vault) => permissionOrigin({ vault })))];
+  if (!(await browser.permissions.contains({ origins }).catch(() => false))) return false;
+  vaultInput.value = config.vault;
+  if (config.deviceName) deviceNameInput.value = config.deviceName;
+  connectionPanel.hidden = false;
+  lockConnection(false);
+  try {
+    if (
+      await establishConnection(config, {
+        requestPermission: false,
+        persist: true,
+        candidates,
+        resumed: true,
+      })
+    )
+      showStatus("Access allowed. This browser is connected and ready to import.");
+  } catch {
+    // establishConnection shows why the connection failed.
+  }
+  return true;
+}
 
 /** The marketplace switch disappears once every marketplace is granted. */
 async function renderMarketplaceAccess() {
@@ -3081,6 +3136,8 @@ async function initialize() {
   }
   renderLauncherPreferences();
   await renderMarketplaceAccess();
+  const pending = await takePendingConnection(sessionStore).catch(() => null);
+  if (pending && (await resumePendingConnection(pending))) return;
   const prepared = await takePreparedSetup(activePage);
   if (prepared) {
     fillConnectionForm(prepared);

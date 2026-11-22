@@ -89,6 +89,21 @@ describe("marketplacePanelActivation", () => {
     expect([...scripts.values()].map((entry) => entry.matches)).toEqual([[origin]]);
   });
 
+  it("activates a requested site that arrives inside a subdomain grant", async () => {
+    fakeBrowser.reset();
+    const origin = "https://www.printables.com/*";
+    const granted: string[] = [];
+    const { api, scripts } = registrationFixture(granted);
+    const activation = marketplacePanelActivation(api, fakeBrowser.storage.session, async () => {});
+
+    await activation.request(origin);
+    // The browser covers www.printables.com with the wildcard it reports.
+    granted.push(origin);
+    await activation.permissionAdded(["https://*.printables.com/*"]);
+
+    expect([...scripts.values()].map((entry) => entry.matches)).toEqual([[origin]]);
+  });
+
   it("does not activate a grant without a matching user request", async () => {
     fakeBrowser.reset();
     const origin = "https://www.thingiverse.com/*";

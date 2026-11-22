@@ -402,8 +402,10 @@ async function fetchVault(
 ) {
   try {
     return await fetchImpl(`${base}${path}`, options);
-  } catch {
-    if (options.signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+  } catch (error) {
+    // A cancelled attempt is not an unreachable server.
+    if (options.signal?.aborted || (error as { name?: unknown } | null)?.name === "AbortError")
+      throw new DOMException("The operation was aborted.", "AbortError");
     throw await unreachableVault(fetchImpl, base);
   }
 }

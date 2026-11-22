@@ -768,6 +768,19 @@ describe("reaching a server", () => {
     expect(error.message).not.toContain("certificate");
   });
 
+  it("reports a cancelled request as cancelled, without probing the server", async () => {
+    const requests: RequestInit[] = [];
+    const failure = await verifyVaultReachability({
+      vault: "https://prints.example.com",
+      fetchImpl: async (_input, init) => {
+        requests.push(init ?? {});
+        throw new DOMException("The operation was aborted.", "AbortError");
+      },
+    }).catch((error) => error);
+    expect(failure.name).toBe("AbortError");
+    expect(requests).toHaveLength(1);
+  });
+
   it("still calls an ordinary website not a PrintStash server", async () => {
     await expect(
       verifyVaultReachability({

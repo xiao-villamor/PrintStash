@@ -54,3 +54,64 @@ export async function saveConnectionDraft(
 export async function clearConnectionDraft(storage: DraftStorage): Promise<void> {
   await storage.remove([KEY]);
 }
+
+/**
+ * A connection waiting on Chrome's permission prompt.
+ *
+ * Chrome closes the toolbar popup when that prompt opens, ending the attempt
+ * before the user can allow it. The attempt is held, with its single-use
+ * pairing code or API key, in session storage: memory only, never written to
+ * disk, unreadable by content scripts, and kept for two minutes. Reopening
+ * the popup after allowing finishes the connection and forgets it.
+ */
+export interface PendingConnection {
+  vault: string;
+  candidates: string[];
+  pairingCode?: string;
+  deviceName?: string;
+  username?: string;
+  apiKey?: string;
+  expiresAt: number;
+}
+
+const PENDING_KEY = "pendingConnection";
+export const PENDING_CONNECTION_MS = 2 * 60 * 1000;
+
+export async function holdPendingConnection(
+  session: DraftStorage,
+  pending: PendingConnection,
+): Promise<void> {
+  await session.set({ [PENDING_KEY]: pending });
+}
+
+/** Return the held connection once, if it has not expired. */
+export async function takePendingConnection(
+  session: DraftStorage,
+  now = Date.now(),
+): Promise<PendingConnection | null> {
+  const stored = (await session.get([PENDING_KEY]))[PENDING_KEY];
+  await session.remove([PENDING_KEY]);
+  if (!stored || typeof stored !== "object") return null;
+  const held = stored as Record<string, unknown>;
+  const candidates = Array.isArray(held.candidates)
+    ? held.candidates.filter((value): value is string => typeof value === "string")
+    : [];
+  if (
+    typeof held.vault !== "string" ||
+    !candidates.length ||
+    typeof held.expiresAt !== "number" ||
+    held.expiresAt <= now
+  )
+    return null;
+  const optional = (name: string) =>
+    typeof held[name] === "string" ? { [name]: held[name] as string } : {};
+  return {
+    vault: held.vault,
+    candidates,
+    expiresAt: held.expiresAt,
+    ...optional("pairingCode"),
+    ...optional("deviceName"),
+    ...optional("username"),
+    ...optional("apiKey"),
+  };
+}

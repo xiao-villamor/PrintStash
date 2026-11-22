@@ -75,6 +75,24 @@ interface PanelIntentStorage {
 }
 
 const PERMISSION_INTENT_MS = 120_000;
+const intentKey = (origin: string) => `panel-permission:${panelIdentity(origin).id}`;
+
+/**
+ * Ask for the page button on these sites once their grant arrives.
+ *
+ * Written straight to session storage by the popup: Chrome closes the popup
+ * when its permission prompt opens, and a message to a sleeping background
+ * worker can be dropped with it, while a storage write already sent is kept.
+ */
+export async function requestPanelsOnGrant(
+  intent: Pick<PanelIntentStorage, "set">,
+  origins: readonly string[],
+  now = Date.now(),
+): Promise<void> {
+  await intent.set(
+    Object.fromEntries(origins.map((origin) => [intentKey(origin), now + PERMISSION_INTENT_MS])),
+  );
+}
 
 /** Complete a user-requested activation even if Chrome closes the requesting popup. */
 export function marketplacePanelActivation(
@@ -83,7 +101,7 @@ export function marketplacePanelActivation(
   inject: (origin: string) => Promise<void>,
 ) {
   const installing = new Map<string, Promise<boolean>>();
-  const keyFor = (origin: string) => `panel-permission:${panelIdentity(origin).id}`;
+  const keyFor = intentKey;
 
   function install(origin: string) {
     const result = (installing.get(origin) ?? Promise.resolve(false))
@@ -108,9 +126,13 @@ export function marketplacePanelActivation(
       await intent.set({ [key]: Date.now() + PERMISSION_INTENT_MS });
       return install(origin);
     },
-    async permissionAdded(origins: string[]) {
-      for (const origin of origins) {
-        if (!MARKETPLACE_ORIGINS.includes(origin)) continue;
+    /**
+     * Chrome reports a grant by the patterns it keeps, so `www.printables.com`
+     * arrives inside `*.printables.com`. Every site waiting on a request is
+     * checked instead; installing it still requires the browser's grant.
+     */
+    async permissionAdded(_origins: string[]) {
+      for (const origin of MARKETPLACE_ORIGINS) {
         const key = keyFor(origin);
         const expiry = (await intent.get([key]))[key];
         if (typeof expiry !== "number") continue;

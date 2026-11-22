@@ -127,7 +127,10 @@ granting a new vault host permission.
 With **Allow supported marketplaces** on (the default), that one Chrome prompt
 also covers every supported marketplace and its download and image hosts, so
 imports and the on-page button never ask again. Turned off, each marketplace
-asks once, at its first import click, for all of its hosts together.
+asks once, at its first import click, for all of its hosts together. Chrome
+closes the toolbar popup when it shows that prompt: reopen the popup after
+choosing **Allow** and it finishes connecting. Until then the attempt, with its
+one-time pairing code, is held only in the browser's memory, for two minutes.
 
 Server addresses:
 

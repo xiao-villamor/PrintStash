@@ -526,11 +526,100 @@ describe("popup browser adapters", () => {
       expect(fakeBrowser.permissions.request).toHaveBeenCalledExactlyOnceWith({
         origins: ["https://prints.example.com/*", ...ALL_MARKETPLACE_ACCESS_ORIGINS],
       });
-      // The background adds the page button when the grant arrives.
-      expect(vi.mocked(fakeBrowser.runtime.sendMessage).mock.calls.map(([m]) => m)).toEqual(
-        MARKETPLACE_ORIGINS.map((origin) => ({ type: "printstash-enable-panel", origin })),
-      );
+      // The background adds the page button when the grant arrives. The
+      // request is stored, not messaged, so a popup Chrome closes keeps it.
+      const intents = await fakeBrowser.storage.session.get(null);
+      expect(
+        Object.keys(intents).filter((key) => key.startsWith("panel-permission:")),
+      ).toHaveLength(MARKETPLACE_ORIGINS.length);
+      expect(fakeBrowser.runtime.sendMessage).not.toHaveBeenCalled();
       expect(element("#connection-title").textContent).toBe("Connected");
+      // The popup survived the prompt, so nothing is held for later.
+      expect(await fakeBrowser.storage.session.get("pendingConnection")).toEqual({});
+    });
+
+    it("finishes a connection whose popup closed for the browser prompt", async () => {
+      // The previous popup asked for access and was closed before the answer.
+      await fakeBrowser.storage.session.set({
+        pendingConnection: {
+          vault: "https://prints.example.com",
+          candidates: ["https://prints.example.com"],
+          pairingCode: "held-code",
+          deviceName: "Chrome",
+          expiresAt: Date.now() + 60_000,
+        },
+      });
+      const claims: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (String(input).endsWith("/browser-pairings/claim")) {
+            claims.push(JSON.parse(String(init?.body)).code);
+            return response({ credential: "device" });
+          }
+          return response({ status: "ok", name: "PrintStash" });
+        }),
+      );
+      await import("../popup.ts");
+      for (let attempt = 0; attempt < 4; attempt += 1) await settle();
+
+      expect(claims).toEqual(["held-code"]);
+      expect(fakeBrowser.permissions.request).not.toHaveBeenCalled();
+      expect(element("#connection-title").textContent).toBe("Connected");
+      expect(await fakeBrowser.storage.session.get("pendingConnection")).toEqual({});
+      expect((await fakeBrowser.storage.local.get("deviceCredential")).deviceCredential).toBe(
+        "device",
+      );
+    });
+
+    it("drops a held connection the browser never allowed", async () => {
+      await fakeBrowser.storage.session.set({
+        pendingConnection: {
+          vault: "https://prints.example.com",
+          candidates: ["https://prints.example.com"],
+          pairingCode: "held-code",
+          expiresAt: Date.now() + 60_000,
+        },
+      });
+      fakeBrowser.permissions.contains = vi.fn().mockResolvedValue(false);
+      const fetchImpl = vi.fn(async () => response({ status: "ok", name: "PrintStash" }));
+      vi.stubGlobal("fetch", fetchImpl);
+      await import("../popup.ts");
+      await settle();
+
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(await fakeBrowser.storage.session.get("pendingConnection")).toEqual({});
+      expect(element("#connection-title").textContent).not.toBe("Connected");
+    });
+
+    it("keeps the server's access while the user signs in to its proxy", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response("<html>Sign in</html>", { status: 401 })),
+      );
+      await import("../popup.ts");
+      await settle();
+      fillPairing("https://prints.example.com");
+      button("#connect").click();
+      await settle();
+
+      expect(fakeBrowser.permissions.remove).not.toHaveBeenCalled();
+    });
+
+    it("drops access to an address that is not a PrintStash server", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => response({ status: "ok", name: "Router" })),
+      );
+      await import("../popup.ts");
+      await settle();
+      fillPairing("https://router.example.com");
+      button("#connect").click();
+      await settle();
+
+      expect(fakeBrowser.permissions.remove).toHaveBeenCalledWith({
+        origins: ["https://router.example.com/*"],
+      });
     });
 
     it("asks for the server alone when marketplaces are switched off", async () => {

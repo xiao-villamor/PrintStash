@@ -2,8 +2,10 @@
 import { describe, expect, it } from "vitest";
 import {
   clearConnectionDraft,
+  holdPendingConnection,
   readConnectionDraft,
   saveConnectionDraft,
+  takePendingConnection,
 } from "../connection-draft.ts";
 
 function memoryStorage() {
@@ -77,5 +79,35 @@ describe("connection draft", () => {
     const storage = memoryStorage();
     storage.values.set("connectionDraft", "not an object");
     expect(await readConnectionDraft(storage)).toBeNull();
+  });
+
+  describe("a connection waiting on the browser prompt", () => {
+    const held = {
+      vault: "http://nas.lan:3470",
+      candidates: ["http://nas.lan:3470", "https://nas.lan:3470"],
+      pairingCode: "one-time",
+      deviceName: "Chrome",
+      expiresAt: 2_000,
+    };
+
+    it("is returned once", async () => {
+      const session = memoryStorage();
+      await holdPendingConnection(session, held);
+      expect(await takePendingConnection(session, 1_000)).toEqual(held);
+      expect(await takePendingConnection(session, 1_000)).toBeNull();
+    });
+
+    it("expires", async () => {
+      const session = memoryStorage();
+      await holdPendingConnection(session, held);
+      expect(await takePendingConnection(session, 2_000)).toBeNull();
+      expect(session.values.size).toBe(0);
+    });
+
+    it("ignores a held value without addresses", async () => {
+      const session = memoryStorage();
+      session.values.set("pendingConnection", { ...held, candidates: [] });
+      expect(await takePendingConnection(session, 1_000)).toBeNull();
+    });
   });
 });
