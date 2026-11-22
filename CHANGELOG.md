@@ -12,6 +12,7 @@
 
 - Web captures can import directly from the browser extension. Pending Imports retains the result and opens the resulting Model. Captures that need a decision stay available for review. The extension remembers collection and tag choices and can be set to always review.
 - Pending Imports shows saved destinations, simpler review controls, and single or bulk import actions for ready captures. Direct files appear as one selected file. The on-page panel fits its content and uses the marketplace title when available.
+- The extension keeps the server URL, browser name and connection method while its popup closes to copy a pairing code. Pairing codes and API keys are never kept.
 - The extension requests missing Printables and Thingiverse permissions together before starting a transfer and reuses existing grants for the launcher.
 - The extension imports the default files with one Import click. Change the selection inline, choose a cover from the gallery thumbnails, or exclude the whole gallery. The Import button and status stay visible while the options scroll.
 - The Library shows child collection previews in grouped rows, and selecting a collection checks its loaded Model cards. Clicking a Model in the tree reveals its card and opens the inspector.

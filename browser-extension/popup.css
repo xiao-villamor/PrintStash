@@ -142,6 +142,11 @@ a {
   outline-offset: 2px;
 }
 
+/* Fields fill the scrolling column edge to edge, so an outside ring is clipped. */
+input:not([type="radio"], [type="checkbox"]):focus-visible {
+  outline-offset: -2px;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;

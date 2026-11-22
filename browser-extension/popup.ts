@@ -156,6 +156,11 @@ import {
   type BrowserProviderAdapter,
 } from "./browser-provider-adapter.ts";
 import { browserCaptureRoute } from "./capture-routing.ts";
+import {
+  clearConnectionDraft,
+  readConnectionDraft,
+  saveConnectionDraft,
+} from "./connection-draft.ts";
 import { buildStatusPresentation, type StatusKind } from "./status-presentation.ts";
 
 declare const chrome: unknown;
@@ -1285,6 +1290,7 @@ async function establishConnection(
     cancelButton.disabled = true;
     if (persist) {
       const credentials: Config = normalized;
+      await clearConnectionDraft(browser.storage).catch(() => {});
       // One set publishes the vault and its credential kind together. Nulls
       // erase inactive secrets; initialization only accepts string credentials.
       await browser.storage.set({
@@ -2028,6 +2034,21 @@ removeCover.addEventListener("click", () => {
   coverInput.focus();
 });
 deviceNameInput.addEventListener("input", clearPairingError);
+// The popup closes while the user copies a pairing code; keep what they typed.
+function rememberConnectionDraft() {
+  if (connectionState === "connected" && !editingConnection) return;
+  void saveConnectionDraft(browser.storage, {
+    vault: vaultInput.value,
+    method: apiKeyMethod.checked ? "api-key" : "pairing",
+    deviceName: deviceNameInput.value,
+    username: usernameInput.value,
+  }).catch(() => {});
+}
+for (const control of [vaultInput, deviceNameInput, usernameInput, pairingMethod, apiKeyMethod])
+  control.addEventListener(
+    control instanceof HTMLInputElement && control.type === "radio" ? "change" : "input",
+    rememberConnectionDraft,
+  );
 pairingCodeInput.addEventListener("input", clearPairingError);
 
 function showConnectionFeedback(message: string) {
@@ -2999,6 +3020,16 @@ async function initialize() {
       : {}),
   };
   fillConnectionForm(storedConfig);
+  if (!storedConfig.deviceCredential && !storedConfig.apiKey) {
+    const draft = await readConnectionDraft(browser.storage).catch(() => null);
+    if (draft) {
+      vaultInput.value = draft.vault;
+      if (draft.deviceName) deviceNameInput.value = draft.deviceName;
+      usernameInput.value = draft.username;
+      (draft.method === "api-key" ? apiKeyMethod : pairingMethod).checked = true;
+      renderCredentialFields();
+    }
+  }
   lockConnection(false);
 
   if (
