@@ -80,3 +80,15 @@ class TestFrontendBuildContext:
         )
 
         assert context == {f"packages/{package}/package.json"}
+
+    def test_drops_the_real_backend_browser_suites(self, tmp_path: Path) -> None:
+        context = _context(
+            tmp_path,
+            (
+                "src/main.tsx",
+                "tests/e2e/library.spec.ts",
+                "tests/e2e-real/inbox-capture.spec.ts",
+            ),
+        )
+
+        assert context == {"src/main.tsx", "tests/e2e/library.spec.ts"}

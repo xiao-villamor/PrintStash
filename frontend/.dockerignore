@@ -2,3 +2,6 @@
 **/node_modules
 .pnpm-store
 npm-debug.log*
+# Real-backend browser suites import the extension from outside this context;
+# the image typecheck cannot resolve them and the SPA never ships them.
+tests/e2e-real
