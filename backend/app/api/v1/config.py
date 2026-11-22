@@ -12,8 +12,8 @@ from sqlmodel import Session
 
 from app.api.edit_preconditions import edit_precondition
 from app.core.config import settings
-from app.core.security import require_superuser
-from app.db.models import User
+from app.core.security import require_superuser, require_user
+from app.db.models import SystemConfig, User
 from app.db.session import get_session
 from app.db.transactions import rollback_on_failure
 from app.modules.administration import config_edits, runtime_config
@@ -162,6 +162,26 @@ class VaultConfigUpdate(BaseModel):
     backup_s3_region: Optional[str] = None
     backup_s3_access_key: Optional[str] = None
     backup_s3_secret_key: Optional[str] = None
+
+
+class PreviewLookRead(BaseModel):
+    """The look generated Model images currently use."""
+
+    preview_look: PreviewLook
+
+
+@router.get(
+    "/preview-look",
+    summary="Get the look generated Model images use",
+    description="Lets every signed-in viewer shade interactive 3D views like the cards.",
+    dependencies=[Depends(require_user)],
+)
+def get_preview_look(session: Session = Depends(get_session)) -> PreviewLookRead:
+    from app.modules.derivatives.policy import render_appearance
+
+    return PreviewLookRead(
+        preview_look=render_appearance(session.get(SystemConfig, 1)).look
+    )
 
 
 @router.get("/preview-example", dependencies=[Depends(require_superuser)])

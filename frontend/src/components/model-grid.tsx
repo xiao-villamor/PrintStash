@@ -131,10 +131,15 @@ import { CollectionReadme } from "@/components/collection-readme";
 import { useCollectionReadmeRenderer } from "@/components/use-collection-readme-renderer";
 import { MultipartModelTagsDialog } from "@/components/multipart-model-tags-dialog";
 import { MultipartModelCard } from "@/components/multipart-model-card";
-import { useCollectionsPane } from "@/lib/collections-pane-context";
+import { useCollectionsPaneOpen } from "@/lib/collections-pane-context";
+import { subscribeUploadRequests } from "@/lib/upload-requests";
 import { LibraryCollectionsPane, LibraryBreadcrumbs } from "@/components/collections-pane";
 import { FilterSidebar } from "@/components/filter-sidebar";
-import { readLibraryLocation, type LibraryViewMode } from "@/features/library/url";
+import {
+  libraryDestinationHref,
+  readLibraryLocation,
+  type LibraryViewMode,
+} from "@/features/library/url";
 import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
 import { StructuredFilters } from "@/components/structured-filters";
 import { LibraryFilterPicker, type LibraryFilterField } from "@/components/library-filter-picker";
@@ -727,7 +732,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const { locale, t } = useI18n();
   const ui = useCallback((value: string) => translateUiText(locale, value), [locale]);
   const router = useRouter();
-  const pane = useCollectionsPane();
+  const paneOpen = useCollectionsPaneOpen();
   const { savedViewsHost, setSavedViewsAvailable } = useNavigationShell();
   const searchParams = useSearchParams();
   const auth = useRequireAuth();
@@ -872,6 +877,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     canonicalParams.set("cid", String(destinationCollection.id));
   }
   const canonicalLibraryHref = `/?${canonicalParams}`;
+  // Dialog parameters stay in the URL but never change what the Library shows.
+  const destinationHref = libraryDestinationHref(canonicalLibraryHref);
   const currentLocationHref = searchParams.size ? `/?${searchParams}` : "/";
   useEffect(() => {
     if (currentLocationHref !== canonicalLibraryHref) router.replace(canonicalLibraryHref);
@@ -1290,7 +1297,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     modelQuery.data !== undefined &&
     !modelQuery.isPlaceholderData;
 
-  const entry = useLibraryEntry(canonicalLibraryHref, projectionReady);
+  const entry = useLibraryEntry(destinationHref, projectionReady);
   const [refreshState, setRefreshState] = useState<LibraryRefreshState | null>(null);
   const refreshScope = useRef({ entry, sequence: 0 });
   useLayoutEffect(() => {
@@ -1384,7 +1391,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     (lookupStatus === 403 ||
       lookupStatus === 404 ||
       settledSnapshot === null ||
-      settledSnapshot.entry.href !== canonicalLibraryHref);
+      settledSnapshot.entry.href !== destinationHref);
   if (unavailableCollection && settledSnapshot !== null) setSettledSnapshot(null);
   if (nextSnapshot !== null && nextSnapshot !== settledSnapshot) setSettledSnapshot(nextSnapshot);
   const snapshot =
@@ -2392,7 +2399,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     !searchQuery &&
     (visibleCollections.length > 0 || reservedCollections > 0);
   // Links belong to the displayed result even while another destination loads.
-  const currentLibraryHref = snapshot?.entry.href ?? canonicalLibraryHref;
+  const currentLibraryHref = snapshot?.entry.href ?? destinationHref;
   const inspectorScope = `${entry.session}:${entry.key}:${currentLibraryHref}`;
   const [inspectorState, setInspectorState] = useState<{
     scope: string;
@@ -2741,6 +2748,22 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const uploadDefaultCollection =
     user?.is_superuser || canWriteCollection(selectedCollectionRow) ? selectedCollection : null;
   const showUpload = uploadOpen || (uploadRequested && canUploadToVault);
+  useEffect(
+    () =>
+      subscribeUploadRequests(() => {
+        setDropPreload(null);
+        setDropCollection(null);
+        setUploadOpen(true);
+      }),
+    [],
+  );
+  // Warm the dialog's code once the Library is usable, so the first Upload
+  // does not wait for its download.
+  useEffect(() => {
+    if (!browseReady || !canUploadToVault) return;
+    const id = window.setTimeout(() => void loadUploadModal(), 1500);
+    return () => window.clearTimeout(id);
+  }, [browseReady, canUploadToVault]);
   function closeUpload() {
     setUploadOpen(false);
     if (uploadRequested) {
@@ -3605,7 +3628,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         {/* Stitch layout: filter sidebar + main content */}
         <LibraryCollectionsPane>
           <FilterSidebar
-            collectionsOnly={pane !== null}
+            collectionsOnly={paneOpen !== null}
             filtersOpen={false}
             outlinerFilters={baseFilters}
             tags={tags}
@@ -3862,7 +3885,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </div>
               </div>
               {newCollectionButton}
-              {!pane && (
+              {paneOpen === null && (
                 <Button
                   onClick={() => {
                     setDropPreload(null);
@@ -4354,7 +4377,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     />
                     <LoadMore
                       paused={reading.status === "restoring" || !browseReady}
-                      layoutKey={`${viewMode}:${pane?.open ?? true}`}
+                      layoutKey={`${viewMode}:${paneOpen ?? true}`}
                       hasMore={snapshot?.moreFolders ?? false}
                       loading={fetchingFolders || currentRefresh !== null}
                       failed={folderPages.isFetchNextPageError}
@@ -4365,7 +4388,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     />
                     <LoadMore
                       paused={reading.status === "restoring" || !browseReady}
-                      layoutKey={`${viewMode}:${pane?.open ?? true}`}
+                      layoutKey={`${viewMode}:${paneOpen ?? true}`}
                       hasMore={hasMore && !refreshRequired}
                       loading={loadingMore}
                       failed={modelQuery.isFetchNextPageError}
@@ -4419,7 +4442,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       />
                       <LoadMore
                         paused={reading.status === "restoring" || !browseReady}
-                        layoutKey={`${viewMode}:${pane?.open ?? true}`}
+                        layoutKey={`${viewMode}:${paneOpen ?? true}`}
                         hasMore={snapshot?.moreFolders ?? false}
                         loading={fetchingFolders || currentRefresh !== null}
                         failed={folderPages.isFetchNextPageError}
@@ -4482,7 +4505,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     </div>
                     <LoadMore
                       paused={reading.status === "restoring" || !browseReady}
-                      layoutKey={`${viewMode}:${pane?.open ?? true}`}
+                      layoutKey={`${viewMode}:${paneOpen ?? true}`}
                       hasMore={hasMore && !refreshRequired}
                       loading={loadingMore}
                       failed={modelQuery.isFetchNextPageError}

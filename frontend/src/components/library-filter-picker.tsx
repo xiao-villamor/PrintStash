@@ -1,19 +1,28 @@
 import { useRef, useState } from "react";
 import {
   ArrowLeft,
+  BadgeCheck,
   Calendar,
   Check,
   ChevronRight,
-  Filter,
+  Copy,
+  Cpu,
+  FileBox,
+  GitBranch,
+  HardDrive,
   History,
+  Layers,
+  Palette,
   Search,
   Star,
   Tags,
   Printer,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { LibraryFilterChoice } from "@/components/library-filter-choice";
 import { PrintHistoryFields } from "@/components/print-history-fields";
 import {
@@ -23,6 +32,7 @@ import {
 import { filterValueText } from "@/lib/filter-labels";
 import { historyKeys } from "@/lib/search-filters";
 import { useI18n } from "@/lib/i18n";
+import type { MessageKey } from "@/lib/locale";
 import type { ModelFacetsRead, PrinterRead, SavedViewFilters, TagRead } from "@/types";
 
 export type LibraryFilterField =
@@ -49,6 +59,43 @@ type Choice = {
   count?: number;
   select: (checked: boolean) => void;
 };
+const ICONS = {
+  material_type: Palette,
+  file_type: FileBox,
+  revision_status: GitBranch,
+  printed: Check,
+  slicer_name: Layers,
+  printer_model: Cpu,
+  print_outcome: BadgeCheck,
+  storage: HardDrive,
+  has_similar_candidates: Copy,
+  tags: Tags,
+  printer: Printer,
+  favorites: Star,
+  uploaded: Calendar,
+  history: History,
+} as const satisfies Record<Category, LucideIcon>;
+/** The category list reads as three short, familiar groups instead of one long column. */
+const SECTIONS: { label: MessageKey; ids: Category[] }[] = [
+  {
+    label: "library.filters.sectionFiles",
+    ids: ["file_type", "storage", "tags", "uploaded"],
+  },
+  {
+    label: "library.filters.sectionPrinting",
+    ids: [
+      "material_type",
+      "slicer_name",
+      "printer_model",
+      "printer",
+      "revision_status",
+      "print_outcome",
+      "history",
+    ],
+  },
+];
+/** Two-state filters toggle in place: opening a page for one checkbox was a detour. */
+const QUICK: Category[] = ["favorites", "printed", "has_similar_candidates"];
 const facetsOrder: (keyof ModelFacetsRead)[] = [
   "material_type",
   "file_type",
@@ -221,6 +268,121 @@ export function LibraryFilterPicker({
     const choices = group.choices.filter((choice) => matches(group.label) || matches(choice.label));
     return !needle || matches(group.label) || choices.length ? [{ ...group, choices }] : [];
   });
+  function clearGroup(id: Category) {
+    if (id === "tags") onChange("tag", []);
+    else if (id === "printer") {
+      onChange("printer_id", []);
+      onChange("printer_presence", []);
+    } else if (id === "uploaded") {
+      onChange("uploaded_after", []);
+      onChange("uploaded_before", []);
+    } else if (id === "history") {
+      for (const key of historyKeys) if (filters[key] != null) onChange(key, []);
+    } else onChange(id, []);
+  }
+  /** What a category currently narrows to, in the words its values use. */
+  function summary(group: (typeof groups)[number]) {
+    if (group.id === "uploaded") {
+      const { uploaded_after: after, uploaded_before: before } = filters;
+      if (after && before) return `${after} – ${before}`;
+      if (after) return `${t("After")} ${after}`;
+      if (before) return `${t("Before")} ${before}`;
+      return null;
+    }
+    if (group.id === "history") {
+      const active = activeCount(group);
+      return active ? t("library.filters.conditions", { count: active }) : null;
+    }
+    const labels = group.choices.filter((choice) => choice.checked).map((choice) => choice.label);
+    return labels.length ? labels.join(", ") : null;
+  }
+  function categoryRow(group: (typeof groups)[number]) {
+    const Icon = ICONS[group.id];
+    const active = activeCount(group);
+    const selected = summary(group);
+    return (
+      <button
+        key={group.id}
+        type="button"
+        onClick={() => choose(group.id)}
+        aria-label={selected ? `${group.label}: ${selected}` : group.label}
+        data-active={active > 0 || undefined}
+        className="group/filter flex min-h-9 w-full items-center gap-2.5 rounded px-2 py-1.5 text-left text-sm transition-colors duration-press hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      >
+        <span
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-sm ${active ? "bg-accent text-accent-foreground" : "bg-muted text-muted-foreground"}`}
+        >
+          <Icon className="h-3.5 w-3.5" aria-hidden />
+        </span>
+        <span className="shrink-0">{group.label}</span>
+        <span className="min-w-0 flex-1 truncate text-right text-xs text-muted-foreground">
+          {selected}
+        </span>
+        {active > 1 && (
+          <span
+            aria-hidden
+            className="shrink-0 rounded-sm bg-accent px-1 text-2xs tabular-nums text-accent-foreground"
+          >
+            {active}
+          </span>
+        )}
+        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      </button>
+    );
+  }
+  function quickRow(group: (typeof groups)[number]) {
+    const Icon = ICONS[group.id];
+    const label = (
+      <>
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-sm bg-muted text-muted-foreground">
+          <Icon className="h-3.5 w-3.5" aria-hidden />
+        </span>
+        <span className="min-w-0 flex-1 truncate">{group.label}</span>
+      </>
+    );
+    if (group.id === "favorites") {
+      const choice = group.choices[0]!;
+      return (
+        <div key={group.id} className="flex min-h-9 items-center gap-2.5 px-2 py-1 text-sm">
+          {label}
+          <Switch
+            checked={choice.checked}
+            onChange={choice.select}
+            label={group.label}
+            stateLabels={null}
+          />
+        </div>
+      );
+    }
+    return (
+      <div key={group.id} className="flex min-h-9 items-center gap-2.5 px-2 py-1 text-sm">
+        {label}
+        <div
+          role="group"
+          aria-label={group.label}
+          className="flex shrink-0 divide-x divide-border border border-border"
+        >
+          {[null, ...group.choices].map((choice) => {
+            const pressed = choice ? choice.checked : !group.choices.some((item) => item.checked);
+            return (
+              <button
+                key={choice?.value ?? "any"}
+                type="button"
+                aria-pressed={pressed}
+                onClick={() => {
+                  if (choice) choice.select(true);
+                  else clearGroup(group.id);
+                }}
+                className={`h-6 px-2 text-xs transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${pressed ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-popover-hover hover:text-foreground"}`}
+              >
+                {choice?.label ?? t("library.filters.any")}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
   function choose(id: Category | null) {
     setCategory(id);
     setQuery("");
@@ -240,6 +402,11 @@ export function LibraryFilterPicker({
           </Button>
         )}
         <span className="flex-1 text-sm font-medium">{selectedGroup?.label ?? t("Filters")}</span>
+        {selectedGroup && activeCount(selectedGroup) > 0 && (
+          <Button variant="ghost" size="xs" onClick={() => clearGroup(selectedGroup.id)}>
+            {t("Clear")}
+          </Button>
+        )}
         <Button variant="ghost" size="icon-sm" aria-label={t("Close")} onClick={onClose}>
           <X className="h-4 w-4" aria-hidden />
         </Button>
@@ -279,90 +446,87 @@ export function LibraryFilterPicker({
             {t("library.filters.noMatches")}
           </p>
         )}
-        {visible.map((group) => {
-          const showChoices = category !== null || needle.length > 0;
-          const Icon =
-            group.id === "tags"
-              ? Tags
-              : group.id === "printer"
-                ? Printer
-                : group.id === "favorites"
-                  ? Star
-                  : group.id === "uploaded"
-                    ? Calendar
-                    : group.id === "history"
-                      ? History
-                      : Filter;
-          if (!showChoices)
-            return (
-              <button
-                key={group.id}
-                type="button"
-                onClick={() => choose(group.id)}
-                className="flex min-h-9 w-full items-center gap-2.5 rounded px-2.5 py-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-              >
-                <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="flex-1">{group.label}</span>
-                {activeCount(group) > 0 && (
-                  <span className="text-xs tabular-nums text-muted-foreground">
-                    {activeCount(group)}
-                  </span>
-                )}
-                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-              </button>
-            );
-          return (
-            <section key={group.id} aria-label={group.label} className="px-1 py-1">
-              {!category && (
-                <h3 className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
-                  {group.label}
-                </h3>
-              )}
-              {group.id === "uploaded" ? (
-                <div className="grid grid-cols-2 gap-2 px-2 py-2">
-                  {(["uploaded_after", "uploaded_before"] as const).map((key) => (
-                    <label key={key} className="space-y-1 text-xs text-muted-foreground">
-                      {t(key === "uploaded_after" ? "After" : "Before")}
-                      <Input
-                        type="date"
-                        value={filters[key] ?? ""}
-                        onChange={(event) =>
-                          onChange(key, event.target.value ? [event.target.value] : [])
-                        }
-                      />
-                    </label>
-                  ))}
-                </div>
-              ) : group.id === "history" ? (
-                <div className="px-2">
-                  <PrintHistoryFields
-                    compact
-                    datePicker
-                    value={filters}
-                    onChange={(key, value) => onChange(key, value ? [value] : [])}
-                  />
-                </div>
-              ) : (
-                <>
-                  {group.choices.map((choice) => (
-                    <LibraryFilterChoice
-                      key={choice.value}
-                      label={choice.label}
-                      count={choice.count}
-                      checked={choice.checked}
-                      onChange={choice.select}
-                    />
-                  ))}
-                  {group.choices.length === 0 && !loading && !error && (
-                    <p role="status" className="px-2 py-3 text-xs text-muted-foreground">
-                      {t("library.filters.noValues")}
-                    </p>
-                  )}
-                </>
-              )}
+        {!category && !needle && (
+          <>
+            <section
+              aria-label={t("library.filters.sectionQuick")}
+              className="mb-1 border-b border-border px-1 pb-2 pt-1"
+            >
+              <h3 className="px-2 pb-1 pt-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                {t("library.filters.sectionQuick")}
+              </h3>
+              {QUICK.map((id) => {
+                const group = groups.find((item) => item.id === id);
+                return group ? quickRow(group) : null;
+              })}
             </section>
-          );
-        })}
+            {SECTIONS.map((section) => (
+              <section key={section.label} aria-label={t(section.label)} className="px-1 py-1">
+                <h3 className="px-2 pb-1 pt-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                  {t(section.label)}
+                </h3>
+                {section.ids.map((id) => {
+                  const group = groups.find((item) => item.id === id);
+                  return group ? categoryRow(group) : null;
+                })}
+              </section>
+            ))}
+          </>
+        )}
+        {(category !== null || needle.length > 0) &&
+          visible.map((group) => {
+            return (
+              <section key={group.id} aria-label={group.label} className="px-1 py-1">
+                {!category && (
+                  <h3 className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                    {group.label}
+                  </h3>
+                )}
+                {group.id === "uploaded" ? (
+                  <div className="grid grid-cols-2 gap-2 px-2 py-2">
+                    {(["uploaded_after", "uploaded_before"] as const).map((key) => (
+                      <label key={key} className="space-y-1 text-xs text-muted-foreground">
+                        {t(key === "uploaded_after" ? "After" : "Before")}
+                        <Input
+                          type="date"
+                          value={filters[key] ?? ""}
+                          onChange={(event) =>
+                            onChange(key, event.target.value ? [event.target.value] : [])
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                ) : group.id === "history" ? (
+                  <div className="px-2">
+                    <PrintHistoryFields
+                      compact
+                      datePicker
+                      value={filters}
+                      onChange={(key, value) => onChange(key, value ? [value] : [])}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    {group.choices.map((choice) => (
+                      <LibraryFilterChoice
+                        key={choice.value}
+                        label={choice.label}
+                        count={choice.count}
+                        checked={choice.checked}
+                        onChange={choice.select}
+                      />
+                    ))}
+                    {group.choices.length === 0 && !loading && !error && (
+                      <p role="status" className="px-2 py-3 text-xs text-muted-foreground">
+                        {t("library.filters.noValues")}
+                      </p>
+                    )}
+                  </>
+                )}
+              </section>
+            );
+          })}
       </div>
       <div className="flex shrink-0 items-center gap-2 border-t border-border px-3 py-2">
         <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />

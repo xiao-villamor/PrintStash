@@ -10,6 +10,17 @@
 
 ### Changed
 
+- Opening Search keeps the collection and grid you were browsing. The Search sidebar searches the current collection and offers a switch to search the whole library and back. Recent searches can be removed one by one or cleared, and the AI Search status sits in one compact note. Switching sidebar tools no longer stalls the page and settles in 150 ms.
+- The Filters picker leads with quick toggles for Favorites, Printed and similar candidates, then groups the remaining filters into Files and library and Printing with a distinct icon per filter and a summary of each active selection. A filter page can be cleared on its own.
+- Model views fills the dialog with the selected image, separates renders from photos in the thumbnail strip, keeps the selected thumbnail in view, shows full view names and supports the arrow keys.
+- Library cards move to their new places on the details panel's own motion when it opens or closes, the same way they follow the Collections sidebar, instead of jumping ahead of it. A card that moves to another row now slides in from the edge of that row instead of crossing the others.
+- G-code previews colour each line by what the slicer says it prints (outer and inner walls, infill, top and bottom, bridges, support, skirt and brim) instead of a rainbow by height. A legend under Layers hides or shows each feature. G-code without slicer feature markers is shaded in one hue by height.
+- G-code previews draw each printed line as a shaded tube as wide as the line itself, so a print reads as a solid object with visible layers instead of faint one-pixel lines.
+- Favorites leaves the navigation rail: it is a Library filter, at the top of the Filters picker, and Collections no longer clears it.
+- The 3D viewer shades Models in the library's preview look, with the same studio lighting as the card thumbnails, so a Model looks the same in its card and in 3D. Shared links use the look too.
+- Settings → Previews → Preview look lets you try a colour or the floor grid in its sample cards without saving. Existing images re-render only when you select Apply look, and Discard returns to the saved look.
+- Upload opens in place without re-rendering the Library, and its code loads in the background once the Library is ready, so the first Upload opens without a wait.
+
 - The Library shows child collection previews in grouped rows, and selecting a collection checks its loaded Model cards. Clicking a Model in the tree reveals its card and opens the inspector.
 - Model previews name each camera angle and mark the cover. The inspector preview can be resized and files can be downloaded or opened in the viewer from their rows.
 
@@ -82,6 +93,9 @@
 
 ### Fixed
 
+- G-code previews draw the printer bed where the print really sits on it, and frame the printed object rather than the start-up purge line, which used to push a print to one side of the view.
+
+- Opening or closing Upload or New collection no longer makes Library cards and thumbnails flash.
 - Generated Model covers and gallery views share a slate material and rim lighting on CPU, WebGPU, and STL fallback paths.
 - Embedded slicer renders fit inside Model cards and image previews. In dark mode, a light backing keeps transparent plates visible. The preview API identifies these images as `slicer_render`.
 - Uploaded, source and embedded 3MF photos fill Model cards and the inspector image preview. Generated views keep their margins, and the expanded gallery shows the full image.

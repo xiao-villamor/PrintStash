@@ -264,6 +264,30 @@ test.describe("Model preview browsing", () => {
     );
   });
 
+  test("browses views with the arrow keys inside the gallery", async ({ page }) => {
+    const { card } = await library(page);
+    await card.getByRole("button", { name: "Model views", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Model views" });
+    await dialog.getByRole("button", { name: "Next preview", exact: true }).focus();
+
+    await page.keyboard.press("ArrowRight");
+
+    await expect(dialog.locator("img[data-preview-view]")).toHaveAttribute(
+      "data-preview-view",
+      "orbit-1",
+    );
+    await expect(dialog.getByRole("button", { pressed: true })).toHaveAccessibleName(/Front right/);
+  });
+
+  test("fills the dialog width with the gallery stage", async ({ page }) => {
+    const { card } = await library(page);
+    await card.getByRole("button", { name: "Model views", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Model views" });
+    const stage = await dialog.locator("[data-model-preview]").boundingBox();
+    const strip = await dialog.getByRole("group", { name: "Model views" }).boundingBox();
+    expect(Math.abs(stage!.width - strip!.width)).toBeLessThan(1);
+  });
+
   test("centers the gallery view indicator", async ({ page }) => {
     const { card } = await library(page);
     await card.getByRole("button", { name: "Model views", exact: true }).click();

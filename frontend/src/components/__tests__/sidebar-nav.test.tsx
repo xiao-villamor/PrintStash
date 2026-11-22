@@ -82,22 +82,11 @@ describe("SidebarNav", () => {
       expect(screen.getByRole("link", { name: "Collections" })).toHaveAttribute("href", "/");
     });
 
-    it("opens Favorites using the existing library filter", () => {
-      renderNav();
+    it("leaves Favorites to the Library filters", () => {
+      renderNav({ at: "/?favorites=true" });
 
-      expect(screen.getByRole("button", { name: "Favorites" })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
-    });
-
-    it("navigates to Favorites through the client router", async () => {
-      const user = userEvent.setup();
-      renderNav({ at: "/inbox" });
-      await user.click(screen.getByRole("button", { name: "Favorites" }));
-      await waitFor(() =>
-        expect(screen.getByTestId("rail-location")).toHaveTextContent("/?favorites=true"),
-      );
+      expect(screen.queryByRole("button", { name: "Favorites" })).toBeNull();
+      expect(screen.queryByRole("link", { name: "Favorites" })).toBeNull();
     });
 
     it("leaves modified link clicks to the browser", () => {
@@ -190,16 +179,6 @@ describe("SidebarNav", () => {
   });
 
   describe("the current destination", () => {
-    it("marks Favorites when the filter is active", () => {
-      renderNav({ at: "/?favorites=true" });
-
-      expect(screen.getByRole("button", { name: "Favorites" })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-      expect(screen.getByRole("link", { name: "Collections" })).not.toHaveAttribute("aria-current");
-    });
-
     it("keeps Pending reachable from a nested inbox route", () => {
       renderNav({ at: "/inbox/41" });
 

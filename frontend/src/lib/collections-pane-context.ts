@@ -19,6 +19,17 @@ export interface CollectionsPaneState {
 
 export const CollectionsPaneContext = createContext<CollectionsPaneState | null>(null);
 
+/**
+ * Whether the shell pane exists and is open. Consumers that only lay out
+ * around the pane read this instead of the full state, so tool changes and
+ * width drags do not re-render them.
+ */
+export const CollectionsPaneOpenContext = createContext<boolean | null>(null);
+
+export function useCollectionsPaneOpen() {
+  return useContext(CollectionsPaneOpenContext);
+}
+
 /** Standalone feature renders keep their existing inline sidebar. */
 export function useCollectionsPane() {
   return useContext(CollectionsPaneContext);

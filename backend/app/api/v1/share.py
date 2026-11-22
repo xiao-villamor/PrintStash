@@ -17,7 +17,7 @@ from sqlmodel import Session
 from app.api.v1.files import serve_artifact, stl_response, thumbnail_response
 from app.core.ratelimit import rate_limit
 from app.core.security import require_user
-from app.db.models import CollectionRole, FileType, Model, ShareLink, User
+from app.db.models import CollectionRole, FileType, Model, ShareLink, SystemConfig, User
 from app.db.session import get_session
 from app.modules.identity import rbac, share
 from app.modules.library import model_covers
@@ -64,7 +64,10 @@ def get_shared_model(token: str, session: Session = Depends(get_session)):
     ]
     if preview.kind == "artifact":
         share.share_file_or_404(session, link, preview.file_id)
-    return share.public_detail(session, link, preview)
+    from app.modules.derivatives.policy import render_appearance
+
+    look = render_appearance(session.get(SystemConfig, 1)).look
+    return share.public_detail(session, link, preview, look)
 
 
 @router.get("/{token}/thumbnail", summary="Thumbnail of a shared model")

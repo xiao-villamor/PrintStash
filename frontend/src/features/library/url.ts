@@ -56,3 +56,17 @@ export function readLibraryLocation(
   params.set("sort", sort);
   return { view, sort, section, href: `/?${params}` };
 }
+
+/**
+ * URL parameters that open a dialog over the Library without changing what it
+ * shows. They stay in the address (deep links, reload) but never form part of
+ * the displayed destination, so opening or closing one cannot replay the
+ * Library's navigation entrance or rewrite card return links.
+ */
+export const LIBRARY_DIALOG_PARAMS = ["upload", "newCollection"] as const;
+
+export function libraryDestinationHref(href: string): string {
+  const url = new URL(href, "http://library.invalid");
+  for (const key of LIBRARY_DIALOG_PARAMS) url.searchParams.delete(key);
+  return `${url.pathname}?${url.searchParams}`;
+}

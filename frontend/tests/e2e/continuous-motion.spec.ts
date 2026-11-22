@@ -3,6 +3,14 @@ import { expect, test, type Page } from "@playwright/test";
 import { aCollectionNode, aModelListItem } from "../../src/test-support/factories";
 import { useMockApi } from "./_setup";
 
+/** Favorites is a Library filter: toggle it in the (non-modal) Filters picker. */
+async function toggleFavorites(page: Page) {
+  const picker = page.getByRole("dialog", { name: "Filter Models" });
+  if (!(await picker.isVisible()))
+    await page.getByRole("button", { name: /^Filters(?: \d+)?$/ }).click();
+  await picker.getByRole("switch", { name: "Favorites", exact: true }).click();
+}
+
 useMockApi();
 declare global {
   interface Window {
@@ -146,7 +154,7 @@ test.describe("Continuous workbench motion", () => {
     await rail.getByRole("link", { name: "Search", exact: true }).click();
     await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
     await expectStationaryReveal(page, "workbench-main-content");
-    await rail.getByRole("button", { name: "Favorites", exact: true }).click();
+    await toggleFavorites(page);
     await expect(page).toHaveURL(/favorites=true/);
     await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
     expect(

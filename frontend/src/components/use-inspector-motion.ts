@@ -1,6 +1,10 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
-import { criticalSpring } from "@/lib/critical-spring";
+import {
+  PANE_SETTLED_EVENT,
+  PaneMovingEvent,
+  dockMotion,
+} from "@/components/use-collections-pane-motion";
 import { cssTimeSeconds } from "@/lib/css-time";
 
 export const LIBRARY_INSPECTOR_MIN_WIDTH = 320;
@@ -13,8 +17,9 @@ export function clampInspectorWidth(width: number, maxWidth: number) {
 const POSITION_SETTLED = 0.001;
 const VELOCITY_SETTLED = 0.03;
 
-/** A compositor spring keeps moving while the 3D preview initializes. Presence
- * follows completion, and reversals inherit the presentation and its velocity. */
+/** Compositor keyframes keep moving while the 3D preview initializes. Presence
+ * follows completion, and reversals inherit the presentation and its velocity.
+ * The panel shares the Collections pane's dock curve and duration. */
 export function useInspectorMotion(open: boolean, onSettled?: () => void) {
   const panel = useRef<HTMLElement>(null);
   const position = useRef(1);
@@ -29,6 +34,7 @@ export function useInspectorMotion(open: boolean, onSettled?: () => void) {
     const target = open ? 0 : 1;
     let animation: Animation | null = null;
     let settled = false;
+    let announced = false;
     const paint = () =>
       element.style.setProperty("--inspector-displacement", String(position.current));
     const settle = () => {
@@ -40,6 +46,7 @@ export function useInspectorMotion(open: boolean, onSettled?: () => void) {
       element.style.removeProperty("will-change");
       if (!open) setPresent(false);
       onSettled?.();
+      if (announced) window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
     };
     const onPreference = () => {
       if (reduced.matches) settle();
@@ -54,8 +61,10 @@ export function useInspectorMotion(open: boolean, onSettled?: () => void) {
     }
 
     const tokens = getComputedStyle(element);
-    const response = cssTimeSeconds(tokens.getPropertyValue("--duration-fast"));
-    const spring = criticalSpring(position.current, velocity.current, target, response);
+    // The same curve and timing as the Collections pane: cards reflowing
+    // beside either panel then move identically.
+    const duration = cssTimeSeconds(tokens.getPropertyValue("--duration-slow"));
+    const spring = dockMotion(position.current, velocity.current, target, duration);
     paint();
     element.style.willChange = "transform";
     animation = element.animate(
@@ -66,12 +75,28 @@ export function useInspectorMotion(open: boolean, onSettled?: () => void) {
       { duration: spring.duration * 1000, easing: "linear", fill: "both" },
     );
     animation.onfinish = settle;
+    // The docked panel has already reserved (or released) its column. Cards
+    // reflow through the same path as the Collections pane: one resting
+    // layout, each card carried along this motion's own progress.
+    const from = spring.samples[0]?.position ?? position.current;
+    const span = target - from;
+    window.dispatchEvent(
+      new PaneMovingEvent({
+        opening: open,
+        contentDelta: 0,
+        durationMs: spring.duration * 1000,
+        progress: spring.samples.map((sample) =>
+          Math.abs(span) < 1e-6 ? 1 : (sample.position - from) / span,
+        ),
+      }),
+    );
+    announced = true;
     reduced.addEventListener("change", onPreference);
     return () => {
       reduced.removeEventListener("change", onPreference);
       if (animation && !settled) {
         // Read presentation before canceling; the analytical velocity comes from
-        // the same spring timeline, not a new zero-velocity entrance.
+        // the same timeline, not a new zero-velocity entrance.
         // element.animate above uses the document timeline, whose time is ms.
         const elapsed = Number(animation.currentTime ?? 0) / 1000;
         velocity.current = spring.sample(elapsed).velocity;

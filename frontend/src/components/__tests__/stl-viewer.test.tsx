@@ -1,10 +1,22 @@
 /** The viewer renders persisted failure reasons before mounting native WebGL. */
-import { render, screen, waitFor } from "@testing-library/react";
+import { render as renderUi, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/errors";
 import type { StlParserWorker, StlParseReply } from "@/lib/stl-parser";
 import type { getDerivedBlob } from "@/lib/api/request";
 import { STLViewer, type STLPreviewFeedback } from "../stl-viewer";
+
+/** The viewer reads the library's preview look through React Query. */
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderUi(ui, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
 
 describe("STLViewer", () => {
   afterEach(() => {
@@ -101,7 +113,8 @@ describe("STLViewer", () => {
     const fetcher = vi
       .fn<typeof getDerivedBlob>()
       .mockRejectedValue(new ApiError(422, "resource_limit", "limited"));
-    render(<STLViewer url="/public/stl" previewFetcher={fetcher} />);
+    // A share page carries its look, so the viewer makes no session request.
+    render(<STLViewer url="/public/stl" previewFetcher={fetcher} look="slate" />);
     expect(await screen.findByText("3D preview omitted due to memory limits")).toBeVisible();
     expect(fetcher).toHaveBeenCalledOnce();
     expect(request).not.toHaveBeenCalled();
@@ -128,8 +141,8 @@ describe("STLViewer", () => {
   it("shows a memory refusal", async () => {
     const request = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ detail: "resource_limit" }), { status: 422 }),
+      .mockImplementation(
+        async () => new Response(JSON.stringify({ detail: "resource_limit" }), { status: 422 }),
       );
     vi.stubGlobal("fetch", request);
 

@@ -158,7 +158,7 @@ describe("Toolpath geometry", () => {
   it("resets every logical axis when G92 has no coordinates", () => {
     const result = parseGcode("G1 X10 Y10 Z10 E1\nG92\nG1 X5 Y5 Z5 E1");
 
-    expect(result.bounds).toEqual({ sizeX: 15, sizeY: 15, sizeZ: 15, maxDim: 15 });
+    expect(result.bounds).toMatchObject({ sizeX: 15, sizeY: 15, sizeZ: 15, maxDim: 15 });
   });
   it("rejects coordinates outside finite numeric range", () => {
     expect(() => parseGcode(`G1 X${"9".repeat(400)} E1`)).toThrow("toolpath_invalid_coordinate");

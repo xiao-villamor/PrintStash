@@ -225,6 +225,7 @@ function ShareContent({ token }: { token: string }) {
               >
                 <STLViewer
                   url={getAssetUrl(sharedStlUrl(token, meshFile.id))}
+                  look={model.preview_look}
                   previewFetcher={getPublicDerivedBlob}
                   onControlsReady={(api) => {
                     viewerControls.current = api;

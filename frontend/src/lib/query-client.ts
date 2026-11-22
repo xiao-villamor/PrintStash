@@ -74,6 +74,7 @@ export const queryKeys = {
   adminUsers: ["admin", "users"] as const,
   vaultStats: ["vault-stats"] as const,
   vaultConfig: ["vault-config"] as const,
+  previewLook: ["vault-config", "preview-look"] as const,
   printStats: (period: string) => ["print-stats", period] as const,
   spoolmanStatus: ["spoolman", "status"] as const,
   spools: ["spoolman", "spools"] as const,
