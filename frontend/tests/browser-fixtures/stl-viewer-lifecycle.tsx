@@ -1,9 +1,11 @@
 /** Observe real viewer resource retirement across repeated native lifecycles. */
 import "../../src/globals.css";
 import { StrictMode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import {
   Box3,
+  MeshMatcapMaterial,
   MeshStandardMaterial,
   BoxGeometry,
   Mesh,
@@ -111,7 +113,12 @@ function observeSceneResources() {
   for (const scene of scenes) {
     scene.traverse((object) => {
       if (!(object instanceof Mesh || object instanceof Line || object instanceof Points)) return;
-      if (object instanceof Mesh && object.material instanceof MeshStandardMaterial) {
+      // The model draws with the studio matcap; an overlay keeps its standard material.
+      if (
+        object instanceof Mesh &&
+        (object.material instanceof MeshMatcapMaterial ||
+          object.material instanceof MeshStandardMaterial)
+      ) {
         const box = new Box3().setFromObject(object);
         bounds.push([...box.min.toArray(), ...box.max.toArray()]);
       }
@@ -147,6 +154,8 @@ const snapshot = (): ResourceSnapshot => ({
   materials: materials.size,
   objectUrls: objectUrls.size,
 });
+// The viewer reads the library's preview look through React Query; fixtures pass it.
+const fixtureQueries = new QueryClient();
 window.meshLifecycleCheck = {
   releaseFrame: () => releaseFrame?.(),
   releaseViewer: () => releaseViewer?.(),
@@ -161,43 +170,46 @@ window.meshLifecycleCheck = {
       });
       root.render(
         <StrictMode>
-          <STLViewer
-            showGrid={false}
-            displayMode={
-              query.get("mode") === "xray"
-                ? "xray"
-                : query.get("mode") === "wireframe"
-                  ? "wireframe"
-                  : "solid"
-            }
-            url={"/lifecycle-" + cycle + ".stl"}
-            previewFetcher={async (url) => ({
-              ready: true as const,
-              blob: url === "/overlay.stl" ? halfBlob : blob,
-            })}
-            comparison={query.has("overlay") ? { referenceSizeMm: 6 } : undefined}
-            overlay={
-              query.has("overlay")
-                ? {
-                    url: "/overlay.stl",
-                    comparison: {
-                      referenceSizeMm: 6,
-                      compensateScale: true,
-                      alignment: [
-                        [2, 0, 0, 0],
-                        [0, 2, 0, 0],
-                        [0, 0, 2, 0],
-                        [0, 0, 0, 1],
-                      ],
-                    },
-                  }
-                : undefined
-            }
-            onReadyChange={(value) => {
-              document.body.dataset.viewerReady = String(value);
-              if (value) ready?.();
-            }}
-          />
+          <QueryClientProvider client={fixtureQueries}>
+            <STLViewer
+              look="sky"
+              showGrid={false}
+              displayMode={
+                query.get("mode") === "xray"
+                  ? "xray"
+                  : query.get("mode") === "wireframe"
+                    ? "wireframe"
+                    : "solid"
+              }
+              url={"/lifecycle-" + cycle + ".stl"}
+              previewFetcher={async (url) => ({
+                ready: true as const,
+                blob: url === "/overlay.stl" ? halfBlob : blob,
+              })}
+              comparison={query.has("overlay") ? { referenceSizeMm: 6 } : undefined}
+              overlay={
+                query.has("overlay")
+                  ? {
+                      url: "/overlay.stl",
+                      comparison: {
+                        referenceSizeMm: 6,
+                        compensateScale: true,
+                        alignment: [
+                          [2, 0, 0, 0],
+                          [0, 2, 0, 0],
+                          [0, 0, 2, 0],
+                          [0, 0, 0, 1],
+                        ],
+                      },
+                    }
+                  : undefined
+              }
+              onReadyChange={(value) => {
+                document.body.dataset.viewerReady = String(value);
+                if (value) ready?.();
+              }}
+            />
+          </QueryClientProvider>
         </StrictMode>,
       );
       await loaded;
