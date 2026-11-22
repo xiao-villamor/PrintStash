@@ -12,6 +12,8 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.modules.media.preview_contracts import (
+    MAX_VIEWS,
+    PreviewImageKind,
     PreviewManifest,
     ViewId,
     ViewProfile,
@@ -38,15 +40,30 @@ REASONED_STATES = frozenset(
 
 
 class PreviewImageRead(BaseModel):
+    image_kind: Literal[PreviewImageKind.RENDER] = PreviewImageKind.RENDER
     id: ViewId
     role: ViewRole
     url: str
+    thumbnail_url: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class PublishedPreviewRead(BaseModel):
     profile: ViewProfile
     manifest_url: str
-    views: list[PreviewImageRead] = Field(min_length=1, max_length=6)
+    # Only present when the displayed cover and a published view have identical bytes.
+    cover_view: ViewId | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    views: list[PreviewImageRead] = Field(min_length=1, max_length=MAX_VIEWS)
+
+
+class ArchiveImageRead(BaseModel):
+    image_kind: Literal[PreviewImageKind.PHOTO, PreviewImageKind.SLICER_RENDER]
+    file_id: int
+    url: str
+    plate: int | None
 
 
 class SourceImageRead(BaseModel):
@@ -68,6 +85,21 @@ class NoPreviewSubject(BaseModel):
     # Embedded, source and custom covers carry no known mesh camera.
     cover_camera: Literal["unknown"] = "unknown"
     source_images: list[SourceImageRead] = Field(default_factory=list)
+    cover_image_kind: PreviewImageKind | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    large_cover_image_kind: PreviewImageKind | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    large_cover_url: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    large_cover_view: ViewId | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    archive_images: list[ArchiveImageRead] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
 
 
 class ArtifactPreviews(BaseModel):
@@ -78,6 +110,24 @@ class ArtifactPreviews(BaseModel):
     kind: Literal["artifact"] = "artifact"
     cover_camera: Literal["unknown"] = "unknown"
     source_images: list[SourceImageRead] = Field(default_factory=list)
+    cover_image_kind: PreviewImageKind | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    large_cover_image_kind: PreviewImageKind | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    large_cover_url: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    large_cover_view: ViewId | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    archive_images: list[ArchiveImageRead] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
+    large_cover_thumbnail_url: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     file_id: int
     state: PreviewState
     reason: str | None

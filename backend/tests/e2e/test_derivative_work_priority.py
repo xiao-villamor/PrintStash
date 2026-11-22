@@ -7,6 +7,7 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from datetime import timedelta
 from pathlib import Path
 
@@ -24,11 +25,15 @@ from app.db.models import (
     Job,
     JobKind,
     JobState,
+    LaneName,
+    SearchProjectionRequest,
     WorkPriority,
 )
+from app.db.projections import bind_content_projection
 from app.db.session import get_session_factory, override_session_factory
 from app.modules.derivatives.source import subject_key
 from app.modules.media.native_process import native_capacity
+from app.modules.search.projection import LibraryProjection
 from app.modules.work.jobs import jobs
 from app.modules.work.reconciler import run_pass
 from app.runtime import native_runtime
@@ -144,6 +149,48 @@ def old_backlog(e2e_db, tmp_path):
     return artifacts, job.id
 
 
+@pytest.fixture
+def projection():
+    previous = bind_content_projection(LibraryProjection())
+    try:
+        yield
+    finally:
+        bind_content_projection(previous)
+
+
+async def _import_zip(api, headers, engine):
+    names = ["first-cover.stl", "second-cover.stl"]
+    archive = content.zip_bytes(
+        {
+            name: content.binary_stl(triangles=index + 2)
+            for index, name in enumerate(names)
+        }
+    )
+    inspected = await api.post(
+        "/api/v1/ingest/archive/inspect",
+        headers=headers,
+        files={"file": ("covers.zip", archive, "application/zip")},
+    )
+    assert inspected.status_code == 202, inspected.text
+    inspection = inspected.json()["job_id"]
+    _drive_until(engine, lambda: _completed(inspection))
+    selected = await api.post(
+        f"/api/v1/ingest/archive/{inspection}/select",
+        headers=headers,
+        json={"names": names},
+    )
+    assert selected.status_code == 202, selected.text
+    batch = selected.json()["job_id"]
+    _drive_until(engine, lambda: _completed(batch))
+
+
+def _job_states(kind: JobKind) -> dict[str, JobState]:
+    with get_session_factory().scoped_session() as session:
+        return dict(
+            session.exec(select(Job.id, Job.state).where(Job.kind == kind)).all()
+        )
+
+
 class TestDerivativeWorkPriority:
     @pytest.mark.asyncio
     async def test_upload_enters_the_queue_before_backfill_drains(
@@ -251,3 +298,63 @@ class TestDerivativeWorkPriority:
         )
         assert thumbnail.status_code == 200, thumbnail.text
         assert thumbnail.content
+
+    @pytest.mark.asyncio
+    async def test_zip_projection_starts_when_the_last_cover_enters_its_slot(
+        self, api, superuser_headers, projection, work_engine, tmp_path
+    ) -> None:
+        configure(tmp_path)
+        lane = await api.put(
+            f"/api/v1/admin/work/lanes/{LaneName.DERIVE_NATIVE.value}",
+            headers=superuser_headers,
+            json={"concurrency": 1},
+        )
+        assert lane.status_code == 200, lane.text
+        work_engine.launch(listen_lanes=[LaneName.INGEST, LaneName.RECONCILE])
+        await _import_zip(api, superuser_headers, work_engine)
+        mesh = JobKind.DERIVATIVES_MESH
+        search = JobKind.SEARCH_PROJECT
+        run_pass(mesh)
+        assert list(_job_states(mesh).values()) == [JobState.QUEUED, JobState.QUEUED]
+        work_engine.launch(listen_lanes=[LaneName.DERIVE_NATIVE])
+
+        capacity = native_capacity()
+        queue = tmp_path / "runtime" / "native"
+        with ThreadPoolExecutor(1) as executor:
+            # Hold the running cover in its lane slot while the second cover
+            # from the same discovery batch waits behind it.
+            with native_runtime.admit(capacity, capacity, checkpoint=lambda: None):
+                first = executor.submit(copy_context().run, work_engine.run_one)
+                _wait_for_native_queue(queue)
+                assert set(_job_states(mesh).values()) == {
+                    JobState.RUNNING,
+                    JobState.QUEUED,
+                }
+                run_pass(search)
+                assert _job_states(search) == {}
+            assert first.result(timeout=30) is not None
+
+            # Once the second Job claims the slot, search can consume the
+            # import's projection requests while the cover is still running.
+            with native_runtime.admit(capacity, capacity, checkpoint=lambda: None):
+                last = executor.submit(copy_context().run, work_engine.run_one)
+                _wait_for_native_queue(queue)
+                assert set(_job_states(mesh).values()) == {
+                    JobState.COMPLETED,
+                    JobState.RUNNING,
+                }
+                run_pass(search)
+                work_engine.launch(listen_lanes=[LaneName.SEARCH])
+                _drive_until(
+                    work_engine,
+                    lambda: JobState.COMPLETED in _job_states(search).values(),
+                )
+                with get_session_factory().scoped_session() as session:
+                    assert session.exec(select(SearchProjectionRequest)).all() == []
+                assert JobState.RUNNING in _job_states(mesh).values()
+            assert last.result(timeout=30) is not None
+
+        assert list(_job_states(mesh).values()) == [
+            JobState.COMPLETED,
+            JobState.COMPLETED,
+        ]

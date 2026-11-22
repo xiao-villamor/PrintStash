@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from printstash_core.mesh.render_geometry import PreparedRender, PreparedRenderGeometry
+from printstash_core.mesh.render_geometry import PreparedRender
 
 from app.modules.media.gpu_geometry import (
     CompletionFence,
@@ -19,7 +19,6 @@ from app.modules.media.gpu_geometry import (
     input_sizes,
     packed_chunks,
 )
-from app.modules.media.gpu_normals import DeferredRender, NormalPipeline
 from app.runtime.compute.budget import Residency
 from app.runtime.compute.contracts import ComputeUnavailable, Reason
 
@@ -155,28 +154,13 @@ def prepared():
         2,
         lambda size: iter([faces]),
         np.arange(3, dtype=np.int64),
-        np.tile([0.0, 0.0, 1.0], (3, 1)),
-    )
-
-
-@pytest.fixture
-def deferred(prepared):
-    return DeferredRender(
-        PreparedRenderGeometry(
-            prepared.vertices, prepared.face_count, prepared.face_chunks
-        ),
-        prepared.position_ids,
-        len(prepared.smooth_normals),
+        np.array([[[0, 0, 1]] * 3, [[0, 0, 0]] * 3], dtype=np.float32),
     )
 
 
 class TestInputSizes:
-    def test_charges_deferred_normal_allocations(self, deferred):
-        assert input_sizes(deferred) == (36, 24, 12, 16, 24, 48, 36, 4)
-        assert sum(input_sizes(deferred)) == 200
-
     def test_charges_exact_compact_buffers(self, prepared):
-        assert input_sizes(prepared) == (36, 24, 12, 36)
+        assert input_sizes(prepared) == (36, 24, 72)
 
 
 class TestPackedChunks:
@@ -215,9 +199,9 @@ class TestGeometryPacker:
 
         packer.submit(prepared, target, "one")
 
-        assert packer.transferred_bytes == 108
+        assert packer.transferred_bytes == 132
         assert packer.submissions == 1
-        assert memory.used == 112
+        assert memory.used == 136
         np.testing.assert_array_equal(
             np.frombuffer(device.buffers[2].data, dtype=np.float32).reshape(3, 3),
             prepared.vertices,
@@ -226,7 +210,8 @@ class TestGeometryPacker:
             np.frombuffer(device.buffers[3].data, dtype=np.uint32), [0, 1, 2, 0, 0, 0]
         )
         np.testing.assert_array_equal(
-            np.frombuffer(device.buffers[4].data, dtype=np.uint32), [0, 1, 2]
+            np.frombuffer(device.buffers[4].data, dtype=np.float32).reshape(2, 3, 3),
+            prepared.corner_normals,
         )
         packer.release_completed(fence_complete=True)
         packer.close()
@@ -241,7 +226,7 @@ class TestGeometryPacker:
             memory.make_room(256)
 
         assert error.value.reason is Reason.CAPACITY
-        assert memory.used == 112
+        assert memory.used == 136
         assert all(not buffer.destroyed for buffer in device.buffers)
         packer.release_completed(fence_complete=True)
         packer.close()
@@ -334,7 +319,7 @@ class TestGeometryPacker:
         with pytest.raises(RuntimeError, match="injected native submission failure"):
             packer.submit(prepared, target, "one")
 
-        assert memory.used == 112
+        assert memory.used == 136
         assert all(not buffer.destroyed for buffer in device.buffers)
         device.queue.fail_submit = False
         packer.release_completed(fence_complete=False)
@@ -356,126 +341,6 @@ class TestGeometryPacker:
         assert all(buffer.destroyed for buffer in device.buffers)
 
 
-class TestDeferredGeometry:
-    def test_shares_gpu_preparation_inputs(self, device, deferred, monkeypatch):
-        monkeypatch.setattr(NormalPipeline, "canary", lambda self, **kwargs: None)
-        memory = Residency(1024**2)
-        packer = GeometryPacker(device, memory)
-        target = device.create_buffer(size=192, usage=128)
-
-        packer.submit(deferred, target, "deferred")
-
-        assert memory.used == 204
-        assert packer.transferred_bytes == 112
-        assert packer.gpu_normal_uploads == 1
-        assert packer.cpu_normal_fallbacks == 0
-        assert set(packer.normal_statuses()) == {"deferred"}
-        assert len(device.buffers) == 10
-        assert all(not buffer.destroyed for buffer in device.buffers)
-        packer.release_completed(fence_complete=True)
-        assert packer.normal_statuses() == {}
-        assert memory.used == 4
-        packer.close()
-        assert memory.used == 0
-
-    def test_uses_cpu_normals_when_startup_canary_refuses(self, device, deferred):
-        memory = Residency(1024**2)
-        packer = GeometryPacker(device, memory)
-        target = device.create_buffer(size=192, usage=128)
-
-        packer.submit(deferred, target, "deferred")
-
-        assert packer.gpu_normal_uploads == 0
-        assert packer.cpu_normal_fallbacks == 1
-        assert packer.normal_statuses() == {}
-        assert packer.transferred_bytes == 108
-        assert memory.used == 112
-        packer.close()
-        assert memory.used == 0
-
-    def test_falls_back_for_excessive_vertex_valence(
-        self, device, deferred, monkeypatch
-    ):
-        monkeypatch.setattr(NormalPipeline, "canary", lambda self, **kwargs: None)
-        faces = np.zeros((1366, 3), dtype=np.int64)
-        excessive = DeferredRender(
-            PreparedRenderGeometry(
-                deferred.vertices, len(faces), lambda size: iter([faces])
-            ),
-            deferred.position_ids,
-            deferred.position_count,
-        )
-        memory = Residency(1024**2)
-        packer = GeometryPacker(device, memory)
-        target = device.create_buffer(size=len(faces) * 96, usage=128)
-
-        packer.submit(excessive, target, "excessive")
-
-        assert packer.gpu_normal_uploads == 0
-        assert packer.cpu_normal_fallbacks == 1
-        assert packer.normal_statuses() == {}
-        packer.close()
-        assert memory.used == 0
-
-    def test_falls_back_for_gpu_unsafe_coordinate_range(
-        self, device, deferred, monkeypatch
-    ):
-        monkeypatch.setattr(NormalPipeline, "canary", lambda self, **kwargs: None)
-        oversized = DeferredRender(
-            PreparedRenderGeometry(
-                deferred.vertices * np.float32(1e5) + np.float32(1e10),
-                deferred.face_count,
-                deferred.face_chunks,
-            ),
-            deferred.position_ids,
-            deferred.position_count,
-        )
-        memory = Residency(1024**2)
-        packer = GeometryPacker(device, memory)
-        target = device.create_buffer(size=192, usage=128)
-
-        packer.submit(oversized, target, "oversized")
-
-        assert packer.gpu_normal_uploads == 0
-        assert packer.cpu_normal_fallbacks == 1
-        assert packer.normal_statuses() == {}
-        packer.close()
-        assert memory.used == 0
-
-    def test_renderer_discards_unverified_geometry_on_close(self, device, deferred):
-        from app.modules.media.webgpu_render import Renderer
-
-        memory = Residency(1024**2)
-        owner = Renderer(device, memory)
-        owner.upload(deferred, "geometry:pending")
-        assert owner.unverified_normals == {"geometry:pending"}
-        assert memory.entries["geometry:pending"].pins == 1
-
-        owner.close()
-
-        assert owner.unverified_normals == set()
-        assert owner.geometry == {}
-        assert memory.used == 0
-
-    def test_renderer_keeps_deferred_geometry_compact(self, device, deferred):
-        from app.modules.media.webgpu_render import Renderer
-
-        memory = Residency(1024**2)
-        owner = Renderer(device, memory)
-        result = owner.upload(deferred, "geometry:deferred")
-
-        assert len(result.positions.data) == 36
-        assert len(result.faces.data) == 24
-        assert len(result.identities.data) == 12
-        assert len(result.smoothed.data) == 36
-        assert len(result.bounds.data) == 32
-        assert owner.geometry_cpu_normal_fallbacks == 0
-        assert owner.packer is not None
-        assert owner.packer.pending[0].plan is not None
-        owner.close()
-        assert memory.used == 0
-
-
 class TestRendererUpload:
     def test_small_models_share_the_compact_path(self, device, prepared):
         from app.modules.media.webgpu_render import Renderer
@@ -489,7 +354,7 @@ class TestRendererUpload:
         assert renderer.gpu_geometry_uploads == 1
         assert renderer.cpu_geometry_uploads == 0
         assert renderer.packer is not None
-        assert memory.entries["geometry:small"].size == 140
+        assert memory.entries["geometry:small"].size == 164
         renderer.close()
         assert memory.used == 0
 

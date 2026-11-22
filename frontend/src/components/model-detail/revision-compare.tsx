@@ -1,8 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { useFilePlates } from "@/lib/queries/file-plates";
+import { formatPlateEstimate } from "./format-plate-estimate";
+import type { GcodePlateMetadata } from "@/lib/api/plates";
+import { useFilePlates, useGcodePlates } from "@/lib/queries/file-plates";
+import { HashValue } from "./file-hashes";
 import { Button } from "@/components/ui/button";
 import { Localized } from "@/components/ui/localized";
 import {
@@ -18,10 +21,10 @@ import {
 import { uiText, currentLocale } from "@/lib/locale";
 import { useUiLocale, type MessageKey } from "@/lib/i18n";
 import type { ArtifactOutcomeRead, FileRead } from "@/types";
-import { revisionStatusLabel } from "./presentation";
+import { slicerDisplayName, revisionStatusLabel } from "./presentation";
 
 export type ComparisonMode = "gcode" | "source" | "all";
-type Value = string | null;
+type Value = string | null | { number: number; name?: string; value: string }[];
 interface ComparisonRow {
   labelKey: MessageKey | "SHA-256";
   left: Value;
@@ -40,13 +43,29 @@ function title(file: FileRead): string {
 
 function ComparisonTable({
   group,
+  compact,
   left,
   right,
 }: {
+  compact: boolean;
   group: ComparisonGroup;
   left: FileRead;
   right: FileRead;
 }) {
+  const columns = (["left", "right"] as const).filter(
+    (side) => !compact || group.rows.some((row) => row[side] !== null),
+  );
+  if (!columns.length) return null;
+  const files = { left, right };
+  const rows = compact
+    ? group.rows
+        .filter((row) => row.left !== null || row.right !== null)
+        .sort(
+          (a, b) =>
+            Number(b.left !== null && b.right !== null) -
+            Number(a.left !== null && a.right !== null),
+        )
+    : group.rows;
   return (
     <section className="min-w-0 space-y-2.5">
       <h3 className="text-sm font-semibold">{uiText(group.titleKey)}</h3>
@@ -56,17 +75,21 @@ function ComparisonTable({
             <th scope="col" className="w-2/5 px-2 py-2 font-medium">
               {uiText("Field")}
             </th>
-            <th scope="col" className="break-words px-2 py-2 font-medium">
-              {title(left)}
-            </th>
-            <th scope="col" className="break-words px-2 py-2 font-medium">
-              {title(right)}
-            </th>
+            {columns.map((side) => (
+              <th key={side} scope="col" className="break-words px-2 py-2 font-medium">
+                {title(files[side])}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {group.rows.map((row) => {
-            const different = row.left !== null && row.right !== null && row.left !== row.right;
+          {rows.map((row) => {
+            const different =
+              row.left !== null &&
+              !Array.isArray(row.left) &&
+              row.right !== null &&
+              !Array.isArray(row.right) &&
+              row.left !== row.right;
             return (
               <tr
                 key={row.labelKey}
@@ -78,20 +101,45 @@ function ComparisonTable({
                 >
                   {row.labelKey === "SHA-256" ? row.labelKey : uiText(row.labelKey)}
                 </th>
-                {[row.left, row.right].map((value, index) => (
-                  <td
-                    key={index}
-                    className="break-words px-2 py-2 align-top tabular-nums [overflow-wrap:anywhere]"
-                  >
-                    {different ? (
-                      <mark className="bg-transparent text-accent-foreground">{value}</mark>
-                    ) : (
-                      <span className={value === null ? "text-muted-foreground" : ""}>
-                        {value ?? uiText("Not recorded")}
-                      </span>
-                    )}
-                  </td>
-                ))}
+                {columns.map((side) => {
+                  const value = row[side];
+                  return (
+                    <td
+                      key={side}
+                      className="break-words px-2 py-2 align-top tabular-nums [overflow-wrap:anywhere]"
+                    >
+                      {Array.isArray(value) ? (
+                        <dl className="space-y-2">
+                          {value.map((plate) => (
+                            <div key={plate.number}>
+                              <dt className="text-xs text-muted-foreground" title={plate.name}>
+                                {uiText("Plate {value1}", {
+                                  value1: String(plate.number).padStart(2, "0"),
+                                })}
+                              </dt>
+                              <dd>{plate.value}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      ) : value &&
+                        (row.labelKey === "SHA-256" ||
+                          row.labelKey === "File SHA-256" ||
+                          row.labelKey === "Geometry SHA-256") ? (
+                        <HashValue
+                          sha={value}
+                          label={row.labelKey === "SHA-256" ? row.labelKey : uiText(row.labelKey)}
+                          filename={files[side].original_filename}
+                        />
+                      ) : different ? (
+                        <mark className="bg-transparent text-accent-foreground">{value}</mark>
+                      ) : (
+                        <span className={value === null ? "text-muted-foreground" : ""}>
+                          {value ?? uiText("Not recorded")}
+                        </span>
+                      )}
+                    </td>
+                  );
+                })}
               </tr>
             );
           })}
@@ -110,6 +158,7 @@ export function RevisionCompare({
   onSelectLeft,
   onSelectRight,
   onClose,
+  backLabel = "Back to revisions",
   initialMode,
   mode: controlledMode,
   onModeChange,
@@ -121,11 +170,17 @@ export function RevisionCompare({
   onSelectLeft?: (id: number) => void;
   onSelectRight?: (id: number) => void;
   onClose?: () => void;
+  backLabel?: MessageKey;
   initialMode?: ComparisonMode;
   mode?: ComparisonMode;
   onModeChange?: (mode: ComparisonMode) => void;
 }) {
   useUiLocale();
+  const [showAllFields, setShowAllFields] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
   const [localMode, setLocalMode] = useState<ComparisonMode>(
     initialMode ??
       (left.file_type === "gcode" && right.file_type === "gcode"
@@ -169,6 +224,41 @@ export function RevisionCompare({
     selectedRight.model_id,
     canReadPlates && selectedRight.file_type === "3mf" ? selectedRight.id : null,
   );
+  const slicedId = (file: FileRead) =>
+    !loading &&
+    user &&
+    choices.length >= 2 &&
+    file.file_type === "gcode" &&
+    file.original_filename.toLowerCase().endsWith(".3mf")
+      ? file.id
+      : null;
+  const mixedSourceAndRevision =
+    (selectedLeft.file_type === "gcode") !== (selectedRight.file_type === "gcode");
+  const leftSliced = useGcodePlates(selectedLeft.model_id, slicedId(selectedLeft));
+  const rightSliced = useGcodePlates(selectedRight.model_id, slicedId(selectedRight));
+  function estimate(
+    file: FileRead,
+    metric: keyof GcodePlateMetadata,
+    format: (value: number) => string,
+  ): Value {
+    const data = file.id === selectedLeft.id ? leftSliced : rightSliced;
+    if (
+      data &&
+      data.plates.length > 1 &&
+      data.plate_metadata?.some((plate) => plate.metadata[metric] != null)
+    ) {
+      return data.plates.map((number) => ({
+        number,
+        name: data.identities?.find((plate) => plate.number === number)?.name,
+        value: formatPlateEstimate(
+          metric,
+          data.plate_metadata.find((plate) => plate.number === number)?.metadata[metric],
+        ),
+      }));
+    }
+    const value = file.metadata?.[metric];
+    return value == null ? null : format(value);
+  }
   const leftOutcome = outcomes.find((row) => row.file_id === selectedLeft.id);
   const rightOutcome = outcomes.find((row) => row.file_id === selectedRight.id);
   const numeric = (
@@ -185,6 +275,9 @@ export function RevisionCompare({
     left: read(selectedLeft, leftOutcome),
     right: read(selectedRight, rightOutcome),
   });
+  const emptyHistory =
+    mode !== "source" && leftOutcome?.print_count === 0 && rightOutcome?.print_count === 0;
+  const summarizeHistory = emptyHistory && !showAllFields;
   const metadata = [
     row("Type", (file) => file.file_type.toUpperCase()),
     row("Version", (file) => String(file.version)),
@@ -217,20 +310,30 @@ export function RevisionCompare({
           {
             titleKey: "Printer results & file history",
             rows: [
-              row("Recorded printer results", (_file, outcome) =>
-                outcome
-                  ? `${uiText("Completed")}: ${outcome.completed_count} · ${uiText("Failed")}: ${outcome.failed_count}`
-                  : null,
-              ),
+              ...(summarizeHistory
+                ? []
+                : [
+                    row("Recorded printer results", (_file, outcome) =>
+                      outcome
+                        ? `${uiText("Completed")}: ${outcome.completed_count} · ${uiText("Failed")}: ${outcome.failed_count}`
+                        : null,
+                    ),
+                  ]),
               row("Manual label", (file) =>
                 file.revision_status === null ? null : revisionStatusLabel(file.revision_status),
               ),
-              row("Print count", (_file, outcome) => numeric(outcome?.print_count)),
-              row("Completed", (_file, outcome) => numeric(outcome?.completed_count)),
-              row("Failed", (_file, outcome) => numeric(outcome?.failed_count)),
-              row("Success rate · all printers", (_file, outcome) =>
-                outcome?.success_rate == null ? null : formatPercent(outcome.success_rate * 100),
-              ),
+              ...(summarizeHistory
+                ? []
+                : [
+                    row("Print count", (_file, outcome) => numeric(outcome?.print_count)),
+                    row("Completed", (_file, outcome) => numeric(outcome?.completed_count)),
+                    row("Failed", (_file, outcome) => numeric(outcome?.failed_count)),
+                    row("Success rate · all printers", (_file, outcome) =>
+                      outcome?.success_rate == null
+                        ? null
+                        : formatPercent(outcome.success_rate * 100),
+                    ),
+                  ]),
               ...metadata.filter(
                 (entry) =>
                   entry.labelKey !== "Version" &&
@@ -283,27 +386,27 @@ export function RevisionCompare({
               row("Bed temperature", (file) =>
                 numeric(file.metadata?.bed_temperature_c, formatTemperature),
               ),
-              row("Estimated time", (file) =>
-                numeric(file.metadata?.estimated_time_s, formatDuration),
-              ),
-              row("Filament weight", (file) =>
-                numeric(file.metadata?.filament_weight_g, formatGrams),
-              ),
-              row("Filament cost", (file) => numeric(file.metadata?.filament_cost, formatCost)),
+              row("Estimated time", (file) => estimate(file, "estimated_time_s", formatDuration)),
+              row("Filament weight", (file) => estimate(file, "filament_weight_g", formatGrams)),
+              row("Filament cost", (file) => estimate(file, "filament_cost", formatCost)),
               row("LAYERS", (file) => numeric(file.metadata?.layer_count, formatNumber)),
-              row("EXPOSURE", (file) =>
-                numeric(file.metadata?.exposure_time_s, (value) => `${formatNumber(value)} s`),
-              ),
-              row("RESIN VOLUME", (file) =>
-                numeric(file.metadata?.resin_volume_ml, (value) => `${formatNumber(value)} ml`),
-              ),
-              row("Slicer / version", (file) =>
-                string(
-                  [file.metadata?.slicer_name, file.metadata?.slicer_version]
-                    .filter(Boolean)
-                    .join(" "),
-                ),
-              ),
+              ...(selectedLeft.file_type === "resin" || selectedRight.file_type === "resin"
+                ? [
+                    row("EXPOSURE", (file) =>
+                      numeric(
+                        file.metadata?.exposure_time_s,
+                        (value) => `${formatNumber(value)} s`,
+                      ),
+                    ),
+                    row("RESIN VOLUME", (file) =>
+                      numeric(
+                        file.metadata?.resin_volume_ml,
+                        (value) => `${formatNumber(value)} ml`,
+                      ),
+                    ),
+                  ]
+                : []),
+              row("Slicer / version", (file) => slicerDisplayName(file.metadata)),
             ],
           },
         ];
@@ -317,7 +420,9 @@ export function RevisionCompare({
     <Localized>
       <section className="@container/comparison space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-base font-semibold">{uiText(heading)}</h2>
+          <h2 ref={headingRef} tabIndex={-1} className="text-base font-semibold">
+            {uiText(heading)}
+          </h2>
           <div role="group" aria-label={uiText("Comparison type")} className="flex flex-wrap gap-1">
             {(
               [
@@ -340,7 +445,7 @@ export function RevisionCompare({
           </div>
           {onClose && (
             <Button size="xs" variant="ghost" onClick={onClose}>
-              {uiText("Back to revisions")}
+              {uiText(backLabel)}
             </Button>
           )}
         </div>
@@ -393,11 +498,27 @@ export function RevisionCompare({
                 </p>
               ))}
             </div>
+            {(mixedSourceAndRevision || emptyHistory) && (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={showAllFields}
+                  onChange={(event) => setShowAllFields(event.target.checked)}
+                />
+                {uiText("Show all comparison fields")}
+              </label>
+            )}
+            {summarizeHistory && (
+              <p className="text-sm text-muted-foreground">
+                {uiText("Neither file has recorded prints.")}
+              </p>
+            )}
             <div className={`grid gap-5 ${mode === "source" ? "" : "@2xl/comparison:grid-cols-2"}`}>
               {groups.map((group) => (
                 <ComparisonTable
                   key={group.titleKey}
                   group={group}
+                  compact={!showAllFields && mixedSourceAndRevision}
                   left={selectedLeft}
                   right={selectedRight}
                 />

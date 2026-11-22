@@ -1093,7 +1093,13 @@ class TestGalleryContentAccess:
         model = make_model()
         source = make_provenance_source(model)
         image = make_cover(source, position=1)
-        get_backend().write_bytes(b"private-gallery", image.storage_key)
+        import io
+
+        from PIL import Image
+
+        gallery = io.BytesIO()
+        Image.new("RGB", (8, 8), "red").save(gallery, "WEBP")
+        get_backend().write_bytes(gallery.getvalue(), image.storage_key)
         db_session.commit()
         url = (
             f"/api/v1/models/{model.id}/provenance/{source.id}/cover/content?position=1"
@@ -1103,5 +1109,7 @@ class TestGalleryContentAccess:
         assert client.get(url, headers=headers_for(outsider)).status_code == 403
         allowed = client.get(url, headers=auth_headers)
         assert allowed.status_code == 200
-        assert allowed.content == b"private-gallery"
+        with Image.open(io.BytesIO(allowed.content)) as served:
+            assert served.format == "WEBP"
+            assert served.size == (8, 8)
         assert "private" in allowed.headers["Cache-Control"]

@@ -10,7 +10,7 @@ import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
 import { lastVaultHref } from "@/lib/last-collection";
 import { readLibraryLocation } from "@/features/library/url";
 import { readLibraryFilters } from "@/features/library/filters";
-import { collectionIdentity } from "@/features/library/collection-navigation";
+import { collectionIdentity, treeModelFolderHref } from "@/features/library/collection-navigation";
 import { FilterSidebar } from "@/components/filter-sidebar";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { LibrarySearch } from "@/components/library-search";
@@ -30,7 +30,7 @@ function storedWidth() {
   try {
     const raw = localStorage.getItem("ps-sidebar-width");
     const width = raw === null ? 320 : Number(raw);
-    return Number.isFinite(width) ? Math.max(280, Math.min(520, width)) : 320;
+    return Number.isFinite(width) ? Math.max(0, Math.min(520, width)) : 320;
   } catch {
     return 320;
   }
@@ -55,7 +55,7 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
   const storageKey = `printstash.collections-pane.${user.id}`;
   const [width, updateWidth] = useState(storedWidth);
   const setWidth = useCallback(
-    (value: number) => updateWidth(Math.max(280, Math.min(520, value))),
+    (value: number) => updateWidth(Math.max(0, Math.min(520, value))),
     [],
   );
   useEffect(() => {
@@ -200,6 +200,9 @@ function NavigationCollections() {
           if (path) next.set("c", path);
           else next.delete("c");
         })
+      }
+      onModelOpen={(model) =>
+        router.push(treeModelFolderHref(model, location.sort), { state: { treeModelId: model.id } })
       }
       onTagsChange={(tags) =>
         navigate((next) => {

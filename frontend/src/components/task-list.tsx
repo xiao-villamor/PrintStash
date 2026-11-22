@@ -253,13 +253,13 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
             />
           )}
           {task.retryable && !active && !task.uploadSessionId && (
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent("printstash:review-import"))}
-              className="mt-2 rounded border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            <Link
+              href="/inbox"
+              onClick={onNavigate}
+              className="mt-2 inline-block rounded border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {uiText("Review and retry")}
-            </button>
+            </Link>
           )}
           {task.uploadSessionId && task.status !== "completed" && <UploadControls task={task} />}
           {isArchiveTransferActive(task.id) && (

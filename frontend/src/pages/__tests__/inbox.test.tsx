@@ -80,17 +80,75 @@ describe("InboxPage", () => {
   it.each([
     { label: "empty", items: [] },
     { label: "populated", items: [pendingImport] },
-  ])("offers the import dialog from an $label queue", async ({ items }) => {
+  ])("offers URL capture from an $label queue", async ({ items }) => {
     renderApp(<InboxPage />, {
       at: "/inbox",
       routePath: "/inbox",
       routes: { "GET /api/v1/inbox": json(items) },
     });
 
-    expect(await screen.findByRole("link", { name: "Open import dialog" })).toHaveAttribute(
-      "href",
-      "/?upload=1",
-    );
+    expect(await screen.findByRole("button", { name: "Add URL" })).toBeEnabled();
+  });
+
+  describe("adding a URL", () => {
+    const url = "https://example.test/model/1";
+
+    async function openCapture(routes = {}) {
+      const user = userEvent.setup();
+      const app = renderApp(<InboxPage />, {
+        at: "/inbox",
+        routePath: "/inbox",
+        routes: {
+          "GET /api/v1/inbox": json([]),
+          "POST /api/v1/inbox": json({ ...pendingImport, id: 3 }),
+          ...routes,
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Add URL" }));
+      return { app, user, field: screen.getByRole("textbox", { name: "Source URL" }) };
+    }
+
+    it("waits for a URL before capture", async () => {
+      const { field } = await openCapture();
+
+      expect(field).toHaveAttribute("type", "url");
+      expect(screen.getByRole("button", { name: "Capture for review" })).toBeDisabled();
+    });
+
+    it("rejects malformed URL syntax before sending a request", async () => {
+      const { app, field, user } = await openCapture();
+      await user.type(field, "not-a-url");
+
+      await user.click(screen.getByRole("button", { name: "Capture for review" }));
+
+      expect(field).toBeInvalid();
+      expect(app.requestsWithMethod("POST")).toEqual([]);
+    });
+
+    it("captures the pasted URL for review", async () => {
+      const { app, field, user } = await openCapture();
+      await user.type(field, url);
+
+      await user.click(screen.getByRole("button", { name: "Capture for review" }));
+
+      await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+      expect(JSON.parse(app.requestsWithMethod("POST")[0].body)).toMatchObject({ url });
+      await waitFor(() => expect(screen.queryByRole("textbox", { name: "Source URL" })).toBeNull());
+    });
+
+    it("keeps a refused URL for correction", async () => {
+      const { field, user } = await openCapture({
+        "POST /api/v1/inbox": json({ detail: "url_not_allowed" }, 400),
+      });
+      await user.type(field, url);
+
+      await user.click(screen.getByRole("button", { name: "Capture for review" }));
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Capture for review" })).toBeEnabled(),
+      );
+      expect(field).toHaveValue(url);
+    });
   });
 
   it("localizes Inbox UI while preserving dynamic source data", async () => {

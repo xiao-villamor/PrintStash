@@ -1,4 +1,5 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
+import { DESKTOP_CHROMIUM } from "./tests/playwright-desktop";
 import { resolve } from "node:path";
 
 const port = Number(process.env.PLAYWRIGHT_DELIVERY_PORT ?? 3335);
@@ -45,5 +46,5 @@ export default defineConfig({
       timeout: 120_000,
     },
   ],
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [{ name: "chromium", use: { ...DESKTOP_CHROMIUM } }],
 });

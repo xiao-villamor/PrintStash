@@ -294,7 +294,7 @@ describe("FilamentProfilesCard", () => {
       const form = screen.getByRole("form", { name: formName });
       for (const field of within(form).getAllByRole("textbox")) await user.type(field, "12");
 
-      await user.click(within(form).getByRole("button", { name: "Cancel" }));
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
 
       await waitFor(() =>
         expect(screen.queryByRole("form", { name: formName })).not.toBeInTheDocument(),

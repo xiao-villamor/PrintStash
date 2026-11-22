@@ -11,7 +11,11 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { X } from "lucide-react";
 import { PrinterRead, TagRead } from "@/types";
-import { FilterSidebarContent, type LibraryViewMode } from "@/components/filter-sidebar";
+import {
+  FilterSidebarContent,
+  type FilterSidebarProps,
+  type LibraryViewMode,
+} from "@/components/filter-sidebar";
 import { Drawer } from "@/components/ui/drawer";
 
 interface MobileFilterDrawerProps {
@@ -25,6 +29,7 @@ interface MobileFilterDrawerProps {
   selectedTags: string[];
   selectedPrinterId: number | null;
   selectedPrinterPresence: "any" | "none" | null;
+  onModelOpen?: FilterSidebarProps["onModelOpen"];
   onCollectionChange: (path: string | null, id?: number | null) => void;
   onTagsChange: (tags: string[]) => void;
   onPrinterChange: (printerId: number | null) => void;
@@ -74,6 +79,13 @@ export function MobileFilterDrawer({ open, onClose, ...filterProps }: MobileFilt
       <div id="mobile-collections-pane" className="min-h-0 flex-1 overflow-y-auto">
         <FilterSidebarContent
           {...filterProps}
+          onModelOpen={
+            filterProps.onModelOpen &&
+            ((model, opener) => {
+              onClose();
+              filterProps.onModelOpen?.(model, opener);
+            })
+          }
           collectionsOnly
           filtersOpen={false}
           readinessEnabled={open}

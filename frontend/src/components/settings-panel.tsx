@@ -9,6 +9,7 @@ import { captureEditingBase } from "@/lib/api/editing";
 import type { EditingBase } from "@/types/editing";
 import type { PreferenceIntent, PreviewMode } from "@/lib/queries/settings-preferences";
 
+import { PreviewAppearanceSettings } from "@/components/preview-appearance-settings";
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 
@@ -18,7 +19,7 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { setThemeMode, useThemeMode } from "@/lib/theme";
 import { copyText } from "@/lib/clipboard";
-import { parseApiError } from "@/lib/errors";
+import { parseApiError, userMessage } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -136,6 +137,7 @@ import { SpoolmanConnectCard } from "@/components/spoolman-connect-card";
 import { OidcSettingsCard } from "@/components/oidc-settings-card";
 import { AiSearchSettings } from "@/components/ai-search-settings";
 import { MaintenancePanel } from "@/components/maintenance-panel";
+import { addSampleCollection } from "@/lib/api/config";
 import { BackgroundWorkPanel } from "@/components/background-work-panel";
 import {
   downloadModelExport,
@@ -391,14 +393,16 @@ function previewModeLabel(mode: PreviewMode): string {
     mode === "single"
       ? "One thumbnail"
       : mode === "oblique"
-        ? "Oblique views"
-        : "Oblique views + top and bottom",
+        ? "Angle views"
+        : "Angle views + top and bottom",
   );
 }
 function preferenceLabel(intent: PreferenceIntent): string {
   switch (intent.kind) {
     case "multi-angle":
       return uiText("Multi-angle previews");
+    case "recreate-embedded-covers":
+      return uiText("Recreate embedded covers");
     case "auto-mark":
       return uiText("Auto-mark known good on successful print");
     case "currency":
@@ -484,6 +488,7 @@ export function SettingsPanel() {
   const sidebar = useCollectionsPane();
   useUiLocale();
   const { user } = useAuth();
+  const [addingSamples, setAddingSamples] = useState(false);
   const { locale, setLocale, t } = useI18n();
   const themeMode = useThemeMode();
   const [storageTab, setStorageTab] = useState<"location" | "usage" | "cache">("location");
@@ -681,6 +686,10 @@ export function SettingsPanel() {
     preferenceIntent?.kind === "multi-angle"
       ? preferenceIntent.value
       : previewMode(remoteConfigData);
+  const recreateEmbeddedCovers =
+    preferenceIntent?.kind === "recreate-embedded-covers"
+      ? preferenceIntent.value
+      : (remoteConfigData?.prefer_rendered_3mf_preview ?? false);
   const autoMarkKnownGood =
     preferenceIntent?.kind === "auto-mark"
       ? preferenceIntent.value
@@ -1054,10 +1063,30 @@ export function SettingsPanel() {
       if (accountCurrent(session)) toast.error(error);
     }
   }
+  async function saveEmbeddedCoverPreference(value: boolean) {
+    if (
+      !user?.is_superuser ||
+      !remoteConfigData ||
+      remoteConfig.isError ||
+      previewBusy !== null ||
+      backupPolicy.isPending ||
+      preferenceCommand.blocked
+    )
+      return;
+    const session = getSessionVersion();
+    try {
+      await preferenceCommand.run({ kind: "recreate-embedded-covers", value }, remoteConfigData);
+      if (accountCurrent(session)) toast.success(uiText("Embedded cover setting saved."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
+    }
+  }
   async function recreateModelImages() {
     setPreviewBusy("rebuild");
     try {
       // Every current preview stays visible until its replacement is ready.
+      // Mark views first so each cover pass can render them from the same mesh load.
+      if (selectedPreviewMode !== "single") await regenerateDerivatives("previews", "all");
       await regenerateDerivatives("thumbnail", "all");
       toast.success(uiText("Model preview recreation queued. Follow it in Background work."));
     } catch (e) {
@@ -2973,6 +3002,37 @@ export function SettingsPanel() {
                           </div>
                         </dl>
                       </SettingsCard>
+                    )}
+                    {user?.is_superuser && (
+                      <SettingsCard
+                        title={uiText("Sample collection")}
+                        action={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            loading={addingSamples}
+                            onClick={async () => {
+                              setAddingSamples(true);
+                              try {
+                                const { job_id } = await addSampleCollection();
+                                toast.success(
+                                  uiText(
+                                    job_id
+                                      ? "Sample collection queued"
+                                      : "Sample collection already exists",
+                                  ),
+                                );
+                              } catch (error) {
+                                toast.error(userMessage(error));
+                              } finally {
+                                setAddingSamples(false);
+                              }
+                            }}
+                          >
+                            {uiText("Add sample collection")}
+                          </Button>
+                        }
+                      />
                     )}
                     {/* System information */}
                     <SettingsCard
@@ -5322,7 +5382,7 @@ export function SettingsPanel() {
                         {uiText("Multi-angle previews")}
                         <span className="settings-row-hint">
                           {uiText(
-                            "Start with one thumbnail for faster imports. Enable four oblique views, optionally adding top and bottom. Existing Models update in the background.",
+                            "Start with one thumbnail for faster imports. Enable four angle views, optionally adding top and bottom. Existing Models update in the background.",
                           )}
                         </span>
                       </span>
@@ -5349,6 +5409,29 @@ export function SettingsPanel() {
                         <option value="oblique-poles">{previewModeLabel("oblique-poles")}</option>
                       </select>
                     </div>
+                    <div className="settings-preference-row">
+                      <span>
+                        {uiText("Recreate embedded covers")}
+                        <span className="settings-row-hint">
+                          {uiText(
+                            "Turn on to render new covers for 3MF files with a built-in picture. Turning off restores the built-in pictures. Covers update in the background.",
+                          )}
+                        </span>
+                      </span>
+                      <SettingsSwitch
+                        label={uiText("Recreate embedded covers")}
+                        checked={recreateEmbeddedCovers}
+                        onChange={(value) => void saveEmbeddedCoverPreference(value)}
+                        disabled={
+                          !user?.is_superuser ||
+                          !remoteConfigData ||
+                          remoteConfig.isError ||
+                          previewBusy !== null ||
+                          preferenceCommand.blocked ||
+                          backupPolicy.isPending
+                        }
+                      />
+                    </div>
                     <p className="settings-footnote">
                       {uiText(
                         "Quality changes apply to new images. Recreate all images to update existing Models in the background.",
@@ -5356,6 +5439,18 @@ export function SettingsPanel() {
                     </p>
                   </div>
                 </SettingsCard>
+
+                {user?.is_superuser && remoteConfigData?.preview_look && (
+                  <PreviewAppearanceSettings
+                    config={remoteConfigData}
+                    disabled={
+                      remoteConfig.isError ||
+                      previewBusy !== null ||
+                      preferenceCommand.blocked ||
+                      backupPolicy.isPending
+                    }
+                  />
+                )}
               </div>
             )}
 

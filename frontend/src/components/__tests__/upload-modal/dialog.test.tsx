@@ -1,10 +1,9 @@
 /*
- * Four ways to get something into the library, behind one dialog.
+ * Two ways to upload, behind one dialog.
  *
- * Each mode posts a different request and, more importantly, *stops in a
- * different place*. Files, Bulk, and From archive queue work and close; the ZIP
- * selection is available from Tasks when preparation completes. From URL
- * opens Pending Imports for review.
+ * Files adds one Model with its G-code. Bulk takes Model files, a folder or one
+ * archive. Each queues work and closes; an archive's selection is available from
+ * Tasks when preparation completes. URL capture belongs to Pending Imports.
  *
  * The submit button is a gate, not a decoration. It stays disabled until the
  * chosen mode actually has its input, and it is disabled outright for a
@@ -77,8 +76,8 @@ function renderUpload(
   return { ...result, onClose, onUploaded };
 }
 
-/** Choose one of the four ways in. */
-function mode(name: "Files" | "Bulk" | "From URL" | "From archive") {
+/** Choose one of the two ways in. */
+function mode(name: "Files" | "Bulk") {
   return screen.getByRole("tab", { name: new RegExp(`\\s*${name}\\s*`) });
 }
 
@@ -96,47 +95,6 @@ afterEach(() => {
 });
 
 describe("UploadModal", () => {
-  it("names the URL capture field", async () => {
-    const user = userEvent.setup();
-    renderUpload();
-
-    await user.click(mode("From URL"));
-
-    expect(screen.getByRole("textbox", { name: "Source URL" })).toHaveAttribute("type", "url");
-  });
-
-  it("rejects malformed URL syntax before sending a request", async () => {
-    const user = userEvent.setup();
-    const app = renderUpload();
-    await user.click(mode("From URL"));
-    await user.type(screen.getByRole("textbox", { name: "Source URL" }), "not-a-url");
-
-    await user.click(screen.getByRole("button", { name: "Capture for review" }));
-
-    expect(screen.getByRole("textbox", { name: "Source URL" })).toBeInvalid();
-    expect(app.requestsWithMethod("POST")).toEqual([]);
-  });
-
-  it("preserves an invalid capture URL for correction", async () => {
-    const user = userEvent.setup();
-    renderUpload({ routes: { "POST /api/v1/inbox": json({ detail: "url_invalid" }, 400) } });
-    await user.click(mode("From URL"));
-    await user.type(
-      screen.getByRole("textbox", { name: "Source URL" }),
-      "ftp://example.invalid/model.stl",
-    );
-
-    await user.click(screen.getByRole("button", { name: "Capture for review" }));
-
-    expect(
-      await screen.findByText("Enter a valid http(s) URL for a model page or file."),
-    ).toBeVisible();
-    expect(screen.getByRole("textbox", { name: "Source URL" })).toHaveValue(
-      "ftp://example.invalid/model.stl",
-    );
-    expect(screen.getByRole("button", { name: "Capture for review" })).toBeEnabled();
-  });
-
   it("shows the exact folder name in the destination picker", async () => {
     const user = userEvent.setup();
     const collections = [
@@ -151,10 +109,12 @@ describe("UploadModal", () => {
     ];
     renderUpload({ collections });
 
-    await user.click(screen.getByRole("button", { name: "None" }));
+    await user.click(screen.getByRole("button", { name: "Collection" }));
     await user.click(screen.getByRole("option", { name: /Testing\/My Parts/ }));
 
-    expect(screen.getByRole("button", { name: "Testing/My Parts" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Collection" })).toHaveTextContent(
+      "Testing/My Parts",
+    );
     expect(screen.queryByText("testing/my-parts")).toBeNull();
   });
 
@@ -183,28 +143,14 @@ describe("UploadModal", () => {
       expect(screen.getByRole("button", { name: /Upload to vault/ })).toBeDisabled();
     });
 
-    it("explains that URL destination values remain editable during review", async () => {
-      const user = userEvent.setup();
-      renderUpload();
-      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
-
-      await user.click(mode("From URL"));
-
-      expect(
-        screen.getByText(
-          "Create a durable capture, then review its files and confirm or change the collection and tags.",
-        ),
-      ).toBeInTheDocument();
-    });
-
     it("offers an archive import", async () => {
       const user = userEvent.setup();
       renderUpload();
       await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
 
-      await user.click(mode("From archive"));
+      await user.click(mode("Bulk"));
 
-      expect(screen.getByText(".zip .7z .rar .tar .tgz")).toBeInTheDocument();
+      expect(screen.getByText(/\.zip/)).toBeInTheDocument();
     });
   });
 
@@ -216,120 +162,29 @@ describe("UploadModal", () => {
       expect(screen.getByRole("button", { name: "Upload to vault" })).toBeDisabled();
     });
 
-    it("refuses an empty URL import", async () => {
+    it("accepts one archive in Bulk", async () => {
       const user = userEvent.setup();
-      renderUpload();
+      const { container } = renderUpload();
       await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
+      await user.click(mode("Bulk"));
 
-      await user.click(mode("From URL"));
+      await user.upload(fileInputs(container)[0], new File(["x"], "parts.zip"));
 
-      expect(screen.getByRole("button", { name: "Capture for review" })).toBeDisabled();
-    });
-
-    it("refuses an empty archive import", async () => {
-      const user = userEvent.setup();
-      renderUpload();
-      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
-
-      await user.click(mode("From archive"));
-
-      expect(screen.getByRole("button", { name: "Prepare archive" })).toBeDisabled();
-    });
-
-    it("accepts a URL once one is typed", async () => {
-      const user = userEvent.setup();
-      renderUpload();
-      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
-      await user.click(mode("From URL"));
-
-      await user.type(
-        screen.getByPlaceholderText(/Model page, collection/),
-        "https://example.test/model/1",
-      );
-
-      expect(screen.getByRole("button", { name: "Capture for review" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Prepare archive" })).toBeEnabled();
     });
 
     it("refuses everything for a member with nowhere to write", async () => {
       // Uploading into a collection you cannot write to fails on the server,
       // after the bytes have gone up — so the gate is here, before them.
       const user = userEvent.setup();
-      renderUpload({
+      const { container } = renderUpload({
         auth: memberSession(),
         collections: [aCollection({ effective_role: "view" })],
       });
       await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
-      await user.click(mode("From URL"));
-      await user.type(
-        screen.getByPlaceholderText(/Model page, collection/),
-        "https://example.test/model/1",
-      );
+      await user.upload(fileInputs(container)[0], new File(["x"], "cube.stl"));
 
-      expect(screen.getByRole("button", { name: "Capture for review" })).toBeDisabled();
-    });
-  });
-
-  describe("importing from a URL", () => {
-    async function pasteAndReview(user: ReturnType<typeof userEvent.setup>) {
-      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
-      await user.click(mode("From URL"));
-      await user.type(
-        screen.getByPlaceholderText(/Model page, collection/),
-        "https://example.test/model/1",
-      );
-      await user.click(screen.getByRole("button", { name: "Capture for review" }));
-    }
-
-    it("captures the URL as a pending import rather than importing it", async () => {
-      // A remote page is captured first and reviewed afterwards, so nothing a
-      // third-party site claims about a model lands in the library unseen.
-      const user = userEvent.setup();
-      const { requestsWithMethod } = renderUpload();
-
-      await pasteAndReview(user);
-
-      await waitFor(() =>
-        expect(requestsWithMethod("POST").some((call) => call.url.includes("/inbox"))).toBe(true),
-      );
-    });
-
-    it("sends the pasted URL verbatim", async () => {
-      const user = userEvent.setup();
-      const { requestsWithMethod } = renderUpload();
-
-      await pasteAndReview(user);
-
-      await waitFor(() => {
-        const capture = requestsWithMethod("POST").find((call) => call.url.includes("/inbox"));
-        expect(JSON.parse(capture?.body ?? "{}")).toMatchObject({
-          url: "https://example.test/model/1",
-          tags: [],
-        });
-      });
-    });
-
-    it("closes once the capture is queued", async () => {
-      const user = userEvent.setup();
-      const { onClose } = renderUpload();
-
-      await pasteAndReview(user);
-
-      await waitFor(() => expect(onClose).toHaveBeenCalled());
-    });
-
-    it("keeps the dialog open when the capture is refused", async () => {
-      // Closing on failure loses the URL the user pasted, with nothing said.
-      const user = userEvent.setup();
-      const { onClose } = renderUpload({
-        routes: { "POST /api/v1/inbox": json({ detail: "url_not_allowed" }, 400) },
-      });
-
-      await pasteAndReview(user);
-
-      await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Capture for review" })).toBeEnabled(),
-      );
-      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Upload to vault" })).toBeDisabled();
     });
   });
 
@@ -337,14 +192,14 @@ describe("UploadModal", () => {
     it("offers the collections the user may write to", async () => {
       renderUpload();
 
-      expect(await screen.findByPlaceholderText(/Search or create/)).toBeInTheDocument();
+      expect(await screen.findByPlaceholderText("Add tags")).toBeInTheDocument();
     });
 
     it("takes a model name", async () => {
       const user = userEvent.setup();
       renderUpload();
 
-      const name = await screen.findByPlaceholderText("e.g. Bracket v2");
+      const name = await screen.findByLabelText("Model name");
       await user.type(name, "Bracket v2");
 
       expect(name).toHaveValue("Bracket v2");
@@ -376,7 +231,7 @@ describe("UploadModal", () => {
 
       await user.upload(fileInputs(container)[0], new File(["x"], "cube.stl"));
 
-      expect(screen.getByPlaceholderText("e.g. Bracket v2")).toHaveValue("cube");
+      expect(screen.getByLabelText("Model name")).toHaveValue("cube");
     });
 
     it("accepts a G-code on its own", async () => {
@@ -427,7 +282,7 @@ describe("UploadModal", () => {
   describe("tagging the upload", () => {
     /** The picker only lists once there is something to filter by. */
     async function search(user: ReturnType<typeof userEvent.setup>, term: string) {
-      await user.type(await screen.findByPlaceholderText(/Search or create/), term);
+      await user.type(await screen.findByPlaceholderText("Add tags"), term);
     }
 
     it("offers a tag that already exists", async () => {
@@ -477,21 +332,17 @@ describe("UploadModal", () => {
       const pendingLookup = new Promise<Response>((resolve) => {
         resolveLookup = resolve;
       });
-      renderUpload({
+      const { container } = renderUpload({
         defaultCollection: "parts",
         routes: { "GET /api/v1/collections/lookup": () => pendingLookup },
       });
 
-      await user.click(mode("From URL"));
-      await user.type(
-        screen.getByPlaceholderText(/Model page, collection/),
-        "https://example.test/model/1",
-      );
-      expect(screen.getByRole("button", { name: "Capture for review" })).toBeDisabled();
+      await user.upload(fileInputs(container)[0], new File(["x"], "cube.stl"));
+      expect(screen.getByRole("button", { name: "Upload to vault" })).toBeDisabled();
 
       resolveLookup(json({ collection: aCollectionNode(), ancestors: [] }));
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Capture for review" })).toBeEnabled(),
+        expect(screen.getByRole("button", { name: "Upload to vault" })).toBeEnabled(),
       );
     });
 
@@ -499,7 +350,7 @@ describe("UploadModal", () => {
       const user = userEvent.setup();
       renderUpload();
 
-      await user.click(await screen.findByRole("button", { name: "None" }));
+      await user.click(await screen.findByRole("button", { name: "Collection" }));
 
       expect(await screen.findByRole("option", { name: /Parts/ })).toBeInTheDocument();
     });
@@ -512,7 +363,7 @@ describe("UploadModal", () => {
         collections: [aCollection({ effective_role: "view" })],
       });
 
-      await user.click(await screen.findByRole("button", { name: "None" }));
+      await user.click(await screen.findByRole("button", { name: "Collection" }));
 
       expect(await screen.findByText("No editable collections.")).toBeInTheDocument();
     });
@@ -520,11 +371,13 @@ describe("UploadModal", () => {
     it("files the upload in the collection the user chose", async () => {
       const user = userEvent.setup();
       renderUpload();
-      await user.click(await screen.findByRole("button", { name: "None" }));
+      await user.click(await screen.findByRole("button", { name: "Collection" }));
 
       await user.click(await screen.findByRole("option", { name: /Parts/ }));
 
-      expect(await screen.findByRole("button", { name: /Parts/ })).toBeInTheDocument();
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Collection" })).toHaveTextContent("Parts"),
+      );
     });
   });
 
@@ -557,7 +410,7 @@ describe("UploadModal", () => {
         dataTransfer: { files: [new File(["x"], "cube.stl")], types: ["Files"] },
       });
 
-      expect(await screen.findAllByText("cube.stl")).toHaveLength(2);
+      expect(await screen.findByText("cube.stl")).toBeInTheDocument();
     });
 
     it("refuses a file the slot does not take", async () => {
@@ -596,7 +449,7 @@ describe("UploadModal", () => {
 
       fireEvent.drop(meshSlot(), { dataTransfer: { files: [], types: [] } });
 
-      expect(screen.getAllByText("cube.stl")).toHaveLength(2);
+      expect(screen.getByText("cube.stl")).toBeInTheDocument();
     });
   });
 
@@ -610,7 +463,7 @@ describe("UploadModal", () => {
       });
       await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
 
-      await user.type(await screen.findByPlaceholderText(/Search or create/), "spares{Enter}");
+      await user.type(await screen.findByPlaceholderText("Add tags"), "spares{Enter}");
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("POST").at(-1)?.body ?? "{}")).toMatchObject({
@@ -626,7 +479,7 @@ describe("UploadModal", () => {
       const { requestsWithMethod } = renderUpload();
       await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
 
-      await user.type(await screen.findByPlaceholderText(/Search or create/), "Functional{Enter}");
+      await user.type(await screen.findByPlaceholderText("Add tags"), "Functional{Enter}");
 
       expect(requestsWithMethod("POST")).toHaveLength(0);
     });
@@ -638,9 +491,9 @@ describe("UploadModal", () => {
       });
       await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
 
-      await user.type(await screen.findByPlaceholderText(/Search or create/), "spares{Enter}");
+      await user.type(await screen.findByPlaceholderText("Add tags"), "spares{Enter}");
 
-      expect(await screen.findByPlaceholderText(/Search or create/)).toBeInTheDocument();
+      expect(await screen.findByPlaceholderText("Add tags")).toBeInTheDocument();
     });
   });
 });

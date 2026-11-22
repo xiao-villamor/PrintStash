@@ -91,24 +91,32 @@ class _Ticket:
     request: Resources
     capacity: Resources
     priority: WorkPriority
+    hard_bytes: int
 
     def __post_init__(self) -> None:
         if not isinstance(self.priority, WorkPriority):
             raise TypeError("priority must be a WorkPriority")
+        if (
+            type(self.hard_bytes) is not int
+            or not self.request.bytes <= self.hard_bytes <= self.capacity.bytes
+        ):
+            raise ValueError("invalid hard resource ceiling")
 
     def encode(self) -> bytes:
-        return json.dumps(
-            {
-                "version": 2,
-                "name": self.name,
-                "order": self.order,
-                "state": self.state.value,
-                "request": [self.request.slots, self.request.bytes],
-                "capacity": [self.capacity.slots, self.capacity.bytes],
-                "priority": self.priority.value,
-            },
-            separators=(",", ":"),
-        ).encode("ascii")
+        data = {
+            "version": 2,
+            "name": self.name,
+            "order": self.order,
+            "state": self.state.value,
+            "request": [self.request.slots, self.request.bytes],
+            "capacity": [self.capacity.slots, self.capacity.bytes],
+            "priority": self.priority.value,
+        }
+        if self.hard_bytes != self.request.bytes:
+            # Only split claims need the new record shape. Drain old native
+            # claimants before starting processes that write split tickets.
+            data.update(version=3, hard_bytes=self.hard_bytes)
+        return json.dumps(data, separators=(",", ":")).encode("ascii")
 
     @classmethod
     def read(cls, descriptor: int) -> _Ticket:
@@ -122,7 +130,7 @@ class _Ticket:
             data = json.loads(raw)
             if (
                 type(data["version"]) is not int
-                or data["version"] not in (1, 2)
+                or data["version"] not in (1, 2, 3)
                 or not isinstance(data["name"], str)
                 or len(data["name"]) != 32
                 or any(c not in "0123456789abcdef" for c in data["name"])
@@ -144,15 +152,21 @@ class _Ticket:
                 if type(data["priority"]) is not str:
                     raise TypeError("invalid priority representation")
                 priority = WorkPriority(data["priority"])
+            request = Resources(*data["request"])
+            hard_bytes = request.bytes
+            if data["version"] == 3:
+                required.add("hard_bytes")
+                hard_bytes = data["hard_bytes"]
             if set(data) != required:
                 raise ValueError("invalid ticket fields")
             ticket = cls(
                 data["name"],
                 data["order"],
                 _State(data["state"]),
-                Resources(*data["request"]),
+                request,
                 Resources(*data["capacity"]),
                 priority,
+                hard_bytes,
             )
             if not ticket.request.fits(ticket.capacity):
                 raise ValueError("invalid ticket resources")
@@ -192,6 +206,7 @@ class NativePermit:
     resources: Resources
     identity: str
     path: Path
+    hard_bytes: int
 
     @property
     def fileno(self) -> int:
@@ -222,7 +237,7 @@ class NativePermit:
                     raise AdmissionCorrupted("inherited descriptor does not own credit")
             finally:
                 os.close(probe)
-            yield cls(owned, ticket.request, ticket.name, path)
+            yield cls(owned, ticket.request, ticket.name, path, ticket.hard_bytes)
 
 
 class LocalResourcePool:
@@ -344,6 +359,7 @@ class LocalResourcePool:
         *,
         checkpoint: Callable[[], None],
         priority: WorkPriority = WorkPriority.INTERACTIVE,
+        hard_bytes: int | None = None,
     ) -> Iterator[NativePermit]:
         if not isinstance(priority, WorkPriority):
             raise TypeError("priority must be a WorkPriority")
@@ -359,6 +375,7 @@ class LocalResourcePool:
                 request,
                 capacity,
                 priority,
+                request.bytes if hard_bytes is None else hard_bytes,
             )
             handle = _open(self.directory / (ticket.name + ".ticket"), exclusive=True)
             try:
@@ -382,6 +399,7 @@ class LocalResourcePool:
                                 request,
                                 capacity,
                                 priority,
+                                ticket.hard_bytes,
                             )
                             self._write(handle, ticket)
                             break
@@ -404,7 +422,11 @@ class LocalResourcePool:
                 _releases.wait(seen, _WAIT_SECONDS)
             checkpoint()
             yield NativePermit(
-                handle, request, ticket.name, self.directory / (ticket.name + ".ticket")
+                handle,
+                request,
+                ticket.name,
+                self.directory / (ticket.name + ".ticket"),
+                ticket.hard_bytes,
             )
         finally:
             # Never unlink here: a child may still hold this exact descriptor.

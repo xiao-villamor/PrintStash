@@ -11,6 +11,7 @@ from app.core.errors import OperationError
 from app.core.time import utcnow
 from app.db.models import File, JobKind, LaneName
 from app.db.scopes import live
+from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.work.contracts import (
     DuringAdditions,
     JobContext,
@@ -87,9 +88,16 @@ def _hooks(derivative_group: DerivativeGroup):
         file_row = _file(session, subject_key)
         if file_row is not None:
             if derivative_group.definition is JobKind.DERIVATIVES_MESH:
+                from . import preview_publication as publication
                 from .mesh_continuations import withdraw_current_job
 
                 withdraw_current_job(session, file_id_of(subject_key))
+                # The pass ended before its views: a retry, never a verdict.
+                publication.settle_stranded(
+                    session,
+                    file_id_of(subject_key),
+                    ThumbnailFailureReason.WORKER_FAILED.value,
+                )
             records.cancel(
                 session,
                 file_row,
@@ -103,6 +111,12 @@ def _hooks(derivative_group: DerivativeGroup):
         if file_row is None:
             return
         recipes = derivative_group.recipes_for(file_row.file_type)
+        if derivative_group.definition is JobKind.DERIVATIVES_MESH:
+            # Views a dead cover pass claimed would otherwise wait out the
+            # stale window; as a retry, the batch renders them.
+            from . import preview_publication as publication
+
+            publication.settle_stranded(session, file_id_of(subject_key), reason)
         if reason == SkipReason.DERIVATIVE_GROUP_DISABLED:
             # Settle started work without spending attempts on outputs that
             # were never started. Re-enabling the group can discover them.
@@ -119,8 +133,7 @@ def _hooks(derivative_group: DerivativeGroup):
         )
 
     def retry(session: Session, subject_key: str) -> bool:
-        policy.lock(session)
-        policy.require_enabled(session, derivative_group.definition)
+        policy.lock_enabled(session, derivative_group.definition)
         file_row = _file(session, subject_key)
         if file_row is None:
             return False
@@ -136,14 +149,13 @@ def _during_additions(name: JobKind) -> DuringAdditions:
     """How a derivative definition looks for work while Models are being added.
 
     A viewer mesh is what opening a Model in 3D waits for; it never yields.
-    Mesh outputs follow an import as its Models land, at a pace. G-code and
-    toolpath outputs wait for the last addition to settle: a paced look costs
-    the import a writer turn every few seconds even when the batch brings no
-    G-code, and the settling addition stamps them, so nothing is lost.
+    Mesh covers refill from committed Artifacts and accepted Job claims.
+    Optional previews still look at a pace. The other groups wait for the last
+    addition to settle, which stamps their sources.
     """
-    if name is JobKind.DERIVATIVES_VIEWER_STL:
+    if name in {JobKind.DERIVATIVES_VIEWER_STL, JobKind.DERIVATIVES_MESH}:
         return DuringAdditions.RUNS
-    if name in {JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_PREVIEWS}:
+    if name is JobKind.DERIVATIVES_PREVIEWS:
         return DuringAdditions.PACED
     return DuringAdditions.WAITS
 
@@ -161,9 +173,12 @@ def _definition(name: JobKind, lane: LaneName, produce: Producer) -> JobDefiniti
         cancel=cancel,
         on_failure=on_failure,
         retry=retry,
-        completion_nudges=(JobKind.DERIVATIVES_PREVIEWS,)
-        if name in {JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_GCODE}
-        else (),
+        completion_nudges={
+            JobKind.DERIVATIVES_MESH: (JobKind.DERIVATIVES_PREVIEWS,),
+            JobKind.DERIVATIVES_GCODE: (JobKind.DERIVATIVES_PREVIEWS,),
+        }.get(name, ()),
+        batch_interactive_discovery=name
+        in {JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_PLATES},
         label=derivative_group.label,
         admission=lambda session: policy.admission(session, name),
         during_additions=_during_additions(name),
@@ -211,7 +226,7 @@ def nudge_for(session: Session, file_row: File) -> None:
     controls = policy.resolve(session)
     for derivative_group in groups_for(file_row):
         if controls[derivative_group.definition].enabled:
-            nudge(derivative_group.definition)
+            nudge(derivative_group.definition, use_interactive_reserve=True)
 
 
 def nudge_with_commit(session: Session, file_row: File) -> None:

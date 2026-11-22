@@ -94,6 +94,53 @@ def orphan(tmp_path, request):
 
 
 class TestLocalResourcePool:
+    def test_admits_concurrent_claims_by_resident_credit(self, tmp_path):
+        pool = LocalResourcePool(tmp_path)
+        capacity = Resources(2, 100)
+
+        def checkpoint():
+            assert time.monotonic() < deadline, "claims should fit together"
+
+        deadline = time.monotonic() + 3
+        with (
+            pool.reserve(
+                Resources(1, 65), capacity, hard_bytes=100, checkpoint=checkpoint
+            ),
+            pool.reserve(
+                Resources(1, 35), capacity, hard_bytes=70, checkpoint=checkpoint
+            ) as permit,
+        ):
+            assert permit.resources == Resources(1, 35)
+
+    def test_inherits_the_hard_worker_ceiling(self, tmp_path):
+        pool = LocalResourcePool(tmp_path)
+        capacity = Resources(2, 100)
+
+        with (
+            pool.reserve(
+                Resources(1, 65), capacity, hard_bytes=100, checkpoint=lambda: None
+            ) as parent,
+            NativePermit.inherit(parent.fileno, parent.path) as child,
+        ):
+            assert child.hard_bytes == 100
+
+    @pytest.mark.parametrize(
+        "hard", [64, 101, True], ids=["below-credit", "above-pool", "boolean"]
+    )
+    def test_refuses_an_invalid_hard_ceiling(self, tmp_path, hard):
+        pool = LocalResourcePool(tmp_path)
+
+        with (
+            pytest.raises(ValueError, match="invalid hard resource ceiling"),
+            pool.reserve(
+                Resources(1, 65),
+                Resources(2, 100),
+                hard_bytes=hard,
+                checkpoint=lambda: None,
+            ),
+        ):
+            pytest.fail("invalid hard ceiling received admission")
+
     def test_observes_changed_live_admission_receipts(self, tmp_path):
         from contextlib import ExitStack
         from dataclasses import replace
@@ -106,7 +153,7 @@ class TestLocalResourcePool:
         ) as permit:
             with ExitStack() as recovery, pool._coordinator(lambda: None):
                 original = pool._live(recovery)[0][0]
-                changed = replace(original, request=Resources(1, 41))
+                changed = replace(original, request=Resources(1, 41), hard_bytes=41)
                 with permit.path.open("r+b", buffering=0) as handle:
                     pool._write(handle, changed)
                 live, _ = pool._live(recovery)

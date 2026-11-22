@@ -274,7 +274,8 @@ describe("FilesTab", () => {
 });
 
 describe("FilesTab recorded identity", () => {
-  it("places the complete Artifact hashes beside their owning filename", () => {
+  it("copies the source hash from the owning file menu", async () => {
+    const user = userEvent.setup();
     renderApp(
       <FilesTab
         modelId={1}
@@ -285,13 +286,10 @@ describe("FilesTab recorded identity", () => {
     );
 
     const file = within(screen.getByRole("article", { name: "bracket.stl" }));
-    expect(file.getByRole("button", { name: "Copy File SHA-256 for bracket.stl" })).toHaveAttribute(
-      "title",
-      artifact.sha256,
-    );
-    expect(
-      file.getByRole("button", { name: "Copy Geometry SHA-256 for bracket.stl" }),
-    ).toHaveAttribute("title", "c".repeat(64));
+    expect(file.queryByTitle(artifact.sha256)).not.toBeInTheDocument();
+    await user.click(file.getByRole("button", { name: "Actions for bracket.stl" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Copy SHA-256" }));
+    expect(await navigator.clipboard.readText()).toBe(artifact.sha256);
   });
   it("offers comparison through the existing owner callback", async () => {
     let comparing = false;

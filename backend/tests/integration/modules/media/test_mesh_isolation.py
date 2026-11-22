@@ -13,6 +13,7 @@ import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -503,6 +504,51 @@ class TestWarmLaunch:
 
         assert (kinds, result.geometry["triangle_count"]) == (
             [mesh_isolation.worker_launch.ForkedWorker],
+            4,
+        )
+
+    @pytest.mark.parametrize(
+        ("template_mib", "worker_type"),
+        [
+            pytest.param(425, "ForkedWorker", id="room-for-measurements"),
+            pytest.param(480, "Popen", id="too-little-room"),
+        ],
+    )
+    def test_geometry_only_3mf_reuses_the_template_if_it_has_room(
+        self, tmp_path, monkeypatch, template_mib, worker_type
+    ):
+        monkeypatch.setattr(
+            mesh_isolation, "memory_budget_bytes", lambda: 512 * 1024**2
+        )
+        path = tmp_path / "pictured.3mf"
+        path.write_bytes(three_mf(extras={"Metadata/thumbnail.png": content.png()}))
+        launcher = mesh_isolation.worker_launch
+        current = launcher._current
+
+        def measured_size(*args):
+            template = current(*args)
+            assert template is not None
+            # Exercise launch policy at a fixed measured size across runners.
+            return replace(template, virtual_size=template_mib * 1024**2)
+
+        monkeypatch.setattr(launcher, "_current", measured_size)
+        launched = self._launched(monkeypatch)
+
+        result = mesh_isolation.generate(
+            _request(
+                path,
+                file_type="3mf",
+                include_thumbnail=False,
+                check_embedded_3mf_preview=False,
+                include_fingerprint=False,
+            )
+        )
+
+        assert (
+            [kind.__name__ for kind in launched],
+            result.geometry["triangle_count"],
+        ) == (
+            [worker_type],
             4,
         )
 

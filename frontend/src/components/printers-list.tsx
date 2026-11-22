@@ -25,6 +25,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { FormField } from "@/components/ui/form-field";
+import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { PageHeader } from "@/components/ui/page-header";
@@ -76,6 +78,8 @@ export function PrintersPage() {
   const error = printersQuery.error instanceof Error ? printersQuery.error.message : null;
   const [addOpen, setAddOpen] = useState(false);
   const [addJobOpen, setAddJobOpen] = useState(false);
+  const settingsFormId = useId();
+  const [settingsFooter, setSettingsFooter] = useState<HTMLDivElement | null>(null);
   const [settingsTarget, setSettingsTarget] = useState<PrinterRead | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PrinterRead | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -446,13 +450,14 @@ export function PrintersPage() {
             onClose={() => setSettingsTarget(null)}
             title={uiText("Edit printer connection")}
             description={uiText("Connect your printer using its local integration.")}
+            footer={<div ref={setSettingsFooter} className="contents" />}
           >
             {settingsTarget && (
               <Suspense fallback={<Skeleton className="h-52 w-full" />}>
                 <PrinterConnectionForm
                   printer={settingsTarget}
                   canEdit={settingsTarget.access.can_admin}
-                  compact
+                  modalActions={{ formId: settingsFormId, target: settingsFooter }}
                   onCancel={() => setSettingsTarget(null)}
                   onSaved={() => setSettingsTarget(null)}
                   onRemove={() => {
@@ -644,6 +649,7 @@ function PrinterModelPicker({
   const models = PRINTER_MODEL_OPTIONS.filter((model) =>
     model.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
+  const modelHintId = useId();
   return (
     <Localized>
       <Modal
@@ -673,7 +679,6 @@ function PrinterModelPicker({
               </Button>
             ) : (
               <Button
-                variant="outline"
                 disabled={saving || blocked}
                 onClick={() => {
                   setCustom(true);
@@ -688,44 +693,40 @@ function PrinterModelPicker({
       >
         {custom ? (
           <div className="space-y-4">
-            <h3 className="text-sm font-semibold">{uiText("Hardware")}</h3>
-            <label className="block space-y-1.5 text-[13px]">
-              {uiText("Manufacturer")}
-              <input
-                className="h-10 w-full border border-input bg-card px-3 text-sm"
+            <h3 className="text-field font-semibold">{uiText("Hardware")}</h3>
+            <FormField label={uiText("Manufacturer")}>
+              <Input
                 value={manufacturer}
                 onChange={(event) => setManufacturer(event.target.value)}
                 disabled={saving}
               />
-            </label>
-            <label className="block space-y-1.5 text-[13px]">
-              {uiText("Model")}
-              <input
+            </FormField>
+            <FormField
+              label={uiText("Model")}
+              hint={uiText("Enter the model printed on the machine.")}
+              hintId={modelHintId}
+            >
+              <Input
                 autoFocus
-                className="h-10 w-full border border-input bg-card px-3 text-sm"
                 value={customValue}
+                aria-describedby={modelHintId}
                 onChange={(event) => onCustomValueChange(event.target.value)}
                 disabled={saving}
                 required
               />
-            </label>
-            <p className="text-xs text-muted-foreground">
-              {uiText("Enter the model printed on the machine.")}
-            </p>
+            </FormField>
           </div>
         ) : (
           <>
-            <label className="block space-y-1.5 text-[13px]">
-              {uiText("Search manufacturer / model")}
-              <input
+            <FormField label={uiText("Search manufacturer / model")}>
+              <Input
                 autoFocus
                 type="search"
                 disabled={saving}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                className="h-10 w-full border border-input bg-card px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
-            </label>
+            </FormField>
             <div className="mt-4 max-h-96 divide-y divide-border overflow-y-auto">
               {models.length ? (
                 models.map((model) => (
@@ -866,296 +867,235 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
           </>
         }
       >
-        <form
-          id={formId}
-          onSubmit={submit}
-          className="grid gap-5 sm:grid-cols-2 [&>div]:sm:col-span-2"
-        >
-          <h3 className="col-span-full text-sm font-semibold">{uiText("Printer")}</h3>
-          <div className="sm:!col-span-1">
-            <label
-              htmlFor="printer-name"
-              className="block text-[13px] font-medium text-foreground mb-1.5"
-            >
-              {uiText("Name")}
-            </label>
-            <input
-              id="printer-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
-              required
-            />
-          </div>
-          <div className="sm:!col-span-1">
-            <label
-              htmlFor="printer-integration"
-              className="block text-[13px] font-medium text-foreground mb-1.5"
-            >
-              {uiText("Integration")}
-            </label>
-            <select
-              id="printer-integration"
-              value={setupKind}
-              onChange={(e) => {
-                const kind = parseSetupKind(e.target.value);
-                if (kind === null) return;
-                setSetupKind(kind);
-                setUrl("");
-              }}
-              className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-[7px]"
-            >
-              {PRINTER_SETUP_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 text-[13px]">
-            <span className="text-muted-foreground">
-              {modelName || uiText("No printer model selected")}
-            </span>
-            <Button type="button" variant="outline" onClick={() => setModelChoiceOpen(true)}>
-              {uiText("Choose printer model")}
-            </Button>
-          </div>
-          <div className="space-y-2">
-            <h3 className="text-sm font-semibold">{uiText("Connection")}</h3>
-            <p className="text-[13px] text-muted-foreground">
-              {PRINTER_SETUP_OPTIONS.find((option) => option.value === setupKind)?.description}
-            </p>
-          </div>
-          <div>
-            <label
-              htmlFor="printer-address"
-              className="block text-[13px] font-medium text-foreground mb-1.5"
-            >
-              {setupKind === "prusalink"
-                ? uiText("PrusaLink URL")
-                : setupKind === "octoprint"
-                  ? uiText("OctoPrint URL")
-                  : setupKind === "moonraker"
-                    ? uiText("Moonraker URL")
-                    : setupKind === "elegoo_neptune4"
-                      ? uiText("Printer URL")
-                      : uiText("Printer host or IP")}
-            </label>
-            <input
-              id="printer-address"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
-              placeholder={
-                setupKind === "prusalink"
-                  ? "http://mk4.local"
-                  : setupKind === "octoprint"
-                    ? "http://octopi.local"
-                    : setupKind === "moonraker" || setupKind === "elegoo_neptune4"
-                      ? "http://printer.local:7125"
-                      : "192.168.1.50"
-              }
-              required
-            />
-          </div>
-          {(setupKind === "moonraker" || setupKind === "elegoo_neptune4") && (
-            <div>
-              <label
-                htmlFor="moonraker-api-key"
-                className="block text-[13px] font-medium text-foreground mb-1.5"
-              >
-                {setupKind === "elegoo_neptune4" ? uiText("API key") : uiText("Moonraker API key")}{" "}
-                <span className="font-normal normal-case tracking-normal opacity-60">
-                  {uiText("(optional)")}
-                </span>
-              </label>
-              <input
-                id="moonraker-api-key"
-                type="password"
-                value={moonrakerKey}
-                onChange={(e) => setMoonrakerKey(e.target.value)}
-                className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
-                placeholder={uiText("Leave blank if auth is disabled")}
-              />
-            </div>
-          )}
-          {setupKind === "bambu_lan" && (
-            <>
-              <div>
-                <label
-                  htmlFor="bambu-serial"
-                  className="block text-[13px] font-medium text-foreground mb-1.5"
-                >
-                  {uiText("Printer serial")}
-                </label>
-                <input
-                  id="bambu-serial"
-                  value={bambuSerial}
-                  onChange={(e) => setBambuSerial(e.target.value)}
-                  required
-                  className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-[7px]"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="bambu-access-code"
-                  className="block text-[13px] font-medium text-foreground mb-1.5"
-                >
-                  {uiText("LAN access code")}
-                </label>
-                <input
-                  id="bambu-access-code"
-                  type="password"
-                  value={bambuAccessCode}
-                  onChange={(e) => setBambuAccessCode(e.target.value)}
-                  required
-                  className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-[7px]"
-                />
-              </div>
-            </>
-          )}
-          {setupKind === "prusalink" && (
-            <>
-              <div>
-                <label
-                  htmlFor="prusalink-auth"
-                  className="block text-[13px] font-medium text-foreground mb-1.5"
-                >
-                  {uiText("Authentication")}
-                </label>
-                <select
-                  id="prusalink-auth"
-                  value={prusaAuthMode}
-                  onChange={(e) => {
-                    setPrusaAuthMode(e.target.value === "api_key" ? "api_key" : "digest");
-                    setPrusaSecret("");
-                  }}
-                  className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-[7px]"
-                >
-                  <option value="digest">{uiText("Username and password (recommended)")}</option>
-                  <option value="api_key">{uiText("Legacy API key")}</option>
-                </select>
-              </div>
-              {prusaAuthMode === "digest" && (
-                <div>
-                  <label
-                    htmlFor="prusalink-username"
-                    className="block text-[13px] font-medium text-foreground mb-1.5"
-                  >
-                    {uiText("Username")}
-                  </label>
-                  <input
-                    id="prusalink-username"
-                    value={prusaUsername}
-                    onChange={(e) => setPrusaUsername(e.target.value)}
-                    required
-                    className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-[7px]"
-                  />
-                </div>
-              )}
-              <div>
-                <label
-                  htmlFor="prusalink-secret"
-                  className="block text-[13px] font-medium text-foreground mb-1.5"
-                >
-                  {prusaAuthMode === "digest" ? uiText("Password") : uiText("API key")}
-                </label>
-                <input
-                  id="prusalink-secret"
-                  type="password"
-                  value={prusaSecret}
-                  onChange={(e) => setPrusaSecret(e.target.value)}
-                  required
-                  className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-[7px]"
-                />
-              </div>
-            </>
-          )}
-          {setupKind === "octoprint" && (
-            <div>
-              <label
-                htmlFor="octoprint-api-key"
-                className="block text-[13px] font-medium text-foreground mb-1.5"
-              >
-                {uiText("API key")}
-              </label>
-              <input
-                id="octoprint-api-key"
-                type="password"
-                value={octoprintApiKey}
-                onChange={(e) => setOctoprintApiKey(e.target.value)}
+        <form id={formId} onSubmit={submit} className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <h3 className="col-span-full text-field font-semibold">{uiText("Printer")}</h3>
+            <FormField htmlFor="printer-name" label={uiText("Name")}>
+              <Input
+                id="printer-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
                 required
-                className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-[7px]"
               />
-            </div>
-          )}
-          {setupKind === "elegoo_centauri_carbon" && (
-            <div>
-              <label
-                htmlFor="centauri-mainboard-id"
-                className="block text-[13px] font-medium text-foreground mb-1.5"
+            </FormField>
+            <FormField htmlFor="printer-integration" label={uiText("Integration")}>
+              <select
+                id="printer-integration"
+                value={setupKind}
+                onChange={(e) => {
+                  const kind = parseSetupKind(e.target.value);
+                  if (kind === null) return;
+                  setSetupKind(kind);
+                  setUrl("");
+                }}
+                className={inputClasses}
               >
-                {uiText("Mainboard ID")}{" "}
-                <span className="font-normal normal-case tracking-normal opacity-60">
-                  {uiText("(recommended)")}
-                </span>
-              </label>
-              <input
-                id="centauri-mainboard-id"
-                value={centauriMainboardId}
-                onChange={(e) => setCentauriMainboardId(e.target.value)}
-                className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-[7px]"
-                placeholder={uiText("From printer discovery or diagnostics")}
-              />
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                {uiText("Needed for reliable printer commands while idle, paused, or errored.")}
+                {PRINTER_SETUP_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            <div className="col-span-full flex flex-wrap items-center justify-between gap-3 text-field">
+              <span className="text-muted-foreground">
+                {modelName || uiText("No printer model selected")}
+              </span>
+              <Button type="button" variant="outline" onClick={() => setModelChoiceOpen(true)}>
+                {uiText("Choose printer model")}
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-field font-semibold">{uiText("Connection")}</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {PRINTER_SETUP_OPTIONS.find((option) => option.value === setupKind)?.description}
               </p>
             </div>
-          )}
-          {setupKind === "elegoo_centauri_carbon_2" && (
-            <>
-              <div className="rounded border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-muted-foreground">
-                {uiText("Enable LAN Only in printer network settings before connecting.")}
-              </div>
-              <div>
-                <label
-                  htmlFor="centauri-access-code"
-                  className="block text-[13px] font-medium text-foreground mb-1.5"
-                >
-                  {uiText("Printer access code")}
-                </label>
-                <input
-                  id="centauri-access-code"
-                  type="password"
-                  value={centauriAccessCode}
-                  onChange={(e) => setCentauriAccessCode(e.target.value)}
-                  required
-                  className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-[7px]"
-                />
-              </div>
-            </>
-          )}
-          <div>
-            <label
-              htmlFor="printer-notes"
-              className="block text-[13px] font-medium text-foreground mb-1.5"
+            <FormField
+              htmlFor="printer-address"
+              label={
+                setupKind === "prusalink"
+                  ? uiText("PrusaLink URL")
+                  : setupKind === "octoprint"
+                    ? uiText("OctoPrint URL")
+                    : setupKind === "moonraker"
+                      ? uiText("Moonraker URL")
+                      : setupKind === "elegoo_neptune4"
+                        ? uiText("Printer URL")
+                        : uiText("Printer host or IP")
+              }
             >
-              {uiText("Notes")}
-            </label>
-            <textarea
-              rows={3}
-              id="printer-notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
-              placeholder={uiText("Optional")}
-            />
-          </div>
-          {err && (
-            <div className="rounded border border-red-300/40 bg-red-50/30 p-2 text-xs text-red-600">
-              {err}
+              <Input
+                id="printer-address"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder={
+                  setupKind === "prusalink"
+                    ? "http://mk4.local"
+                    : setupKind === "octoprint"
+                      ? "http://octopi.local"
+                      : setupKind === "moonraker" || setupKind === "elegoo_neptune4"
+                        ? "http://printer.local:7125"
+                        : "192.168.1.50"
+                }
+                required
+              />
+            </FormField>
+            {(setupKind === "moonraker" || setupKind === "elegoo_neptune4") && (
+              <FormField
+                htmlFor="moonraker-api-key"
+                label={
+                  <>
+                    {setupKind === "elegoo_neptune4"
+                      ? uiText("API key")
+                      : uiText("Moonraker API key")}{" "}
+                    <span className="font-normal normal-case tracking-normal opacity-60">
+                      {uiText("(optional)")}
+                    </span>
+                  </>
+                }
+              >
+                <Input
+                  id="moonraker-api-key"
+                  type="password"
+                  value={moonrakerKey}
+                  onChange={(e) => setMoonrakerKey(e.target.value)}
+                  placeholder={uiText("Leave blank if auth is disabled")}
+                />
+              </FormField>
+            )}
+            {setupKind === "bambu_lan" && (
+              <>
+                <FormField htmlFor="bambu-serial" label={uiText("Printer serial")}>
+                  <Input
+                    id="bambu-serial"
+                    value={bambuSerial}
+                    onChange={(e) => setBambuSerial(e.target.value)}
+                    required
+                  />
+                </FormField>
+                <FormField htmlFor="bambu-access-code" label={uiText("LAN access code")}>
+                  <Input
+                    id="bambu-access-code"
+                    type="password"
+                    value={bambuAccessCode}
+                    onChange={(e) => setBambuAccessCode(e.target.value)}
+                    required
+                  />
+                </FormField>
+              </>
+            )}
+            {setupKind === "prusalink" && (
+              <>
+                <FormField htmlFor="prusalink-auth" label={uiText("Authentication")}>
+                  <select
+                    id="prusalink-auth"
+                    value={prusaAuthMode}
+                    onChange={(e) => {
+                      setPrusaAuthMode(e.target.value === "api_key" ? "api_key" : "digest");
+                      setPrusaSecret("");
+                    }}
+                    className={inputClasses}
+                  >
+                    <option value="digest">{uiText("Username and password (recommended)")}</option>
+                    <option value="api_key">{uiText("Legacy API key")}</option>
+                  </select>
+                </FormField>
+                {prusaAuthMode === "digest" && (
+                  <FormField htmlFor="prusalink-username" label={uiText("Username")}>
+                    <Input
+                      id="prusalink-username"
+                      value={prusaUsername}
+                      onChange={(e) => setPrusaUsername(e.target.value)}
+                      required
+                    />
+                  </FormField>
+                )}
+                <FormField
+                  htmlFor="prusalink-secret"
+                  label={prusaAuthMode === "digest" ? uiText("Password") : uiText("API key")}
+                >
+                  <Input
+                    id="prusalink-secret"
+                    type="password"
+                    value={prusaSecret}
+                    onChange={(e) => setPrusaSecret(e.target.value)}
+                    required
+                  />
+                </FormField>
+              </>
+            )}
+            {setupKind === "octoprint" && (
+              <FormField htmlFor="octoprint-api-key" label={uiText("API key")}>
+                <Input
+                  id="octoprint-api-key"
+                  type="password"
+                  value={octoprintApiKey}
+                  onChange={(e) => setOctoprintApiKey(e.target.value)}
+                  required
+                />
+              </FormField>
+            )}
+            {setupKind === "elegoo_centauri_carbon" && (
+              <FormField
+                htmlFor="centauri-mainboard-id"
+                label={
+                  <>
+                    {uiText("Mainboard ID")}{" "}
+                    <span className="font-normal normal-case tracking-normal opacity-60">
+                      {uiText("(recommended)")}
+                    </span>
+                  </>
+                }
+                hintId={`${formId}-mainboard-hint`}
+                hint={uiText(
+                  "Needed for reliable printer commands while idle, paused, or errored.",
+                )}
+              >
+                <Input
+                  id="centauri-mainboard-id"
+                  aria-describedby={`${formId}-mainboard-hint`}
+                  value={centauriMainboardId}
+                  onChange={(e) => setCentauriMainboardId(e.target.value)}
+                  placeholder={uiText("From printer discovery or diagnostics")}
+                />
+              </FormField>
+            )}
+            {setupKind === "elegoo_centauri_carbon_2" && (
+              <>
+                <div className="text-xs text-warning">
+                  {uiText("Enable LAN Only in printer network settings before connecting.")}
+                </div>
+                <FormField htmlFor="centauri-access-code" label={uiText("Printer access code")}>
+                  <Input
+                    id="centauri-access-code"
+                    type="password"
+                    value={centauriAccessCode}
+                    onChange={(e) => setCentauriAccessCode(e.target.value)}
+                    required
+                  />
+                </FormField>
+              </>
+            )}
+            <div>
+              <FormField htmlFor="printer-notes" label={uiText("Notes")}>
+                <textarea
+                  id="printer-notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className={inputClasses}
+                  placeholder={uiText("Optional")}
+                />
+              </FormField>
+              {err && (
+                <div role="alert" className="mt-1 text-xs text-destructive">
+                  {err}
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </form>
       </Modal>
       {modelChoiceOpen && (

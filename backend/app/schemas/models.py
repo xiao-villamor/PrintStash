@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.core.time import ensure_utc
 from app.db.models import CollectionRole, FileRevisionStatus, FileType, PrintJobState
+from app.modules.media.sliced_archive import SlicedGeometry
 from app.schemas.editing import EditingBase
 from app.schemas.mesh_measurements import VolumeMeasurementRead
 from app.schemas.orca import OrcaNativeContext
@@ -68,6 +69,9 @@ class MetadataRead(BaseModel):
 
 
 class FileRead(BaseModel):
+    sliced_geometry: SlicedGeometry | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     id: int
     model_id: int
     original_filename: str

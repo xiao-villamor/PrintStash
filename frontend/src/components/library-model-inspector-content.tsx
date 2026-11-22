@@ -1,8 +1,8 @@
 "use client";
 
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Box, Check, ChevronRight, Loader2, Plus, Star, X } from "lucide-react";
+import { Box, Check, ChevronRight, Download, Loader2, MoreHorizontal, X } from "lucide-react";
 import {
   modelPrinterFilesOptions,
   useModelDetail,
@@ -21,16 +21,25 @@ import { useAuth } from "@/lib/auth-context";
 import { usePrinters } from "@/lib/queries";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
+import { useToolpathSources } from "@/lib/toolpath-preview";
 import { formatBytes, formatDuration, formatGrams, formatNumber, timeAgo } from "@/lib/format";
 import { ApiError, userMessage } from "@/lib/errors";
 import { isTypingTarget, keyboardOverlayOpen } from "@/lib/keyboard-commands";
 import { toast } from "@/lib/toast";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { MarkdownView } from "@/components/markdown-view";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { AddGcodeRevisionModal } from "@/components/model-detail/add-revision-modal";
 import { SendToButtons } from "@/components/model-detail/send-to-buttons";
-import { HashValue } from "@/components/model-detail/file-hashes";
+import { InspectorPreviewResize } from "./inspector-preview-resize";
+import {
+  meshGeometryFacts,
+  useMeshGeometryMeasurement,
+} from "@/components/model-detail/use-mesh-geometry-facts";
+import { InspectorPreviewImages } from "@/components/model-preview";
+import { coverImageKind, NO_PREVIEWS } from "@/types/previews";
+import { ViewerModeSwitch, type InspectorViewerMode } from "@/components/viewer-mode-switch";
 import { normalizeRecommendedGcodeFiles } from "@/components/model-detail/presentation";
 import { useRevisionUpdater } from "@/components/model-detail/use-revision-updater";
 import type { FileRead, MetadataRead, ModelRead } from "@/types";
@@ -38,10 +47,13 @@ import type { FileRead, MetadataRead, ModelRead } from "@/types";
 const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
 );
-const GcodeViewer = lazy(() =>
-  import("@/components/gcode-viewer").then((m) => ({ default: m.GcodeViewer })),
+const GcodePreview = lazy(() =>
+  import("@/components/model-detail/gcode-preview").then((m) => ({ default: m.GcodePreview })),
 );
 const meshTypes = new Set(["stl", "3mf", "obj", "step", "glb", "gltf", "ply", "3dm", "fbx"]);
+
+const sectionAction = "px-0 text-muted-foreground hover:bg-transparent hover:text-foreground";
+const descriptionText = "text-[13px] leading-5 text-muted-foreground";
 
 export function InspectorContent({
   model,
@@ -49,12 +61,16 @@ export function InspectorContent({
   active,
   canWrite,
   onClose,
+  previewSize,
+  widthHandle,
 }: {
   model: ModelRead;
   active: boolean;
   publish: ReturnType<typeof useModelDetail>["publish"];
   canWrite: boolean;
   onClose: () => void;
+  previewSize: React.ComponentProps<typeof InspectorPreviewResize>;
+  widthHandle: React.ReactNode;
 }) {
   useUiLocale();
   const { user } = useAuth();
@@ -151,9 +167,43 @@ export function InspectorContent({
     setDescriptionReviewed(null);
     setDescriptionReviewing(false);
   }
-  const [preview, setPreview] = useState<"3d" | "gcode">("3d");
-  const sourceFile = files.find((item) => meshTypes.has(item.file_type));
-  const geometry = sourceFile?.metadata;
+  const [preview, setPreview] = useState<InspectorViewerMode | null>(null);
+  const [toolpathId, setToolpathId] = useState<number | null>(null);
+  const { sources: toolpathFiles, availability: toolpathAvailability } = useToolpathSources(
+    files,
+    active,
+  );
+  const toolpath =
+    toolpathFiles.find((item) => item.id === (toolpathId ?? file?.id)) ?? toolpathFiles[0];
+  const [sourceId, setSourceId] = useState<number | null>(null);
+  const [fileMenu, setFileMenu] = useState<number | null>(null);
+  const viewer = useRef<HTMLDivElement>(null);
+  const meshFiles = files.filter(
+    (item) => meshTypes.has(item.file_type) && item.sliced_geometry !== "gcode_only",
+  );
+  const sourceFile = meshFiles.find((item) => item.id === sourceId) ?? meshFiles[0];
+  const gcodeOnly =
+    !sourceFile && toolpathFiles.some((item) => item.sliced_geometry === "gcode_only");
+  const previews = model.previews ?? NO_PREVIEWS;
+  const coverKind = coverImageKind(previews, "full");
+  const photoCover = coverKind === "photo";
+  const hasImages = coverKind !== "render" || Boolean(previews.archive_images?.length);
+  const hasModel = Boolean(sourceFile) || !hasImages;
+  const defaultMode = gcodeOnly ? "gcode" : photoCover ? "images" : "model";
+  const viewerMode =
+    (preview === "images" && hasImages) ||
+    (preview === "gcode" && toolpath) ||
+    (preview === "model" && hasModel && !gcodeOnly)
+      ? preview
+      : defaultMode;
+  function download(item: FileRead) {
+    void downloadAuthenticatedFile(
+      `/api/v1/files/${item.id}/download`,
+      item.original_filename,
+    ).catch((error) => toast.error(userMessage(error)));
+  }
+  const measurement = useMeshGeometryMeasurement(sourceFile ?? null);
+  const geometry = meshGeometryFacts(sourceFile ?? null, measurement);
   const jobs = (history.isError ? [] : (history.data ?? [])).filter(
     (job) => job.file_id === file?.id,
   );
@@ -407,8 +457,58 @@ export function InspectorContent({
 
   return (
     <div className="library-inspector-body fade-in">
+      <div ref={viewer} className="relative">
+        {widthHandle}
+        <div
+          className="library-inspector-preview library-preview"
+          style={{ height: previewSize.height }}
+        >
+          <ViewerModeSwitch
+            compact
+            mode={viewerMode}
+            gcodeOnly={gcodeOnly}
+            hasModel={hasModel}
+            onChange={setPreview}
+            onImages={hasImages ? () => setPreview("images") : undefined}
+            hasGcode={toolpathAvailability === "available"}
+            availability={toolpathAvailability}
+          />
+          <Suspense fallback={<Loader2 className="h-5 w-5 animate-spin" />}>
+            {viewerMode === "images" ? (
+              <InspectorPreviewImages
+                name={model.name}
+                cover={model.thumbnail_url}
+                previews={previews}
+              />
+            ) : viewerMode === "gcode" && toolpath ? (
+              <GcodePreview
+                files={toolpathFiles}
+                archiveImages={model.previews?.archive_images}
+                selectedFileId={toolpath.id}
+                onSelectFile={setToolpathId}
+                bedSizeFor={() => null}
+                viewerProps={{ screenshotName: model.slug }}
+              />
+            ) : sourceFile ? (
+              <STLViewer
+                url={getAssetUrl(`/api/v1/files/${sourceFile.id}/stl`)}
+                modelId={model.id}
+              />
+            ) : (
+              <ProtectedThumbnail
+                path={model.previews?.large_cover_url ?? model.thumbnail_url}
+                alt={model.name}
+                className="h-full w-full"
+                imageClassName="h-full w-full object-contain"
+                placeholder={<Box className="h-7 w-7 text-muted-foreground" />}
+              />
+            )}
+          </Suspense>
+        </div>
+      </div>
+      <InspectorPreviewResize {...previewSize} />
       {error && (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="mb-3 text-xs text-destructive">
           {error}
         </p>
       )}
@@ -424,12 +524,12 @@ export function InspectorContent({
               {uiText("G-code revisions")} <span>{revisions.length}</span>
             </h3>
             <Button
+              className={sectionAction}
               size="xs"
-              variant="outline"
+              variant="ghost"
               disabled={!canEdit}
               onClick={() => setAddOpen(true)}
             >
-              <Plus className="h-3.5 w-3.5" />
               {uiText("Add revision")}
             </Button>
           </header>
@@ -460,7 +560,9 @@ export function InspectorContent({
             }}
           >
             {(["print", "history", "settings"] as const).map((value) => (
-              <button
+              <Button
+                variant="ghost"
+                size="xs"
                 key={value}
                 id={`inspector-tab-${value}`}
                 type="button"
@@ -479,7 +581,7 @@ export function InspectorContent({
                 ) : (
                   uiText("Settings")
                 )}
-              </button>
+              </Button>
             ))}
           </div>
           {file && (
@@ -490,115 +592,115 @@ export function InspectorContent({
                 aria-labelledby="inspector-tab-print"
                 hidden={tab !== "print"}
               >
-                <div className="library-inspector-overview">
-                  {revisions.length > 1 ? (
-                    <select
-                      disabled={busy}
-                      value={file.id}
-                      aria-label={uiText("Choose G-code revision")}
-                      onChange={(event) => selectRevision(Number(event.target.value))}
-                    >
-                      {revisions.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {revisionName(item)}
-                          {item.is_recommended ? ` · ★ ${uiText("Recommended")}` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div className="library-inspector-single">
-                      <strong>{revisionName(file)}</strong>
-                      {file.is_recommended && (
-                        <span>
-                          <Star className="h-3 w-3 fill-current" />
-                          {uiText("Recommended")}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  {!file.is_recommended && (
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      disabled={!canEdit || revision.saving !== null}
-                      onClick={() => void revision.update(file, { is_recommended: true })}
-                    >
-                      {uiText("Recommend")}
-                    </Button>
-                  )}
-                  <dl className="library-inspector-properties">
-                    <div>
-                      <dt>{uiText("Result")}</dt>
+                <div>
+                  <dl className="library-inspector-properties divide-y divide-border">
+                    <div className="library-inspector-revision">
+                      <dt>{uiText("Revision")}</dt>
                       <dd>
-                        {!administrator ? (
-                          uiText("Access restricted")
-                        ) : history.isPending ? (
-                          uiText("Loading...")
-                        ) : history.isError ? (
-                          <Button size="xs" variant="ghost" onClick={() => void history.refetch()}>
-                            {uiText("Retry")}
-                          </Button>
+                        {revisions.length > 1 ? (
+                          <select
+                            disabled={busy}
+                            value={file.id}
+                            aria-label={uiText("Choose G-code revision")}
+                            onChange={(event) => selectRevision(Number(event.target.value))}
+                          >
+                            {revisions.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {revisionName(item)}
+                                {item.is_recommended ? ` · ★ ${uiText("Recommended")}` : ""}
+                              </option>
+                            ))}
+                          </select>
                         ) : (
-                          <>
-                            <span className="font-mono">
-                              {ok ? uiText("inspector.okCount", { count: ok }) : null}
-                              {ok && failed ? " · " : null}
-                              {failed ? (
-                                <span className="text-destructive">
-                                  {uiText("inspector.failedCount", { count: failed })}
-                                </span>
-                              ) : null}
-                              {!ok && !failed ? uiText("No recorded prints") : null}
-                            </span>
-                            {onPrinter[0]?.error && (
-                              <p className="mt-1 break-words">{onPrinter[0].error}</p>
+                          <span className="min-w-0 truncate" title={revisionName(file)}>
+                            <span className="font-medium">{revisionName(file)}</span>
+                            {file.is_recommended && (
+                              <span className="text-muted-foreground">
+                                {" · "}
+                                <span aria-hidden="true">★ </span>
+                                {uiText("Recommended")}
+                              </span>
                             )}
-                          </>
+                          </span>
+                        )}
+                        {!file.is_recommended && (
+                          <Button
+                            className={sectionAction}
+                            variant="ghost"
+                            size="xs"
+                            disabled={!canEdit || revision.saving !== null}
+                            onClick={() => void revision.update(file, { is_recommended: true })}
+                          >
+                            {uiText("Recommend")}
+                          </Button>
                         )}
                       </dd>
                     </div>
+                    {(ok > 0 || failed > 0) && (
+                      <div>
+                        <dt>{uiText("Result")}</dt>
+                        <dd>
+                          {ok > 0 && uiText("inspector.okCount", { count: ok })}
+                          {ok > 0 && failed > 0 && " · "}
+                          {failed > 0 && uiText("inspector.failedCount", { count: failed })}
+                          {onPrinter[0]?.error && <p className="mt-1">{onPrinter[0].error}</p>}
+                        </dd>
+                      </div>
+                    )}
                     <div>
                       <dt>{uiText("Sliced for")}</dt>
                       <dd>{file.metadata?.printer_model ?? uiText("Not recorded")}</dd>
                     </div>
                     <div>
                       <dt>{uiText("File")}</dt>
-                      <dd className="font-mono">{revisionFacts(file.metadata)}</dd>
+                      <dd className="font-mono text-xs">{revisionFacts(file.metadata)}</dd>
                     </div>
                   </dl>
+                  {administrator && history.isPending && (
+                    <p className="library-inspector-caption" role="status">
+                      {uiText("Loading...")}
+                    </p>
+                  )}
+                  {administrator && history.isError && (
+                    <div className="library-inspector-caption" role="alert">
+                      <p>{userMessage(history.error)}</p>
+                      <Button size="xs" variant="ghost" onClick={() => void history.refetch()}>
+                        {uiText("Retry")}
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 <section
                   className="library-inspector-print"
                   aria-label={uiText("Print this revision")}
                 >
-                  <label className="library-inspector-control-row">
-                    <span>{uiText("Printer")}</span>
-                    <select
-                      value={printer?.id ?? ""}
-                      disabled={!administrator || busy || printersQuery.isError}
-                      aria-label={uiText("Printer for printing and logging")}
-                      onChange={(event) => {
-                        setPrinterId(Number(event.target.value));
-                        setFailing(false);
-                        setFailNote("");
-                      }}
-                    >
-                      <option value="" disabled>
-                        {uiText("No printers")}
-                      </option>
-                      {printers.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  {printer && (
+                    <label className="library-inspector-control-row">
+                      <span>{uiText("Printer")}</span>
+                      <select
+                        value={printer.id}
+                        disabled={!administrator || busy || printersQuery.isError}
+                        aria-label={uiText("Printer for printing and logging")}
+                        onChange={(event) => {
+                          setPrinterId(Number(event.target.value));
+                          setFailing(false);
+                          setFailNote("");
+                        }}
+                      >
+                        {printers.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   {printersQuery.isError && (
                     <p className="library-inspector-caption" role="alert">
                       {userMessage(printersQuery.error)}
                     </p>
                   )}
-                  {!canSend && (
+                  {printer && !canSend && (
                     <p className="library-inspector-caption">
                       {!canEdit
                         ? uiText("Read-only")
@@ -627,92 +729,100 @@ export function InspectorContent({
                     </Button>
                   </div>
                 </section>
-                <section
-                  className="library-inspector-results"
-                  aria-label={uiText("Log print outcome")}
-                >
-                  <span>{uiText("Print outcome")}</span>
-                  {!failing && (
-                    <div className="library-inspector-actions" data-library-log-outcomes>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        disabled={!canLog}
-                        aria-keyshortcuts="1"
-                        onClick={() => void log("completed")}
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                        {uiText("OK")}
-                      </Button>
-                      <Button
-                        ref={failedButton}
-                        size="xs"
-                        variant="outline"
-                        disabled={!canLog}
-                        aria-keyshortcuts="2"
-                        onClick={beginFailure}
-                      >
-                        <X className="h-3.5 w-3.5 text-destructive" />
-                        {uiText("Failed")}
-                      </Button>
-                    </div>
-                  )}
-                  {failing && (
-                    <div
-                      className="library-inspector-failure"
-                      role="group"
-                      aria-label={uiText("Log a failed print")}
-                    >
-                      <p>{uiText("Log failed print")}</p>
-                      <label htmlFor="inspector-failure-note">
-                        {uiText("What went wrong?")}{" "}
-                        <span className="text-muted-foreground">{uiText("Optional")}</span>
-                      </label>
-                      <textarea
-                        ref={failureInput}
-                        id="inspector-failure-note"
-                        maxLength={300}
-                        rows={2}
-                        value={failNote}
-                        disabled={busy || !canEdit || !administrator}
-                        onChange={(event) => setFailNote(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (
-                            event.defaultPrevented ||
-                            event.nativeEvent.isComposing ||
-                            event.repeat ||
-                            event.altKey ||
-                            event.shiftKey ||
-                            event.getModifierState("AltGraph") ||
-                            !(event.metaKey || event.ctrlKey) ||
-                            event.key !== "Enter"
-                          )
-                            return;
-                          event.preventDefault();
-                          void log("failed");
-                        }}
-                        placeholder={uiText("e.g. Corner lifted at layer 112")}
-                      />
-                      <div className="flex items-center justify-end gap-2">
-                        <kbd className="mr-auto text-xs text-muted-foreground">
-                          {navigator.platform.includes("Mac") ? "⌘" : uiText("Ctrl")}
-                          {uiText("+Enter")}
-                        </kbd>
-                        <Button size="xs" variant="outline" disabled={busy} onClick={cancelFailure}>
-                          {uiText("Cancel")}
-                        </Button>
+                {printer && (
+                  <section
+                    className="library-inspector-results"
+                    aria-label={uiText("Log print outcome")}
+                  >
+                    <span>{uiText("Print outcome")}</span>
+                    {!failing && (
+                      <div className="library-inspector-actions" data-library-log-outcomes>
                         <Button
                           size="xs"
-                          loading={busy}
+                          variant="outline"
                           disabled={!canLog}
-                          onClick={() => void log("failed")}
+                          aria-keyshortcuts="1"
+                          onClick={() => void log("completed")}
                         >
-                          {uiText("Save failed print")}
+                          <Check className="h-3.5 w-3.5" />
+                          {uiText("OK")}
+                        </Button>
+                        <Button
+                          ref={failedButton}
+                          size="xs"
+                          variant="outline"
+                          disabled={!canLog}
+                          aria-keyshortcuts="2"
+                          onClick={beginFailure}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                          {uiText("Failed")}
                         </Button>
                       </div>
-                    </div>
-                  )}
-                </section>
+                    )}
+                    {failing && (
+                      <div
+                        className="library-inspector-failure"
+                        role="group"
+                        aria-label={uiText("Log a failed print")}
+                      >
+                        <p>{uiText("Log failed print")}</p>
+                        <label htmlFor="inspector-failure-note">
+                          {uiText("What went wrong?")}{" "}
+                          <span className="text-muted-foreground">{uiText("Optional")}</span>
+                        </label>
+                        <textarea
+                          ref={failureInput}
+                          id="inspector-failure-note"
+                          maxLength={300}
+                          rows={2}
+                          value={failNote}
+                          disabled={busy || !canEdit || !administrator}
+                          onChange={(event) => setFailNote(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (
+                              event.defaultPrevented ||
+                              event.nativeEvent.isComposing ||
+                              event.repeat ||
+                              event.altKey ||
+                              event.shiftKey ||
+                              event.getModifierState("AltGraph") ||
+                              !(event.metaKey || event.ctrlKey) ||
+                              event.key !== "Enter"
+                            )
+                              return;
+                            event.preventDefault();
+                            void log("failed");
+                          }}
+                          placeholder={uiText("e.g. Corner lifted at layer 112")}
+                        />
+                        <div className="flex items-center justify-end gap-2">
+                          <kbd className="mr-auto text-xs text-muted-foreground">
+                            {navigator.platform.includes("Mac") ? "⌘" : uiText("Ctrl")}
+                            {uiText("+Enter")}
+                          </kbd>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={cancelFailure}
+                          >
+                            {uiText("Cancel")}
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            loading={busy}
+                            disabled={!canLog}
+                            onClick={() => void log("failed")}
+                          >
+                            {uiText("Save failed print")}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                )}
               </section>
               <section
                 role="tabpanel"
@@ -740,7 +850,6 @@ export function InspectorContent({
                   <ol>
                     {jobs.map((job) => (
                       <li key={job.id}>
-                        <i data-state={job.state} />
                         <div>
                           <p>
                             <strong>
@@ -776,11 +885,11 @@ export function InspectorContent({
                 </div>
                 <p className="library-inspector-caption">{timeAgo(file.uploaded_at)}</p>
                 <p className="break-words font-mono text-xs">{file.original_filename}</p>
-                <dl>
-                  {settingFacts(file.metadata).map(([label, value]) => (
+                <dl className="library-inspector-properties divide-y divide-border">
+                  {settingFacts(file.metadata).map(([label, value, mono]) => (
                     <div key={label}>
                       <dt>{label}</dt>
-                      <dd>{value}</dd>
+                      <dd className={mono ? "font-mono" : undefined}>{value}</dd>
                     </div>
                   ))}
                 </dl>
@@ -794,81 +903,32 @@ export function InspectorContent({
           )}
         </section>
       ) : (
-        <section className="library-inspector-empty">
-          <strong>{uiText("No G-code revisions yet")}</strong>
-          <p>{uiText("Slice this model in your slicer, then add the G-code file here.")}</p>
-          <Button size="sm" disabled={!canEdit} onClick={() => setAddOpen(true)}>
-            {uiText("Add G-code revision")}
-          </Button>
+        <section className="library-inspector-section">
+          <header className="library-inspector-section-heading">
+            <h3>
+              {uiText("G-code revisions")} <span>{revisions.length}</span>
+            </h3>
+            <Button
+              className={sectionAction}
+              size="xs"
+              variant="ghost"
+              disabled={!canEdit}
+              onClick={() => setAddOpen(true)}
+            >
+              {uiText("Add revision")}
+            </Button>
+          </header>
+          <p className="text-muted-foreground">{uiText("No G-code revisions yet")}</p>
         </section>
       )}
-      <div className="library-inspector-preview library-preview">
-        <div
-          role="radiogroup"
-          aria-label={uiText("Preview")}
-          onKeyDown={(event) => {
-            if (!["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"].includes(event.key)) return;
-            const controls = Array.from(
-              event.currentTarget.querySelectorAll<HTMLButtonElement>(
-                '[role="radio"]:not(:disabled)',
-              ),
-            );
-            const index = controls.findIndex((button) => button === document.activeElement);
-            if (index < 0) return;
-            event.preventDefault();
-            const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
-            const next = controls[(index + step + controls.length) % controls.length];
-            next?.click();
-            next?.focus();
-          }}
-        >
-          <button
-            type="button"
-            role="radio"
-            aria-checked={preview === "3d"}
-            tabIndex={preview === "3d" ? 0 : -1}
-            onClick={() => setPreview("3d")}
-          >
-            {uiText("3D")}
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={preview === "gcode"}
-            tabIndex={preview === "gcode" ? 0 : -1}
-            disabled={!file}
-            onClick={() => setPreview("gcode")}
-          >
-            {uiText("G-code")}
-          </button>
-        </div>
-        <Suspense fallback={<Loader2 className="h-5 w-5 animate-spin" />}>
-          {preview === "gcode" && file ? (
-            <GcodeViewer
-              url={`/api/v1/files/${file.id}/toolpath`}
-              showDimensions={false}
-              screenshotName={model.slug}
-            />
-          ) : sourceFile ? (
-            <STLViewer url={getAssetUrl(`/api/v1/files/${sourceFile.id}/stl`)} modelId={model.id} />
-          ) : (
-            <ProtectedThumbnail
-              path={model.thumbnail_url}
-              alt={model.name}
-              className="h-full w-full"
-              imageClassName="h-full w-full object-contain"
-              placeholder={<Box className="h-7 w-7 text-muted-foreground" />}
-            />
-          )}
-        </Suspense>
-      </div>
       <section className="library-inspector-section">
         <header className="library-inspector-section-heading">
           <h3>{uiText("Description")}</h3>
           {canEdit && !descriptionIntent && (
             <Button
+              className={sectionAction}
               size="xs"
-              variant="outline"
+              variant="ghost"
               aria-label={uiText("Edit description")}
               onClick={beginDescription}
             >
@@ -877,7 +937,7 @@ export function InspectorContent({
           )}
         </header>
         {descriptionIntent ? (
-          <div className="space-y-2 pb-3">
+          <div className="space-y-2">
             {descriptionProblem && (
               <div role="alert" className="space-y-2 border border-border bg-muted p-3 text-xs">
                 <p>
@@ -899,7 +959,7 @@ export function InspectorContent({
                 {descriptionReviewed && (
                   <div className="space-y-2">
                     <strong>{uiText("Description")}</strong>
-                    <p className="whitespace-pre-wrap break-words">
+                    <p className="whitespace-pre-wrap wrap-anywhere">
                       {descriptionReviewed.description ?? uiText("Not recorded")}
                     </p>
                     <div className="flex flex-wrap gap-2">
@@ -913,6 +973,7 @@ export function InspectorContent({
                       </Button>
                       <Button
                         size="xs"
+                        variant="outline"
                         disabled={!canEdit || descriptionDenied || descriptionBusy}
                         onClick={() => void saveDescription(descriptionReviewed)}
                       >
@@ -973,6 +1034,7 @@ export function InspectorContent({
               </Button>
               <Button
                 size="xs"
+                variant="outline"
                 loading={descriptionBusy}
                 disabled={
                   !canEdit ||
@@ -986,58 +1048,125 @@ export function InspectorContent({
               </Button>
             </div>
           </div>
+        ) : model.description ? (
+          <InspectorDescription description={model.description} />
         ) : (
-          <div className="library-inspector-description">
-            {model.description ? (
-              <MarkdownView source={model.description} />
-            ) : (
-              <p className="text-muted-foreground">
-                {uiText("No description yet. Add orientation, hardware or print notes.")}
-              </p>
-            )}
-          </div>
+          <p className={descriptionText}>
+            {uiText("No description yet. Add orientation, hardware or print notes.")}
+          </p>
         )}
       </section>
+      {sourceFile && (
+        <details className="library-inspector-section">
+          <summary className="library-inspector-section-heading">
+            <h3>{uiText("Geometry")}</h3>
+            <ChevronRight
+              aria-hidden="true"
+              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+            />
+          </summary>
+          {geometry.emptyMessage ? (
+            <p className="text-xs text-muted-foreground">{geometry.emptyMessage}</p>
+          ) : (
+            <dl className="library-inspector-properties divide-y divide-border">
+              {geometry.facts.map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd className="font-mono">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </details>
+      )}
       <details className="library-inspector-section">
         <summary className="library-inspector-section-heading">
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-          <h3>{uiText("Geometry")}</h3>
-        </summary>
-        <dl className="library-inspector-geometry">
-          {geometryFacts(geometry).map(([label, value]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd>{value}</dd>
-            </div>
-          ))}
-        </dl>
-      </details>
-      <details className="library-inspector-section">
-        <summary className="library-inspector-section-heading">
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
           <h3>
             {uiText("Files")} <span>{files.length}</span>
           </h3>
-          <span className="text-xs text-muted-foreground">{uiText("SHA-256")}</span>
+          <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </summary>
-        <ul className="library-inspector-files">
-          {files.map((item) => (
-            <li key={item.id}>
-              <span className="library-inspector-file-type">{item.file_type.toUpperCase()}</span>
-              <div>
-                <strong title={item.original_filename}>{item.original_filename}</strong>
-                <p>
-                  {formatBytes(item.size_bytes)} ·{" "}
-                  {item.file_type === "gcode" ? revisionName(item) : uiText("Source")}
-                </p>
-              </div>
-              <HashValue
-                sha={item.sha256}
-                label={uiText("File SHA-256")}
-                filename={item.original_filename}
-              />
-            </li>
-          ))}
+        <ul className="library-inspector-files divide-y divide-border">
+          {files.map((item) => {
+            const isToolpath = toolpathFiles.some((file) => file.id === item.id);
+            return (
+              <li key={item.id}>
+                <span className="library-inspector-file-type">{item.file_type.toUpperCase()}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="h-auto min-w-0 justify-between py-1 text-left"
+                  aria-label={`${uiText("Download")} ${item.original_filename}`}
+                  onClick={() => download(item)}
+                >
+                  <span className="flex min-w-0 flex-col items-start">
+                    <strong className="max-w-full" title={item.original_filename}>
+                      {item.original_filename}
+                    </strong>
+                    <span className="text-muted-foreground">
+                      {formatBytes(item.size_bytes)} ·{" "}
+                      {item.file_type === "gcode" ? revisionName(item) : uiText("Source")}
+                    </span>
+                  </span>
+                  <Download className="h-4 w-4 shrink-0" aria-hidden />
+                </Button>
+                <DropdownMenu
+                  open={fileMenu === item.id}
+                  onOpenChange={(open) => setFileMenu(open ? item.id : null)}
+                  portal
+                  trigger={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-haspopup="menu"
+                      aria-expanded={fileMenu === item.id}
+                      aria-label={uiText("Actions for {value1}", {
+                        value1: item.original_filename,
+                      })}
+                      onClick={() => setFileMenu(fileMenu === item.id ? null : item.id)}
+                    >
+                      <MoreHorizontal className="h-4 w-4" aria-hidden />
+                    </Button>
+                  }
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+                    onClick={() => {
+                      setFileMenu(null);
+                      download(item);
+                    }}
+                  >
+                    <Download className="h-4 w-4" aria-hidden />
+                    {uiText("Download")}
+                  </button>
+                  {(isToolpath || meshTypes.has(item.file_type)) && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+                      onClick={() => {
+                        setFileMenu(null);
+                        if (isToolpath) {
+                          setToolpathId(item.id);
+                          setPreview("gcode");
+                        } else {
+                          setSourceId(item.id);
+                          setPreview("model");
+                        }
+                        viewer.current?.scrollIntoView({ block: "nearest" });
+                      }}
+                    >
+                      <Box className="h-4 w-4" aria-hidden />
+                      {uiText("Open in viewer")}
+                    </button>
+                  )}
+                </DropdownMenu>
+              </li>
+            );
+          })}
         </ul>
       </details>
       {addOpen && canEdit && (
@@ -1073,6 +1202,49 @@ export function InspectorContent({
     </div>
   );
 }
+function InspectorDescription({ description }: { description: string }) {
+  const id = useId();
+  const content = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  useLayoutEffect(() => {
+    const element = content.current;
+    if (!element) return;
+    const measure = () => {
+      const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight);
+      setOverflows(element.scrollHeight > lineHeight * 4 + 1);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [description, expanded]);
+
+  return (
+    <div>
+      <div
+        id={id}
+        ref={content}
+        className={`${descriptionText} wrap-anywhere ${expanded ? "" : "line-clamp-4"}`}
+      >
+        <MarkdownView source={description} />
+      </div>
+      {overflows && (
+        <Button
+          size="xs"
+          variant="ghost"
+          className={sectionAction}
+          aria-controls={id}
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {uiText(expanded ? "Show less" : "Show more")}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function revisionName(file: FileRead) {
   return `${uiText("Rev {value1}", { value1: String(file.gcode_revision_number ?? file.version) })}${file.revision_label ? ` · ${file.revision_label}` : ""}`;
 }
@@ -1088,25 +1260,28 @@ function revisionFacts(meta: MetadataRead | null) {
       .join(" · ") || uiText("Not recorded")
   );
 }
-function settingFacts(meta: MetadataRead | null): [string, string][] {
+function settingFacts(meta: MetadataRead | null): [string, string, boolean?][] {
   return [
     [
       uiText("Time"),
       meta?.estimated_time_s != null
         ? formatDuration(meta.estimated_time_s)
         : uiText("Not recorded"),
+      true,
     ],
     [
       uiText("Filament"),
       meta?.filament_weight_g != null
         ? formatGrams(meta.filament_weight_g)
         : uiText("Not recorded"),
+      true,
     ],
     [
       uiText("Layer height"),
       meta?.layer_height_mm != null
         ? `${formatNumber(meta.layer_height_mm)} mm`
         : uiText("Not recorded"),
+      true,
     ],
     [uiText("Material"), meta?.material_type ?? uiText("Not recorded")],
     [
@@ -1114,45 +1289,29 @@ function settingFacts(meta: MetadataRead | null): [string, string][] {
       meta?.nozzle_diameter_mm != null
         ? `${formatNumber(meta.nozzle_diameter_mm)} mm`
         : uiText("Not recorded"),
+      true,
     ],
     [
       uiText("Infill"),
       meta?.infill_percent != null
         ? `${formatNumber(meta.infill_percent)}%`
         : uiText("Not recorded"),
+      true,
     ],
     [
       uiText("Nozzle temperature"),
       meta?.nozzle_temperature_c != null
         ? `${formatNumber(meta.nozzle_temperature_c)} °C`
         : uiText("Not recorded"),
+      true,
     ],
     [
       uiText("Bed temperature"),
       meta?.bed_temperature_c != null
         ? `${formatNumber(meta.bed_temperature_c)} °C`
         : uiText("Not recorded"),
+      true,
     ],
     [uiText("Printer profile"), meta?.printer_model ?? uiText("Not recorded")],
-  ];
-}
-function geometryFacts(meta: MetadataRead | null | undefined): [string, string][] {
-  return [
-    [
-      uiText("Dimensions"),
-      meta?.bbox_x_mm != null && meta.bbox_y_mm != null && meta.bbox_z_mm != null
-        ? `${formatNumber(meta.bbox_x_mm)} × ${formatNumber(meta.bbox_y_mm)} × ${formatNumber(meta.bbox_z_mm)} mm`
-        : uiText("Not recorded"),
-    ],
-    [
-      uiText("Volume"),
-      meta?.volume_mm3 != null
-        ? `${formatNumber(meta.volume_mm3 / 1000)} cm³`
-        : uiText("Not recorded"),
-    ],
-    [
-      uiText("Triangles"),
-      meta?.triangle_count != null ? formatNumber(meta.triangle_count) : uiText("Not recorded"),
-    ],
   ];
 }

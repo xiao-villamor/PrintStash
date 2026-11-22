@@ -120,6 +120,45 @@
         "title": "ApiKeyRead",
         "type": "object"
       },
+      "ArchiveImageRead": {
+        "properties": {
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "image_kind": {
+            "enum": [
+              "photo",
+              "slicer_render"
+            ],
+            "title": "Image Kind",
+            "type": "string"
+          },
+          "plate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_kind",
+          "file_id",
+          "url",
+          "plate"
+        ],
+        "title": "ArchiveImageRead",
+        "type": "object"
+      },
       "ArchivePart": {
         "additionalProperties": false,
         "properties": {
@@ -292,11 +331,28 @@
       "ArtifactPreviews": {
         "description": "The view set of the one mesh Artifact selected for this Model.",
         "properties": {
+          "archive_images": {
+            "items": {
+              "$ref": "#/components/schemas/ArchiveImageRead"
+            },
+            "title": "Archive Images",
+            "type": "array"
+          },
           "cover_camera": {
             "const": "unknown",
             "default": "unknown",
             "title": "Cover Camera",
             "type": "string"
+          },
+          "cover_image_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewImageKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "file_id": {
             "title": "File Id",
@@ -307,6 +363,48 @@
             "default": "artifact",
             "title": "Kind",
             "type": "string"
+          },
+          "large_cover_image_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewImageKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "large_cover_thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Large Cover Thumbnail Url"
+          },
+          "large_cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Large Cover Url"
+          },
+          "large_cover_view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ViewId"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "published": {
             "anyOf": [
@@ -1306,6 +1404,18 @@
             "exclusiveMinimum": 0.0,
             "title": "File Id",
             "type": "integer"
+          },
+          "plate_index": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
           },
           "printer_id": {
             "anyOf": [
@@ -3152,12 +3262,21 @@
             "title": "Idempotent Requests",
             "type": "boolean"
           },
+          "import_intent": {
+            "default": true,
+            "title": "Import Intent",
+            "type": "boolean"
+          },
           "max_file_bytes": {
             "title": "Max File Bytes",
             "type": "integer"
           },
           "max_files": {
             "title": "Max Files",
+            "type": "integer"
+          },
+          "owner_user_id": {
+            "title": "Owner User Id",
             "type": "integer"
           },
           "resumable_cover": {
@@ -3194,7 +3313,8 @@
           "max_file_bytes",
           "capture_preferences",
           "resumable_cover",
-          "resumable_gallery"
+          "resumable_gallery",
+          "owner_user_id"
         ],
         "title": "CaptureCapabilitiesRead",
         "type": "object"
@@ -3607,6 +3727,21 @@
             ],
             "title": "Gallery"
           },
+          "import_again": {
+            "default": false,
+            "title": "Import Again",
+            "type": "boolean"
+          },
+          "on_ready": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxImportIntent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "profiles": {
             "anyOf": [
               {
@@ -3767,6 +3902,17 @@
             "title": "Id",
             "type": "integer"
           },
+          "resulting_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resulting Model Id"
+          },
           "state": {
             "$ref": "#/components/schemas/InboxItemState"
           },
@@ -3783,6 +3929,81 @@
           "updated_at"
         ],
         "title": "CaptureSourceStatusRead",
+        "type": "object"
+      },
+      "CaptureStatusRead": {
+        "properties": {
+          "collection_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Name"
+          },
+          "completion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxItemCompletion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "resulting_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resulting Model Id"
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxReviewReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/InboxItemState"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "review_reason",
+          "error_code",
+          "resulting_model_id",
+          "collection_name",
+          "completion"
+        ],
+        "title": "CaptureStatusRead",
         "type": "object"
       },
       "CaptureUploadFileDeclaration": {
@@ -3936,6 +4157,21 @@
             "minItems": 1,
             "title": "Files",
             "type": "array"
+          },
+          "import_again": {
+            "default": false,
+            "title": "Import Again",
+            "type": "boolean"
+          },
+          "on_ready": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxImportIntent"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "request_key": {
             "anyOf": [
@@ -6787,6 +7023,16 @@
             "title": "Size Bytes",
             "type": "integer"
           },
+          "sliced_geometry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SlicedGeometry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "tags": {
             "default": [],
             "items": {
@@ -7140,9 +7386,278 @@
         "title": "GcApprovalRequest",
         "type": "object"
       },
+      "GcodePlateIdentityRead": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "object_count": {
+            "title": "Object Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "number",
+          "name",
+          "object_count"
+        ],
+        "title": "GcodePlateIdentityRead",
+        "type": "object"
+      },
+      "GcodePlateMetadata": {
+        "properties": {
+          "bed_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bed Temperature C"
+          },
+          "bottom_shell_layers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bottom Shell Layers"
+          },
+          "estimated_time_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Time S"
+          },
+          "filament_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filament Cost"
+          },
+          "filament_length_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filament Length Mm"
+          },
+          "filament_weight_g": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filament Weight G"
+          },
+          "first_layer_height_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Layer Height Mm"
+          },
+          "infill_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Infill Percent"
+          },
+          "layer_height_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layer Height Mm"
+          },
+          "material_brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Brand"
+          },
+          "material_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Type"
+          },
+          "nozzle_diameter_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nozzle Diameter Mm"
+          },
+          "nozzle_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nozzle Temperature C"
+          },
+          "printer_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer Model"
+          },
+          "slicer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slicer Name"
+          },
+          "slicer_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slicer Version"
+          },
+          "support_material": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Support Material"
+          },
+          "top_shell_layers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top Shell Layers"
+          },
+          "wall_loops": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Loops"
+          }
+        },
+        "title": "GcodePlateMetadata",
+        "type": "object"
+      },
+      "GcodePlateMetadataRead": {
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/GcodePlateMetadata"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "number",
+          "metadata"
+        ],
+        "title": "GcodePlateMetadataRead",
+        "type": "object"
+      },
       "GcodePlatesRead": {
         "description": "Numbers of the sliced plates actually present in a 3MF archive.",
         "properties": {
+          "identities": {
+            "items": {
+              "$ref": "#/components/schemas/GcodePlateIdentityRead"
+            },
+            "title": "Identities",
+            "type": "array"
+          },
+          "plate_metadata": {
+            "items": {
+              "$ref": "#/components/schemas/GcodePlateMetadataRead"
+            },
+            "title": "Plate Metadata",
+            "type": "array"
+          },
           "plates": {
             "items": {
               "type": "integer"
@@ -7152,7 +7667,9 @@
           }
         },
         "required": [
-          "plates"
+          "plates",
+          "plate_metadata",
+          "identities"
         ],
         "title": "GcodePlatesRead",
         "type": "object"
@@ -7691,6 +8208,11 @@
             "maxItems": 100,
             "title": "Tags",
             "type": "array"
+          },
+          "use_default_destination": {
+            "default": false,
+            "title": "Use Default Destination",
+            "type": "boolean"
           }
         },
         "required": [
@@ -7699,6 +8221,14 @@
         ],
         "title": "InboxBatchRequest",
         "type": "object"
+      },
+      "InboxImportIntent": {
+        "enum": [
+          "review",
+          "import"
+        ],
+        "title": "InboxImportIntent",
+        "type": "string"
       },
       "InboxImportRequest": {
         "additionalProperties": false,
@@ -7747,6 +8277,21 @@
               }
             ],
             "title": "Collection Id"
+          },
+          "import_again": {
+            "default": false,
+            "title": "Import Again",
+            "type": "boolean"
+          },
+          "on_ready": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxImportIntent"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_kind": {
             "$ref": "#/components/schemas/InboxSourceKind",
@@ -7869,6 +8414,9 @@
             ],
             "title": "Manifest"
           },
+          "on_ready": {
+            "$ref": "#/components/schemas/InboxImportIntent"
+          },
           "owner_user_id": {
             "title": "Owner User Id",
             "type": "integer"
@@ -7901,6 +8449,16 @@
           "retryable": {
             "title": "Retryable",
             "type": "boolean"
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxReviewReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_hostname": {
             "anyOf": [
@@ -7941,6 +8499,17 @@
             ],
             "title": "Target Collection Id"
           },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -7952,6 +8521,7 @@
           "owner_user_id",
           "source_kind",
           "state",
+          "on_ready",
           "retryable",
           "attempt_count",
           "created_at",
@@ -8127,6 +8697,15 @@
         },
         "title": "InboxItemUpdate",
         "type": "object"
+      },
+      "InboxReviewReason": {
+        "enum": [
+          "files_need_review",
+          "destination_not_editable",
+          "already_imported"
+        ],
+        "title": "InboxReviewReason",
+        "type": "string"
       },
       "InboxSourceKind": {
         "enum": [
@@ -8441,6 +9020,7 @@
           "ingestion.upload_recovery",
           "ingestion.url",
           "ingestion.url_selection",
+          "ingestion.samples",
           "ingestion.scratch_cleanup",
           "notifications.deliver",
           "notifications.retention",
@@ -13734,17 +14314,65 @@
       "NoPreviewSubject": {
         "description": "The Model has no live mesh Artifact; only its cover can be shown.",
         "properties": {
+          "archive_images": {
+            "items": {
+              "$ref": "#/components/schemas/ArchiveImageRead"
+            },
+            "title": "Archive Images",
+            "type": "array"
+          },
           "cover_camera": {
             "const": "unknown",
             "default": "unknown",
             "title": "Cover Camera",
             "type": "string"
           },
+          "cover_image_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewImageKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "kind": {
             "const": "none",
             "default": "none",
             "title": "Kind",
             "type": "string"
+          },
+          "large_cover_image_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewImageKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "large_cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Large Cover Url"
+          },
+          "large_cover_view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ViewId"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_images": {
             "items": {
@@ -15417,13 +16045,39 @@
         "title": "PreviewActivity",
         "type": "object"
       },
+      "PreviewImageKind": {
+        "enum": [
+          "photo",
+          "render",
+          "slicer_render"
+        ],
+        "title": "PreviewImageKind",
+        "type": "string"
+      },
       "PreviewImageRead": {
         "properties": {
           "id": {
             "$ref": "#/components/schemas/ViewId"
           },
+          "image_kind": {
+            "const": "render",
+            "default": "render",
+            "title": "Image Kind",
+            "type": "string"
+          },
           "role": {
             "$ref": "#/components/schemas/ViewRole"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
           },
           "url": {
             "title": "Url",
@@ -15437,6 +16091,25 @@
         ],
         "title": "PreviewImageRead",
         "type": "object"
+      },
+      "PreviewLook": {
+        "enum": [
+          "sky",
+          "printstash_blue",
+          "slate",
+          "graphite",
+          "sand"
+        ],
+        "title": "PreviewLook",
+        "type": "string"
+      },
+      "PreviewSize": {
+        "enum": [
+          "full",
+          "thumbnail"
+        ],
+        "title": "PreviewSize",
+        "type": "string"
       },
       "PreviewState": {
         "enum": [
@@ -15936,6 +16609,17 @@
           "operator_gate_state": {
             "$ref": "#/components/schemas/OperatorGateState",
             "default": "not_required"
+          },
+          "plate_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
           },
           "printer_id": {
             "anyOf": [
@@ -18528,6 +19212,16 @@
       },
       "PublishedPreviewRead": {
         "properties": {
+          "cover_view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ViewId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "manifest_url": {
             "title": "Manifest Url",
             "type": "string"
@@ -18539,7 +19233,7 @@
             "items": {
               "$ref": "#/components/schemas/PreviewImageRead"
             },
-            "maxItems": 6,
+            "maxItems": 7,
             "minItems": 1,
             "title": "Views",
             "type": "array"
@@ -18564,6 +19258,18 @@
             "exclusiveMinimum": 0.0,
             "title": "File Id",
             "type": "integer"
+          },
+          "plate_index": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
           },
           "printer_id": {
             "anyOf": [
@@ -19802,6 +20508,18 @@
             "title": "File Id",
             "type": "integer"
           },
+          "plate_index": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
+          },
           "remote_filename": {
             "anyOf": [
               {
@@ -20218,6 +20936,19 @@
           "access_token"
         ],
         "title": "SetupResponse",
+        "type": "object"
+      },
+      "SetupSampleChoice": {
+        "properties": {
+          "include": {
+            "title": "Include",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "include"
+        ],
+        "title": "SetupSampleChoice",
         "type": "object"
       },
       "SetupSessionResponse": {
@@ -20890,6 +21621,13 @@
         ],
         "title": "ShareLinkRead",
         "type": "object"
+      },
+      "SlicedGeometry": {
+        "enum": [
+          "gcode_only"
+        ],
+        "title": "SlicedGeometry",
+        "type": "string"
       },
       "SlicerProfilePage": {
         "properties": {
@@ -23174,6 +23912,17 @@
             "title": "Oidc Username Claim",
             "type": "string"
           },
+          "prefer_rendered_3mf_preview": {
+            "title": "Prefer Rendered 3Mf Preview",
+            "type": "boolean"
+          },
+          "preview_floor_grid": {
+            "title": "Preview Floor Grid",
+            "type": "boolean"
+          },
+          "preview_look": {
+            "$ref": "#/components/schemas/PreviewLook"
+          },
           "s3_access_key": {
             "default": "",
             "title": "S3 Access Key",
@@ -23269,7 +24018,10 @@
           "derivatives_gcode_enabled",
           "derivatives_toolpath_enabled",
           "derivatives_previews_enabled",
-          "derivatives_previews_include_poles"
+          "derivatives_previews_include_poles",
+          "prefer_rendered_3mf_preview",
+          "preview_look",
+          "preview_floor_grid"
         ],
         "title": "VaultConfigRead",
         "type": "object"
@@ -23635,6 +24387,38 @@
               }
             ],
             "title": "Oidc Username Claim"
+          },
+          "prefer_rendered_3mf_preview": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefer Rendered 3Mf Preview"
+          },
+          "preview_floor_grid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Floor Grid"
+          },
+          "preview_look": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewLook"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "s3_access_key": {
             "anyOf": [
@@ -29080,6 +29864,123 @@
         ]
       }
     },
+    "/api/v1/config/preview-example": {
+      "get": {
+        "operationId": "preview_example_api_v1_config_preview_example_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "look",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PreviewLook"
+            }
+          },
+          {
+            "in": "query",
+            "name": "floor_grid",
+            "required": true,
+            "schema": {
+              "title": "Floor Grid",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Preview Example",
+        "tags": [
+          "config"
+        ]
+      }
+    },
+    "/api/v1/config/sample-collection": {
+      "post": {
+        "operationId": "add_sample_collection_api_v1_config_sample_collection_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/SetupSampleChoice"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Setup"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Add Sample Collection Api V1 Config Sample Collection Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Add Sample Collection",
+        "tags": [
+          "config"
+        ]
+      }
+    },
     "/api/v1/config/storage-roots/enroll": {
       "post": {
         "operationId": "enroll_storage_root_api_v1_config_storage_roots_enroll_post",
@@ -30014,6 +30915,74 @@
         "summary": "Update a local filament preset",
         "tags": [
           "filament-profiles"
+        ]
+      }
+    },
+    "/api/v1/files/{file_id}/archive-images/{index}": {
+      "get": {
+        "operationId": "archive_image_api_v1_files__file_id__archive_images__index__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "title": "Index",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "framing",
+            "required": false,
+            "schema": {
+              "default": "source",
+              "enum": [
+                "source",
+                "photo"
+              ],
+              "title": "Framing",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read a sliced archive image",
+        "tags": [
+          "files"
         ]
       }
     },
@@ -32555,6 +33524,53 @@
         ]
       }
     },
+    "/api/v1/inbox/{item_id}/capture-status": {
+      "get": {
+        "operationId": "capture_status_api_v1_inbox__item_id__capture_status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureStatusRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Capture Status",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
     "/api/v1/inbox/{item_id}/capture-upload": {
       "delete": {
         "description": "Release an unfinished capture's exact slot leases after extension failure.",
@@ -32834,6 +33850,51 @@
           }
         ],
         "summary": "Retry Item",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/{item_id}/thumbnail": {
+      "get": {
+        "operationId": "capture_thumbnail_api_v1_inbox__item_id__thumbnail_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Capture Thumbnail",
         "tags": [
           "pending imports"
         ]
@@ -37870,6 +38931,20 @@
               "title": "Model Id",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": "original",
+              "enum": [
+                "thumbnail",
+                "original"
+              ],
+              "title": "Size",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -38436,6 +39511,15 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/ViewId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PreviewSize",
+              "default": "full"
             }
           }
         ],
@@ -46703,6 +47787,15 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/ViewId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PreviewSize",
+              "default": "full"
             }
           }
         ],

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import math
 import time
 import zipfile
@@ -33,6 +34,8 @@ from sqlmodel import Session, col, select
 
 from app.core.config import _overlay, settings
 from app.core.errors import ErrorKind, OperationError
+from app.core.execution_scope import ExecutionIdentity, execution_scope
+from app.core.time import utcnow
 from app.db.models import (
     ArtifactDerivative,
     DerivativeKind,
@@ -45,9 +48,10 @@ from app.db.models import (
     JobState,
     Metadata,
     Model,
+    ModelCover,
 )
 from app.db.session import get_session_factory
-from app.modules.derivatives import kinds, producers, records
+from app.modules.derivatives import kinds, policy, producers, records
 from app.modules.ingestion import extensions
 from app.modules.library.volume_metadata import apply_volume, read_volume
 from app.modules.media import mesh_isolation, toolpath
@@ -733,18 +737,11 @@ class TestDeriveMesh:
         with zipfile.ZipFile(io.BytesIO(original)) as archive:
             assert archive.read("Metadata/thumbnail.png") == image.getvalue()
 
-    def test_a_3mf_cover_is_the_render_rather_than_its_slicer_picture(
-        self, db_session, stored
-    ):
-        import io
-
-        from PIL import Image
-
-        image = io.BytesIO()
-        Image.new("RGB", (32, 32), "red").save(image, format="PNG")
+    def test_recreates_a_cover_when_enabled(self, db_session, stored):
+        policy.update(db_session, {policy.SettingName.RECREATE_EMBEDDED_COVERS: True})
         artifact = stored(
             "pictured.3mf",
-            three_mf(extras={"Metadata/thumbnail.png": image.getvalue()}),
+            three_mf(extras={"Metadata/thumbnail.png": content.png()}),
         )
 
         result = producers.derive_mesh(artifact.id)
@@ -752,10 +749,213 @@ class TestDeriveMesh:
         assert result.kinds[DerivativeKind.THUMBNAIL] == DerivativeState.READY
         row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
         assert json.loads(row.output_json)["strategy"] == "full"
+        assert row.has_embedded_3mf_preview is True
+
+    def test_publishes_embedded_cover_without_render_preparation(
+        self, db_session, stored, monkeypatch
+    ):
+        from app.modules.media import thumbnail_handoff
+        from app.runtime.native_admission import Resources
+
+        artifact = stored(
+            "pictured.3mf",
+            three_mf(extras={"Metadata/thumbnail.png": content.png()}),
+        )
+        handoff = thumbnail_handoff.HandoffPlan(
+            640, 480, Resources(1, 100), Resources(4, 400)
+        )
+        monkeypatch.setattr(thumbnail_handoff, "plan", lambda *args: handoff)
+        monkeypatch.setattr(
+            thumbnail_handoff,
+            "reserve",
+            lambda *args: pytest.fail("embedded cover entered GPU preparation"),
+        )
+        generate = mesh_isolation.generate
+
+        def worker(request, *, on_output):
+            assert not request.include_thumbnail
+            return generate(request, on_output=on_output)
+
+        monkeypatch.setattr(mesh_isolation, "generate", worker)
+        producers.derive_mesh(artifact.id)
+
+        row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
+        assert json.loads(row.output_json)["strategy"] == "embedded"
+        assert row.has_embedded_3mf_preview is True
+
+    @pytest.mark.parametrize(
+        "picture",
+        [pytest.param(content.png(), id="present"), pytest.param(None, id="absent")],
+    )
+    def test_logs_the_parent_embedded_probe(self, stored, caplog, picture):
+        extras = {"Metadata/thumbnail.png": picture} if picture is not None else {}
+        source = three_mf(extras=extras)
+        artifact = stored("probed.3mf", source)
+        caplog.set_level(logging.INFO, logger="app.modules.media.mesh_observability")
+
+        identity = ExecutionIdentity("job-1", "job-1:e:1", "derivatives.mesh")
+        with execution_scope(identity):
+            producers.derive_mesh(artifact.id)
+
+        records = [
+            json.loads(record.getMessage().removeprefix("mesh_phases "))
+            for record in caplog.records
+            if record.getMessage().startswith("mesh_phases ")
+        ]
+        parent_record = next(
+            record for record in records if record["execution_id"] is None
+        )
+        (phase,) = parent_record["stages"]
+        assert (
+            parent_record["file_id"],
+            parent_record["job_execution_id"],
+            phase["phase"],
+            phase["input_bytes"],
+            phase["output_bytes"],
+        ) == (
+            artifact.id,
+            identity.execution_id,
+            "embedded",
+            len(source),
+            len(picture) if picture is not None else None,
+        )
+
+    @pytest.mark.parametrize(
+        "extras", [{}, {"Metadata/thumbnail.png": content.png()[:30]}]
+    )
+    def test_renders_when_no_usable_picture_is_present(
+        self, db_session, stored, extras
+    ):
+        artifact = stored("no-picture.3mf", three_mf(extras=extras))
+
+        producers.derive_mesh(artifact.id)
+
+        row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
+        assert json.loads(row.output_json)["strategy"] == "full"
+        assert row.has_embedded_3mf_preview is False
+
+    def test_keeps_fingerprints_with_an_embedded_cover(
+        self, db_session, stored, make_system_config, monkeypatch
+    ):
+        artifact = stored(
+            "pictured-fingerprint.3mf",
+            three_mf(extras={"Metadata/thumbnail.png": content.png()}),
+        )
+        make_system_config(
+            similarity_settings_json=json.dumps(
+                {"enabled": True, "fingerprint_on_ingest": True}
+            )
+        )
+        monkeypatch.setattr(extensions, "_derivatives", similarity_ingestion)
+
+        producers.derive_mesh(artifact.id)
+
+        fingerprint = db_session.exec(
+            select(GeometryFingerprint).where(
+                GeometryFingerprint.file_id == artifact.id,
+                GeometryFingerprint.component_index == 0,
+            )
+        ).one()
+        assert fingerprint.state == "ready"
+
+    def test_uses_the_embedded_picture_after_a_renderer_refusal(
+        self, db_session, stored, monkeypatch
+    ):
+        from app.modules.media import mesh_render, thumbnail_handoff
+        from app.modules.media.thumbnail_engine import ThumbnailEngine
+
+        policy.update(db_session, {policy.SettingName.RECREATE_EMBEDDED_COVERS: True})
+        artifact = stored(
+            "renderer-refused.3mf",
+            three_mf(extras={"Metadata/thumbnail.png": content.png()}),
+        )
+        monkeypatch.setattr(thumbnail_handoff, "plan", lambda *args: None)
+        monkeypatch.setattr(mesh_isolation, "generate", ThumbnailEngine().generate)
+        render = []
+
+        def refuse(*args, **kwargs):
+            render.append(args)
+            return None
+
+        monkeypatch.setattr(mesh_render, "render_scene_thumbnail", refuse)
+
+        producers.derive_mesh(artifact.id)
+
+        assert len(render) == 1
+        row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
+        assert row.state is DerivativeState.READY
+        assert json.loads(row.output_json)["strategy"] == "embedded"
+
+    def test_requeues_only_affected_covers(self, db_session, stored):
+        from app.modules.derivatives.source import DerivativeSource
+
+        pictured = stored(
+            "pictured.3mf",
+            three_mf(extras={"Metadata/thumbnail.png": content.png()}),
+        )
+        plain = stored("plain.3mf", three_mf())
+        stl = stored("different-format.stl", content.binary_stl())
+        for artifact in (pictured, plain, stl):
+            producers.derive_mesh(artifact.id)
+        source = DerivativeSource(kinds.group(JobKind.DERIVATIVES_MESH))
+        assert source.pending(db_session, now=utcnow(), limit=10) == []
+
+        for enabled, strategy in ((True, "full"), (False, "embedded")):
+            policy.update(
+                db_session, {policy.SettingName.RECREATE_EMBEDDED_COVERS: enabled}
+            )
+            pending = source.pending(db_session, now=utcnow(), limit=10)
+            assert [item.subject_key for item in pending] == [f"file/{pictured.id}"]
+            assert producers.derive_mesh(pictured.id).kinds == {
+                DerivativeKind.THUMBNAIL: DerivativeState.READY
+            }
+            row = _rows(db_session, pictured.id)[DerivativeKind.THUMBNAIL]
+            assert json.loads(row.output_json)["strategy"] == strategy
+
+    def test_preserves_a_chosen_cover_on_regeneration(
+        self, db_session, stored, make_model_cover
+    ):
+        artifact = stored(
+            "pictured.3mf",
+            three_mf(extras={"Metadata/thumbnail.png": content.png()}),
+        )
+        producers.derive_mesh(artifact.id)
+        chosen = make_model_cover(db_session.get_one(Model, artifact.model_id))
+        before = (chosen.filename, chosen.sha256)
+
+        policy.update(db_session, {policy.SettingName.RECREATE_EMBEDDED_COVERS: True})
+        producers.derive_mesh(artifact.id)
+
+        db_session.expire_all()
+        after = db_session.get_one(ModelCover, artifact.model_id)
+        assert (after.filename, after.sha256) == before
+
+    def test_replaces_a_previous_recipe_render(self, db_session, stored):
+        artifact = stored(
+            "pictured.3mf",
+            three_mf(extras={"Metadata/thumbnail.png": content.png()}),
+        )
+        policy.update(db_session, {policy.SettingName.RECREATE_EMBEDDED_COVERS: True})
+        producers.derive_mesh(artifact.id)
+        previous = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
+        assert json.loads(previous.output_json)["strategy"] == "full"
+        previous.recipe_version = kinds.THREE_MF_THUMBNAIL_RECIPE - 1
+        previous.has_embedded_3mf_preview = None
+        db_session.add(previous)
+        db_session.commit()
+        policy.update(db_session, {policy.SettingName.RECREATE_EMBEDDED_COVERS: None})
+
+        producers.derive_mesh(artifact.id)
+
+        db_session.refresh(artifact)
+        current = records.rows_for(db_session, artifact)[DerivativeKind.THUMBNAIL]
+        assert json.loads(current.output_json)["strategy"] == "embedded"
+        assert artifact.thumbnail_path == current.storage_key
 
     def test_a_failed_mesh_worker_still_publishes_the_slicer_picture(
         self, db_session, stored, monkeypatch
     ):
+        policy.update(db_session, {policy.SettingName.RECREATE_EMBEDDED_COVERS: True})
         import io
 
         from PIL import Image
@@ -819,15 +1019,26 @@ class TestDeriveMesh:
         assert row.next_attempt_at is None
 
     def test_the_thumbnail_represents_its_model(
-        self, db_session: Session, stored
+        self, db_session: Session, stored, make_collection, make_tag, sql_statements
     ) -> None:
         artifact = stored("cube.stl", content.binary_stl())
+        model = db_session.get_one(Model, artifact.model_id)
+        model.collection_id = make_collection().id
+        model.tags = [make_tag()]
+        db_session.commit()
+        file_id, model_id = artifact.id, model.id
 
-        producers.derive_mesh(artifact.id)
+        with sql_statements.recording():
+            producers.derive_mesh(file_id)
 
-        model = db_session.get(Model, artifact.model_id)
-        assert model is not None
-        assert model.thumbnail_file_id == artifact.id
+        db_session.expire_all()
+        assert db_session.get_one(Model, model_id).thumbnail_file_id == file_id
+        assert not [
+            statement.sql
+            for statement in sql_statements.statements
+            if " FROM collections " in f" {' '.join(statement.sql.split())} "
+            or "model_tags" in statement.sql
+        ]
 
     def test_tells_the_models_viewers_what_changed(self, stored, announced) -> None:
         artifact = stored("cube.stl", content.binary_stl())
@@ -1020,6 +1231,105 @@ class TestDeriveMesh:
 
 
 class TestDeriveGcode:
+    def test_uses_sliced_archive_thumbnail(self, db_session, stored):
+        package = io.BytesIO()
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("Metadata/plate_1.gcode", b"G28\n")
+            archive.writestr("Metadata/plate_1.png", content.png())
+        artifact = stored("project.gcode.3mf", package.getvalue())
+        outcome = producers.derive_gcode(artifact.id)
+        assert outcome.kinds[DerivativeKind.THUMBNAIL] == DerivativeState.READY
+        db_session.refresh(artifact)
+        assert artifact.thumbnail_path is not None
+        assert get_backend().exists(artifact.thumbnail_path)
+
+    def test_parses_single_plate_slicer_metadata(self, db_session, stored):
+        package = io.BytesIO()
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr(
+                "Metadata/plate_7.gcode",
+                (FIXTURES_DIR / "real_orca_ender3_benchy.gcode").read_bytes(),
+            )
+        artifact = stored("project.gcode.3mf", package.getvalue())
+        outcome = producers.derive_gcode(artifact.id)
+        metadata = db_session.exec(
+            select(Metadata).where(Metadata.file_id == artifact.id)
+        ).one()
+        assert outcome.kinds[DerivativeKind.METADATA] == DerivativeState.READY
+        assert metadata.slicer_name == "OrcaSlicer"
+        assert metadata.estimated_time_s is not None
+
+    def test_keeps_plate_specific_fields_out_of_shared_settings(
+        self, db_session, stored, make_derivative
+    ):
+        package = io.BytesIO()
+        with zipfile.ZipFile(package, "w") as archive:
+            for number, duration, weight, nozzle in (
+                (1, "7h 44m 22s", "419.18", "0.4"),
+                (2, "41m 5s", "13.03", "0.6"),
+            ):
+                archive.writestr(
+                    f"Metadata/plate_{number}.gcode",
+                    f"; total estimated time: {duration}\n"
+                    f"; total filament weight [g] : {weight}\n"
+                    "; printer_model = Bambu Lab P1S\n"
+                    "; layer_height = 0.2\n"
+                    f"; nozzle_diameter = {nozzle}\n",
+                )
+        artifact = stored("project.gcode.3mf", package.getvalue())
+        make_derivative(
+            artifact,
+            DerivativeKind.METADATA,
+            recipe_version=kinds.GCODE_METADATA_RECIPE - 1,
+            state=DerivativeState.SKIPPED,
+            failure_reason="per_plate_metadata",
+        )
+        outcome = producers.derive_gcode(artifact.id)
+        metadata = db_session.exec(
+            select(Metadata).where(Metadata.file_id == artifact.id)
+        ).one()
+        assert outcome.kinds[DerivativeKind.METADATA] == DerivativeState.READY
+        assert metadata.printer_model == "Bambu Lab P1S"
+        assert metadata.layer_height_mm == 0.2
+        assert metadata.nozzle_diameter_mm is None
+        assert metadata.estimated_time_s is None
+        assert metadata.filament_weight_g is None
+        output = json.loads(
+            records.rows_for(db_session, artifact)[DerivativeKind.METADATA].output_json
+        )
+        plate_metadata = output["plate_metadata"]
+        assert [plate["number"] for plate in plate_metadata] == [1, 2]
+        assert [plate["metadata"]["estimated_time_s"] for plate in plate_metadata] == [
+            27862,
+            2465,
+        ]
+        assert [plate["metadata"]["filament_weight_g"] for plate in plate_metadata] == [
+            419.18,
+            13.03,
+        ]
+
+    def test_unsliced_archive_metadata_is_skipped(self, db_session, stored):
+        from tests.fixtures.three_mf_projects import build_sliced_project
+
+        artifact = stored("project.gcode.3mf", build_sliced_project(plate_numbers=()))
+        outcome = producers.derive_gcode(artifact.id)
+        assert outcome.kinds[DerivativeKind.METADATA] == DerivativeState.SKIPPED
+        assert (
+            db_session.exec(
+                select(Metadata).where(Metadata.file_id == artifact.id)
+            ).first()
+            is None
+        )
+
+    def test_refuses_malformed_sliced_metadata(self, db_session, stored):
+        artifact = stored("broken.gcode.3mf", b"invalid zip")
+        outcome = producers.derive_gcode(artifact.id)
+        assert outcome.kinds[DerivativeKind.METADATA] == DerivativeState.FAILED
+        assert (
+            _rows(db_session, artifact.id)[DerivativeKind.METADATA].failure_reason
+            == "invalid_source"
+        )
+
     def test_persists_the_selected_plate_temperature(
         self, db_session: Session, stored
     ) -> None:
@@ -1466,6 +1776,46 @@ class TestOutcome:
 
 
 class TestLivePolicy:
+    def test_cover_settlement_does_not_nudge_disabled_previews(
+        self, db_session, stored, work_engine
+    ) -> None:
+        from app.modules.derivatives import policy
+        from app.modules.work.contracts import PassSubmission
+        from app.modules.work.reconciler import run_pass
+
+        policy.update(db_session, {policy.SettingName.PREVIEWS: False})
+        artifact = stored("cover-only.stl", content.binary_stl())
+        work_engine.reset()
+        run_pass(JobKind.DERIVATIVES_MESH)
+        work_engine.drain()
+
+        assert (
+            _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL].state
+            is DerivativeState.READY
+        )
+        assert not any(
+            isinstance(execution.submission, PassSubmission)
+            and execution.submission.source is JobKind.DERIVATIVES_PREVIEWS
+            for execution in work_engine.executions.values()
+        )
+
+    def test_reenabled_previews_find_the_existing_cover(
+        self, db_session, stored, work_engine
+    ) -> None:
+        from app.modules.derivatives import policy
+
+        policy.update(db_session, {policy.SettingName.PREVIEWS: False})
+        artifact = stored("views-later.stl", content.binary_stl())
+        producers.derive_mesh(artifact.id)
+        work_engine.drain()
+        assert DerivativeKind.PREVIEWS not in _rows(db_session, artifact.id)
+
+        policy.update(db_session, {policy.SettingName.PREVIEWS: True})
+        work_engine.drain()
+
+        preview = _rows(db_session, artifact.id)[DerivativeKind.PREVIEWS]
+        assert preview.state is DerivativeState.READY
+
     def test_reenable_processes_missing_outputs_through_the_source(
         self, db_session, stored, work_engine
     ):
@@ -1623,7 +1973,7 @@ class TestBegin:
     def test_commits_what_the_caller_adds_with_the_claims(self, db_session, stored):
         artifact = stored("claimed.gcode", content.gcode())
 
-        def rename(session, file):
+        def rename(session, file, _attempts):
             file.revision_notes = "claimed"
             session.add(file)
 
@@ -1637,7 +1987,7 @@ class TestBegin:
 
         artifact = stored("refused.gcode", content.gcode())
 
-        def refuse(_session, _file):
+        def refuse(_session, _file, _attempts):
             raise RuntimeError("continuation unavailable")
 
         with pytest.raises(RuntimeError, match="continuation unavailable"):
@@ -1648,7 +1998,7 @@ class TestBegin:
     def test_a_claim_with_its_artifact_is_one_transaction(self, stored, transactions):
         artifact = stored("once.gcode", content.gcode())
 
-        def rename(session, file):
+        def rename(session, file, _attempts):
             file.revision_notes = "claimed"
             session.add(file)
 
@@ -1670,7 +2020,7 @@ class TestBegin:
         begun = producers._begin(
             404,
             JobKind.DERIVATIVES_GCODE,
-            claimed=lambda _session, file: called.append(file.id),
+            claimed=lambda _session, file, _attempts: called.append(file.id),
         )
 
         assert (begun, called) == (None, [])

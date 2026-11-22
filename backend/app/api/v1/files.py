@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import (
@@ -27,8 +28,13 @@ from app.core.security import get_current_user, require_auth, require_user
 from app.db.models import CollectionRole, DerivativeKind, File, FileType, Model, User
 from app.db.scopes import live
 from app.db.session import get_session
+from app.modules.derivatives.sliced_reads import meshless_archives
 from app.modules.identity import auth, rbac
 from app.modules.library.model_views.thumbnails import thumbnail_version
+from app.modules.media import thumbnail
+from app.modules.media.preview_contracts import PreviewImageKind
+from app.modules.media.sliced_archive import read_archive_image
+from app.modules.media.sliced_gcode import is_container, plate_metadata
 from app.modules.media.three_mf_preview import (
     EmbeddedGcodeError,
     list_embedded_gcode_plates,
@@ -48,7 +54,7 @@ from app.modules.storage.artifact_delivery import (
 from app.modules.storage.delivery_contracts import content_disposition
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.schemas.jobs import DerivativeRead
-from app.schemas.plates import FilePlatesRead, GcodePlatesRead
+from app.schemas.plates import FilePlatesRead, GcodePlateIdentityRead, GcodePlatesRead
 from app.schemas.project_profiles import FileProjectProfileRead
 
 logger = get_logger(__name__)
@@ -177,18 +183,32 @@ def gcode_plates(
     session: Session = Depends(get_session),
 ) -> GcodePlatesRead:
     artifact = _accessible_file(session, file_id, current_user)
-    if artifact.file_type != FileType.THREE_MF:
+    if not is_container(artifact):
         raise HTTPException(status_code=404, detail="embedded_gcode_not_supported")
     if artifact.size_bytes > settings.three_mf_preview_max_archive_mb * 1024 * 1024:
         raise HTTPException(status_code=413, detail="embedded_gcode_archive_too_large")
     try:
         with resolve(artifact).materialize() as path:
             numbers = list_embedded_gcode_plates(path)
+            from app.modules.media.sliced_plate_identity import (
+                read_sliced_plate_identities,
+            )
+
+            identities = read_sliced_plate_identities(path)
     except EmbeddedGcodeError as exc:
         raise _embedded_gcode_error(exc) from exc
     except (FileNotFoundError, ArtifactContentError) as exc:
         raise HTTPException(status_code=410, detail="file_blob_missing") from exc
-    return GcodePlatesRead(plates=list(numbers))
+    return GcodePlatesRead(
+        plates=list(numbers),
+        plate_metadata=plate_metadata(session, artifact),
+        identities=[
+            GcodePlateIdentityRead(
+                number=item.number, name=item.name, object_count=item.object_count
+            )
+            for item in identities
+        ],
+    )
 
 
 @router.get(
@@ -218,7 +238,7 @@ def embedded_gcode(
     session: Session = Depends(get_session),
 ):
     artifact = _accessible_file(session, file_id, current_user)
-    if artifact.file_type != FileType.THREE_MF:
+    if not is_container(artifact):
         raise HTTPException(status_code=404, detail="embedded_gcode_not_supported")
     archive_cap = settings.three_mf_preview_max_archive_mb * 1024 * 1024
     if artifact.size_bytes > archive_cap:
@@ -243,6 +263,52 @@ def embedded_gcode(
     return PlainTextResponse(
         content=embedded.content if status_code == 200 else "",
         status_code=status_code,
+        headers=headers,
+    )
+
+
+@router.get("/{file_id}/archive-images/{index}", summary="Read a sliced archive image")
+def archive_image(
+    file_id: int,
+    index: int,
+    request: Request,
+    framing: Literal["source", "photo"] = "source",
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+):
+    artifact = _accessible_file(session, file_id, current_user)
+    entry = meshless_archives(session, [artifact.model_id]).get(file_id)
+    if entry is None or not 0 <= index < len(entry[2]):
+        raise HTTPException(status_code=404, detail="archive_image_not_found")
+    image = entry[2][index]
+    try:
+        with resolve(artifact).materialize() as path:
+            payload = read_archive_image(path, image)
+    except EmbeddedGcodeError as exc:
+        raise _embedded_gcode_error(exc) from exc
+    except (FileNotFoundError, ArtifactContentError) as exc:
+        raise HTTPException(status_code=410, detail="file_blob_missing") from exc
+    media_type = image.media_type
+    name = Path(image.member)
+    if framing == "photo" and image.image_kind is PreviewImageKind.PHOTO:
+        try:
+            payload = thumbnail.to_photo_webp(
+                payload, size=thumbnail.PhotoSize.ORIGINAL
+            ).data
+        except thumbnail.ThumbnailValidationError as exc:
+            raise HTTPException(
+                status_code=410, detail="archive_image_unavailable"
+            ) from exc
+        media_type = "image/webp"
+        name = name.with_suffix(".webp")
+    code, headers = bytes_response_headers(
+        payload,
+        delivery_request(request, name.name, media_type, DeliveryPurpose.THUMBNAIL),
+    )
+    return Response(
+        content=payload if code == 200 else b"",
+        status_code=code,
+        media_type=media_type,
         headers=headers,
     )
 

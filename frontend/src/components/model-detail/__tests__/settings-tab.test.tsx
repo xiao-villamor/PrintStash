@@ -90,6 +90,101 @@ function renderSettings(meta: MetadataRead, preferences = DEFAULT_METADATA_PREFE
   );
 }
 
+describe("SettingsTab sliced revision", () => {
+  it("shows per-plate estimates instead of an archive-wide estimate", () => {
+    render(
+      <SettingsTab
+        meta={aMetadata({ printer_model: "Workshop printer" })}
+        printSettingRows={[]}
+        preferences={DEFAULT_METADATA_PREFERENCES}
+        hasSlicedRevision
+        selectedSlicedPlate={2}
+        plateEstimates={{
+          plates: [1, 2],
+          identities: [],
+          plate_metadata: [
+            {
+              number: 1,
+              metadata: { estimated_time_s: 27862, filament_weight_g: 419.18, filament_cost: null },
+            },
+            {
+              number: 2,
+              metadata: { estimated_time_s: 2465, filament_weight_g: 13.03, filament_cost: null },
+            },
+          ],
+        }}
+      />,
+    );
+    expect(
+      within(screen.getByRole("region", { name: "Plate 02" })).getByText("13.03 g"),
+    ).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Estimates" })).not.toBeInTheDocument();
+  });
+
+  it("honors hidden per-plate estimate preferences", () => {
+    render(
+      <SettingsTab
+        meta={aMetadata()}
+        printSettingRows={[]}
+        preferences={{
+          ...DEFAULT_METADATA_PREFERENCES,
+          estimated_time: false,
+          filament_weight: false,
+          filament_cost: false,
+        }}
+        plateEstimates={{ plates: [1, 2], identities: [], plate_metadata: [] }}
+      />,
+    );
+    expect(screen.queryByText("Estimated time")).not.toBeInTheDocument();
+    expect(screen.queryByText("Filament weight")).not.toBeInTheDocument();
+    expect(screen.queryByText("Filament cost")).not.toBeInTheDocument();
+  });
+
+  it("suggests a sliced revision when no settings or revision exist", () => {
+    render(
+      <SettingsTab meta={null} printSettingRows={[]} preferences={DEFAULT_METADATA_PREFERENCES} />,
+    );
+
+    expect(
+      screen.getByText(
+        "No print settings recorded yet. Add a sliced G-code revision to capture them.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("does not show an empty state when settings are recorded", () => {
+    render(
+      <SettingsTab
+        meta={aMetadata({ printer_model: "Workshop printer" })}
+        printSettingRows={[]}
+        preferences={DEFAULT_METADATA_PREFERENCES}
+        hasSlicedRevision
+      />,
+    );
+
+    expect(screen.getByText("Workshop printer")).toBeVisible();
+    expect(
+      screen.queryByText("No print settings are available for this sliced revision."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("explains missing settings without asking for another revision", () => {
+    render(
+      <SettingsTab
+        meta={geometryOnlyMetadata}
+        printSettingRows={buildPrintSettingRows(geometryOnlyMetadata, DEFAULT_METADATA_PREFERENCES)}
+        preferences={DEFAULT_METADATA_PREFERENCES}
+        hasSlicedRevision
+      />,
+    );
+
+    expect(
+      screen.getByText("No print settings are available for this sliced revision."),
+    ).toBeVisible();
+    expect(screen.queryByText(/Add a sliced G-code/)).not.toBeInTheDocument();
+  });
+});
+
 describe("SettingsTab recorded values", () => {
   it("groups settings into the reference sections", () => {
     renderSettings(aMetadata({ printer_model: "Workshop printer" }));

@@ -40,7 +40,11 @@ describe("ProtectedThumbnail", () => {
       },
     });
     await act(async () => fireEvent.load(image));
-    expect(image.parentElement).toHaveAttribute("data-library-thumbnail", "failed");
+    expect(screen.getByText("Fallback").parentElement).toHaveAttribute(
+      "data-library-thumbnail",
+      "failed",
+    );
+    expect(image).not.toBeInTheDocument();
     expect(screen.getByText("Fallback")).toBeVisible();
     expect(fetch).toHaveBeenCalledOnce();
   });
@@ -197,7 +201,11 @@ describe("ProtectedThumbnail", () => {
     );
     const image = await screen.findByAltText("Part");
     fireEvent.error(image);
-    expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("failed");
+    expect(screen.getByText("Missing").parentElement).toHaveAttribute(
+      "data-library-thumbnail",
+      "failed",
+    );
+    expect(image).not.toBeInTheDocument();
   });
   it("keeps missing image semantics", () => {
     render(<ProtectedThumbnail path={null} alt="Part" placeholder={<span>Missing</span>} />);
@@ -245,7 +253,11 @@ describe("ProtectedThumbnail", () => {
       },
     });
     await act(async () => fireEvent.load(image));
-    expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("failed");
+    expect(screen.getByText("Missing").parentElement).toHaveAttribute(
+      "data-library-thumbnail",
+      "failed",
+    );
+    expect(image).not.toBeInTheDocument();
   });
 
   it("ignores a previous URL decode after image reassignment", async () => {

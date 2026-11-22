@@ -287,12 +287,15 @@ export function printersOptions(api: Pick<QueryApi, "listPrinters"> = defaultQue
   });
 }
 
-export function usePrinters(options?: { enabled?: boolean; refetchInterval?: number }) {
+export function usePrinters(options?: {
+  enabled?: boolean;
+  refetchInterval?: number;
+  refetchOnWindowFocus?: boolean | "always";
+}) {
   const api = useQueryApi();
   return useQuery({
     ...printersOptions(api),
-    enabled: options?.enabled ?? true,
-    refetchInterval: options?.refetchInterval,
+    ...options,
   });
 }
 
@@ -451,7 +454,7 @@ export type ModelListFilters = Omit<ListModelsParams, "limit" | "offset">;
 function modelFacetsOptions(api: QueryApi, filters: ModelListFilters) {
   return queryOptions<ModelFacetsRead>({
     queryKey: [...queryKeys.models, "facets", filters],
-    queryFn: () => api.getModelFacets(filters),
+    queryFn: ({ signal }) => api.getModelFacets(filters, { signal }),
   });
 }
 

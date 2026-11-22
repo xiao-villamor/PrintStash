@@ -40,3 +40,55 @@ class TestDispatchAuthority:
         assert raised.value.kind is ErrorKind.FORBIDDEN
         assert contacted == []
         assert db_session.exec(select(PrintJob)).all() == []
+
+
+class TestSlicedDispatch:
+    @pytest.mark.parametrize("delivery", ["send", "queue", "batch"])
+    @pytest.mark.parametrize(
+        ("plate", "code"),
+        [(None, "plate_selection_required"), (99, "embedded_gcode_not_found")],
+    )
+    def test_refuses_unresolved_plate_before_recording_work(
+        self,
+        client,
+        auth_headers,
+        db_session,
+        stored,
+        make_printer,
+        delivery,
+        plate,
+        code,
+    ):
+        from tests.fixtures.three_mf_projects import build_sliced_project
+
+        artifact = stored("project.gcode.3mf", build_sliced_project())
+        printer = make_printer()
+        payload = {"file_id": artifact.id, "plate_index": plate}
+        if delivery == "send":
+            url = f"/api/v1/printers/{printer.id}/send"
+        else:
+            payload.update({"strategy": "manual", "printer_id": printer.id})
+            url = (
+                "/api/v1/fleet/queue"
+                if delivery == "queue"
+                else "/api/v1/fleet/batches"
+            )
+            if delivery == "batch":
+                payload["quantity"] = 2
+        response = client.post(url, headers=auth_headers, json=payload)
+        assert response.status_code == 400, response.text
+        assert response.json()["detail"] == code
+        assert db_session.exec(select(PrintJob)).all() == []
+
+    def test_refuses_a_plate_on_plain_gcode(
+        self, client, auth_headers, stored, make_printer
+    ):
+        artifact = stored("part.gcode", b"G28\n")
+        printer = make_printer()
+        response = client.post(
+            f"/api/v1/printers/{printer.id}/send",
+            headers=auth_headers,
+            json={"file_id": artifact.id, "plate_index": 1},
+        )
+        assert response.status_code == 400, response.text
+        assert response.json()["detail"] == "plate_not_supported"

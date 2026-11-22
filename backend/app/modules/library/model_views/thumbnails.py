@@ -18,16 +18,14 @@ def thumbnail_version(file_id: int, thumbnail_path: str | None) -> Optional[str]
     return hashlib.sha256(thumbnail_path.encode()).hexdigest()[:12]
 
 
-def thumb_url(model: Model, *, source_image_url: str | None = None) -> Optional[str]:
+def thumb_url(model: Model) -> Optional[str]:
     """Stable URL for the model's thumbnail, or None.
 
     Prefers a chosen Model cover, then ``thumbnail_file_id``; falls back to the legacy
     ``thumbnail_path`` for rows written before the file-id column existed.
     """
     if model.cover_filename is not None:
-        return f"/api/v1/models/{model.id}/cover/content?v={model.cover_filename}"
-    if source_image_url is not None:
-        return source_image_url
+        return f"/api/v1/models/{model.id}/cover/content?v={model.cover_filename}&size=thumbnail"
     if model.thumbnail_file_id:
         url = f"/api/v1/files/{model.thumbnail_file_id}/thumbnail"
         version = thumbnail_version(model.thumbnail_file_id, model.thumbnail_path)

@@ -246,6 +246,10 @@
   line-height: 1.5;
 }
 
+.settings-main .settings-preview-look .settings-card-head p {
+  max-width: none;
+}
+
 /* Rows: label and hint on the left, control on the right. */
 .settings-preference-row {
   grid-template-columns: minmax(0, 1fr) minmax(0, 280px);

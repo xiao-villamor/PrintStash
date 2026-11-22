@@ -1,4 +1,5 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
+import { DESKTOP_CHROMIUM } from "./tests/playwright-desktop";
 import { resolve } from "node:path";
 const port = Number(process.env.STARTUP_PORT ?? 3420);
 const apiPort = Number(process.env.STARTUP_API_PORT ?? 8420);
@@ -36,7 +37,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium-startup",
-      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+      use: { ...DESKTOP_CHROMIUM },
     },
   ],
 });

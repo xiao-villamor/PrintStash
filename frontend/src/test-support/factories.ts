@@ -182,6 +182,7 @@ export function aPrintJob(override?: Partial<PrintJobRead>): PrintJobRead {
     external_profile_id: null,
     external_gcode_file: null,
     external_plate_index: null,
+    plate_index: null,
     external_current_layer: null,
     external_total_layers: null,
     external_nozzle_diameter: null,
@@ -846,6 +847,9 @@ export function aVaultConfig(
     derivatives_toolpath_enabled: true,
     derivatives_previews_enabled: false,
     derivatives_previews_include_poles: false,
+    prefer_rendered_3mf_preview: false,
+    preview_look: "sky",
+    preview_floor_grid: true,
     storage_backend: "local",
     storage_provider: "local",
     storage_provider_config: {

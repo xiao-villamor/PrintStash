@@ -12,6 +12,8 @@ import { ModelRead, TagRead } from "@/types";
 
 import { CollectionPicker } from "@/components/collection-picker";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
+import { inputClasses } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
 
 import { InspectedPrintCard } from "./inspected-print-card";
@@ -108,12 +110,18 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
                   onClick={() => editor.setCatOpen((v) => !v)}
                   aria-haspopup="dialog"
                   aria-expanded={editor.catOpen}
-                  className="w-full h-10 flex items-center justify-between bg-card text-foreground text-sm border border-input rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  className={cn(inputClasses, "flex items-center justify-between gap-2 text-left")}
                 >
-                  <span className={editor.collection ? "" : "text-on-surface-variant/60"}>
+                  <span
+                    className={cn(
+                      "min-w-0 truncate",
+                      !editor.collection && "text-muted-foreground",
+                    )}
+                    title={editor.collectionLabel ?? undefined}
+                  >
                     {editor.collectionLabel || uiText("None")}
                   </span>
-                  <ChevronDown className="h-4 w-4 text-on-surface-variant" />
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 </button>
               }
             >
@@ -146,7 +154,7 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
               value={editor.description}
               onChange={(e) => editor.setDescription(e.target.value)}
               rows={3}
-              className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
+              className={inputClasses}
               placeholder={uiText("Optional description")}
             />
             <p id={`${descriptionId}-hint`} className="mt-1.5 text-xs text-muted-foreground">
@@ -173,7 +181,7 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
               type="url"
               value={editor.sourceUrl}
               onChange={(e) => editor.setSourceUrl(e.target.value)}
-              className="w-full h-10 bg-card text-foreground text-sm border border-input rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              className={inputClasses}
               placeholder="https://www.printables.com/model/..."
             />
             <p className="mt-1.5 text-xs text-muted-foreground">
@@ -201,7 +209,7 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
                   }
                 }}
                 placeholder={uiText("Search or create — press Enter")}
-                className="w-full h-10 bg-card text-foreground text-sm border border-input rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                className={inputClasses}
               />
               {editor.tagInput && (editor.filteredTags.length > 0 || editor.canCreate) && (
                 <div

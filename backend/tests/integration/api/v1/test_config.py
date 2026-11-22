@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.core.config import _overlay
+from app.core.config import ConfigResolver, FrozenSettings, _overlay
 from app.db.models import File, FileType, Model, SystemConfig
 from app.modules.administration import runtime_config
 from tests.factories import build_file, build_model
@@ -1122,3 +1122,56 @@ class TestPreviewControl:
             after = revision()
             assert after != before
             before = after
+
+
+class TestEmbeddedCoverPreference:
+    def test_persists_the_admin_override(self, client, auth_headers, db_session):
+        before = client.get("/api/v1/config", headers=auth_headers).json()
+        assert before["prefer_rendered_3mf_preview"] is False
+
+        saved = client.put(
+            "/api/v1/config",
+            headers=auth_headers,
+            json={"prefer_rendered_3mf_preview": True},
+        )
+
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["edit_version"] > before["edit_version"]
+        assert (
+            client.get("/api/v1/config", headers=auth_headers).json()[
+                "prefer_rendered_3mf_preview"
+            ]
+            is True
+        )
+        assert db_session.get_one(SystemConfig, 1).prefer_rendered_3mf_preview is True
+
+    def test_rejects_a_non_boolean_preference(self, client, auth_headers):
+        saved = client.put(
+            "/api/v1/config",
+            headers=auth_headers,
+            json={"prefer_rendered_3mf_preview": "true"},
+        )
+        assert saved.status_code == 422
+
+    def test_null_inherits_the_frozen_environment_value(
+        self, client, auth_headers, monkeypatch
+    ):
+        from app.modules.derivatives import policy
+
+        monkeypatch.setenv("VAULT_PREFER_RENDERED_3MF_PREVIEW", "true")
+        configured = ConfigResolver(FrozenSettings(_env_file=None))
+        monkeypatch.setattr(policy, "settings", configured)
+        assert (
+            client.get("/api/v1/config", headers=auth_headers).json()[
+                "prefer_rendered_3mf_preview"
+            ]
+            is True
+        )
+        for value, effective in ((False, False), (None, True)):
+            saved = client.put(
+                "/api/v1/config",
+                headers=auth_headers,
+                json={"prefer_rendered_3mf_preview": value},
+            )
+            assert saved.status_code == 200, saved.text
+            assert saved.json()["prefer_rendered_3mf_preview"] is effective

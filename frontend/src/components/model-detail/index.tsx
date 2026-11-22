@@ -17,8 +17,9 @@ import { useLibraryStar } from "@/features/library/mutations";
 import { ApiError } from "@/lib/errors";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { Modal } from "@/components/ui/modal";
-import { TitleEditor } from "@/components/title-editor";
+import { InlineTitleEditor } from "@/components/inline-title-editor";
 import { ModelInformation } from "./model-information";
+import { useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { RevisionPicker } from "./revision-picker";
 import { inspectedRevision } from "./inspected-revision";
 import "./model-detail.css";
@@ -28,18 +29,29 @@ import { uiText } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import { useLocation } from "@tanstack/react-router";
-import { FileText, Link2, Loader2, Pencil, Star, Trash2, Wifi } from "lucide-react";
+import { FileText, Link2, Loader2, MoreHorizontal, Pencil, Star, Trash2, Wifi } from "lucide-react";
 
 import type {
   STLViewerControls,
   ViewerControls,
+  ViewerCameraPreset,
   STLPreviewFeedback,
   ViewerDisplayMode,
 } from "@/components/stl-viewer";
+import { useToolpathSources } from "@/lib/toolpath-preview";
 import type { ViewerMode } from "@/components/model-detail/viewer-toolbar";
 import { SlicerOpenButton } from "@/components/slicer-open-button";
 import {
@@ -49,13 +61,13 @@ import {
   getModel,
   updateModel,
 } from "@/lib/api";
-import { useTags } from "@/lib/queries";
+import { usePrinters, useTags } from "@/lib/queries";
 import { readMetadataPreferences } from "@/lib/metadata-preferences";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@/lib/auth-context";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { modalOverlayOpen } from "@/lib/keyboard-commands";
+import { keyboardOverlayOpen, modalOverlayOpen } from "@/lib/keyboard-commands";
 import { ModelPrinterFileRead, ModelRead, TagRead } from "@/types";
 
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -79,6 +91,7 @@ import { RevisionsTab } from "./revisions-tab";
 import { SendToButtons } from "./send-to-buttons";
 import { ShareDialog } from "./share-dialog";
 import { SettingsTab } from "./settings-tab";
+import { PlateEstimates } from "./plate-estimates";
 import { SourceTab } from "./source-tab";
 import { useContentReveal } from "@/lib/use-content-reveal";
 import { DetailTabLoading } from "./tab-loading";
@@ -86,7 +99,8 @@ import { useDerivativeRefresh } from "./use-derivative-refresh";
 import { ViewerToolbar } from "./viewer-toolbar";
 import { ModelCoverEditor } from "./cover-editor";
 import { PlatePicker } from "./plate-picker";
-import { useFilePlates } from "@/lib/queries/file-plates";
+import { useFilePlates, useGcodePlates } from "@/lib/queries/file-plates";
+import { matchSlicedPlate } from "./plate-mapping";
 import { Localized } from "@/components/ui/localized";
 import { ModelTagsDialog } from "@/components/model-tags-dialog";
 
@@ -97,6 +111,12 @@ const STLViewer = lazy(() =>
 const GcodePreview = lazy(() =>
   import("./gcode-preview").then((m) => ({ default: m.GcodePreview })),
 );
+
+const compareBackLabel = {
+  files: "Back to files",
+  overview: "Back to overview",
+  settings: "Back to print settings",
+} as const;
 
 const ViewerFallback = <Loader2 className="h-8 w-8 animate-spin text-on-surface-variant" />;
 
@@ -116,8 +136,6 @@ interface BedSize {
   y: number;
 }
 
-const DEFAULT_BED_SIZE: BedSize = { x: 235, y: 235 };
-
 const DETAIL_SIDEBAR_STORAGE_KEY = "ps-model-detail-inspector-preferred-width";
 const DETAIL_SIDEBAR_MIN_WIDTH = 400;
 const DETAIL_SIDEBAR_MAX_WIDTH = 1100;
@@ -134,8 +152,8 @@ function clampDetailSidebarWidth(width: number, availableWidth?: number): number
   );
 }
 
-function getBedSize(printerModel: string | null | undefined): BedSize {
-  if (!printerModel) return DEFAULT_BED_SIZE;
+function getBedSize(printerModel: string | null | undefined): BedSize | null {
+  if (!printerModel) return null;
   const m = printerModel.toLowerCase();
   if (m.includes("a1 mini") || (m.includes("bambu") && m.includes("mini")))
     return { x: 180, y: 180 };
@@ -146,11 +164,11 @@ function getBedSize(printerModel: string | null | undefined): BedSize {
   if (m.includes("voron") || m.includes("v2.4")) {
     if (m.includes("350")) return { x: 350, y: 350 };
     if (m.includes("300")) return { x: 300, y: 300 };
-    return { x: 250, y: 250 };
+    return null;
   }
   if (m.includes("cr-10") || m.includes("cr10")) return { x: 300, y: 300 };
   if (m.includes("ender") || m.includes("k1")) return { x: 220, y: 220 };
-  return DEFAULT_BED_SIZE;
+  return null;
 }
 
 export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
@@ -235,15 +253,25 @@ function ModelDetailPresentation({
     // A click back to the visible tab must still supersede a pending navigation.
     if (tab === activeTab && tabIntent.current === tab) return;
     tabIntent.current = tab;
-    if (tab !== "revisions") setCompareRequested(false);
+    if (tab !== "revisions") setCompareOrigin(null);
     if (tab !== "history") setHistoryDraft(null);
     const params = new URLSearchParams(searchParams);
     params.set("tab", tab);
     router.replace(`/models/${model.id}?${params}`, {
+      resetScroll: false,
       state: location.state,
     });
   }
   const [displayMode, setDisplayMode] = useState<ViewerDisplayMode>("solid");
+  const focusTab = useRef<TabKey | null>(null);
+  function focusInspector() {
+    detailLayout.current?.querySelector<HTMLElement>('[role="tabpanel"]')?.focus();
+  }
+  function openInspectorTab(tab: TabKey) {
+    if (activeTab === tab) focusInspector();
+    else focusTab.current = tab;
+    selectTab(tab);
+  }
   const detailLayout = useRef<HTMLDivElement>(null);
   const [detailLayoutWidth, setDetailLayoutWidth] = useState(() =>
     isBrowser() ? window.innerWidth - 93 : 1827,
@@ -294,11 +322,35 @@ function ModelDetailPresentation({
     window.addEventListener("keydown", toggleDetails);
     return () => window.removeEventListener("keydown", toggleDetails);
   }, []);
+  useEffect(() => {
+    if (!previewExpanded) return;
+    function collapse(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented || keyboardOverlayOpen()) return;
+      event.preventDefault();
+      setPreviewExpanded(false);
+      detailLayout.current?.querySelector<HTMLButtonElement>("[data-preview-expand]")?.focus();
+    }
+    window.addEventListener("keydown", collapse, true);
+    return () => window.removeEventListener("keydown", collapse, true);
+  }, [previewExpanded]);
   // The plate chosen for one 3MF; another mesh file shows its whole build.
+  const [inspectedSlicedPlate, setInspectedSlicedPlate] = useState<{
+    fileId: number;
+    number: number;
+  } | null>(null);
   const [chosenPlate, setChosenPlate] = useState<{ fileId: number; number: number } | null>(null);
+  const [plateDimensions, setPlateDimensions] = useState<{
+    fileId: number;
+    number: number;
+    dimensions: { x: number; y: number; z: number };
+  } | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
-  const [compareRequested, setCompareRequested] = useState(false);
-  const [comparisonMode, setComparisonMode] = useState<"gcode" | "source" | "all">("gcode");
+  const [compareOrigin, setCompareOrigin] = useState<keyof typeof compareBackLabel | null>(null);
+  const compareFocus = useRef<TabKey | null>(null);
+  function openComparison(origin: keyof typeof compareBackLabel) {
+    setCompareOrigin(origin);
+    selectTab("revisions");
+  }
   const [deliveryMode, setDeliveryMode] = useState<"send" | "queue">("send");
   const [historyDraft, setHistoryDraft] = useState<{
     fileId: number;
@@ -315,7 +367,11 @@ function ModelDetailPresentation({
   const metadataClient = useQueryClient();
   const [deleteTagTarget, setDeleteTagTarget] = useState<TagRead | null>(null);
   const [deleteTagBusy, setDeleteTagBusy] = useState(false);
-  const [viewerMode, setViewerMode] = useState<ViewerMode>("model");
+  const [requestedViewerMode, setViewerMode] = useState<ViewerMode>("model");
+  const [cameraPreset, setCameraPreset] = useState<ViewerCameraPreset | null>("isometric");
+  const clearCameraPreset = useCallback(() => setCameraPreset(null), [setCameraPreset]);
+  const [plateContainer, setPlateContainer] = useState<HTMLDivElement | null>(null);
+  const [slicedPlatePickerReady, setSlicedPlatePickerReady] = useState(false);
   const [revisionSelection, setRevisionSelection] = useState<{
     modelId: number;
     fileId: number;
@@ -341,6 +397,8 @@ function ModelDetailPresentation({
     setReviewing(false);
   }
   const canViewPrinters = !!user?.is_superuser;
+  const printers = usePrinters({ enabled: canViewPrinters });
+  const printerless = printers.isSuccess && printers.data.length === 0;
   const printerFileQuery = useQuery({
     ...modelPrinterFilesOptions(model.id),
     enabled: canViewPrinters,
@@ -356,6 +414,14 @@ function ModelDetailPresentation({
     (!canEditModel && requestedTab === "similar")
       ? "overview"
       : requestedTab;
+  useLayoutEffect(() => {
+    if (compareFocus.current === activeTab) {
+      detailLayout.current?.querySelector<HTMLButtonElement>("[data-compare-origin]")?.focus();
+    }
+    compareFocus.current = null;
+    if (focusTab.current === activeTab) focusInspector();
+    focusTab.current = null;
+  }, [activeTab]);
   const detailTabBody = useContentReveal(activeTab, { scroll: "parent" });
   const visibleTabs = useMemo(
     () =>
@@ -458,9 +524,35 @@ function ModelDetailPresentation({
     setEditTags([...model.tags]);
     setTagInput("");
     setCatOpen(false);
-    if (mode === "details") selectTab("overview");
     setEditMode(mode);
   }
+
+  useEffect(() => {
+    function rename(event: KeyboardEvent) {
+      if (
+        event.key !== "F2" ||
+        event.defaultPrevented ||
+        event.repeat ||
+        event.isComposing ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.shiftKey ||
+        keyboardOverlayOpen() ||
+        !auth.isAuthenticated ||
+        !canEditModel ||
+        editMode ||
+        saving ||
+        (event.target instanceof HTMLElement &&
+          event.target.closest('input, textarea, select, [contenteditable="true"]'))
+      )
+        return;
+      event.preventDefault();
+      enterEdit("name");
+    }
+    window.addEventListener("keydown", rename, true);
+    return () => window.removeEventListener("keydown", rename, true);
+  });
 
   function cancelEdit() {
     editLifetime.current += 1;
@@ -647,29 +739,34 @@ function ModelDetailPresentation({
   const requestedArtifact = Number(searchParams.get("artifact"));
   const meshCandidates = model.files.filter(
     (f) =>
-      f.file_type === "stl" ||
-      f.file_type === "3mf" ||
-      f.file_type === "obj" ||
-      f.file_type === "glb" ||
-      f.file_type === "ply" ||
-      f.file_type === "gltf" ||
-      f.file_type === "3dm" ||
-      f.file_type === "fbx" ||
-      f.file_type === "step",
+      f.sliced_geometry !== "gcode_only" &&
+      (f.file_type === "stl" ||
+        f.file_type === "3mf" ||
+        f.file_type === "obj" ||
+        f.file_type === "glb" ||
+        f.file_type === "ply" ||
+        f.file_type === "gltf" ||
+        f.file_type === "3dm" ||
+        f.file_type === "fbx" ||
+        f.file_type === "step"),
   );
   const meshFile =
     meshCandidates.find((file) => file.id === requestedArtifact) ?? meshCandidates[0];
+  const geometryMeasurement = useMeshGeometryMeasurement(meshFile ?? null);
   const hasGcode = gcodeFiles.length > 0;
-  const hasToolpathPreview = hasGcode || sourceFiles.some((file) => file.file_type === "3mf");
+  const { sources: toolpathFiles, availability: toolpathAvailability } =
+    useToolpathSources(sortedFiles);
+  const hasToolpathPreview = toolpathAvailability === "available";
+  const gcodeOnly =
+    !meshFile && toolpathFiles.some((file) => file.sliced_geometry === "gcode_only");
+  const viewerMode = gcodeOnly ? "gcode" : hasToolpathPreview ? requestedViewerMode : "model";
   const previewSourceId =
     toolpathSource?.modelId === model.id &&
     toolpathSource.revisionId === (inspectedGcode?.id ?? null)
       ? toolpathSource.fileId
       : inspectedGcode?.id;
   const previewSource =
-    sortedFiles.find((file) => file.id === previewSourceId) ??
-    inspectedGcode ??
-    sourceFiles.find((file) => file.file_type === "3mf");
+    toolpathFiles.find((file) => file.id === previewSourceId) ?? inspectedGcode ?? toolpathFiles[0];
   function selectToolpathSource(fileId: number) {
     const file = sortedFiles.find((source) => source.id === fileId);
     if (file?.file_type === "gcode") {
@@ -682,13 +779,39 @@ function ModelDetailPresentation({
   const filePlates = useFilePlates(model.id, meshFile?.file_type === "3mf" ? meshFile.id : null);
   // A single plate is the whole build; only a multi-plate project offers a choice.
   const plates = filePlates !== null && filePlates.plates.length > 1 ? filePlates.plates : [];
-  const pickerShown = viewerMode === "model" && plates.length > 1;
+  // Keep the same row in place until the sliced picker is ready to take over.
+  const pickerShown = plates.length > 1 && (viewerMode === "model" || !slicedPlatePickerReady);
   // The viewer's corner controls sit above the plate strip when it is shown.
   const shownPlate =
     chosenPlate !== null && chosenPlate.fileId === meshFile?.id
       ? (plates.find((plate) => plate.number === chosenPlate.number) ?? null)
       : null;
-  const thumbUrl = useAuthenticatedAssetUrl(model.thumbnail_url);
+  const slicedMetadataFile =
+    !inspectedGcode && previewSource?.sliced_geometry === "gcode_only"
+      ? previewSource
+      : inspectedGcode;
+  const slicedEstimates = useGcodePlates(
+    model.id,
+    slicedMetadataFile?.original_filename.toLowerCase().endsWith(".3mf")
+      ? slicedMetadataFile.id
+      : null,
+  );
+  const selectedEstimatePlate =
+    inspectedSlicedPlate?.fileId === slicedMetadataFile?.id && inspectedSlicedPlate
+      ? inspectedSlicedPlate.number
+      : shownPlate && slicedEstimates
+        ? (matchSlicedPlate(shownPlate, plates, slicedEstimates.identities ?? [])?.number ?? null)
+        : null;
+  const dispatchPlate = inspectedSlicedPlate
+    ? inspectedSlicedPlate.fileId === inspectedGcode?.id
+      ? inspectedSlicedPlate.number
+      : null
+    : selectedEstimatePlate;
+  const thumbUrl = useAuthenticatedAssetUrl(
+    !meshFile && !hasToolpathPreview
+      ? (model.previews?.large_cover_url ?? model.thumbnail_url)
+      : null,
+  );
   const printerFilesByFileId = useMemo(() => {
     const grouped = new Map<number, ModelPrinterFileRead[]>();
     for (const row of printerFiles) {
@@ -956,113 +1079,82 @@ function ModelDetailPresentation({
             >
               <div className="flex w-full min-w-0 items-start gap-3 md:w-auto md:flex-1 md:gap-4">
                 <div className="min-w-0 flex-1">
-                  <TitleEditor
-                    open={renaming && canEditModel && auth.isAuthenticated}
-                    onOpenChange={(open) => {
-                      if (!open) cancelEdit();
-                    }}
-                    label={uiText("Rename {value1}", { value1: model.name })}
+                  <InlineTitleEditor
+                    title={model.name}
                     fieldLabel={uiText("Model name")}
+                    canEdit={canEditModel && auth.isAuthenticated}
+                    open={renaming && canEditModel && auth.isAuthenticated}
                     value={editName}
                     onValueChange={setEditName}
-                    onSave={() => void saveEdit()}
+                    onOpen={() => enterEdit("name")}
+                    onCancel={cancelEdit}
+                    onSave={() => saveEdit()}
+                    saveBlocked={editProblem !== null}
                     busy={saving}
-                    requiredMessage={uiText("Model name is required.")}
-                    saveDisabled={editProblem !== null || !canEditModel}
-                    trigger={
-                      <h1
-                        onDoubleClick={() => {
-                          if (auth.isAuthenticated && canEditModel && !renaming) enterEdit("name");
-                        }}
-                        aria-label={model.name}
-                        tabIndex={auth.isAuthenticated && canEditModel ? undefined : 0}
-                        data-menu-trigger={auth.isAuthenticated && canEditModel ? undefined : true}
-                        className="min-w-0 break-words text-2xl font-semibold text-on-surface leading-tight tracking-tight"
-                      >
-                        {auth.isAuthenticated && canEditModel ? (
-                          <button
-                            type="button"
-                            className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            aria-label={uiText("Rename {value1}", { value1: model.name })}
-                            title={uiText("Rename")}
-                            onClick={() => {
-                              if (!saving) {
-                                if (!renaming) enterEdit("name");
+                  />
+                  {renaming && editProblem && (
+                    <div className="space-y-2 border-t border-border pt-3 text-xs">
+                      <Button size="sm" variant="outline" onClick={cancelEdit} disabled={saving}>
+                        {uiText("Cancel")}
+                      </Button>
+                      <p role="alert">
+                        {uiText(
+                          editProblem === "conflict"
+                            ? "library.editConflict"
+                            : "library.saveUnconfirmed",
+                        )}
+                      </p>
+                      {reviewedModel ? (
+                        <>
+                          <p className="font-medium">{uiText("library.latestVersion")}</p>
+                          <p className="break-words">{reviewedModel.name}</p>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={useReviewedVersion}
+                              disabled={saving}
+                            >
+                              {uiText("library.useLatest")}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setReviewedModel(null)}
+                              disabled={saving}
+                            >
+                              {uiText("library.keepDraft")}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-auto min-h-9 whitespace-normal"
+                              loading={saving}
+                              disabled={
+                                reviewedModel.effective_role !== "edit" &&
+                                reviewedModel.effective_role !== "admin"
                               }
-                            }}
-                            data-menu-trigger
-                            aria-haspopup="dialog"
-                            aria-expanded={renaming}
-                          >
-                            {model.name}
-                          </button>
-                        ) : (
-                          model.name
-                        )}
-                      </h1>
-                    }
-                  >
-                    {renaming && editProblem && (
-                      <div className="space-y-2 border-t border-border pt-3 text-xs">
-                        <p role="alert">
-                          {uiText(
-                            editProblem === "conflict"
-                              ? "library.editConflict"
-                              : "library.saveUnconfirmed",
-                          )}
-                        </p>
-                        {reviewedModel ? (
-                          <>
-                            <p className="font-medium">{uiText("library.latestVersion")}</p>
-                            <p className="break-words">{reviewedModel.name}</p>
-                            <div className="flex flex-wrap gap-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={useReviewedVersion}
-                                disabled={saving}
-                              >
-                                {uiText("library.useLatest")}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setReviewedModel(null)}
-                                disabled={saving}
-                              >
-                                {uiText("library.keepDraft")}
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                className="h-auto min-h-9 whitespace-normal"
-                                loading={saving}
-                                disabled={
-                                  reviewedModel.effective_role !== "edit" &&
-                                  reviewedModel.effective_role !== "admin"
-                                }
-                                onClick={() => void saveEdit(reviewedModel)}
-                              >
-                                {uiText("library.retryDraft")}
-                              </Button>
-                            </div>
-                          </>
-                        ) : (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => void reviewLatest()}
-                            loading={reviewing}
-                          >
-                            {uiText("library.reviewLatest")}
-                          </Button>
-                        )}
-                      </div>
-                    )}
-                  </TitleEditor>
+                              onClick={() => void saveEdit(reviewedModel)}
+                            >
+                              {uiText("library.retryDraft")}
+                            </Button>
+                          </div>
+                        </>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void reviewLatest()}
+                          loading={reviewing}
+                        >
+                          {uiText("library.reviewLatest")}
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               <div
@@ -1105,6 +1197,19 @@ function ModelDetailPresentation({
                     onClick={() => setShareOpen(true)}
                   >
                     {uiText("Share")}
+                  </Button>
+                  <Button
+                    data-menu-trigger
+                    variant="outline"
+                    size="sm"
+                    aria-label={uiText("More model actions")}
+                    title={uiText("Model actions")}
+                    aria-haspopup="menu"
+                    aria-expanded={actionsOpen}
+                    onClick={() => setActionsOpen(!actionsOpen)}
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                    {uiText("nav.more")}
                   </Button>
                 </>
               </div>
@@ -1156,33 +1261,6 @@ function ModelDetailPresentation({
           </button>
         </DropdownMenu>
 
-        {/* Segmented tab navigation */}
-        <TabBar
-          tabs={visibleTabs.map((tab) => ({
-            key: tab.key,
-            label: (
-              <>
-                {tab.label}
-                {tab.key === "revisions" && gcodeFiles.length > 0 && (
-                  <span className="model-detail-tab-count">{gcodeFiles.length}</span>
-                )}
-                {tab.key === "files" && sourceFiles.length > 0 && (
-                  <span className="model-detail-tab-count">{sourceFiles.length}</span>
-                )}
-                {tab.key === "history" && printJobs.length > 0 && (
-                  <span className="model-detail-tab-count">{printJobs.length}</span>
-                )}
-              </>
-            ),
-          }))}
-          active={activeTab}
-          onChange={selectTab}
-          showIndicator={false}
-          className="model-detail-tabs shrink-0 overflow-x-auto border-b"
-          tabClassName="relative inline-flex items-center gap-1.5 h-10 min-w-max whitespace-nowrap px-0 py-0 text-sm font-medium text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          activeTabClassName="text-foreground"
-        />
-
         {/* Two-Column Layout. On mobile the panels stack and the whole area
           scrolls; on desktop each pane keeps its own fixed height. */}
         <div
@@ -1201,15 +1279,32 @@ function ModelDetailPresentation({
                 {viewerMode === "gcode" && hasToolpathPreview ? (
                   <Suspense fallback={ViewerFallback}>
                     <GcodePreview
-                      files={sortedFiles}
+                      files={toolpathFiles}
+                      archiveImages={model.previews?.archive_images}
                       bedSizeFor={(file) => getBedSize(file.metadata?.printer_model)}
                       selectedFileId={previewSource?.id}
                       onSelectFile={selectToolpathSource}
+                      onInspectSlicedPlate={(fileId, number) =>
+                        setInspectedSlicedPlate({ fileId, number })
+                      }
+                      sourcePlates={plates}
+                      plateContainer={plateContainer}
+                      onPlatePickerReady={setSlicedPlatePickerReady}
+                      selectedSourcePlate={shownPlate?.number ?? null}
+                      onSelectSourcePlate={(number) =>
+                        setChosenPlate(
+                          number === null || !meshFile ? null : { fileId: meshFile.id, number },
+                        )
+                      }
                       viewerProps={{
                         screenshotName: model.slug || model.name,
+                        sharedControls: true,
                         showGrid,
                         showDimensions,
+                        onShowGridChange: setShowGrid,
+                        onShowDimensionsChange: setShowDimensions,
                         onControlsReady: connectToolpathControls,
+                        onOrbit: clearCameraPreset,
                       }}
                     />
                   </Suspense>
@@ -1222,6 +1317,7 @@ function ModelDetailPresentation({
                         viewerControls.current = api;
                       }}
                       onReadyChange={setViewerReady}
+                      onOrbit={clearCameraPreset}
                       onFailureChange={setPreviewFeedback}
                       displayMode={displayMode}
                       showGrid={showGrid}
@@ -1231,6 +1327,15 @@ function ModelDetailPresentation({
                           : model.slug || model.name
                       }
                       plate={shownPlate?.region}
+                      onGeometryDimensions={(dimensions) => {
+                        if (shownPlate && meshFile && dimensions) {
+                          setPlateDimensions({
+                            fileId: meshFile.id,
+                            number: shownPlate.number,
+                            dimensions,
+                          });
+                        }
+                      }}
                     />
                   </Suspense>
                 ) : thumbUrl ? (
@@ -1251,8 +1356,33 @@ function ModelDetailPresentation({
                     )}
                   </div>
                 )}
-                {/* Dimensions overlay (bottom-left). They measure the whole build, so a
-                single plate does not claim them. */}
+                {/* Source plate bounds are measured from the shown mesh, separately from
+                    the whole-source metadata shown below the preview. */}
+                {viewerMode === "model" &&
+                  showDimensions &&
+                  viewerReady &&
+                  shownPlate &&
+                  plateDimensions !== null &&
+                  plateDimensions.fileId === meshFile?.id &&
+                  plateDimensions.number === shownPlate.number && (
+                    <div className="absolute bottom-4 left-4 z-10 bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-2 py-1 text-xs text-on-surface">
+                      <span>{uiText("Selected plate mesh bounds")}: </span>
+                      <span className="font-mono">
+                        {uiText("{value1}×{value2}×{value3} mm", {
+                          value1: formatNumber(plateDimensions.dimensions.x, {
+                            maximumFractionDigits: 1,
+                          }),
+                          value2: formatNumber(plateDimensions.dimensions.y, {
+                            maximumFractionDigits: 1,
+                          }),
+                          value3: formatNumber(plateDimensions.dimensions.z, {
+                            maximumFractionDigits: 1,
+                          }),
+                        })}
+                      </span>
+                    </div>
+                  )}
+                {/* Whole-source dimensions do not describe an individual plate. */}
                 {viewerMode === "model" &&
                   showDimensions &&
                   viewerReady &&
@@ -1263,6 +1393,7 @@ function ModelDetailPresentation({
                     <div className="absolute bottom-4 left-4 z-10">
                       <div className="bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-2 py-1 flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span>{uiText("Whole source geometry")}: </span>
                         <span className="font-mono text-[13px] text-on-surface">
                           {uiText("{value1}×{value2}×{value3} mm", {
                             value1: formatNumber(meshFile.metadata.bbox_x_mm, {
@@ -1280,18 +1411,11 @@ function ModelDetailPresentation({
                     </div>
                   )}
               </div>
-              {pickerShown && meshFile && (
-                <PlatePicker
-                  plates={plates}
-                  selected={shownPlate?.number ?? null}
-                  onSelect={(number) =>
-                    setChosenPlate(number === null ? null : { fileId: meshFile.id, number })
-                  }
-                />
-              )}
               {(meshFile || hasToolpathPreview) && (
                 <div className="contents">
                   <ViewerToolbar
+                    camera={cameraPreset}
+                    setCamera={setCameraPreset}
                     displayMode={displayMode}
                     setDisplayMode={setDisplayMode}
                     showGrid={showGrid}
@@ -1300,6 +1424,8 @@ function ModelDetailPresentation({
                     viewerMode={viewerMode}
                     setViewerMode={setViewerMode}
                     hasGcode={hasToolpathPreview}
+                    availability={toolpathAvailability}
+                    gcodeOnly={gcodeOnly}
                     viewerReady={viewerMode === "gcode" ? toolpathReady : viewerReady}
                     filename={
                       viewerMode === "gcode"
@@ -1315,11 +1441,26 @@ function ModelDetailPresentation({
                   />
                 </div>
               )}
+              <div className="contents" ref={setPlateContainer} />
+              {pickerShown && meshFile && (
+                <PlatePicker
+                  plates={plates}
+                  allowAll={viewerMode === "model"}
+                  selected={shownPlate?.number ?? null}
+                  onSelect={(number) => {
+                    setInspectedSlicedPlate(null);
+                    setChosenPlate(number === null ? null : { fileId: meshFile.id, number });
+                  }}
+                />
+              )}
             </div>
 
             <ModelInformation
               model={model}
               sourceFile={meshFile ?? null}
+              measurement={geometryMeasurement}
+              onFiles={() => openInspectorTab("files")}
+              onRevisions={() => openInspectorTab("revisions")}
               canEdit={canEditModel}
               onEdit={() => enterEdit("details")}
               onTags={() => {
@@ -1363,48 +1504,85 @@ function ModelDetailPresentation({
               <span className="absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-border transition-colors duration-press group-hover:bg-primary group-focus-visible:bg-primary" />
             </div>
 
+            <TabBar
+              tabs={visibleTabs.map((tab) => ({
+                key: tab.key,
+                label: (
+                  <>
+                    {tab.label}
+                    {tab.key === "revisions" && gcodeFiles.length > 0 && (
+                      <span className="model-detail-tab-count">{gcodeFiles.length}</span>
+                    )}
+                    {tab.key === "files" && sourceFiles.length > 0 && (
+                      <span className="model-detail-tab-count">{sourceFiles.length}</span>
+                    )}
+                    {tab.key === "history" && printJobs.length > 0 && (
+                      <span className="model-detail-tab-count">{printJobs.length}</span>
+                    )}
+                  </>
+                ),
+              }))}
+              active={activeTab}
+              onChange={selectTab}
+              showIndicator={false}
+              className="model-detail-tabs shrink-0 overflow-x-auto border-b"
+              tabClassName="relative inline-flex items-center gap-1.5 h-10 min-w-max whitespace-nowrap px-0 py-0 text-sm font-medium text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              activeTabClassName="text-foreground"
+            />
             <div
               role="tabpanel"
+              tabIndex={0}
               aria-label={visibleTabs.find((tab) => tab.key === activeTab)?.label}
-              className="model-detail-content flex-1 min-h-0 overflow-y-auto p-4"
+              className="model-detail-content focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring flex-1 min-h-0 overflow-y-auto p-4"
             >
               <div ref={detailTabBody} className="model-detail-tab-body space-y-4">
                 {activeTab === "overview" && (
                   <div className="space-y-4">
-                    <OverviewTab
-                      model={model}
-                      editing={false}
-                      editor={modelMetadataEditor}
-                      revision={{
-                        file: inspectedGcode,
-                        recommended: recommendedGcode,
-                        revisionCount: gcodeFiles.length,
-                        canEdit: canEditModel,
-                        canSend: canViewPrinters,
-                        jobs: canViewPrinters && printJobQuery.isSuccess ? printJobs : null,
-                        onRevisions: () => {
-                          setCompareRequested(false);
-                          selectTab("revisions");
-                        },
-                        onSettings: () => selectTab("settings"),
-                        onHistory: () => selectTab("history"),
-                        onCompare: () => {
-                          setComparisonMode("gcode");
-                          setCompareRequested(true);
-                          selectTab("revisions");
-                        },
-                        onInspect: (fileId) => setRevisionSelection({ modelId: model.id, fileId }),
-                        onSend: (mode) => {
-                          setDeliveryMode(mode);
-                          setSendOpen(true);
-                        },
-                        onLogPrint: (state) => {
-                          if (inspectedGcode) setHistoryDraft({ fileId: inspectedGcode.id, state });
-                          selectTab("history");
-                        },
-                        onAddRevision: requestAddRevision,
-                      }}
-                    />
+                    {!inspectedGcode && gcodeOnly ? (
+                      slicedEstimates && (
+                        <PlateEstimates
+                          data={slicedEstimates}
+                          selected={selectedEstimatePlate}
+                          showCost={false}
+                        />
+                      )
+                    ) : (
+                      <OverviewTab
+                        model={model}
+                        editing={false}
+                        editor={modelMetadataEditor}
+                        revision={{
+                          file: inspectedGcode,
+                          plateEstimates: slicedEstimates,
+                          selectedSlicedPlate: selectedEstimatePlate,
+                          recommended: recommendedGcode,
+                          revisionCount: gcodeFiles.length,
+                          canEdit: canEditModel,
+                          canSend: canViewPrinters,
+                          printerless,
+                          jobs: canViewPrinters && printJobQuery.isSuccess ? printJobs : null,
+                          onRevisions: () => {
+                            setCompareOrigin(null);
+                            selectTab("revisions");
+                          },
+                          onSettings: () => selectTab("settings"),
+                          onHistory: () => selectTab("history"),
+                          onCompare: () => openComparison("overview"),
+                          onInspect: (fileId) =>
+                            setRevisionSelection({ modelId: model.id, fileId }),
+                          onSend: (mode) => {
+                            setDeliveryMode(mode);
+                            setSendOpen(true);
+                          },
+                          onLogPrint: (state) => {
+                            if (inspectedGcode)
+                              setHistoryDraft({ fileId: inspectedGcode.id, state });
+                            selectTab("history");
+                          },
+                          onAddRevision: requestAddRevision,
+                        }}
+                      />
+                    )}
                     {!editing && !hasGcode && latestFile?.file_type === "resin" && (
                       <SettingsTab
                         meta={meta}
@@ -1420,16 +1598,16 @@ function ModelDetailPresentation({
                     meta={meta}
                     printSettingRows={printSettingRows}
                     preferences={metadataPreferences}
+                    hasSlicedRevision={gcodeFiles.length > 0 || gcodeOnly}
+                    plateEstimates={slicedEstimates}
+                    selectedSlicedPlate={selectedEstimatePlate}
                     headerActions={
                       gcodeFiles.length > 1 ? (
                         <Button
+                          data-compare-origin
                           variant="ghost"
                           size="sm"
-                          onClick={() => {
-                            setComparisonMode("gcode");
-                            setCompareRequested(true);
-                            selectTab("revisions");
-                          }}
+                          onClick={() => openComparison("settings")}
                         >
                           {uiText("Compare")}
                         </Button>
@@ -1483,10 +1661,28 @@ function ModelDetailPresentation({
                 )}
                 {activeTab === "revisions" && (
                   <RevisionsTab
+                    printerless={printerless}
+                    plateEstimates={slicedEstimates}
+                    selectedPlate={selectedEstimatePlate}
+                    onPreview={(fileId) => {
+                      selectToolpathSource(fileId);
+                      setViewerMode("gcode");
+                    }}
                     inspectedFileId={inspectedGcode?.id}
                     onInspect={(fileId) => setRevisionSelection({ modelId: model.id, fileId })}
-                    startComparing={compareRequested}
-                    comparisonMode={comparisonMode}
+                    startComparing={compareOrigin !== null}
+                    backLabel={
+                      compareOrigin ? compareBackLabel[compareOrigin] : "Back to revisions"
+                    }
+                    onReturnToOrigin={
+                      compareOrigin
+                        ? () => {
+                            compareFocus.current = compareOrigin;
+                            selectTab(compareOrigin);
+                          }
+                        : undefined
+                    }
+                    comparisonMode={compareOrigin === "files" ? "source" : "gcode"}
                     jobs={canViewPrinters && printJobQuery.isSuccess ? printJobs : null}
                     onSend={
                       canViewPrinters
@@ -1519,11 +1715,7 @@ function ModelDetailPresentation({
                   <>
                     <FilesTab
                       modelId={model.id}
-                      onCompare={() => {
-                        setComparisonMode("source");
-                        setCompareRequested(true);
-                        selectTab("revisions");
-                      }}
+                      onCompare={() => openComparison("files")}
                       sourceFiles={sourceFiles}
                       previewFailure={
                         meshFile &&
@@ -1574,6 +1766,7 @@ function ModelDetailPresentation({
                   open={sendOpen}
                   onOpenChange={setSendOpen}
                   preselectFileId={inspectedGcode?.id}
+                  preselectPlate={dispatchPlate}
                   compact
                   initialDeliveryMode={deliveryMode}
                 />

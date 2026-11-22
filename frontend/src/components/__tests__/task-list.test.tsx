@@ -295,7 +295,10 @@ describe("TaskList", () => {
     expect(
       screen.getByText(/Falta un archivo necesario para la copia de seguridad\./),
     ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Revisar y reintentar" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Revisar y reintentar" })).toHaveAttribute(
+      "href",
+      "/inbox",
+    );
   });
 
   it("retains failed item names literally", async () => {

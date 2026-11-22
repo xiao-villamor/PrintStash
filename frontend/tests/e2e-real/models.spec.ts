@@ -29,8 +29,10 @@ test.describe("model library", () => {
       // Resolve the uploaded revision through the existing API from the card.
       const card = modelCard(page, name).locator("xpath=ancestor::article");
       const download = page.waitForEvent("download");
+      await card.hover();
       await card.getByRole("button", { name: "Download Rev 1", exact: true }).click();
       expect((await download).suggestedFilename()).toContain(name);
+      await card.hover();
       await card.getByRole("button", { name: "Print Rev 1", exact: true }).click();
       await expect(
         page.getByRole("dialog", { name: "Send Rev 1 to printer", exact: true }),
@@ -41,15 +43,15 @@ test.describe("model library", () => {
       await openModelPage(page, name);
       const modelUrl = page.url();
       await page.getByRole("button", { name: `Rename ${name}`, exact: true }).click();
-      const titleEditor = page.getByRole("dialog", { name: `Rename ${name}`, exact: true });
+      const titleEditor = page.getByRole("textbox", { name: "Model name", exact: true });
       await expect(
         page.getByRole("button", { name: `Edit tags for ${name}`, exact: true }),
       ).toBeVisible();
       await expect(
         page.getByRole("button", { name: `Add ${name} to favorites`, exact: true }),
       ).toBeVisible();
-      await titleEditor.getByRole("textbox", { name: "Model name", exact: true }).fill(quickName);
-      await titleEditor.getByRole("button", { name: "Save", exact: true }).click();
+      await titleEditor.fill(quickName);
+      await titleEditor.press("Enter");
       await expect(titleEditor).toHaveCount(0);
       await expect(page.getByRole("heading", { name: quickName, exact: true })).toBeVisible();
       await page.reload();

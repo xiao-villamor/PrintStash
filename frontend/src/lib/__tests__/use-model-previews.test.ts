@@ -65,25 +65,6 @@ afterEach(() => {
 });
 
 describe("useModelPreviews", () => {
-  it("navigates saved source images", async () => {
-    const images = [0, 1, 2].map((position) => ({
-      id: `source-${position}` as const,
-      role: "source" as const,
-      source_id: 1,
-      position,
-      provider: "thingiverse",
-      url: `/gallery/${position}`,
-    }));
-    const hook = renderHook(() => useModelPreviews("/gallery/0", images, true));
-    act(() => hook.result.current.select("source-1"));
-    await waitFor(() => expect(requested).toContain("/gallery/1"));
-    act(() => respond("/gallery/1"));
-    await waitFor(() => expect(hook.result.current.displayed?.id).toBe("source-1"));
-    act(() => hook.result.current.select("source-2"));
-    await waitFor(() => expect(requested).toContain("/gallery/2"));
-    act(() => respond("/gallery/2"));
-    await waitFor(() => expect(hook.result.current.displayed?.id).toBe("source-2"));
-  });
   it("leaves the cover to its own thumbnail", () => {
     const hook = renderHook(() => useModelPreviews("/cover", views, true));
     expect(hook.result.current.selected).toBe("cover");
@@ -161,15 +142,15 @@ describe("useModelPreviews", () => {
     await waitFor(() => expect(hook.result.current.displayed?.id).toBe("orbit-1"));
   });
 
-  it("starts the card rotation at the side after the cover", () => {
+  it("keeps the first orbit after a distinct cover", () => {
     const hook = renderHook(() => useModelPreviews("/cover", views, true));
-    expect(hook.result.current.destination(1)?.id).toBe("orbit-1");
-    expect(hook.result.current.destination(-1)?.id).toBe("orbit-3");
+    expect(hook.result.current.destination(1)?.id).toBe("orbit-0");
+    expect(hook.result.current.destination(-1)?.id).toBe("top");
   });
 
   it.each([
-    ["orbit-1", -1],
-    ["orbit-3", 1],
+    ["orbit-0", -1],
+    ["top", 1],
   ] as const)("returns from %s to the cover in direction %s", (id, delta) => {
     const hook = renderHook(() => useModelPreviews("/cover", views, true));
     act(() => hook.result.current.select(id));
@@ -179,16 +160,27 @@ describe("useModelPreviews", () => {
   it("retains the complete orbit when there is no cover", () => {
     const hook = renderHook(() => useModelPreviews(null, views, true));
     expect(hook.result.current.selected).toBe("orbit-0");
-    expect(hook.result.current.destination(-1)?.id).toBe("orbit-3");
-    act(() => hook.result.current.select("orbit-3"));
+    expect(hook.result.current.destination(-1)?.id).toBe("top");
+    act(() => hook.result.current.select("top"));
     expect(hook.result.current.destination(1)?.id).toBe("orbit-0");
   });
 
-  it("does not fetch the first orbit when the next neighbor is the cover", async () => {
+  it("does not prefetch when the next slide is the cover", async () => {
     const hook = renderHook(() => useModelPreviews("/cover", views, true));
-    act(() => hook.result.current.select("orbit-3"));
+    act(() => hook.result.current.select("top"));
     act(() => hook.result.current.prioritize(hook.result.current.destination(1)));
-    await waitFor(() => expect(requested).toEqual(["/hook-previews/orbit-3"]));
+    await waitFor(() => expect(requested).toEqual(["/hook-previews/top"]));
+  });
+
+  it("omits the orbit image that already serves as the cover", () => {
+    const hook = renderHook(() => useModelPreviews("/cover", views, true, "orbit-1"));
+    expect(hook.result.current.navigationViews.map(({ id }) => id)).toEqual([
+      "cover",
+      "orbit-2",
+      "orbit-3",
+      "orbit-0",
+      "top",
+    ]);
   });
 
   it("has no navigation without generated views", () => {
@@ -222,7 +214,7 @@ describe("useModelPreviews", () => {
     await waitFor(() => expect(requested).toEqual(["/hook-previews/edge"]));
   });
 
-  it("warms both orbit neighbors after a sustained hover", async () => {
+  it("warms both neighbors after a sustained hover", async () => {
     vi.useFakeTimers();
     const hook = renderHook(() => useModelPreviews("/cover", views, true));
     act(() => hook.result.current.hover());
@@ -230,11 +222,11 @@ describe("useModelPreviews", () => {
     expect(requested).toEqual([]);
     act(() => vi.advanceTimersByTime(1));
     // At most one speculative transfer runs at a time; the other neighbor follows.
-    expect(requested).toEqual(["/hook-previews/orbit-1"]);
+    expect(requested).toEqual(["/hook-previews/orbit-0"]);
     vi.useRealTimers();
-    act(() => respond("/hook-previews/orbit-1"));
+    act(() => respond("/hook-previews/orbit-0"));
     await waitFor(() =>
-      expect(requested).toEqual(["/hook-previews/orbit-1", "/hook-previews/orbit-3"]),
+      expect(requested).toEqual(["/hook-previews/orbit-0", "/hook-previews/top"]),
     );
   });
 

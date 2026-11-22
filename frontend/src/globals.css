@@ -9,7 +9,8 @@
 @source "../packages/ui/src";
 
 @layer base {
-  :root {
+  :root,
+  [data-preview-theme="light"] {
     /* Font families (previously injected by next/font; now from @fontsource). */
     --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
     --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
@@ -36,10 +37,12 @@
     --border-strong: #cdd3db;
     --overlay-scrim: rgb(16 24 40 / 0.28);
     --plate: #f8fafc;
+    /* Neutral backing for transparent slicer images, independent of theme. */
+    --preview-image-matte: #eef0f3;
     --dialog-shadow: rgb(16 24 40 / 0.12);
     --input: #8190a3;
     --ring: #4d6f9b;
-    --radius: 4px;
+    --radius: 0px;
     color-scheme: light;
 
     /* Interaction shades of primary (hover = one step darker; soft = 40% for
@@ -106,7 +109,8 @@
     --tertiary-fixed-dim: #fb923c;
   }
 
-  .dark {
+  .dark,
+  [data-preview-theme="dark"] {
     color-scheme: dark;
 
     /* Surfaces — distinct contrast steps */
@@ -329,6 +333,92 @@
   }
 }
 
+@layer components {
+  .setup-card {
+    display: grid;
+    max-width: 800px;
+  }
+
+  .setup-card-appearance {
+    max-width: 960px;
+  }
+
+  @media (min-width: 768px) {
+    .setup-card {
+      height: min(600px, 100dvh - 136px);
+      grid-template-columns: 220px minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr);
+    }
+
+    .setup-card-appearance {
+      height: min(736px, 100dvh - 136px);
+    }
+  }
+
+  .field-option {
+    @apply flex min-h-8 w-full min-w-0 items-center gap-2 px-2.5 py-2 text-left text-field leading-4 text-popover-foreground hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none data-[active=true]:bg-popover-hover;
+  }
+
+  .field-option[aria-selected="true"]:not([data-active], :hover, :focus-visible) {
+    @apply bg-accent text-accent-foreground;
+  }
+}
+
+/* Upload field pickers use the native menu's surface and depth. */
+:where(.upload-dialog, .upload-field-panel) {
+  --upload-picker-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+@supports (appearance: base-select) {
+  select.upload-store-in::picker(select) {
+    inset: auto;
+    position-area: block-end span-inline-end;
+    position-try-fallbacks: flip-block;
+    position-try-order: normal;
+    align-self: start;
+    justify-self: start;
+    width: anchor-size(width);
+    min-width: 0;
+    max-height: min(280px, 60dvh);
+    overflow-x: hidden;
+    overflow-y: auto;
+    box-shadow: var(--upload-picker-shadow);
+    transform-origin: top left;
+    opacity: 0;
+    transform: scale(var(--scale-content-enter));
+    transition:
+      opacity var(--duration-fast) var(--ease-out),
+      transform var(--duration-fast) var(--ease-out),
+      display var(--duration-fast) allow-discrete,
+      overlay var(--duration-fast) allow-discrete;
+  }
+
+  select.upload-store-in[data-picker-side="above"]::picker(select) {
+    transform-origin: bottom left;
+  }
+
+  select.upload-store-in:open::picker(select) {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  @starting-style {
+    select.upload-store-in:open::picker(select) {
+      opacity: 0;
+      transform: scale(var(--scale-content-enter));
+    }
+  }
+
+  select.upload-store-in option {
+    font-size: 13px;
+  }
+
+  select.upload-store-in option:checked:is(:hover, :focus-visible) {
+    background: var(--popover-hover);
+    color: var(--popover-foreground);
+  }
+}
+
 /* Smooth theme transitions — only active during the class swap, not on hovers.
    Color properties only: box-shadow is not composited and this selector hits
    every node in the document. */
@@ -485,6 +575,21 @@
   .pane-in {
     animation: none;
   }
+  .upload-drop-zone,
+  .upload-drop-zone .upload-drop-icon,
+  .upload-drop-zone[data-dragging="true"] .upload-drop-icon {
+    transform: none;
+    transition: none;
+  }
+
+  @supports (appearance: base-select) {
+    select.upload-store-in::picker(select),
+    select.upload-store-in:open::picker(select) {
+      transform: none;
+      transition: none;
+    }
+  }
+
   .animate-theme-icon {
     animation: none;
   }
@@ -503,5 +608,54 @@
 
   .library-model-toolbar label:has(> select) > svg:last-child {
     display: none;
+  }
+}
+
+@media (min-width: 1024px) {
+  .auth-frame-split {
+    --auth-workspace-width: max(480px, 40%);
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(480px, 40%) minmax(0, 1fr);
+  }
+
+  .auth-split-workspace > header,
+  .auth-split-workspace > footer {
+    min-height: 80px;
+    height: auto;
+    padding-block: 24px;
+  }
+
+  .auth-split-main {
+    justify-items: center;
+    padding-inline: 24px;
+  }
+
+  .auth-split-form {
+    width: 340px;
+    max-width: 100%;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .auth-split-tagline {
+    position: absolute;
+    inset-inline-start: calc(var(--auth-workspace-width) + 24px);
+    inset-block-end: 24px;
+    z-index: 1;
+  }
+
+  .auth-split-art {
+    position: relative;
+    display: block;
+    background: var(--plate);
+  }
+
+  .auth-split-art > svg {
+    position: absolute;
+    inset: 0;
+    padding: 48px;
   }
 }

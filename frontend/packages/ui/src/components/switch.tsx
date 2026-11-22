@@ -15,6 +15,7 @@ export const Switch = forwardRef<
     onChange: (checked: boolean) => void;
     /** Accessible name of the switch itself. */
     label: string;
+    descriptionId?: string;
     /** Visible state words; pass `null` to hide them where a row already says it. */
     stateLabels?: { on: string; off: string } | null;
     disabled?: boolean;
@@ -22,7 +23,15 @@ export const Switch = forwardRef<
   }
 >(
   (
-    { checked, onChange, label, stateLabels = { on: "On", off: "Off" }, disabled, className },
+    {
+      checked,
+      onChange,
+      label,
+      descriptionId,
+      stateLabels = { on: "On", off: "Off" },
+      disabled,
+      className,
+    },
     ref,
   ) => (
     <span className={cn("inline-flex items-center gap-2", className)}>
@@ -31,6 +40,7 @@ export const Switch = forwardRef<
         type="button"
         role="switch"
         aria-label={label}
+        aria-describedby={descriptionId}
         aria-checked={checked}
         disabled={disabled}
         onClick={() => onChange(!checked)}

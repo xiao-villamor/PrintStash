@@ -192,7 +192,20 @@ class TestRenderRecipe:
         monkeypatch.setattr(compute_render.client, "exchange_render", exchange)
         assert compute_render.render(prepared, 2, 2, [None] * views, matte) is not None
         assert recipes == [compute_render.render_recipe(2, 2, views, matte)]
-        assert (
-            recipes[0]
-            == f"webgpu-native-raster-v4:qualified-portable-v7:2x2:{views}:{int(matte)}"
+        version, identity, size, frames, matte_flag = recipes[0].split(":")
+        assert (version, size, frames, matte_flag) == (
+            compute_render.RECIPE,
+            "2x2",
+            str(views),
+            str(int(matte)),
+        )
+        from printstash_core.mesh.preview_profile import (
+            DEFAULT_APPEARANCE,
+            RASTERIZER_RECIPE,
+        )
+
+        assert identity == (
+            RASTERIZER_RECIPE
+            if matte
+            else f"{RASTERIZER_RECIPE}-{DEFAULT_APPEARANCE.fingerprint}"
         )

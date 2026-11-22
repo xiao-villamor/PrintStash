@@ -21,6 +21,8 @@ function show(
       canEdit={canEdit}
       onEdit={() => {}}
       onTags={() => {}}
+      onFiles={() => {}}
+      onRevisions={() => {}}
     />,
     {
       routes: {
@@ -85,9 +87,17 @@ describe("ModelInformation", () => {
       expect(screen.queryByRole("link", { name: "Source model" })).not.toBeInTheDocument();
     },
   );
-  it("keeps unavailable geometry explicit", () => {
+  it("labels the mesh geometry as the whole source", () => {
+    show(null, aRevision({ file_type: "stl" }));
+    expect(screen.getByRole("heading", { name: "Whole source geometry" })).toBeInTheDocument();
+  });
+  it("explains unavailable mesh measurements", () => {
+    show(null, aRevision({ file_type: "stl" }));
+    expect(screen.getByText("Measurement unavailable")).toBeVisible();
+  });
+  it("hides geometry when there is no mesh", () => {
     show();
-    expect(screen.getAllByText("Not recorded")).toHaveLength(3);
+    expect(screen.queryByRole("heading", { name: "Whole source geometry" })).toBeNull();
   });
   it("does not discard recorded zero geometry", () => {
     show(
@@ -103,7 +113,7 @@ describe("ModelInformation", () => {
         }),
       }),
     );
-    expect(screen.getByText("0mm × 12mm × 30mm")).toBeInTheDocument();
+    expect(screen.getByText("0 × 12 × 30 mm")).toBeInTheDocument();
     expect(screen.getByText("0 cm³")).toBeInTheDocument();
     expect(screen.queryByText("Not recorded")).not.toBeInTheDocument();
   });

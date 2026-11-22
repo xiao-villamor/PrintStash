@@ -2049,32 +2049,32 @@ class TestDiscoveryWaitsForAdditions:
 class TestDiscoveryYieldsToInteractiveWork:
     """``yields_to``: discovery holds back while a person waits on other work."""
 
-    def test_holds_back_while_an_interactive_job_is_active(
+    def test_runs_beside_running_interactive_work(
         self, yielding_engine, make_job, db_session: Session
     ) -> None:
-        from app.modules.work.reconciler import PassNote
-
         from .conftest import INTERACTIVE_WORK, YIELDING
 
         make_job(kind=INTERACTIVE_WORK, state=JobState.RUNNING, attempts=1)
+
+        run_pass(YIELDING)
+
+        assert len(TestDiscoveryWaitsForAdditions._created(db_session, YIELDING)) == 1
+
+    @pytest.mark.parametrize("state", [JobState.QUEUED, JobState.INTERRUPTED])
+    def test_holds_back_while_interactive_work_waits_for_a_slot(
+        self, yielding_engine, make_job, db_session: Session, state: JobState
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        make_job(kind=INTERACTIVE_WORK, state=JobState.RUNNING, subject="artifact/2")
+        make_job(kind=INTERACTIVE_WORK, state=state)
 
         result = run_pass(YIELDING)
 
         assert (
             TestDiscoveryWaitsForAdditions._created(db_session, YIELDING),
             result.outcomes,
-        ) == ([], {PassNote.YIELDING_TO_INTERACTIVE.value: 1})
-
-    def test_holds_back_while_an_interactive_job_is_queued(
-        self, yielding_engine, make_job, db_session: Session
-    ) -> None:
-        from .conftest import INTERACTIVE_WORK, YIELDING
-
-        make_job(kind=INTERACTIVE_WORK, state=JobState.QUEUED)
-
-        run_pass(YIELDING)
-
-        assert TestDiscoveryWaitsForAdditions._created(db_session, YIELDING) == []
+        ) == ([], {reconciler_module.PassNote.YIELDING_TO_INTERACTIVE.value: 1})
 
     def test_runs_beside_backfill_jobs(
         self, yielding_engine, make_job, db_session: Session
@@ -2124,6 +2124,35 @@ class TestDiscoveryYieldsToInteractiveWork:
         assert result.outcomes.get(
             reconciler_module.PassNote.YIELDING_TO_INTERACTIVE.value
         ) == (1 if owes else None)
+
+    def test_holds_back_when_owed_work_enters_the_queue(
+        self, yielding_engine, make_job, db_session: Session
+    ) -> None:
+        from dataclasses import replace
+
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        class Materializing:
+            def pending(self, session, *, now, limit):
+                return []
+
+            def next_due(self, session, *, now):
+                return None
+
+            def owes_interactive(self, session, *, now):
+                # Discovery on another connection makes this intent visible
+                # as a queued Job before the backlog read observes it.
+                make_job(kind=INTERACTIVE_WORK)
+                return False
+
+        definitions = yielding_engine.catalog.definitions
+        definitions[INTERACTIVE_WORK] = replace(
+            definitions[INTERACTIVE_WORK], source=Materializing()
+        )
+
+        run_pass(YIELDING)
+
+        assert TestDiscoveryWaitsForAdditions._created(db_session, YIELDING) == []
 
     def test_finds_work_once_no_interactive_job_is_active(
         self, yielding_engine, make_job, db_session: Session
@@ -2179,3 +2208,141 @@ class TestPacedDiscovery:
         run_pass(PACED)
 
         assert self._delays(additions_engine, PACED) == []
+
+
+class TestBatchedInteractiveRefills:
+    @pytest.fixture
+    def batched(self, engine):
+        from dataclasses import replace
+
+        TestPriorityDiscovery.source(engine)
+        definition = _definition(SOURCED)
+        engine.catalog.definitions[SOURCED] = replace(
+            definition, batch_interactive_discovery=True
+        )
+        engine.catalog.lanes[PROBE_LANE] = Lane(PROBE_LANE, 2)
+        return engine
+
+    def test_concurrent_claims_queue_one_pass_at_the_low_water_mark(
+        self, priority_admission_vault, batched
+    ):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+
+        from app.db.session import override_session_factory
+        from app.modules.work.runner import _begin
+        from tests.factories import build_job
+
+        with priority_admission_vault.scoped_session() as session:
+            jobs = [build_job(session, kind=SOURCED, attempts=1) for _ in range(4)]
+            claims = [(row.id, row.execution_epoch) for row in jobs[:2]]
+            expected = {row.subject_key for row in jobs[2:]}
+
+        starting = Barrier(len(claims))
+
+        def claim(identity):
+            override_session_factory(priority_admission_vault)
+            starting.wait(timeout=5)
+            job_id, epoch = identity
+            return _begin(job_id, 1, epoch)
+
+        with ThreadPoolExecutor(max_workers=len(claims)) as pool:
+            assert all(pool.map(claim, claims))
+
+        assert len(_passes(batched, SOURCED)) == 1
+        with priority_admission_vault.scoped_session() as session:
+            assert {
+                row.subject_key
+                for row in _jobs(session)
+                if row.state is JobState.QUEUED
+            } == expected
+
+    def test_refills_before_running_jobs_finish(self, batched, db_session):
+        from app.modules.work.runner import _begin
+
+        PROBE.items = _items(
+            *(f"initial/{index}" for index in range(6)),
+            priority=WorkPriority.INTERACTIVE,
+        )
+        assert run_pass(SOURCED).submitted == 6
+        PROBE.items = _items(
+            *(f"remaining/{index}" for index in range(4)),
+            priority=WorkPriority.INTERACTIVE,
+        )
+
+        assert batched.run_one() is not None
+        assert batched.run_one() is not None
+        assert _passes(batched, SOURCED) == []
+        pending = [row for row in _jobs(db_session) if row.state is JobState.QUEUED]
+        for row in pending[:2]:
+            batched.executions[
+                execution_id(row.id, row.attempts, row.execution_epoch)
+            ].status = EngineStatus.RUNNING
+            assert _begin(row.id, row.attempts, row.execution_epoch)
+        assert len(_passes(batched, SOURCED)) == 1
+        assert batched.lane_depth(PROBE_LANE).queued == 2
+
+        assert run_pass(SOURCED).submitted == 4
+        assert batched.lane_depth(PROBE_LANE).queued == 6
+
+    def test_sweep_recovers_a_lost_low_water_nudge(
+        self, batched, db_session, make_job, monkeypatch
+    ):
+        from app.modules.work import submission
+        from app.modules.work.runner import _begin
+
+        row = make_job(kind=SOURCED, attempts=1)
+        make_job(kind=SOURCED, attempts=1)
+        job_id, epoch = row.id, row.execution_epoch
+        PROBE.items = _items("pending", priority=WorkPriority.INTERACTIVE)
+
+        def lost(*args, **kwargs):
+            raise RuntimeError("engine refused reconcile pass")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(submission, "queue_pass", lost)
+            assert _begin(job_id, 1, epoch)
+        assert _passes(batched, SOURCED) == []
+
+        cursor = db_session.get(ReconcileCursor, SOURCED)
+        assert cursor is not None and cursor.nudged_at is not None
+        assert cursor.pass_queued_at is not None
+        # After the grace interval the periodic pass replaces the lost submission.
+        monkeypatch.setattr(
+            submission, "utcnow", lambda: utcnow() + timedelta(minutes=10)
+        )
+        reconciler_module.tick()
+
+        assert len(_passes(batched, SOURCED)) == 1
+        assert run_pass(SOURCED).submitted >= 1
+        assert any(row.subject_key == "pending" for row in _jobs(db_session))
+
+    def test_interactive_reserve_keeps_a_prompt_source_discoverable(
+        self, batched, db_session, make_job
+    ):
+        from dataclasses import replace
+
+        prompt = replace(_definition(REQUESTED), source=_PrioritizedSource())
+        batched.catalog.definitions[REQUESTED] = prompt
+        for index in range(6):
+            make_job(kind=SOURCED, subject=f"buffer/{index}", attempts=1)
+        PROBE.items = _items("prompt", priority=WorkPriority.INTERACTIVE)
+
+        assert run_pass(REQUESTED).submitted == 1
+        assert [row.subject_key for row in _jobs(db_session, REQUESTED)] == ["prompt"]
+
+    def test_unsubmitted_attempts_cannot_cover_an_arrival(self, batched, make_job):
+        for index in range(3):
+            make_job(kind=SOURCED, subject=f"unsubmitted/{index}")
+
+        nudge(SOURCED, use_interactive_reserve=True)
+
+        assert len(_passes(batched, SOURCED)) == 1
+
+    def test_accepted_reserve_covers_an_arrival(self, batched, make_job):
+        for index in range(3):
+            make_job(kind=SOURCED, subject=f"accepted/{index}", attempts=1)
+
+        nudge(SOURCED, use_interactive_reserve=True)
+
+        assert _passes(batched, SOURCED) == []

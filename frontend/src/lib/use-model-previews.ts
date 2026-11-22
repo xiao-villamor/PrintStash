@@ -7,11 +7,11 @@ import {
 } from "@/lib/asset-cache";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
-import type { GalleryImage, PreviewViewId, SourceImage } from "@/types/previews";
+import { PREVIEW_VIEW_IDS, type CarouselImage, type PreviewImageId } from "@/types/previews";
 
 export const PREVIEW_INTENT_MS = 350;
-export type PreviewSelection = PreviewViewId | SourceImage["id"] | "cover";
-type PreviewDestination = GalleryImage | { id: "cover"; url: string };
+export type PreviewSelection = PreviewImageId | "cover";
+type PreviewDestination = CarouselImage | { id: "cover"; url: string };
 
 interface ConnectionBudget {
   saveData?: boolean;
@@ -46,7 +46,12 @@ async function decode(url: string) {
  * Owns generated views only; the cover is presented by `ProtectedThumbnail`.
  * The displayed view lease stays until the latest selected view has decoded.
  */
-export function useModelPreviews(cover: string | null, views: GalleryImage[], admitted: boolean) {
+export function useModelPreviews(
+  cover: string | null,
+  views: CarouselImage[],
+  admitted: boolean,
+  matchingView?: PreviewImageId,
+) {
   const [mountedSession] = useState(getSessionVersion);
   const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
   const [selection, setSelection] = useState<PreviewSelection>("cover");
@@ -60,29 +65,36 @@ export function useModelPreviews(cover: string | null, views: GalleryImage[], ad
   const displayedLease = useRef<AssetLease | null>(null);
   const warming = useRef(new Map<string, AssetLease>());
   const intent = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const available = selection === "cover" || views.some((view) => view.id === selection);
+  const orderedViews = views.some((view) => view.role === "orbit")
+    ? [
+        ...PREVIEW_VIEW_IDS.flatMap((id) => views.filter((view) => view.id === id)),
+        ...views.filter((view) => view.role === "archive"),
+      ]
+    : views;
+  const coverView =
+    cover === null
+      ? undefined
+      : orderedViews.find((view) => view.id === matchingView || view.url === cover);
+  const afterCover = orderedViews.filter((view) => view !== coverView);
+  if (coverView?.role === "orbit") {
+    const index = orderedViews.indexOf(coverView);
+    const nextOrbit = afterCover.splice(index).filter((view) => view.role === "orbit");
+    const otherViews = orderedViews.filter((view) => view.role !== "orbit");
+    afterCover.unshift(...nextOrbit);
+    afterCover.push(...otherViews);
+  }
+  const available = selection === "cover" || afterCover.some((view) => view.id === selection);
   const selected =
     available && (selection !== "cover" || cover)
       ? selection
       : cover
         ? "cover"
-        : (views[0]?.id ?? "cover");
+        : (orderedViews[0]?.id ?? "cover");
   const path = selected === "cover" ? null : views.find((view) => view.id === selected)?.url;
   const active = session === mountedSession;
-  // The card uses its cover as the default face. Keep the generated first
-  // face in the gallery, where it is useful for custom/source-image covers.
-  const generatedOrbit = views.filter((view) => view.role === "orbit");
-  const generatedNavigation =
-    generatedOrbit.length > 0
-      ? [...views.filter((view) => view.role === "source"), ...generatedOrbit]
-      : views;
-  const navigationViews: PreviewDestination[] =
-    cover && generatedNavigation.length > 0
-      ? [
-          { id: "cover", url: cover },
-          ...generatedNavigation.filter((view) => view.id !== "orbit-0" && view.url !== cover),
-        ]
-      : generatedNavigation;
+  const navigationViews: PreviewDestination[] = cover
+    ? [{ id: "cover", url: cover }, ...afterCover]
+    : orderedViews;
 
   useEffect(() => {
     if (!active || !admitted || !path) return;
@@ -166,6 +178,7 @@ export function useModelPreviews(cover: string | null, views: GalleryImage[], ad
     if (navigationViews.some((view) => view.id === id)) warm(destination(1, id));
   }
   function destination(delta: -1 | 1, from: PreviewSelection = selected) {
+    if (navigationViews.length < 2) return undefined;
     const index = navigationViews.findIndex((view) => view.id === from);
     return navigationViews[
       index < 0
@@ -188,6 +201,7 @@ export function useModelPreviews(cover: string | null, views: GalleryImage[], ad
   }
   return {
     navigationViews,
+    coverView,
     selected,
     displayed: active && displayed?.session === session ? displayed : null,
     failed: failure !== null && failure.path === path && failure.attempt === attempt,

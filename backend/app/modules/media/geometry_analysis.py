@@ -152,7 +152,7 @@ def _component_embedding_views(prepared, component_index, image_size):
 
     vertices, faces = _component(prepared, component_index)
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
-    visual = mesh_render.prepare_mesh_render(mesh)
+    visual = mesh_render.prepare_encoder_render(mesh)
     if visual is None:
         raise GeometryError("embedding_view_failed")
     return _render_views(visual, image_size, canonical_frames())
@@ -193,22 +193,9 @@ def canonical_frames():
     )
 
 
-def _render_views(prepared: mesh_render.RenderInput, image_size: int, frames):
+def _render_views(prepared: mesh_render.FrozenRender, image_size: int, frames):
     import numpy as np
 
-    from .compute_render import render
-
-    accelerated = render(prepared, image_size, image_size, frames, True)
-    if accelerated is not None:
-        return tuple(
-            EmbeddingInput(
-                "image",
-                rgb=frame.rgb(mesh_render.RGBBackground.WHITE),
-                width=image_size,
-                height=image_size,
-            )
-            for frame in accelerated
-        )
     views = []
     for frame in frames:
         rendered = mesh_render.render_prepared_pixels(
@@ -220,7 +207,6 @@ def _render_views(prepared: mesh_render.RenderInput, image_size: int, frames):
             if frame is not None
             else None,
             matte=True,
-            compute=False,
         )
         if rendered is None:
             raise GeometryError("embedding_view_failed")
@@ -269,7 +255,7 @@ def visual_views(
                 return VisualViews(None, (points,))
             from app.modules.media import thumbnail
 
-            visual = mesh_render.prepare_mesh_render(prepared.whole_mesh)
+            visual = mesh_render.prepare_encoder_render(prepared.whole_mesh)
             if visual is None:
                 raise GeometryError("embedding_view_failed")
             encoded = mesh_render.render_prepared_thumbnail(

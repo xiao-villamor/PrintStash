@@ -9,7 +9,7 @@ import { LibraryItemLink } from "@/features/library/navigation";
 import { displayModelName } from "@/lib/display-name";
 import { memo, useEffect, useRef, useState } from "react";
 import { ModelListItem, FileRevisionStatus } from "@/types";
-import { ScanSearch, ArrowUpRight, PanelRight, Star, Tags } from "lucide-react";
+import { ScanSearch, ArrowUpRight, Maximize2, PanelRight, Star, Tags } from "lucide-react";
 import { useCardDetail, cardDimensions, cardRevisions } from "@/features/library/card-detail";
 import { ModelCardRevision } from "@/components/model-card-revision";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { useLibraryStar } from "@/features/library/mutations";
 import { toast } from "@/lib/toast";
 import { ModelPreviewControls, ModelPreviewFrame } from "@/components/model-preview";
+import { keepOffCard } from "@/lib/card-overlay";
 import { useModelPreviewCard } from "@/lib/use-model-preview-card";
 import { Localized } from "@/components/ui/localized";
 import "./library-items.css";
@@ -161,6 +162,7 @@ function ModelCardInner({
   model,
   origin,
   arriving = false,
+  collectionLabel,
   metrics,
   selectable = false,
   selected = false,
@@ -220,6 +222,8 @@ function ModelCardInner({
       ? ["print_time", "filament_weight", "layer_height"]
       : metrics;
   const canEditTags = model.effective_role === "edit" || model.effective_role === "admin";
+  // A plain click already opens the page when no inspector takes it.
+  const opensPage = Boolean(onInspect) && !selectable;
 
   async function toggleStar() {
     if (starBusy) return;
@@ -265,6 +269,7 @@ function ModelCardInner({
               }
             }}
             data-favorites={favorites || undefined}
+            data-selected={selected || undefined}
             data-inspected={inspected || undefined}
             draggable={draggable}
             onDragStart={
@@ -396,7 +401,31 @@ function ModelCardInner({
                 </div>
               )}
             </LibraryItemLink>
-            {!selectable && <ModelPreviewControls name={model.name} state={preview} />}
+            {!selectable && (
+              <ModelPreviewControls name={model.name} state={preview}>
+                {opensPage && (
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    className="library-card-open-page library-preview-reveal pointer-events-auto"
+                    asChild
+                  >
+                    <LibraryItemLink
+                      {...keepOffCard}
+                      origin={origin}
+                      href={`/models/${model.id}`}
+                      onPointerEnter={preview.enter}
+                      onPointerLeave={preview.leave}
+                      trackPosition={false}
+                      aria-label={uiText("Open full page")}
+                      title={uiText("Open the full model page")}
+                    >
+                      <Maximize2 className="h-3 w-3" aria-hidden />
+                    </LibraryItemLink>
+                  </Button>
+                )}
+              </ModelPreviewControls>
+            )}
             {!favorites && (
               <ModelCardRevision
                 model={model}
@@ -404,6 +433,7 @@ function ModelCardInner({
                 admitted={admitted}
                 origin={origin}
                 dimensions={dimensions}
+                collectionLabel={collectionLabel ?? null}
               >
                 <div className="library-card-facts">
                   {factMetrics.map((id) => (

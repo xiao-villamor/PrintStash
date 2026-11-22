@@ -3,10 +3,10 @@ import { ProjectProfile } from "./project-profile";
 import { RelatedProfiles } from "./related-profiles";
 import { GeometryReport } from "./geometry-report";
 import { ModelSourceSummary } from "./source-summary";
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useId, useLayoutEffect, useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatNumber } from "@/lib/format";
+import { meshGeometryFacts, type useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { currentLocale, uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import type { FileRead, ModelRead } from "@/types";
@@ -16,27 +16,26 @@ import { safeHttpUrl } from "./source-url";
 export function ModelInformation({
   model,
   sourceFile,
+  measurement = "unavailable",
   canEdit,
   onEdit,
   onTags,
+  onFiles,
+  onRevisions,
 }: {
   model: ModelRead;
   sourceFile: FileRead | null;
+  measurement?: ReturnType<typeof useMeshGeometryMeasurement>;
   canEdit: boolean;
   onEdit: () => void;
   onTags: () => void;
+  onFiles: () => void;
+  onRevisions: () => void;
 }) {
   useUiLocale();
   const sourceUrl = model.source_url ? safeHttpUrl(model.source_url) : null;
-  const geometry = sourceFile?.metadata;
+  const geometry = meshGeometryFacts(sourceFile, measurement);
   const gcodeCount = model.files.filter((file) => file.file_type === "gcode").length;
-  const dimensions =
-    geometry &&
-    geometry.bbox_x_mm !== null &&
-    geometry.bbox_y_mm !== null &&
-    geometry.bbox_z_mm !== null
-      ? `${formatNumber(geometry.bbox_x_mm)}mm × ${formatNumber(geometry.bbox_y_mm)}mm × ${formatNumber(geometry.bbox_z_mm)}mm`
-      : uiText("Not recorded");
   return (
     <section className="model-information" aria-label={uiText("About this model")}>
       <div className="model-information-about">
@@ -76,6 +75,7 @@ export function ModelInformation({
           )}
           <dt>{uiText("Tags")}</dt>
           <dd className="flex flex-wrap items-center gap-1">
+            {!canEdit && model.tags.length === 0 && uiText("None")}
             {model.tags.map((tag) => (
               <span className="bg-muted px-1.5 py-0.5 text-xs" key={tag}>
                 {tag}
@@ -83,8 +83,8 @@ export function ModelInformation({
             ))}
             {canEdit && (
               <Button
-                size="sm"
-                variant="ghost"
+                size="xs"
+                variant="outline"
                 aria-label={
                   model.tags.length
                     ? uiText("Edit tags for {value1}", { value1: model.name })
@@ -97,12 +97,13 @@ export function ModelInformation({
             )}
           </dd>
           <dt>{uiText("Files")}</dt>
-          <dd>
-            {uiText("{total} total · {sources} source · {revisions} G-code", {
-              total: String(model.files.length),
-              sources: String(model.files.length - gcodeCount),
-              revisions: String(gcodeCount),
-            })}
+          <dd className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <button type="button" className="detail-file-link" onClick={onFiles}>
+              {uiText("Source files")} ({model.files.length - gcodeCount})
+            </button>
+            <button type="button" className="detail-file-link" onClick={onRevisions}>
+              {uiText("G-code revisions")} ({gcodeCount})
+            </button>
           </dd>
           <dt>{uiText("Created")}</dt>
           <dd>{new Date(model.created_at).toLocaleDateString(currentLocale())}</dd>
@@ -113,32 +114,28 @@ export function ModelInformation({
           <ProjectProfile modelId={model.id} fileId={sourceFile.id} />
         )}
       </div>
-      <div className="model-information-geometry">
-        <h2 className="text-sm font-semibold">{uiText("Geometry")}</h2>
-        <dl className="model-information-facts">
-          <dt>{uiText("Dimensions")}</dt>
-          <dd>{dimensions}</dd>
-          <dt>{uiText("Volume")}</dt>
-          <dd>
-            {geometry?.volume_mm3 != null
-              ? uiText("{value} cm³", {
-                  value: formatNumber(geometry.volume_mm3 / 1000, { maximumFractionDigits: 2 }),
-                })
-              : uiText("Not recorded")}
-          </dd>
-          <dt>{uiText("Triangles")}</dt>
-          <dd>
-            {geometry?.triangle_count != null
-              ? formatNumber(geometry.triangle_count)
-              : uiText("Not recorded")}
-          </dd>
-        </dl>
-        <GeometryReport
-          modelId={model.id}
-          fileId={sourceFile?.file_type === "gcode" ? null : (sourceFile?.id ?? null)}
-          volume={geometry?.volume_measurement ?? null}
-        />
-      </div>
+      {sourceFile && (
+        <div className="model-information-geometry">
+          <h2 className="text-sm font-semibold">{uiText("Whole source geometry")}</h2>
+          {geometry.emptyMessage ? (
+            <p className="mt-2 text-sm text-muted-foreground">{geometry.emptyMessage}</p>
+          ) : (
+            <dl className="model-information-facts">
+              {geometry.facts.map(([label, value]) => (
+                <Fragment key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </Fragment>
+              ))}
+            </dl>
+          )}
+          <GeometryReport
+            modelId={model.id}
+            fileId={sourceFile.file_type === "gcode" ? null : sourceFile.id}
+            volume={sourceFile.metadata?.volume_measurement ?? null}
+          />
+        </div>
+      )}
     </section>
   );
 }

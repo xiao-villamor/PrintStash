@@ -30,7 +30,7 @@ variable** — `bg-primary`, not `bg-[var(--primary)]`.
 
 ### Color
 
-Every color has a light and a dark value. The base palette is `#F6F7F9` /
+Interface colors have light and dark values; the image matte stays neutral in both themes so dark transparent previews remain visible. The base palette is `#F6F7F9` /
 `#0C0F14`, panels are `#FFFFFF` / `#13171E`, and primary actions use
 `#4D6F9B` in both themes. Neutral selection uses `#EEF0F3` in light and a
 translucent white fill in dark. Use semantic tokens instead of hand-encoding a
@@ -49,6 +49,7 @@ theme swap so colors remain consistent throughout the application.
 | `success`, `warning` | Status only — never as decoration |
 | `border`, `input`, `ring` | Edges and focus rings |
 | `surface-*`, `on-surface*`, `outline*` | The elevation scale, for multi-layer panels |
+| `preview-image-matte` | A theme-independent neutral backing for transparent slicer preview images |
 
 **Pair a background with its `-foreground`.** `bg-primary` takes
 `text-primary-foreground`, which is white in both themes. Keep using the paired
@@ -239,7 +240,8 @@ new directions, bounce, cascades, or text crossfades for individual features.
 
 Collections, Search, Pending, Saved views and Settings use one shell
 sidebar and one persisted width (`--workbench-sidebar-width`, 320px by default,
-resizable from 280px to 520px). The model inspector uses the same width on desktop.
+resizable down to the measured Collections header width and up to 520px).
+The model inspector has its own width and preview-height preferences.
 Section navigation preserves the sidebar's open state, boundary and workspace
 position. Settings navigation occupies this frame rather than adding another column.
 The border and background belong to the stationary shell, outside animated content.
@@ -266,6 +268,11 @@ same panel. Selections update the URL and results immediately, remain visible as
 removable chips, and survive reloads. Reset in the picker preserves the folder,
 keyword query and view. Keep loading, retry and empty states inside the picker;
 Escape and the close button return focus to Filters.
+
+A plain click on a Library card opens the inspector. The card's hover or focus
+corner action and the inspector header share one expand icon for the full page.
+Card overlays stay compact so the Model remains visible; touch enlarges their hit
+area without enlarging the mark.
 
 Model context menus show the Model name once above concise, icon-led actions:
 Open page, Model details, Favorites and tags. Details uses the existing inspector;
@@ -354,6 +361,10 @@ Choosing:
 
 `ease-in` is never correct on UI — it starts slow, delaying exactly the moment
 the user is watching. **Nothing in the app may exceed 300ms.**
+The decorative sign-in build-plate print is the duration exception. It plays
+once over 18.95 seconds, is non-interactive, and shows the filled layers,
+top infill, and parked nozzle under
+reduced motion.
 
 ### Rules
 
@@ -362,7 +373,9 @@ the user is watching. **Nothing in the app may exceed 300ms.**
    `transform: scaleX()`, not `width`. The docked sidebar is an explicit exception:
    one width animation keeps its boundary and the workspace on the same timeline.
    Child-collection disclosure uses a bounded clip-path for the row and a
-   compositor translation for the Model content, with one layout commit.
+   compositor translation for the Model content, with one layout commit. The
+   sign-in build-plate print updates the active SVG path geometry so the tip
+   and nozzle share the same endpoint.
 2. **`transition-all` is banned.** It animates properties you did not intend,
    off the GPU. List them: `transition-[background-color,border-color,transform]`.
    The count in `frontend/src/` must stay at zero.

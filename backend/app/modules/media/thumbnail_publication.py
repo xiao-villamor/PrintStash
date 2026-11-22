@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
+from sqlalchemy.orm import lazyload
 from sqlmodel import Session
 
 from app.db.models import File, FileType, Model
@@ -152,7 +153,7 @@ def point_at(session: Session, file_row: File, key: str) -> None:
     """Point the Artifact (and its Model, when it represents it) at ``key``."""
     file_row.thumbnail_path = key
     session.add(file_row)
-    model = session.get(Model, file_row.model_id)
+    model = session.get(Model, file_row.model_id, options=[lazyload("*")])
     if model is not None and should_represent_model(session, model, file_row):
         model.thumbnail_file_id = file_row.id
         model.thumbnail_path = key

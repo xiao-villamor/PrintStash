@@ -18,7 +18,7 @@ import {
 } from "@/lib/comparison-camera";
 import { AlertTriangle, Loader2 } from "lucide-react";
 
-import { trianglesOnPlate } from "@/lib/plate-geometry";
+import { geometryDimensions, trianglesOnPlate } from "@/lib/plate-geometry";
 import { useParsedStl, type ParsedStl } from "@/lib/use-parsed-stl";
 import { createMeshRenderer, type MeshRenderer, type RendererFallback } from "@/lib/mesh-renderer";
 import type { CameraPose } from "@/lib/comparison-camera";
@@ -28,7 +28,12 @@ import {
   usePreviewPreferences,
   type ScreenshotScale,
 } from "@/lib/preview-preferences";
-import { fitCameraToBounds, heroCameraDirection } from "@/lib/thumbnail-camera";
+import {
+  fitCameraToBounds,
+  heroCameraDirection,
+  viewerPresetDirection,
+  VIEWER_POLE_MARGIN,
+} from "@/lib/thumbnail-camera";
 import { useViewerReadiness } from "@/lib/use-viewer-readiness";
 import { useStlPreview, stlPreviewMessage, type StlPreviewFailure } from "@/lib/use-stl-preview";
 import type { PlateRegion } from "@/types";
@@ -64,6 +69,9 @@ export interface STLViewerProps {
   onFailureChange?: (feedback: STLPreviewFeedback) => void;
   /** Largest loaded dimension, before viewer normalization, in source units. */
   onGeometrySize?: (size: number) => void;
+  onOrbit?: () => void;
+  /** Bounds of the displayed mesh, in source coordinates before normalization. */
+  onGeometryDimensions?: (dimensions: { x: number; y: number; z: number } | null) => void;
   displayMode?: ViewerDisplayMode;
   showGrid?: boolean;
   screenshotName?: string;
@@ -83,7 +91,6 @@ const ZOOM_FACTOR = 0.75;
 const NORMALIZED_SIZE = 10;
 // The orbit reaches every side of the mesh but stops short of looking straight
 // along the up axis, where the camera's heading is undefined.
-const POLE_MARGIN = 0.02;
 
 const box = new THREE.Box3();
 const sizeVec = new THREE.Vector3();
@@ -169,6 +176,7 @@ function Scene({
   onControlsReady,
   onLoadedChange,
   onGeometrySize,
+  onOrbit,
   displayMode,
   showGrid,
   screenshotName,
@@ -185,13 +193,15 @@ function Scene({
     | "onReadyChange"
     | "onFailureChange"
     | "onGeometrySize"
+    | "onOrbit"
+    | "onGeometryDimensions"
     | "comparison"
     | "comparisonCamera"
     | "overlay"
     | "plate"
   >
 > &
-  Pick<STLViewerProps, "comparison" | "comparisonCamera" | "overlay"> & {
+  Pick<STLViewerProps, "comparison" | "comparisonCamera" | "overlay" | "onOrbit"> & {
     onControlsReady?: (api: STLViewerControls) => void;
     onLoadedChange?: (loaded: boolean) => void;
     onGeometrySize?: (size: number) => void;
@@ -204,6 +214,7 @@ function Scene({
   }) {
   useUiLocale();
   const orbitRef = useRef<OrbitControlsImpl>(null);
+  const interactionStart = useRef<THREE.Quaternion | null>(null);
   const syncing = useRef(false);
   const poseApplied = useRef(false);
   const initialComparisonPose = useRef(restoredPose.current);
@@ -214,6 +225,9 @@ function Scene({
     () => new THREE.Vector3(NORMALIZED_SIZE, NORMALIZED_SIZE, NORMALIZED_SIZE),
   );
   const { loaded, setLoaded } = useViewerReadiness(url);
+  useEffect(() => {
+    invalidate();
+  }, [invalidate, showGrid]);
   const overlayComparison = overlay?.comparison;
   const comparisonSize = useMemo(() => {
     if (!comparison) return null;
@@ -258,6 +272,7 @@ function Scene({
 
   const handleSized = useCallback(
     (nextSize: THREE.Vector3) => {
+      sizeRef.current = nextSize;
       setModelSize((current) => (current.equals(nextSize) ? current : nextSize));
       setLoaded(true);
       invalidate();
@@ -275,14 +290,16 @@ function Scene({
   const gridSize = Math.max(modelSize.x, modelSize.z) * 2.6 || NORMALIZED_SIZE * 2.6;
   const floorY = -modelSize.y / 2;
 
+  const presetRef = useRef<ViewerCameraPreset>("isometric");
   const controlsApi: STLViewerControls = {
     setView: (preset) => {
       controlsApi.fit();
+      presetRef.current = preset;
       const cam = cameraRef.current;
       if (!cam || preset === "isometric") return;
-      const distance = cam.position.length();
-      cam.up.set(0, preset === "top" ? 0 : 1, preset === "top" ? -1 : 0);
-      cam.position.set(0, preset === "top" ? distance : 0, preset === "front" ? distance : 0);
+      const direction = viewerPresetDirection(preset);
+      const aspect = canvasSize.width / Math.max(canvasSize.height, 1);
+      cam.position.copy(fitCameraToBounds(sizeRef.current, aspect, cam.fov, direction).position);
       cam.lookAt(0, 0, 0);
       orbitRef.current?.update();
       invalidate();
@@ -305,6 +322,7 @@ function Scene({
       controlsApi.fit();
     },
     fit: () => {
+      presetRef.current = "isometric";
       const cam = cameraRef.current;
       if (!cam) return;
       if (comparisonSize && comparisonCamera) {
@@ -392,13 +410,14 @@ function Scene({
         orbitRef.current.target.fromArray(pose.target);
         orbitRef.current.update();
         invalidate();
-      } else controlsApi.fit();
+      } else controlsApi.setView(presetRef.current);
       if (comparisonSize) poseApplied.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     loaded,
     modelSize,
+    geometry,
     comparisonSize,
     comparisonCamera,
     canvasSize.width,
@@ -442,10 +461,22 @@ function Scene({
         enablePan
         enableZoom
         enableRotate
-        minPolarAngle={POLE_MARGIN}
-        maxPolarAngle={Math.PI - POLE_MARGIN}
+        minPolarAngle={VIEWER_POLE_MARGIN}
+        maxPolarAngle={Math.PI - VIEWER_POLE_MARGIN}
+        onStart={() => {
+          interactionStart.current = cameraRef.current?.quaternion.clone() ?? null;
+        }}
+        onEnd={() => {
+          interactionStart.current = null;
+        }}
         onChange={() => {
           invalidate();
+          const start = interactionStart.current;
+          const orientation = cameraRef.current?.quaternion;
+          if (start && orientation && 1 - Math.abs(start.dot(orientation)) > 1e-8) {
+            interactionStart.current = null;
+            onOrbit?.();
+          }
           if (cameraRef.current && orbitRef.current) {
             const pose = {
               position: cameraRef.current.position.toArray(),
@@ -617,6 +648,8 @@ export function STLViewer({
   onReadyChange,
   onFailureChange,
   onGeometrySize,
+  onOrbit,
+  onGeometryDimensions,
   displayMode = "solid",
   showGrid = true,
   screenshotName = "model",
@@ -637,6 +670,14 @@ export function STLViewer({
   const parsed = useParsedStl(preview.state === "ready" ? preview.url : null);
   const parsedOverlay = useParsedStl(overlayPreview.state === "ready" ? overlayPreview.url : null);
   const shownGeometry = usePlateGeometry(parsed, plate);
+  const dimensions = useMemo(() => geometryDimensions(shownGeometry), [shownGeometry]);
+  const dimensionsCallback = useRef(onGeometryDimensions);
+  useEffect(() => {
+    dimensionsCallback.current = onGeometryDimensions;
+  }, [onGeometryDimensions]);
+  useEffect(() => {
+    dimensionsCallback.current?.(dimensions);
+  }, [dimensions]);
 
   useEffect(() => {
     onReadyChange?.(meshLoaded && preview.state === "ready");
@@ -719,6 +760,7 @@ export function STLViewer({
         onControlsReady={onControlsReady}
         onLoadedChange={setMeshLoaded}
         onGeometrySize={onGeometrySize}
+        onOrbit={onOrbit}
         displayMode={displayMode}
         showGrid={showGrid}
         screenshotName={screenshotName}

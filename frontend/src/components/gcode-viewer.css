@@ -1,12 +1,236 @@
-/* The toolpath view picker sits inside the viewer's own toolbar frame. Hosts
-   that style every form select (the library inspector) must not give it a
-   second border or full width. */
-.toolpath-view-select.toolpath-view-select {
-  width: auto;
-  min-height: 28px;
-  height: 28px;
-  border: 0;
-  padding: 0 6px;
-  background: transparent;
-  font-size: 12px;
+.toolpath-layout {
+  container-type: inline-size;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+}
+
+.toolpath-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(12rem, 32cqw, 15rem);
+  height: 100%;
+  min-height: 26rem;
+}
+
+.toolpath-viewport {
+  position: relative;
+  min-width: 0;
+  min-height: 20rem;
+  overflow: hidden;
+}
+
+.toolpath-sidebar {
+  contain: size;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--card);
+  scrollbar-gutter: stable;
+}
+
+.toolpath-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.toolpath-control-tabs {
+  border-bottom: 1px solid var(--border);
+}
+
+.toolpath-section-title {
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.toolpath-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.toolpath-field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.25rem;
+  border: 1px solid var(--input);
+  border-radius: 0;
+  padding: 0.375rem;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 0.75rem;
+}
+
+.toolpath-field select:focus-visible,
+.toolpath-layer-slider:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.toolpath-layer-entry {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.toolpath-layer-slider {
+  width: 100%;
+  min-height: 1.5rem;
+  accent-color: var(--primary);
+}
+
+.toolpath-camera-actions {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.375rem;
+}
+
+.toolpath-toggle.toolpath-toggle {
+  width: 100%;
+  height: auto;
+  min-height: 2.25rem;
+  justify-content: space-between;
+  padding: 0.375rem 0;
+  font-size: 0.75rem;
+  font-weight: 400;
+  white-space: normal;
+  text-align: left;
+}
+
+.toolpath-toggle-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.toolpath-toggle-description,
+.toolpath-view-note {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.toolpath-option-group {
+  border: 1px solid var(--border);
+}
+
+.toolpath-option-group .toolpath-toggle {
+  gap: 0.5rem;
+  padding: 0.625rem;
+  font-weight: 500;
+}
+
+.toolpath-option-group .toolpath-toggle + .toolpath-toggle {
+  border-top: 1px solid var(--border);
+}
+
+.toolpath-bounds-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.toolpath-bounds-unit {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+}
+
+.toolpath-bounds-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  background: var(--muted);
+}
+
+.toolpath-bounds-grid > div {
+  min-width: 0;
+  padding: 0.5rem;
+}
+
+.toolpath-bounds-grid > div + div {
+  border-left: 1px solid var(--border);
+}
+
+.toolpath-bounds-grid dt {
+  color: var(--muted-foreground);
+  font-size: 0.625rem;
+  font-weight: 600;
+}
+
+.toolpath-bounds-grid dd {
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.toolpath-check {
+  display: flex;
+  width: 1rem;
+  height: 1rem;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid var(--input);
+}
+
+[aria-pressed="true"] > .toolpath-check {
+  background: var(--accent);
+  color: var(--accent-foreground);
+  border-color: var(--foreground);
+}
+
+.toolpath-notice {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+@container (max-width: 27rem) {
+  .toolpath-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(20rem, 1fr) auto;
+    height: auto;
+    min-height: 100%;
+  }
+
+  .toolpath-sidebar {
+    contain: none;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    overflow-y: visible;
+  }
+
+  .toolpath-sidebar button,
+  .toolpath-sidebar input,
+  .toolpath-sidebar select {
+    min-height: 2.75rem;
+  }
+
+  .toolpath-camera-actions button:first-child,
+  .toolpath-camera-actions button:last-child,
+  .toolpath-layer-entry button {
+    min-width: 2.75rem;
+  }
 }

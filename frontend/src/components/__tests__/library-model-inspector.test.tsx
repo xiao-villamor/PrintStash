@@ -154,7 +154,7 @@ describe("Library model inspector", () => {
   it("disables outcome writes for a read-only inspector", async () => {
     const app = setup({}, false);
     await screen.findByRole("heading", { name: "Bracket" });
-    expect(screen.getByRole("button", { name: "OK" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "OK" })).not.toBeInTheDocument();
     screen.getByRole("tab", { name: "Print" }).focus();
     fireEvent.keyDown(window, { key: "1" });
     expect(app.requestsWithMethod("POST")).toEqual([]);
@@ -301,10 +301,11 @@ describe("Library model inspector", () => {
     it("starts another model's details from the top", async () => {
       const app = setup(routes);
       await ready();
-      panel().scrollTop = 240;
+      const scroll = panel().querySelector<HTMLElement>(".library-inspector-scroll")!;
+      scroll.scrollTop = 240;
       app.rerender(<LibraryModelInspector id={2} open canWrite onClose={vi.fn<() => void>()} />);
       await screen.findByRole("heading", { name: "Hinge" });
-      expect(panel().scrollTop).toBe(0);
+      expect(scroll.scrollTop).toBe(0);
     });
   });
 });

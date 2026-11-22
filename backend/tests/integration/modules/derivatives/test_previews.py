@@ -1,6 +1,7 @@
 """Published sets retain usable images independently of primary derivatives."""
 
 import hashlib
+import json
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import timedelta
@@ -10,7 +11,14 @@ import trimesh
 from sqlmodel import select
 
 from app.core.time import utcnow
-from app.db.models import ArtifactDerivative, DerivativeKind, DerivativeState, JobKind
+from app.db.models import (
+    ArtifactDerivative,
+    DerivativeKind,
+    DerivativeState,
+    JobKind,
+    JobState,
+    Model,
+)
 from app.db.session import get_session_factory
 from app.modules.derivatives import policy, previews, producers, records
 from app.modules.derivatives.kinds import PREVIEWS_RECIPE, group
@@ -19,6 +27,11 @@ from app.modules.library.model_views.previews import resolve, summaries
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_utils import ownership_snapshot
 from tests.factories.geometry import three_mf
+
+
+def _summary(session, artifact, *, root=None):
+    model = session.get_one(Model, artifact.model_id)
+    return summaries(session, [model], root=root)[artifact.model_id]
 
 
 @pytest.fixture(autouse=True)
@@ -153,7 +166,7 @@ class TestPreviewPublication:
         policy.update(db_session, {policy.SettingName.PREVIEWS: False}, commit=False)
         db_session.commit()
 
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
 
         assert summary.state == "disabled"
         assert summary.published is None
@@ -167,7 +180,7 @@ class TestPreviewPublication:
             is DerivativeState.FAILED
         )
         db_session.expire_all()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.kind == "artifact"
         assert summary.state == "failed"
         assert summary.published is None
@@ -253,7 +266,7 @@ class TestPreviewPublication:
             now=utcnow(),
         )
         db_session.commit()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.state == "running"
         _, manifest = resolve(
             db_session,
@@ -261,10 +274,15 @@ class TestPreviewPublication:
             summary.published.manifest_url.rsplit("/", 1)[1],
         )
         assert manifest.recipe == PREVIEWS_RECIPE
-        assert len(manifest.views) == 4
+        assert [view.id for view in manifest.views] == [
+            "orbit-0",
+            "orbit-1",
+            "orbit-2",
+            "orbit-3",
+        ]
 
     def test_publishes_known_camera_frames(self, db_session, artifact, ready):
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         _, manifest = resolve(
             db_session,
             artifact.model_id,
@@ -299,7 +317,7 @@ class TestPreviewPublication:
         assert get_backend().read_bytes(artifact.thumbnail_path) == previous
 
     def test_keeps_unknown_cover_camera_explicit(self, db_session, artifact, ready):
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.cover_camera == "unknown"
         assert all(view.role != "cover" for view in summary.published.views)
 
@@ -322,7 +340,7 @@ class TestPreviewPublication:
             db_session, artifact, DerivativeKind.PREVIEWS, PREVIEWS_RECIPE, now=utcnow()
         )
         db_session.commit()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.state == "running"
         assert len(summary.published.views) == 4
         assert get_backend().read_bytes(previous)
@@ -340,7 +358,7 @@ class TestPreviewPublication:
         db_session.commit()
         records.reset(db_session, artifact, {DerivativeKind.PREVIEWS: PREVIEWS_RECIPE})
         db_session.commit()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.state == "queued"
         assert summary.reason is None
         assert len(summary.published.views) == 4
@@ -370,7 +388,7 @@ class TestPreviewPublication:
         from app.db.models import Model
 
         newer = make_file(db_session.get(Model, artifact.model_id), filename="new.stl")
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.file_id == newer.id
         assert summary.state == "pending"
         assert summary.published is None
@@ -379,7 +397,7 @@ class TestPreviewPublication:
         artifact.deleted_at = utcnow()
         db_session.add(artifact)
         db_session.commit()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.kind == "none"
 
     def test_withholds_views_rendered_from_replaced_bytes(
@@ -389,7 +407,7 @@ class TestPreviewPublication:
         artifact.sha256 = "b" * 64
         db_session.add(artifact)
         db_session.commit()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.state == "pending"
         assert summary.published is None
 
@@ -400,20 +418,19 @@ class TestPreviewPublication:
         db_session.add(ready)
         db_session.commit()
         with pytest.raises(ValidationError):
-            summaries(db_session, [artifact.model_id])
+            summaries(db_session, [db_session.get_one(Model, artifact.model_id)])
 
     def test_addresses_shared_delivery_routes(self, db_session, artifact, ready):
         root = "/api/v1/share/token"
-        summary = summaries(db_session, [artifact.model_id], root=root)[
-            artifact.model_id
-        ]
+        summary = _summary(db_session, artifact, root=root)
         assert summary.published.manifest_url.startswith(root + "/previews/")
         assert all(
             view.url.startswith(summary.published.manifest_url + "/")
             for view in summary.published.views
         )
         with pytest.raises(ValueError, match="needs_one_model"):
-            summaries(db_session, [artifact.model_id, 0], root=root)
+            model = db_session.get_one(Model, artifact.model_id)
+            summaries(db_session, [model, model], root=root)
 
     def test_applies_3mf_instance_placement(self, db_session, stored):
         mesh = trimesh.creation.box(extents=(10, 12, 14))
@@ -429,7 +446,7 @@ class TestPreviewPublication:
             previews.derive(file.id).kinds[DerivativeKind.PREVIEWS]
             is DerivativeState.READY
         )
-        summary = summaries(db_session, [file.model_id])[file.model_id]
+        summary = _summary(db_session, file)
         _, manifest = resolve(
             db_session,
             file.model_id,
@@ -464,6 +481,21 @@ class TestPreviewAdmission:
         assert items[0].priority.value == "backfill"
 
     def test_waits_for_the_primary_attempt(self, db_session, artifact):
+        source = PreviewSource(group(JobKind.DERIVATIVES_PREVIEWS))
+        assert source.pending(db_session, now=utcnow(), limit=20) == []
+
+    def test_waits_for_a_cover_due_for_regeneration(
+        self, db_session, artifact, make_derivative, make_derivative_group_regeneration
+    ):
+        make_derivative(
+            artifact,
+            DerivativeKind.THUMBNAIL,
+            updated_at=utcnow() - timedelta(minutes=5),
+        )
+        # "Recreate all images": the cover pass owes this Model again.
+        make_derivative_group_regeneration(
+            JobKind.DERIVATIVES_MESH, DerivativeKind.THUMBNAIL, requested_at=utcnow()
+        )
         source = PreviewSource(group(JobKind.DERIVATIVES_PREVIEWS))
         assert source.pending(db_session, now=utcnow(), limit=20) == []
 
@@ -608,14 +640,7 @@ class TestPreviewLinkedSources:
 
 class TestPreviewModes:
     def test_mode_changes_replace_existing_views(self, db_session, artifact, ready):
-        assert (
-            len(
-                summaries(db_session, [artifact.model_id])[
-                    artifact.model_id
-                ].published.views
-            )
-            == 4
-        )
+        assert len(_summary(db_session, artifact).published.views) == 4
         policy.update(db_session, {policy.SettingName.PREVIEW_POLES: True})
         assert DerivativeKind.PREVIEWS in records.needed(
             db_session,
@@ -627,7 +652,7 @@ class TestPreviewModes:
             DerivativeKind.PREVIEWS: DerivativeState.READY
         }
         db_session.expire_all()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert [view.id for view in summary.published.views] == [
             "orbit-0",
             "orbit-1",
@@ -638,14 +663,7 @@ class TestPreviewModes:
         ]
         policy.update(db_session, {policy.SettingName.PREVIEW_POLES: False})
         # The smaller selection applies immediately, before replacement finishes.
-        assert (
-            len(
-                summaries(db_session, [artifact.model_id])[
-                    artifact.model_id
-                ].published.views
-            )
-            == 4
-        )
+        assert len(_summary(db_session, artifact).published.views) == 4
         assert previews.derive(artifact.id).kinds == {
             DerivativeKind.PREVIEWS: DerivativeState.READY
         }
@@ -677,6 +695,299 @@ class TestPreviewModes:
         ).model_dump_json()
         db_session.add(ready)
         db_session.commit()
-        summary = summaries(db_session, [artifact.model_id])[artifact.model_id]
+        summary = _summary(db_session, artifact)
         assert summary.state == "pending"
         assert summary.published is None
+
+
+def _views_row(db_session, artifact):
+    db_session.expire_all()
+    return records.rows_for(db_session, artifact).get(DerivativeKind.PREVIEWS)
+
+
+class TestCoverPassViews:
+    """The cover Job renders the views from its own mesh load."""
+
+    def test_publishes_views_from_the_cover_pass(self, db_session, artifact):
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds[DerivativeKind.PREVIEWS] is DerivativeState.READY
+        row = _views_row(db_session, artifact)
+        assert (row.state, row.attempts) == (DerivativeState.READY, 1)
+        summary = _summary(db_session, artifact)
+        assert [view.id for view in summary.published.views] == [
+            "orbit-0",
+            "orbit-1",
+            "orbit-2",
+            "orbit-3",
+        ]
+
+    def test_publishes_the_bytes_the_batch_would(self, db_session, artifact):
+        producers.derive_mesh(artifact.id)
+        from_pass = get_backend().read_bytes(
+            _views_row(db_session, artifact).storage_key
+        )
+        with get_session_factory().scoped_session() as session:
+            file = session.get(type(artifact), artifact.id)
+            # An audit-style invalidation: the batch renders the set again.
+            records.invalidate(session, file, [DerivativeKind.PREVIEWS])
+            session.commit()
+
+        assert previews.derive(artifact.id).kinds == {
+            DerivativeKind.PREVIEWS: DerivativeState.READY
+        }
+        from_batch = get_backend().read_bytes(
+            _views_row(db_session, artifact).storage_key
+        )
+        assert from_batch == from_pass
+
+    def test_includes_poles_when_enabled(self, db_session, artifact):
+        policy.update(
+            db_session, {policy.SettingName.PREVIEW_POLES: True}, commit=False
+        )
+        db_session.commit()
+
+        producers.derive_mesh(artifact.id)
+
+        manifest = json.loads(_views_row(db_session, artifact).output_json)
+        assert [view["id"] for view in manifest["views"]][-2:] == ["top", "bottom"]
+
+    def test_claims_no_views_while_previews_are_disabled(self, db_session, artifact):
+        policy.update(db_session, {policy.SettingName.PREVIEWS: False}, commit=False)
+        db_session.commit()
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert DerivativeKind.PREVIEWS not in outcome.kinds
+        assert _views_row(db_session, artifact) is None
+
+    def test_keeps_an_already_ready_set(self, db_session, artifact, ready):
+        producers.derive_mesh(artifact.id)
+
+        row = _views_row(db_session, artifact)
+        assert (row.storage_key, row.attempts) == (ready.storage_key, ready.attempts)
+
+    def test_leaves_views_to_the_batch_when_the_cover_owes_nothing(
+        self, db_session, artifact
+    ):
+        policy.update(db_session, {policy.SettingName.PREVIEWS: False}, commit=False)
+        db_session.commit()
+        producers.derive_mesh(artifact.id)
+        policy.update(db_session, {policy.SettingName.PREVIEWS: True}, commit=False)
+        db_session.commit()
+
+        assert producers.derive_mesh(artifact.id).kinds == {}
+        assert _views_row(db_session, artifact) is None
+
+    def test_records_the_load_refusal_of_an_unreadable_source(
+        self, db_session, stored, local_storage
+    ):
+        artifact = stored("broken.stl", b"not geometry")
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds[DerivativeKind.PREVIEWS] is DerivativeState.FAILED
+        row = _views_row(db_session, artifact)
+        # Deterministic, as the batch records it: no second load is scheduled.
+        assert (row.failure_reason, row.next_attempt_at) == ("invalid_source", None)
+
+    def test_leaves_views_retryable_when_the_worker_dies(
+        self, db_session, artifact, monkeypatch
+    ):
+        from app.modules.media import mesh_isolation
+        from app.modules.media.mesh_contracts import ThumbnailFailureReason
+
+        def crash(*args, **kwargs):
+            raise mesh_isolation.MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
+
+        monkeypatch.setattr(mesh_isolation, "generate", crash)
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds[DerivativeKind.PREVIEWS] is DerivativeState.FAILED
+        row = _views_row(db_session, artifact)
+        assert row.failure_reason == "worker_failed"
+        assert row.next_attempt_at is not None
+
+    def test_yields_views_to_a_superseding_attempt(
+        self, db_session, artifact, monkeypatch
+    ):
+        from app.modules.derivatives import preview_publication
+
+        original = preview_publication.publish
+
+        def supersede(file, *args, **kwargs):
+            # A regeneration claims the views while the cover pass publishes.
+            with get_session_factory().scoped_session() as session:
+                row = session.get(type(artifact), artifact.id)
+                records.begin(
+                    session, row, DerivativeKind.PREVIEWS, PREVIEWS_RECIPE, now=utcnow()
+                )
+                session.commit()
+            return original(file, *args, **kwargs)
+
+        monkeypatch.setattr(preview_publication, "publish", supersede)
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert DerivativeKind.PREVIEWS not in outcome.kinds
+        assert outcome.kinds[DerivativeKind.THUMBNAIL] is DerivativeState.READY
+        row = _views_row(db_session, artifact)
+        assert (row.state, row.storage_key) == (DerivativeState.RUNNING, None)
+
+    def test_rebuilds_views_with_a_regenerated_cover(
+        self, db_session, artifact, ready, make_derivative_group_regeneration
+    ):
+        attempts, published = ready.attempts, ready.storage_key
+        requested = utcnow()
+        for definition, kind in (
+            (JobKind.DERIVATIVES_PREVIEWS, DerivativeKind.PREVIEWS),
+            (JobKind.DERIVATIVES_MESH, DerivativeKind.THUMBNAIL),
+        ):
+            make_derivative_group_regeneration(definition, kind, requested_at=requested)
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds[DerivativeKind.PREVIEWS] is DerivativeState.READY
+        row = _views_row(db_session, artifact)
+        assert row.attempts == attempts + 1
+        assert row.storage_key != published
+
+    @pytest.mark.parametrize("width", [320, 1280], ids=str)
+    def test_keeps_large_views_independent_of_card_image_quality(
+        self, db_session, artifact, monkeypatch, width
+    ):
+        from app.core.config import _overlay
+
+        # What saving "Model image quality" in Settings leaves in effect.
+        monkeypatch.setitem(_overlay, "model_thumbnail_width", width)
+
+        producers.derive_mesh(artifact.id)
+
+        manifest = json.loads(_views_row(db_session, artifact).output_json)
+        assert {(v["width"], v["height"]) for v in manifest["views"]} == {(1280, 960)}
+        card = db_session.exec(
+            select(ArtifactDerivative).where(
+                ArtifactDerivative.file_id == artifact.id,
+                ArtifactDerivative.kind == DerivativeKind.THUMBNAIL,
+            )
+        ).one()
+        card_output = json.loads(card.output_json)
+        assert (card_output["width"], card_output["height"]) == (width, width * 3 // 4)
+
+
+class TestCoverPassRecovery:
+    """Views a cover pass claimed never wait out the stale window."""
+
+    def test_gives_new_views_back_when_the_cover_pass_crashes(
+        self, db_session, artifact, monkeypatch
+    ):
+        from app.modules.media import mesh_isolation
+
+        working = mesh_isolation.generate
+
+        def crash(*args, **kwargs):
+            raise RuntimeError("renderer segfaulted")
+
+        monkeypatch.setattr(mesh_isolation, "generate", crash)
+
+        with pytest.raises(RuntimeError):
+            producers.derive_mesh(artifact.id)
+
+        assert _views_row(db_session, artifact) is None
+        monkeypatch.setattr(mesh_isolation, "generate", working)
+        assert previews.derive(artifact.id).kinds == {
+            DerivativeKind.PREVIEWS: DerivativeState.READY
+        }
+
+    def test_restores_the_row_a_crashed_cover_pass_replaced(
+        self, db_session, artifact, make_derivative, monkeypatch
+    ):
+        from app.modules.media import mesh_isolation
+
+        retry_at = utcnow() - timedelta(minutes=1)
+        make_derivative(
+            artifact,
+            DerivativeKind.PREVIEWS,
+            state=DerivativeState.FAILED,
+            failure_reason="timeout",
+            next_attempt_at=retry_at,
+        )
+
+        def crash(*args, **kwargs):
+            raise RuntimeError("renderer segfaulted")
+
+        monkeypatch.setattr(mesh_isolation, "generate", crash)
+
+        with pytest.raises(RuntimeError):
+            producers.derive_mesh(artifact.id)
+
+        row = _views_row(db_session, artifact)
+        assert (row.state, row.attempts, row.failure_reason) == (
+            DerivativeState.FAILED,
+            1,
+            "timeout",
+        )
+        assert row.next_attempt_at.replace(tzinfo=None) == retry_at.replace(tzinfo=None)
+
+    def test_finishes_views_a_dead_cover_pass_stranded(
+        self, db_session, artifact, make_derivative
+    ):
+        policy.update(db_session, {policy.SettingName.PREVIEWS: False}, commit=False)
+        db_session.commit()
+        producers.derive_mesh(artifact.id)
+        policy.update(db_session, {policy.SettingName.PREVIEWS: True}, commit=False)
+        db_session.commit()
+        # The previous cover pass claimed the views, then its process died.
+        make_derivative(
+            artifact, DerivativeKind.PREVIEWS, state=DerivativeState.RUNNING
+        )
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds == {DerivativeKind.PREVIEWS: DerivativeState.READY}
+
+    def test_leaves_views_the_batch_is_rendering(
+        self, db_session, artifact, make_derivative, make_job
+    ):
+        claimed = make_derivative(
+            artifact, DerivativeKind.PREVIEWS, state=DerivativeState.RUNNING
+        )
+        make_job(
+            kind=JobKind.DERIVATIVES_PREVIEWS,
+            state=JobState.RUNNING,
+            subject=f"file/{artifact.id}",
+        )
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert DerivativeKind.PREVIEWS not in outcome.kinds
+        row = _views_row(db_session, artifact)
+        assert (row.state, row.attempt_token) == (
+            DerivativeState.RUNNING,
+            claimed.attempt_token,
+        )
+
+    @pytest.mark.parametrize("hook", ["on_failure", "cancel"])
+    def test_cover_job_hooks_turn_stranded_views_into_a_retry(
+        self, db_session, artifact, make_derivative, hook
+    ):
+        from app.modules.derivatives.jobs import definitions
+
+        make_derivative(
+            artifact, DerivativeKind.PREVIEWS, state=DerivativeState.RUNNING
+        )
+        (cover,) = [d for d in definitions() if d.name is JobKind.DERIVATIVES_MESH]
+
+        if hook == "on_failure":
+            cover.on_failure(db_session, f"file/{artifact.id}", "worker_failed")
+        else:
+            cover.cancel(db_session, f"file/{artifact.id}")
+        db_session.commit()
+
+        row = _views_row(db_session, artifact)
+        assert (row.state, row.failure_reason) == (
+            DerivativeState.FAILED,
+            "worker_failed",
+        )
+        assert row.next_attempt_at is not None

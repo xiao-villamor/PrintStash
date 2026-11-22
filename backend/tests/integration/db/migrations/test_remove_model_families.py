@@ -102,7 +102,12 @@ class TestRemoveModelFamiliesMigration:
                     ).scalar_one()
                     == "original.gcode"
                 )
-                assert session.get(PrintJob, job_id).model_id == model_id
+                assert (
+                    session.exec(
+                        select(PrintJob.model_id).where(PrintJob.id == job_id)
+                    ).one()
+                    == model_id
+                )
                 assert (
                     session.exec(
                         select(MultipartModel.name).where(

@@ -7,24 +7,37 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import numpy as np
-from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
-from printstash_core.mesh.rasterizer import render_prepared_thumbnail
-from printstash_core.mesh.render_geometry import prepare_mesh, prepare_normals
+from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, preview_appearance
+from printstash_core.mesh.rasterizer import (
+    _select_view_rotation,
+    render_prepared_thumbnail,
+)
+from printstash_core.mesh.render_geometry import (
+    PreparedRenderGeometry,
+    RenderableMesh,
+    prepare_mesh,
+    prepare_normals,
+)
+from printstash_core.mesh.similarity import GeometryError
+from printstash_core.mesh.similarity.components import ExpandedScene
 
 from app.core.cancellation import checkpoint
-from app.modules.media import thumbnail
+from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.preview_contracts import (
-    HEIGHT,
+    GALLERY_WIDTH,
     MAX_IMAGE_BYTES,
-    WIDTH,
+    MAX_STRIP_BYTES,
+    STRIP_WIDTH,
     CameraView,
     Matrix,
     PreviewLimitError,
     PreviewManifest,
+    PreviewSpan,
     PublishedView,
     ViewId,
     ViewProfile,
     ViewRole,
+    height_for,
 )
 
 if TYPE_CHECKING:
@@ -65,7 +78,13 @@ def _orbit(azimuth: float) -> Matrix:
 def candidates(
     mesh: Trimesh, *, max_faces: int, include_poles: bool = False
 ) -> tuple[ViewProfile, tuple[CameraView, ...]]:
-    if not 0 < len(mesh.faces) <= max_faces:
+    return _cameras(len(mesh.faces), max_faces=max_faces, include_poles=include_poles)
+
+
+def _cameras(
+    face_count: int, *, max_faces: int, include_poles: bool
+) -> tuple[ViewProfile, tuple[CameraView, ...]]:
+    if not 0 < face_count <= max_faces:
         raise PreviewLimitError
     views: list[CameraView] = []
     for index in range(4):
@@ -98,72 +117,217 @@ def candidates(
 
 
 def render_views(
-    mesh: Trimesh,
+    mesh: RenderableMesh,
     *,
     source_sha256: str,
     max_faces: int,
+    width: int,
     recipe: int = 1,
     include_poles: bool = False,
     progress: Callable[[int, int], None] | None = None,
+    planar_cover: Matrix | None = None,
 ) -> tuple[PreviewManifest, list[bytes]]:
-    profile, views = candidates(mesh, max_faces=max_faces, include_poles=include_poles)
+    faces = mesh.faces
+    if faces is None:
+        raise ValueError("preview_no_geometry")
+    if not 0 < len(faces) <= max_faces:
+        raise PreviewLimitError
     geometry = prepare_mesh(mesh)
     if geometry is None:
         raise ValueError("preview_no_geometry")
+    used = np.asarray(mesh.vertices)[np.unique(faces)]
+    return render_prepared_views(
+        geometry,
+        center=(used.min(axis=0) + used.max(axis=0)) * 0.5,
+        source_sha256=source_sha256,
+        max_faces=max_faces,
+        width=width,
+        recipe=recipe,
+        include_poles=include_poles,
+        progress=progress,
+        planar_cover=planar_cover,
+    )
+
+
+def render_prepared_views(
+    geometry: PreparedRenderGeometry,
+    *,
+    center,
+    source_sha256: str,
+    max_faces: int,
+    width: int,
+    recipe: int,
+    include_poles: bool,
+    progress: Callable[[int, int], None] | None = None,
+    planar_cover: Matrix | None = None,
+) -> tuple[PreviewManifest, list[bytes]]:
+    """Render the view set from geometry the caller already holds.
+
+    ``geometry`` is centred on its referenced bounding box, as both
+    ``prepare_mesh`` and ``prepare_scene`` produce it; ``center`` is that box's
+    centre in source coordinates. The cover pass and the standalone batch both
+    end here, so one mesh load can serve the cover and every view.
+    """
+    profile, views = _cameras(
+        geometry.face_count, max_faces=max_faces, include_poles=include_poles
+    )
+    cover_view = None
+    if width >= GALLERY_WIDTH:
+        rotation = planar_cover
+        # Legacy standing-plate covers could look up from below the bed.
+        if rotation is None or rotation[2][2] >= -1e-6:
+            rotation = _matrix(_select_view_rotation(geometry.vertices))
+        matching = next(
+            (view for view in views if np.allclose(view.rotation, rotation)), None
+        )
+        if matching is not None:
+            cover_view = matching.id
+        else:
+            cover_view = ViewId.FACE
+            views += (
+                CameraView(
+                    id=cover_view,
+                    role=ViewRole.FACE,
+                    rotation=rotation,
+                    azimuth_degrees=None,
+                    elevation_degrees=90
+                    if np.allclose(rotation, _looking_from((0, 0, 1)))
+                    else None,
+                ),
+            )
+    # The canonical encoder brings G-code and printer models with it; a cover
+    # worker loads it only once it renders views, never at startup.
+    from app.modules.media import thumbnail
+
+    height = height_for(width)
     prepared = prepare_normals(geometry)
-    used = np.asarray(mesh.vertices)[np.unique(mesh.faces)]
-    center = (used.min(axis=0) + used.max(axis=0)) * 0.5
     images: list[bytes] = []
     published: list[PublishedView] = []
     offset = 0
-    for view in views:
+    for index, view in enumerate(views, start=1):
         checkpoint(force=True)
         encoded = render_prepared_thumbnail(
             prepared,
             view.id,
-            WIDTH,
-            HEIGHT,
+            width,
+            height,
             view_rotation=np.asarray(view.rotation),
             output_format="WEBP",
         )
         if encoded is None:
             raise ValueError("preview_renderer_no_output")
         # Every advertised image crosses the same canonical validation seam.
-        encoded = thumbnail.to_webp(
-            encoded,
-            width=WIDTH,
-            normalize=False,
-            preserve_frame=True,
-            renderer_encoded=True,
-        )
+        try:
+            encoded = thumbnail.to_webp(
+                encoded,
+                width=width,
+                normalize=False,
+                preserve_frame=True,
+                renderer_encoded=True,
+            )
+        except thumbnail.EmptyThumbnailError:
+            # A pole of a plate standing on edge sees less than a pixel. The
+            # orbit still shows the Model, so that one view is left out; an
+            # empty orbit view means there is nothing to show at all.
+            if view.role is ViewRole.ORBIT:
+                raise
+            if progress is not None:
+                progress(index, len(views))
+            continue
         if len(encoded) > MAX_IMAGE_BYTES:
             raise PreviewLimitError
         points = geometry.vertices @ np.asarray(view.rotation).T.astype(np.float32)
         minimum, maximum = points[:, :2].min(axis=0), points[:, :2].max(axis=0)
         extent = np.maximum(maximum - minimum, 1e-6)
         scale = min(
-            WIDTH * (1 - 2 * PREVIEW_PROFILE.margin_fraction) / extent[0],
-            HEIGHT * (1 - 2 * PREVIEW_PROFILE.margin_fraction) / extent[1],
+            width * (1 - 2 * PREVIEW_PROFILE.margin_fraction) / extent[0],
+            height * (1 - 2 * PREVIEW_PROFILE.margin_fraction) / extent[1],
         )
+        strip = None
+        if width >= GALLERY_WIDTH:
+            strip = thumbnail.to_webp(encoded, width=STRIP_WIDTH, normalize=False)
+            if len(strip) > MAX_STRIP_BYTES:
+                raise PreviewLimitError
         published.append(
             PublishedView(
                 **view.model_dump(),
+                width=width,
+                height=height,
                 view_center=tuple((minimum + maximum) * 0.5),
                 pixels_per_unit=float(scale),
                 offset=offset,
                 size=len(encoded),
                 sha256=hashlib.sha256(encoded).hexdigest(),
+                thumbnail=PreviewSpan(
+                    offset=offset + len(encoded),
+                    size=len(strip),
+                    sha256=hashlib.sha256(strip).hexdigest(),
+                )
+                if strip is not None
+                else None,
             )
         )
         images.append(encoded)
         offset += len(encoded)
+        if strip is not None:
+            images.append(strip)
+            offset += len(strip)
         if progress is not None:
-            progress(len(images), len(views))
+            progress(index, len(views))
     return PreviewManifest(
         source_sha256=source_sha256,
         recipe=recipe,
         profile=profile,
-        center=tuple(center),
+        appearance=preview_appearance().fingerprint,
+        center=(float(center[0]), float(center[1]), float(center[2])),
         views=tuple(published),
+        cover_view=cover_view
+        if any(view.id == cover_view for view in published)
+        else None,
         size=offset,
     ), images
+
+
+def scene_center(scene: ExpandedScene):
+    """The placed bounding-box centre ``prepare_scene`` frames a scene around."""
+    minimum = np.full(3, np.inf)
+    maximum = np.full(3, -np.inf)
+    by_id = {resource.resource_id: resource for resource in scene.resources}
+    for instance in scene.instances:
+        resource = by_id[instance.resource_id]
+        source = resource.vertices[np.unique(resource.faces)]
+        placed = source @ instance.transform[:3, :3].T + instance.transform[:3, 3]
+        minimum = np.minimum(minimum, placed.min(axis=0))
+        maximum = np.maximum(maximum, placed.max(axis=0))
+    return (minimum + maximum) * 0.5
+
+
+_RESOURCE_CODES = frozenset(
+    {
+        "geometry_work_limit",
+        "resource_limit",
+        "scene_resource_limit",
+        "archive_resource_limit",
+    }
+)
+
+
+# GeometryError is a ValueError. Anything else is a bug for the supervisor.
+RENDER_FAILURES = (PreviewLimitError, ImportError, ValueError)
+
+
+def failure_reason(exc: Exception) -> ThumbnailFailureReason:
+    """The closed reason reported for one of ``RENDER_FAILURES``."""
+    if isinstance(exc, PreviewLimitError):
+        return ThumbnailFailureReason.RESOURCE_LIMIT
+    if isinstance(exc, GeometryError):
+        if exc.code in _RESOURCE_CODES:
+            return ThumbnailFailureReason.RESOURCE_LIMIT
+        if exc.code in {"unsupported_geometry", "step_unavailable"}:
+            return ThumbnailFailureReason.UNSUPPORTED_CAPABILITY
+        return ThumbnailFailureReason.INVALID_SOURCE
+    if isinstance(exc, ImportError):
+        return ThumbnailFailureReason.UNSUPPORTED_CAPABILITY
+    if isinstance(exc, ValueError):
+        return ThumbnailFailureReason.INVALID_SOURCE
+    raise TypeError(f"unexpected_preview_failure:{type(exc).__name__}") from exc

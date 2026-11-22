@@ -13,13 +13,15 @@ export function LibraryCardDetailsPlaceholder() {
   return (
     <div aria-hidden className="flex flex-col bg-card">
       <div className="library-card-content library-card-standard">
-        <h3>
+        <h3 className="h-[1lh]">
           <Skeleton className="h-4 w-3/4 animate-none" />
         </h3>
       </div>
       <div className="library-card-summary-container">
         <div className="library-card-revision-summary">
-          <span className="sr-only" />
+          <div className="library-card-context flex items-center">
+            <Skeleton className="h-3 w-1/4 animate-none" />
+          </div>
           <div className="library-card-meta items-center">
             <Skeleton className="h-3 w-1/3 animate-none" />
             <Skeleton className="h-3 w-10 animate-none" />

@@ -22,6 +22,7 @@ import { printerDetailOptions } from "@/features/printers/queries";
 import { documentDetailOptions } from "@/lib/queries/documents";
 import { LibraryBackLink } from "@/features/library/navigation";
 import { uiText } from "@/lib/locale";
+import { displayModelName } from "@/lib/display-name";
 import { userMessage } from "@/lib/errors";
 import { lastVaultHref } from "@/lib/last-collection";
 import { useI18n, type MessageKey } from "@/lib/i18n";
@@ -295,11 +296,18 @@ export function TopBar() {
           <span aria-hidden className="text-muted-foreground">
             /
           </span>
-          <span className="min-w-0 truncate font-medium text-foreground" aria-current="page">
+          <span
+            className="min-w-0 truncate font-medium text-foreground"
+            aria-current="page"
+            aria-label={modelId !== null ? record?.name : undefined}
+            title={modelId !== null ? record?.name : undefined}
+          >
             {printerName
               ? printerName
               : recordRoute && record
-                ? record.name
+                ? modelId !== null
+                  ? displayModelName(record.name)
+                  : record.name
                 : titleKey
                   ? t(titleKey)
                   : t("Page not found")}

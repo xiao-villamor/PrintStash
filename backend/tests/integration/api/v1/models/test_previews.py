@@ -7,6 +7,7 @@ import trimesh
 
 from app.core.time import utcnow
 from app.db.models import CollectionRole, DerivativeKind, FileType
+from app.modules.derivatives.kinds import PREVIEWS_RECIPE
 from app.modules.library.model_views.previews import generation
 from app.modules.media.preview_views import render_views
 from app.modules.storage.storage_backend.runtime import get_backend
@@ -25,7 +26,8 @@ def rendered():
         trimesh.creation.box(extents=(10, 12, 14)),
         source_sha256="a" * 64,
         max_faces=2_000_000,
-        recipe=3,
+        width=640,
+        recipe=PREVIEWS_RECIPE,
     )
 
 

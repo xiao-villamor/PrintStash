@@ -55,7 +55,9 @@ def _remote_modified(raw: dict[str, Any]) -> datetime | None:
         return None
 
 
-def build_traceable_remote_filename(file: File) -> str:
+def build_traceable_remote_filename(
+    file: File, *, plate_index: int | None = None
+) -> str:
     """Return a Moonraker-safe filename with a Vault revision marker."""
     filename = PurePosixPath(file.original_filename)
     recognized_suffixes = {".gcode", ".bgcode", ".g", ".gco"}
@@ -74,9 +76,10 @@ def build_traceable_remote_filename(file: File) -> str:
             suffix = ".gcode"
         stem = filename.stem or "print"
     safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip(".-_") or "print"
+    plate_suffix = f"-plate-{plate_index}" if plate_index is not None else ""
     marker = f"vault-f{file.id}-{file.sha256[:12]}"
-    max_stem_len = max(1, 512 - len(marker) - len(suffix) - 2)
-    return f"{safe_stem[:max_stem_len]}__{marker}{suffix}"
+    max_stem_len = max(1, 512 - len(marker) - len(suffix) - len(plate_suffix) - 2)
+    return f"{safe_stem[:max_stem_len]}{plate_suffix}__{marker}{suffix}"
 
 
 def _find_marker_match(
@@ -160,6 +163,7 @@ def upsert_printer_file(
     sha256: str | None = None,
     matched_by: str | None = None,
     modified_at: datetime | None = None,
+    plate_index: int | None = None,
 ) -> PrinterFile:
     now = utcnow()
     row = session.exec(
@@ -175,7 +179,12 @@ def upsert_printer_file(
         file_id, matched_by = _find_match(
             session, printer_id, remote_filename, size_bytes
         )
-
+        # Inventory refresh does not carry plate metadata. Keep the known plate
+        # only while the remote file still resolves to the same Artifact.
+        if row.file_id != file_id:
+            row.plate_index = None
+    else:
+        row.plate_index = plate_index
     row.file_id = file_id
     row.size_bytes = size_bytes
     row.sha256 = sha256

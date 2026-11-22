@@ -85,6 +85,7 @@ export type FileRevisionStatus = "known_good" | "needs_test" | "failed" | "archi
 export type CollectionRole = "view" | "edit" | "admin";
 
 export interface FileRead {
+  sliced_geometry?: "gcode_only" | null;
   id: number;
   model_id: number;
   original_filename: string;
@@ -510,6 +511,7 @@ export type JobKind =
   | "ingestion.upload_recovery"
   | "ingestion.url"
   | "ingestion.url_selection"
+  | "ingestion.samples"
   | "ingestion.scratch_cleanup"
   | "notifications.deliver"
   | "notifications.retention"

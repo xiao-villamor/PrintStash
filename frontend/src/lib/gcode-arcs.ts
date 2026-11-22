@@ -1,4 +1,4 @@
-/** Circular interpolation in the selected G-code plane, with a bounded chord length. */
+/** Circular interpolation in the selected G-code plane, with a bounded chord error. */
 export type Point = [number, number, number];
 export type Plane = "xy" | "xz" | "yz";
 export interface ArcOptions {
@@ -8,6 +8,11 @@ export interface ArcOptions {
   radius?: number;
   segmentLimit: number;
 }
+
+// A preview chord stays within 20 microns of the commanded circle. A fixed
+// 0.25 mm chord massively over-tessellates the broad arcs slicers emit.
+const MAX_CHORD_ERROR_MM = 0.02;
+const MAX_CHORD_ANGLE = Math.PI / 36;
 
 function sweep(start: number, end: number, clockwise: boolean): number {
   let angle = end - start;
@@ -60,7 +65,9 @@ export function* arcPoints(start: Point, end: Point, options: ArcOptions): Gener
   }
   const initial = Math.atan2(start[v] - cv, start[u] - cu);
   const angle = sweep(initial, Math.atan2(end[v] - cv, end[u] - cu), options.clockwise);
-  const count = Math.max(1, Math.ceil(Math.abs(angle) / Math.min(Math.PI / 36, 0.25 / radius)));
+  // This form of the sagitta formula remains stable for very large radii.
+  const errorAngle = 4 * Math.asin(Math.sqrt(Math.min(1, MAX_CHORD_ERROR_MM / (2 * radius))));
+  const count = Math.max(1, Math.ceil(Math.abs(angle) / Math.min(MAX_CHORD_ANGLE, errorAngle)));
   if (count > options.segmentLimit) throw new Error("toolpath_segment_limit");
   for (let index = 1; index <= count; index++) {
     if (index === count) {

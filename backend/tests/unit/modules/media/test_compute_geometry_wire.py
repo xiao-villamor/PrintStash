@@ -36,12 +36,12 @@ class TestGeometryWire:
         assert (values["width"], values["height"], values["faces"]) == (64, 48, 1)
         restored, *_ = decode(payload)
         np.testing.assert_array_equal(
-            canonical(restored).smooth_normals, canonical(prepared).smooth_normals
+            canonical(restored).corner_normals, canonical(prepared).corner_normals
         )
         if mode == "visual":
             assert isinstance(restored, VisualRender)
             assert not hasattr(restored, "position_ids")
-            assert not hasattr(restored, "smooth_normals")
+            assert not hasattr(restored, "corner_normals")
             assert len(body) == 48
             assert not restored.vertices.flags.writeable
 

@@ -29,6 +29,7 @@ from app.modules.media.mesh_facts import (
     SampledGeometry,
 )
 from app.modules.media.mesh_telemetry import PhaseStats, SupervisionStats
+from app.modules.media.preview_contracts import Matrix
 from app.modules.media.thumbnail_packet import PacketDescriptor
 
 if TYPE_CHECKING:
@@ -154,6 +155,17 @@ class MeshMeasurements:
 
 
 @dataclass(frozen=True)
+class ViewsRequest:
+    """Multi-angle views rendered from the cover pass's own loaded mesh."""
+
+    recipe: int
+    include_poles: bool
+    source_sha256: str
+    width: int
+    planar_cover: Matrix | None = None
+
+
+@dataclass(frozen=True)
 class ThumbnailRequest:
     path: Path
     file_type: str | None = None
@@ -166,6 +178,10 @@ class ThumbnailRequest:
     include_fingerprint: bool = False
     triangle_cap: int = MAX_ANALYSIS_FACES
     include_thumbnail: bool = True
+    # The derivative producer checks the archive before admitting cover rendering.
+    check_embedded_3mf_preview: bool = True
+    # None: this pass renders no views (the standalone batch may own them).
+    views: ViewsRequest | None = None
 
 
 @dataclass(frozen=True)

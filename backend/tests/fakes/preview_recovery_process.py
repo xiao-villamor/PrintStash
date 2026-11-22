@@ -1,4 +1,4 @@
-"""Drive real preview work and expose an OS-stopped worker to the parent."""
+"""Drive real preview work and expose an OS-stopped cover worker to the parent."""
 
 import hashlib
 import signal
@@ -46,12 +46,33 @@ def hold():
     stopped = threading.Event()
     observed = {}
 
+    def cover_published() -> bool:
+        from sqlmodel import col, select
+
+        from app.db.models import File
+        from app.db.session import get_session_factory
+
+        with get_session_factory().scoped_session() as session:
+            return (
+                session.exec(
+                    select(File.id).where(col(File.thumbnail_path).is_not(None))
+                ).first()
+                is not None
+            )
+
     def intercept():
+        # The cover pass renders the views after publishing the cover: stop
+        # its worker in that window, with the cover durable and views owed.
         deadline = time.monotonic() + 80
         while time.monotonic() < deadline:
             for child in psutil.Process().children(recursive=True):
                 try:
-                    if "app.modules.media.preview_worker" in child.cmdline():
+                    # Native workers fork from the template without exec: the
+                    # cover pass is the template's child, not a fresh command.
+                    if (
+                        "app.modules.media.worker_template" in child.parent().cmdline()
+                        and cover_published()
+                    ):
                         child.send_signal(signal.SIGSTOP)
                         observed["native_pid"] = child.pid
                         stopped.set()
@@ -71,7 +92,8 @@ def hold():
             files={
                 "file": (
                     "restart.stl",
-                    trimesh.creation.box().export(file_type="stl"),
+                    # Dense enough that its views outlast the watcher's poll.
+                    trimesh.creation.icosphere(subdivisions=6).export(file_type="stl"),
                     "model/stl",
                 )
             },

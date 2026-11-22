@@ -18,11 +18,10 @@ from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 
 class TestPreviewProfile:
     @staticmethod
-    def test_canonical_thumbnail_profile_is_stable() -> None:
-        assert PREVIEW_PROFILE.version == 5
+    def test_studio_thumbnail_framing_is_stable() -> None:
+        assert PREVIEW_PROFILE.version == 8
         assert PREVIEW_PROFILE.aspect_ratio == (4, 3)
         assert PREVIEW_PROFILE.margin_fraction == 0.10
-        assert PREVIEW_PROFILE.material_albedo == (0.70, 0.75, 0.84)
         assert PREVIEW_PROFILE.hero_azimuth_degrees == -35.0
         assert PREVIEW_PROFILE.hero_elevation_degrees == 30.0
         assert PREVIEW_PROFILE.flat_tilt_degrees == 25.0
@@ -33,6 +32,20 @@ class TestPreviewProfile:
         assert PREVIEW_PROFILE.encoding_quality == 85
         assert PREVIEW_PROFILE.encoding_lossless is False
         assert PREVIEW_PROFILE.encoding_exact is False
+
+    @staticmethod
+    def test_studio_looks_have_the_canonical_palette() -> None:
+        colours = [
+            tuple(round(channel * 255) for channel in studio.albedo)
+            for studio in profile_module.STUDIO_LOOKS.values()
+        ]
+        assert colours == [
+            (159, 184, 218),
+            (94, 139, 203),
+            (142, 151, 166),
+            (110, 115, 124),
+            (205, 188, 168),
+        ]
 
     @staticmethod
     def test_generated_frontend_profile_matches_manifest() -> None:
@@ -78,7 +91,20 @@ class TestPreviewProfile:
         [
             lambda payload: payload.__setitem__("aspectRatio", [4]),
             lambda payload: payload.__setitem__("marginFraction", 0.5),
-            lambda payload: payload.__setitem__("material", {"albedo": [1, 2]}),
+            lambda payload: payload["looks"]["sky"].__setitem__("albedo", [1, 2]),
+            lambda payload: payload["looks"].pop("sand"),
+            lambda payload: payload["looks"].__setitem__("other", {}),
+            lambda payload: payload["looks"]["sky"].__setitem__("key", -1),
+            lambda payload: payload["looks"]["slate"].__setitem__(
+                "ambient", float("inf")
+            ),
+            lambda payload: payload["lighting"]["key"].__setitem__(
+                "direction", [0, 0, 0]
+            ),
+            lambda payload: payload["lighting"]["fill"].__setitem__(
+                "colour", [1, True, 1]
+            ),
+            lambda payload: payload["lighting"]["rim"].__setitem__("power", 0),
             lambda payload: payload["encoding"].__setitem__("method", -1),
             lambda payload: payload["encoding"].__setitem__("method", 7),
             lambda payload: payload["encoding"].__setitem__("quality", -1),
@@ -90,7 +116,14 @@ class TestPreviewProfile:
         ids=[
             "aspect",
             "margin",
-            "material",
+            "albedo",
+            "missing-look",
+            "unknown-look",
+            "negative-key",
+            "nonfinite-ambient",
+            "zero-direction",
+            "boolean-colour",
+            "zero-power",
             "negative-method",
             "excess-method",
             "negative-quality",
@@ -100,7 +133,7 @@ class TestPreviewProfile:
             "nonboolean-exact",
         ],
     )
-    def test_profile_structure_rejects_invalid_recipe(monkeypatch, mutate) -> None:
+    def test_profile_structure_rejects_invalid_recipe(mutate) -> None:
         manifest = json.loads(
             (
                 Path(profile_module.__file__).with_name("preview_profile.json")
@@ -109,14 +142,5 @@ class TestPreviewProfile:
         mutate(manifest)
         encoded = json.dumps(manifest).encode()
 
-        class Resource:
-            def joinpath(self, _name: str):
-                return self
-
-            def read_bytes(self) -> bytes:
-                return encoded
-
-        monkeypatch.setattr(profile_module, "files", lambda _package: Resource())
-
         with pytest.raises(ValueError, match="preview_profile_invalid"):
-            profile_module._load_profile()
+            profile_module._parse_studio_profile(encoded, manifest)

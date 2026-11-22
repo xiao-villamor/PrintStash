@@ -659,24 +659,35 @@ class TestRenderStlPreviewIsolated:
         assert pixels[0, 0, 3] == 0
         assert int((pixels[:, :, 3] > 200).sum()) > 0
 
+    @pytest.mark.parametrize("floor_grid", [False, True], ids=["plain", "with-grid"])
     def test_streaming_preview_preserves_true_annulus_hole(
-        self, tmp_path: Path
+        self, tmp_path: Path, floor_grid: bool
     ) -> None:
         import numpy as np
         from PIL import Image
+        from printstash_core.mesh.floor_grid import GRID_ALPHA
+        from printstash_core.mesh.preview_profile import (
+            PreviewAppearance,
+            appearance_scope,
+        )
 
         path = tmp_path / "annulus.stl"
         _binary_annulus_stl(path)
-        result = render_stl_preview_isolated(
-            path, width=160, height=120, limits=_limits()
-        )
+        with appearance_scope(PreviewAppearance(floor_grid=floor_grid)):
+            result = render_stl_preview_isolated(
+                path, width=160, height=120, limits=_limits()
+            )
 
         assert result is not None
         pixels = np.asarray(Image.open(io.BytesIO(result.png)).convert("RGBA"))
         alpha = pixels[:, :, 3]
         center = alpha[alpha.shape[0] // 2, alpha.shape[1] // 2]
-        assert center < 32
-        assert float((alpha > 200).mean()) > 0.10
+        grid_alpha_ceiling = int(GRID_ALPHA * 255)
+        if floor_grid:
+            assert 32 <= center <= grid_alpha_ceiling
+        else:
+            assert center < 32
+        assert float((alpha > grid_alpha_ceiling).mean()) > 0.10
 
     def test_translated_mesh_is_centered_in_preview(self, tmp_path: Path) -> None:
         import numpy as np

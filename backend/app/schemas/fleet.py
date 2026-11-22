@@ -13,6 +13,7 @@ class QueueJobCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     file_id: int = Field(gt=0)
+    plate_index: int | None = Field(default=None, ge=0)
     strategy: RoutingStrategy = RoutingStrategy.MANUAL
     printer_id: Optional[int] = Field(default=None, gt=0)
     spool_id: Optional[int] = None
@@ -70,6 +71,7 @@ class BatchRouting(BaseModel):
 
 class BatchCreate(BatchRouting):
     file_id: int = Field(gt=0)
+    plate_index: int | None = Field(default=None, ge=0)
     quantity: int = Field(gt=0)
 
 

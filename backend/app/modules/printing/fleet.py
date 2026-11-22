@@ -37,6 +37,7 @@ from app.db.models import (
     User,
 )
 from app.db.scopes import live
+from app.modules.media.sliced_gcode import selected_plate
 from app.modules.printing.feed_fit import Feed, FeedFit, Need, fit_requirements
 from app.modules.printing.printer_files import build_traceable_remote_filename
 from app.modules.printing.printer_provider import capabilities_for_provider
@@ -505,6 +506,7 @@ def enqueue_job(
         raise FleetError("file_not_found")
     if artifact.file_type != FileType.GCODE:
         raise FleetError("file_not_gcode")
+    plate_index = selected_plate(artifact, payload.plate_index)
     snapshot = build_routing_snapshot(session, {int(artifact.id)})
     printer, blocked_reason = choose_printer(
         session,
@@ -528,7 +530,10 @@ def enqueue_job(
         printer_name=printer.name if printer else None,
         file_id=artifact.id,
         model_id=artifact.model_id,
-        remote_filename=build_traceable_remote_filename(artifact),
+        remote_filename=build_traceable_remote_filename(
+            artifact, plate_index=plate_index
+        ),
+        plate_index=plate_index,
         state=PrintJobState.QUEUED,
         routing_strategy=payload.strategy,
         queue_position=max((row.queue_position for row in queued), default=0) + 1,
@@ -575,6 +580,7 @@ def create_batch(
         raise FleetError("file_not_found")
     if artifact.file_type != FileType.GCODE:
         raise FleetError("file_not_gcode")
+    plate_index = selected_plate(artifact, payload.plate_index)
     now = utcnow()
     batch = PrintBatch(
         file_id=int(artifact.id),
@@ -627,7 +633,10 @@ def create_batch(
             model_id=artifact.model_id,
             batch_id=batch.id,
             copy_index=copy_index,
-            remote_filename=build_traceable_remote_filename(artifact),
+            remote_filename=build_traceable_remote_filename(
+                artifact, plate_index=plate_index
+            ),
+            plate_index=plate_index,
             state=PrintJobState.QUEUED,
             routing_strategy=payload.strategy,
             queue_position=position,

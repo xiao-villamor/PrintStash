@@ -1,6 +1,6 @@
 // Generated from printstash-core/mesh/preview_profile.json. Do not edit by hand.
 export const THUMBNAIL_PROFILE = {
-  version: 5,
+  version: 8,
   aspectRatio: [4, 3],
   background: "transparent",
   upAxis: "z",
@@ -16,4 +16,11 @@ export const THUMBNAIL_PROFILE = {
     exact: false,
     method: 2,
   },
+} as const;
+export const PREVIEW_LOOK_COLOURS = {
+  sky: "#9FB8DA",
+  printstash_blue: "#5E8BCB",
+  slate: "#8E97A6",
+  graphite: "#6E737C",
+  sand: "#CDBCA8",
 } as const;

@@ -8,11 +8,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
-from printstash_core.mesh.preview_profile import RASTERIZER_RECIPE
 from printstash_core.mesh.render_geometry import PreparedRender
 
 from app.modules.media.compute_geometry import encode, split
-from app.modules.media.compute_render import RECIPE
+from app.modules.media.compute_render import render_recipe
 from app.runtime.compute import client
 from app.runtime.compute.broker import serve
 from app.runtime.compute.contracts import ComputeMode, ComputeUnavailable, Reason
@@ -83,7 +82,7 @@ def main():
             deadline=time.monotonic() + timeout,
             priority=priority,
             request_id=name,
-            recipe=f"{RECIPE}:{RASTERIZER_RECIPE}:64x48:{frames}:0",
+            recipe=render_recipe(64, 48, frames),
             units=frames,
             geometry_key=key,
             geometry_bytes=len(body),
@@ -115,7 +114,8 @@ def main():
                 raise RuntimeError("probe_block_timeout")
             if scenario == "frames":
                 futures = [
-                    pool.submit(request, str(index), frames=4) for index in range(3)
+                    pool.submit(request, str(index), frames=frames)
+                    for index, frames in enumerate((3, 5, 4))
                 ]
                 await_queue(3)
             elif scenario == "deadline":

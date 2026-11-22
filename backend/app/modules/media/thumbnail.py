@@ -7,6 +7,8 @@ import binascii
 import io
 import re
 import warnings
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -23,6 +25,68 @@ _MAX_BASE64_BYTES = 16 * 1024 * 1024
 
 class ThumbnailValidationError(ValueError):
     """A decodable candidate failed the canonical thumbnail contract."""
+
+
+class EmptyThumbnailError(ThumbnailValidationError):
+    """The candidate decoded, but not one pixel of it is opaque."""
+
+
+class PhotoSize(StrEnum):
+    ORIGINAL = "original"
+    THUMBNAIL = "thumbnail"
+
+
+@dataclass(frozen=True)
+class PhotoWebP:
+    data: bytes
+    width: int
+    height: int
+
+
+def to_photo_webp(data: bytes, *, size: PhotoSize) -> PhotoWebP:
+    """Frame a chosen or embedded photo without the renderer's padded matte."""
+    from PIL import Image, ImageOps
+    from printstash_core.mesh.rasterizer import RenderedPixels, encode_rendered_pixels
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data)) as image:
+                if image.width * image.height > _MAX_IMAGE_PIXELS:
+                    raise ThumbnailValidationError("thumbnail_too_large")
+                oriented = ImageOps.exif_transpose(image)
+                rgba = oriented.convert("RGBA")
+                bounds = rgba.getchannel("A").getbbox()
+                if bounds is None:
+                    raise EmptyThumbnailError("thumbnail_empty")
+                width = int(settings.model_thumbnail_width)
+                target = (width, round(width * 3 / 4))
+                # Older chosen and embedded covers had transparent padding baked
+                # into the WebP. Trim only that padding and keep the photo's ratio.
+                if bounds != (0, 0, rgba.width, rgba.height):
+                    rgba = rgba.crop(bounds)
+                elif (
+                    (
+                        size is PhotoSize.ORIGINAL
+                        or (rgba.width <= target[0] and rgba.height <= target[1])
+                    )
+                    and image.format == "WEBP"
+                    and oriented.size == image.size
+                    and not image.getexif()
+                ):
+                    return PhotoWebP(data, rgba.width, rgba.height)
+                if size is PhotoSize.THUMBNAIL:
+                    rgba.thumbnail(target, Image.Resampling.LANCZOS)
+                encoded = encode_rendered_pixels(
+                    RenderedPixels(rgba.width, rgba.height, rgba.tobytes()),
+                    output_format="WEBP",
+                )
+                return PhotoWebP(encoded, rgba.width, rgba.height)
+    except ThumbnailValidationError:
+        raise
+    except Exception as exc:
+        logger.warning("thumbnail: photo conversion failed", exc_info=True)
+        raise ThumbnailValidationError("thumbnail_too_large") from exc
 
 
 def to_webp(
@@ -66,7 +130,7 @@ def to_webp(
                 rgba = img.convert("RGBA")
                 alpha_bounds = rgba.getchannel("A").getbbox()
                 if alpha_bounds is None:
-                    raise ThumbnailValidationError("thumbnail_empty")
+                    raise EmptyThumbnailError("thumbnail_empty")
 
                 if preserve_frame:
                     # Only the complete renderer owns this frame. Embedded

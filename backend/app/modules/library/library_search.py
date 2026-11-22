@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from sqlalchemy import func, or_, union_all
 from sqlalchemy.orm import aliased
-from sqlmodel import select
+from sqlmodel import col, select
 
 from app.db.models import (
     Collection,
@@ -30,7 +30,7 @@ def _escaped_like(value: str) -> str:
     return f"%{escaped}%"
 
 
-def effective_tag_pairs(visible_collection_ids=None):
+def effective_tag_pairs(visible_collection_ids=None, *, model_scope=None):
     """Return ``(tag_id, model_id)`` for every live effective tag association."""
     model_collection = aliased(Collection)
     tagged_collection = aliased(Collection)
@@ -90,6 +90,11 @@ def effective_tag_pairs(visible_collection_ids=None):
     )
     if visible_collection_ids is not None:
         scope = Model.collection_id.in_(visible_collection_ids)  # type: ignore[union-attr]
+        direct = direct.where(scope)
+        artifact = artifact.where(scope)
+        collection = collection.where(scope)
+    if model_scope is not None:
+        scope = col(Model.id).in_(model_scope)
         direct = direct.where(scope)
         artifact = artifact.where(scope)
         collection = collection.where(scope)

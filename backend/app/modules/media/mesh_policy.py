@@ -268,13 +268,9 @@ def ram_triangle_cap(suffix: str, *, lib3mf: bool = False) -> Optional[int]:
         return None
     from app.modules.media.native_budget import face_capacity
 
-    permit = current_permit()
-    memory = (
-        permit.resources.bytes
-        if permit is not None
-        else native_process.native_capacity().bytes
+    return face_capacity(
+        native_process.native_memory_budget_bytes(), suffix, lib3mf=lib3mf
     )
-    return face_capacity(memory, suffix, lib3mf=lib3mf)
 
 
 def load_face_budget(suffix: str, *, lib3mf: bool = False) -> int:

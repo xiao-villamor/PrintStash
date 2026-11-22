@@ -1,4 +1,5 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
+import { DESKTOP_CHROMIUM } from "./tests/playwright-desktop";
 // An installation whose first administrator comes from VAULT_SETUP_ADMIN_*, the way
 // an app-store form provisions it. VAULT_SETUP_MODE=environment keeps browser
 // registration shut, so the flow cannot depend on the trusted-network wizard.
@@ -32,5 +33,5 @@ export default defineConfig({
       reuseExistingServer: false,
     },
   ],
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [{ name: "chromium", use: { ...DESKTOP_CHROMIUM } }],
 });

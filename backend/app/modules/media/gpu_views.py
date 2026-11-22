@@ -1,7 +1,8 @@
 """GPU bounds reduction and constant-size camera preparation per view.
 
-Framing rotates eight corners of the cached AABB; source geometry and exact
-measurements are untouched. No vertex array crosses back to the CPU.
+The cached model-space bounds select the automatic rotation. Each view then
+reduces the rotated positions directly, without a transformed vertex buffer
+or a CPU readback.
 """
 
 from __future__ import annotations
@@ -10,12 +11,37 @@ import math
 from typing import Any
 
 import numpy as np
-from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+from printstash_core.mesh.preview_profile import (
+    MATTE_LIGHTING,
+    PREVIEW_PROFILE,
+    REFERENCE_THUMBNAIL_PROFILE,
+    STUDIO_LOOKS,
+    preview_appearance,
+)
 
-from .gpu_render_layout import FRAME_BYTES, FRAME_STRIDE
+from .gpu_render_layout import BOUND_BYTES, FRAME_BYTES, FRAME_STRIDE
 
-BOUNDS_COMMON = """
-struct Bounds { low: vec4<f32>, high: vec4<f32> };
+FRAME_STRUCT = """
+struct Frame {
+    r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>,
+    projection: vec4<f32>, extent: vec4<f32>,
+    ambient: f32, specular_strength: f32, specular_power: f32, rim_power: f32,
+    albedo: vec3<f32>, studio: f32,
+    key_direction: vec4<f32>, fill_direction: vec4<f32>,
+    key_colour: vec3<f32>, key_strength: f32,
+    fill_colour: vec3<f32>, fill_strength: f32,
+    rim_colour: vec3<f32>, rim_strength: f32,
+    floor: vec4<f32>,
+    footprint: vec4<f32>
+};
+fn rotate(value: vec3<f32>, frame: Frame) -> vec3<f32> {
+    return vec3(dot(value,frame.r0.xyz), dot(value,frame.r1.xyz), dot(value,frame.r2.xyz));
+}
+"""
+BOUND_STRUCT = "struct Bounds { low: vec4<f32>, high: vec4<f32> };"
+BOUNDS_COMMON = (
+    BOUND_STRUCT
+    + """
 @group(0) @binding(1) var<storage, read_write> result: array<Bounds>;
 var<workgroup> lows: array<vec3<f32>, 64>;
 var<workgroup> highs: array<vec3<f32>, 64>;
@@ -35,9 +61,9 @@ fn reduce(local: u32, group: u32) {
     }
 }
 """
-BOUNDS_VERTICES = (
-    BOUNDS_COMMON
-    + """
+)
+BOUNDS_VERTICES = """
+FRAME_BINDING
 @group(0) @binding(0) var<storage, read> source: array<f32>;
 @compute @workgroup_size(64)
 fn bounds(@builtin(local_invocation_index) local: u32,
@@ -48,13 +74,13 @@ fn bounds(@builtin(local_invocation_index) local: u32,
     lows[local] = vec3(3.402823e38); highs[local] = vec3(-3.402823e38);
     if index < arrayLength(&source) / 3u {
         let offset = index * 3u;
-        let value = vec3(source[offset], source[offset+1u], source[offset+2u]);
+        let point = vec3(source[offset], source[offset+1u], source[offset+2u]);
+        let value = BOUNDS_POINT;
         lows[local] = value; highs[local] = value;
     }
     reduce(local, group);
 }
 """
-)
 BOUNDS_REDUCE = (
     BOUNDS_COMMON
     + """
@@ -73,22 +99,16 @@ fn bounds(@builtin(local_invocation_index) local: u32,
 }
 """
 )
-FRAME_STRUCT = """
-struct Frame {
-    r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>,
-    projection: vec4<f32>, extent: vec4<f32>, style: vec4<f32>, albedo: vec4<f32>
-};
-"""
-FRAME_SHADER = (
+CAMERA_SHADER = (
     FRAME_STRUCT
+    + BOUND_STRUCT
     + """
-struct Bounds { low: vec4<f32>, high: vec4<f32> };
 @group(0) @binding(0) var<storage, read> bounds: Bounds;
 @group(0) @binding(1) var<uniform> config: Frame;
 @group(0) @binding(2) var<storage, read_write> frame: Frame;
 AUTO_ROTATIONS
 @compute @workgroup_size(1)
-fn camera() {
+fn select_rotation() {
     var r0 = config.r0; var r1 = config.r1; var r2 = config.r2;
     if config.projection.w != 0. {
         let extents = bounds.high.xyz - bounds.low.xyz;
@@ -98,23 +118,43 @@ fn camera() {
         let broad = min(extents[(axis+1u)%3u], extents[(axis+2u)%3u]);
         var choice = 3u;
         if broad > 1e-6 && extents[axis] / broad <= FLAT_RATIO { choice = axis; }
+        if choice < 2u && config.studio != 0. { choice += 4u; }
         r0 = rotations[choice*3u]; r1 = rotations[choice*3u+1u];
         r2 = rotations[choice*3u+2u];
     }
-    var low = vec3(3.402823e38); var high = vec3(-3.402823e38);
-    for (var index = 0u; index < 8u; index++) {
-        let point = select(bounds.low.xyz, bounds.high.xyz,
-                           vec3((index&1u)!=0u, (index&2u)!=0u, (index&4u)!=0u));
-        let rotated = vec3(dot(point,r0.xyz), dot(point,r1.xyz), dot(point,r2.xyz));
-        low = min(low,rotated); high = max(high,rotated);
-    }
-    let extent = max(high-low, vec3(1e-6));
-    let scale = min(config.projection.x/extent.x, config.projection.y/extent.y)
-                * (1. - 2.*config.projection.z);
+    frame = config;
     frame.r0 = r0; frame.r1 = r1; frame.r2 = r2;
+    let extents = bounds.high.xyz - bounds.low.xyz;
+    let target_cell = max(extents.x, extents.y)/5.;
+    let cells = array<f32, 6>(1., 2., 5., 10., 20., 50.);
+    var cell = 50.;
+    for (var i = 0u; i < 6u; i++) {
+        if target_cell <= cells[i] { cell = cells[i]; break; }
+    }
+    frame.floor = vec4(bounds.low.z, cell, 0., config.floor.w);
+    frame.footprint = vec4(
+        (bounds.low.xy + bounds.high.xy)*0.5,
+        extents.xy*0.5 + 1.5*cell
+    );
+}
+"""
+)
+FIT_SHADER = (
+    FRAME_STRUCT
+    + BOUND_STRUCT
+    + """
+@group(0) @binding(0) var<storage, read> bounds: Bounds;
+@group(0) @binding(1) var<storage, read_write> frame: Frame;
+@compute @workgroup_size(1)
+fn fit() {
+    let low = bounds.low.xyz;
+    let high = bounds.high.xyz;
+    let extent = max(high-low, vec3(1e-6));
+    let size = frame.projection.xy;
+    let interior = size * (1. - 2.*frame.projection.z);
+    let scale = min(interior.x/extent.x, interior.y/extent.y);
     frame.projection = vec4(low.xy*0.5+high.xy*0.5, scale, 0.);
-    frame.extent = vec4(config.projection.xy, low.z, extent.z);
-    frame.style = config.style; frame.albedo = config.albedo;
+    frame.extent = vec4(size, low.z, extent.z);
 }
 """
 )
@@ -153,60 +193,111 @@ def _auto_rotations() -> str:
         ]
     )
     rotations.append(hero_tilt @ bases[1] @ spin)
+    rotations.extend(tilt.T @ base for base in bases[:2])
     rows = ",".join(
         "vec4<f32>(" + ",".join(f"{float(x):.9f}" for x in row) + ",0.)"
         for rotation in rotations
         for row in rotation
     )
-    return "const rotations = array<vec4<f32>,12>(" + rows + ");"
+    return "const rotations = array<vec4<f32>,18>(" + rows + ");"
 
 
-def frame_config(rotation: Any, width: int, height: int, matte: bool) -> bytes:
+def frame_config(
+    rotation: Any, width: int, height: int, matte: bool, *, samples: int = 1
+) -> bytes:
     rows = np.zeros((FRAME_STRIDE // 16, 4), dtype="<f4")
     if rotation is not None:
         rows[:3, :3] = rotation
     rows[3] = (width, height, PREVIEW_PROFILE.margin_fraction, rotation is None)
-    rows[5, 0] = 0.0 if matte else 0.16
-    rows[6, :3] = PREVIEW_PROFILE.material_albedo
+    appearance = preview_appearance()
+    look = STUDIO_LOOKS[appearance.look]
+    lighting = MATTE_LIGHTING if matte else look.lighting
+    albedo = REFERENCE_THUMBNAIL_PROFILE.material_albedo if matte else look.albedo
+    rows[5] = (
+        lighting.ambient,
+        lighting.specular_strength,
+        lighting.specular_power,
+        lighting.rim_power,
+    )
+    rows[6] = (*albedo, not matte)
+    rows[7, :3] = lighting.key.direction
+    rows[8, :3] = lighting.fill.direction
+    rows[9] = (*lighting.key.colour, lighting.key.strength)
+    rows[10] = (*lighting.fill.colour, lighting.fill.strength)
+    rows[11] = (*lighting.rim_colour, lighting.rim_strength)
+    rows[12, 3] = samples if not matte and appearance.floor_grid else 0
     return rows.tobytes()
 
 
 class ViewPipeline:
     def __init__(self, device: Any):
         self.device = device
-        self.bounds = []
-        for code in (BOUNDS_VERTICES, BOUNDS_REDUCE):
-            shader = device.create_shader_module(code=code)
-            self.bounds.append(
-                device.create_compute_pipeline(
-                    layout="auto", compute={"module": shader, "entry_point": "bounds"}
-                )
-            )
-        shader = device.create_shader_module(
-            code=FRAME_SHADER.replace("AUTO_ROTATIONS", _auto_rotations()).replace(
-                "FLAT_RATIO", str(PREVIEW_PROFILE.flat_thickness_ratio)
-            )
+        self.model_bounds = self._pipeline(
+            BOUNDS_COMMON
+            + BOUNDS_VERTICES.replace("FRAME_BINDING", "").replace(
+                "BOUNDS_POINT", "point"
+            ),
+            "bounds",
         )
-        self.camera = device.create_compute_pipeline(
-            layout="auto", compute={"module": shader, "entry_point": "camera"}
+        self.view_bounds = self._pipeline(
+            FRAME_STRUCT
+            + BOUNDS_COMMON
+            + BOUNDS_VERTICES.replace(
+                "FRAME_BINDING", "@group(0) @binding(2) var<uniform> frame: Frame;"
+            ).replace("BOUNDS_POINT", "rotate(point, frame)"),
+            "bounds",
+        )
+        self.reduce_bounds = self._pipeline(BOUNDS_REDUCE, "bounds")
+        self.select_rotation = self._pipeline(
+            CAMERA_SHADER.replace("AUTO_ROTATIONS", _auto_rotations()).replace(
+                "FLAT_RATIO", str(PREVIEW_PROFILE.flat_thickness_ratio)
+            ),
+            "select_rotation",
+        )
+        self.fit = self._pipeline(FIT_SHADER, "fit")
+
+    def _pipeline(self, code: str, entry_point: str) -> Any:
+        shader = self.device.create_shader_module(code=code)
+        return self.device.create_compute_pipeline(
+            layout="auto", compute={"module": shader, "entry_point": entry_point}
         )
 
     def encode_bounds(
-        self, encoder: Any, positions: Any, count: int, target: Any, scratch: list[Any]
+        self,
+        encoder: Any,
+        positions: Any,
+        count: int,
+        target: Any,
+        scratch: list[Any],
+        *,
+        frame: dict[str, Any] | None = None,
     ) -> None:
-        source = positions
+        # The shared view scratch may be larger than this model. Bind only
+        # each level's live records so the next pass never reads a stale tail.
+        source = {"buffer": positions}
+        first = self.model_bounds if frame is None else self.view_bounds
         for index, result in enumerate([*scratch, target]):
-            pipeline = self.bounds[min(index, 1)]
-            self._dispatch(encoder, pipeline, [source, result], (count + 63) // 64)
             count = (count + 63) // 64
-            source = result
+            destination = {"buffer": result, "size": count * BOUND_BYTES}
+            if index == 0:
+                resources = [source, destination]
+                if frame is not None:
+                    resources.append(frame)
+                self._dispatch(encoder, first, resources, count)
+            else:
+                self._dispatch(
+                    encoder, self.reduce_bounds, [source, destination], count
+                )
+            source = destination
 
-    def _dispatch(self, encoder: Any, pipeline: Any, buffers: list[Any], groups: int):
+    def _dispatch(
+        self, encoder: Any, pipeline: Any, resources: list[dict[str, Any]], groups: int
+    ) -> None:
         group = self.device.create_bind_group(
             layout=pipeline.get_bind_group_layout(0),
             entries=[
-                {"binding": i, "resource": {"buffer": buffer}}
-                for i, buffer in enumerate(buffers)
+                {"binding": i, "resource": resource}
+                for i, resource in enumerate(resources)
             ],
         )
         compute = encoder.begin_compute_pass()
@@ -217,33 +308,24 @@ class ViewPipeline:
         compute.end()
 
     def encode_camera(
-        self, encoder: Any, bounds: Any, configs: Any, frames: Any, index: int
+        self,
+        encoder: Any,
+        model_bounds: Any,
+        positions: Any,
+        vertex_count: int,
+        view_bounds: Any,
+        scratch: list[Any],
+        configs: Any,
+        frames: Any,
+        index: int,
     ) -> None:
         offset = index * FRAME_STRIDE
-        group = self.device.create_bind_group(
-            layout=self.camera.get_bind_group_layout(0),
-            entries=[
-                {"binding": 0, "resource": {"buffer": bounds}},
-                {
-                    "binding": 1,
-                    "resource": {
-                        "buffer": configs,
-                        "offset": offset,
-                        "size": FRAME_BYTES,
-                    },
-                },
-                {
-                    "binding": 2,
-                    "resource": {
-                        "buffer": frames,
-                        "offset": offset,
-                        "size": FRAME_BYTES,
-                    },
-                },
-            ],
+        config = {"buffer": configs, "offset": offset, "size": FRAME_BYTES}
+        frame = {"buffer": frames, "offset": offset, "size": FRAME_BYTES}
+        self._dispatch(
+            encoder, self.select_rotation, [{"buffer": model_bounds}, config, frame], 1
         )
-        compute = encoder.begin_compute_pass()
-        compute.set_pipeline(self.camera)
-        compute.set_bind_group(0, group)
-        compute.dispatch_workgroups(1)
-        compute.end()
+        self.encode_bounds(
+            encoder, positions, vertex_count, view_bounds, scratch, frame=frame
+        )
+        self._dispatch(encoder, self.fit, [{"buffer": view_bounds}, frame], 1)

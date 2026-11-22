@@ -17,6 +17,29 @@ async function inspect(page: Page) {
   return { card, drawer };
 }
 
+async function libraryCard(page: Page) {
+  const model = aModelListItem({
+    id: 1,
+    name: "Bracket",
+    recommended_revision_status: "needs_test",
+  });
+  await page.route("**/api/v1/models/browse?**", (route) =>
+    route.fulfill({
+      json: {
+        items: [{ kind: "model", model }],
+        total: 1,
+        next_cursor: null,
+        browse_revision: "r1",
+        authorization_revision: "a1",
+      },
+    }),
+  );
+  await page.goto("/");
+  const card = page.locator("main article").filter({ hasText: "Bracket" });
+  await expect(card).toBeVisible();
+  return card;
+}
+
 async function records(page: Page) {
   const response = await page.request.get(`http://127.0.0.1:${apiPort}/api/v1/models/1/print-jobs`);
   expect(response.ok()).toBe(true);
@@ -107,6 +130,63 @@ test.describe("Library inline inspector", () => {
       drawer.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true }),
     ).toBeVisible();
     expect(problems).toEqual([]);
+  });
+
+  test("opens the full page from the card corner on hover", async ({ page }) => {
+    const card = await libraryCard(page);
+    await card.hover();
+
+    await card.getByRole("link", { name: "Open full page", exact: true }).click();
+
+    await expect(page).toHaveURL(/\/models\/1(?:\?|$)/);
+  });
+
+  test("hides the card's full-page action until hover", async ({ page }) => {
+    const card = await libraryCard(page);
+
+    await page.mouse.move(0, 0);
+
+    await expect(card.getByRole("link", { name: "Open full page", exact: true })).toHaveCSS(
+      "opacity",
+      "0",
+    );
+  });
+
+  test("keeps the status in the image corner", async ({ page }) => {
+    const card = await libraryCard(page);
+    await page.mouse.move(0, 0);
+
+    const status = await card.locator(".library-card-status").boundingBox();
+    const frame = await card.boundingBox();
+
+    expect(status!.y - frame!.y).toBeLessThanOrEqual(8);
+  });
+
+  test("moves the status clear of the full-page action on hover", async ({ page }) => {
+    const card = await libraryCard(page);
+    await card.hover();
+    const action = card.getByRole("link", { name: "Open full page", exact: true });
+
+    await expect
+      .poll(async () => {
+        const status = await card.locator(".library-card-status").boundingBox();
+        const corner = await action.boundingBox();
+        return status!.x + status!.width <= corner!.x;
+      })
+      .toBe(true);
+  });
+
+  test("shows no drag cursor around the card selection control", async ({ page }) => {
+    const card = await libraryCard(page);
+    await card.hover();
+    const box = await card.getByRole("checkbox").boundingBox();
+
+    const cursor = await page.evaluate(
+      ({ x, y }) => getComputedStyle(document.elementFromPoint(x, y)!).cursor,
+      { x: box!.x - 2, y: box!.y - 2 },
+    );
+
+    expect(cursor).toBe("default");
   });
 
   test("persists one completed outcome while a numeric key is held", async ({ page }) => {

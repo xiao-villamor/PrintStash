@@ -421,9 +421,7 @@ def thumbnail_items(
     models = {model.id: model for model in rows}
     from .previews import summaries as preview_summaries
 
-    previews = preview_summaries(
-        session, [model.id for model in rows if model.id is not None]
-    )
+    previews = preview_summaries(session, list(rows))
     items = [
         BrowseThumbnail(
             model_id=model_id,

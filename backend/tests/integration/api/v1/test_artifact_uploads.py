@@ -771,6 +771,71 @@ class TestArtifactUploads:
         assert artifact.revision_label == "Resumable"
         assert artifact.revision_status == FileRevisionStatus.NEEDS_TEST
 
+    def test_sliced_archive_upload_persists_embedded_settings(
+        self, client, auth_headers, db_session, make_model, tmp_path
+    ) -> None:
+        from app.db.models import Metadata
+        from tests.fixtures.three_mf_projects import build_sliced_project
+
+        use_local_storage(tmp_path)
+        model = make_model(name="Sliced revision target")
+        payload = build_sliced_project(plate_numbers=(1, 2))
+        request = _request(payload) | {
+            "purpose": "revision",
+            "target_role": "model_revision",
+            "target_id": str(model.id),
+            "filename": "sliced.gcode.3mf",
+        }
+        created = client.post(
+            "/api/v1/artifact-uploads", json=request, headers=auth_headers
+        )
+        assert created.status_code == 201, created.text
+        upload_id = created.json()["id"]
+        assert _put_chunk(client, auth_headers, upload_id, payload).status_code == 200
+        response = client.post(
+            f"/api/v1/artifact-uploads/{upload_id}/finalize", headers=auth_headers
+        )
+        assert response.status_code == 200, response.text
+        drain_work()
+        assert (
+            client.get(
+                f"/api/v1/artifact-uploads/{upload_id}", headers=auth_headers
+            ).json()["state"]
+            == "completed"
+        )
+        artifact = db_session.exec(
+            select(File).where(File.sha256 == hashlib.sha256(payload).hexdigest())
+        ).one()
+        assert artifact.model_id == model.id
+        assert artifact.file_type is FileType.GCODE
+        assert (
+            db_session.exec(
+                select(Metadata).where(Metadata.file_id == artifact.id)
+            ).one()
+            is not None
+        )
+        plates = client.get(
+            f"/api/v1/files/{artifact.id}/gcode-plates", headers=auth_headers
+        )
+        assert plates.status_code == 200, plates.text
+        assert [plate["number"] for plate in plates.json()["plate_metadata"]] == [1, 2]
+
+    def test_plain_3mf_is_not_accepted_as_a_gcode_revision(
+        self, client, auth_headers, make_model
+    ) -> None:
+        model = make_model(name="Plain source target")
+        request = _request(b"test") | {
+            "purpose": "revision",
+            "target_role": "model_revision",
+            "target_id": str(model.id),
+            "filename": "source.3mf",
+        }
+        response = client.post(
+            "/api/v1/artifact-uploads", json=request, headers=auth_headers
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "unsupported_file_type"
+
     def test_revision_requires_an_existing_target(
         self,
         client: TestClient,

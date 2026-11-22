@@ -11,7 +11,7 @@ class TestSummaries:
         file = make_file(model, filename="part.stl")
         make_system_config(derivatives_previews_enabled=False)
 
-        result = summaries(db_session, [model.id])[model.id]
+        result = summaries(db_session, [model])[model.id]
 
         assert result.model_dump() == {
             "kind": "artifact",
@@ -29,7 +29,7 @@ class TestSummaries:
         model = make_model()
         source = make_provenance_source(model)
         images = [make_cover(source, position=index) for index in range(3)]
-        result = summaries(db_session, [model.id])[model.id]
+        result = summaries(db_session, [model])[model.id]
         assert result.kind == "none"
         assert [image.position for image in result.source_images] == [0, 1, 2]
         assert [image.id for image in result.source_images] == [
@@ -48,9 +48,7 @@ class TestSummaries:
         model = make_model()
         source = make_provenance_source(model)
         make_cover(source, position=1)
-        result = summaries(db_session, [model.id], root="/api/v1/shares/public")[
-            model.id
-        ]
+        result = summaries(db_session, [model], root="/api/v1/shares/public")[model.id]
         assert result.source_images == []
 
     def test_gallery_address_changes_after_replacement(
@@ -61,11 +59,11 @@ class TestSummaries:
         model = make_model()
         source = make_provenance_source(model)
         image = make_cover(source, position=1)
-        before = summaries(db_session, [model.id])[model.id].source_images[0].url
+        before = summaries(db_session, [model])[model.id].source_images[0].url
         image.updated_at += timedelta(seconds=1)
         db_session.add(image)
         db_session.flush()
-        after = summaries(db_session, [model.id])[model.id].source_images[0].url
+        after = summaries(db_session, [model])[model.id].source_images[0].url
         assert before != after
 
     def test_fresh_install_has_only_the_ordinary_thumbnail(
@@ -75,7 +73,7 @@ class TestSummaries:
 
         model = make_model()
         make_file(model, filename="part.stl")
-        result = summaries(db_session, [model.id])[model.id]
+        result = summaries(db_session, [model])[model.id]
         assert result.state == "disabled"
         assert result.published is None
         assert preview_activity(db_session).total == 1

@@ -12,11 +12,10 @@ import struct
 import time
 
 import numpy as np
-from printstash_core.mesh.preview_profile import RASTERIZER_RECIPE
 from printstash_core.mesh.render_geometry import PreparedRender
 
 from app.modules.media.compute_geometry import encode, split
-from app.modules.media.compute_render import RECIPE
+from app.modules.media.compute_render import render_recipe
 from app.runtime.compute import client
 from app.runtime.compute.contracts import (
     ComputeMode,
@@ -95,7 +94,7 @@ class QualifiedBatchRenderer:
                         device_identity=self.device_info.identity,
                         runtime_identity=self.runtime,
                         operation=Operation.RENDER,
-                        recipe=f"{RECIPE}:{RASTERIZER_RECIPE}:{width}x{height}:1:0",
+                        recipe=render_recipe(width, height),
                         minimum_units=1,
                         maximum_units=100_000,
                         maximum_batch_items=2,
@@ -179,7 +178,7 @@ class QualifiedBatchRenderer:
             deadline=time.monotonic() + 60,
             priority=Priority.INTERACTIVE,
             request_id="busy-device",
-            recipe=f"{RECIPE}:{RASTERIZER_RECIPE}:64x48:1:0",
+            recipe=render_recipe(64, 48),
             units=1,
             geometry_key=key,
             geometry_bytes=len(body),

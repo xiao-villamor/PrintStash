@@ -42,6 +42,17 @@ export function heroCameraDirection(): THREE.Vector3 {
   ).normalize();
 }
 
+export const VIEWER_POLE_MARGIN = 0.02;
+
+/** Keep toolpath and mesh presets in the same Three.js coordinate frame. */
+export function viewerPresetDirection(preset: "isometric" | "front" | "top"): THREE.Vector3 {
+  if (preset === "front") return new THREE.Vector3(0, 0, 1);
+  // A tiny Z component avoids a degenerate cross product with the world up axis.
+  if (preset === "top")
+    return new THREE.Vector3(0, Math.cos(VIEWER_POLE_MARGIN), Math.sin(VIEWER_POLE_MARGIN));
+  return heroCameraDirection();
+}
+
 export function fitCameraToBounds(
   size: THREE.Vector3,
   aspect: number,

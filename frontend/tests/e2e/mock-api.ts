@@ -2236,6 +2236,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
           derivatives_toolpath_enabled,
           derivatives_previews_enabled,
           derivatives_previews_include_poles,
+          prefer_rendered_3mf_preview,
           ...publicFields
         } = update;
         configuration = {
@@ -2262,6 +2263,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
             derivatives_previews_include_poles === undefined
               ? configuration.derivatives_previews_include_poles
               : (derivatives_previews_include_poles ?? false),
+          prefer_rendered_3mf_preview:
+            prefer_rendered_3mf_preview === undefined
+              ? configuration.prefer_rendered_3mf_preview
+              : (prefer_rendered_3mf_preview ?? false),
           has_oidc_client_secret:
             oidc_client_secret === undefined
               ? configuration.has_oidc_client_secret

@@ -21,12 +21,9 @@ pixels for all triangles are expanded into flat arrays and resolved against
 the z-buffer with a single lexsort per chunk, so cost scales with covered
 pixel area rather than with Python-level triangle count.
 
-Memory shape: the per-face geometry/shading arrays (``tri``, ``view_tri``,
-corner normals, RGB, …) are each O(faces). They are built and freed one
-``mesh_render_face_chunk_size`` chunk at a time, so peak render memory is
-O(chunk_size) rather than O(total_faces) — a million-triangle mesh no longer
-materialises several ~70 MB float32 arrays at once (#29). Only the vertex-scale
-arrays (the projected vertices and the welded smooth-normal table) are held whole.
+Memory shape: per-face projection and shading temporaries are built and freed one
+``mesh_render_face_chunk_size`` chunk at a time. The camera and geometry arrays
+(projected vertices and prepared corner normals) are shared across chunks.
 
 The backend invokes ``render_mesh_thumbnail`` in a disposable mesh worker through
 its bounded isolation seam. This function takes an already-loaded mesh and
@@ -43,16 +40,27 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, runtime_checkable
 
+from .floor_grid import paint_floor_grid
 from .preview_profile import (
+    MATTE_LIGHTING,
     PREVIEW_PROFILE,
+    REFERENCE_LIGHTING,
     REFERENCE_THUMBNAIL_PROFILE,
+    STUDIO_LOOKS,
+    PreviewLighting,
     PreviewProfile,
+    Vector,
+    preview_appearance,
 )
 from .render_geometry import (
+    FrozenRender,
     MeshRenderInput,
     PreparedRender,
     SceneRenderInput,
+    prepare_frozen_mesh_render,
+    prepare_frozen_render,
     prepare_mesh_render,
+    prepare_scene,
     prepare_scene_render,
 )
 from .similarity.components import ExpandedScene
@@ -137,7 +145,7 @@ class PreparedRasteriser(DeferredRasteriser, Protocol):
 
     def draw_prepared(
         self,
-        geometry: PreparedRender,
+        geometry: PreparedRender | FrozenRender,
         rotation: FloatArray,
         screen: FloatArray,
         width: int,
@@ -227,11 +235,17 @@ def _render_thumbnail(
         from PIL import Image  # pyright: ignore[reportMissingTypeStubs]
 
         del Image
-        prepared = (
-            prepare_scene_render(source.scene, face_chunk_size=face_chunk_size)
-            if isinstance(source, SceneRenderInput)
-            else prepare_mesh_render(source.mesh, face_chunk_size=face_chunk_size)
-        )
+        if isinstance(source, SceneRenderInput):
+            prepared = (
+                prepare_frozen_render(
+                    prepare_scene(source.scene), face_chunk_size=face_chunk_size
+                )
+                if matte
+                else prepare_scene_render(source.scene, face_chunk_size=face_chunk_size)
+            )
+        else:
+            prepare = prepare_frozen_mesh_render if matte else prepare_mesh_render
+            prepared = prepare(source.mesh, face_chunk_size=face_chunk_size)
         if prepared is None:
             if logger is not None:
                 logger.warning("mesh_render: empty mesh for %s", name)
@@ -263,7 +277,7 @@ def _render_thumbnail(
 
 
 def render_prepared_thumbnail(
-    prepared: PreparedRender,
+    prepared: PreparedRender | FrozenRender,
     name: str,
     width: int = 640,
     height: int = 480,
@@ -362,8 +376,43 @@ def render_scene_thumbnail(
     )
 
 
+def make_preview_shade(albedo: Vector, lighting: PreviewLighting) -> Shade:
+    """Build the diffuse, Fresnel rim and Blinn-Phong shader for unit normals."""
+    import numpy as np
+
+    def normalise(direction: FloatArray) -> FloatArray:
+        return direction / np.linalg.norm(direction)
+
+    body = np.asarray(albedo)
+    key_dir = normalise(np.asarray(lighting.key.direction))
+    fill_dir = normalise(np.asarray(lighting.fill.direction))
+    half = normalise(key_dir + np.array([0.0, 0.0, 1.0]))
+    key_colour = np.asarray(lighting.key.colour)
+    fill_colour = np.asarray(lighting.fill.colour)
+    rim_colour = np.asarray(lighting.rim_colour)
+
+    def shade(n: FloatArray) -> FloatArray:
+        diff_k = np.clip(n @ key_dir, 0.0, 1.0)[..., None]
+        diff_f = np.clip(n @ fill_dir, 0.0, 1.0)[..., None]
+        fresnel = (1.0 - np.clip(n[..., 2:3], 0.0, 1.0)) ** lighting.rim_power
+        specular = np.clip(n @ half, 0.0, 1.0)[..., None] ** lighting.specular_power
+        diffuse = (
+            lighting.ambient
+            + lighting.key.strength * diff_k * key_colour
+            + lighting.fill.strength * diff_f * fill_colour
+        ) * body
+        rgb = (
+            diffuse
+            + lighting.rim_strength * fresnel * rim_colour
+            + lighting.specular_strength * specular
+        )
+        return np.clip(rgb, 0.0, 1.0)
+
+    return shade
+
+
 def render_prepared_pixels(
-    prepared: PreparedRender,
+    prepared: PreparedRender | FrozenRender,
     name: str,
     width: int = 640,
     height: int = 480,
@@ -393,7 +442,12 @@ def render_prepared_pixels(
         return None
 
     try:
+        studio = not (matte or reference_thumbnail)
         geometry = prepared
+        if not studio and isinstance(geometry, PreparedRender):
+            geometry = prepare_frozen_render(geometry, face_chunk_size=face_chunk_size)
+        if studio and isinstance(geometry, FrozenRender):
+            raise ValueError("studio_render_requires_corner_normals")
         verts = geometry.vertices
 
         profile = (
@@ -451,104 +505,29 @@ def render_prepared_pixels(
         screen = np.stack([px, py, pz], axis=1)  # (N, 3)
 
         # ------------------------------------------------------------------
-        # 4. Reuse welded position identities and smooth object-space normals.
-        #    Preparation computed these once, independently of this camera.
+        # 4. Reuse crease-aware object-space corner normals across cameras.
         # ------------------------------------------------------------------
-        pos_id = geometry.position_ids
-        vsm = geometry.smooth_normals
         rot_T = rotation.T
         chunk = max(int(face_chunk_size), 1)
         rasterise = rasterise_triangles or _rasterise_triangles
 
-        # ------------------------------------------------------------------
-        # 5. Three-light shading + specular constants (per corner). Defined once,
-        #    applied per chunk in the rasterisation pass below.
-        #
-        #    View-space axes: X=right, Y=up, Z=toward camera.
-        #    Light directions point FROM the surface TOWARD the light. The
-        #    rasteriser interpolates the three corner colours across each face.
-        # ------------------------------------------------------------------
-
-        def _normalise(v: FloatArray) -> FloatArray:
-            return v / np.linalg.norm(v)
-
-        # Model albedo: the blue-grey surface colour, baked into the light terms
-        # below (not the rasteriser's per-pixel multiply, which is now pure white —
-        # see `base_color`). Folding albedo into shading lets the specular and rim
-        # add *white* highlights on top of the tinted body, so curved surfaces get
-        # a bright sheen that reads on the dark card instead of clipping at a dim
-        # blue-grey ceiling. Slightly lighter + less saturated than the old base so
-        # the model pops against a near-black background.
-        albedo = np.array(profile.material_albedo)
-
-        # Key light: main illumination, upper-left and well in front of the
-        # camera. Side lighting separates adjacent faces without washing the
-        # brightest face out to white.
-        # Encoder inputs keep their frozen lighting across cover recipe changes.
-        studio = not (matte or reference_thumbnail)
-        key_dir = _normalise(
-            np.array([-0.8, 0.9, 0.65] if studio else [-0.5, 0.65, 1.0])
+        # 5. Shade interpolated normals with an albedo and lights in view-space.
+        appearance = preview_appearance()
+        look = STUDIO_LOOKS[appearance.look]
+        lighting = (
+            look.lighting if studio else MATTE_LIGHTING if matte else REFERENCE_LIGHTING
         )
-        key_color = np.array([1.00, 0.98, 0.95])  # warm white
-        key_str = 1.0 if studio else 1.05
-
-        # Fill light: opposite side, soft and cool. Kept gentle so it only lifts
-        # the shadow side and never forms a second highlight — competing
-        # directional highlights are what made smooth surfaces look muddy/blotchy.
-        fill_dir = _normalise(np.array([0.55, -0.25, 0.55]))
-        fill_color = np.array([0.55, 0.62, 0.78])  # cool blue-grey
-        fill_str = 0.22 if studio else 0.30
-
-        # Rim: a view-based Fresnel edge light (brightens the silhouette where the
-        # surface turns away from the camera). Additive white, so it lifts the
-        # silhouette off the dark card rather than darkening into it.
-        rim_color = np.array([0.85, 0.92, 1.00])  # near-white, slightly cool
-        rim_str = 0.12 if studio else 0.22
-        rim_power = 3.0
-
-        # Ambient: blue-grey floor tied to the albedo so shadowed faces stay a
-        # dark version of the body colour (never crushed to muddy near-black, never
-        # a flat grey wash). Lifted enough that curved faces turned away from the
-        # key still read as form against the dark card.
-        ambient_str = 0.20 if studio else 0.30
-
-        # Blinn-Phong specular off the key light — an additive *white* sheen that
-        # picks out ridges, like the 3D viewer. Kept gentle: a strong spec sparkles
-        # facet to facet on tessellated curves. Camera is on +Z in view-space, so
-        # the half-vector is between key_dir and (0,0,1).
-        half = _normalise(key_dir + np.array([0.0, 0.0, 1.0]))
-        spec_str = 0.16 if studio else (0.0 if matte else 0.22)
-        spec_power = 24.0 if studio else 32.0
-
-        def _shade(n: FloatArray) -> FloatArray:
-            # Per-fragment (Phong) shading from a view-space unit normal of any
-            # leading shape (..., 3), returning absolute linear colour in [0, 1]
-            # (the rasteriser scales by white). Diffuse terms are tinted by the
-            # albedo; rim and specular add white on top so highlights brighten the
-            # body toward white instead of clipping at the albedo. Evaluated per
-            # pixel after the normal is interpolated across the triangle — per-
-            # vertex (Gouraud) colour made triangle edges and many-triangle "poles"
-            # show as banding and radial fan streaks; per-pixel shading removes them.
-            diff_k = np.clip(n @ key_dir, 0.0, 1.0)[..., None]
-            diff_f = np.clip(n @ fill_dir, 0.0, 1.0)[..., None]
-            fres = (1.0 - np.clip(n[..., 2:3], 0.0, 1.0)) ** rim_power
-            spec = np.clip(n @ half, 0.0, 1.0)[..., None] ** spec_power
-            diffuse = (
-                ambient_str
-                + key_str * diff_k * key_color
-                + fill_str * diff_f * fill_color
-            ) * albedo
-            rgb = diffuse + rim_str * fres * rim_color + spec_str * spec
-            return np.clip(rgb, 0.0, 1.0)
+        albedo = look.albedo if studio else REFERENCE_THUMBNAIL_PROFILE.material_albedo
+        shade = make_preview_shade(albedo, lighting)
 
         # ------------------------------------------------------------------
         # 6. Rasterise (z-buffered — no painter's sort needed), one face chunk at
         #    a time into the shared image/z-buffer. The z-buffer makes chunk order
         #    irrelevant, so the result is identical to a single-pass render.
         # ------------------------------------------------------------------
-        # The albedo now lives in `_shade` (so highlights can add white on top),
+        # The shader applies the albedo before adding the rim and specular terms,
         # so the rasteriser multiply is pure white — it just scales the absolute
-        # [0, 1] colour `_shade` returns up to 8-bit.
+        # [0, 1] colour up to 8-bit.
         base_color = np.array([255, 255, 255], dtype=np.float32)
 
         # Transparent background — floats cleanly on any card colour.
@@ -560,8 +539,15 @@ def render_prepared_pixels(
                 geometry, rotation, screen, ss_width, ss_height, matte
             )
         else:
-            visible_total = 0
+            visible_total = start = 0
             for fc in geometry.face_chunks(chunk):
+                end = start + len(fc)
+                corner_n = (
+                    geometry.normals_for(fc)
+                    if isinstance(geometry, FrozenRender)
+                    else geometry.corner_normals[start:end]
+                )
+                start = end
                 tri = screen[fc]  # (c, 3, 3) screen-space
                 view_tri = view[fc]  # (c, 3, 3) view-space
 
@@ -572,35 +558,6 @@ def render_prepared_pixels(
                 raw_normals = np.cross(edge1, edge2)  # (c, 3)
                 norm_len = np.linalg.norm(raw_normals, axis=1)  # (c,)
 
-                # Object-space face normals for the crease test (the view normals are
-                # flipped toward the camera, which would corrupt smoothing across
-                # silhouettes).
-                f_obj = verts[fc]  # (c, 3, 3)
-                fn = np.cross(f_obj[:, 1] - f_obj[:, 0], f_obj[:, 2] - f_obj[:, 0])
-                fn = fn / np.where(
-                    np.linalg.norm(fn, axis=1, keepdims=True) == 0,
-                    1.0,
-                    np.linalg.norm(fn, axis=1, keepdims=True),
-                )
-
-                corner_smooth = vsm[pos_id[fc]]  # (c, 3, 3) object-space
-                # Blend each corner between its smoothed normal and the flat face
-                # normal by how far the two diverge (a crease measure). A *smooth*
-                # blend (smoothstep), not a hard threshold, is essential: a binary
-                # flip snaps neighbouring corners between smooth and flat, which on
-                # coarse fillets paints a comb of sharp light/dark streaks. The window
-                # cos(41°)=0.75 → cos(23°)=0.92 keeps a 90° edge's 45° half-angle
-                # (cos 0.707, below the window) fully flat so box/mechanical edges stay
-                # crisp, while curved fillets blend gradually and read smooth.
-                cos_crease = np.sum(corner_smooth * fn[:, None, :], axis=2)  # (c, 3)
-                t = np.clip((cos_crease - 0.75) / (0.92 - 0.75), 0.0, 1.0)
-                t = (t * t * (3.0 - 2.0 * t))[..., None]  # smoothstep, (c, 3, 1)
-                corner_n = t * corner_smooth + (1.0 - t) * fn[:, None, :]
-                corner_n = corner_n / np.where(
-                    np.linalg.norm(corner_n, axis=2, keepdims=True) == 0,
-                    1.0,
-                    np.linalg.norm(corner_n, axis=2, keepdims=True),
-                )
                 # The depth camera looks along +Z. Orient normals toward it,
                 # then reflect only Z into the lighting frame (camera at +Z).
                 # Negating the whole vector here reverses left/right and up/down
@@ -619,13 +576,13 @@ def render_prepared_pixels(
                 cvn = cvn[valid]
                 visible_total += int(tri.shape[0])
 
-                rasterise(img, zbuf, tri, cvn, _shade, base_color, ss_width, ss_height)
+                rasterise(img, zbuf, tri, cvn, shade, base_color, ss_width, ss_height)
                 # Free this chunk's temporaries before the next one so only one
                 # chunk's worth of per-face arrays is ever live. No gc.collect() here:
                 # there are no reference cycles in the hot loop, and the per-file
                 # The application mesh policy returns retired arenas to the OS.
-                del view_tri, edge1, edge2, raw_normals, norm_len, f_obj, fn
-                del corner_smooth, cos_crease, corner_n, cvn, tri, valid
+                del view_tri, edge1, edge2, raw_normals, norm_len
+                del corner_n, cvn, tri, valid
 
             if visible_total == 0:
                 # Degenerate / fully back-facing mesh: paint every face flat so the
@@ -635,7 +592,11 @@ def render_prepared_pixels(
                         "mesh_render: no visible triangles for %s — using silhouette",
                         name,
                     )
-                flat_color = albedo * 0.6
+                flat_color = (
+                    shade(np.array([0.0, 0.0, 1.0]))
+                    if studio
+                    else np.asarray(albedo) * 0.6
+                )
 
                 def _flat_shade(
                     n: FloatArray,
@@ -664,6 +625,16 @@ def render_prepared_pixels(
         # Alpha = 255 wherever a triangle was painted, 0 elsewhere.
         alpha = np.where(zbuf < np.inf, np.uint8(255), np.uint8(0)).astype(np.uint8)
         rgba = np.dstack([img, alpha])
+        if studio and appearance.floor_grid and alpha.any():
+            paint_floor_grid(
+                rgba,
+                rotation,
+                verts.min(axis=0),
+                verts.max(axis=0),
+                ((x_min + x_max) * 0.5, (y_min + y_max) * 0.5),
+                scale,
+                samples=supersample,
+            )
 
         # ------------------------------------------------------------------
         # 7. Post-process: Lanczos downsample (anti-aliasing) + subtle vignette.
@@ -754,6 +725,9 @@ def _front_rotation_for_thin_axis(
     # 25° tilt rotation around the screen-X axis (tips the model top toward camera).
     profile = REFERENCE_THUMBNAIL_PROFILE if reference else PREVIEW_PROFILE
     tilt = np.radians(profile.flat_tilt_degrees)
+    if not reference and thin_axis != 2:
+        # Photograph standing plates from above the build plane.
+        tilt = -tilt
     ct, st = float(np.cos(tilt)), float(np.sin(tilt))
 
     if thin_axis == 0:

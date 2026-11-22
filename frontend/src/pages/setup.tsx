@@ -226,7 +226,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
         is_superuser: true,
       });
       setAccount({ username: "", password: "", confirm: "", email: "" });
-      router.replace("/getting-started");
+      router.replace("/setup-appearance");
     } catch (error) {
       if (!controller.signal.aborted && version === getSessionVersion())
         setError(describeError(error instanceof Error ? error : new Error()));
@@ -250,32 +250,65 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
     confirm: t("setup.mismatch"),
     email: t("setup.badEmail"),
   };
+  const formId = `setup-form-${entry}`;
+  const retry = () => setBootAttempt((n) => n + 1);
+
+  let actions;
+  if (existing) {
+    actions = (
+      <Button className="ml-auto" onClick={() => router.replace("/login")}>
+        {t("setup.login")}
+      </Button>
+    );
+  } else if (!status) {
+    actions = bootstrap.error && (
+      <Button variant="outline" className="ml-auto" onClick={retry}>
+        {t("setup.retry")}
+      </Button>
+    );
+  } else if (status.setup_available) {
+    actions = (
+      <>
+        {step !== 1 && (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={() => setStep(step === 3 ? 2 : 1)}
+          >
+            {t("setup.back")}
+          </Button>
+        )}
+        <Button type="submit" form={formId} className="ml-auto" loading={busy}>
+          {t(step === 3 ? "setup.create" : "setup.next")}
+        </Button>
+      </>
+    );
+  }
+
   return (
-    <SetupFrame step={step}>
+    <SetupFrame step={step} actions={actions}>
       {existing ? (
-        <div className="space-y-5">
-          <p role="status">{t("setup.exists")}</p>
-          <Button onClick={() => router.replace("/login")}>{t("setup.login")}</Button>
-        </div>
+        <p role="status" className="text-[13px] text-muted-foreground">
+          {t("setup.exists")}
+        </p>
       ) : !status ? (
-        <div role="status">
+        <p role="status" className="text-[13px] text-muted-foreground">
           {bootstrap.error ? t("setup.failed") : t("setup.loading")}
-          {bootstrap.error && (
-            <Button onClick={() => setBootAttempt((n) => n + 1)}>{t("setup.retry")}</Button>
-          )}
-        </div>
+        </p>
       ) : !status.setup_available ? (
         <SetupUnavailable
           reason={status.unavailable_reason ?? "disabled"}
           host={status.observed_host ?? window.location.hostname}
           variables={status.unavailable_variables ?? []}
-          onRetry={() => setBootAttempt((n) => n + 1)}
+          onRetry={retry}
         />
       ) : (
         <form
+          id={formId}
           ref={form}
           noValidate
-          className="space-y-5"
+          className={step === 3 ? "space-y-3" : "space-y-5"}
           onSubmit={(event) => {
             event.preventDefault();
             if (step === 1) next();
@@ -299,7 +332,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
               )}
             </h2>
             {step !== 3 && (
-              <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
                 {step === 1
                   ? t("setup.accountHelp")
                   : `${t("setup.defaultHelp")} ${t("setup.existingHelp")}`}
@@ -307,7 +340,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
             )}
           </div>
           {step === 1 ? (
-            <div className="grid gap-4">
+            <div className="grid gap-4 md:grid-cols-2">
               {ACCOUNT_FIELDS.map((field) => {
                 const invalid = fieldErrors.includes(field);
                 const secret = field === "password" || field === "confirm";
@@ -319,7 +352,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                       : null;
                 const described = invalid || help !== null;
                 return (
-                  <div key={field} className="grid gap-1.5">
+                  <div key={field} className="min-w-0 space-y-1.5">
                     <label htmlFor={`setup-${field}`} className={authFieldLabel}>
                       {t(`setup.${field}`)}
                     </label>
@@ -419,21 +452,8 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                   setFailedFields((current) => current.filter((field) => field !== name));
                 }}
               />
-              <div className="space-y-3 border-t border-border pt-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-5">
-                  <p className="text-[13px] text-on-surface-variant">{t("setup.checkFirst")}</p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    loading={operation === "check"}
-                    disabled={operation === "create"}
-                    className="shrink-0"
-                    onClick={() => void checkStorage()}
-                  >
-                    {t("setup.check")}
-                  </Button>
-                </div>
+              <div className="space-y-2">
+                <p className="text-[13px] text-muted-foreground">{t("setup.checkFirst")}</p>
                 <div role="status" aria-live="polite" className="text-[13px]">
                   {busy ? (
                     <p className="text-muted-foreground">
@@ -494,7 +514,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
           ) : (
             <dl
               aria-label={t("setup.summary")}
-              className="divide-y divide-border border-y border-border text-sm"
+              className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-2 divide-y divide-border text-[13px] md:gap-x-3"
             >
               {(
                 [
@@ -545,23 +565,33 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
               ).map((row) => (
                 <div
                   key={row.key}
-                  className="grid min-h-12 grid-cols-[8rem_minmax(0,1fr)_auto] items-center gap-3 py-2"
+                  className="col-span-3 grid min-h-12 grid-cols-subgrid items-center py-2"
                 >
                   <dt className="text-muted-foreground">{row.label}</dt>
-                  <dd className="min-w-0 break-words">{row.value}</dd>
-                  <dd>
-                    {"edit" in row && (
+                  <dd
+                    title={row.value}
+                    className={
+                      row.key === "files" || row.key === "previews"
+                        ? "truncate text-right font-mono text-xs"
+                        : "truncate text-right"
+                    }
+                  >
+                    {row.value}
+                  </dd>
+                  {"edit" in row && (
+                    <dd className="justify-self-end">
                       <Button
                         type="button"
-                        variant="ghost"
-                        size="sm"
+                        variant="link"
+                        size="xs"
+                        className="px-0 text-muted-foreground hover:text-foreground"
                         disabled={busy}
                         onClick={() => setStep(row.edit.step)}
                       >
                         {row.edit.label}
                       </Button>
-                    )}
-                  </dd>
+                    </dd>
+                  )}
                 </div>
               ))}
             </dl>
@@ -576,26 +606,6 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
               {t("setup.creating")}
             </p>
           )}
-          <div className="flex justify-between gap-3 border-t border-border pt-5">
-            {step !== 1 ? (
-              <Button
-                type="button"
-                variant="outline"
-                className="h-10"
-                disabled={busy}
-                onClick={() => setStep(step === 3 ? 2 : 1)}
-              >
-                {t("setup.back")}
-              </Button>
-            ) : null}
-            <Button
-              type="submit"
-              className="ml-auto h-auto min-h-10 whitespace-normal py-2"
-              loading={busy}
-            >
-              {t(step === 3 ? "setup.create" : "setup.next")}
-            </Button>
-          </div>
         </form>
       )}
     </SetupFrame>

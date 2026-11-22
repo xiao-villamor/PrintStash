@@ -197,6 +197,7 @@ def windows(
     info: zipfile.ZipInfo,
     *,
     checkpoint: Callable[[], None] | None = None,
+    chunk_bytes: int | None = None,
 ) -> Iterator[bytes]:
     """One part's bytes in windows that each end before an unfinished tag.
 
@@ -206,7 +207,17 @@ def windows(
     carry = b""
     total = 0
     with archive.open(info) as stream:
-        while chunk := stream.read(_CHUNK_BYTES):
+        # Admission streams the entire part, so short reads need no buffer to
+        # join them. The native reader still probes one full opening window.
+        read = (
+            stream.read1
+            if chunk_bytes is not None
+            and info.compress_type == zipfile.ZIP_DEFLATED
+            and isinstance(stream, zipfile.ZipExtFile)
+            else stream.read
+        )
+        size = _CHUNK_BYTES if chunk_bytes is None else chunk_bytes
+        while chunk := read(size):
             total += len(chunk)
             if checkpoint is not None:
                 checkpoint()

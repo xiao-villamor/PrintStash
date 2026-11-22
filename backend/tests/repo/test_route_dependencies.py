@@ -127,6 +127,7 @@ class TestRouteDependencies:
             ("/inbox/capture-capabilities", "GET"),
             ("/inbox/capture-destinations", "GET"),
             ("/inbox/capture-source-status", "GET"),
+            ("/inbox/{item_id}/capture-status", "GET"),
             ("/inbox/{item_id}/capture-upload", "GET"),
             ("/inbox/capture-upload-slots", "POST"),
             ("/inbox/capture-upload-slots/{slot_id}", "PUT"),

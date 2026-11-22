@@ -108,10 +108,11 @@ export async function listOutlinerModels(
 
 export async function getModelFacets(
   params?: Omit<ListModelsParams, "limit" | "offset">,
+  options?: GetJsonOptions,
 ): Promise<ModelFacetsRead> {
   const search = modelListSearch(params);
   const query = search.toString();
-  return getJson<ModelFacetsRead>(`/api/v1/models/facets${query ? `?${query}` : ""}`, {});
+  return getJson<ModelFacetsRead>(`/api/v1/models/facets${query ? `?${query}` : ""}`, options);
 }
 
 export function starModel(id: number): Promise<ModelStarRead> {

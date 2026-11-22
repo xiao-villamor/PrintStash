@@ -105,7 +105,7 @@ class TestSelectViewRotation:
 
         rotation = mesh_render._select_view_rotation(verts, np)
 
-        expected = _tilt_matrix() @ np.array(
+        expected = _tilt_matrix().T @ np.array(
             [
                 [0.0, 1.0, 0.0],
                 [0.0, 0.0, 1.0],
@@ -358,7 +358,7 @@ class TestDeferredPreparation:
         )
         prepared = mesh_render.prepare_preview_render(self.mesh(faces))
         assert isinstance(prepared, VisualRender)
-        assert not hasattr(prepared, "smooth_normals")
+        assert not hasattr(prepared, "corner_normals")
         assert not hasattr(prepared, "position_ids")
         assert prepared._canonical is None
 
@@ -403,7 +403,7 @@ class TestDeferredPreparation:
         mesh_render.render_prepared_pixels(prepared, "model", compute=False)
         mesh_render.render_prepared_pixels(prepared, "model", compute=False)
         assert seen[0] is seen[1]
-        np.testing.assert_array_equal(seen[0].smooth_normals, [[0, 0, 1]] * 3)
+        np.testing.assert_array_equal(seen[0].corner_normals, [[[0, 0, 1]] * 3] * 2)
 
 
 class TestAcceleratedEncoding:

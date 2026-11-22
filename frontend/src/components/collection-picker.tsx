@@ -61,12 +61,15 @@ export function CollectionPicker({
       ),
   );
 
+  const nameCounts = new Map<string, number>();
+  for (const { name } of options) nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+
   return (
     <Localized>
       <div>
-        <div className="relative mb-2">
+        <div className="collection-picker-search relative border-b border-border">
           <Search
-            className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground"
+            className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground"
             aria-hidden
           />
           <Input
@@ -75,13 +78,13 @@ export function CollectionPicker({
             onChange={(event) => setQuery(event.target.value)}
             placeholder={uiText("Find destination...")}
             aria-label={uiText("Find destination")}
-            className="pl-9"
+            className="h-9 border-0 bg-transparent pl-8 text-field shadow-none focus-visible:ring-inset focus-visible:ring-offset-0"
           />
         </div>
         <div
           role="listbox"
           aria-label={uiText("Collections")}
-          className="max-h-72 overflow-x-hidden overflow-y-auto rounded-md border border-border"
+          className="collection-picker-options max-h-[280px] min-w-0 overflow-x-hidden overflow-y-auto"
         >
           {noneLabel !== undefined && (
             <button
@@ -89,15 +92,11 @@ export function CollectionPicker({
               role="option"
               aria-selected={selectedPath === ""}
               onClick={() => onSelect(null)}
-              className={`flex w-full min-w-0 items-start gap-3 px-3 py-2.5 text-left text-sm transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
-                selectedPath === ""
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-muted"
-              }`}
+              className="field-option"
             >
-              <Folder className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-              <span className="min-w-0 flex-1 break-words">{noneLabel}</span>
-              {selectedPath === "" && <Check className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />}
+              <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 flex-1 truncate">{noneLabel}</span>
+              {selectedPath === "" && <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />}
             </button>
           )}
           {options.map((collection) => (
@@ -107,28 +106,26 @@ export function CollectionPicker({
               role="option"
               aria-selected={selectedPath === collection.path}
               aria-label={`${collection.display_path} (${collection.model_count})`}
+              title={collection.display_path}
               onClick={() => onSelect(collection)}
-              className={`flex w-full min-w-0 items-start gap-3 px-3 py-2.5 text-left text-sm transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
-                selectedPath === collection.path
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-muted"
-              }`}
+              className="field-option"
             >
-              <Folder className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-              <span className="min-w-0 flex-1 space-y-0.5">
-                <span className="block break-words font-medium">{collection.name}</span>
-                {collection.display_path !== collection.name && (
-                  <span className="block break-words text-xs text-muted-foreground">
-                    {collection.display_path}
-                  </span>
-                )}
+              <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{collection.name}</span>
+                {(nameCounts.get(collection.name) ?? 0) > 1 &&
+                  collection.display_path !== collection.name && (
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {collection.display_path.slice(0, -(collection.name.length + 1))}
+                    </span>
+                  )}
               </span>
               <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                 ({collection.model_count})
               </span>
-              {selectedPath === collection.path && (
-                <Check className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-              )}
+              <span className="h-3.5 w-3.5 shrink-0" aria-hidden>
+                {selectedPath === collection.path && <Check className="h-full w-full" />}
+              </span>
             </button>
           ))}
           {results.isPending && (
@@ -141,7 +138,7 @@ export function CollectionPicker({
               type="button"
               disabled={results.isFetchingNextPage}
               onClick={() => void results.fetchNextPage()}
-              className="w-full px-3 py-2 text-left font-mono text-3xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="field-option"
             >
               {uiText("Show more folders")}
             </button>

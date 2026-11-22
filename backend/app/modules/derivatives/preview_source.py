@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import ColumnElement, exists
+from sqlalchemy import ColumnElement, and_, exists
 from sqlmodel import Session, col, select
 
 from app.core.time import ensure_utc
@@ -19,6 +19,7 @@ from app.modules.work.contracts import DiscoveryBudget
 from app.modules.work.jobs import active_job_predicate
 
 from . import policy
+from .records import regenerations
 from .source import DerivativeSource
 
 PRIMARY_GRACE = timedelta(minutes=2)
@@ -28,8 +29,13 @@ class PreviewSource(DerivativeSource):
     # Optional output never competes with a recent upload's first cover.
     interactive = False
 
-    def prerequisite(self) -> ColumnElement[bool]:
-        return primary_settled()
+    def prerequisite(self, session: Session) -> ColumnElement[bool]:
+        # A cover due for regeneration is not settled: its pass renders the
+        # views from the same load, so the batch must not load the mesh first.
+        regenerated_at = regenerations(
+            session, definitions=[JobKind.DERIVATIVES_MESH]
+        ).get(DerivativeKind.THUMBNAIL)
+        return primary_settled(regenerated_at=regenerated_at)
 
     def pending_prioritized(
         self, session: Session, *, now: datetime, budget: DiscoveryBudget
@@ -89,16 +95,20 @@ class PreviewSource(DerivativeSource):
         return min(dates) if dates else None
 
 
-def primary_settled() -> ColumnElement[bool]:
+def primary_settled(*, regenerated_at: datetime | None) -> ColumnElement[bool]:
+    """The cover attempt is terminal, and not owed again by a regeneration."""
+    settled = col(ArtifactDerivative.state).in_(
+        (
+            DerivativeState.READY,
+            DerivativeState.SKIPPED,
+            DerivativeState.FAILED,
+            DerivativeState.CANCELLED,
+        )
+    )
+    if regenerated_at is not None:
+        settled = and_(settled, col(ArtifactDerivative.updated_at) >= regenerated_at)
     return exists().where(
         col(ArtifactDerivative.file_id) == col(File.id),
         col(ArtifactDerivative.kind) == DerivativeKind.THUMBNAIL,
-        col(ArtifactDerivative.state).in_(
-            (
-                DerivativeState.READY,
-                DerivativeState.SKIPPED,
-                DerivativeState.FAILED,
-                DerivativeState.CANCELLED,
-            )
-        ),
+        settled,
     )

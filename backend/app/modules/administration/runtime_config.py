@@ -1242,7 +1242,11 @@ def _mask_secret(value: str) -> str:
 
 def read_editing_snapshot(session: Session) -> tuple[EditingBase, dict]:
     """Capture the persisted row and history epoch in one statement."""
-    from app.modules.derivatives.policy import SettingName
+    from app.modules.derivatives.policy import (
+        SettingName,
+        effective_setting,
+        render_appearance,
+    )
 
     config, epoch = session.exec(
         select(SystemConfig, LibraryRevision.epoch)
@@ -1258,11 +1262,12 @@ def read_editing_snapshot(session: Session) -> tuple[EditingBase, dict]:
         edit_version=1 if config is None else config.vault_edit_version,
     )
     values = get_editing_config(config)
+    appearance = render_appearance(config)
+    values.update(
+        preview_look=appearance.look, preview_floor_grid=appearance.floor_grid
+    )
     for name in SettingName:
-        override = getattr(config, name.value) if config is not None else None
-        values[name.value] = (
-            getattr(settings.frozen, name.value) if override is None else override
-        )
+        values[name.value] = effective_setting(config, name)
     provider = sanitized_storage_provider(config)
     if provider is not None:
         values["storage_provider"], values["storage_provider_config"] = provider

@@ -32,11 +32,12 @@ from app.db.models import (
     WorkPriority,
 )
 from app.db.session import get_session_factory
+from app.modules.media.sliced_gcode import is_sliced_filename
 from app.modules.work.async_steps import run_async
 from app.modules.work.contracts import JobContext, JobDefinition, Step, WorkItem
 from app.schemas.ingest import UrlIngestRequest
 
-from . import background, requests, staging_leases
+from . import background, requests, samples, staging_leases
 from .archive_plan import ArchiveIntake
 from .import_resolvers import CollectionMember, ModelFile
 from .ingestion import StagedArtifact, ingest_staged_file, release_job_staging
@@ -128,7 +129,9 @@ def _upload(ctx: JobContext) -> None:
                 ),
                 revision_notes=selection.get("revision_notes"),
                 is_recommended=bool(selection.get("is_recommended")),
-                auto_recommend_first_gcode=False,
+                auto_recommend_first_gcode=is_sliced_filename(
+                    request.original_filename or staged.name
+                ),
                 received_sha256=received,
             ),
             actor_user_id=request.owner_user_id,
@@ -348,6 +351,13 @@ def _cleanup_scratch(ctx: JobContext) -> None:
 
 def definitions() -> list[JobDefinition]:
     return [
+        JobDefinition(
+            name=samples.KIND,
+            lane=LaneName.INGEST,
+            steps=(Step("ingestion.samples.run", samples.ingest),),
+            label="Sample collection",
+            adds_to_library=True,
+        ),
         JobDefinition(
             name=JobKind.INGESTION_SCRATCH_CLEANUP,
             lane=LaneName.MAINTENANCE,

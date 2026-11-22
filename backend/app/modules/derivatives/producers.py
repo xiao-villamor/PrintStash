@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import tempfile
 import time
+import zipfile
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass
@@ -24,6 +25,7 @@ from printstash_core.mesh.measurements import (
     VolumeNotCalculated,
     VolumeNotCalculatedCause,
 )
+from printstash_core.mesh.preview_profile import appearance_scope, preview_appearance
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 from printstash_core.resin.reader import ResinFormatError
 from sqlmodel import Session, col, delete, select
@@ -42,6 +44,7 @@ from app.db.models import (
     FileType,
     JobKind,
     Metadata,
+    SystemConfig,
 )
 from app.db.scopes import live
 from app.db.session import get_session_factory
@@ -63,7 +66,19 @@ from app.modules.media.mesh_contracts import (
     ThumbnailStrategy,
 )
 from app.modules.media.mesh_isolation import MeshWorkerError
+from app.modules.media.preview_contracts import PreviewImageKind
+from app.modules.media.sliced_archive import (
+    SlicedArchive,
+    SlicedGeometry,
+    inspect_sliced_archive,
+    read_archive_image,
+)
+from app.modules.media.sliced_gcode import is_container, plate_toolpath
 from app.modules.media.source_preparation import reserve_sources
+from app.modules.media.three_mf_preview import (
+    EmbeddedGcodeError,
+    list_embedded_gcode_plates,
+)
 from app.modules.media.thumbnail_publication import (
     ThumbnailPublicationError,
     adopt_thumbnail,
@@ -136,7 +151,10 @@ def _begin(
     definition: JobKind,
     *,
     execution: JobExecution | None = None,
-    claimed: Callable[[Session, File], None] | None = None,
+    claimed: Callable[
+        [Session, File, dict[DerivativeKind, records.DerivativeAttempt]], None
+    ]
+    | None = None,
 ) -> tuple[File, dict[DerivativeKind, records.DerivativeAttempt]] | None:
     """Claim the kinds this Artifact still needs, in one transaction.
 
@@ -150,8 +168,7 @@ def _begin(
     with get_session_factory().scoped_session() as session:
         if execution is not None:
             records.require_execution(session, execution)
-        policy.lock(session)
-        policy.require_enabled(session, definition)
+        policy.lock_enabled(session, definition)
         try:
             file_row = _live_file(session, file_id)
         except ArtifactGone:
@@ -174,7 +191,7 @@ def _begin(
                 session, file_row, row, execution=execution
             )
         if claimed is not None:
-            claimed(session, file_row)
+            claimed(session, file_row, attempts)
         # Load what the caller reads while this transaction is still open: a
         # refresh after the commit is a second transaction.
         session.flush()
@@ -242,15 +259,29 @@ def _publish_thumbnail(
     abort_on_failure: bool = False,
     preserve_frame: bool = False,
     renderer_encoded: bool = False,
+    has_embedded_3mf_preview: bool | None = None,
+    embedded_kind: PreviewImageKind = PreviewImageKind.SLICER_RENDER,
 ) -> DerivativeState:
     assert file_row.id is not None
+    embedded_container = strategy == ThumbnailStrategy.EMBEDDED and is_container(
+        file_row
+    )
     try:
-        encoded = thumbnail.to_webp(
-            image,
-            normalize=normalize,
-            preserve_frame=preserve_frame,
-            renderer_encoded=renderer_encoded,
-        )
+        if embedded_container and embedded_kind is PreviewImageKind.PHOTO:
+            source_image = thumbnail.to_photo_webp(
+                image, size=thumbnail.PhotoSize.THUMBNAIL
+            )
+            encoded = source_image.data
+            width, height = source_image.width, source_image.height
+        else:
+            encoded = thumbnail.to_webp(
+                image,
+                normalize=normalize,
+                preserve_frame=preserve_frame,
+                renderer_encoded=renderer_encoded,
+            )
+            width = int(settings.model_thumbnail_width)
+            height = round(width * 3 / 4)
     except ValueError:
         _fail(
             attempt,
@@ -260,6 +291,17 @@ def _publish_thumbnail(
         if abort_on_failure:
             raise
         return DerivativeState.FAILED
+    appearance = (
+        preview_appearance().fingerprint
+        if strategy != ThumbnailStrategy.EMBEDDED
+        else None
+    )
+    recipe_tag = (
+        f"{DerivativeKind.THUMBNAIL}:{attempt.recipe}:{attempt.token}"
+        f":w{settings.model_thumbnail_width}"
+    )
+    if appearance is not None:
+        recipe_tag = f"{recipe_tag}:{appearance}"
     backend = get_backend()
     with get_session_factory().scoped_session() as session:
         try:
@@ -268,7 +310,7 @@ def _publish_thumbnail(
                 backend,
                 file_row,
                 encoded,
-                recipe_tag=f"{DerivativeKind.THUMBNAIL}:{attempt.recipe}:{attempt.token}:w{settings.model_thumbnail_width}",
+                recipe_tag=recipe_tag,
             )
         except ThumbnailPublicationError, OperationError, OSError:
             session.rollback()
@@ -293,13 +335,16 @@ def _publish_thumbnail(
                 "sha256": published.sha256,
                 "size": published.size,
                 "etag": published.etag,
-                "width": int(settings.model_thumbnail_width),
-                "height": round(int(settings.model_thumbnail_width) * 3 / 4),
+                "width": width,
+                "height": height,
                 "strategy": strategy,
                 "complete": complete,
+                **({"appearance": appearance} if appearance is not None else {}),
+                **({"image_kind": embedded_kind.value} if embedded_container else {}),
             },
             duration_ms=duration_ms,
             peak_rss_bytes=peak_rss_bytes,
+            has_embedded_3mf_preview=has_embedded_3mf_preview,
         )
         point_at(session, fresh, published.key)
         session.flush()
@@ -308,27 +353,21 @@ def _publish_thumbnail(
     return DerivativeState.READY
 
 
-def _publish_embedded_3mf_cover(
-    file_row: File, attempt: records.DerivativeAttempt
-) -> DerivativeState | None:
-    """Publish a 3MF's own slicer picture, or None when it carries none."""
+def _embedded_3mf_cover(source: Path, file_id: int, source_bytes: int) -> bytes | None:
+    from app.modules.media.mesh_observability import record_phases
+    from app.modules.media.mesh_telemetry import MeshPhase, PhaseRecorder
+
+    phases = PhaseRecorder()
+    phases.start(MeshPhase.EMBEDDED, input_bytes=source_bytes)
     try:
-        with resolve(file_row).materialize() as source:
-            image = mesh_previews.extract_embedded_3mf_thumbnail(
-                source, validate_image=True
-            )
-    except ArtifactContentError:
-        return None
-    if image is None:
-        return None
-    return _publish_thumbnail(
-        file_row,
-        image,
-        attempt=attempt,
-        normalize=True,
-        strategy=ThumbnailStrategy.EMBEDDED.value,
-        complete=True,
-    )
+        image = mesh_previews.extract_embedded_3mf_thumbnail(
+            source, validate_image=True, file_type=FileType.THREE_MF.value
+        )
+        phases.finish(output_bytes=len(image) if image is not None else None)
+        return image
+    finally:
+        phases.fail_active()
+        record_phases(phases.snapshot(), file_id=file_id)
 
 
 def _thumbnail_failure(
@@ -343,11 +382,73 @@ def _thumbnail_failure(
     return DerivativeState.FAILED
 
 
+def _sliced_archive(path: Path) -> SlicedArchive | None:
+    try:
+        return inspect_sliced_archive(path)
+    except EmbeddedGcodeError, zipfile.BadZipFile:
+        # Keep the ordinary reader's error reporting for unrecognized archives.
+        return None
+
+
+def _sliced_cover(
+    source: Path, sliced: SlicedArchive | None
+) -> tuple[bytes, PreviewImageKind] | None:
+    if sliced is None or not sliced.images:
+        return None
+    try:
+        image = sliced.images[0]
+        return read_archive_image(source, image), image.image_kind
+    except EmbeddedGcodeError:
+        return None
+
+
+def _sliced_output(file: File, sliced: SlicedArchive) -> dict[str, Any]:
+    return {
+        "geometry": sliced.geometry.value,
+        "source_sha256": file.sha256,
+        "archive_images": [asdict(image) for image in sliced.images],
+    }
+
+
+def _publish_sliced_metadata(
+    file_id: int, attempt: records.DerivativeAttempt, sliced: SlicedArchive
+) -> None:
+    with get_session_factory().scoped_session() as session:
+        file, _ = records.claim_running(session, attempt)
+        records.mark_ready(
+            session,
+            attempt,
+            now=utcnow(),
+            output={
+                **_sliced_output(file, sliced),
+                "plate_metadata": sliced.plate_metadata,
+            },
+        )
+        row = _metadata_row(session, file_id)
+        apply_volume(row, VolumeNotCalculated(VolumeNotCalculatedCause.NOT_APPLICABLE))
+        row.bbox_x_mm = row.bbox_y_mm = row.bbox_z_mm = None
+        row.triangle_count = None
+        for name, value in sliced.metadata.items():
+            setattr(row, name, value)
+        session.add(row)
+        session.commit()
+
+
+def _skip_meshless(attempt: records.DerivativeAttempt) -> DerivativeState:
+    with get_session_factory().scoped_session() as session:
+        records.mark_skipped(
+            session, attempt, SlicedGeometry.GCODE_ONLY.value, now=utcnow()
+        )
+        session.commit()
+    return DerivativeState.SKIPPED
+
+
 def _derive_mesh(
     file_id: int,
     *,
     execution: JobExecution | None = None,
     phases: _ProducePhases,
+    render_scope: ExitStack,
 ) -> Outcome:
     """Publish each fenced basic output before optional fingerprint completion."""
     from app.modules.ingestion.extensions import extraction_options
@@ -357,10 +458,13 @@ def _derive_mesh(
         BasicOutput,
         GeometryOutput,
         ThumbnailOutput,
+        ViewsReady,
+        ViewsRefused,
     )
 
-    from . import mesh_continuations
+    from . import mesh_continuations, policy
     from .mesh_continuation_values import FingerprintPlan
+    from .preview_publication import PassClaim
 
     with phases.phase("options"):
         options = extraction_options(get_session_factory())
@@ -372,14 +476,37 @@ def _derive_mesh(
         else None
     )
     pending: mesh_continuations.MeshContinuation | None = None
+    views: PassClaim | None = None
+    recreate_embedded = False
 
-    def resume(session: Session, claimed_file: File) -> None:
+    def resume(
+        session: Session,
+        claimed_file: File,
+        claimed_kinds: dict[DerivativeKind, records.DerivativeAttempt],
+    ) -> None:
         # The claim already holds the Job, the generation and this Artifact:
         # durable fingerprint intent is resumed under those same locks.
-        nonlocal pending
+        nonlocal pending, views, recreate_embedded
+        if (
+            claimed_file.file_type is FileType.THREE_MF
+            and DerivativeKind.THUMBNAIL in claimed_kinds
+        ):
+            recreate_embedded = policy.effective_setting(
+                session.get(SystemConfig, 1),
+                policy.SettingName.RECREATE_EMBEDDED_COVERS,
+            )
         pending = mesh_continuations.resume(
             session, claimed_file, plan, execution=execution
         )
+        from . import preview_publication as publication
+
+        # This pass loads the mesh anyway: its views share that load. A replay
+        # whose basics already landed still finishes the views it stranded.
+        assert claimed_file.id is not None
+        if claimed_kinds or publication.stranded(session, claimed_file.id):
+            views = publication.claim_for_pass(
+                session, claimed_file, execution=execution
+            )
 
     with phases.phase("claim"):
         begun = _begin(
@@ -388,8 +515,12 @@ def _derive_mesh(
     if begun is None:
         return Outcome({})
     file_row, attempts = begun
+    with get_session_factory().scoped_session() as session:
+        render_scope.enter_context(
+            appearance_scope(policy.render_appearance(session.get(SystemConfig, 1)))
+        )
     outcome: dict[DerivativeKind, DerivativeState] = {}
-    if not attempts and pending is None:
+    if not attempts and pending is None and views is None:
         return Outcome(outcome)
 
     def published(kind: DerivativeKind, state: DerivativeState) -> None:
@@ -403,8 +534,47 @@ def _derive_mesh(
                 "mesh output notice failed", extra={"file_id": file_id, "kind": kind}
             )
 
+    views_started = time.monotonic()
+    views_settled = False
+
+    cover_attempt = attempts.get(DerivativeKind.THUMBNAIL)
+    check_embedded = (
+        cover_attempt is not None and file_row.file_type is FileType.THREE_MF
+    )
+    embedded_checked = False
+    embedded = None
+    embedded_kind = PreviewImageKind.SLICER_RENDER
+
+    def publish_embedded(image: bytes) -> None:
+        assert cover_attempt is not None
+        with phases.phase("publish_thumbnail"):
+            state = _publish_thumbnail(
+                file_row,
+                image,
+                attempt=cover_attempt,
+                normalize=True,
+                strategy=ThumbnailStrategy.EMBEDDED.value,
+                complete=True,
+                has_embedded_3mf_preview=True,
+                embedded_kind=embedded_kind,
+            )
+        published(DerivativeKind.THUMBNAIL, state)
+
     def publish(frame: BasicOutput) -> None:
-        nonlocal pending
+        nonlocal pending, views_settled
+        if isinstance(frame, ViewsReady | ViewsRefused):
+            from . import preview_publication as publication
+
+            if views is None or views_settled:
+                raise ValueError("unexpected_mesh_views_output")
+            views_settled = True
+            with phases.phase("publish_views"):
+                state = publication.publish_pass(
+                    file_row, views.attempt, frame, started=views_started
+                )
+            if state is not None:
+                published(DerivativeKind.PREVIEWS, state)
+            return
         if isinstance(frame, GeometryOutput):
             kind = DerivativeKind.METADATA
             if kind not in attempts or kind in outcome:
@@ -453,6 +623,9 @@ def _derive_mesh(
             kind = DerivativeKind.THUMBNAIL
             if kind not in attempts or kind in outcome:
                 raise ValueError("unexpected_mesh_thumbnail_output")
+            if frame.image is None and embedded is not None:
+                publish_embedded(embedded)
+                return
             with phases.phase("publish_thumbnail"):
                 state = (
                     _thumbnail_failure(
@@ -476,6 +649,9 @@ def _derive_mesh(
                         duration_ms=frame.duration_ms,
                         peak_rss_bytes=frame.peak_rss_bytes,
                         abort_on_failure=True,
+                        has_embedded_3mf_preview=(embedded is not None)
+                        if check_embedded
+                        else None,
                     )
                 )
             published(kind, state)
@@ -483,170 +659,236 @@ def _derive_mesh(
             raise TypeError("unknown_mesh_basic_output")
 
     try:
-        with ExitStack() as stack:
-            from app.modules.media import thumbnail_handoff
-            from app.modules.media.thumbnail_packet import MAX_PACKET_BYTES
+        try:
+            with ExitStack() as stack:
+                from app.modules.media import thumbnail_handoff
+                from app.modules.media.thumbnail_packet import MAX_PACKET_BYTES
 
-            width = int(settings.model_thumbnail_width)
-            handoff_plan = (
-                thumbnail_handoff.plan(width, round(width * 3 / 4), file_row.size_bytes)
-                if DerivativeKind.THUMBNAIL in attempts and plan is None
-                else None
-            )
-            output_bytes = MAX_PACKET_BYTES if handoff_plan is not None else 0
-            reserve_started = time.monotonic_ns()
-            prepared = stack.enter_context(
-                reserve_sources((resolve(file_row),), output_bytes=output_bytes)
-            )
-            phases.ns["reserve_prepared"] = time.monotonic_ns() - reserve_started
-            reserve_started = time.monotonic_ns()
-            claim = CapacityManager(get_session_factory()).reserve(
-                f"derive:mesh:{file_id}:{time.monotonic_ns()}",
-                [
-                    CapacityResource.for_path(
-                        prepared.directory,
-                        file_row.size_bytes * 2 + output_bytes,
-                        role="mesh source preparation",
-                    ),
-                    CapacityResource.for_path(
-                        Path(tempfile.gettempdir()),
-                        file_row.size_bytes * 3 + 16 * 1024**2,
-                        role="thumbnail rendering",
-                    ),
-                ],
-                transient=True,
-            )
-            phases.ns["reserve_capacity"] = time.monotonic_ns() - reserve_started
-            stack.callback(claim.release)
-            with phases.phase("materialize"):
-                (source,) = stack.enter_context(
-                    prepared.materialize(capacity_claimed=True)
+                width = int(settings.model_thumbnail_width)
+                handoff_plan = (
+                    thumbnail_handoff.plan(
+                        width, round(width * 3 / 4), file_row.size_bytes
+                    )
+                    if DerivativeKind.THUMBNAIL in attempts and plan is None
+                    else None
                 )
-            request = ThumbnailRequest(
-                path=source,
-                file_type=file_row.file_type.value,
-                include_geometry=DerivativeKind.METADATA in attempts,
-                include_thumbnail=DerivativeKind.THUMBNAIL in attempts,
-                reason="derivative",
-                output_format="WEBP",
-                include_fingerprint=plan is not None
-                and (DerivativeKind.METADATA in attempts or pending is not None),
-                triangle_cap=plan.triangle_cap
-                if plan is not None
-                else MAX_ANALYSIS_FACES,
-            )
-            result = None
-            try:
-                # Decode once under one native admission. Independent output
-                # consumers share source arrays; the GPU handoff starts after
-                # clean worker exit releases its native memory reservation.
-                with phases.phase("generate"):
-                    if handoff_plan is not None:
-                        handoff = stack.enter_context(
-                            thumbnail_handoff.reserve(handoff_plan, prepared.directory)
-                        )
-                        result = mesh_isolation.generate(
-                            request, on_output=publish, handoff=handoff
-                        )
-                    else:
-                        result = mesh_isolation.generate(request, on_output=publish)
-                if result is not None and result.fingerprint_result is not None:
-                    if pending is None:
-                        raise RuntimeError(
-                            "fingerprint_completion_without_pending_input"
-                        )
-                    try:
-                        with get_session_factory().scoped_session() as session:
-                            mesh_continuations.complete(
-                                session, pending, result.fingerprint_result
+                output_bytes = MAX_PACKET_BYTES if handoff_plan is not None else 0
+                reserve_started = time.monotonic_ns()
+                prepared = stack.enter_context(
+                    reserve_sources((resolve(file_row),), output_bytes=output_bytes)
+                )
+                phases.ns["reserve_prepared"] = time.monotonic_ns() - reserve_started
+                reserve_started = time.monotonic_ns()
+                claim = CapacityManager(get_session_factory()).reserve(
+                    f"derive:mesh:{file_id}:{time.monotonic_ns()}",
+                    [
+                        CapacityResource.for_path(
+                            prepared.directory,
+                            file_row.size_bytes * 2 + output_bytes,
+                            role="mesh source preparation",
+                        ),
+                        CapacityResource.for_path(
+                            Path(tempfile.gettempdir()),
+                            file_row.size_bytes * 3 + 16 * 1024**2,
+                            role="thumbnail rendering",
+                        ),
+                    ],
+                    transient=True,
+                )
+                phases.ns["reserve_capacity"] = time.monotonic_ns() - reserve_started
+                stack.callback(claim.release)
+                with phases.phase("materialize"):
+                    (source,) = stack.enter_context(
+                        prepared.materialize(capacity_claimed=True)
+                    )
+                sliced = (
+                    _sliced_archive(source)
+                    if file_row.file_type is FileType.THREE_MF
+                    else None
+                )
+                if check_embedded:
+                    with phases.phase("embedded_cover"):
+                        archive_cover = _sliced_cover(source, sliced)
+                        if archive_cover is not None:
+                            embedded, embedded_kind = archive_cover
+                        else:
+                            embedded = _embedded_3mf_cover(
+                                source, file_id, file_row.size_bytes
                             )
-                            session.commit()
-                    except records.AttemptSuperseded:
-                        raise
-                    except Exception:  # noqa: BLE001 - basics are already durable
-                        logger.exception(
-                            "fingerprint publication failed", extra={"file_id": file_id}
-                        )
-                        with get_session_factory().scoped_session() as session:
-                            mesh_continuations.defer(
-                                session, pending, FingerprintFailureCode.WORKER_FAILED
+                    embedded_checked = True
+                    if embedded is not None and not recreate_embedded:
+                        publish_embedded(embedded)
+                need_thumbnail = (
+                    cover_attempt is not None
+                    and DerivativeKind.THUMBNAIL not in outcome
+                )
+                if sliced is not None:
+                    if authority := attempts.get(DerivativeKind.METADATA):
+                        _publish_sliced_metadata(file_id, authority, sliced)
+                        published(DerivativeKind.METADATA, DerivativeState.READY)
+                    if views is not None:
+                        state = _skip_meshless(views.attempt)
+                        views_settled = True
+                        published(DerivativeKind.PREVIEWS, state)
+                    if need_thumbnail and cover_attempt is not None:
+                        if embedded is not None:
+                            publish_embedded(embedded)
+                        else:
+                            published(
+                                DerivativeKind.THUMBNAIL, _skip_meshless(cover_attempt)
                             )
-                            session.commit()
-            finally:
-                # Clear active-frame ownership before the host reservation exits,
-                # including publication and continuation failures.
-                del result
+                    return Outcome(outcome)
+                if not (
+                    need_thumbnail
+                    or DerivativeKind.METADATA in attempts
+                    or pending is not None
+                    or views is not None
+                ):
+                    return Outcome(outcome)
+                request = ThumbnailRequest(
+                    path=source,
+                    file_type=file_row.file_type.value,
+                    include_geometry=DerivativeKind.METADATA in attempts,
+                    include_thumbnail=need_thumbnail,
+                    check_embedded_3mf_preview=False,
+                    reason="derivative",
+                    output_format="WEBP",
+                    include_fingerprint=plan is not None
+                    and (DerivativeKind.METADATA in attempts or pending is not None),
+                    triangle_cap=plan.triangle_cap
+                    if plan is not None
+                    else MAX_ANALYSIS_FACES,
+                    views=views.request if views is not None else None,
+                )
+                result = None
+                try:
+                    # Decode once under one native admission. Independent output
+                    # consumers share source arrays; the GPU handoff starts after
+                    # clean worker exit releases its native memory reservation.
+                    with phases.phase("generate"):
+                        if need_thumbnail and handoff_plan is not None:
+                            handoff = stack.enter_context(
+                                thumbnail_handoff.reserve(
+                                    handoff_plan, prepared.directory
+                                )
+                            )
+                            result = mesh_isolation.generate(
+                                request, on_output=publish, handoff=handoff
+                            )
+                        else:
+                            result = mesh_isolation.generate(request, on_output=publish)
+                    if result is not None and result.fingerprint_result is not None:
+                        if pending is None:
+                            raise RuntimeError(
+                                "fingerprint_completion_without_pending_input"
+                            )
+                        try:
+                            with get_session_factory().scoped_session() as session:
+                                mesh_continuations.complete(
+                                    session, pending, result.fingerprint_result
+                                )
+                                session.commit()
+                        except records.AttemptSuperseded:
+                            raise
+                        except Exception:  # noqa: BLE001 - basics are already durable
+                            logger.exception(
+                                "fingerprint publication failed",
+                                extra={"file_id": file_id},
+                            )
+                            with get_session_factory().scoped_session() as session:
+                                mesh_continuations.defer(
+                                    session,
+                                    pending,
+                                    FingerprintFailureCode.WORKER_FAILED,
+                                )
+                                session.commit()
+                finally:
+                    # Clear active-frame ownership before the host reservation exits,
+                    # including publication and continuation failures.
+                    del result
 
-    except records.AttemptSuperseded:
+        except records.AttemptSuperseded:
+            return Outcome(outcome)
+        except (
+            ArtifactContentError,
+            MeshWorkerError,
+            AdmissionTooLarge,
+            TimeoutError,
+        ) as exc:
+            reason = (
+                ThumbnailFailureReason.TIMEOUT.value
+                if isinstance(exc, TimeoutError)
+                else ThumbnailFailureReason.RESOURCE_LIMIT.value
+                if isinstance(exc, AdmissionTooLarge)
+                else exc.reason.value
+                if isinstance(exc, MeshWorkerError)
+                else "invalid_source"
+            )
+            logger.warning(
+                "mesh derivation failed in its worker",
+                extra={"file_id": file_id, "reason": reason},
+            )
+            if check_embedded and DerivativeKind.THUMBNAIL not in outcome:
+                try:
+                    if not embedded_checked:
+                        # Capacity or worker admission can fail before probing.
+                        # The bounded archive read is independent of mesh loading.
+                        with resolve(file_row).materialize() as source:
+                            embedded = _embedded_3mf_cover(
+                                source, file_id, file_row.size_bytes
+                            )
+                    if embedded is not None:
+                        publish_embedded(embedded)
+                except ArtifactContentError:
+                    pass
+                except records.AttemptSuperseded:
+                    return Outcome(outcome)
+            if views is not None and not views_settled:
+                from . import preview_publication as publication
+
+                views_settled = True
+                state = publication.fail_pass(views.attempt, reason)
+                if state is not None:
+                    published(DerivativeKind.PREVIEWS, state)
+            for kind, authority in attempts.items():
+                if kind in outcome:
+                    continue
+                try:
+                    _fail(
+                        authority,
+                        reason,
+                        deterministic=isinstance(
+                            exc, MeshWorkerError | AdmissionTooLarge
+                        )
+                        and reason in _DETERMINISTIC,
+                    )
+                except records.AttemptSuperseded:
+                    break
+                published(kind, DerivativeState.FAILED)
+            if pending is not None:
+                failure_code = (
+                    FingerprintFailureCode.TIMEOUT
+                    if reason == ThumbnailFailureReason.TIMEOUT.value
+                    else FingerprintFailureCode.RESOURCE_LIMIT
+                    if reason == ThumbnailFailureReason.RESOURCE_LIMIT.value
+                    else FingerprintFailureCode.SOURCE_UNAVAILABLE
+                    if isinstance(exc, ArtifactContentError)
+                    else FingerprintFailureCode.WORKER_FAILED
+                )
+                try:
+                    with get_session_factory().scoped_session() as session:
+                        mesh_continuations.defer(session, pending, failure_code)
+                        session.commit()
+                except records.AttemptSuperseded:
+                    pass
         return Outcome(outcome)
-    except (
-        ArtifactContentError,
-        MeshWorkerError,
-        AdmissionTooLarge,
-        TimeoutError,
-    ) as exc:
-        reason = (
-            ThumbnailFailureReason.TIMEOUT.value
-            if isinstance(exc, TimeoutError)
-            else ThumbnailFailureReason.RESOURCE_LIMIT.value
-            if isinstance(exc, AdmissionTooLarge)
-            else exc.reason.value
-            if isinstance(exc, MeshWorkerError)
-            else "invalid_source"
-        )
-        logger.warning(
-            "mesh derivation failed in its worker",
-            extra={"file_id": file_id, "reason": reason},
-        )
-        if (
-            DerivativeKind.THUMBNAIL in attempts
-            and DerivativeKind.THUMBNAIL not in outcome
-            and file_row.file_type is FileType.THREE_MF
-            and settings.prefer_rendered_3mf_preview
-        ):
-            # A preferred render is attempted before the slicer's picture is
-            # published, so a worker that dies while reading the mesh would
-            # otherwise leave the Model without a cover. The picture is a
-            # bounded archive read, done here as G-code's embedded image is.
-            try:
-                state = _publish_embedded_3mf_cover(
-                    file_row, attempts[DerivativeKind.THUMBNAIL]
-                )
-            except records.AttemptSuperseded:
-                return Outcome(outcome)
-            if state is not None:
-                outcome[DerivativeKind.THUMBNAIL] = state
-                published(DerivativeKind.THUMBNAIL, state)
-        for kind, authority in attempts.items():
-            if kind in outcome:
-                continue
-            try:
-                _fail(
-                    authority,
-                    reason,
-                    deterministic=isinstance(exc, MeshWorkerError | AdmissionTooLarge)
-                    and reason in _DETERMINISTIC,
-                )
-            except records.AttemptSuperseded:
-                break
-            published(kind, DerivativeState.FAILED)
-        if pending is not None:
-            failure_code = (
-                FingerprintFailureCode.TIMEOUT
-                if reason == ThumbnailFailureReason.TIMEOUT.value
-                else FingerprintFailureCode.RESOURCE_LIMIT
-                if reason == ThumbnailFailureReason.RESOURCE_LIMIT.value
-                else FingerprintFailureCode.SOURCE_UNAVAILABLE
-                if isinstance(exc, ArtifactContentError)
-                else FingerprintFailureCode.WORKER_FAILED
-            )
-            try:
-                with get_session_factory().scoped_session() as session:
-                    mesh_continuations.defer(session, pending, failure_code)
-                    session.commit()
-            except records.AttemptSuperseded:
-                pass
-    return Outcome(outcome)
+    finally:
+        # Any exit that did not settle the claimed views (a crash, a superseded
+        # cover) gives them back untouched, so the batch renders them at once.
+        if views is not None and not views_settled:
+            from . import preview_publication as publication
+
+            publication.release_pass(views)
 
 
 def _replace_material_requirements(
@@ -688,17 +930,76 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
     started = time.monotonic()
     meta: dict[str, Any] = {}
     captured = CapturedSettings()
+    plate_metadata: list[dict[str, Any]] = []
     image: bytes | None = None
+    embedded_kind = PreviewImageKind.SLICER_RENDER
+    sliced = None
     try:
         with resolve(file_row).materialize() as source:
+            sliced = _sliced_archive(source) if is_container(file_row) else None
             if DerivativeKind.METADATA in needed:
                 try:
                     if file_row.file_type is FileType.RESIN:
                         meta = resin.parse(source)
+                    elif is_container(file_row):
+                        plates = list_embedded_gcode_plates(source)
+                        if plates:
+                            for number in plates:
+                                with plate_toolpath(source, number) as toolpath:
+                                    parsed = gcode_parser.parse(toolpath)
+                                    if sliced is not None:
+                                        archive_meta = next(
+                                            details["metadata"]
+                                            for details in sliced.plate_metadata
+                                            if details["number"] == number
+                                        )
+                                        parsed.update(
+                                            {
+                                                key: value
+                                                for key, value in archive_meta.items()
+                                                if value is not None
+                                            }
+                                        )
+                                    plate_metadata.append(
+                                        {"number": number, "metadata": parsed}
+                                    )
+                                    if len(plates) == 1:
+                                        captured = capture_settings(toolpath)
+                            if len(plate_metadata) == 1:
+                                meta = plate_metadata[0]["metadata"]
+                            else:
+                                # Estimates describe one plate, even if two happen to match.
+                                per_plate = {
+                                    "estimated_time_s",
+                                    "filament_weight_g",
+                                    "filament_length_mm",
+                                    "filament_cost",
+                                }
+                                first = plate_metadata[0]["metadata"]
+                                meta = {
+                                    key: value
+                                    if key not in per_plate
+                                    and all(
+                                        plate["metadata"][key] == value
+                                        for plate in plate_metadata[1:]
+                                    )
+                                    else None
+                                    for key, value in first.items()
+                                }
+                        else:
+                            with get_session_factory().scoped_session() as session:
+                                records.mark_skipped(
+                                    session,
+                                    attempts[DerivativeKind.METADATA],
+                                    "no_sliced_plates",
+                                    now=utcnow(),
+                                )
+                                session.commit()
+                            outcome[DerivativeKind.METADATA] = DerivativeState.SKIPPED
                     else:
                         meta = gcode_parser.parse(source)
                         captured = capture_settings(source)
-                except ResinFormatError:
+                except ResinFormatError, EmbeddedGcodeError:
                     _fail(
                         attempts[DerivativeKind.METADATA],
                         "invalid_source",
@@ -707,12 +1008,19 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
                     outcome[DerivativeKind.METADATA] = DerivativeState.FAILED
             if DerivativeKind.THUMBNAIL in needed:
                 try:
-                    image = (
-                        resin.extract(source)
-                        if file_row.file_type is FileType.RESIN
-                        else thumbnail.extract(source)
-                    )
-                except ResinFormatError:
+                    if file_row.file_type is FileType.RESIN:
+                        image = resin.extract(source)
+                    elif is_container(file_row):
+                        archive_cover = _sliced_cover(source, sliced)
+                        if archive_cover is not None:
+                            image, embedded_kind = archive_cover
+                        else:
+                            image = mesh_previews.extract_embedded_3mf_thumbnail(
+                                source, file_type="3mf"
+                            )
+                    else:
+                        image = thumbnail.extract(source)
+                except ResinFormatError, EmbeddedGcodeError:
                     _fail(
                         attempts[DerivativeKind.THUMBNAIL],
                         "invalid_source",
@@ -737,6 +1045,8 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
                 output={
                     "slicer": meta.get("slicer_name"),
                     "slicer_settings": asdict(captured),
+                    "plate_metadata": plate_metadata,
+                    **(_sliced_output(file_row, sliced) if sliced is not None else {}),
                 },
                 duration_ms=duration_ms,
             )
@@ -785,9 +1095,10 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
                     image,
                     attempt=attempts[DerivativeKind.THUMBNAIL],
                     normalize=False,
-                    strategy="embedded",
+                    strategy=ThumbnailStrategy.EMBEDDED.value,
                     complete=True,
                     duration_ms=duration_ms,
+                    embedded_kind=embedded_kind,
                 )
     except records.AttemptSuperseded:
         # Earlier kinds committed independently and still deserve their notice.
@@ -929,7 +1240,10 @@ class _ProducePhases:
 def derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outcome:
     phases = _ProducePhases()
     try:
-        return _derive_mesh(file_id, execution=execution, phases=phases)
+        with ExitStack() as scope:
+            return _derive_mesh(
+                file_id, execution=execution, phases=phases, render_scope=scope
+            )
     except records.AttemptSuperseded:
         return Outcome({})
     finally:
@@ -1078,6 +1392,11 @@ def _derive_viewer_stl(
         ):
             (source,) = sources
             require_current_execution()
+            if (
+                file.file_type is FileType.THREE_MF
+                and _sliced_archive(source) is not None
+            ):
+                return Outcome({DerivativeKind.VIEWER_STL: _skip_meshless(attempt)})
             with stl_isolation.prepare_stl(
                 source,
                 file_type=file.file_type.value,

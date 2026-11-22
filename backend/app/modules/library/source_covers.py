@@ -87,6 +87,7 @@ def prepare_candidate(
     data: bytes,
     content_type: str | None,
     position: int = 0,
+    minimum_frame: tuple[int, int] | None = None,
 ) -> SourceCoverCandidate:
     """Publish private bytes without inserting a cover or changing visible bytes.
 
@@ -96,7 +97,9 @@ def prepare_candidate(
     """
     if position < 0:
         raise ValueError("invalid_source_image_position")
-    processed = process_source_cover_upload(data, content_type)
+    processed = process_source_cover_upload(
+        data, content_type, minimum_frame=minimum_frame
+    )
     with session.no_autoflush:
         existing = get(session, provenance_source_id, position=position)
         previous = (

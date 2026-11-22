@@ -7,42 +7,54 @@ backup, migration and purge, while range-capable backends transfer one view.
 
 from __future__ import annotations
 
-import hashlib
 import time
 from collections.abc import Callable
+from dataclasses import asdict
 from functools import partial
-
-from pydantic import ValidationError
 
 from app.core.cancellation import checkpoint
 from app.core.config import settings
-from app.core.time import utcnow
-from app.db.models import DerivativeKind, DerivativeState, JobKind
+from app.db.models import (
+    DerivativeKind,
+    DerivativeState,
+    FileType,
+    JobKind,
+    SystemConfig,
+)
 from app.db.session import get_session_factory
-from app.modules.media import mesh_isolation, thumbnail
+from app.modules.media import mesh_isolation
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_isolation import MeshWorkerError
 from app.modules.media.native_budget import MeshSource, RasterCodec, RasterWork
 from app.modules.media.preview_contracts import (
-    HEIGHT,
+    GALLERY_WIDTH,
     MAX_BUNDLE_BYTES,
     MAX_MANIFEST_BYTES,
-    WIDTH,
+    MAX_VIEWS,
     PreviewManifest,
+    height_for,
 )
 from app.modules.media.source_preparation import reserve_sources
-from app.modules.media.stl_isolation import manifest_for, open_worker_output
+from app.modules.media.stl_isolation import (
+    manifest_for,
+    open_worker_output,
+)
 from app.modules.storage.artifact_content import ArtifactContentError, resolve
 from app.modules.storage.capacity import CapacityManager, CapacityResource
 from app.modules.storage.capacity_estimates import vault_allocation
-from app.modules.storage.storage_backend.contracts import StorageCollisionError
-from app.modules.storage.storage_backend.runtime import get_backend
-from app.modules.storage.storage_ownership import adopt_publication, prepare_stream
 from app.modules.work.contracts import JobExecution
 from app.runtime.native_admission import AdmissionTooLarge
 
 from . import policy, records
-from .producers import Outcome, _announced, _begin, _fail
+from . import preview_publication as publication
+from .producers import (
+    Outcome,
+    _announced,
+    _begin,
+    _fail,
+    _skip_meshless,
+    _sliced_archive,
+)
 
 
 def _derive(
@@ -58,6 +70,9 @@ def _derive(
     attempt = attempts[DerivativeKind.PREVIEWS]
     with get_session_factory().scoped_session() as session:
         include_poles = policy.preview_poles(session)
+        planar_cover = publication.planar_cover_rotation(session, file)
+        appearance = policy.render_appearance(session.get(SystemConfig, 1))
+    width = GALLERY_WIDTH
     # VAULT_MESH_MAX_LOAD_MB: the same source-size ceiling as every mesh path.
     if file.size_bytes > settings.mesh_max_load_mb * 1024 * 1024:
         _fail(attempt, "resource_limit", deterministic=True)
@@ -79,7 +94,7 @@ def _derive(
                 count, size = int(done), int(total)
             except ValueError as exc:  # UnicodeDecodeError is a ValueError
                 raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED) from exc
-            if prefix != "P" or not completed < count <= size <= 6:
+            if prefix != "P" or not completed < count <= size <= MAX_VIEWS:
                 raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
             completed = count
             checkpoint(force=True)
@@ -106,6 +121,11 @@ def _derive(
             prepared.materialize(capacity_claimed=True) as sources,
         ):
             (source,) = sources
+            if (
+                file.file_type is FileType.THREE_MF
+                and _sliced_archive(source) is not None
+            ):
+                return Outcome({DerivativeKind.PREVIEWS: _skip_meshless(attempt)})
             with mesh_isolation.prepared_worker_result(
                 "app.modules.media.preview_worker",
                 {
@@ -114,11 +134,14 @@ def _derive(
                     "expected_sha256": file.sha256,
                     "recipe": attempt.recipe,
                     "include_poles": include_poles,
+                    "width": width,
+                    "planar_cover": planar_cover,
+                    "preview_appearance": asdict(appearance),
                 },
                 workspace=prepared.directory,
                 sources=(MeshSource(source, file.file_type.value),),
                 # Images are encoded sequentially; one live raster, six bounded WebPs.
-                work=RasterWork(WIDTH, HEIGHT, 1, RasterCodec.WEBP),
+                work=RasterWork(width, height_for(width), 1, RasterCodec.WEBP),
                 reply_limit=MAX_MANIFEST_BYTES,
                 on_chunk=receive,
             ) as (reply, directory):
@@ -128,89 +151,30 @@ def _derive(
                         ThumbnailFailureReason(payload[4:].decode("ascii"))
                     )
                 manifest = PreviewManifest.model_validate_json(payload)
-                if (
-                    manifest.source_sha256 != file.sha256
-                    or manifest.recipe != attempt.recipe
-                ):
-                    raise ValueError("preview_source_changed")
                 with open_worker_output(directory / "views.bin") as stream:
-                    bundle = manifest_for(stream)
-                    if bundle.size != manifest.size:
-                        raise ValueError("preview_size_mismatch")
-                    for view in manifest.views:
-                        checkpoint(force=True)
-                        image = stream.read(view.size)
-                        if hashlib.sha256(image).hexdigest() != view.sha256:
-                            raise ValueError("preview_digest_mismatch")
-                        canonical = thumbnail.to_webp(
-                            image,
-                            width=WIDTH,
-                            normalize=False,
-                            preserve_frame=True,
-                            renderer_encoded=True,
-                        )
-                        if canonical != image:
-                            raise ValueError("preview_noncanonical_image")
-                    stream.seek(0)
-                    backend = get_backend()
-                    key = backend.blob_key(
-                        "_derivatives",
-                        0,
-                        f"{file.sha256}-previews-r{attempt.recipe}-{attempt.token}.bin",
+                    publication.publish(
+                        file,
+                        attempt,
+                        manifest,
+                        stream,
+                        manifest_for(stream),
+                        started=started,
                     )
-                    with get_session_factory().scoped_session() as session:
-                        candidate = prepare_stream(
-                            session,
-                            backend,
-                            key,
-                            stream,
-                            expected_size=manifest.size,
-                            sha256=bundle.sha256,
-                            object_kind="previews",
-                        )
-                        records.mark_ready(
-                            session,
-                            attempt,
-                            now=utcnow(),
-                            storage_key=candidate.receipt.key,
-                            output=manifest.model_dump(mode="json"),
-                            duration_ms=int((time.monotonic() - started) * 1000),
-                        )
-                        session.flush()
-                        adopt_publication(session, candidate)
-                        session.commit()
     except records.AttemptSuperseded:
         return Outcome({})
     except (
         MeshWorkerError,
         AdmissionTooLarge,
         ArtifactContentError,
-        ValueError,
-        ValidationError,
-        OSError,
-        StorageCollisionError,
+        *publication.SOURCE_FAILURES,
+        *publication.STORAGE_FAILURES,
     ) as exc:
-        reason = (
-            exc.reason.value
-            if isinstance(exc, MeshWorkerError)
-            else "resource_limit"
-            if isinstance(exc, AdmissionTooLarge)
-            else "storage"
-            if isinstance(exc, (OSError, StorageCollisionError))
-            else "invalid_source"
-        )
-        if reason in {"unsupported_format", "unsupported_capability", "no_geometry"}:
-            with get_session_factory().scoped_session() as session:
-                records.mark_skipped(session, attempt, reason, now=utcnow())
-                session.commit()
-            return Outcome({DerivativeKind.PREVIEWS: DerivativeState.SKIPPED})
-        _fail(
+        state = publication.settle_failure(
             attempt,
-            reason,
-            deterministic=reason not in {"storage", "worker_failed", "timeout"},
+            publication.reason_for(exc),
             duration_ms=int((time.monotonic() - started) * 1000),
         )
-        return Outcome({DerivativeKind.PREVIEWS: DerivativeState.FAILED})
+        return Outcome({DerivativeKind.PREVIEWS: state})
     return Outcome({DerivativeKind.PREVIEWS: DerivativeState.READY})
 
 

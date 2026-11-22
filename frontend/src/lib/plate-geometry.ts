@@ -6,6 +6,7 @@
  * belongs to the plate its centroid lies over. Positions and normals are
  * non-indexed: nine floats per triangle.
  */
+import * as THREE from "three";
 import type { PlateRegion } from "@/types";
 
 export interface TriangleArrays {
@@ -34,4 +35,12 @@ export function trianglesOnPlate(mesh: TriangleArrays, region: PlateRegion): Tri
     keptNormals.set(normals.subarray(start, end), index * FLOATS_PER_TRIANGLE);
   });
   return { positions: keptPositions, normals: keptNormals };
+}
+
+export function geometryDimensions(geometry: THREE.BufferGeometry | null) {
+  if (!geometry || geometry.getAttribute("position").count === 0) return null;
+  geometry.computeBoundingBox();
+  if (!geometry.boundingBox) return null;
+  const size = geometry.boundingBox.getSize(new THREE.Vector3());
+  return { x: size.x, y: size.y, z: size.z };
 }

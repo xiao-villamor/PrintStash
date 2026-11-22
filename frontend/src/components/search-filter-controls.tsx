@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { PrintHistoryFields } from "@/components/print-history-fields";
 import { Button } from "@/components/ui/button";
@@ -47,12 +47,14 @@ export function SearchFilterControls({
   q,
   sort,
   showQuery = true,
+  actions,
   onChange,
 }: {
   filters: SavedViewFilters;
   q: string;
   sort: ModelSort;
   showQuery?: boolean;
+  actions: ReactNode;
   onChange: (filters: SavedViewFilters, q: string, sort: ModelSort) => void;
 }) {
   const { t } = useI18n();
@@ -78,70 +80,73 @@ export function SearchFilterControls({
   }
   return (
     <div className="space-y-3">
-      <form
-        key={q}
-        className="flex flex-wrap items-center gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onChange(filters, query, sort);
-        }}
-      >
-        {showQuery && (
-          <Input
-            className="min-w-0 flex-1 basis-full sm:basis-auto"
-            aria-label={t("aiSearch.residualQuery")}
-            defaultValue={q}
-            maxLength={512}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        )}
-        {showQuery && <Button type="submit">{t("aiSearch.applySearch")}</Button>}
-        {!showQuery && (
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <form
+          key={q}
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onChange(filters, query, sort);
+          }}
+        >
+          {showQuery && (
+            <Input
+              className="min-w-0 flex-1 basis-full sm:basis-auto"
+              aria-label={t("aiSearch.residualQuery")}
+              defaultValue={q}
+              maxLength={512}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          )}
+          {showQuery && <Button type="submit">{t("aiSearch.applySearch")}</Button>}
+          {!showQuery && (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              onClick={() => {
+                setAddValue("");
+                setAddOpen(true);
+              }}
+            >
+              {uiText("Add filter")}
+            </Button>
+          )}
           <Button
             type="button"
             variant="outline"
             size="xs"
             onClick={() => {
-              setAddValue("");
-              setAddOpen(true);
+              setDraft(params);
+              setHistoryOpen(true);
             }}
           >
-            {uiText("Add filter")}
+            {uiText("Print history")}
           </Button>
-        )}
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          onClick={() => {
-            setDraft(params);
-            setHistoryOpen(true);
-          }}
-        >
-          {uiText("Print history")}
-        </Button>
-        <label className="flex items-center gap-2 text-xs">
-          {t("aiSearch.sort")}
-          <select
-            aria-label={t("aiSearch.sort")}
-            className="h-9 rounded-md border border-input bg-card px-3 text-xs"
-            value={sort}
-            onChange={(event) =>
-              onChange(
-                filters,
-                q,
-                searchSorts.find((value) => value === event.target.value) ?? "relevance",
-              )
-            }
-          >
-            {searchSorts.map((value) => (
-              <option key={value} value={value}>
-                {t(`aiSearch.sort.${value}`)}
-              </option>
-            ))}
-          </select>
-        </label>
-      </form>
+          <label className="flex items-center gap-2 text-xs">
+            {t("aiSearch.sort")}
+            <select
+              aria-label={t("aiSearch.sort")}
+              className="h-9 rounded-md border border-input bg-card px-3 text-xs"
+              value={sort}
+              onChange={(event) =>
+                onChange(
+                  filters,
+                  q,
+                  searchSorts.find((value) => value === event.target.value) ?? "relevance",
+                )
+              }
+            >
+              {searchSorts.map((value) => (
+                <option key={value} value={value}>
+                  {t(`aiSearch.sort.${value}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </form>
+        {actions}
+      </div>
       {chips.length > 0 && (
         <div className="flex flex-wrap gap-2" aria-label={t("aiSearch.activeFilters")}>
           {chips.map(([key, value], index) => {

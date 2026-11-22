@@ -2,12 +2,13 @@
 
 Library cards keep one large cover. Use the arrows to browse a Model's views,
 or **Model views** to open a selectable thumbnail strip. Top and Bottom are named
-choices in that gallery; they are outside the horizontal orbit. Planar objects
-cycle through Cover, Face, Reverse, Oblique edge, Top and Bottom with the same arrows.
+choices in that gallery; they are outside the horizontal orbit. A planar cover can sit before the orbit without dropping any of the four angles.
 There is no autoplay or pointer-position scrubbing.
 
 Single-cover and multi-angle cards reserve the same image area and control row.
-The expanded gallery grows with the screen, up to 1152 px wide, while its image
+Chosen and embedded 3MF photos fill the card and inspector image area.
+Generated views keep their surrounding space. The expanded gallery shows the
+whole image and grows with the screen, up to 1152 px wide, while its image
 height stays within the viewport and its thumbnail strip scrolls on narrow screens.
 
 On cards, the cover occupies the default face in the arrow cycle: Cover → 55° →
@@ -20,6 +21,18 @@ A chosen cover can be an uploaded PNG/JPEG/WebP, a capture of the current 3D vie
 or a source image. Reset to automatic restores the latest automatic thumbnail.
 Chosen covers survive regeneration. Covers with no measured camera are labelled
 as covers, separately from generated viewpoints.
+
+## Embedded 3MF covers
+
+PrintStash uses a usable embedded 3MF picture as its automatic cover. In
+**Settings → Previews**, turn on **Recreate embedded covers** to render automatic
+covers for those files. The embedded picture remains available as a fallback.
+Changing the setting refreshes affected covers in the background. Multi-angle
+views follow their own setting.
+
+`VAULT_PREFER_RENDERED_3MF_PREVIEW` defaults to `false`. A saved admin override
+takes precedence over the environment value. On upgrade, PrintStash checks
+existing 3MF covers for embedded pictures in the background.
 
 ## Fetching and access
 
@@ -63,20 +76,17 @@ other generated cameras retain imported +Z as screen up where possible.
 Camera matrices, orthographic projection scale/offset, source center, dimensions,
 roles, IDs, ordering, recipe, source SHA-256 and image digests are recorded.
 
-Planar classification uses the shared area-weighted surface covariance. Sorted
-eigenvalues must satisfy smallest/middle < 0.04 and middle/largest >= 0.09.
-This separates plates from rods and works after rotation. The broad-face normal
-has a deterministic sign anchored in the imported frame; it does not claim
-semantic front/back. Ambiguous shapes keep the imported-frame orbit. The oblique
-edge view is 65° from the face. 3MF build/component transforms are applied before
-analysis. No candidates are pruned by silhouette or presumed symmetry.
-
-Recipe 2 produces lossless 480 × 360 WebPs: six views for solids, five for planar
-objects, including Top and Bottom. Sources follow the same limits as covers and
+Generated views use 1280 × 960 images for the expanded gallery. Older sets stay
+available while background work rebuilds them. The gallery centres each image at
+its intrinsic size when the stage has room. Model image quality still controls
+the automatic card cover. Each generated view includes a separate 320 × 240
+thumbnail for the gallery strip and the card's carousel. Four orbit views are
+rendered, plus Top and Bottom when enabled. A saved planar cover keeps its camera.
+An optional view that projects only an edge can be omitted from the set.
+Sources follow the same limits as covers and
 every other mesh path: `VAULT_MESH_MAX_LOAD_MB` (default 200) and
 `VAULT_MESH_MAX_RENDER_TRIANGLES` (default 2,000,000). Raise them in your
-environment to include larger files. Output is bounded at 1 MiB per image, 6 MiB
-per bundle and a 32 KiB manifest. Native memory and timeout admission also apply,
+environment to include larger files. Output is bounded at 1 MiB per full image, 128 KiB per thumbnail, seven views per bundle, and a 32 KiB manifest. Native memory and timeout admission also apply,
 so on small hosts keep `VAULT_MAX_RENDER_JOBS` low. Oversized sources receive an explicit resource-limit
 outcome; optional unavailable converters are unsupported. Neither outcome
 invalidates the original Artifact or its primary thumbnail. These discrete
@@ -93,19 +103,32 @@ replacement, cancellation, and retry.
 
 ## Scheduling and reuse
 
-`derivatives.previews` is an independent, durable derivative Job and Work Source.
-It has its own control, **Multi-angle Model card views** in Settings →
-Background work (`VAULT_DERIVATIVES_PREVIEWS_ENABLED`). Views follow covers,
-so they also need mesh processing enabled. It uses backfill priority,
-one queued/running batch at a time, and requires a terminal primary-thumbnail
-attempt. Active mesh/G-code primary work gets a two-minute grace period. That
+Views have their own control, **Multi-angle Model card views** in Settings →
+Background work (`VAULT_DERIVATIVES_PREVIEWS_ENABLED`). They follow covers, so
+they also need mesh processing enabled.
+
+When a mesh Job (`derivatives.mesh`) has a cover or metadata to produce and the
+views are owed, it claims them in the same transaction and renders them in the
+same worker, right after publishing the cover, from the mesh it already loaded.
+The cover is never delayed by its own views, and views run on every native slot
+like covers do. If that pass ends before its views (a crash, a cancellation, a
+superseded attempt), the claim is handed back untouched or recorded as a
+retryable failure, so the views do not wait out the one-hour stale window. A
+replayed mesh Job finishes views its previous execution stranded.
+
+`derivatives.previews` remains an independent, durable derivative Job and Work
+Source for views no cover pass owes: existing libraries, a newly enabled
+setting, and retries. It uses backfill priority, one queued/running batch at a
+time, and requires a terminal primary-thumbnail attempt. Active mesh/G-code primary work gets a two-minute grace period. That
 grace is persisted and does not move when fresh imports arrive; afterwards one
 bounded secondary batch can progress. Running native work is not preempted.
 Cancellation checkpoints and progress updates occur between images. Existing
 libraries use the same bounded discovery cursor, without removing their covers.
 
-The worker loads/composes the mesh once and prepares welded geometry/normals once
-for the entire batch. Each view still pays projection, rasterization and encoding.
+Either way the mesh is loaded/composed once and welded geometry/normals are
+prepared once for every view of the set; both paths share one renderer and
+publish identical bundles. Each view still pays projection, rasterization and
+encoding, roughly in proportion to its pixel count.
 Remote original bytes use the existing Artifact cache; warm, cold, disabled and
 evicted cases follow the normal materialization path. Linked Library sources also
 use the existing descriptor-pinned source boundary.

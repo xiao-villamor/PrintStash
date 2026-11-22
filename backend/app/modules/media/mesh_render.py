@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal, Optional
 
 from printstash_core.mesh import rasterizer as _core
 from printstash_core.mesh.render_geometry import (
+    FrozenRender,
     PreparedRender,
     PreparedRenderGeometry,
     RenderableMesh,
+    prepare_frozen_mesh_render,
     prepare_mesh,
     prepare_normals,
     prepare_scene,
@@ -125,9 +128,16 @@ def prepare_scene_packet(scene: ExpandedScene) -> RenderInput:
 
 
 def prepare_mesh_render(mesh: RenderableMesh | None) -> RenderInput | None:
-    """Choose the prepared representation before computing CPU smooth normals."""
+    """Choose the prepared representation before computing shared corner normals."""
     geometry = prepare_mesh(mesh)
     return None if geometry is None else _prepare_geometry(geometry)
+
+
+def prepare_encoder_render(mesh: RenderableMesh | None) -> FrozenRender | None:
+    """Prepare the frozen CPU geometry used for search encoder inputs."""
+    return prepare_frozen_mesh_render(
+        mesh, face_chunk_size=settings.mesh_render_face_chunk_size
+    )
 
 
 def prepare_preview_render(mesh: RenderableMesh | None) -> RenderInput | None:
@@ -142,7 +152,7 @@ def prepare_scene_render(scene: ExpandedScene) -> RenderInput:
 
 
 def render_prepared_thumbnail(
-    prepared: RenderInput,
+    prepared: RenderInput | FrozenRender,
     name: str,
     width: int = 640,
     height: int = 480,
@@ -157,13 +167,15 @@ def render_prepared_thumbnail(
 
     accelerated = (
         None
-        if reference_thumbnail
+        if matte or reference_thumbnail or isinstance(prepared, FrozenRender)
         else render(prepared, width, height, (view_rotation,), matte)
     )
     if accelerated is not None:
         return _core.encode_rendered_pixels(accelerated[0], output_format=output_format)
     return _core.render_prepared_thumbnail(
-        canonical(
+        prepared
+        if isinstance(prepared, FrozenRender)
+        else canonical(
             prepared, cache=True, face_chunk_size=settings.mesh_render_face_chunk_size
         ),
         name,
@@ -180,7 +192,7 @@ def render_prepared_thumbnail(
 
 
 def render_prepared_pixels(
-    prepared: RenderInput,
+    prepared: RenderInput | FrozenRender,
     name: str,
     width: int = 640,
     height: int = 480,
@@ -193,12 +205,16 @@ def render_prepared_pixels(
     from .compute_render import render
 
     accelerated = (
-        render(prepared, width, height, (view_rotation,), matte) if compute else None
+        render(prepared, width, height, (view_rotation,), matte)
+        if compute and not matte and not isinstance(prepared, FrozenRender)
+        else None
     )
     if accelerated is not None:
         return accelerated[0]
     return _core.render_prepared_pixels(
-        canonical(
+        prepared
+        if isinstance(prepared, FrozenRender)
+        else canonical(
             prepared, cache=True, face_chunk_size=settings.mesh_render_face_chunk_size
         ),
         name,
@@ -247,6 +263,7 @@ __all__ = [
     "FLAT_MESH_THICKNESS_RATIO",
     "RasterBudget",
     "PreparedRender",
+    "FrozenRender",
     "RenderInput",
     "RenderedPixels",
     "RGBBackground",
@@ -259,3 +276,62 @@ __all__ = [
     "render_scene_thumbnail",
     "render_thumbnail",
 ]
+
+
+@dataclass(frozen=True)
+class _Bracket:
+    vertices: NDArray[np.float64]
+    faces: NDArray[np.int64]
+
+
+def _bracket() -> _Bracket:
+    import numpy as np
+
+    x = (-24, -17, -9, 9, 17, 24)
+    y = (-16, -9, -1, 10, 16)
+    z = (0, 5, 13, 24)
+    occupied = {
+        (i, j, k)
+        for i in range(len(x) - 1)
+        for j in range(len(y) - 1)
+        for k in range(len(z) - 1)
+        if (k == 0 and (i, j) not in {(1, 1), (3, 1)})
+        or (j == 3 and k > 0 and (i, k) != (2, 1))
+    }
+    vertices = []
+    faces = []
+    for position in sorted(occupied):
+        for axis in range(3):
+            right, up = (axis + 1) % 3, (axis + 2) % 3
+            for side in (0, 1):
+                other = list(position)
+                other[axis] += 1 if side else -1
+                if tuple(other) in occupied:
+                    continue
+                start = len(vertices)
+                for a, b in ((0, 0), (1, 0), (1, 1), (0, 1)):
+                    corner = list(position)
+                    corner[axis] += side
+                    corner[right] += a
+                    corner[up] += b
+                    vertices.append(
+                        tuple(
+                            values[index]
+                            for values, index in zip((x, y, z), corner, strict=True)
+                        )
+                    )
+                triangles = ((0, 1, 2), (0, 2, 3))
+                faces.extend(
+                    tuple(start + i for i in (face if side else face[::-1]))
+                    for face in triangles
+                )
+    return _Bracket(
+        np.asarray(vertices, dtype=np.float64), np.asarray(faces, dtype=np.int64)
+    )
+
+
+def render_example_bracket() -> bytes | None:
+    """Render the fixed 320px setup example without accepting user geometry."""
+    return _core.render_mesh_thumbnail(
+        _bracket(), "Example bracket", 320, 240, output_format="WEBP"
+    )

@@ -1,14 +1,23 @@
 """Every shape uses the same source-relative oblique cameras; poles are optional."""
 
+import io
+
 import numpy as np
 import pytest
 import trimesh
 from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 
-from app.modules.media.preview_views import candidates, render_views
+from app.modules.media.preview_views import (
+    GALLERY_WIDTH,
+    STRIP_WIDTH,
+    candidates,
+    render_views,
+)
 
 # The shared default, VAULT_MESH_MAX_RENDER_TRIANGLES.
 LIMIT = 2_000_000
+# The Model image quality default (VAULT_MODEL_THUMBNAIL_WIDTH).
+VIEW_WIDTH = 640
 
 
 class TestCandidates:
@@ -79,19 +88,24 @@ class TestRenderViews:
         )
         with pytest.raises(ValueError, match="thumbnail"):
             render_views(
-                trimesh.creation.box(), source_sha256="a" * 64, max_faces=LIMIT
+                trimesh.creation.box(),
+                source_sha256="a" * 64,
+                max_faces=LIMIT,
+                width=VIEW_WIDTH,
             )
 
     def test_records_source_relative_projection(self):
         mesh = trimesh.creation.box()
         mesh.apply_translation([10, 20, 30])
-        manifest, images = render_views(mesh, source_sha256="a" * 64, max_faces=LIMIT)
+        manifest, images = render_views(
+            mesh, source_sha256="a" * 64, max_faces=LIMIT, width=VIEW_WIDTH
+        )
         assert manifest.source_sha256 == "a" * 64
         assert manifest.center == (10, 20, 30)
         assert len(images) == len(manifest.views) == 4
         for view, image in zip(manifest.views, images, strict=True):
-            assert view.width == 480
-            assert view.height == 360
+            assert view.width == VIEW_WIDTH
+            assert view.height == 480
             assert view.size == len(image)
             assert view.projection == "orthographic"
             assert view.pixels_per_unit > 0
@@ -110,5 +124,77 @@ class TestLimits:
         monkeypatch.setattr("app.modules.media.preview_views.MAX_IMAGE_BYTES", 10)
         with pytest.raises(PreviewLimitError):
             render_views(
-                trimesh.creation.box(), source_sha256="a" * 64, max_faces=LIMIT
+                trimesh.creation.box(),
+                source_sha256="a" * 64,
+                max_faces=LIMIT,
+                width=VIEW_WIDTH,
             )
+
+
+class TestDegenerateViews:
+    # A plate standing on edge: looking straight down sees less than a pixel.
+    PLATE = (10, 0.001, 10)
+
+    def test_omits_a_pole_that_sees_only_an_edge(self):
+        manifest, images = render_views(
+            trimesh.creation.box(extents=self.PLATE),
+            source_sha256="a" * 64,
+            max_faces=LIMIT,
+            width=VIEW_WIDTH,
+            include_poles=True,
+        )
+        assert [view.id for view in manifest.views] == [
+            "orbit-0",
+            "orbit-1",
+            "orbit-2",
+            "orbit-3",
+        ]
+        assert manifest.size == sum(len(image) for image in images)
+
+    def test_reports_progress_for_every_attempted_view(self):
+        reported = []
+        render_views(
+            trimesh.creation.box(extents=self.PLATE),
+            source_sha256="a" * 64,
+            max_faces=LIMIT,
+            width=VIEW_WIDTH,
+            include_poles=True,
+            progress=lambda done, total: reported.append((done, total)),
+        )
+        assert reported == [(done, 6) for done in range(1, 7)]
+
+    def test_fails_when_an_orbit_view_is_empty(self, monkeypatch):
+        from app.modules.media import thumbnail
+
+        def empty(*args, **kwargs):
+            raise thumbnail.EmptyThumbnailError("thumbnail_empty")
+
+        monkeypatch.setattr(thumbnail, "to_webp", empty)
+        with pytest.raises(thumbnail.EmptyThumbnailError):
+            render_views(
+                trimesh.creation.box(),
+                source_sha256="a" * 64,
+                max_faces=LIMIT,
+                width=VIEW_WIDTH,
+            )
+
+
+class TestResolution:
+    @pytest.mark.parametrize(
+        ("width", "height"), [(320, 240), (640, 480), (1280, 960)], ids=str
+    )
+    def test_follows_the_model_image_quality(self, width, height):
+        from PIL import Image
+
+        manifest, images = render_views(
+            trimesh.creation.box(), source_sha256="a" * 64, max_faces=LIMIT, width=width
+        )
+        assert {(view.width, view.height) for view in manifest.views} == {
+            (width, height)
+        }
+        expected_sizes = [(width, height)]
+        if width >= GALLERY_WIDTH:
+            expected_sizes.append((STRIP_WIDTH, round(STRIP_WIDTH * 3 / 4)))
+        assert [Image.open(io.BytesIO(image)).size for image in images] == (
+            expected_sizes * len(manifest.views)
+        )

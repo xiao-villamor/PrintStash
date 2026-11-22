@@ -3157,6 +3157,63 @@ describe("SettingsPanel", () => {
   });
 
   describe("preview quality", () => {
+    it("disables the cover switch until the vault configuration loads", async () => {
+      const config = Promise.withResolvers<Response>();
+      renderSettings({
+        at: "/settings?section=previews",
+        routes: { "GET /api/v1/config": () => config.promise },
+      });
+      const toggle = await screen.findByRole("switch", { name: "Recreate embedded covers" });
+      expect(toggle).toBeDisabled();
+
+      config.resolve(json({ ...VAULT_CONFIG, prefer_rendered_3mf_preview: true }));
+
+      await waitFor(() => expect(toggle).toBeEnabled());
+      expect(toggle).toBeChecked();
+    });
+
+    it("keeps the cover switch read-only for members", async () => {
+      renderSettings({ at: "/settings?section=previews", auth: memberSession() });
+      const toggle = await screen.findByRole("switch", { name: "Recreate embedded covers" });
+      expect(toggle).toBeDisabled();
+    });
+
+    it("holds the requested cover setting while awaiting its save receipt", async () => {
+      const save = Promise.withResolvers<Response>();
+      const app = renderSettings({
+        at: "/settings?section=previews",
+        routes: { "PUT /api/v1/config": () => save.promise },
+      });
+      const toggle = await screen.findByRole("switch", { name: "Recreate embedded covers" });
+      await waitFor(() => expect(toggle).toBeEnabled());
+      expect(toggle).not.toBeChecked();
+
+      await userEvent.click(toggle);
+      expect(toggle).toBeChecked();
+      expect(toggle).toBeDisabled();
+      expect(app.requestsWithMethod("PUT").at(-1)?.body).toBe(
+        JSON.stringify({ prefer_rendered_3mf_preview: true }),
+      );
+
+      save.resolve(json({ ...VAULT_CONFIG, edit_version: 2, prefer_rendered_3mf_preview: true }));
+      await waitFor(() => expect(toggle).toBeEnabled());
+      expect(toggle).toBeChecked();
+    });
+
+    it("restores the saved cover preference after a refused edit", async () => {
+      renderSettings({
+        at: "/settings?section=previews",
+        routes: { "PUT /api/v1/config": json({ detail: "forbidden" }, 403) },
+      });
+      const toggle = await screen.findByRole("switch", { name: "Recreate embedded covers" });
+      await waitFor(() => expect(toggle).toBeEnabled());
+
+      await userEvent.click(toggle);
+
+      await waitFor(() => expect(toggle).toBeEnabled());
+      expect(toggle).not.toBeChecked();
+    });
+
     it.each(["single", "oblique", "oblique-poles"] as const)(
       "saves preview mode %s",
       async (mode) => {
@@ -3225,7 +3282,7 @@ describe("SettingsPanel", () => {
       await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
 
       const latest = await screen.findByRole("region", { name: "Latest saved version" });
-      expect(within(latest).getByText("Oblique views")).toBeVisible();
+      expect(within(latest).getByText("Angle views")).toBeVisible();
       expect(toggle).toBeDisabled();
       expect(toggle).toHaveValue("single");
       expect(app.requestsWithMethod("PUT")).toHaveLength(1);
@@ -3299,6 +3356,45 @@ describe("SettingsPanel", () => {
         );
         expect(rebuild?.body).toBe(JSON.stringify({ mode: "all" }));
       });
+      // Single-cover mode owns no views to rebuild.
+      expect(
+        requestsWithMethod("POST").some((call) =>
+          call.url.endsWith("/derivatives/previews/regenerate"),
+        ),
+      ).toBe(false);
+    });
+
+    it("rebuilds multi-angle views at the new quality before the covers", async () => {
+      // Views follow Model image quality. Queued first, they are due when
+      // each cover pass starts, so one mesh load renders the cover and views.
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=previews",
+        routes: {
+          "GET /api/v1/config": json({ ...VAULT_CONFIG, derivatives_previews_enabled: true }),
+          "POST /api/v1/admin/work/derivatives/previews/regenerate": json({
+            kind: "previews",
+            mode: "all",
+          }),
+          "POST /api/v1/admin/work/derivatives/thumbnail/regenerate": json({
+            kind: "thumbnail",
+            mode: "all",
+          }),
+        },
+      });
+
+      await user.click(await screen.findByRole("button", { name: /Recreate all images/ }));
+
+      await waitFor(() =>
+        expect(
+          requestsWithMethod("POST")
+            .map((call) => call.url)
+            .filter((url) => url.endsWith("/regenerate")),
+        ).toEqual([
+          expect.stringMatching(/\/derivatives\/previews\/regenerate$/),
+          expect.stringMatching(/\/derivatives\/thumbnail\/regenerate$/),
+        ]),
+      );
     });
 
     it("remembers the viewer quality in this browser", async () => {
