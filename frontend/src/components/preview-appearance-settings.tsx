@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Palette } from "lucide-react";
 import { PreviewAppearance } from "@/components/preview-appearance";
 import { SettingsCard } from "@/components/settings-card";
 import { captureEditingBase } from "@/lib/api/editing";
@@ -65,6 +66,7 @@ export function PreviewAppearanceSettings({
 
   return (
     <SettingsCard
+      icon={Palette}
       className="settings-preview-look"
       title={t("Preview look")}
       description={t(

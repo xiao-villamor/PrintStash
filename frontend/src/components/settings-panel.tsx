@@ -3018,6 +3018,7 @@ export function SettingsPanel() {
                     )}
                     {user?.is_superuser && (
                       <SettingsCard
+                        icon={Boxes}
                         title={uiText("Sample collection")}
                         action={
                           <Button
