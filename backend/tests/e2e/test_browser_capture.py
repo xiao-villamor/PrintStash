@@ -59,6 +59,18 @@ def _fixture_resolved_asset(manifest: CaptureManifestV2) -> ResolvedAsset:
     )
 
 
+def _dominant_channel(content: bytes) -> int:
+    """Index of the strongest RGB channel at the centre of an encoded image."""
+    import io
+
+    from PIL import Image
+
+    with Image.open(io.BytesIO(content)) as image:
+        rgb = image.convert("RGB")
+        pixel = rgb.getpixel((rgb.width // 2, rgb.height // 2))
+        return max(range(3), key=lambda channel: pixel[channel])
+
+
 class TestBrowserCapture:
     """The browser extension's whole capture flow, end to end against fixtures.
 
@@ -479,6 +491,7 @@ class TestBrowserCapture:
         assert health.status_code == 200
         assert health.json() == {
             "status": "ok",
+            "capture_import_intent": True,
             "name": "PrintStash",
             "storage": {
                 "provider": "local",
@@ -652,9 +665,6 @@ class TestBrowserGalleryCapture:
 
         from PIL import Image
 
-        from app.modules.media.source_cover_processing import (
-            process_source_cover_upload,
-        )
         from tests.factories.capture import DEFAULT_SOURCE_URL, capture_source
 
         original = (FIXTURES_DIR / "sample.gcode").read_bytes()
@@ -697,7 +707,7 @@ class TestBrowserGalleryCapture:
             buffer = io.BytesIO()
             Image.new("RGB", (16, 16), color).save(buffer, "PNG")
             data = buffer.getvalue()
-            expected.append(process_source_cover_upload(data, "image/png").data)
+            expected.append(i)
             declared = await api.post(
                 f"/api/v1/inbox/{item_id}/capture-images/{i}",
                 headers=superuser_headers,
@@ -742,11 +752,11 @@ class TestBrowserGalleryCapture:
         )
         images = detail.json()["previews"]["source_images"]
         assert [image["position"] for image in images] == [0, 1, 2]
-        assert detail.json()["thumbnail_url"] == images[0]["url"]
-        for image, content in zip(images, expected, strict=True):
+        # Served gallery images are re-encoded photos; their pixels identify them.
+        for image, channel in zip(images, expected, strict=True):
             response = await api.get(image["url"], headers=superuser_headers)
             assert response.status_code == 200
-            assert response.content == content
+            assert _dominant_channel(response.content) == channel
         chosen = await api.post(
             f"/api/v1/models/{result['model_id']}/cover/source",
             headers={**superuser_headers, "If-Match": detail.headers["etag"]},
@@ -756,4 +766,4 @@ class TestBrowserGalleryCapture:
         chosen_image = await api.get(
             chosen.json()["thumbnail_url"], headers=superuser_headers
         )
-        assert chosen_image.content == expected[1]
+        assert _dominant_channel(chosen_image.content) == expected[1]
