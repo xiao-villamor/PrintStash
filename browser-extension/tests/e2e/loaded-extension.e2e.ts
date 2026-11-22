@@ -164,12 +164,16 @@ describe("loaded extension", () => {
         content.append(tallPicker);
         capture.hidden = false;
         status.hidden = false;
-        const bottom = doc.body.getBoundingClientRect().bottom;
-        const initial = capture.getBoundingClientRect().bottom;
+        const bottom = Math.min(
+          doc.body.getBoundingClientRect().bottom,
+          doc.documentElement.clientHeight,
+        );
+        const initial = capture.getBoundingClientRect();
         content.scrollTop = content.scrollHeight;
+        const scrolled = capture.getBoundingClientRect();
         const result = {
           scrolls: content.scrollTop > 0,
-          fixed: capture.getBoundingClientRect().bottom === initial && initial < bottom,
+          fixed: scrolled.top === initial.top && scrolled.top >= 0 && scrolled.bottom <= bottom,
           statusVisible:
             status.getBoundingClientRect().bottom > content.getBoundingClientRect().bottom,
         };
@@ -311,6 +315,7 @@ describe("loaded extension", () => {
         await browser.$("#edit-connection").click();
         await browser.$("#vault").setValue(`${vault}/second`);
         await browser.$("#pairing-code").setValue("test-cancelled-code");
+        await browser.$("#marketplace-access-row label").click();
         await browser.$("#connect").click();
         await browser.waitUntil(async () => heldResponse !== undefined);
         await browser.$("#cancel-edit").click();
@@ -415,6 +420,7 @@ describe("loaded extension", () => {
         await browser.$("#edit-connection").click();
         await browser.$("#vault").setValue(`${vault}/second`);
         await browser.$("#pairing-code").setValue("new-device-code");
+        await browser.$("#marketplace-access-row label").click();
         await browser.$("#connect").click();
         await browser.waitUntil(async () => heldRequestClosed);
         await browser.waitUntil(

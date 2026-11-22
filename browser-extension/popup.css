@@ -688,6 +688,7 @@ button:disabled,
 
 main:has(#view-settings:not([hidden])) {
   gap: var(--space-8);
+  padding-top: var(--space-12);
   padding-bottom: var(--space-8);
 }
 
