@@ -91,7 +91,7 @@ backend/
     └── api/v1/            ← routers (files, ingest, models, printers, taxonomy, auth, backups, config)
 ```
 
-See [backend development guidance](../.agents/skills/printstash/references/backend.md) for module ownership,
+See [backend development guidance](../.agents/skills/backend-engineering/references/backend.md) for module ownership,
 shared business contracts and dependency rules.
 
 ## Environment variables

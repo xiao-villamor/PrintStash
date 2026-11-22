@@ -3,7 +3,7 @@
 # (`docker buildx imagetools inspect ghcr.io/xiao-villamor/printstash:X.Y.Z`).
 # The package ships one tag, so a setting added after that tag runs inert in the
 # store's image: check the tag's Settings before submitting
-# (`.agents/skills/printstash/references/release.md`).
+# (`.agents/skills/create-printstash-release/references/release.md`).
 version: "3.7"
 
 services:

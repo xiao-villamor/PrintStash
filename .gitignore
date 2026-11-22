@@ -76,7 +76,7 @@ docs/*-internal.md
 !.claude/skills
 .opencode/
 skills-lock.json
-docs/agents/
+!/skills-lock.json
 frontend/test-results/
 frontend/playwright-report/
 frontend/tests/e2e-real/.data/
@@ -101,6 +101,10 @@ screenshots/gif-frames/
 # Keep private work in reports/. Never force-add it or expand this list for it.
 /docs/**
 !/docs/README.md
+!/docs/agents/
+!/docs/agents/domain.md
+!/docs/agents/issue-tracker.md
+!/docs/agents/triage-labels.md
 !/docs/0.13.0-release-guide.md
 !/docs/3mf-capabilities.md
 !/docs/artifact-cache.md
