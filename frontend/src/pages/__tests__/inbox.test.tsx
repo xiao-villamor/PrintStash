@@ -88,11 +88,6 @@ describe("InboxPage", () => {
     });
 
     expect(await screen.findByRole("button", { name: "Add URL" })).toBeEnabled();
-    expect(
-      screen.getByText(
-        "Captures stay in the Inbox until you choose their destination. Removing a capture does not delete Models already imported into your Library.",
-      ),
-    ).toBeVisible();
   });
 
   describe("adding a URL", () => {

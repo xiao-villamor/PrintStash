@@ -18,6 +18,8 @@ import { listTasks, trackImportJob, updateTask } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
 import type { ArchiveEntry, ArchiveManifest, CollectionNodeRead, JobStatus } from "@/types";
 
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { CollectionPicker } from "@/components/collection-picker";
@@ -109,6 +111,27 @@ function ArchiveReview({
     };
   }, []);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [mode, setMode] = useState<"separate" | "multipart">("separate");
+  const [groupName, setGroupName] = useState<string | null>(null);
+  const [partNames, setPartNames] = useState<Record<string, string>>({});
+  const [cover, setCover] = useState<string | null>(null);
+  const [documents, setDocuments] = useState<Set<string>>(new Set());
+  const defaultGroupName = manifest?.archive_name.replace(/\.[^.]+$/, "") ?? "";
+  const nameForPart = (name: string) =>
+    partNames[name] ??
+    name
+      .split("/")
+      .at(-1)!
+      .replace(/\.[^.]+$/, "");
+  const invalidIntake =
+    documents.size > 100 ||
+    (mode === "multipart" &&
+      (selected.size > 100 ||
+        !(groupName ?? defaultGroupName).trim() ||
+        (groupName ?? defaultGroupName).trim().length > 255 ||
+        [...selected].some(
+          (name) => !nameForPart(name).trim() || nameForPart(name).trim().length > 128,
+        )));
   const [folder, setFolder] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   // The collection picked, "none" for the vault root, or undefined for no pick yet.
@@ -187,7 +210,13 @@ function ArchiveReview({
   }
 
   async function importSelected() {
-    if (!manifest || selected.size === 0 || submitting || (!user?.is_superuser && !collection))
+    if (
+      !manifest ||
+      selected.size === 0 ||
+      submitting ||
+      invalidIntake ||
+      (!user?.is_superuser && !collection)
+    )
       return;
     setSubmitting(true);
     try {
@@ -195,6 +224,19 @@ function ArchiveReview({
       requireSessionVersion(session);
       const accepted = await selectArchiveEntries(manifest.archive_id, {
         names: [...selected],
+        intake:
+          mode === "multipart"
+            ? {
+                mode,
+                name: (groupName ?? defaultGroupName).trim(),
+                cover,
+                documents: [...documents],
+                parts: [...selected].map((name) => ({
+                  entry_name: name,
+                  name: nameForPart(name).trim(),
+                })),
+              }
+            : { mode, documents: [...documents] },
         collection: collection ?? undefined,
         tags: tags.length ? tags.join(",") : undefined,
       });
@@ -220,7 +262,6 @@ function ArchiveReview({
       onClose={onClose}
       title={uiText("Choose ZIP files")}
       className="flex max-h-[90dvh] max-w-5xl flex-col"
-      bodyClassName="flex min-h-0 flex-col"
       footer={
         manifest && (
           <div className="flex w-full flex-wrap items-end justify-between gap-3">
@@ -279,7 +320,10 @@ function ArchiveReview({
                 </Button>
                 <Button
                   disabled={
-                    selected.size === 0 || submitting || (!user?.is_superuser && !collection)
+                    selected.size === 0 ||
+                    submitting ||
+                    invalidIntake ||
+                    (!user?.is_superuser && !collection)
                   }
                   onClick={() => void importSelected()}
                 >
@@ -293,7 +337,7 @@ function ArchiveReview({
         )
       }
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <div className="flex flex-col gap-4">
         <p className="break-words text-sm text-muted-foreground">
           {manifest
             ? uiText(
@@ -324,6 +368,143 @@ function ArchiveReview({
         )}
         {manifest && (
           <>
+            <p className="text-sm text-muted-foreground">
+              {uiText(
+                "Each selected model file creates or reuses a Model. Subfolders become collections; changing the collection does not move source files.",
+              )}
+            </p>
+            <fieldset className="space-y-3 rounded border border-border p-3" disabled={submitting}>
+              <legend className="px-1 text-sm font-medium">{uiText("Import as")}</legend>
+              <div className="flex flex-wrap gap-4 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="archive-grouping"
+                    checked={mode === "separate"}
+                    onChange={() => setMode("separate")}
+                  />
+                  {uiText("Separate Models")}
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="archive-grouping"
+                    checked={mode === "multipart"}
+                    onChange={() => setMode("multipart")}
+                  />
+                  {uiText("Multipart Model")}
+                </label>
+              </div>
+              {mode === "multipart" && (
+                <div className="space-y-3">
+                  <label className="block space-y-1 text-sm">
+                    <span>{uiText("Multipart name")}</span>
+                    <Input
+                      value={groupName ?? defaultGroupName}
+                      onChange={(event) => setGroupName(event.target.value)}
+                      maxLength={255}
+                    />
+                  </label>
+                  <p className="text-sm text-muted-foreground">
+                    {uiText(
+                      "Creates references to the selected Models after every required piece and guide has imported. Originals stay unchanged.",
+                    )}
+                  </p>
+                  <label className="block space-y-1 text-sm">
+                    <span>{uiText("Multipart cover")}</span>
+                    <select
+                      value={cover ?? ""}
+                      onChange={(event) => setCover(event.target.value || null)}
+                      className="h-10 w-full rounded border border-input bg-background px-3 text-foreground"
+                    >
+                      <option value="">{uiText("No selected cover")}</option>
+                      {manifest.entries
+                        .filter(
+                          (entry) => entry.is_image && /\.(png|jpe?g|webp)$/i.test(entry.name),
+                        )
+                        .map((entry) => (
+                          <option key={entry.name} value={entry.name}>
+                            {entry.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  {[...selected].map((name) => (
+                    <label key={name} className="block space-y-1 text-sm">
+                      <span className="break-all">
+                        {uiText("Piece name: {value1}", { value1: name })}
+                      </span>
+                      <Input
+                        value={nameForPart(name)}
+                        onChange={(event) =>
+                          setPartNames((current) => ({ ...current, [name]: event.target.value }))
+                        }
+                        maxLength={128}
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
+              {invalidIntake && (
+                <p role="alert" className="text-sm text-destructive">
+                  {uiText(
+                    "Enter valid names and select at most 100 pieces for a Multipart and 100 Documents.",
+                  )}
+                </p>
+              )}
+            </fieldset>
+            {manifest.entries.some((entry) => entry.file_type === null) && (
+              <section
+                className="space-y-2 rounded border border-border p-3 text-sm"
+                aria-label={uiText("Documents and omitted files")}
+              >
+                <p className="font-medium">{uiText("Documents and omitted files")}</p>
+                <p className="text-muted-foreground">
+                  {uiText(
+                    "Select guides or images to save as Documents. Unselected and unsupported files will be omitted.",
+                  )}
+                </p>
+                <ul className="space-y-2">
+                  {manifest.entries
+                    .filter((entry) => entry.file_type === null)
+                    .map((entry) => (
+                      <li
+                        key={entry.name}
+                        className="flex flex-wrap items-center justify-between gap-2"
+                      >
+                        {entry.is_image || entry.is_document ? (
+                          <label className="flex min-w-0 items-center gap-2">
+                            <Checkbox
+                              checked={documents.has(entry.name)}
+                              disabled={submitting}
+                              onChange={() =>
+                                setDocuments((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(entry.name)) next.delete(entry.name);
+                                  else next.add(entry.name);
+                                  return next;
+                                })
+                              }
+                            />
+                            <span className="break-all">{entry.name}</span>
+                          </label>
+                        ) : (
+                          <span className="break-all">{entry.name}</span>
+                        )}
+                        <span className="text-muted-foreground">
+                          {entry.is_image
+                            ? uiText("Image")
+                            : entry.is_document
+                              ? uiText("Document")
+                              : uiText("Unsupported file")}
+                          {" · "}
+                          {formatBytes(entry.size_bytes)}
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              </section>
+            )}
             <SelectionBrowserToolbar
               query={query}
               onQueryChange={setQuery}

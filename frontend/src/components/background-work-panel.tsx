@@ -65,6 +65,8 @@ function derivativeLabel(kind: DerivativeKind): string {
       return uiText("3D preview");
     case "previews":
       return uiText("modelPreview.gallery");
+    case "project_profile":
+      return uiText("3MF project settings");
     case "plates":
       return uiText("3MF plates");
     case "toolpath":
@@ -77,6 +79,7 @@ const POLICY_SETTINGS = {
   "derivatives.previews": "derivatives_previews_enabled",
   "derivatives.viewer_stl": "derivatives_mesh_enabled",
   "derivatives.plates": "derivatives_mesh_enabled",
+  "derivatives.project_profile": "derivatives_mesh_enabled",
   "derivatives.gcode": "derivatives_gcode_enabled",
   "derivatives.toolpath": "derivatives_toolpath_enabled",
 } as const;
@@ -89,6 +92,8 @@ function policyPurpose(name: string): string {
       return uiText("Mesh metadata and preview images");
     case "derivatives.previews":
       return uiText("Multi-angle Model card views");
+    case "derivatives.project_profile":
+      return uiText("3MF project settings");
     case "derivatives.plates":
       return uiText("Plates of slicer project 3MFs");
     case "derivatives.gcode":

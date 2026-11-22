@@ -25,7 +25,7 @@ from app.core.config import settings
 from app.core.http import get_or_404
 from app.core.logging import get_logger
 from app.core.security import get_current_user, require_auth, require_user
-from app.db.models import CollectionRole, DerivativeKind, File, Model, User
+from app.db.models import CollectionRole, DerivativeKind, File, FileType, Model, User
 from app.db.scopes import live
 from app.db.session import get_session
 from app.modules.derivatives.sliced_reads import meshless_archives
@@ -55,6 +55,7 @@ from app.modules.storage.delivery_contracts import content_disposition
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.schemas.jobs import DerivativeRead
 from app.schemas.plates import FilePlatesRead, GcodePlateIdentityRead, GcodePlatesRead
+from app.schemas.project_profiles import FileProjectProfileRead
 
 logger = get_logger(__name__)
 
@@ -310,6 +311,24 @@ def archive_image(
         media_type=media_type,
         headers=headers,
     )
+
+
+@router.get(
+    "/{file_id}/project-profile",
+    response_model=FileProjectProfileRead,
+    summary="Saved settings and per-plate estimates of a 3MF project",
+)
+def file_project_profile(
+    file_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> FileProjectProfileRead:
+    from app.modules.derivatives import project_profiles
+
+    artifact = _accessible_file(session, file_id, current_user)
+    if artifact.file_type != FileType.THREE_MF:
+        raise HTTPException(status_code=404, detail="project_profile_not_supported")
+    return project_profiles.read(session, artifact)
 
 
 @router.get(

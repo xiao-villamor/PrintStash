@@ -284,4 +284,8 @@ sends no further setup probe.
 - `documents.spec.ts`: collection spreadsheets and binary resin attachments remain downloadable with their original filenames and bytes.
 
 - `model-covers.spec.ts`: source selection, upload, real 3D-view capture, preservation through thumbnail regeneration, and reset to automatic.
+- `gcode-plates.spec.ts`: upload sliced 3MF exports with or without meshes, then switch between distinct plate toolpaths in the real viewer.
+
+`inbox-capture.spec.ts`: pairs a browser, interrupts a two-file transfer, resumes only the pending file, imports both Models through review, and verifies revocation denies importer recovery. Provider bytes are controlled; the API, staging and ingestion are real.
+
 - `gcode-plates.spec.ts`: upload sliced 3MF exports with or without meshes, switch plate toolpaths, preview a dense 750-layer revision, and send the selected revision to a printer emulator. Desktop layout cases check that Layers and View controls fit without clipping or overlap in normal and expanded previews and across model tabs. The default render is 1920×1080 with the main navigation collapsed; explicit 1280×720 and 1440×1000 cases reproduce the reported sidebar clipping.

@@ -45,6 +45,8 @@ function renderView(options: RenderAppOptions & { initialModel?: ModelRead | nul
   return renderApp(<ModelDetailClientView id={1} initialModel={initialModel} />, {
     routes: {
       "GET /api/v1/models/1/print-jobs": json([]),
+      "GET /api/v1/models/1/related-profiles": json({ items: [], has_more: false }),
+      "GET /api/v1/models/1/provenance": json({ edit_version: 1, sources: [] }),
       "GET /api/v1/models/1/printer-files": json([]),
       "GET /api/v1/printers": json([]),
       "GET /api/v1/collections": json([]),

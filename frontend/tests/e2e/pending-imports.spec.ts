@@ -155,7 +155,9 @@ test.describe("pending imports", () => {
     expect(problems, "before opening the Source tab").toEqual([]);
     await page.getByRole("tab", { name: "Source info", exact: true }).click();
     await expect(page.getByTestId("model-detail-sidebar").getByText("Fixture maker")).toBeVisible();
-    await expect(page.getByText("CC BY 4.0")).toBeVisible();
+    await expect(
+      page.getByTestId("model-detail-sidebar").getByText("CC BY 4.0", { exact: true }),
+    ).toBeVisible();
     await expect(page.getByText("Print with supports.")).toBeVisible();
     expect(problems, "after opening the Source tab").toEqual([]);
     const creatorField = page
@@ -171,8 +173,12 @@ test.describe("pending imports", () => {
       .getByRole("button", { name: "Save override" })
       .click();
     await expect(page.getByRole("dialog", { name: "Edit Creator" })).toBeHidden();
-    await expect(page.getByText("Corrected maker")).toBeVisible();
-    await expect(page.getByText("Edited")).toBeVisible();
+    await expect(
+      page.getByTestId("model-detail-sidebar").getByText("Corrected maker", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("model-detail-sidebar").getByText("Edited", { exact: true }),
+    ).toBeVisible();
     expect(problems, "after saving the override").toEqual([]);
     await creatorField.getByRole("button", { name: "Edit" }).click();
     await page
@@ -207,7 +213,9 @@ test.describe("pending imports", () => {
       page.getByText("Captured URL. Review it before importing.", { exact: true }),
     ).toBeHidden();
 
-    await expect(page.getByRole("combobox", { name: "Destination" })).toHaveValue("new");
+    await expect(page.getByRole("combobox", { name: "Collection", exact: true })).toHaveValue(
+      "new",
+    );
     await expect(page.getByRole("textbox", { name: "Collection name" })).toHaveValue(
       "Capture bracket",
     );

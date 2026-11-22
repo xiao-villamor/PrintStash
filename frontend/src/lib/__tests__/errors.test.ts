@@ -34,6 +34,44 @@ describe("ApiError", () => {
 
 describe("getErrorMessage", () => {
   it.each([
+    ["url_target_not_public", /download the file and attach it/i],
+    ["staging_expired", /capture the source again/i],
+    ["provider_auth_failed", /reconnect the provider in settings/i],
+    ["browser_device_name_in_use", /choose a different name/i],
+    ["resolve_failed", /check access or attach/i],
+  ] as const)("offers recovery for capture error %s", (code, action) => {
+    expect(getErrorMessage(code)).toMatch(action);
+  });
+
+  it.each([
+    [
+      "document_import_result_missing",
+      "A saved guide was removed. Review or restore it before retrying.",
+    ],
+    [
+      "document_import_intent_mismatch",
+      "A saved guide was moved or assigned elsewhere. Review that change before retrying.",
+    ],
+    [
+      "multipart_model_slug_exists",
+      "A Multipart with this name already exists. Rename it or review a new import with another name.",
+    ],
+    [
+      "source_cover_invalid",
+      "The selected cover is not a valid JPEG, PNG or WebP image within the size limits.",
+    ],
+    [
+      "archive_document_missing",
+      "A selected guide is missing from the archive. Prepare and review the archive again.",
+    ],
+    [
+      "archive_cover_missing",
+      "The selected cover is missing from the archive. Prepare and review the archive again.",
+    ],
+  ])("explains archive recovery for %s", (code, expected) => {
+    expect(getErrorMessage(code)).toBe(expected);
+  });
+  it.each([
     ["en", "Enter a valid http(s) URL for a model page or file."],
     ["es", "Introduce una URL http(s) válida de una página de modelo o un archivo."],
   ])("explains rejected input without blaming connectivity in %s", (locale, expected) => {
@@ -191,6 +229,34 @@ describe("provider connection errors", () => {
 });
 
 describe("getErrorMessage", () => {
+  it.each([
+    [
+      "document_import_result_missing",
+      "A saved guide was removed. Review or restore it before retrying.",
+    ],
+    [
+      "document_import_intent_mismatch",
+      "A saved guide was moved or assigned elsewhere. Review that change before retrying.",
+    ],
+    [
+      "multipart_model_slug_exists",
+      "A Multipart with this name already exists. Rename it or review a new import with another name.",
+    ],
+    [
+      "source_cover_invalid",
+      "The selected cover is not a valid JPEG, PNG or WebP image within the size limits.",
+    ],
+    [
+      "archive_document_missing",
+      "A selected guide is missing from the archive. Prepare and review the archive again.",
+    ],
+    [
+      "archive_cover_missing",
+      "The selected cover is missing from the archive. Prepare and review the archive again.",
+    ],
+  ])("explains archive recovery for %s", (code, expected) => {
+    expect(getErrorMessage(code)).toBe(expected);
+  });
   it("maps known codes to friendly copy", () => {
     expect(getErrorMessage("invalid_credentials")).toBe("Invalid username or password.");
     expect(getErrorMessage("collection_not_empty")).toMatch(/still has models/);

@@ -24,12 +24,12 @@
             code.
           </li>
           <li>
-            Open the extension. Enter your Vault URL and the code, then choose
+            Open the extension. Enter your server URL and the code, then choose
             <strong>Pair browser</strong>. Codes expire after five minutes.
           </li>
           <li>
-            Open a supported model page and choose <strong>Send to Pending Imports</strong>. Select
-            files when prompted.
+            Open a supported model page and choose <strong>Send to PrintStash</strong>. Select files
+            when prompted.
           </li>
           <li>
             Keep the popup open during the transfer. Open <strong>Pending Imports</strong> in
@@ -86,7 +86,9 @@
           The extension stores the Vault URL and a browser device credential locally in your
           browser. A pairing code is exchanged once and is not saved. If you choose the legacy
           setup, your username and named API key are stored locally instead. Temporary access tokens
-          remain in memory.
+          remain in memory. Interrupted captures retain only an opaque request identifier so
+          verified uploads can be recovered. Marketplace cookies, signed download URLs and model
+          bytes are not saved in extension storage.
         </p>
         <h3>Where data goes</h3>
         <p>

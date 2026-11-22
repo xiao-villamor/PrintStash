@@ -170,6 +170,9 @@ describe("KeyboardShortcuts", () => {
     expect(calls).toBe(0);
     expect(undoLastChange()).toBe(true);
     await waitFor(() => expect(calls).toBe(1));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument(),
+    );
   });
   it("toggles help with question mark", async () => {
     renderShortcuts();

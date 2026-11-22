@@ -45,6 +45,8 @@ function kindLabel(kind: string): string {
       return uiText("Metadata");
     case "viewer_stl":
       return uiText("3D preview");
+    case "project_profile":
+      return uiText("3MF project settings");
     case "plates":
       return uiText("Plates");
     case "toolpath":

@@ -121,6 +121,17 @@ class InboxSourceKind(str, Enum):
     EXTERNAL = "external"
 
 
+class InboxImportIntent(str, Enum):
+    REVIEW = "review"
+    IMPORT = "import"
+
+
+class InboxReviewReason(str, Enum):
+    FILES_NEED_REVIEW = "files_need_review"
+    DESTINATION_NOT_EDITABLE = "destination_not_editable"
+    ALREADY_IMPORTED = "already_imported"
+
+
 class InboxItemState(str, Enum):
     CAPTURED = "captured"
     RESOLVING = "resolving"
@@ -198,6 +209,7 @@ class JobKind(StrEnum):
     DERIVATIVES_MESH = "derivatives.mesh"
     DERIVATIVES_PREVIEWS = "derivatives.previews"
     DERIVATIVES_PLATES = "derivatives.plates"
+    DERIVATIVES_PROJECT_PROFILE = "derivatives.project_profile"
     DERIVATIVES_TOOLPATH = "derivatives.toolpath"
     DERIVATIVES_VIEWER_STL = "derivatives.viewer_stl"
     IDENTITY_RETENTION = "identity.retention"
@@ -256,6 +268,7 @@ class DerivativeKind(StrEnum):
 
     METADATA = "metadata"
     PLATES = "plates"
+    PROJECT_PROFILE = "project_profile"
     PREVIEWS = "previews"
     THUMBNAIL = "thumbnail"
     TOOLPATH = "toolpath"

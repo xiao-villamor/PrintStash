@@ -18,18 +18,27 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi import (
+    Path as PathParam,
+)
+from fastapi.responses import JSONResponse
 from sqlmodel import Session
 
 from app.api.command_actor import (
     CommandActor,
     command_session,
     require_capture_actor,
+    require_command_user,
     require_command_writer,
 )
 from app.api.command_execution import bounded_command, run_command
 from app.core.config import settings
 from app.core.security import require_auth, require_user
 from app.db.models import (
+    CaptureUploadSlotState,
+    Collection,
+    CollectionRole,
+    InboxItem,
     InboxItemState,
     InboxSourceKind,
     JobKind,
@@ -40,6 +49,14 @@ from app.modules.ingestion import importer, inbox, staging_leases
 from app.modules.storage import storage
 from app.modules.work import nudge
 from app.schemas.inbox import (
+    CaptureCapabilitiesRead,
+    CaptureDestinationRead,
+    CaptureRecoveryRead,
+    CaptureSessionCreate,
+    CaptureSourceStatusRead,
+    CaptureStatusRead,
+    CaptureUploadFileDeclaration,
+    CaptureUploadPartRead,
     CaptureUploadSlotRead,
     CaptureUploadSlotsCreate,
     CaptureUploadSlotsRead,
@@ -51,6 +68,158 @@ from app.schemas.inbox import (
 )
 
 router = APIRouter(prefix="/inbox", tags=["pending imports"])
+
+
+@router.post("/capture-sessions", response_model=CaptureRecoveryRead, status_code=201)
+@bounded_command
+def start_capture_session(
+    payload: CaptureSessionCreate, actor: CommandActor = Depends(require_capture_actor)
+) -> CaptureRecoveryRead:
+    with command_session(actor) as (session, user):
+        try:
+            row = inbox.start_capture_session(session, user, payload)
+        except staging_leases.StagingCapacityExceeded as exc:
+            raise HTTPException(status_code=507, detail=str(exc)) from exc
+        except (ValueError, importer.ImportError_) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        assert row.id is not None
+        return inbox.capture_recovery(session, user, row.id)
+
+
+@router.post(
+    "/{item_id}/capture-files", response_model=CaptureUploadSlotRead, status_code=201
+)
+@bounded_command
+def declare_capture_file(
+    item_id: int,
+    payload: CaptureUploadFileDeclaration,
+    actor: CommandActor = Depends(require_capture_actor),
+) -> CaptureUploadSlotRead:
+    with command_session(actor) as (session, user):
+        try:
+            return inbox.slot_read(
+                inbox.declare_capture_file(session, user, item_id, payload)
+            )
+        except staging_leases.StagingCapacityExceeded as exc:
+            raise HTTPException(status_code=507, detail=str(exc)) from exc
+        except (ValueError, importer.ImportError_) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{item_id}/capture-images/{position}",
+    response_model=CaptureUploadSlotRead,
+    status_code=201,
+)
+@bounded_command
+def declare_capture_image(
+    item_id: int,
+    position: int,
+    payload: CaptureUploadFileDeclaration,
+    actor: CommandActor = Depends(require_capture_actor),
+) -> CaptureUploadSlotRead:
+    with command_session(actor) as (session, user):
+        try:
+            return inbox.slot_read(
+                inbox.declare_capture_image(session, user, item_id, position, payload)
+            )
+        except staging_leases.StagingCapacityExceeded as exc:
+            raise HTTPException(status_code=507, detail=str(exc)) from exc
+        except (ValueError, importer.ImportError_) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/capture-capabilities", response_model=CaptureCapabilitiesRead)
+@bounded_command
+def capture_capabilities(
+    actor: CommandActor = Depends(require_capture_actor),
+) -> CaptureCapabilitiesRead:
+    with command_session(actor):
+        return CaptureCapabilitiesRead(
+            owner_user_id=actor.user_id,
+            schema_versions=[1, 2, 3],
+            resumable_slots=True,
+            capture_preferences=True,
+            resumable_cover=True,
+            resumable_gallery=True,
+            upload_parts=True,
+            idempotent_requests=True,
+            storage="managed",
+            max_files=64,
+            max_file_bytes=settings.max_upload_bytes,
+        )
+
+
+@router.get("/capture-destinations", response_model=list[CaptureDestinationRead])
+@bounded_command
+def capture_destinations(
+    q: str = Query("", max_length=128),
+    limit: int = Query(20, ge=1, le=20),
+    actor: CommandActor = Depends(require_capture_actor),
+) -> list[CaptureDestinationRead]:
+    from app.modules.library import collection_tree
+
+    with command_session(actor) as (session, user):
+        page = collection_tree.search(
+            session,
+            user,
+            query=q,
+            minimum=CollectionRole.EDIT,
+            cursor=None,
+            limit=limit,
+        )
+        return [
+            CaptureDestinationRead(id=item.id, label=item.display_path)
+            for item in page.items
+        ]
+
+
+@router.get("/capture-source-status", response_model=list[CaptureSourceStatusRead])
+@bounded_command
+def capture_source_status(
+    source_url: str = Query(min_length=1, max_length=2048),
+    limit: int = Query(default=20, ge=1, le=20),
+    actor: CommandActor = Depends(require_capture_actor),
+) -> list[CaptureSourceStatusRead]:
+    with command_session(actor) as (session, user):
+        try:
+            return inbox.capture_source_status(session, user, source_url, limit=limit)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{item_id}/capture-status", response_model=CaptureStatusRead)
+@bounded_command
+def capture_status(
+    item_id: int, actor: CommandActor = Depends(require_capture_actor)
+) -> CaptureStatusRead:
+    with command_session(actor) as (session, user):
+        row = session.get(InboxItem, item_id)
+        if row is None or row.owner_user_id != user.id:
+            raise HTTPException(status_code=404, detail="pending_import_not_found")
+        collection = (
+            session.get(Collection, row.target_collection_id)
+            if row.target_collection_id is not None
+            else None
+        )
+        return CaptureStatusRead(
+            id=item_id,
+            state=row.state,
+            review_reason=row.review_reason,
+            error_code=row.error_code,
+            resulting_model_id=row.resulting_model_id,
+            collection_name=collection.name if collection is not None else None,
+            completion=row.completion,
+        )
+
+
+@router.get("/{item_id}/capture-upload", response_model=CaptureRecoveryRead)
+@bounded_command
+def recover_capture_upload(
+    item_id: int, actor: CommandActor = Depends(require_capture_actor)
+) -> CaptureRecoveryRead:
+    with command_session(actor) as (session, user):
+        return inbox.capture_recovery(session, user, item_id)
 
 
 @router.post(
@@ -168,10 +337,12 @@ def _prepare_capture_upload(actor: CommandActor, slot_id: str) -> Path:
 
 
 def _open_capture_spool(
-    slot_id: str,
+    slot_id: str, start: int = 0
 ) -> tuple[AbstractContextManager[BinaryIO], BinaryIO]:
     with get_session_factory().scoped_session() as session:
-        context = staging_leases.open_capture_slot_staging(session, slot_id=slot_id)
+        context = staging_leases.open_capture_slot_staging(
+            session, slot_id=slot_id, start=start
+        )
         target = context.__enter__()
         # The context retains an open, identity-checked descriptor. Its exit only
         # flushes and validates that descriptor/path; it does not access SQL.
@@ -179,10 +350,10 @@ def _open_capture_spool(
 
 
 @asynccontextmanager
-async def _capture_slot_writer(slot_id: str) -> AsyncIterator[BinaryIO]:
+async def _capture_slot_writer(slot_id: str, start: int = 0) -> AsyncIterator[BinaryIO]:
     exit_limiter = CapacityLimiter(1)
     with CancelScope(shield=True):
-        context, target = await run_command(_open_capture_spool, slot_id)
+        context, target = await run_command(_open_capture_spool, slot_id, start)
     try:
         yield target
     except BaseException as exc:
@@ -221,6 +392,113 @@ def _publish_capture_slot(
             stream=empty_stream,
             media_type=media_type,
             staged_path=staged_path,
+        )
+        return inbox.slot_read(uploaded)
+
+
+@router.put(
+    "/capture-upload-slots/{slot_id}/parts/{offset}",
+    response_model=CaptureUploadPartRead,
+    responses={409: {"description": "The part does not continue the stored bytes."}},
+)
+async def put_capture_upload_part(
+    slot_id: str,
+    request: Request,
+    offset: int = PathParam(ge=0),
+    actor: CommandActor = Depends(require_capture_actor),
+) -> CaptureUploadPartRead | JSONResponse:
+    """Store one part of a slot's file; ``complete`` publishes the whole.
+
+    Proxies in front of a server often cap one request's body (nginx at 1 MiB
+    by default, Cloudflare at 100 MB). Parts keep each request under such a
+    cap. The spool stays between parts; a part repeated after a lost response
+    replaces the bytes from its offset, and a part past the stored bytes is
+    refused with how many bytes the server really holds.
+    """
+    size_bytes = await run_command(_prepare_capture_part, actor, slot_id, offset)
+    received = offset
+    try:
+        async with _capture_slot_writer(slot_id, offset) as target:
+            async for chunk in request.stream():
+                received += len(chunk)
+                if received > size_bytes:
+                    raise HTTPException(
+                        status_code=413, detail="capture_upload_part_past_declared_size"
+                    )
+                await run_command(target.write, chunk)
+    except staging_leases.CaptureSpoolOffsetMismatch as exc:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "capture_upload_offset_mismatch",
+                "received_bytes": exc.received_bytes,
+            },
+        )
+    except staging_leases.StagingLeaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return CaptureUploadPartRead(received_bytes=received)
+
+
+def _prepare_capture_part(actor: CommandActor, slot_id: str, offset: int) -> int:
+    with command_session(actor) as (session, user):
+        slot = inbox.require_capture_slot(session, user, slot_id)
+        if slot.state != CaptureUploadSlotState.PENDING:
+            raise HTTPException(
+                status_code=409, detail="capture_upload_slot_not_uploadable"
+            )
+        if offset > slot.size_bytes:
+            raise HTTPException(
+                status_code=413, detail="capture_upload_part_past_declared_size"
+            )
+        if offset == 0:
+            # The first part claims a fresh spool, exactly like a whole upload.
+            staging_leases.prepare_capture_slot_staging(session, slot_id=slot_id)
+        return slot.size_bytes
+
+
+@router.post(
+    "/capture-upload-slots/{slot_id}/complete", response_model=CaptureUploadSlotRead
+)
+async def complete_capture_upload_slot(
+    slot_id: str,
+    actor: CommandActor = Depends(require_capture_actor),
+) -> CaptureUploadSlotRead:
+    """Verify the parts against the declared size and hash, then publish them."""
+    try:
+        return await run_command(_publish_capture_parts, actor, slot_id)
+    except storage.UploadTooLarge as exc:
+        raise HTTPException(status_code=413, detail="upload_too_large") from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409
+            if str(exc) == "capture_upload_slot_not_uploadable"
+            else 400,
+            detail=str(exc),
+        ) from exc
+    except staging_leases.StagingLeaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        # Published or refused, these parts are finished; a retry starts over.
+        with CancelScope(shield=True):
+            await to_thread.run_sync(
+                _cleanup_capture_slot_staging, slot_id, limiter=CapacityLimiter(1)
+            )
+
+
+def _publish_capture_parts(actor: CommandActor, slot_id: str) -> CaptureUploadSlotRead:
+    with command_session(actor) as (session, user), BytesIO() as empty_stream:
+        session.commit()
+        slot = inbox.require_capture_slot(session, user, slot_id)
+        if slot.state == CaptureUploadSlotState.UPLOADED:
+            # A repeated completion after a lost response.
+            return inbox.slot_read(slot)
+        uploaded = inbox.upload_capture_slot(
+            session,
+            slot,
+            stream=empty_stream,
+            # Parts carry no file media type; the declaration is the record.
+            media_type=slot.media_type,
+            staged_path=staging_leases.capture_slot_staging_path(slot_id),
         )
         return inbox.slot_read(uploaded)
 
@@ -348,12 +626,35 @@ def batch_items(
             elif payload.action == "import":
                 if row.state != InboxItemState.REVIEW:
                     continue
-                _start_import(session, row, [])
+                if payload.use_default_destination:
+                    inbox.begin_ready_import(session, row)
+                else:
+                    _start_import(session, row, [])
             else:
                 inbox.dismiss(session, row)
             session.refresh(row)
             output.append(inbox.read(row, session))
         return output
+
+
+@router.get("/{item_id}/thumbnail")
+@bounded_command
+def capture_thumbnail(
+    item_id: int, actor: CommandActor = Depends(require_command_user)
+) -> Response:
+    with command_session(actor) as (session, user):
+        row = inbox.require_visible(session, user, item_id)
+        thumbnail = inbox.capture_thumbnail(session, row)
+        if thumbnail is None:
+            raise HTTPException(status_code=404, detail="capture_thumbnail_not_found")
+        return Response(
+            thumbnail[0],
+            media_type=thumbnail[1],
+            headers={
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
 
 @router.get("/{item_id}", response_model=InboxItemRead)

@@ -49,7 +49,7 @@ describe("capture upload-slot transport", () => {
           { id: "part", file: new Blob(["x"]), filename: "part.stl", mediaType: "model/stl" },
         ],
       }),
-    ).rejects.toThrow("while uploading part.stl");
+    ).rejects.toThrow("while uploading a selected file");
     expect(fetchImpl).toHaveBeenNthCalledWith(
       3,
       "https://prints.example.com/api/v1/inbox/44/capture-upload",
@@ -472,7 +472,7 @@ describe("capture upload-slot transport", () => {
           { id: "part", file: new Blob(["x"]), filename: "part.stl", mediaType: "model/stl" },
         ],
       });
-      const rejected = expect(outcome).rejects.toThrow("while uploading part.stl");
+      const rejected = expect(outcome).rejects.toThrow("while uploading a selected file");
       await cleaning;
       await vi.advanceTimersByTimeAsync(CAPTURE_CLEANUP_TIMEOUT_MS);
       await rejected;
@@ -565,7 +565,8 @@ describe("rich capture authentication boundary", () => {
   it.each(stages)("keeps rich capture permission failures scoped: %s", async (stage) => {
     await expect(attempt(stage, 403).outcome).rejects.toMatchObject({
       name: "Error",
-      message: expect.stringContaining("403"),
+      message: "This PrintStash user does not have import permission.",
+      diagnosticCode: "insufficient_scope",
     });
   });
 

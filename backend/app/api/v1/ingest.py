@@ -540,12 +540,29 @@ def select_archive_entries(
         if not chosen:
             raise HTTPException(status_code=400, detail="no_importable_files")
 
+        if req.intake is not None:
+            from app.modules.ingestion.archive_plan import validate_selection
+            from app.schemas.ingest import ArchiveEntryRead
+
+            validate_selection(
+                req.intake,
+                [ArchiveEntryRead.model_validate(entry) for entry in entries],
+                chosen,
+            )
         assert current_user.id is not None
         request = requests.create(
             session,
             kind=IngestRequestKind.ARCHIVE_SELECTION,
             owner_user_id=current_user.id,
-            selection={"names": chosen, "archive_name": manifest.get("archive_name")},
+            selection={
+                "names": chosen,
+                "archive_name": manifest.get("archive_name"),
+                **(
+                    {"intake": req.intake.model_dump()}
+                    if req.intake is not None
+                    else {}
+                ),
+            },
             collection=req.collection,
             tags=req.tags,
             source_url=manifest.get("source_url"),

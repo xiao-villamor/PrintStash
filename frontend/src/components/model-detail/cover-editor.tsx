@@ -184,6 +184,40 @@ export function ModelCoverEditor({
               )}
             </div>
           )}
+          {(model.previews.source_images ?? []).filter((image) => image.position > 0).length >
+            0 && (
+            <div className="grid grid-cols-2 gap-2">
+              {(model.previews.source_images ?? [])
+                .filter((image) => image.position > 0)
+                .map((image) => (
+                  <Button
+                    key={image.id}
+                    variant="outline"
+                    disabled={disabled}
+                    className="h-auto flex-col p-2"
+                    onClick={() =>
+                      edit.submit({
+                        kind: "source",
+                        sourceId: image.source_id,
+                        position: image.position,
+                      })
+                    }
+                    aria-label={`${uiText("modelCover.useSource", { provider: image.provider })} · ${image.position + 1}`}
+                  >
+                    <ProtectedThumbnail
+                      path={image.url}
+                      alt={image.provider}
+                      placeholder={<ImageIcon className="h-8 w-8" />}
+                      className="flex aspect-[4/3] w-full items-center justify-center overflow-hidden"
+                      imageClassName="h-full w-full object-contain"
+                    />
+                    <span>
+                      {image.provider} · {image.position + 1}
+                    </span>
+                  </Button>
+                ))}
+            </div>
+          )}
         </section>
       </div>
     </Modal>

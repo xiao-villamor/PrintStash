@@ -978,7 +978,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     }
     const result = classifyDrop(files);
     if (!result) return;
-    setDropPreload({ ...result, items: bulkItems });
+    setDropPreload({
+      ...result,
+      mode: bulkItems?.some((item) => item.relPath !== "") ? "bulk" : result.mode,
+      items: bulkItems,
+    });
     setDropCollection(collPath);
     setUploadOpen(true);
   }

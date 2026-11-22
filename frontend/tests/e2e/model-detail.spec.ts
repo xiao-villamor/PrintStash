@@ -747,13 +747,13 @@ test.describe("model detail route", () => {
     await page.getByRole("tab", { name: /Files/ }).click();
 
     await expect(page.getByText("Metadata, 3D preview failed")).toBeVisible();
-    await expect(page.getByText(/stopped unexpectedly on the server/)).toHaveCount(1);
+    const failedFile = page
+      .getByRole("listitem")
+      .filter({ has: page.getByText("Metadata, 3D preview failed", { exact: true }) });
+    await expect(failedFile.getByText(/stopped unexpectedly on the server/)).toHaveCount(1);
     await expect(page.getByText(/reaching the server/)).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Retry 3D preview" })).toBeVisible();
-    await page
-      .getByText("Metadata, 3D preview failed")
-      .locator("xpath=ancestor::li")
-      .screenshot({ path: test.info().outputPath("derivative-failures.png") });
+    await failedFile.screenshot({ path: test.info().outputPath("derivative-failures.png") });
   });
 
   for (const width of [320, 390]) {

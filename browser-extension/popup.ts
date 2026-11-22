@@ -1,3 +1,79 @@
+import { defaultCaptureSelection, type CaptureSelection } from "./capture-selection.ts";
+import {
+  canResumeCapture,
+  captureAccount,
+  captureProgress,
+  captureRecoveryMessage,
+  type ImportIntent,
+} from "./import-status.ts";
+import {
+  readSourceGalleryInMainWorld,
+  readPrintablesGallery,
+  sourceGallery,
+  downloadSourceImage,
+  type SourceGalleryImage,
+} from "./source-gallery.ts";
+import { captureTransferFetch, progressLabel, type ByteProgress } from "./transfer-progress.ts";
+import { collectionCombobox } from "./collection-combobox.ts";
+import {
+  captureDestinations,
+  capturePreferences,
+  captureTags,
+  selectedCaptureCover,
+} from "./capture-preferences.ts";
+import {
+  requestCultsInMainWorld,
+  cultsCaptureFromPage,
+  downloadCultsCandidate,
+  type CultsPageResult,
+} from "./cults-capture.ts";
+import {
+  readMyMiniFactoryInMainWorld,
+  myMiniFactoryCaptureFromPage,
+  downloadMyMiniFactoryCandidate,
+  type MyMiniFactoryPageResult,
+} from "./myminifactory-capture.ts";
+import {
+  requestMakerOnlineInMainWorld,
+  makerOnlineCaptureFromPage,
+  downloadMakerOnlineCandidate,
+  type MakerOnlinePageResult,
+} from "./makeronline-capture.ts";
+import { profileSummary } from "./print-profile.ts";
+import {
+  requestCrealityCloudInMainWorld,
+  crealityCloudCaptureFromPage,
+  downloadCrealityCloudCandidate,
+  type CrealityCloudPageResult,
+} from "./crealitycloud-capture.ts";
+import { MarketplaceDownloadError } from "./marketplace-download.ts";
+import {
+  ThangsCaptureError,
+  requestThangsInMainWorld,
+  thangsCaptureFromPage,
+  downloadThangsCandidate,
+  type ThangsPageResult,
+} from "./thangs-capture.ts";
+import {
+  MARKETPLACE_ORIGINS,
+  sourcePublication,
+  type SourceProviderLabel,
+} from "./source-providers.ts";
+import { ALL_MARKETPLACE_ACCESS_ORIGINS, marketplaceAccessOrigins } from "./marketplace-access.ts";
+import { marketplaceOrigin } from "./marketplace-panel.ts";
+import { isMarketplacePanelEnabled, requestPanelsOnGrant } from "./panel-registration.ts";
+import { launcherButton, positionLauncher } from "./launcher.ts";
+import {
+  defaultLauncherPreferences,
+  launcherPreferences,
+  LAUNCHER_CORNERS,
+  LAUNCHER_VARIANTS,
+  type LauncherStorage,
+} from "./launcher-preferences.ts";
+import { POPUP_TABS, popupTabs, type PopupTab } from "./popup-tabs.ts";
+import { captureSequentialFiles } from "./sequential-capture.ts";
+import { captureReviewUrl } from "./capture-result.ts";
+import { previousCaptures, captureHistoryLabel } from "./source-history.ts";
 import {
   CaptureOperationOwner,
   CaptureRetiredError,
@@ -7,11 +83,18 @@ import {
 import {
   BROWSER_EXTENSION_SETUP_STORAGE_KEY,
   CaptureAuthenticationError,
+  CaptureResponseError,
+  PairingValidationError,
+  captureUrlForVault,
   captureModelPage,
   claimBrowserPairing,
   classifyModelPage,
   isLocalVault,
+  modelTitleFromPageTitle,
   normalizeVault,
+  isPlainHttpToPublicHost,
+  vaultCandidates,
+  VaultAccessError,
   parseBrowserExtensionSetup,
   verifyVaultReachability,
   verifyVaultConnection,
@@ -41,8 +124,8 @@ import {
   type PrintablesSelectedFile,
 } from "./printables-capture.ts";
 import {
-  CaptureCapacityError,
   captureRichFiles,
+  captureDirectFile,
   type BrowserCaptureFile,
   type CaptureStageRunner,
   type CaptureUploadStage,
@@ -50,6 +133,7 @@ import {
 import {
   MAKERWORLD_MAX_RESPONSE_BYTES,
   MAKERWORLD_METADATA_FIXTURE_VERSION,
+  MakerWorldSignInError,
   makerWorldCaptureFromMetadata,
   makerWorldFailureMessage,
   downloadMakerWorldCandidate,
@@ -77,6 +161,15 @@ import {
   type BrowserProviderAdapter,
 } from "./browser-provider-adapter.ts";
 import { browserCaptureRoute } from "./capture-routing.ts";
+import {
+  clearConnectionDraft,
+  holdPendingConnection,
+  PENDING_CONNECTION_MS,
+  readConnectionDraft,
+  saveConnectionDraft,
+  takePendingConnection,
+  type PendingConnection,
+} from "./connection-draft.ts";
 import { buildStatusPresentation, type StatusKind } from "./status-presentation.ts";
 
 declare const chrome: unknown;
@@ -86,17 +179,28 @@ function requiredElement<T extends Element>(selector: string, constructor: { new
   return element;
 }
 
-const browser: BrowserProviderAdapter = createBrowserProviderAdapter(
-  chrome as unknown as BrowserExtensionApi,
-);
+const extensionApi = chrome as BrowserExtensionApi & { storage: LauncherStorage };
+const browser: BrowserProviderAdapter = createBrowserProviderAdapter(extensionApi);
+const launcherStore = launcherPreferences(extensionApi.storage);
+/** Memory-only storage shared by this extension's pages, never content scripts. */
+const sessionStore = (
+  extensionApi.storage as unknown as {
+    session: Parameters<typeof holdPendingConnection>[0];
+  }
+).session;
+const importPreferences = capturePreferences(browser.storage);
+const panelMode = new URL(location.href).searchParams.get("panel") === "1";
+document.documentElement.toggleAttribute("data-panel", panelMode);
+
 type Page = { id?: number; title?: string; url?: string };
-type Source = "Printables" | "MakerWorld" | "Thingiverse" | "Cults" | "Direct file" | null;
+type Source = SourceProviderLabel | "Direct file" | null;
 type Config = {
   vault: string;
   pairingCode?: string;
   username?: string;
   apiKey?: string;
   deviceCredential?: string;
+  deviceName?: string;
 };
 type Profile = { username: string; is_superuser: boolean };
 type ConnectionState = "checking" | "connected" | "error" | "disconnected";
@@ -107,40 +211,122 @@ type VisibleCaptureResult = {
 };
 
 const vaultInput = requiredElement("#vault", HTMLInputElement);
+const pairingMethod = requiredElement("#pairing-method", HTMLInputElement);
+const apiKeyMethod = requiredElement("#api-key-method", HTMLInputElement);
+const pairingFields = requiredElement("#pairing-fields", HTMLElement);
+const apiKeyFields = requiredElement("#api-key-fields", HTMLElement);
 const pairingCodeInput = requiredElement("#pairing-code", HTMLInputElement);
+const deviceNameError = requiredElement("#device-name-error", HTMLElement);
+const deviceNameInput = requiredElement("#device-name", HTMLInputElement);
 const usernameInput = requiredElement("#username", HTMLInputElement);
 const keyInput = requiredElement("#key", HTMLInputElement);
 const runtimeMarker = requiredElement("#runtime-marker", HTMLElement);
 const pageLabel = requiredElement("#page", HTMLElement);
+const pageHost = requiredElement("#page-host", HTMLElement);
+const unsupportedPage = requiredElement("#unsupported-page", HTMLElement);
 const pageContext = requiredElement("#page-context", HTMLElement);
+const sourceActions = requiredElement("#source-actions", HTMLElement);
 const sourceLabel = requiredElement("#source", HTMLElement);
 const statusLabel = requiredElement("#status", HTMLElement);
 const statusTitle = requiredElement("#status-title", HTMLElement);
+const statusTitleText = requiredElement("#status-title-text", HTMLElement);
 const statusMessage = requiredElement("#status-message", HTMLElement);
-const statusDetails = requiredElement("#status-details", HTMLDetailsElement);
+const statusDetails = requiredElement("#status-details", HTMLElement);
 const statusCode = requiredElement("#status-code", HTMLElement);
+const preferenceFields = requiredElement("#capture-preferences", HTMLFieldSetElement);
+const coverPicker = requiredElement("#cover-picker", HTMLElement);
+const coverInput = requiredElement("#capture-cover", HTMLInputElement);
+const coverFileName = requiredElement("#capture-cover-name", HTMLElement);
+const coverError = requiredElement("#cover-error", HTMLElement);
+const removeCover = requiredElement("#remove-cover", HTMLButtonElement);
+const tagsInput = requiredElement("#capture-tags", HTMLInputElement);
+const suggestionOperations = new CaptureOperationOwner();
+const collection = collectionCombobox(
+  requiredElement("#capture-collection", HTMLInputElement),
+  requiredElement("#collection-options", HTMLElement),
+  requiredElement("#collection-feedback", HTMLElement),
+  searchCollections,
+  () => suggestionOperations.retire(),
+);
 const captureButton = requiredElement("#capture", HTMLButtonElement);
+const reviewBeforeImporting = requiredElement("#review-before-importing", HTMLInputElement);
+const importAgainButton = requiredElement("#import-again", HTMLButtonElement);
 const inboxButton = requiredElement("#open-inbox", HTMLButtonElement);
 const importPanel = requiredElement("#import-panel", HTMLElement);
 const importHint = requiredElement("#import-hint", HTMLElement);
+const captureContent = requiredElement("#capture-content", HTMLElement);
+const fileSummary = requiredElement("#file-summary", HTMLElement);
+const fileCount = requiredElement("#file-count", HTMLElement);
+const changeFiles = requiredElement("#change-files", HTMLButtonElement);
+const selectionMessage = requiredElement("#selection-message", HTMLElement);
 const candidatePanel = requiredElement("#candidate-panel", HTMLFieldSetElement);
 const candidateLegend = requiredElement("#candidate-panel legend", HTMLElement);
 const candidateList = requiredElement("#candidate-list", HTMLElement);
 const manualFilePanel = requiredElement("#manual-file-panel", HTMLFieldSetElement);
 const manualFileInput = requiredElement("#manual-file", HTMLInputElement);
+const manualFileName = requiredElement("#manual-file-name", HTMLElement);
 const connectionStatus = requiredElement("#connection-status", HTMLElement);
 const connectionTitle = requiredElement("#connection-title", HTMLElement);
 const connectionDetail = requiredElement("#connection-detail", HTMLElement);
+const connectionHostLabel = requiredElement("#connection-host", HTMLElement);
+const connectionFeedback = requiredElement("#connection-feedback", HTMLElement);
 const connectionPanel = requiredElement("#connection-panel", HTMLElement);
 const connectionForm = requiredElement("#connection-form", HTMLFormElement);
 const connectButton = requiredElement("#connect", HTMLButtonElement);
+const openServerButton = requiredElement("#open-server", HTMLButtonElement);
+const plainHttp = requiredElement("#plain-http", HTMLElement);
+const plainHttpDetail = requiredElement("#plain-http-detail", HTMLElement);
+const plainHttpConfirm = requiredElement("#plain-http-confirm", HTMLInputElement);
+const marketplaceAccessRow = requiredElement("#marketplace-access-row", HTMLElement);
+const marketplaceAccess = requiredElement("#marketplace-access", HTMLInputElement);
 const editButton = requiredElement("#edit-connection", HTMLButtonElement);
 const cancelButton = requiredElement("#cancel-edit", HTMLButtonElement);
 const disconnectButton = requiredElement("#disconnect", HTMLButtonElement);
+const captureSetup = requiredElement("#capture-setup", HTMLElement);
+const captureEditorHint = requiredElement("#capture-editor-hint", HTMLElement);
+const settingsConnection = requiredElement("#settings-connection", HTMLElement);
+const connectionOverview = requiredElement("#connection-overview", HTMLElement);
+const settingsServer = requiredElement("#settings-server", HTMLElement);
+const settingsDevice = requiredElement("#settings-device", HTMLElement);
+const settingsEdit = requiredElement("#settings-edit-connection", HTMLButtonElement);
+const historyMessage = requiredElement("#history-message", HTMLElement);
+const historyList = requiredElement("#history-list", HTMLElement);
+const launcherEnabled = requiredElement("#launcher-enabled", HTMLInputElement);
+const launcherPreview = requiredElement("#launcher-preview", HTMLElement);
+const launcherSite = requiredElement("#launcher-site", HTMLButtonElement);
+const launcherError = requiredElement("#launcher-settings-error", HTMLElement);
 const apiSettingsButton = requiredElement("#open-api-settings", HTMLButtonElement);
 
 runtimeMarker.textContent = `Version ${browser.runtime.getManifest().version}`;
 
+const tabs = popupTabs(
+  {
+    capture: requiredElement("#tab-capture", HTMLButtonElement),
+    history: requiredElement("#tab-history", HTMLButtonElement),
+    settings: requiredElement("#tab-settings", HTMLButtonElement),
+  },
+  {
+    capture: requiredElement("#view-capture", HTMLElement),
+    history: requiredElement("#view-history", HTMLElement),
+    settings: requiredElement("#view-settings", HTMLElement),
+  },
+  (tab, persist) => {
+    activeTab = tab;
+    if (persist) {
+      tabTouched = true;
+      void browser.storage.set({ popupTab: tab }).catch(() => {});
+    }
+    renderTabContent();
+    if (tab === "history") void refreshCaptureHistory();
+  },
+);
+
+let activeTab: PopupTab = "capture";
+let tabTouched = false;
+let tabBeforeEdit: PopupTab = "capture";
+let historyRequest = 0;
+let launcher = defaultLauncherPreferences();
+let permittedSite: string | null = null;
 let activePage: Page | null = null;
 let activeSource: Source = null;
 let connectionState = "checking";
@@ -161,13 +347,28 @@ function lockConnection(locked: boolean) {
   disconnectButton.disabled = locked;
   cancelButton.disabled = locked;
 }
+let importAccount: number | null = null;
+let importIntentSupported = false;
+let importAgain = false;
+let resumingImport = false;
+let checkingImportContext = false;
+let importContext: AbortController | null = null;
 let importBusy = false;
 const captureOperations = new CaptureOperationOwner();
 let pendingPrintablesCapture: BrowserCaptureMessage | null = null;
 let pendingMakerWorldCapture: BrowserCaptureMessage | null = null;
 let pendingThingiverseCapture: BrowserCaptureMessage | null = null;
+let pendingMarketplaceCapture: BrowserCaptureMessage | null = null;
 let pendingThingiverseLinks = new Map<string, string>();
-let pendingManualCapture: BrowserCaptureMessage | null = null;
+let pendingGallery: SourceGalleryImage[] = [];
+let galleryUnavailable = false;
+let gallerySelection: HTMLFieldSetElement | null = null;
+let galleryCoverId: string | null = null;
+let includeGallery = true;
+type ManualCapture =
+  | { kind: "publication"; draft: BrowserCaptureMessage }
+  | { kind: "direct"; url: string };
+let pendingManualCapture: ManualCapture | null = null;
 
 declare global {
   var __PRINTSTASH_CAPTURE_TIMEOUT_MS__: number | undefined;
@@ -220,11 +421,11 @@ class CaptureDiagnosticError extends Error {
 
 const DEFAULT_CAPTURE_TIMEOUT_MS = 10_000;
 
-function captureTimeoutMs() {
+function captureTimeoutMs(defaultMs = DEFAULT_CAPTURE_TIMEOUT_MS) {
   const configured = globalThis.__PRINTSTASH_CAPTURE_TIMEOUT_MS__;
   return typeof configured === "number" && Number.isFinite(configured) && configured > 0
     ? configured
-    : DEFAULT_CAPTURE_TIMEOUT_MS;
+    : defaultMs;
 }
 
 async function runCaptureStage<T>(
@@ -235,6 +436,7 @@ async function runCaptureStage<T>(
   provider?: DiagnosticProvider,
   fallbackCode?: DiagnosticFallbackCode,
   captureSignal?: AbortSignal,
+  timeoutMs = captureTimeoutMs(),
 ): Promise<T> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -244,14 +446,15 @@ async function runCaptureStage<T>(
       timer = setTimeout(() => {
         controller.abort();
         reject(new CaptureDiagnosticError(timeoutCode, safeMessage, provider, fallbackCode));
-      }, captureTimeoutMs());
+      }, timeoutMs);
       operationResult.then(resolve, reject);
     });
   } catch (error) {
     if (
       error instanceof CaptureDiagnosticError ||
       error instanceof CaptureRetiredError ||
-      error instanceof CaptureAuthenticationError
+      error instanceof CaptureAuthenticationError ||
+      (error instanceof CaptureResponseError && error.diagnosticCode !== undefined)
     )
       throw error;
     const message = messageFrom(error);
@@ -290,6 +493,12 @@ function diagnosticStatus(error: unknown, fallbackMessage = "Capture could not b
 }
 
 function safeCaptureMessage(error: unknown) {
+  if (
+    error instanceof CaptureResponseError ||
+    error instanceof ThangsCaptureError ||
+    error instanceof MarketplaceDownloadError
+  )
+    return error.message;
   const message = messageFrom(error);
   if (message.startsWith("user_file_required:")) return message;
   if (message.startsWith("Choose a downloaded") || message.startsWith("Select at least one")) {
@@ -321,15 +530,7 @@ function vaultStage(capture: CaptureOperation<Config>): CaptureStageRunner {
           ? "capture_vault_slot_upload_failed"
           : "capture_vault_finalize_failed";
     return runCaptureStage(
-      async (signal) => {
-        try {
-          return await operation(signal);
-        } catch (error) {
-          if (error instanceof CaptureCapacityError)
-            throw new CaptureDiagnosticError(failureCode, error.message);
-          throw error;
-        }
-      },
+      operation,
       timeoutCode,
       failureCode,
       "PrintStash could not finish the selected file upload. Try again from Pending Imports.",
@@ -352,10 +553,9 @@ function showStatus(
 ) {
   if (!message) {
     statusLabel.hidden = true;
-    statusTitle.textContent = "";
+    statusTitleText.textContent = "";
     statusMessage.textContent = "";
     statusDetails.hidden = true;
-    statusDetails.open = false;
     statusCode.textContent = "";
     delete statusLabel.dataset.kind;
     return;
@@ -367,11 +567,11 @@ function showStatus(
     providerCode,
   });
   statusLabel.hidden = false;
-  statusTitle.textContent = presentation.title ?? "";
-  statusTitle.hidden = !presentation.title;
-  statusMessage.textContent = presentation.message;
+  statusTitleText.textContent = presentation.title ?? "";
+  statusTitle.hidden = kind !== "success";
+  statusMessage.textContent = kind === "success" ? "" : presentation.message;
+  statusMessage.hidden = kind === "success";
   statusDetails.hidden = !presentation.technicalCode;
-  statusDetails.open = false;
   statusCode.textContent = presentation.technicalCode ?? "";
   if (kind) statusLabel.dataset.kind = kind;
   else delete statusLabel.dataset.kind;
@@ -382,8 +582,38 @@ function showDiagnosticStatus(error: unknown, fallbackMessage?: string) {
   showStatus(diagnostic.message, "error", diagnostic.diagnosticCode, diagnostic.providerCode);
 }
 
+function renderFileName(input: HTMLInputElement, display: HTMLElement) {
+  const file = input.files?.[0];
+  display.textContent = file ? file.name : "No file selected";
+  display.title = file ? file.name : "";
+}
+
+function renderCover() {
+  coverError.hidden = true;
+  coverInput.removeAttribute("aria-invalid");
+  try {
+    selectedCaptureCover(coverInput.files?.[0]);
+  } catch (error) {
+    coverError.textContent = messageFrom(error);
+    coverError.hidden = false;
+    coverInput.setAttribute("aria-invalid", "true");
+  }
+  renderFileName(coverInput, coverFileName);
+  const hasCover = Boolean(coverInput.files?.length);
+  coverFileName.hidden = !hasCover;
+  removeCover.hidden = !hasCover;
+}
+
 function retireCapture() {
   captureOperations.retire();
+  importContext?.abort();
+  checkingImportContext = false;
+  importAccount = null;
+  importAgain = false;
+  collection.reset();
+  tagsInput.value = "";
+  coverInput.value = "";
+  renderCover();
   importBusy = false;
   setButtonBusy(captureButton, false);
   clearCandidateSelection();
@@ -403,50 +633,263 @@ function recoverCaptureConnection() {
 
 function clearInboxAction() {
   inboxButton.hidden = true;
+  importAgainButton.hidden = true;
   delete inboxButton.dataset.url;
 }
 
 function clearCandidateSelection() {
+  pendingGallery = [];
+  galleryUnavailable = false;
+  gallerySelection?.remove();
+  gallerySelection = null;
+  galleryCoverId = null;
+  includeGallery = true;
+  fileCount.textContent = "Files";
+  setFilePickerVisible(false);
+  selectionMessage.hidden = true;
+  pendingMarketplaceCapture = null;
   pendingPrintablesCapture = null;
   pendingMakerWorldCapture = null;
   pendingThingiverseCapture = null;
   pendingThingiverseLinks.clear();
   candidatePanel.hidden = true;
   candidateList.replaceChildren();
-  captureButton.textContent = "Send to Pending Imports";
+  captureButton.textContent = "Send to PrintStash";
 }
 
 function clearManualFileSelection() {
   pendingManualCapture = null;
   manualFileInput.value = "";
+  renderFileName(manualFileInput, manualFileName);
   manualFilePanel.hidden = true;
-  captureButton.textContent = "Send to Pending Imports";
+  captureButton.textContent = "Send to PrintStash";
 }
 
-function renderManualFileSelection(capture: BrowserCaptureMessage) {
-  pendingPrintablesCapture = null;
-  pendingMakerWorldCapture = null;
-  pendingThingiverseCapture = null;
-  pendingThingiverseLinks.clear();
-  candidatePanel.hidden = true;
-  candidateList.replaceChildren();
+function showCaptureOutcome(
+  message: string,
+  url: string,
+  action: string,
+  kind: StatusKind = "success",
+) {
+  inboxButton.textContent = action;
+  inboxButton.dataset.url = url;
+  inboxButton.hidden = false;
+  showStatus(message, kind);
+  if (kind === "success") statusTitleText.textContent = message;
+  renderImportAvailability();
+  inboxButton.focus();
+}
+
+async function confirmCapture(
+  url: string,
+  capture: CaptureOperation<Config>,
+  onReady: ImportIntent | undefined,
+) {
+  if (onReady === "import") {
+    const itemId = Number(new URL(url).pathname.split("/").at(-1));
+    showStatus("Importing into PrintStash…");
+    const deadline = Date.now() + 90_000;
+    while (Date.now() < deadline) {
+      let item;
+      try {
+        item = await capture.run((signal) =>
+          captureProgress(capture.config.vault, capture.authorization, itemId, signal),
+        );
+      } catch (error) {
+        if (error instanceof CaptureRetiredError || error instanceof CaptureAuthenticationError)
+          throw error;
+        break;
+      }
+      if (item.state === "completed" && item.completion !== "partial") {
+        const model = item.resulting_model_id;
+        showCaptureOutcome(
+          item.collection_name ? `Imported to ${item.collection_name}` : "Imported",
+          Number.isSafeInteger(model) && Number(model) > 0
+            ? `${capture.config.vault}/models/${model}`
+            : url,
+          "Open in PrintStash",
+        );
+        return;
+      }
+      if (
+        item.state === "review" ||
+        item.state === "failed" ||
+        item.state === "completed" ||
+        item.state === "dismissed"
+      ) {
+        const reason = captureRecoveryMessage(
+          item.review_reason ?? item.error_code,
+          "Check this capture in Pending Imports.",
+        );
+        showCaptureOutcome(`Needs review: ${reason}`, url, "Review", "error");
+        return;
+      }
+      await capture.run(() => new Promise((resolve) => setTimeout(resolve, 650)));
+    }
+    showCaptureOutcome(
+      "Import started. Open PrintStash to check its progress.",
+      url,
+      "Open in PrintStash",
+      "",
+    );
+    return;
+  }
+  showCaptureOutcome("Sent to Pending Imports", url, "Review in PrintStash");
+}
+
+async function primeImportContext(config: Config, authorization: string) {
+  const controller = new AbortController();
+  importContext?.abort();
+  importContext = controller;
+  checkingImportContext = true;
+  resumingImport = false;
+  renderImportAvailability();
+  try {
+    const account = await captureAccount(config.vault, authorization, controller.signal);
+    const defaults = await importPreferences.defaults(config.vault, account);
+    if (controller.signal.aborted) return;
+    importAccount = account;
+    collection.choose(defaults.collection);
+    tagsInput.value = defaults.tags.join(", ");
+    if (!activePage?.url || !activeSource) return;
+    const items = await previousCaptures(config.vault, authorization, activePage.url);
+    if (controller.signal.aborted) return;
+    const previous = items.find((item) => item.state !== "failed" && item.state !== "dismissed");
+    if (previous) {
+      if (
+        previous.state === "captured" &&
+        (await canResumeCapture(config.vault, authorization, previous.id, controller.signal))
+      ) {
+        if (!controller.signal.aborted) resumingImport = true;
+        return;
+      }
+      if (controller.signal.aborted) return;
+      const url = previous.resulting_model_id
+        ? `${config.vault}/models/${previous.resulting_model_id}`
+        : captureReviewUrl(config.vault, previous);
+      showCaptureOutcome("Already in PrintStash", url, "Open");
+      importAgainButton.hidden = false;
+    }
+  } catch {
+    // The server still checks for an existing Pending Import at creation.
+  } finally {
+    if (importContext === controller) {
+      checkingImportContext = false;
+      renderImportAvailability();
+    }
+  }
+}
+
+importAgainButton.addEventListener("click", () => {
+  importAgain = true;
+  clearInboxAction();
+  showStatus();
+  renderImportAvailability();
+  captureButton.focus();
+  captureButton.click();
+});
+
+reviewBeforeImporting.addEventListener("change", () => {
+  void importPreferences.setReviewBeforeImporting(reviewBeforeImporting.checked);
+  renderImportAvailability();
+});
+
+function renderManualFileSelection(draft: BrowserCaptureMessage) {
+  offerManualFile({ kind: "publication", draft });
+}
+
+function offerManualFile(capture: ManualCapture) {
+  clearCandidateSelection();
   pendingManualCapture = capture;
   manualFilePanel.hidden = false;
   captureButton.textContent = "Upload selected file";
 }
 
-function selectedManualFile(capture: BrowserCaptureMessage): BrowserCaptureFile {
+function selectedManualFile(sourceItemId: string | null): BrowserCaptureFile {
   const file = manualFileInput.files?.item(0);
   if (!file) throw new Error("Choose a downloaded model file before uploading.");
   return {
-    id: stableCaptureFileId(capture.source.source_item_id, file.name),
+    id: stableCaptureFileId(sourceItemId, file.name),
     file,
     filename: file.name,
     mediaType: file.type || "application/octet-stream",
   };
 }
 
-function renderCandidateSelection(capture: BrowserCaptureMessage) {
+function setFilePickerVisible(visible: boolean) {
+  candidatePanel.hidden = !visible;
+  changeFiles.setAttribute("aria-expanded", String(visible));
+  changeFiles.textContent = visible ? "Done" : "Change";
+}
+
+function renderGallery() {
+  gallerySelection?.remove();
+  if (!pendingGallery.length && !galleryUnavailable) return;
+  gallerySelection = document.createElement("fieldset");
+  gallerySelection.className = "publication-gallery";
+  const legend = document.createElement("legend");
+  gallerySelection.append(legend);
+  if (!pendingGallery.length) {
+    legend.textContent = "Gallery unavailable";
+    candidatePanel.after(gallerySelection);
+    return;
+  }
+  const [defaultCover] = pendingGallery;
+  galleryCoverId = defaultCover.id;
+  const strip = document.createElement("div");
+  strip.className = "gallery-strip";
+  strip.setAttribute("role", "group");
+  strip.setAttribute("aria-label", "Choose a cover image");
+  const toggleLabel = document.createElement("label");
+  toggleLabel.className = "gallery-toggle";
+  const toggle = document.createElement("input");
+  toggle.type = "checkbox";
+  toggleLabel.append(toggle, "Don’t include images");
+  function updateCover() {
+    const cover = pendingGallery.findIndex((image) => image.id === galleryCoverId);
+    const count = pendingGallery.length;
+    legend.textContent = includeGallery
+      ? `${count} ${count === 1 ? "image" : "images"} · cover: image ${cover + 1}`
+      : "Gallery excluded";
+    strip.hidden = !includeGallery;
+    for (const button of strip.querySelectorAll("button")) {
+      button.setAttribute("aria-pressed", String(button.dataset.imageId === galleryCoverId));
+    }
+  }
+  toggle.addEventListener("change", () => {
+    includeGallery = !toggle.checked;
+    updateCover();
+  });
+  for (const [index, image] of pendingGallery.entries()) {
+    const button = document.createElement("button");
+    const label = `Use image ${index + 1} as cover`;
+    button.type = "button";
+    button.dataset.imageId = image.id;
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    const thumbnail = document.createElement("img");
+    thumbnail.alt = "";
+    thumbnail.loading = "lazy";
+    thumbnail.referrerPolicy = "no-referrer";
+    thumbnail.src = image.url;
+    button.append(thumbnail);
+    button.addEventListener("click", () => {
+      galleryCoverId = image.id;
+      updateCover();
+    });
+    strip.append(button);
+  }
+  gallerySelection.append(strip, toggleLabel);
+  candidatePanel.after(gallerySelection);
+  updateCover();
+}
+
+function renderCandidateSelection(
+  capture: BrowserCaptureMessage,
+  defaults: CaptureSelection,
+  showPicker: boolean,
+) {
+  pendingMarketplaceCapture = null;
   if (capture.source.provider === "makerworld") {
     pendingMakerWorldCapture = capture;
     pendingPrintablesCapture = null;
@@ -455,9 +898,15 @@ function renderCandidateSelection(capture: BrowserCaptureMessage) {
     pendingThingiverseCapture = capture;
     pendingMakerWorldCapture = null;
     pendingPrintablesCapture = null;
-  } else {
+  } else if (capture.source.provider === "printables") {
     pendingPrintablesCapture = capture;
     pendingMakerWorldCapture = null;
+    pendingThingiverseCapture = null;
+  }
+  if (!["makerworld", "printables", "thingiverse"].includes(capture.source.provider)) {
+    pendingMarketplaceCapture = capture;
+    pendingMakerWorldCapture = null;
+    pendingPrintablesCapture = null;
     pendingThingiverseCapture = null;
   }
   candidateLegend.textContent =
@@ -465,29 +914,64 @@ function renderCandidateSelection(capture: BrowserCaptureMessage) {
       ? "Select MakerWorld packages"
       : capture.source.provider === "thingiverse"
         ? "Select Thingiverse files"
-        : "Select Printables files";
+        : `Select ${activeSource} files`;
   candidateList.replaceChildren();
+  const selected = new Set(
+    defaults.kind === "selected" ? defaults.files.map((file) => file.id) : [],
+  );
+  candidateList.onchange = renderImportAvailability;
   capture.candidates.forEach((candidate, index) => {
     const label = document.createElement("label");
     label.className = "candidate-option";
     const input = document.createElement("input");
     input.type = "checkbox";
-    input.checked = capture.source.provider !== "makerworld";
+    input.checked = selected.has(candidate.id);
     input.dataset.candidateIndex = String(index);
+    const copy = document.createElement("span");
+    copy.className = "candidate-copy";
     const filename = document.createElement("span");
+    filename.className = "candidate-filename";
     filename.textContent = candidate.filename;
-    label.append(input, filename);
+    filename.title = candidate.filename;
+    copy.append(filename);
+    if (candidate.profile) {
+      const facts = document.createElement("small");
+      facts.className = "candidate-facts";
+      facts.textContent = profileSummary(candidate.profile);
+      facts.title = facts.textContent;
+      copy.append(facts);
+    }
+    label.append(input, copy);
     candidateList.append(label);
   });
-  candidatePanel.hidden = false;
+  selectionMessage.hidden = defaults.kind !== "ambiguous";
+  if (defaults.kind === "ambiguous") selectionMessage.textContent = defaults.message;
+  setFilePickerVisible(showPicker || defaults.kind !== "selected");
+  renderGallery();
   captureButton.textContent = "Confirm and upload selected files";
+  renderImportAvailability();
 }
 
-function selectedPrintablesCandidates(capture: BrowserCaptureMessage) {
+function pendingDraft() {
+  return (
+    pendingPrintablesCapture ??
+    pendingMakerWorldCapture ??
+    pendingThingiverseCapture ??
+    pendingMarketplaceCapture
+  );
+}
+
+function selectedCandidates(capture: BrowserCaptureMessage) {
   const indexes = [...candidateList.querySelectorAll<HTMLInputElement>("input:checked")].map(
     (input) => Number(input.dataset.candidateIndex),
   );
   return indexes.flatMap((index) => capture.candidates[index] ?? []);
+}
+
+function selectedGallery() {
+  if (!includeGallery) return [];
+  const cover = pendingGallery.find((image) => image.id === galleryCoverId);
+  return cover ? [cover, ...pendingGallery.filter((image) => image.id !== cover.id)] : [];
 }
 
 function setButtonBusy(button: HTMLButtonElement, busy: boolean, busyLabel = "Working…") {
@@ -513,20 +997,70 @@ function setConnectionFormBusy(busy: boolean) {
 
 function configFromForm() {
   const vault = normalizeVault(vaultInput.value);
-  const pairingCode = pairingCodeInput.value.trim();
-  if (pairingCode) return { vault, pairingCode };
+  if (pairingMethod.checked) {
+    const pairingCode = pairingCodeInput.value.trim();
+    if (!pairingCode) throw new Error("Enter a pairing code.");
+    if (!deviceNameInput.value.trim()) throw new Error("Enter a name for this browser.");
+    return { vault, pairingCode, deviceName: deviceNameInput.value.trim() };
+  }
   const username = usernameInput.value.trim();
   const apiKey = keyInput.value.trim();
-  if (!username || !apiKey)
-    throw new Error("Enter a pairing code, or a username and named API key.");
+  if (!username || !apiKey) throw new Error("Enter your username and named API key.");
   return { vault, username, apiKey };
+}
+
+function defaultBrowserName({ userAgent, platform }: Navigator) {
+  const browserName = /Edg(?:A|iOS)?\//.test(userAgent)
+    ? "Edge"
+    : /Firefox|FxiOS/.test(userAgent)
+      ? "Firefox"
+      : /Chromium/.test(userAgent)
+        ? "Chromium"
+        : /Chrome|CriOS/.test(userAgent)
+          ? "Chrome"
+          : "Browser";
+  const platformName = [
+    [/CrOS/, "ChromeOS"],
+    [/Android/, "Android"],
+    [/iPhone|iPad|iPod/, "iOS"],
+    [/Win/, "Windows"],
+    [/Mac/, "macOS"],
+    [/Linux/, "Linux"],
+  ] as const;
+  const os = platformName.find(([pattern]) => pattern.test(`${userAgent} ${platform}`))?.[1];
+  return os ? `${browserName} on ${os}` : browserName;
+}
+
+const preferredBrowserName = defaultBrowserName(navigator);
+deviceNameInput.value = preferredBrowserName;
+
+function clearPairingError() {
+  deviceNameError.hidden = true;
+  deviceNameInput.removeAttribute("aria-invalid");
+  pairingCodeInput.removeAttribute("aria-invalid");
+}
+
+function renderCredentialFields() {
+  clearPairingError();
+  pairingFields.hidden = apiKeyMethod.checked;
+  apiKeyFields.hidden = pairingMethod.checked;
+  connectButton.textContent = connectionActionLabel();
+}
+
+function connectionActionLabel() {
+  if (editingConnection) return "Update connection";
+  return pairingMethod.checked ? "Pair browser" : "Connect with API key";
 }
 
 function fillConnectionForm(config: Config | null) {
   vaultInput.value = config?.vault || "";
+  deviceNameInput.value = config?.deviceName ?? preferredBrowserName;
   pairingCodeInput.value = "";
   usernameInput.value = config?.username || "";
   keyInput.value = config?.apiKey || "";
+  const method = config?.username && config.apiKey ? apiKeyMethod : pairingMethod;
+  method.checked = true;
+  renderCredentialFields();
 }
 
 function permissionOrigin(config: Config) {
@@ -554,18 +1088,75 @@ function connectionHost(config: Config) {
 function renderImportAvailability() {
   const connected = connectionState === "connected" && connectedConfig;
   const readyConnection = connected && !editingConnection;
-  importPanel.hidden = !readyConnection;
-  captureButton.disabled = importBusy || !readyConnection || !activeSource;
-  if (importBusy) {
-    importHint.textContent =
-      "Sending to your review inbox… Keep this popup open until it finishes.";
-  } else if (!connected) {
-    importHint.textContent = "Connect PrintStash to enable importing.";
-  } else if (!activeSource) {
-    importHint.textContent = "Open a supported model page or direct model file first.";
-  } else {
-    importHint.textContent = `${activeSource} is ready. Files will remain reviewable before import.`;
+  const hasReceipt = Boolean(inboxButton.dataset.url);
+  const canCapture = Boolean(readyConnection && activeSource && !hasReceipt);
+  const needsDirectFile = pendingManualCapture?.kind === "direct";
+  importPanel.hidden = !readyConnection || hasReceipt;
+  pageContext.hidden = !canCapture;
+  unsupportedPage.hidden = !readyConnection || Boolean(activeSource);
+  preferenceFields.hidden = !canCapture || needsDirectFile;
+  preferenceFields.disabled = importBusy || !canCapture;
+  coverPicker.hidden = activeSource === "Direct file";
+  captureButton.hidden = !canCapture;
+  const draft = pendingDraft();
+  const count = draft ? selectedCandidates(draft).length : 0;
+  const packageSource = activeSource === "MakerWorld" || activeSource === "Creality Cloud";
+  const unit = packageSource ? "package" : "file";
+  fileSummary.hidden =
+    !canCapture ||
+    Boolean(pendingManualCapture) ||
+    !(draft || (importIntentSupported && isRichProvider(activeSource)));
+  fileCount.textContent = draft ? `Files: ${count} ${unit}${count === 1 ? "" : "s"}` : "Files";
+  changeFiles.disabled = importBusy || checkingImportContext;
+  candidatePanel.disabled = importBusy;
+  if (gallerySelection) gallerySelection.disabled = importBusy;
+  if (count > 0) selectionMessage.hidden = true;
+  captureButton.disabled =
+    importBusy ||
+    checkingImportContext ||
+    !canCapture ||
+    Boolean(draft && !count && importIntentSupported);
+  if (!importBusy && importIntentSupported) {
+    const legend = preferenceFields.querySelector("legend");
+    if (legend) {
+      legend.textContent = reviewBeforeImporting.checked
+        ? "Suggestions for review"
+        : "Import options";
+    }
+    captureButton.textContent = pendingManualCapture
+      ? "Upload selected file"
+      : resumingImport
+        ? "Resume import"
+        : reviewBeforeImporting.checked
+          ? "Send to Pending Imports"
+          : count > 1
+            ? `Import ${count} files`
+            : "Import";
   }
+  importHint.hidden = !importBusy && (!pendingManualCapture || needsDirectFile);
+  if (importBusy) {
+    importHint.textContent = panelMode
+      ? "You can hide this panel. Keep the source tab open."
+      : "Keep this popup open until it finishes.";
+  } else if (pendingManualCapture) {
+    importHint.textContent = "Automatic download was unavailable.";
+  }
+}
+
+function renderTabContent() {
+  const showOverview = connectionState === "connected" && !editingConnection;
+  const showSetupInCapture =
+    activeTab === "capture" && connectionState !== "connected" && !editingConnection;
+  const target = showSetupInCapture ? captureSetup : settingsConnection;
+  if (connectionPanel.parentElement !== target) target.append(connectionPanel);
+  connectionOverview.hidden = !showOverview;
+  editButton.hidden = !showOverview || activeTab === "settings";
+  captureEditorHint.hidden = !editingConnection;
+  if (showOverview && connectedConfig) {
+    settingsServer.textContent = connectedConfig.vault;
+    settingsDevice.textContent = connectedConfig.deviceName ?? preferredBrowserName;
+  }
+  renderImportAvailability();
 }
 
 function renderConnection(
@@ -583,22 +1174,27 @@ function renderConnection(
     const role = profile ? ` · ${profile.is_superuser ? "Admin" : "Member"}` : "";
     connectionDetail.textContent = `${identity} · ${connectionHost(config)}${role}`;
   } else if (state === "checking") {
-    connectionTitle.textContent = "Checking connection…";
+    connectionTitle.textContent = "Checking…";
     connectionDetail.textContent =
       detail || (config ? connectionHost(config) : "Reading saved settings");
   } else if (state === "error") {
-    connectionTitle.textContent = "Connection failed";
+    connectionTitle.textContent = "Connection problem";
     connectionDetail.textContent = detail || "Review the URL and credentials below.";
   } else {
     connectionTitle.textContent = "Not connected";
-    connectionDetail.textContent = detail || "Connect a PrintStash vault to start importing.";
+    connectionDetail.textContent = detail || "Connect a PrintStash server to start importing.";
   }
+  connectionStatus.title = connectionDetail.textContent;
+  connectionHostLabel.hidden = !config;
+  connectionHostLabel.textContent = config ? connectionHost(config) : "";
+  connectionHostLabel.title = connectionHostLabel.textContent;
+  connectionFeedback.hidden = state !== "error";
+  connectionFeedback.textContent = state === "error" ? connectionDetail.textContent : "";
 
   const showConnectedActions = state === "connected";
-  pageContext.hidden = !showConnectedActions;
-  editButton.hidden = !showConnectedActions || editingConnection;
   disconnectButton.hidden = !showConnectedActions || !editingConnection;
-  renderImportAvailability();
+  renderTabContent();
+  if (activeTab === "history") void refreshCaptureHistory();
 }
 
 function renderActivePage() {
@@ -608,36 +1204,85 @@ function renderActivePage() {
     classified === "MakerWorld" ||
     classified === "Thingiverse" ||
     classified === "Cults" ||
+    classified === "MyMiniFactory" ||
+    classified === "Thangs" ||
+    classified === "Creality Cloud" ||
+    classified === "MakerOnline" ||
     classified === "Direct file"
       ? classified
       : null;
-  pageLabel.textContent = activePage?.title || activePage?.url || "No active page";
-  sourceLabel.textContent = activeSource
-    ? activeSource === "Direct file"
-      ? "Direct model file detected"
-      : `${activeSource} page detected`
-    : "Open a MakerWorld, Printables, Thingiverse, or Cults page, or a direct model file";
+  pageHost.hidden = true;
+  if (activeSource === "Direct file" && activePage?.url) {
+    const url = new URL(activePage.url);
+    const filename = url.pathname.split("/").at(-1) ?? "";
+    try {
+      pageLabel.textContent = decodeURIComponent(filename);
+    } catch {
+      pageLabel.textContent = filename;
+    }
+    pageHost.textContent = url.host;
+    pageHost.hidden = false;
+  } else {
+    pageLabel.textContent = activePage?.title
+      ? modelTitleFromPageTitle(activePage.title, activeSource ?? "")
+      : activePage?.url || "No active page";
+  }
+  pageLabel.title = pageLabel.textContent;
+  sourceLabel.textContent = activeSource ? `${activeSource} · Supported` : "Unsupported source";
   sourceLabel.dataset.supported = activeSource ? "true" : "false";
   renderImportAvailability();
 }
 
-async function ensureVaultPermission(config: Config, requestPermission: boolean) {
-  const origins = [permissionOrigin(config)];
+async function ensureVaultPermission(origins: string[], requestPermission: boolean) {
   const granted = requestPermission
     ? await browser.permissions.request({ origins })
     : await browser.permissions.contains({ origins });
   if (!granted) {
     throw new Error(
       requestPermission
-        ? "Permission to contact this PrintStash vault was not granted."
-        : "Reconnect this vault to restore its browser permission.",
+        ? "Permission to contact this PrintStash server was not granted."
+        : "Reconnect this server to restore its browser permission.",
     );
   }
 }
 
+/** The first address where the server answers; a pairing code is claimed only there. */
+async function answeringCandidate(candidates: string[], fetchImpl: typeof fetch) {
+  let failure: unknown = null;
+  for (const vault of candidates) {
+    try {
+      return (await verifyVaultReachability({ vault, fetchImpl })).base;
+    } catch (error) {
+      if (!(error instanceof VaultAccessError && error.problem === "unreachable")) throw error;
+      failure = error;
+    }
+  }
+  throw failure;
+}
+
+/** Ask the background to add the page button once marketplace access arrives. */
+function requestMarketplacePanels() {
+  void requestPanelsOnGrant(sessionStore, MARKETPLACE_ORIGINS).catch(() => {});
+}
+
 async function establishConnection(
   config: Config,
-  { requestPermission, persist }: { requestPermission: boolean; persist: boolean },
+  {
+    requestPermission,
+    persist,
+    candidates = [config.vault],
+    marketplaces = false,
+    resumed = false,
+  }: {
+    requestPermission: boolean;
+    persist: boolean;
+    /** Addresses to try in order for what the user typed. */
+    candidates?: string[];
+    /** Grant every supported marketplace in the same browser prompt. */
+    marketplaces?: boolean;
+    /** Finishing an attempt whose popup Chrome closed for the prompt. */
+    resumed?: boolean;
+  },
 ) {
   if (connectionLocked) return false;
   const attempt: ConnectionAttempt = { controller: new AbortController(), phase: "verifying" };
@@ -658,9 +1303,40 @@ async function establishConnection(
   lockConnection(true);
   cancelButton.disabled = !preservePrevious;
   showStatus();
+  renderOpenServer(null);
+  const candidateOrigins = [...new Set(candidates.map((vault) => permissionOrigin({ vault })))];
+  const ownsPermissions = requestPermission || resumed;
+  let held: Promise<void> = Promise.resolve();
   try {
-    await ensureVaultPermission(config, requestPermission);
+    if (requestPermission) {
+      if (marketplaces) requestMarketplacePanels();
+      // Not awaited yet: the prompt must open within this click's activation.
+      held = holdPendingConnection(sessionStore, {
+        ...config,
+        candidates,
+        expiresAt: Date.now() + PENDING_CONNECTION_MS,
+      }).catch(() => {});
+    }
+    // One prompt: every address to try, plus the marketplaces when chosen.
+    try {
+      await ensureVaultPermission(
+        requestPermission && marketplaces
+          ? [...candidateOrigins, ...ALL_MARKETPLACE_ACCESS_ORIGINS]
+          : candidateOrigins,
+        requestPermission,
+      );
+    } finally {
+      // The popup survived the prompt, so nothing needs finishing later.
+      if (requestPermission) {
+        await held;
+        await takePendingConnection(sessionStore).catch(() => null);
+      }
+    }
     signal.throwIfAborted();
+    if (candidates.length > 1) {
+      config = { ...config, vault: await answeringCandidate(candidates, fetchImpl) };
+      signal.throwIfAborted();
+    }
     let verified;
     let normalized;
     if (config.pairingCode) {
@@ -668,12 +1344,16 @@ async function establishConnection(
         fetchImpl,
         vault: config.vault,
         code: config.pairingCode,
-        name: "Browser extension",
+        name: config.deviceName,
       });
-      normalized = { vault: verified.base, deviceCredential: verified.deviceCredential };
+      normalized = {
+        vault: verified.base,
+        deviceCredential: verified.deviceCredential,
+        deviceName: config.deviceName,
+      };
     } else if (config.deviceCredential) {
       verified = await verifyVaultReachability({ vault: config.vault, fetchImpl });
-      normalized = { vault: verified.base, deviceCredential: config.deviceCredential };
+      normalized = { ...config, vault: verified.base };
     } else {
       verified = await verifyVaultConnection({
         fetchImpl,
@@ -695,6 +1375,7 @@ async function establishConnection(
     cancelButton.disabled = true;
     if (persist) {
       const credentials: Config = normalized;
+      await clearConnectionDraft(browser.storage).catch(() => {});
       // One set publishes the vault and its credential kind together. Nulls
       // erase inactive secrets; initialization only accepts string credentials.
       await browser.storage.set({
@@ -702,6 +1383,9 @@ async function establishConnection(
         username: credentials.username ?? null,
         apiKey: credentials.apiKey ?? null,
         deviceCredential: credentials.deviceCredential ?? null,
+        ...(credentials.deviceName || previous?.config.deviceName
+          ? { deviceName: credentials.deviceName ?? null }
+          : {}),
       });
     }
 
@@ -710,30 +1394,52 @@ async function establishConnection(
         .remove({ origins: [permissionOrigin(previous.config)] })
         .catch(() => false);
     }
+    // The other address was asked only to find where the server answers.
+    const unused = candidateOrigins.filter(
+      (origin) =>
+        origin !== permissionOrigin(normalized) &&
+        (!previous || origin !== permissionOrigin(previous.config)),
+    );
+    if (ownsPermissions && unused.length)
+      await browser.permissions.remove({ origins: unused }).catch(() => false);
 
     connectedConfig = normalized;
-    const verifiedConnection = verified as { user?: Profile; accessToken?: string };
+    const verifiedConnection = verified as {
+      user?: Profile;
+      accessToken?: string;
+      importIntent?: true;
+    };
+    importIntentSupported = verifiedConnection.importIntent === true;
+    collection.setDefaultLabel(
+      importIntentSupported ? "New collection from title" : "Choose in Pending Imports",
+    );
     connectedProfile = verifiedConnection.user || null;
     accessToken = verifiedConnection.accessToken || null;
     if (previous && previous.config.vault !== normalized.vault) clearInboxAction();
+    const wasEditing = editingConnection;
     editingConnection = false;
     connectionPanel.hidden = true;
     cancelButton.hidden = true;
     disconnectButton.hidden = true;
     fillConnectionForm(normalized);
     renderConnection("connected", { config: normalized, profile: verifiedConnection.user });
+    if (wasEditing) tabs.select(tabBeforeEdit);
+    const captureAuthorization = accessToken ?? normalized.deviceCredential;
+    if (importIntentSupported && captureAuthorization)
+      void primeImportContext(normalized, captureAuthorization);
     return true;
   } catch (error) {
-    let failedOrigin = null;
     let previousOrigin = null;
     try {
-      failedOrigin = permissionOrigin(config);
       previousOrigin = previous ? permissionOrigin(previous.config) : null;
     } catch {
       // Invalid legacy settings have no origin permission to clean up.
     }
-    if (requestPermission && failedOrigin && failedOrigin !== previousOrigin) {
-      await browser.permissions.remove({ origins: [failedOrigin] }).catch(() => false);
+    const failedOrigins = candidateOrigins.filter((origin) => origin !== previousOrigin);
+    // A sign-in page or an unaccepted certificate is fixed in a tab and then
+    // retried; keep that server's grant so the retry needs no second prompt.
+    if (ownsPermissions && failedOrigins.length && !(error instanceof VaultAccessError)) {
+      await browser.permissions.remove({ origins: failedOrigins }).catch(() => false);
     }
     if (signal.aborted) return false;
     if (preservePrevious && previous) {
@@ -745,26 +1451,55 @@ async function establishConnection(
       connectedConfig = null;
       connectedProfile = null;
       accessToken = null;
-      renderConnection("error", { detail: messageFrom(error) });
+      renderConnection(error instanceof PairingValidationError ? "disconnected" : "error", {
+        detail: messageFrom(error),
+      });
+      renderOpenServer(error);
     }
     connectionPanel.hidden = false;
     throw error;
   } finally {
     connectionAttempt = null;
     lockConnection(false);
-    connectButton.textContent = editingConnection ? "Update connection" : "Connect";
+    connectButton.textContent = connectionActionLabel();
   }
 }
 
 async function ensureOriginPermission(origin: string) {
-  const granted = await browser.permissions.request({ origins: [origin] });
-  if (!granted) throw new Error("Permission to download the selected source file was not granted.");
+  if (await browser.permissions.contains({ origins: [origin] })) return;
+  try {
+    const granted = await browser.permissions.request({ origins: [origin] });
+    if (granted) return;
+  } catch {
+    throw new MarketplaceDownloadError(
+      "The browser could not request access to the download host. Click import again to grant access.",
+    );
+  }
+  throw new MarketplaceDownloadError(
+    "Permission to download the selected source file was not granted. Click import again to grant access.",
+  );
 }
 
 async function ensureOriginPermissions(origins: string[]) {
-  const granted = await browser.permissions.request({ origins });
-  if (!granted)
-    throw new Error("Permission to download the selected source files was not granted.");
+  if (await browser.permissions.contains({ origins })) return;
+  const missing = (
+    await Promise.all(
+      origins.map(async (origin) =>
+        (await browser.permissions.contains({ origins: [origin] })) ? null : origin,
+      ),
+    )
+  ).filter((origin) => origin !== null);
+  if (!missing.length) return;
+  try {
+    if (await browser.permissions.request({ origins: missing })) return;
+  } catch {
+    throw new MarketplaceDownloadError(
+      "The browser could not request file access. Click import again to grant access.",
+    );
+  }
+  throw new MarketplaceDownloadError(
+    "Permission to download the selected source files was not granted. Click import again to grant access.",
+  );
 }
 
 async function ensurePrintablesFilePermissions(
@@ -790,6 +1525,7 @@ async function ensurePrintablesFilePermissions(
     "Printables",
     "cors_failure",
     captureSignal,
+    captureTimeoutMs(120_000),
   );
   if (!granted) {
     throw new CaptureDiagnosticError(
@@ -825,6 +1561,7 @@ async function ensureMetadataPermission(
     provider,
     "cors_failure",
     captureSignal,
+    captureTimeoutMs(120_000),
   );
   if (!granted) {
     throw new CaptureDiagnosticError(
@@ -840,6 +1577,7 @@ async function downloadPrintablesCandidate(
   candidate: BrowserCaptureMessage["candidates"][number],
   link: string,
   signal?: AbortSignal,
+  progress?: ByteProgress,
 ): Promise<BrowserCaptureFile> {
   if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
   const response = await fetch(link, {
@@ -864,7 +1602,7 @@ async function downloadPrintablesCandidate(
       );
     }
   }
-  const file = await readBoundedPrintablesResponse(response, candidate.sizeBytes, signal);
+  const file = await readBoundedPrintablesResponse(response, candidate.sizeBytes, signal, progress);
   return {
     id: candidate.id,
     file,
@@ -983,7 +1721,11 @@ function isRichProvider(source: Source): source is Exclude<Source, "Direct file"
     source === "Printables" ||
     source === "MakerWorld" ||
     source === "Thingiverse" ||
-    source === "Cults"
+    source === "Cults" ||
+    source === "MyMiniFactory" ||
+    source === "Thangs" ||
+    source === "Creality Cloud" ||
+    source === "MakerOnline"
   );
 }
 async function readVisibleCapture(
@@ -1161,6 +1903,66 @@ async function readVisibleCapture(
       });
       return thingiverseCapture;
     }
+    if (provider === "Cults") {
+      const publicationId = capture.source.source_item_id;
+      if (!publicationId) return capture;
+      const results = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: requestCultsInMainWorld,
+        args: [{ publicationId, operation: "metadata" }],
+      });
+      const result = results[0]?.result as CultsPageResult | undefined;
+      return result ? cultsCaptureFromPage(pageUrl, result) : capture;
+    }
+    if (provider === "MyMiniFactory") {
+      const publicationId = capture.source.source_item_id;
+      if (!publicationId) return capture;
+      const results = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: readMyMiniFactoryInMainWorld,
+        args: [{ publicationId }],
+      });
+      const result = results[0]?.result as MyMiniFactoryPageResult | undefined;
+      return result ? myMiniFactoryCaptureFromPage(pageUrl, result) : capture;
+    }
+    if (provider === "MakerOnline") {
+      const publicationId = capture.source.source_item_id;
+      if (!publicationId) return capture;
+      const results = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: requestMakerOnlineInMainWorld,
+        args: [{ publicationId, operation: "metadata" }],
+      });
+      const result = results[0]?.result as MakerOnlinePageResult | undefined;
+      return result ? makerOnlineCaptureFromPage(pageUrl, result) : capture;
+    }
+    if (provider === "Creality Cloud") {
+      const publicationId = capture.source.source_item_id;
+      if (!publicationId) return capture;
+      const results = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: requestCrealityCloudInMainWorld,
+        args: [{ publicationId, operation: "metadata" }],
+      });
+      const result = results[0]?.result as CrealityCloudPageResult | undefined;
+      return result ? crealityCloudCaptureFromPage(pageUrl, result) : capture;
+    }
+    if (provider === "Thangs") {
+      const modelId = capture.source.source_item_id;
+      if (!modelId) return capture;
+      const results = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: requestThangsInMainWorld,
+        args: [{ modelId, operation: "metadata" }],
+      });
+      const result = results[0]?.result as ThangsPageResult | undefined;
+      return result ? thangsCaptureFromPage(pageUrl, result) : capture;
+    }
     if (provider !== "Printables") return capture;
     if (visible.challengeDetected) {
       return {
@@ -1314,36 +2116,158 @@ async function takePreparedSetup(page: Page) {
   }
 }
 
+pairingMethod.addEventListener("change", renderCredentialFields);
+apiKeyMethod.addEventListener("change", renderCredentialFields);
+manualFileInput.addEventListener("change", () => {
+  renderFileName(manualFileInput, manualFileName);
+  renderImportAvailability();
+});
+coverInput.addEventListener("change", renderCover);
+removeCover.addEventListener("click", () => {
+  coverInput.value = "";
+  renderCover();
+  coverInput.focus();
+});
+deviceNameInput.addEventListener("input", clearPairingError);
+// The popup closes while the user copies a pairing code; keep what they typed.
+function rememberConnectionDraft() {
+  if (connectionState === "connected" && !editingConnection) return;
+  void saveConnectionDraft(browser.storage, {
+    vault: vaultInput.value,
+    method: apiKeyMethod.checked ? "api-key" : "pairing",
+    deviceName: deviceNameInput.value,
+    username: usernameInput.value,
+  }).catch(() => {});
+}
+for (const control of [vaultInput, deviceNameInput, usernameInput, pairingMethod, apiKeyMethod])
+  control.addEventListener(
+    control instanceof HTMLInputElement && control.type === "radio" ? "change" : "input",
+    rememberConnectionDraft,
+  );
+pairingCodeInput.addEventListener("input", clearPairingError);
+vaultInput.addEventListener("input", () => {
+  plainHttp.hidden = true;
+  plainHttpConfirm.checked = false;
+});
+
+let openServerUrl: string | null = null;
+/** Offer the page the user must open: a sign-in page or a certificate to accept. */
+function renderOpenServer(error: unknown) {
+  openServerUrl = error instanceof VaultAccessError ? error.url : null;
+  openServerButton.hidden = openServerUrl === null;
+  openServerButton.textContent =
+    error instanceof VaultAccessError && error.problem === "sign_in"
+      ? "Open sign-in page"
+      : "Open server in a tab";
+}
+openServerButton.addEventListener("click", () => {
+  if (openServerUrl) void browser.tabs.create({ url: openServerUrl });
+});
+
+/** Finish a connection whose popup Chrome closed while asking for access. */
+async function resumePendingConnection(pending: PendingConnection) {
+  const { candidates, expiresAt: _expiresAt, ...config } = pending;
+  const origins = [...new Set(candidates.map((vault) => permissionOrigin({ vault })))];
+  if (!(await browser.permissions.contains({ origins }).catch(() => false))) return false;
+  vaultInput.value = config.vault;
+  if (config.deviceName) deviceNameInput.value = config.deviceName;
+  connectionPanel.hidden = false;
+  lockConnection(false);
+  try {
+    if (
+      await establishConnection(config, {
+        requestPermission: false,
+        persist: true,
+        candidates,
+        resumed: true,
+      })
+    )
+      showStatus("Access allowed. This browser is connected and ready to import.");
+  } catch {
+    // establishConnection shows why the connection failed.
+  }
+  return true;
+}
+
+/** The marketplace switch disappears once every marketplace is granted. */
+async function renderMarketplaceAccess() {
+  const granted = await browser.permissions
+    .contains({ origins: [...ALL_MARKETPLACE_ACCESS_ORIGINS] })
+    .catch(() => false);
+  marketplaceAccessRow.hidden = granted;
+}
+
+function showConnectionFeedback(message: string) {
+  connectionFeedback.textContent = message;
+  connectionFeedback.hidden = false;
+}
+
 connectionForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (connectionLocked) return;
+  clearPairingError();
+  connectionFeedback.hidden = true;
+  let config: Config;
+  let candidates: string[];
   try {
-    const config = configFromForm();
-    if (await establishConnection(config, { requestPermission: true, persist: true })) {
-      showStatus("Connection verified. This browser is ready to import.", "success");
+    config = configFromForm();
+    candidates = vaultCandidates(vaultInput.value);
+  } catch (error) {
+    showConnectionFeedback(messageFrom(error));
+    return;
+  }
+  if (isPlainHttpToPublicHost(config.vault) && !plainHttpConfirm.checked) {
+    plainHttpDetail.textContent = `${new URL(config.vault).host} is not on your local network, and HTTP sends the pairing code and this browser's key unencrypted. Use https:// if the server has a certificate.`;
+    plainHttp.hidden = false;
+    plainHttpConfirm.focus();
+    return;
+  }
+  try {
+    if (
+      await establishConnection(config, {
+        requestPermission: true,
+        persist: true,
+        candidates,
+        marketplaces: !marketplaceAccessRow.hidden && marketplaceAccess.checked,
+      })
+    ) {
+      showStatus("Connection verified. This browser is ready to import.");
     }
   } catch (error) {
-    if (connectionState === "connected") {
+    if (error instanceof PairingValidationError) {
+      const field = error.field === "name" ? deviceNameInput : pairingCodeInput;
+      field.setAttribute("aria-invalid", "true");
+      if (error.field === "name") {
+        deviceNameError.textContent = error.message;
+        deviceNameError.hidden = false;
+      } else {
+        showConnectionFeedback(error.message);
+      }
+      field.focus();
+    } else if (connectionState === "connected") {
       showStatus(`Connection was not updated. ${messageFrom(error)}`, "error");
-    } else {
-      showStatus();
-      renderConnection("error", { detail: messageFrom(error) });
     }
   }
 });
 
-editButton.addEventListener("click", () => {
+function openConnectionEditor() {
   if (connectionLocked) return;
+  tabBeforeEdit = activeTab;
   editingConnection = true;
+  collection.close();
+  clearInboxAction();
   connectionPanel.hidden = false;
   editButton.hidden = true;
   cancelButton.hidden = false;
   disconnectButton.hidden = false;
-  connectButton.textContent = "Update connection";
-  renderImportAvailability();
+  connectButton.textContent = connectionActionLabel();
+  tabs.select("settings");
   showStatus();
   vaultInput.focus();
-});
+}
+
+editButton.addEventListener("click", openConnectionEditor);
+settingsEdit.addEventListener("click", openConnectionEditor);
 
 cancelButton.addEventListener("click", () => {
   if (connectionLocked && connectionAttempt?.phase !== "verifying") return;
@@ -1353,11 +2277,11 @@ cancelButton.addEventListener("click", () => {
   connectionPanel.hidden = Boolean(connectedConfig);
   cancelButton.hidden = true;
   disconnectButton.hidden = true;
-  connectButton.textContent = "Connect";
   renderConnection("connected", {
     config: connectedConfig ?? undefined,
     profile: connectedProfile,
   });
+  tabs.select(tabBeforeEdit);
   showStatus();
 });
 
@@ -1368,7 +2292,7 @@ disconnectButton.addEventListener("click", async () => {
   retireCapture();
   const builtInPermission = previous ? hasBuiltInVaultPermission(previous) : false;
   try {
-    await browser.storage.remove(["apiKey", "username", "deviceCredential"]);
+    await browser.storage.remove(["apiKey", "username", "deviceCredential", "deviceName"]);
   } catch (error) {
     showStatus(`Couldn't remove the stored browser credential. ${messageFrom(error)}`, "error");
     lockConnection(false);
@@ -1389,23 +2313,22 @@ disconnectButton.addEventListener("click", async () => {
   connectedProfile = null;
   accessToken = null;
   editingConnection = false;
-  keyInput.value = "";
+  fillConnectionForm({ vault: vaultInput.value });
   clearInboxAction();
   clearCandidateSelection();
   clearManualFileSelection();
   connectionPanel.hidden = false;
   cancelButton.hidden = true;
   disconnectButton.hidden = true;
-  connectButton.textContent = "Connect";
   renderConnection("disconnected");
   lockConnection(false);
   showStatus(
     permissionStillGranted
-      ? "Disconnected and removed the stored browser credential, but Chrome kept the vault permission. Remove it from the extension's site access settings."
+      ? "Disconnected and removed the stored browser credential, but Chrome kept the server permission. Remove it from the extension's site access settings."
       : builtInPermission
         ? "Disconnected. The stored browser credential was removed; built-in loopback access contains no credentials."
-        : "Disconnected. The stored browser credential and vault permission were removed from this browser.",
-    permissionStillGranted ? "error" : "success",
+        : "Disconnected. The stored browser credential and server permission were removed from this browser.",
+    permissionStillGranted ? "error" : "",
   );
 });
 
@@ -1418,25 +2341,95 @@ apiSettingsButton.addEventListener("click", () => {
   }
 });
 
-captureButton.addEventListener("click", async () => {
+async function searchCollections(query: string) {
+  const authorization = accessToken || connectedConfig?.deviceCredential;
+  if (importBusy || !connectedConfig || !authorization) throw new CaptureRetiredError();
+  const operation = suggestionOperations.begin(connectedConfig, authorization);
+  try {
+    return await operation.run((signal) =>
+      captureDestinations({ vault: operation.config.vault, authorization, query, signal }),
+    );
+  } catch (error) {
+    if (!suggestionOperations.isCurrent(operation)) throw new CaptureRetiredError();
+    if (error instanceof CaptureAuthenticationError) {
+      recoverCaptureConnection();
+      throw new CaptureRetiredError();
+    }
+    throw error;
+  } finally {
+    suggestionOperations.finish(operation);
+  }
+}
+
+async function rememberCaptureDefaults(config: Config, tags: string[]) {
+  if (importAccount === null) return;
+  await importPreferences
+    .saveDefaults(config.vault, importAccount, { collection: collection.destination, tags })
+    .catch(() => {});
+}
+
+captureButton.addEventListener("click", () => void runCapture("import"));
+changeFiles.addEventListener("click", () => {
+  if (pendingDraft()) {
+    const open = candidatePanel.hidden === true;
+    setFilePickerVisible(open);
+    if (open) candidatePanel.querySelector("input")?.focus();
+  } else {
+    void runCapture("choose");
+  }
+});
+
+async function runCapture(mode: "import" | "choose") {
   if (!connectedConfig || connectionState !== "connected") {
     showStatus("Connect PrintStash before importing.", "error");
     return;
   }
-  if (importBusy) return;
+  if (importBusy || checkingImportContext || (mode === "import" && captureButton.disabled)) return;
+  if (!coverError.hidden) {
+    coverInput.focus();
+    return;
+  }
   const config = { ...connectedConfig };
   const authorization = accessToken || config.deviceCredential;
   if (!authorization) {
     showStatus("The browser connection expired. Connect PrintStash again.", "error");
     return;
   }
+  collection.close();
   const capture = captureOperations.begin(config, authorization);
   const runStage = vaultStage(capture);
+  let focusCandidates = false;
   importBusy = true;
   setButtonBusy(captureButton, true, "Sending…");
   renderImportAvailability();
   showStatus();
   try {
+    const transferProgress = (loaded: number, total: number | null) => {
+      capture.assertCurrent();
+      showStatus(
+        `Transferring to PrintStash: ${progressLabel(loaded, total)}${total !== null && loaded === total ? " · awaiting confirmation" : ""}`,
+      );
+    };
+    const transferFetch = captureTransferFetch(transferProgress);
+    const onReady: ImportIntent | undefined = importIntentSupported
+      ? reviewBeforeImporting.checked
+        ? "review"
+        : "import"
+      : undefined;
+    const preferences = {
+      onReady,
+      importAgain,
+      collectionId: collection.id,
+      tags: captureTags(tagsInput.value),
+      cover: selectedCaptureCover(coverInput.files?.[0]),
+    };
+    // Ask for every host this marketplace can use while the import click can
+    // still open Chrome's prompt. A prompt shown after a lookup can retire the
+    // toolbar popup or arrive after the click's activation has expired.
+    const provider = activePage?.url ? sourcePublication(activePage.url)?.code : undefined;
+    if (provider && !pendingManualCapture)
+      await ensureOriginPermissions(marketplaceAccessOrigins(provider));
+    capture.assertCurrent();
     if (activeSource === "Printables" && !pendingPrintablesCapture && !pendingManualCapture) {
       try {
         await ensureMetadataPermission(
@@ -1458,176 +2451,266 @@ captureButton.addEventListener("click", async () => {
     }
     capture.assertCurrent();
     if (pendingManualCapture) {
-      const draft = pendingManualCapture;
-      const file = selectedManualFile(draft);
-      await capture.run(() =>
-        captureRichFiles({
-          vault: capture.config.vault,
-          authorization,
-          sourceUrl: draft.source.canonical_url,
-          title: activePage?.title,
-          captureSource: draft.source,
-          files: [file],
-          runStage,
-        }),
-      );
-      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
-      clearManualFileSelection();
-      inboxButton.hidden = false;
-      inboxButton.dataset.url = inboxUrl;
-      showStatus("Selected file and source metadata sent to Pending Imports.", "success");
-      return;
-    }
-    if (pendingPrintablesCapture) {
-      const draft = pendingPrintablesCapture;
-      const selected = selectedPrintablesCandidates(draft);
-      if (selected.length === 0) {
-        showStatus("Select at least one Printables file to upload.", "error");
-        return;
-      }
-      const links = await resolvePrintablesLinks(draft, selected, capture.signal);
-      const linksById = new Map(links.map((link) => [link.id, link.url]));
-      const selectedLinks = selected.map((candidate) => {
-        const link = linksById.get(candidate.id);
-        if (!link) throw new Error("Printables link mapping changed.");
-        return { candidate, link };
-      });
-      await ensurePrintablesFilePermissions(
-        selectedLinks.map(({ link }) => link),
-        capture.signal,
-      );
-      const files = await Promise.all(
-        selectedLinks.map(({ candidate, link }) =>
-          runCaptureStage(
-            (signal) => downloadPrintablesCandidate(candidate, link, signal),
-            "capture_download_timeout",
-            "capture_download_failed",
-            "The selected Printables file could not be downloaded. Attach it manually in Pending Imports.",
-            "Printables",
-            "request_failed",
-            capture.signal,
-          ),
-        ),
-      );
-      await capture.run(() =>
-        captureRichFiles({
-          vault: capture.config.vault,
-          authorization,
-          sourceUrl: draft.source.canonical_url,
-          title: activePage?.title,
-          captureSource: draft.source,
-          files,
-          runStage,
-        }),
-      );
-      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
-      clearCandidateSelection();
-      inboxButton.hidden = false;
-      inboxButton.dataset.url = inboxUrl;
-      showStatus("Selected Printables files sent to Pending Imports.", "success");
-      return;
-    }
-    if (pendingMakerWorldCapture) {
-      const draft = pendingMakerWorldCapture;
-      const selected = selectedPrintablesCandidates(draft);
-      if (selected.length === 0) {
-        showStatus("Select at least one MakerWorld package to upload.", "error");
-        return;
-      }
-      const links = await resolveMakerWorldLinks(draft, selected, capture.signal);
-      const linksById = new Map(links.map((link) => [link.id, link.url]));
-      const files: BrowserCaptureFile[] = [];
-      let totalBytes = 0;
-      for (const candidate of selected) {
-        const link = linksById.get(candidate.id);
-        if (!link) throw new Error("MakerWorld link mapping changed.");
-        const file = await runCaptureStage(
-          (signal) =>
-            downloadMakerWorldCandidate({
-              candidate: {
-                id: candidate.id,
-                filename: candidate.filename,
-                fileType: "other",
-                ...(candidate.sizeBytes === undefined ? {} : { sizeBytes: candidate.sizeBytes }),
-              },
-              link,
-              totalBefore: totalBytes,
-              ensureOriginPermission,
+      const manual = pendingManualCapture;
+      const title = pageLabel.textContent;
+      const receipt = await capture.run((signal) =>
+        manual.kind === "direct"
+          ? captureDirectFile({
+              vault: capture.config.vault,
+              authorization,
+              sourceUrl: manual.url,
+              title,
+              file: selectedManualFile(null),
+              fetchImpl: transferFetch,
               signal,
+            })
+          : captureRichFiles({
+              ...preferences,
+              fetchImpl: transferFetch,
+              vault: capture.config.vault,
+              authorization,
+              sourceUrl: manual.draft.source.canonical_url,
+              title,
+              captureSource: manual.draft.source,
+              files: [selectedManualFile(manual.draft.source.source_item_id)],
+              runStage,
             }),
-          "capture_download_timeout",
-          "capture_download_failed",
-          "The selected MakerWorld package could not be downloaded. Attach it manually in Pending Imports.",
-          "MakerWorld",
-          "request_failed",
+      );
+      clearManualFileSelection();
+      await rememberCaptureDefaults(capture.config, preferences.tags);
+      await confirmCapture(
+        captureReviewUrl(capture.config.vault, receipt),
+        capture,
+        manual.kind === "direct" ? undefined : onReady,
+      );
+      return;
+    }
+    async function uploadSelection(draft: BrowserCaptureMessage) {
+      const selectedImages = selectedGallery();
+      const imageOrigins = [
+        ...new Set(selectedImages.map((image) => `${new URL(image.url).origin}/*`)),
+      ];
+      capture.assertCurrent();
+      const selected = selectedCandidates(draft);
+      if (selected.length === 0) {
+        showStatus("Select at least one file to upload.", "error");
+        return;
+      }
+      // Chrome can close a toolbar popup when it opens a native access prompt.
+      // Obtain access before creating a capture session with durable slots.
+      const printablesLinks =
+        draft.source.provider === "printables" && onReady === "import"
+          ? await resolvePrintablesLinks(draft, selected, capture.signal)
+          : null;
+      if (printablesLinks) {
+        await ensurePrintablesFilePermissions(
+          printablesLinks.map((link) => link.url),
           capture.signal,
         );
-        totalBytes += file.file.size;
-        files.push(file);
       }
-      await capture.run(() =>
-        captureRichFiles({
+      const makerWorldLinks =
+        draft.source.provider === "makerworld" && onReady
+          ? await resolveMakerWorldLinks(draft, selected, capture.signal)
+          : null;
+      if (makerWorldLinks) {
+        await ensureOriginPermissions([
+          ...new Set([
+            ...imageOrigins,
+            ...makerWorldLinks.map((link) => `${new URL(link.url).origin}/*`),
+          ]),
+        ]);
+      } else if (imageOrigins.length) {
+        await ensureOriginPermissions(imageOrigins);
+      }
+      const receipt = await capture.run((signal) =>
+        captureSequentialFiles({
+          uploadProgress: transferProgress,
+          ...preferences,
+          fetchImpl: transferFetch,
           vault: capture.config.vault,
-          authorization,
-          sourceUrl: draft.source.canonical_url,
-          title: activePage?.title,
-          captureSource: draft.source,
-          files,
-          runStage,
-        }),
-      );
-      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
-      clearCandidateSelection();
-      inboxButton.hidden = false;
-      inboxButton.dataset.url = inboxUrl;
-      showStatus("Selected MakerWorld packages sent to Pending Imports.", "success");
-      return;
-    }
-    if (pendingThingiverseCapture) {
-      const draft = pendingThingiverseCapture;
-      const selected = selectedPrintablesCandidates(draft);
-      if (selected.length === 0) {
-        showStatus("Select at least one Thingiverse file to upload.", "error");
-        return;
-      }
-      const files: BrowserCaptureFile[] = [];
-      for (const candidate of selected) {
-        const link = pendingThingiverseLinks.get(candidate.id);
-        if (!link) throw new Error("Thingiverse file mapping changed.");
-        files.push(
-          await runCaptureStage(
-            (signal) =>
-              downloadThingiverseCandidate({
-                candidate,
+          authorization: capture.authorization,
+          source: draft.source,
+          title: draft.source.fields.title?.value.slice(0, 255) || activePage?.title,
+          candidates: selected,
+          gallery: selectedImages.map((image) => ({
+            id: image.id,
+            filename: image.filename,
+            download: (signal) => downloadSourceImage(image, signal),
+          })),
+          storage: browser.storage,
+          signal,
+          progress: (message) => {
+            capture.assertCurrent();
+            showStatus(message);
+          },
+          download: async (candidate, signal) => {
+            const progress: ByteProgress = (loaded, total) => {
+              capture.assertCurrent();
+              showStatus(`Downloading ${candidate.filename}: ${progressLabel(loaded, total)}`);
+            };
+            if (draft.source.provider === "printables") {
+              const links =
+                printablesLinks ??
+                (await resolvePrintablesLinks(draft, [candidate], capture.signal));
+              const link = links.find((link) => link.id === candidate.id)?.url;
+              if (!link) throw new Error("Printables link mapping changed.");
+              if (!printablesLinks) await ensurePrintablesFilePermissions([link], capture.signal);
+              return downloadPrintablesCandidate(candidate, link, signal, progress);
+            }
+            if (draft.source.provider === "makerworld") {
+              const links =
+                makerWorldLinks ??
+                (await resolveMakerWorldLinks(draft, [candidate], capture.signal));
+              const link = links.find((link) => link.id === candidate.id)?.url;
+              if (!link) throw new Error("MakerWorld link mapping changed.");
+              return downloadMakerWorldCandidate({
+                candidate: { ...candidate, fileType: "other" },
                 link,
+                totalBefore: 0,
+                ensureOriginPermission,
+                signal,
+                progress,
+              });
+            }
+            if (draft.source.provider === "cults") {
+              if (!activePage?.id || !draft.source.source_item_id)
+                throw new MarketplaceDownloadError("Reopen the Cults publication to continue.");
+              const results = await browser.scripting.executeScript({
+                target: { tabId: activePage.id },
+                world: "MAIN",
+                func: requestCultsInMainWorld,
+                args: [{ publicationId: draft.source.source_item_id, operation: "download" }],
+              });
+              const result = results[0]?.result as CultsPageResult | undefined;
+              if (!result)
+                throw new MarketplaceDownloadError("Cults download could not be checked.");
+              return downloadCultsCandidate({ candidate, result, signal, progress });
+            }
+            if (draft.source.provider === "myminifactory") {
+              if (!activePage?.id || !draft.source.source_item_id)
+                throw new MarketplaceDownloadError(
+                  "Reopen the MyMiniFactory publication to continue.",
+                );
+              const results = await browser.scripting.executeScript({
+                target: { tabId: activePage.id },
+                world: "MAIN",
+                func: readMyMiniFactoryInMainWorld,
+                args: [{ publicationId: draft.source.source_item_id }],
+              });
+              const result = results[0]?.result as MyMiniFactoryPageResult | undefined;
+              if (!result)
+                throw new MarketplaceDownloadError(
+                  "MyMiniFactory file selection could not be checked.",
+                );
+              return downloadMyMiniFactoryCandidate({
+                candidate,
+                result,
                 ensureOriginPermissions,
                 signal,
-              }),
-            "capture_download_timeout",
-            "capture_download_failed",
-            "The selected Thingiverse file could not be downloaded. Attach it manually in Pending Imports.",
-            undefined,
-            undefined,
-            capture.signal,
-          ),
-        );
-      }
-      await capture.run(() =>
-        captureRichFiles({
-          vault: capture.config.vault,
-          authorization,
-          sourceUrl: draft.source.canonical_url,
-          title: activePage?.title,
-          captureSource: draft.source,
-          files,
-          runStage,
+                progress,
+              });
+            }
+            if (draft.source.provider === "makeronline") {
+              if (!activePage?.id || !draft.source.source_item_id)
+                throw new MarketplaceDownloadError(
+                  "Reopen the MakerOnline model page to continue.",
+                );
+              showStatus(
+                "Requesting the MakerOnline download. If verification appears, hide this panel and complete it on the source page; the transfer will continue.",
+              );
+              const results = await browser.scripting.executeScript({
+                target: { tabId: activePage.id },
+                world: "MAIN",
+                func: requestMakerOnlineInMainWorld,
+                args: [
+                  {
+                    publicationId: draft.source.source_item_id,
+                    operation: "download",
+                    profileId: candidate.id,
+                  },
+                ],
+              });
+              const result = results[0]?.result as MakerOnlinePageResult | undefined;
+              if (!result)
+                throw new MarketplaceDownloadError(
+                  "MakerOnline did not return a download response.",
+                );
+              return downloadMakerOnlineCandidate({
+                candidate,
+                result,
+                ensureOriginPermission,
+                signal,
+                progress,
+              });
+            }
+            if (draft.source.provider === "crealitycloud") {
+              if (!activePage?.id || !draft.source.source_item_id)
+                throw new MarketplaceDownloadError(
+                  "Reopen the Creality Cloud model page to continue.",
+                );
+              const results = await browser.scripting.executeScript({
+                target: { tabId: activePage.id },
+                world: "MAIN",
+                func: requestCrealityCloudInMainWorld,
+                args: [
+                  {
+                    publicationId: draft.source.source_item_id,
+                    operation: "download",
+                    profileId: candidate.id,
+                  },
+                ],
+              });
+              const result = results[0]?.result as CrealityCloudPageResult | undefined;
+              if (!result)
+                throw new MarketplaceDownloadError(
+                  "Creality Cloud did not return a download response.",
+                );
+              return downloadCrealityCloudCandidate({
+                candidate,
+                result,
+                ensureOriginPermission,
+                signal,
+                progress,
+              });
+            }
+            if (draft.source.provider === "thangs") {
+              if (!activePage?.id || !draft.source.source_item_id)
+                throw new Error("Reopen the Thangs model page to continue.");
+              const results = await browser.scripting.executeScript({
+                target: { tabId: activePage.id },
+                world: "MAIN",
+                func: requestThangsInMainWorld,
+                args: [{ modelId: draft.source.source_item_id, operation: "download" }],
+              });
+              const result = results[0]?.result as ThangsPageResult | undefined;
+              if (!result) throw new Error("Thangs did not return a download response.");
+              return downloadThangsCandidate({
+                candidate,
+                result,
+                ensureOriginPermission,
+                signal,
+                progress,
+              });
+            }
+            const link = pendingThingiverseLinks.get(candidate.id);
+            if (!link) throw new Error("Thingiverse file mapping changed.");
+            return downloadThingiverseCandidate({
+              candidate,
+              link,
+              ensureOriginPermissions,
+              signal,
+              progress,
+            });
+          },
         }),
       );
-      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
       clearCandidateSelection();
-      inboxButton.hidden = false;
-      inboxButton.dataset.url = inboxUrl;
-      showStatus("Selected Thingiverse files sent to Pending Imports.", "success");
+      await rememberCaptureDefaults(capture.config, preferences.tags);
+      await confirmCapture(captureReviewUrl(capture.config.vault, receipt), capture, onReady);
+    }
+    const draft = pendingDraft();
+    if (draft) {
+      await uploadSelection(draft);
       return;
     }
     const visibleCapture =
@@ -1645,18 +2728,47 @@ captureButton.addEventListener("click", async () => {
     }
     if (captureRoute === "candidate_confirmation") {
       if (!visibleCapture) throw new Error("The active tab has no normalized capture source.");
+      pendingGallery = [];
+      galleryUnavailable = false;
+      if (activePage?.id) {
+        const tabId = activePage.id;
+        try {
+          if (visibleCapture.source.provider === "printables") {
+            pendingGallery = await capture.run((signal) =>
+              readPrintablesGallery(visibleCapture.source.canonical_url, signal),
+            );
+          } else {
+            const results = await capture.run(() =>
+              browser.scripting.executeScript({
+                target: { tabId },
+                world: "MAIN",
+                func: readSourceGalleryInMainWorld,
+                args: [visibleCapture.source.provider],
+              }),
+            );
+            pendingGallery = await sourceGallery(
+              visibleCapture.source.canonical_url,
+              results[0]?.result ?? [],
+            );
+          }
+        } catch {
+          capture.assertCurrent();
+          galleryUnavailable = true;
+        }
+        capture.assertCurrent();
+      }
+      if (!activePage?.url) throw new Error("The active tab has no capture URL.");
+      const defaults = defaultCaptureSelection(visibleCapture, activePage.url);
       runCaptureSyncStage(
-        () => renderCandidateSelection(visibleCapture),
+        () => renderCandidateSelection(visibleCapture, defaults, mode === "choose" || !onReady),
         "capture_candidate_render_failed",
         "The provider files could not be shown. Choose a downloaded file to attach it in Pending Imports.",
       );
-      showStatus(
-        visibleCapture.source.provider === "makerworld"
-          ? "Select MakerWorld packages, then confirm the upload."
-          : visibleCapture.source.provider === "thingiverse"
-            ? "Select Thingiverse files, then confirm the upload."
-            : "Review the selected Printables files, then confirm the upload.",
-      );
+      if (mode === "import" && onReady && defaults.kind === "selected") {
+        await uploadSelection(visibleCapture);
+      } else if (mode === "choose" || defaults.kind === "ambiguous") {
+        focusCandidates = true;
+      }
       return;
     }
     const pageUrl = activePage?.url;
@@ -1667,20 +2779,57 @@ captureButton.addEventListener("click", async () => {
         accessToken: capture.authorization,
         signal,
         pageUrl,
-        title: activePage?.title ?? undefined,
+        title: pageLabel.textContent,
+        collectionId: preferences.collectionId,
+        tags: preferences.tags,
+        onReady,
+        importAgain,
         captureSource: visibleCapture?.source,
       }),
     );
-    inboxButton.hidden = false;
-    inboxButton.dataset.url = result.inboxUrl;
-    showStatus(`Model from ${result.source} sent to Pending Imports.`, "success");
+    await rememberCaptureDefaults(capture.config, preferences.tags);
+    await confirmCapture(result.inboxUrl, capture, onReady);
   } catch (error) {
     if (!captureOperations.isCurrent(capture) || error instanceof CaptureRetiredError) return;
     if (error instanceof CaptureAuthenticationError) {
       recoverCaptureConnection();
       return;
     }
+    if (error instanceof CaptureResponseError) {
+      if (error.diagnosticCode === "capture_already_pending") {
+        await primeImportContext(capture.config, capture.authorization);
+        if (inboxButton.dataset.url) return;
+      }
+      if (error.diagnosticCode === "url_target_not_public" && !pendingManualCapture) {
+        const fallback = fallbackVisibleCapture();
+        if (fallback) {
+          renderManualFileSelection(fallback);
+        } else if (activeSource === "Direct file" && activePage?.url) {
+          offerManualFile({ kind: "direct", url: captureUrlForVault(activePage.url) });
+        }
+        showStatus(
+          "PrintStash can't download from local or private addresses. Download the file and attach it instead.",
+          "error",
+          error.diagnosticCode,
+        );
+      } else {
+        showStatus(
+          captureRecoveryMessage(error.diagnosticCode, safeCaptureMessage(error)),
+          "error",
+          error.diagnosticCode ?? "capture_failed",
+        );
+      }
+      return;
+    }
+    if (error instanceof MakerWorldSignInError) {
+      showStatus(error.message, "error");
+      return;
+    }
     if (error instanceof CaptureDiagnosticError) {
+      if (error.provider === "MakerWorld" && error.fallbackCode === "auth_required") {
+        showStatus(makerWorldFailureMessage("auth_required"), "error");
+        return;
+      }
       const fallback =
         pendingPrintablesCapture ||
         pendingMakerWorldCapture ||
@@ -1735,22 +2884,260 @@ captureButton.addEventListener("click", async () => {
         captureButton.textContent = "Upload selected file";
       }
       renderImportAvailability();
+      if (focusCandidates) candidatePanel.querySelector("input")?.focus();
     }
   }
-});
+}
 
 inboxButton.addEventListener("click", () => {
   if (inboxButton.dataset.url) browser.tabs.create({ url: inboxButton.dataset.url });
 });
 
+const enablePanel = document.createElement("button");
+enablePanel.type = "button";
+enablePanel.textContent = "Enable panel on this site";
+enablePanel.className = "text-button text-action";
+enablePanel.hidden = true;
+sourceActions.append(enablePanel);
+async function refreshCaptureHistory() {
+  const request = ++historyRequest;
+  const config = connectedConfig;
+  const authorization = accessToken || config?.deviceCredential;
+  const url = activePage?.url;
+  historyList.replaceChildren();
+  historyList.hidden = true;
+  historyMessage.hidden = false;
+  if (!config || !authorization) {
+    historyMessage.textContent = "Connect to PrintStash to see previous captures.";
+    return;
+  }
+  if (!url || !activeSource || !marketplaceOrigin(url)) {
+    historyMessage.textContent = "No capture history for this page.";
+    return;
+  }
+  historyMessage.textContent = "Loading previous captures…";
+  try {
+    const items = await previousCaptures(config.vault, authorization, url);
+    if (historyRequest !== request) return;
+    if (!items.length) {
+      historyMessage.textContent = "No previous captures of this page.";
+      return;
+    }
+    historyMessage.hidden = true;
+    historyList.hidden = false;
+    for (const item of items) {
+      const row = document.createElement("li");
+      const facts = document.createElement("div");
+      const identifier = document.createElement("strong");
+      identifier.textContent = `#${item.id}`;
+      const state = document.createElement("span");
+      state.className = "history-state";
+      state.textContent = captureHistoryLabel(item);
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "text-button";
+      open.textContent = "Open";
+      open.setAttribute("aria-label", `Open capture #${item.id}`);
+      open.addEventListener("click", () =>
+        browser.tabs.create({ url: captureReviewUrl(config.vault, item) }),
+      );
+      facts.append(identifier, state);
+      row.append(facts, open);
+      historyList.append(row);
+    }
+  } catch {
+    if (historyRequest === request) historyMessage.textContent = "Capture history is unavailable.";
+  }
+}
+
+function pageMarketplace() {
+  return activeSource && activePage?.url ? marketplaceOrigin(activePage.url) : null;
+}
+
+const preview = launcherButton("/icon.svg");
+launcherPreview.append(preview);
+const variantFields = LAUNCHER_VARIANTS.map((value) =>
+  requiredElement(`[name="launcher-variant"][value="${value}"]`, HTMLInputElement),
+);
+const cornerFields = LAUNCHER_CORNERS.map((value) =>
+  requiredElement(`[name="launcher-corner"][value="${value}"]`, HTMLInputElement),
+);
+
+function renderLauncherPreferences() {
+  launcherEnabled.checked = launcher.enabled;
+  variantFields.forEach((input) => (input.checked = input.value === launcher.variant));
+  cornerFields.forEach((input) => (input.checked = input.value === launcher.corner));
+  positionLauncher(launcherPreview, launcher.corner, launcher.variant);
+
+  const origin = pageMarketplace();
+  const siteHidden = Boolean(origin && launcher.hiddenSites.has(origin));
+  launcherSite.hidden = !origin || (!siteHidden && permittedSite !== origin);
+  launcherSite.textContent = siteHidden ? "Show on this site" : "Hide on this site";
+  enablePanel.hidden = panelMode || !origin || permittedSite === origin;
+}
+
+function showLauncherError() {
+  launcherError.textContent = "Launcher settings could not be saved. Try again.";
+  launcherError.hidden = false;
+  renderLauncherPreferences();
+}
+
+function updateLauncher(write: Promise<void>) {
+  launcherError.hidden = true;
+  void write.catch(showLauncherError);
+}
+
+variantFields.forEach((input, index) =>
+  input.addEventListener("change", () =>
+    updateLauncher(launcherStore.setVariant(LAUNCHER_VARIANTS[index])),
+  ),
+);
+cornerFields.forEach((input, index) =>
+  input.addEventListener("change", () =>
+    updateLauncher(launcherStore.setCorner(LAUNCHER_CORNERS[index])),
+  ),
+);
+launcherEnabled.addEventListener("change", () =>
+  updateLauncher(launcherStore.setEnabled(launcherEnabled.checked)),
+);
+launcherSite.addEventListener("click", () => {
+  const origin = pageMarketplace();
+  if (origin)
+    updateLauncher(launcherStore.setSiteHidden(origin, !launcher.hiddenSites.has(origin)));
+});
+
+const stopLauncherUpdates = launcherStore.subscribe((value) => {
+  launcher = value;
+  renderLauncherPreferences();
+}, showLauncherError);
+window.addEventListener(
+  "pagehide",
+  (event) => {
+    if (!event.persisted) stopLauncherUpdates();
+  },
+  { once: true },
+);
+
+enablePanel.addEventListener("click", async () => {
+  const origin = activePage?.url ? marketplaceOrigin(activePage.url) : null;
+  if (!origin) return;
+  const message = { type: "printstash-enable-panel", origin };
+  // The native permission prompt can close the toolbar popup. Hand off the
+  // activation before requesting permission so the background can finish it.
+  const activation = browser.runtime.sendMessage(message).catch(() => false);
+  const requested = { origins: [origin] };
+  const allowed = await browser.permissions.contains(requested).catch(() => false);
+  if (!allowed && !(await browser.permissions.request(requested).catch(() => false))) return;
+  const enabled =
+    (await activation) || (await browser.runtime.sendMessage(message).catch(() => false));
+  if (enabled) {
+    permittedSite = origin;
+    renderLauncherPreferences();
+  }
+  showStatus(
+    enabled
+      ? "Panel enabled. Open PrintStash on the page; hiding it keeps transfers running. Reloading the tab requires recovery."
+      : "The panel could not be enabled.",
+    enabled ? "" : "error",
+  );
+});
+
+function pageTitleIsUrl(title: string | undefined, url: string) {
+  return !title?.trim() || title === url || title === url.replace(/^https?:\/\/(?:www\.)?/, "");
+}
+
+async function resolvePageTitle(page: Page) {
+  const { id, url, title } = page;
+  if (id === undefined || !url || !marketplaceOrigin(url) || !pageTitleIsUrl(title, url)) return;
+  try {
+    const [{ result } = {}] = await browser.scripting.executeScript({
+      target: { tabId: id },
+      func: () =>
+        document.querySelector<HTMLMetaElement>('meta[property="og:title"]')?.content.trim() ||
+        document.querySelector("main h1")?.textContent?.trim() ||
+        document.title.trim(),
+    });
+    if (typeof result === "string" && !pageTitleIsUrl(result, url)) {
+      page.title = result;
+      renderActivePage();
+    }
+  } catch {
+    // Tab permissions or the source document may have changed while opening PrintStash.
+  }
+}
+
+function measurePanelHeight(page: Page | null) {
+  if (!panelMode || !page?.url) return;
+  const origin = new URL(page.url).origin;
+  const observer = new ResizeObserver(() => {
+    const height = Math.ceil(
+      Math.max(document.body.scrollHeight, document.body.getBoundingClientRect().height) +
+        Math.max(0, captureContent.scrollHeight - captureContent.clientHeight),
+    );
+    if (height > 0) window.parent.postMessage({ type: "printstash-panel-height", height }, origin);
+  });
+  observer.observe(document.body);
+  observer.observe(captureContent);
+  observer.observe(importPanel);
+}
+
+async function captureTabs(): Promise<Page[]> {
+  if (!panelMode) return browser.tabs.query({ active: true, currentWindow: true });
+  const tab = await browser.runtime.sendMessage({ type: "printstash-panel-context" });
+  if (
+    typeof tab !== "object" ||
+    tab === null ||
+    !("id" in tab) ||
+    typeof tab.id !== "number" ||
+    !("url" in tab) ||
+    typeof tab.url !== "string" ||
+    !marketplaceOrigin(tab.url)
+  )
+    return [];
+  return [
+    {
+      id: tab.id,
+      url: tab.url,
+      title: "title" in tab && typeof tab.title === "string" ? tab.title : undefined,
+    },
+  ];
+}
+
 async function initialize() {
   lockConnection(true);
-  const [stored, tabs] = await Promise.all([
-    browser.storage.get(["vault", "username", "apiKey", "deviceCredential"]),
-    browser.tabs.query({ active: true, currentWindow: true }),
+  const [stored, openTabs] = await Promise.all([
+    browser.storage.get([
+      "vault",
+      "username",
+      "apiKey",
+      "deviceCredential",
+      "deviceName",
+      "popupTab",
+    ]),
+    captureTabs(),
   ]);
-  activePage = tabs[0] || null;
+  reviewBeforeImporting.checked = await importPreferences
+    .reviewBeforeImporting()
+    .catch(() => false);
+  activePage = openTabs[0] || null;
   renderActivePage();
+  measurePanelHeight(activePage);
+  if (activePage) void resolvePageTitle(activePage);
+  if (!tabTouched) {
+    const saved = POPUP_TABS.find((tab) => tab === stored.popupTab);
+    tabs.select(activeSource ? "capture" : (saved ?? "capture"));
+  }
+  const origin = pageMarketplace();
+  if (
+    origin &&
+    (panelMode || (await isMarketplacePanelEnabled(browser.storage, origin).catch(() => false)))
+  ) {
+    permittedSite = origin;
+  }
+  renderLauncherPreferences();
+  await renderMarketplaceAccess();
+  const pending = await takePendingConnection(sessionStore).catch(() => null);
+  if (pending && (await resumePendingConnection(pending))) return;
   const prepared = await takePreparedSetup(activePage);
   if (prepared) {
     fillConnectionForm(prepared);
@@ -1758,24 +3145,25 @@ async function initialize() {
     renderConnection("disconnected", {
       detail: "Setup received from this PrintStash tab.",
     });
-    connectButton.textContent = "Finish setup";
     const origins = [permissionOrigin(prepared)];
     const alreadyAllowed = await browser.permissions.contains({ origins }).catch(() => false);
     lockConnection(false);
+    connectButton.textContent = "Finish setup";
     if (alreadyAllowed) {
       try {
         await establishConnection(prepared, { requestPermission: false, persist: true });
-        showStatus("Extension setup completed and connection verified.", "success");
+        showStatus("Extension setup completed and connection verified.");
       } catch {
         showStatus();
       }
     } else {
-      showStatus("Setup received. Choose Finish setup to approve access to this vault.", "success");
+      showStatus("Setup received. Choose Finish setup to approve access to this server.");
     }
     return;
   }
   const storedConfig: Config = {
     vault: typeof stored.vault === "string" ? stored.vault : "",
+    ...(typeof stored.deviceName === "string" ? { deviceName: stored.deviceName } : {}),
     ...(typeof stored.username === "string" ? { username: stored.username } : {}),
     ...(typeof stored.apiKey === "string" ? { apiKey: stored.apiKey } : {}),
     ...(typeof stored.deviceCredential === "string"
@@ -1783,6 +3171,16 @@ async function initialize() {
       : {}),
   };
   fillConnectionForm(storedConfig);
+  if (!storedConfig.deviceCredential && !storedConfig.apiKey) {
+    const draft = await readConnectionDraft(browser.storage).catch(() => null);
+    if (draft) {
+      vaultInput.value = draft.vault;
+      if (draft.deviceName) deviceNameInput.value = draft.deviceName;
+      usernameInput.value = draft.username;
+      (draft.method === "api-key" ? apiKeyMethod : pairingMethod).checked = true;
+      renderCredentialFields();
+    }
+  }
   lockConnection(false);
 
   if (
@@ -1804,5 +3202,11 @@ initialize().catch((error) => {
   lockConnection(false);
   connectionPanel.hidden = false;
   renderConnection("error", { detail: messageFrom(error) });
-  showStatus(messageFrom(error), "error");
+});
+
+// Escape hides the embedded panel; the transfer owner remains mounted.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !panelMode) return;
+  const origin = activePage?.url ? new URL(activePage.url).origin : null;
+  if (origin) window.parent.postMessage({ type: "printstash-hide-panel" }, origin);
 });

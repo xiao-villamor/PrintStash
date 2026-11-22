@@ -497,3 +497,46 @@ describe("UploadModal", () => {
     });
   });
 });
+
+describe("folder review choice", () => {
+  it("retains folder auxiliaries before import", async () => {
+    renderUpload();
+    await userEvent.click(screen.getByRole("tab", { name: /Bulk/ }));
+    const files = [
+      new File(["mesh"], "part.stl"),
+      new File(["guide"], "manual.pdf"),
+      new File(["image"], "photo.jpg"),
+    ];
+    for (const file of files)
+      Object.defineProperty(file, "webkitRelativePath", { value: `Assembly/${file.name}` });
+    const picker = screen
+      .getByRole("dialog")
+      .querySelector<HTMLInputElement>("input[webkitdirectory]");
+    if (!picker) throw new Error("folder picker missing");
+    await userEvent.upload(picker, files);
+    expect(screen.getByRole("button", { name: "Remove manual.pdf" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Remove photo.jpg" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Prepare folder review" })).toBeEnabled();
+    expect(
+      screen.getByRole("radio", { name: "Review grouping and guides before importing" }),
+    ).toBeChecked();
+  });
+  it("explains omitted guides for direct separate imports", async () => {
+    renderUpload();
+    await userEvent.click(screen.getByRole("tab", { name: /Bulk/ }));
+    const file = new File(["mesh"], "part.stl");
+    Object.defineProperty(file, "webkitRelativePath", { value: "Assembly/part.stl" });
+    const picker = screen
+      .getByRole("dialog")
+      .querySelector<HTMLInputElement>("input[webkitdirectory]");
+    if (!picker) throw new Error("folder picker missing");
+    await userEvent.upload(picker, [file]);
+    await userEvent.click(screen.getByRole("radio", { name: "Import separate Models directly" }));
+    expect(
+      screen.getByText(
+        "Only Model files will be imported. Images, guides and other files will be omitted.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Prepare folder review" })).toBeNull();
+  });
+});

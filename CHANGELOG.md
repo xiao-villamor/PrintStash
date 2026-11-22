@@ -10,6 +10,13 @@
 
 ### Changed
 
+- Web captures can import directly from the browser extension. Pending Imports retains the result and opens the resulting Model. Captures that need a decision stay available for review. The extension remembers collection and tag choices and can be set to always review.
+- Pending Imports shows saved destinations, simpler review controls, and single or bulk import actions for ready captures. Direct files appear as one selected file. The on-page panel fits its content and uses the marketplace title when available.
+- The extension keeps the server URL, browser name and connection method while its popup closes to copy a pairing code. Pairing codes and API keys are never kept.
+- Connecting the extension can grant the server and every supported marketplace in one Chrome prompt, so imports and the on-page button never ask again. With that switch off, each marketplace asks once, at its first import click, for all of its hosts together. Reopening the popup after choosing Allow finishes the connection that Chrome interrupted to show the prompt.
+- The extension reaches more servers: `.lan`, `.home`, `.home.arpa`, `.internal`, `.intranet` and `.localdomain` names and Tailscale `100.64.0.0/10` addresses count as LAN and try HTTP, then HTTPS. A redirect to HTTPS on the same host is followed. Servers behind sign-in proxies such as Cloudflare Access or Authelia work after signing in once in a tab, and the popup offers that sign-in page or the server tab for accepting a self-signed certificate. Plain HTTP to a server outside the LAN needs explicit confirmation.
+- Browser uploads go to PrintStash in parts, so a reverse proxy's request-size limit (nginx's 1 MiB default, Cloudflare's 100 MB) no longer caps model size. The extension halves the part size when a proxy refuses one.
+- The extension imports the default files with one Import click. Change the selection inline, choose a cover from the gallery thumbnails, or exclude the whole gallery. The Import button and status stay visible while the options scroll.
 - Opening Search keeps the collection and grid you were browsing. The Search sidebar searches the current collection and offers a switch to search the whole library and back. Recent searches can be removed one by one or cleared, and the AI Search status sits in one compact note. Switching sidebar tools no longer stalls the page and settles in 150 ms.
 - The Filters picker leads with quick toggles for Favorites, Printed and similar candidates, then groups the remaining filters into Files and library and Printing with a distinct icon per filter and a summary of each active selection. A filter page can be cleared on its own.
 - Model views fills the dialog with the selected image, separates renders from photos in the thumbnail strip, keeps the selected thumbnail in view, shows full view names and supports the arrow keys.
@@ -36,6 +43,16 @@
 
 - New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.
 
+- The browser extension popup puts pairing and capture first, with connection status in the header, a choice of pairing code or API key, and a direct review action after sending files.
+- The Chrome toolbar popup has a consistent width, a searchable collection field, and a compact unsupported-page state. The new History and Settings tabs show previous captures and let users choose the on-page launcher style, position, and visibility. Pairing name conflicts appear beside the browser name, and the extension can attach explicitly selected files when a private URL cannot be downloaded.
+
+- Model descriptions render Markdown in detail, inspection and shared views, with an edit preview. Browser capture can retain up to 64 publication photos, show them in the card gallery, and choose any captured image as the cover. Gallery transfers recover verified images, preserve source provenance, and remain included in Vault backups and portable exports.
+
+- Browser captures can suggest an editable collection and tags, include a selected cover for every resulting Model, and show download and upload byte progress. Recovering an interrupted capture retains its original suggestions and verified files; a pending local cover must be selected again.
+
+- Archive review identifies omitted images, documents and unsupported entries before importing Models, and explains how selected files and subfolders become Models and collections.
+
+- New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.
 - Flat-model previews now support arrow navigation through all five views and back to the cover. Single-cover and multi-angle cards share a larger image area, and the expanded gallery uses more room on large screens while fitting narrow displays.
 
 - Preview settings now include the vault-wide multi-angle generation switch. Preview activity reports total, completed, remaining, skipped and failed image tasks across the library, including work waiting to enter the queue. Multi-angle orbits use the shared cover camera elevation; enabled generators refresh older view sets in the background.
@@ -67,6 +84,12 @@
 
 ### Added
 
+- Review folders and archives as separate Models or a Multipart with named pieces. Preserve selected guides and images as Documents, retain completed results when retrying, and open saved results from Tasks. Folder review is bounded to 256 MiB and 2,000 files; original files remain unchanged.
+
+
+- 3MF projects show bounded saved printer, material, nozzle, layer, wall and infill settings, with per-plate estimates when present. File estimates remain separate from provider estimates and measured print results; original project bytes are unchanged.
+- Opt-in corner import panels for MakerWorld, Printables, Thingiverse, MyMiniFactory, Cults, Thangs, Creality Cloud and MakerOnline publications, with per-file transfer recovery, owner-scoped capture history and direct links to Pending Imports review. MakerWorld profiles retain allowlisted provider estimates and link related, accessible Models without merging them.
+- Advisory geometry checks, an import-readiness summary, and source/license summaries expose existing evidence without certifying printability or interpreting license terms.
 - Sliced `.gcode.3mf` archives are G-code Revisions: import or attach them, retain the original download, recommend a revision, preview its plates, and choose a plate to send, queue or batch. Printer history retains the selected plate. Existing explicit sliced archives are recognized during upgrade.
 
 - Custom recovery pages distinguish missing content, restricted access and connection failures, with retry and return actions that match the workbench.
@@ -93,6 +116,9 @@
 
 ### Fixed
 
+- The browser extension popup improves contrast, puts credentials before the browser name, and provides keyboard-accessible file selectors that show the selected filename.
+- Partial imports show every file result and its failure reason. Expired browser staging prompts a fresh capture, and collection selection is distinguished from physical storage.
+- Slicer handoff remembers the current user's browser preference, retains a download fallback for the selected Artifact and distinguishes a requested launch from a confirmed opening.
 - G-code previews draw the printer bed where the print really sits on it, and frame the printed object rather than the start-up purge line, which used to push a print to one side of the view.
 
 - Opening or closing Upload or New collection no longer makes Library cards and thumbnails flash.
@@ -117,7 +143,6 @@
 - The Library now refreshes automatically after catalog changes or expired browse cursors, including paged galleries. Updates preserve the reading position, wait until selection ends, and no longer require a Refresh library banner.
 
 - Completing a ZIP import no longer leaves the Library empty with a request error when it interrupts an in-progress refresh. Interrupted reads recover automatically while preserving the displayed Models and reading position.
-
 - Library refreshes recover automatically when an ongoing ZIP import changes the catalog during a read, keeping the displayed Models and reading position instead of showing a stuck request error.
 
 - Model card arrows return to the cover in both directions and skip the repeated default camera angle. The expanded gallery keeps every generated view available.

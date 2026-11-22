@@ -1,5 +1,7 @@
 "use client";
 
+import { mergeFolderItems, prepareFolderArchive } from "@/lib/folder-archive";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { useContentReveal } from "@/lib/use-content-reveal";
 import { useTaxonomyCommands } from "@/features/library/taxonomy";
 
@@ -7,7 +9,7 @@ import { uiMessage } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useI18n, useUiLocale } from "@/lib/i18n";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { vaultConfigOptions } from "@/lib/queries/settings-config";
 import { librarySourcesOptions } from "@/lib/queries/settings-library-sources";
@@ -145,6 +147,14 @@ export function UploadModal({
   const bulkFiles = bulkSelection.kind === "bulk" ? bulkSelection.items : [];
   const zipFile = bulkSelection.kind === "zip" ? bulkSelection.file : null;
   const submissionKind = mode === "files" ? "files" : bulkSelection.kind;
+  const [folderReview, setFolderReview] = useState(true);
+  const folderPreparation = useRef<AbortController | null>(null);
+  useEffect(() => () => folderPreparation.current?.abort(), []);
+  useEffect(() => {
+    if (!open) folderPreparation.current?.abort();
+  }, [open]);
+  const hasFolder = bulkFiles.some((item) => item.relPath !== "");
+  const modelFiles = bulkFiles.filter(isBulkModel);
   const bulkRef = useRef<HTMLInputElement>(null);
   const bulkFolderRef = useRef<HTMLInputElement>(null);
   const [modelName, setModelName] = useState("");
@@ -311,6 +321,19 @@ export function UploadModal({
   // Merge newly picked/dropped meshes into the bulk queue (drops non-mesh
   // files and duplicates), then surface a notice for anything skipped.
   function addBulkItems(items: BulkItem[]) {
+    // A folder keeps its guides and images so review can retain them as Documents.
+    if (hasFolder || items.some((item) => item.relPath !== "")) {
+      try {
+        setBulkSelection({ kind: "bulk", items: mergeFolderItems(bulkFiles, items) });
+      } catch {
+        toast.error(
+          uiText(
+            "Two selected files have the same folder path. Remove the earlier file before replacing it.",
+          ),
+        );
+      }
+      return;
+    }
     const models = items.filter(isBulkModel);
     const archives = items.filter(({ file }) => isArchiveFile(file.name));
     if (models.length > 0) {
@@ -347,6 +370,8 @@ export function UploadModal({
     setGcodeFile(null);
     setMode("files");
     setBulkSelection(EMPTY_BULK);
+    setFolderReview(true);
+    folderPreparation.current?.abort();
     setModelName("");
     setPickedCollection(null);
     setSelectedTags([]);
@@ -374,7 +399,10 @@ export function UploadModal({
 
   function doInspectZip() {
     if (!collectionGate() || submitting || !zipFile) return;
-    const file = zipFile;
+    queueArchive(zipFile);
+  }
+
+  function queueArchive(file: File) {
     const taskId = createTask({
       title: uiMessage("Upload {value1}", { value1: String(file.name) }),
       detail: uiText("Transferring file"),
@@ -390,6 +418,34 @@ export function UploadModal({
     close();
   }
 
+  async function reviewFolder() {
+    if (!collectionGate() || submitting) return;
+    const session = getSessionVersion();
+    const controller = new AbortController();
+    folderPreparation.current = controller;
+    setSubmitting(true);
+    try {
+      const file = await prepareFolderArchive(bulkFiles, controller.signal);
+      controller.signal.throwIfAborted();
+      requireSessionVersion(session);
+      queueArchive(file);
+    } catch (error) {
+      if (controller.signal.aborted || session !== getSessionVersion()) return;
+      toast.error(
+        error instanceof Error && error.message === "folder_size_limit"
+          ? uiText(
+              "Folder review accepts up to 256 MiB. Choose separate Models or upload an archive prepared on your computer.",
+            )
+          : uiText(
+              "The folder could not be prepared. Check for conflicting paths or choose a smaller folder (up to 2000 files).",
+            ),
+      );
+      setSubmitting(false);
+    } finally {
+      if (folderPreparation.current === controller) folderPreparation.current = null;
+    }
+  }
+
   function doSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting || pendingTagCount > 0 || (sourceMode && destinationBlocked)) return;
@@ -398,11 +454,15 @@ export function UploadModal({
       return;
     }
     if (submissionKind === "bulk") {
-      if (bulkFiles.length === 0) return;
+      if (hasFolder && folderReview && !sourceSelected) {
+        void reviewFolder();
+        return;
+      }
+      if (modelFiles.length === 0) return;
       if (!collectionGate()) return;
       void runBulkModelUpload(
         {
-          files: bulkFiles,
+          files: modelFiles,
           collection: collectionPath,
           tagsForUpload: [...selectedTags],
           libraryId: targetLibraryId,
@@ -411,8 +471,8 @@ export function UploadModal({
       );
       toast.success(
         uiText("uploads.queued", {
-          value1: String(bulkFiles.length),
-          count: Number(bulkFiles.length),
+          value1: String(modelFiles.length),
+          count: Number(modelFiles.length),
         }),
       );
       reset();
@@ -626,22 +686,58 @@ export function UploadModal({
                   />
                 </div>
               ) : (
-                <BulkFiles
-                  items={bulkFiles}
-                  archive={zipFile}
-                  fileInputRef={bulkRef}
-                  folderInputRef={bulkFolderRef}
-                  onAddItems={addBulkItems}
-                  onRemove={(idx) =>
-                    setBulkSelection((prev) =>
-                      prev.kind === "bulk"
-                        ? { kind: "bulk", items: prev.items.filter((_, i) => i !== idx) }
-                        : prev,
-                    )
-                  }
-                  onClear={() => setBulkSelection(EMPTY_BULK)}
-                  onRemoveArchive={() => setBulkSelection(EMPTY_BULK)}
-                />
+                <>
+                  {hasFolder && (
+                    <fieldset className="mb-4 space-y-2 rounded border border-border p-3 text-sm">
+                      <legend className="px-1 font-medium">{uiText("Folder intake")}</legend>
+                      {!sourceSelected && (
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name="folder-intake"
+                            checked={folderReview}
+                            onChange={() => setFolderReview(true)}
+                          />
+                          {uiText("Review grouping and guides before importing")}
+                        </label>
+                      )}
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="folder-intake"
+                          checked={!folderReview || sourceSelected}
+                          onChange={() => setFolderReview(false)}
+                        />
+                        {uiText("Import separate Models directly")}
+                      </label>
+                      <p className="text-muted-foreground">
+                        {folderReview && !sourceSelected
+                          ? uiText(
+                              "Next: choose separate Models or a Multipart, edit piece names and select Documents. Files use managed storage.",
+                            )
+                          : uiText(
+                              "Only Model files will be imported. Images, guides and other files will be omitted.",
+                            )}
+                      </p>
+                    </fieldset>
+                  )}
+                  <BulkFiles
+                    items={bulkFiles}
+                    archive={zipFile}
+                    fileInputRef={bulkRef}
+                    folderInputRef={bulkFolderRef}
+                    onAddItems={addBulkItems}
+                    onRemove={(idx) =>
+                      setBulkSelection((prev) =>
+                        prev.kind === "bulk"
+                          ? { kind: "bulk", items: prev.items.filter((_, i) => i !== idx) }
+                          : prev,
+                      )
+                    }
+                    onClear={() => setBulkSelection(EMPTY_BULK)}
+                    onRemoveArchive={() => setBulkSelection(EMPTY_BULK)}
+                  />
+                </>
               )}
             </div>
 
@@ -954,7 +1050,7 @@ export function UploadModal({
                 (submissionKind === "files"
                   ? !meshFile && !gcodeFile
                   : submissionKind === "bulk"
-                    ? bulkFiles.length === 0
+                    ? modelFiles.length === 0
                     : !zipFile)
               }
             >
@@ -964,8 +1060,10 @@ export function UploadModal({
                   {submissionKind === "zip" ? uiText("Preparing archive…") : uiText("Working…")}
                 </>
               ) : submissionKind === "bulk" ? (
-                bulkFiles.length > 0 ? (
-                  uiText("counts.uploadModels", { count: bulkFiles.length })
+                hasFolder && folderReview && !sourceSelected ? (
+                  uiText("Prepare folder review")
+                ) : modelFiles.length > 0 ? (
+                  uiText("counts.uploadModels", { count: modelFiles.length })
                 ) : (
                   uiText("Upload to vault")
                 )

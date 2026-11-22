@@ -28,6 +28,7 @@ import { isTypingTarget, keyboardOverlayOpen } from "@/lib/keyboard-commands";
 import { toast } from "@/lib/toast";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { MarkdownView } from "@/components/markdown-view";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { AddGcodeRevisionModal } from "@/components/model-detail/add-revision-modal";
 import { SendToButtons } from "@/components/model-detail/send-to-buttons";
@@ -989,7 +990,7 @@ export function InspectorContent({
             <textarea
               id="inspector-description"
               autoFocus
-              maxLength={500}
+              maxLength={4096}
               rows={3}
               value={descriptionIntent.text}
               disabled={descriptionBusy || descriptionReviewing || !canEdit || descriptionDenied}
@@ -1021,7 +1022,7 @@ export function InspectorContent({
             />
             <div className="flex items-center justify-end gap-2">
               <span className="mr-auto text-xs text-muted-foreground">
-                {descriptionIntent.text.length} /500
+                {descriptionIntent.text.length} /4096
               </span>
               <Button
                 size="xs"
@@ -1203,7 +1204,7 @@ export function InspectorContent({
 }
 function InspectorDescription({ description }: { description: string }) {
   const id = useId();
-  const content = useRef<HTMLParagraphElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   useLayoutEffect(() => {
@@ -1221,13 +1222,13 @@ function InspectorDescription({ description }: { description: string }) {
 
   return (
     <div>
-      <p
+      <div
         id={id}
         ref={content}
-        className={`${descriptionText} whitespace-pre-wrap wrap-anywhere ${expanded ? "" : "line-clamp-4"}`}
+        className={`${descriptionText} wrap-anywhere ${expanded ? "" : "line-clamp-4"}`}
       >
-        {description}
-      </p>
+        <MarkdownView source={description} />
+      </div>
       {overflows && (
         <Button
           size="xs"

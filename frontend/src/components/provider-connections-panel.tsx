@@ -1,5 +1,7 @@
 "use client";
 
+import { ImportReadiness } from "./import-readiness";
+
 import { SettingsGroupHead } from "@/components/settings-card";
 import { currentLocale } from "@/lib/locale";
 
@@ -234,6 +236,11 @@ export function ProviderConnectionsPanel({
   return (
     <div className="space-y-3">
       {loadFailure}
+      <ImportReadiness
+        devices={devices}
+        connections={connections}
+        checkedAt={Math.min(devicesQuery.dataUpdatedAt, connectionsQuery.dataUpdatedAt)}
+      />
       <fieldset disabled={busy !== null || Boolean(loadError)} className="min-w-0">
         <section
           aria-labelledby="provider-connections-title"

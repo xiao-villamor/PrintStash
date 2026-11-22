@@ -35,6 +35,7 @@ interface LoadedExtensionElement {
 
 interface LoadedExtensionBrowser {
   $(selector: string): LoadedExtensionElement;
+  keys(value: string): Promise<void>;
   webExtensionInstall(parameters: {
     extensionData: { type: "path"; path: string };
   }): Promise<{ extension: string }>;
@@ -105,6 +106,171 @@ describe("loaded extension", () => {
     assert.deepEqual(apis, { permissions: "function", scripting: "function" });
   });
 
+  it("uses a fixed toolbar width with a fluid embedded panel", async () => {
+    const layouts = await browser.execute(async () => {
+      const frame = document.createElement("iframe");
+      // Keep the fixture out of the popup's flex layout so it cannot shrink.
+      frame.style.position = "fixed";
+      frame.style.width = "300px";
+      frame.style.height = "650px";
+      frame.style.border = "0";
+      frame.src = new URL("?panel=1", location.href).href;
+      const loaded = new Promise<void>((resolve) =>
+        frame.addEventListener("load", () => resolve()),
+      );
+      document.body.append(frame);
+      await loaded;
+      const panel = frame.contentDocument;
+      const width = (element: HTMLElement | null | undefined) =>
+        element?.getBoundingClientRect().width;
+      const result = {
+        toolbar: [width(document.documentElement), width(document.body)],
+        toolbarMinimum: [document.documentElement, document.body].map(
+          (el) => getComputedStyle(el).minWidth,
+        ),
+        toolbarMaximum: [document.documentElement, document.body].map(
+          (el) => getComputedStyle(el).maxWidth,
+        ),
+        panelFrame: width(frame),
+        panelFillsViewport: Boolean(
+          panel &&
+          width(panel.documentElement) === panel.documentElement.clientWidth &&
+          width(panel.body) === panel.documentElement.clientWidth,
+        ),
+        titleLines: getComputedStyle(document.querySelector("#page") as HTMLElement)
+          .webkitLineClamp,
+        headerDivider: getComputedStyle(document.querySelector("header") as HTMLElement)
+          .borderBottomWidth,
+        panelBorder: getComputedStyle(document.querySelector("#connection-panel") as HTMLElement)
+          .borderTopWidth,
+        hasDisclosure: Boolean(document.querySelector("details, summary")),
+      };
+      frame.remove();
+      return result;
+    });
+    assert.deepEqual(layouts, {
+      toolbar: [360, 360],
+      toolbarMinimum: ["360px", "360px"],
+      toolbarMaximum: ["none", "none"],
+      panelFrame: 300,
+      panelFillsViewport: true,
+      titleLines: "2",
+      headerDivider: "1px",
+      panelBorder: "0px",
+      hasDisclosure: false,
+    });
+  });
+
+  it("keeps capture status and Import visible with a tall picker", async () => {
+    const layout = await browser.execute(async () => {
+      function measure(doc: Document) {
+        const content = doc.querySelector<HTMLElement>("#capture-content")!;
+        const capture = doc.querySelector<HTMLElement>("#capture")!;
+        const status = doc.querySelector<HTMLElement>("#status")!;
+        const tallPicker = doc.createElement("div");
+        tallPicker.style.blockSize = "1200px";
+        content.append(tallPicker);
+        capture.hidden = false;
+        status.hidden = false;
+        const bottom = Math.min(
+          doc.body.getBoundingClientRect().bottom,
+          doc.documentElement.clientHeight,
+        );
+        const initial = capture.getBoundingClientRect();
+        content.scrollTop = content.scrollHeight;
+        const scrolled = capture.getBoundingClientRect();
+        const statusBounds = status.getBoundingClientRect();
+        return {
+          scrolls: content.scrollTop > 0,
+          fixed: scrolled.top === initial.top && scrolled.top >= 0 && scrolled.bottom <= bottom,
+          statusVisible:
+            statusBounds.top >= content.getBoundingClientRect().bottom &&
+            statusBounds.bottom <= bottom,
+          geometry: { bottom, initialTop: initial.top, top: scrolled.top, end: scrolled.bottom },
+        };
+      }
+      async function measureInFrame(width: number, height: number, search: string) {
+        const frame = document.createElement("iframe");
+        frame.style.position = "fixed";
+        frame.style.width = `${width}px`;
+        frame.style.height = `${height}px`;
+        frame.style.border = "0";
+        frame.src = new URL(`popup.html${search}`, location.href).href;
+        const loaded = new Promise<void>((resolve) =>
+          frame.addEventListener("load", () => resolve(), { once: true }),
+        );
+        document.body.append(frame);
+        try {
+          await loaded;
+          return measure(frame.contentDocument!);
+        } finally {
+          frame.remove();
+        }
+      }
+      const toolbar = await measureInFrame(360, 600, "");
+      const panel = await measureInFrame(300, 400, "?panel=1");
+      return { toolbar, panel };
+    });
+    const visible = { scrolls: true, fixed: true, statusVisible: true };
+    for (const [surface, { geometry, ...visibility }] of Object.entries(layout)) {
+      assert.deepEqual(visibility, visible, `${surface}: ${JSON.stringify(geometry)}`);
+    }
+  });
+
+  it("switches credential fields using the keyboard", async () => {
+    await browser.waitUntil(
+      async () => (await browser.$("#connection-title").getText()) === "Not connected",
+    );
+    await browser.execute(() =>
+      document.querySelector<HTMLInputElement>("#pairing-method")?.focus(),
+    );
+
+    await browser.keys("ArrowRight");
+
+    const fields = await browser.execute(() => ({
+      active: document.activeElement?.id,
+      pairing: document.querySelector("#pairing-code")?.checkVisibility(),
+      username: document.querySelector("#username")?.checkVisibility(),
+      key: document.querySelector("#key")?.checkVisibility(),
+    }));
+    assert.deepEqual(fields, {
+      active: "api-key-method",
+      pairing: false,
+      username: true,
+      key: true,
+    });
+  });
+
+  it("selects launcher settings with the keyboard in the installed popup", async () => {
+    await browser.execute(() => document.querySelector<HTMLButtonElement>("#tab-capture")?.focus());
+    await browser.keys("ArrowRight");
+    await browser.keys("ArrowRight");
+    assert.equal(await browser.execute(() => document.activeElement?.id), "tab-settings");
+
+    await browser.$('label:has([name="launcher-variant"][value="icon-and-label"])').click();
+    await browser.$('label:has([name="launcher-corner"][value="bottom-left"])').click();
+    await browser.waitUntil(() =>
+      browser.execute(() => {
+        const preview = document.querySelector<HTMLElement>("#launcher-preview");
+        return (
+          preview?.dataset.variant === "icon-and-label" &&
+          preview.dataset.corner === "bottom-left" &&
+          document.body.scrollWidth === 360
+        );
+      }),
+    );
+    await browser.$('label:has([name="launcher-variant"][value="edge-tab"])').click();
+    await browser.waitUntil(() =>
+      browser.execute(() => {
+        return (
+          document.querySelector<HTMLElement>("#launcher-preview")?.dataset.variant ===
+            "edge-tab" && document.body.scrollWidth === 360
+        );
+      }),
+    );
+    await browser.$("#tab-capture").click();
+  });
+
   it("opens packaged help from the installed popup", async () => {
     const previousHandles = await browser.getWindowHandles();
 
@@ -156,9 +322,18 @@ describe("loaded extension", () => {
         await browser.waitUntil(
           async () => (await browser.$("#connection-title").getText()) === "Connected",
         );
+        await browser.$("#tab-settings").click();
+        const settingsSize = await browser.execute(() => ({
+          width: document.body.scrollWidth,
+          height: document.body.scrollHeight,
+        }));
+        assert.equal(settingsSize.width, 360);
+        assert.ok(settingsSize.height <= 600, "Settings and its footer fit the toolbar popup");
+        await browser.$("#tab-capture").click();
         await browser.$("#edit-connection").click();
         await browser.$("#vault").setValue(`${vault}/second`);
         await browser.$("#pairing-code").setValue("test-cancelled-code");
+        await browser.$("#marketplace-access-row label").click();
         await browser.$("#connect").click();
         await browser.waitUntil(async () => heldResponse !== undefined);
         await browser.$("#cancel-edit").click();
@@ -188,6 +363,7 @@ describe("loaded extension", () => {
       let heldResponse: ServerResponse | undefined;
       let heldRequestClosed = false;
       let healthReads = 0;
+      let rejectCapture = false;
       const server = createServer((request, response) => {
         const path = request.url || "";
         if (path === "/api/v1/health") healthReads += 1;
@@ -203,6 +379,14 @@ describe("loaded extension", () => {
           return;
         }
         response.setHeader("Content-Type", "application/json");
+        if (path === "/second/api/v1/inbox") {
+          if (rejectCapture) {
+            response.writeHead(503).end(JSON.stringify({ detail: "Import unavailable." }));
+            return;
+          }
+          response.end(JSON.stringify({ id: 2 }));
+          return;
+        }
         response.end(JSON.stringify({ status: "ok", name: "PrintStash", credential: "device-b" }));
       });
       await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -239,6 +423,14 @@ describe("loaded extension", () => {
         await browser.waitUntil(
           async () => (await browser.$("#connection-title").getText()) === "Connected",
         );
+        assert.deepEqual(
+          await browser.execute(() =>
+            [...document.querySelectorAll("#capture-preferences :is(input, select, button)")]
+              .filter((control) => control.checkVisibility())
+              .map((control) => control.id),
+          ),
+          ["capture-collection", "capture-tags"],
+        );
         await browser.$("#capture").click();
         await browser.waitUntil(async () => heldResponse !== undefined);
         assert.deepEqual(writes, [{ path: "/api/v1/inbox", authorization: "Bearer device-a" }]);
@@ -246,6 +438,7 @@ describe("loaded extension", () => {
         await browser.$("#edit-connection").click();
         await browser.$("#vault").setValue(`${vault}/second`);
         await browser.$("#pairing-code").setValue("new-device-code");
+        await browser.$("#marketplace-access-row label").click();
         await browser.$("#connect").click();
         await browser.waitUntil(async () => heldRequestClosed);
         await browser.waitUntil(
@@ -262,19 +455,31 @@ describe("loaded extension", () => {
         assert.equal(state.inboxHidden, true);
         await browser.$("#capture").click();
         await browser.waitUntil(
-          async () =>
-            (await browser.$("#status-message").getText()) ===
-            "Model from Direct file sent to Pending Imports.",
+          async () => (await browser.$("#status-title").getText()) === "Sent to Pending Imports",
+        );
+        assert.equal(await browser.$("#open-inbox").getText(), "Review in PrintStash");
+        assert.equal(
+          await browser.execute(() =>
+            document.querySelector("#capture-preferences")?.checkVisibility(),
+          ),
+          false,
         );
         const inboxUrl = await browser.execute(
           () => document.querySelector<HTMLElement>("#open-inbox")?.dataset.url,
         );
-        assert.equal(inboxUrl, `${vault}/second/inbox`);
+        assert.equal(inboxUrl, `${vault}/second/inbox/2`);
         assert.deepEqual(writes, [
           { path: "/api/v1/inbox", authorization: "Bearer device-a" },
           { path: "/second/api/v1/browser-pairings/claim", authorization: undefined },
           { path: "/second/api/v1/inbox", authorization: "Bearer device-b" },
         ]);
+        rejectCapture = true;
+        await browser.$("#edit-connection").click();
+        await browser.$("#cancel-edit").click();
+        await browser.$("#capture").click();
+        await browser.waitUntil(
+          async () => (await browser.$("#status-details").getText()) === "Code: capture_failed",
+        );
       } finally {
         heldResponse?.destroy();
         server.closeAllConnections();

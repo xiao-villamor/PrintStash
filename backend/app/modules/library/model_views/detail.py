@@ -136,7 +136,8 @@ def _provenance_sources(session: Session, model_id: int) -> list[ProvenanceSourc
         cover.provenance_source_id: ModelSourceCoverRead.model_validate(cover)
         for cover in session.exec(
             select(ModelSourceCover).where(
-                col(ModelSourceCover.provenance_source_id).in_(source_ids)
+                col(ModelSourceCover.provenance_source_id).in_(source_ids),
+                ModelSourceCover.position == 0,
             )
         ).all()
     }

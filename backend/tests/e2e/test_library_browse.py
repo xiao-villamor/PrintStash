@@ -82,6 +82,7 @@ class TestLibraryBrowse:
                     "previews": {
                         "kind": "none",
                         "cover_camera": "unknown",
+                        "source_images": [],
                         "cover_image_kind": "render",
                     },
                 }

@@ -8,7 +8,7 @@ from sqlalchemy import text
 from app.db.models import CollectionRole, FileType, PrintJobState
 
 # Models without a live mesh Artifact expose only their cover.
-NO_PREVIEWS = {"kind": "none", "cover_camera": "unknown"}
+NO_PREVIEWS = {"kind": "none", "cover_camera": "unknown", "source_images": []}
 BROWSE = "/api/v1/models/browse"
 TIED = datetime(2026, 1, 1, tzinfo=timezone.utc)
 

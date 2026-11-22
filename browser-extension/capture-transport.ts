@@ -1,5 +1,8 @@
+import { vaultFetch } from "./vault-fetch.ts";
+import { refusedByProxy, uploadSlotBytes, UploadTooLargeError } from "./slot-upload.ts";
+import type { ImportIntent } from "./import-status.ts";
 import { runCaptureRequest } from "./capture-operation.ts";
-import { CaptureAuthenticationError } from "./core.ts";
+import { CaptureAuthenticationError, CaptureResponseError } from "./core.ts";
 
 import type { CaptureSourceDraft } from "./capture-adapter.ts";
 
@@ -95,12 +98,13 @@ interface PreparedCaptureFile {
 
 export type CaptureUploadStage = "slot_create" | "slot_upload" | "slot_finalize";
 
-export class CaptureCapacityError extends Error {
+export class CaptureCapacityError extends CaptureResponseError {
   constructor(readonly reason: "staging_capacity_exceeded" | "staging_capacity_unavailable") {
     super(
       reason === "staging_capacity_unavailable"
         ? "PrintStash could not measure staging space. Check its staging directory and disk access."
         : "PrintStash capture capacity is full. Clear completed Pending Imports or free staging space, then retry.",
+      reason,
     );
   }
 }
@@ -115,7 +119,7 @@ async function sha256Hex(file: Blob): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function prepareCaptureFile(
+export async function prepareCaptureFile(
   upload: BrowserCaptureFile,
   id: string,
   role: "file" | "cover",
@@ -158,12 +162,54 @@ function matchingSlot(slots: CaptureUploadSlot[], upload: PreparedCaptureFile): 
   return slot;
 }
 
-export async function captureRichFiles({
-  fetchImpl = fetch,
+export async function captureDirectFile({
   vault,
   authorization,
   sourceUrl,
   title,
+  file,
+  fetchImpl = vaultFetch,
+  signal,
+}: {
+  vault: string;
+  authorization: string;
+  sourceUrl: string;
+  title: string;
+  file: BrowserCaptureFile;
+  fetchImpl?: typeof fetch;
+  signal: AbortSignal;
+}): Promise<unknown> {
+  const body = new FormData();
+  body.set("source_url", sourceUrl);
+  body.set("title", title);
+  body.set("file", file.file, file.filename);
+  const response = await fetchImpl(`${vault}/api/v1/inbox/browser-upload`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${authorization}` },
+    body,
+    signal,
+  });
+  if (response.status === 401) throw new CaptureAuthenticationError();
+  if (await refusedByProxy(response)) throw new UploadTooLargeError(false);
+  if (!response.ok) {
+    throw await CaptureResponseError.from(
+      response,
+      "PrintStash could not attach the selected file.",
+    );
+  }
+  return response.json();
+}
+
+export async function captureRichFiles({
+  fetchImpl = vaultFetch,
+  vault,
+  authorization,
+  sourceUrl,
+  title,
+  collectionId,
+  onReady,
+  importAgain,
+  tags,
   captureSource,
   files,
   cover,
@@ -175,6 +221,10 @@ export async function captureRichFiles({
   authorization: string;
   sourceUrl: string;
   title?: string;
+  collectionId?: number;
+  onReady?: ImportIntent;
+  importAgain?: boolean;
+  tags?: string[];
   captureSource: CaptureSourceDraft;
   files: BrowserCaptureFile[];
   cover?: BrowserCaptureFile;
@@ -222,7 +272,10 @@ export async function captureRichFiles({
       signal,
       body: JSON.stringify({
         source_url: sourceUrl,
+        ...(onReady ? { on_ready: onReady, import_again: importAgain === true } : {}),
         title: title || null,
+        collection_id: collectionId ?? null,
+        tags: tags ?? [],
         capture_source: captureSource,
         files: preparedFiles.map(({ declaration }) => declaration),
         ...(preparedCover ? { cover: preparedCover.declaration } : {}),
@@ -236,7 +289,10 @@ export async function captureRichFiles({
       throw new CaptureCapacityError("staging_capacity_exceeded");
     }
     if (!created.ok)
-      throw new Error(`PrintStash returned ${created.status} while creating upload slots.`);
+      throw await CaptureResponseError.from(
+        created,
+        `PrintStash returned ${created.status} while creating upload slots.`,
+      );
     return captureReceipt(await created.json());
   };
   const payload = await stageRequest("slot_create", createSlot);
@@ -245,22 +301,25 @@ export async function captureRichFiles({
     const plannedUploads = uploads.map((upload) => ({ upload, slot: matchingSlot(slots, upload) }));
     for (const { upload, slot } of plannedUploads) {
       const uploadSlot = async (signal?: AbortSignal) => {
-        const uploaded = await fetchImpl(
-          `${base}/api/v1/inbox/capture-upload-slots/${encodeURIComponent(slot.id)}`,
-          {
-            method: "PUT",
-            headers: {
-              Authorization: `Bearer ${authorization}`,
-              "Content-Type": upload.declaration.media_type,
-            },
-            signal,
-            body: upload.file,
-          },
-        );
+        // Servers on this path predate parts; a proxy's size refusal is named.
+        const uploaded = await uploadSlotBytes({
+          send: (path, init) =>
+            fetchImpl(`${base}/api/v1/inbox${path}`, {
+              ...init,
+              headers: { Authorization: `Bearer ${authorization}`, ...init.headers },
+              signal,
+            }),
+          server: base,
+          slotId: slot.id,
+          file: upload.file,
+          mediaType: upload.declaration.media_type,
+          parts: false,
+        });
         if (uploaded.status === 401) throw new CaptureAuthenticationError();
         if (!uploaded.ok)
-          throw new Error(
-            `PrintStash returned ${uploaded.status} while uploading ${upload.declaration.filename}.`,
+          throw await CaptureResponseError.from(
+            uploaded,
+            `PrintStash returned ${uploaded.status} while uploading a selected file.`,
           );
       };
       await stageRequest("slot_upload", uploadSlot);
@@ -277,7 +336,10 @@ export async function captureRichFiles({
       );
       if (finalized.status === 401) throw new CaptureAuthenticationError();
       if (!finalized.ok)
-        throw new Error(`PrintStash returned ${finalized.status} while finalizing the capture.`);
+        throw await CaptureResponseError.from(
+          finalized,
+          `PrintStash returned ${finalized.status} while finalizing the capture.`,
+        );
       return finalized.json();
     };
     return await stageRequest("slot_finalize", finalize);

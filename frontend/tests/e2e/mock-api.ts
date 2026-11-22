@@ -1249,10 +1249,18 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
   if (url.pathname === "/api/v1/inbox/batch" && req.method === "POST") {
-    drainRequest(req, () => {
-      state.inboxCaptured = false;
-      state.inboxImported = false;
-      sendJson(res, []);
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      const payload = JSON.parse(body);
+      if (payload.action === "import" && payload.use_default_destination === true) {
+        state.inboxImported = true;
+        sendJson(res, [importedInboxItem()]);
+      } else {
+        state.inboxCaptured = false;
+        state.inboxImported = false;
+        sendJson(res, []);
+      }
     });
     return;
   }
@@ -1293,6 +1301,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
   if (url.pathname === "/api/v1/inbox/41/retry" && req.method === "POST") {
     drainRequest(req, () => sendJson(res, importedInboxItem()));
+    return;
+  }
+  if (/^\/api\/v1\/models\/\d+\/related-profiles$/.test(url.pathname)) {
+    sendJson(res, { items: [], has_more: false });
     return;
   }
   if (url.pathname === "/api/v1/models/1/provenance") {

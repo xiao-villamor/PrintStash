@@ -1,3 +1,4 @@
+import { MARKETPLACE_ORIGINS } from "../source-providers.ts";
 /** The generated manifests preserve each browser's permissions and install metadata. */
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
@@ -49,4 +50,19 @@ describe("MV3 manifest contract", () => {
     );
     await readFile(".output/chrome-mv3/popup.html");
   });
+
+  it.each(["chrome-mv3", "firefox-mv3", "edge-mv3"])(
+    "restricts contextual frames to the selected marketplaces in %s",
+    async (target) => {
+      const manifest = JSON.parse(await readFile(`.output/${target}/manifest.json`, "utf8"));
+      expect(manifest.content_scripts ?? []).toEqual([]);
+      expect(manifest.web_accessible_resources).toHaveLength(1);
+      expect(manifest.web_accessible_resources[0].matches.sort()).toEqual(
+        [...MARKETPLACE_ORIGINS].sort(),
+      );
+      expect(manifest.web_accessible_resources[0].resources).toContain("popup.html");
+      expect(manifest.permissions).not.toContain("cookies");
+      await readFile(`.output/${target}/marketplace.js`);
+    },
+  );
 });

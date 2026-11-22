@@ -582,6 +582,7 @@ class ModelCoverSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_id: int = Field(gt=0)
+    position: int = Field(default=0, ge=0)
 
 
 class ModelUpdate(BaseModel):

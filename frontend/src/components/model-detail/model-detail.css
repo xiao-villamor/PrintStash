@@ -848,6 +848,22 @@
   animation: none;
   border-radius: 2px;
 }
+/* Facts respond to their pane, including when the collection sidebar is open. */
+.model-detail-visual {
+  container-name: model-visual;
+  container-type: inline-size;
+}
+@container model-visual (max-width: 40rem) {
+  .model-information {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .model-information-geometry {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding-left: 0;
+    padding-top: 0.75rem;
+  }
+}
 
 .detail-file-link {
   color: var(--foreground);

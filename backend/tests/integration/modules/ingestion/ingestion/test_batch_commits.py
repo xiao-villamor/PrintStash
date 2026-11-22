@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 
 import pytest
+from printstash_core.imports.contracts import CaptureManifestV2
 from sqlmodel import select
 
 from app.core.cancellation import OperationCancelled
@@ -78,7 +79,7 @@ def batch(make_user, make_job, tmp_path, local_storage):
 
 
 def _capture(batch: _Batch, revision: str) -> provenance.ProvenanceContext:
-    manifest = provenance.CaptureManifestV2.from_dict(
+    manifest = CaptureManifestV2.from_dict(
         {
             "schema_version": 2,
             "kind": "model_files",

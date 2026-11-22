@@ -584,3 +584,69 @@ class TestJobInput:
             assert running.result(timeout=3) == b"staged"
         assert path.read_bytes() == b"staged"
         assert len(_leases(db_session, request.job_id)) == 1
+
+
+class TestArchiveSelectionRetention:
+    def test_retains_original_bytes_after_partial_import(
+        self, db_session, make_user, make_ingest_request, tmp_path, monkeypatch
+    ):
+        import zipfile
+
+        from app.db.models import File
+        from app.modules.ingestion import importer, staging_leases
+        from tests.factories.ops import build_job_context
+
+        owner = make_user(superuser=True)
+        request = make_ingest_request(
+            owner,
+            kind=IngestRequestKind.ARCHIVE_SELECTION,
+            selection_json=json.dumps(
+                {
+                    "names": ["first.gcode", "second.gcode"],
+                    "archive_name": "parts.zip",
+                    "_entry_identity_version": 1,
+                }
+            ),
+        )
+        from app.core.config import settings
+
+        settings.incoming_dir.mkdir(parents=True, exist_ok=True)
+        archive = settings.incoming_dir / "parts.zip"
+        with zipfile.ZipFile(archive, "w") as output:
+            output.writestr("first.gcode", b"; first\nG1 X1 Y2\n")
+            output.writestr("second.gcode", b"; second\nG1 X3 Y4\n")
+        original = archive.read_bytes()
+        before_files = {file.id for file in db_session.exec(select(File)).all()}
+        staging_leases.create_job_lease(
+            db_session,
+            job_id=request.job_id,
+            owner_user_id=owner.id,
+            path=archive,
+            size_bytes=len(original),
+            sha256=hashlib.sha256(original).hexdigest(),
+        )
+        db_session.commit()
+        commit = importer._ingest_one_file
+
+        def reject_second(staged, original_filename, *args, **kwargs):
+            if original_filename == "second.gcode":
+                raise importer.ImportError_("source_unavailable")
+            return commit(staged, original_filename, *args, **kwargs)
+
+        monkeypatch.setattr(importer, "_ingest_one_file", reject_second)
+
+        ingest_jobs._archive_selection(build_job_context(request.job_id))
+
+        db_session.expire_all()
+        job = db_session.get(Job, request.job_id)
+        result = json.loads(job.status_json)
+        assert result["succeeded"] == 1
+        assert result["failed"] == 1
+        assert (
+            len(
+                {file.id for file in db_session.exec(select(File)).all()} - before_files
+            )
+            == 1
+        )
+        assert len(staging_leases.job_leases(db_session, request.job_id)) == 1
+        assert archive.read_bytes() == original

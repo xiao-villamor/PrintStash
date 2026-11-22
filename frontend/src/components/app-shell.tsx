@@ -47,6 +47,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isVault = pathname === "/";
   const [archiveJobId, setArchiveJobId] = useState<string | null>(null);
   useEffect(() => subscribeArchiveReviewRequests(setArchiveJobId), []);
+  useEffect(() => {
+    if (archiveJobId) toast.dismiss(`archive-review:${archiveJobId}`);
+  }, [archiveJobId]);
 
   useEffect(
     () =>
@@ -59,13 +62,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           return;
         }
         if (job.kind !== "ingestion.archive_inspect" || job.state !== "completed") return;
+        if (archiveJobId === job.job_id) return;
         toast.successAction(
           uiText("ZIP ready. Choose which files to add."),
           uiText("Choose files"),
           () => setArchiveJobId(job.job_id),
+          `archive-review:${job.job_id}`,
         );
       }),
-    [],
+    [archiveJobId],
   );
 
   useEffect(() => {

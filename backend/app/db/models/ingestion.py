@@ -22,9 +22,11 @@ from app.db.enum_columns import EnumText, enum_check
 from .base import SQLModel
 from .types import (
     CaptureUploadSlotState,
+    InboxImportIntent,
     InboxItemCompletion,
     InboxItemResultState,
     InboxItemState,
+    InboxReviewReason,
     InboxSourceKind,
     IngestionEntryState,
     IngestRequestKind,
@@ -224,6 +226,31 @@ class InboxItem(SQLModel, table=True):
     """Durable capture request; API/UI calls these Pending Imports."""
 
     __tablename__ = "inbox_items"
+    __table_args__ = (
+        enum_check("on_ready", InboxImportIntent),
+        enum_check("review_reason", InboxReviewReason),
+        UniqueConstraint(
+            "owner_user_id", "capture_request_key", name="uq_capture_request_owner"
+        ),
+        Index("ix_inbox_owner_source", "owner_user_id", "source_url"),
+        Index("ix_inbox_owner_publication", "owner_user_id", "source_identity_key"),
+    )
+
+    on_ready: InboxImportIntent = Field(
+        default=InboxImportIntent.REVIEW,
+        sa_column=Column(
+            EnumText(InboxImportIntent), nullable=False, server_default="review"
+        ),
+    )
+    review_reason: InboxReviewReason | None = Field(
+        default=None, sa_column=Column(EnumText(InboxReviewReason), nullable=True)
+    )
+    capture_request_key: Optional[str] = Field(default=None, max_length=64)
+    source_identity_key: Optional[str] = Field(default=None, max_length=64)
+    capture_request_hash: Optional[str] = Field(default=None, max_length=64)
+    gallery_json: str = Field(
+        default="[]", sa_column=Column(Text, nullable=False, server_default="[]")
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     owner_user_id: int = Field(foreign_key="users.id", index=True)
@@ -267,6 +294,18 @@ class CaptureUploadSlot(SQLModel, table=True):
     """Declared browser capture object and its durable staging receipt."""
 
     __tablename__ = "capture_upload_slots"
+    __table_args__ = (
+        UniqueConstraint(
+            "inbox_item_id", "image_position", name="uq_capture_slot_image_position"
+        ),
+        CheckConstraint(
+            "image_position IS NULL OR (role = 'cover' AND image_position >= 0)",
+            name="capture_image_position",
+        ),
+        UniqueConstraint(
+            "inbox_item_id", "source_file_id", name="uq_capture_slot_source_file"
+        ),
+    )
 
     id: str = Field(primary_key=True, max_length=64)
     inbox_item_id: int = Field(
@@ -275,6 +314,7 @@ class CaptureUploadSlot(SQLModel, table=True):
         ),
     )
     role: str = Field(max_length=16, index=True)
+    image_position: Optional[int] = Field(default=None)
     source_file_id: Optional[str] = Field(default=None, max_length=255)
     filename: str = Field(max_length=512)
     media_type: str = Field(max_length=128)

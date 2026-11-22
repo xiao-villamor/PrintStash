@@ -736,7 +736,8 @@ function ModelDetailPresentation({
   const latestFile = inspectedGcode ?? sortedFiles[sortedFiles.length - 1];
   const meta = latestFile?.metadata;
   const printSettingRows = buildPrintSettingRows(meta, metadataPreferences);
-  const meshFile = model.files.find(
+  const requestedArtifact = Number(searchParams.get("artifact"));
+  const meshCandidates = model.files.filter(
     (f) =>
       f.sliced_geometry !== "gcode_only" &&
       (f.file_type === "stl" ||
@@ -749,6 +750,8 @@ function ModelDetailPresentation({
         f.file_type === "fbx" ||
         f.file_type === "step"),
   );
+  const meshFile =
+    meshCandidates.find((file) => file.id === requestedArtifact) ?? meshCandidates[0];
   const geometryMeasurement = useMeshGeometryMeasurement(meshFile ?? null);
   const hasGcode = gcodeFiles.length > 0;
   const { sources: toolpathFiles, availability: toolpathAvailability } =

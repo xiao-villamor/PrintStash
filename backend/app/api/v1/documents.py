@@ -48,7 +48,7 @@ from app.db.projections import content_changed
 from app.db.scopes import live, trashed
 from app.db.session import get_session
 from app.modules.identity import rbac
-from app.modules.library import multipart_models
+from app.modules.library import document_uploads, multipart_models
 from app.modules.library.edit_preconditions import EditKind, etag
 from app.modules.library.edit_preconditions import claim as claim_edit
 from app.modules.library.trash import (
@@ -64,7 +64,6 @@ from app.modules.storage.storage_ownership import (
     abandon_publication,
     adopt_publication,
     prepare_bytes,
-    prepare_stream,
 )
 from app.schemas.documents import (
     DocumentCreate,
@@ -87,23 +86,7 @@ _IMAGE_TYPES = {
 }
 _IMAGE_NAME_RE = re.compile(r"^[0-9a-f]{64}\.(png|jpe?g|gif|webp)$")
 
-_MARKDOWN_EXTS = {".md", ".markdown", ".txt"}
 _BINARY_TYPES = {".pdf": "application/pdf", **_IMAGE_TYPES}
-
-
-def _kind_for(ext: str) -> DocumentKind:
-    if ext in _MARKDOWN_EXTS:
-        return DocumentKind.MARKDOWN
-    if ext == ".pdf":
-        return DocumentKind.PDF
-    return DocumentKind.OTHER
-
-
-def _safe_filename(filename: str) -> str:
-    base = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-    stem, dot, ext = base.rpartition(".")
-    safe = re.sub(r"[^A-Za-z0-9._-]", "_", stem or base)[:120] or "document"
-    return f"{safe}{dot}{ext.lower()}"
 
 
 def _collection_path(session: Session, collection_id: Optional[int]) -> Optional[str]:
@@ -343,98 +326,16 @@ def upload_document(
             session, current_user, multipart_model_id, collection_id
         )
         raw = file.filename or "document"
-        ext = ("." + raw.rsplit(".", 1)[-1].lower()) if "." in raw else ""
-        kind = _kind_for(ext)
-        display = (name or Path(raw).stem or "Document").strip()
-
-        if file.size is not None and file.size > settings.max_upload_bytes:
-            raise HTTPException(status_code=413, detail="upload_too_large")
-
-        doc = Document(
-            name=display,
-            kind=kind,
+        doc = document_uploads.publish(
+            session,
+            current_user,
+            stream=file.file,
+            filename=raw,
+            size=file.size,
+            name=(name or Path(raw).stem or "Document").strip(),
             collection_id=collection_id,
-            multipart_model_id=multipart_model_id,
-            created_by=current_user.id,
-            updated_by=current_user.id,
+            aggregate=aggregate,
         )
-
-        if kind is DocumentKind.MARKDOWN:
-            # Editable text docs keep their content in the DB, not as a blob.
-            data = file.file.read(settings.max_upload_bytes + 1)
-            if len(data) > settings.max_upload_bytes:
-                raise HTTPException(status_code=413, detail="upload_too_large")
-            doc.body = data.decode("utf-8", errors="replace")
-            session.add(doc)
-            content_changed(session, "document", (row.id for row in (doc,)))
-            session.commit()
-            session.refresh(doc)
-            if aggregate is not None:
-                aggregate.updated_at = utcnow()
-                aggregate.updated_by = current_user.id
-                session.add(aggregate)
-                session.commit()
-            return _read(session, current_user, doc)
-
-        # Binary docs need their row id in the storage key. Persist that small,
-        # recoverable intent before publication so SQLite's caller transaction does
-        # not hold a write lock while the ownership ledger commits its reservation.
-        session.add(doc)
-        content_changed(session, "document", (row.id for row in (doc,)))
-        session.commit()
-        session.refresh(doc)
-        safe = _safe_filename(raw)
-        document_id = doc.id
-        backend = get_backend()
-        key = backend.document_file_key(doc.id, safe)
-        candidate = None
-        try:
-            candidate = prepare_stream(
-                session,
-                backend,
-                key,
-                file.file,
-                object_kind="document_file",
-                expected_size=file.size,
-                sha256=None,
-            )
-            receipt = candidate.receipt
-            if receipt.size > settings.max_upload_bytes:
-                raise HTTPException(status_code=413, detail="upload_too_large")
-            doc.filename = safe
-            doc.size_bytes = receipt.size
-            session.add(doc)
-            if aggregate is not None:
-                aggregate.updated_at = utcnow()
-                aggregate.updated_by = current_user.id
-                session.add(aggregate)
-            content_changed(session, "document", [document_id])
-            session.flush()
-            adopt_publication(session, candidate)
-            session.commit()
-        except StorageCollisionError as exc:
-            session.rollback()
-            session.delete(doc)
-            content_changed(session, "document", [document_id])
-            session.commit()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="storage_destination_exists",
-            ) from exc
-        except Exception:
-            session.rollback()
-            if candidate is not None:
-                if not abandon_publication(session, candidate):
-                    # An adopted generation survives a lost commit acknowledgement.
-                    raise
-                backend.rollback_create(candidate.receipt)
-            persisted = session.get(Document, document_id)
-            if persisted is not None:
-                session.delete(persisted)
-                content_changed(session, "document", [document_id])
-                session.commit()
-            raise
-        session.refresh(doc)
         return _read(session, current_user, doc)
 
 

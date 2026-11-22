@@ -16,6 +16,9 @@ from fastapi.testclient import TestClient
 # Pages are requested smaller than the smallest seeded library, so every size
 # fills one page and only the library behind it grows.
 LIBRARY_READS = [
+    pytest.param(
+        "/api/v1/inbox/capture-destinations", {"limit": 5}, id="capture-destinations"
+    ),
     pytest.param("/api/v1/slicer-profiles", {"limit": 10}, id="slicer-profiles"),
     # The smallest corpus has eight direct siblings; fill each page before comparing scale.
     pytest.param(

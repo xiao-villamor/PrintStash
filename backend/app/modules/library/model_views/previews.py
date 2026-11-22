@@ -20,6 +20,8 @@ from app.db.models import (
     JobKind,
     Model,
     ModelCover,
+    ModelProvenanceSource,
+    ModelSourceCover,
 )
 from app.db.scopes import live
 from app.modules.derivatives import policy
@@ -45,6 +47,7 @@ from app.schemas.previews import (
     PreviewManifestRead,
     PreviewState,
     PublishedPreviewRead,
+    SourceImageRead,
 )
 
 
@@ -263,6 +266,29 @@ def summaries(
         raise ValueError("shared_preview_root_needs_one_model")
     if not model_ids:
         return {}
+    source_images: dict[int, list[SourceImageRead]] = defaultdict(list)
+    if root is None:
+        for source, image in session.exec(
+            select(ModelProvenanceSource, ModelSourceCover)
+            .join(
+                ModelSourceCover,
+                ModelSourceCover.provenance_source_id == ModelProvenanceSource.id,
+            )
+            .where(col(ModelProvenanceSource.model_id).in_(model_ids))
+            .order_by(ModelProvenanceSource.id, ModelSourceCover.position)
+        ).all():
+            version = hashlib.sha256(
+                f"{image.storage_key}:{image.updated_at.isoformat()}".encode()
+            ).hexdigest()[:16]
+            source_images[source.model_id].append(
+                SourceImageRead(
+                    id=f"source-{image.id}",
+                    source_id=source.id,
+                    position=image.position,
+                    provider=source.provider,
+                    url=f"/api/v1/models/{source.model_id}/provenance/{source.id}/cover/content?position={image.position}&v={version}",
+                )
+            )
     files, archive_files, cover_info = _preview_sources(session, models)
     enabled = not files or policy.resolve(session)[JobKind.DERIVATIVES_PREVIEWS].enabled
     include_poles = policy.preview_poles(session) if files else False
@@ -324,6 +350,7 @@ def summaries(
                     else None
                 ),
                 archive_images=archive_images,
+                source_images=source_images[model_id],
                 large_cover_url=custom_url
                 or (archive_cover.url if archive_cover is not None else None),
             )
@@ -419,6 +446,7 @@ def summaries(
         else:
             state = PreviewState(current.state.value)
         result[model_id] = ArtifactPreviews(
+            source_images=source_images[model_id],
             cover_image_kind=cover_kind,
             large_cover_image_kind=(
                 PreviewImageKind.PHOTO

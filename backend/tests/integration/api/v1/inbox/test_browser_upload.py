@@ -13,6 +13,7 @@ own field-by-field provenance rather than a guess made from the filename.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -55,6 +56,27 @@ class TestCaptureBrowserUpload:
         )
 
         assert response.status_code == 201, response.text
+
+    def test_stages_a_local_attachment_for_a_private_direct_file_url(
+        self, client: TestClient, user_headers, staging, db_session
+    ) -> None:
+        headers = user_headers("browser-direct-file")
+        private_url = "http://127.0.0.1:8000/widget.3mf"
+
+        response = client.post(
+            "/api/v1/inbox/browser-upload",
+            headers=headers,
+            data={"source_url": f"{private_url}?token=private"},
+            files=FILE,
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["state"] == "review"
+        assert response.json()["source_url"] == private_url
+        item = db_session.get(InboxItem, response.json()["id"])
+        assert item is not None
+        assert item.staging_key is not None
+        assert Path(item.staging_key).read_bytes() == b"browser-owned"
 
     def test_stages_extension_provenance_as_a_v2_manifest(
         self, client: TestClient, user_headers, staging

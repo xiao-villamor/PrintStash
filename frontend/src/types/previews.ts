@@ -59,6 +59,15 @@ export interface PreviewImage {
   url: string;
   thumbnail_url?: string;
 }
+export interface SourceImage {
+  id: `source-${number}`;
+  role: "source";
+  source_id: number;
+  position: number;
+  provider: string;
+  url: string;
+}
+export type GalleryImage = PreviewImage | SourceImage;
 export interface ArchivePreviewImage {
   image_kind: "photo" | "slicer_render";
   file_id: number;
@@ -90,11 +99,15 @@ export interface PublishedPreviews {
 export interface NoPreviewSubject extends ModelPreviewMedia {
   kind: "none";
   cover_camera: "unknown";
+  /** Optional when reading a Vault predating provider galleries. */
+  source_images?: SourceImage[];
 }
 /** The view set of the one mesh Artifact selected for this Model. */
 export interface ArtifactPreviews extends ModelPreviewMedia {
   kind: "artifact";
   cover_camera: "unknown";
+  /** Optional when reading a Vault predating provider galleries. */
+  source_images?: SourceImage[];
   file_id: number;
   state: PreviewState;
   reason: string | null;
@@ -153,6 +166,22 @@ function isPreviewImageKind(value: PreviewImageKind): boolean {
 export function isModelPreviews(wire: ModelPreviews): boolean {
   // oxlint-disable anti-slop/no-runtime-typeof -- Foreign HTTP JSON must establish its closed case, Artifact identity and view addresses before it can replace a displayed preview.
   if (wire?.cover_camera !== "unknown") return false;
+  if (
+    wire.source_images !== undefined &&
+    (!Array.isArray(wire.source_images) ||
+      wire.source_images.some(
+        (image) =>
+          !/^source-\d+$/.test(image?.id) ||
+          image.role !== "source" ||
+          !Number.isSafeInteger(image.source_id) ||
+          image.source_id <= 0 ||
+          !Number.isSafeInteger(image.position) ||
+          image.position < 0 ||
+          typeof image.provider !== "string" ||
+          typeof image.url !== "string",
+      ))
+  )
+    return false;
   if (
     (wire.cover_image_kind !== undefined && !isPreviewImageKind(wire.cover_image_kind)) ||
     (wire.large_cover_image_kind !== undefined && !isPreviewImageKind(wire.large_cover_image_kind))

@@ -188,6 +188,11 @@ def _definition(name: JobKind, lane: LaneName, produce: Producer) -> JobDefiniti
 def definitions() -> list[JobDefinition]:
     return [
         _definition(
+            JobKind.DERIVATIVES_PROJECT_PROFILE,
+            LaneName.DERIVE_LIGHT,
+            producers.derive_project_profile,
+        ),
+        _definition(
             JobKind.DERIVATIVES_PREVIEWS, LaneName.DERIVE_NATIVE, previews.derive
         ),
         _definition(

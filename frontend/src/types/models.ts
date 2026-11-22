@@ -495,6 +495,7 @@ export type JobKind =
   | "derivatives.mesh"
   | "derivatives.previews"
   | "derivatives.plates"
+  | "derivatives.project_profile"
   | "derivatives.toolpath"
   | "derivatives.viewer_stl"
   | "identity.retention"
@@ -549,6 +550,7 @@ export type LaneName =
 export type DerivativeKind =
   | "metadata"
   | "plates"
+  | "project_profile"
   | "previews"
   | "thumbnail"
   | "toolpath"
@@ -734,6 +736,16 @@ export interface IngestJobResultItem {
  * import reports counts plus per-member outcomes, and a plain single-artifact
  * ingest reports whether it created a new Model.
  */
+export type ArchiveIntake =
+  | { mode: "separate"; documents: string[] }
+  | {
+      mode: "multipart";
+      name: string;
+      parts: { entry_name: string; name: string }[];
+      cover?: string | null;
+      documents: string[];
+    };
+
 export interface IngestJobResult {
   kind?: "archive_manifest" | "model_files_manifest" | "collection_manifest" | "collection_import";
   // kind === "archive_manifest"
@@ -754,6 +766,8 @@ export interface IngestJobResult {
   imported?: number;
   total?: number;
   items?: IngestJobResultItem[];
+  documents?: { name: string; document_id: number }[];
+  multipart_model_id?: number;
   // Plain single-artifact ingest.
   created?: boolean;
   resumed?: boolean;
@@ -774,6 +788,8 @@ export interface IngestJobResult {
 }
 
 export interface ArchiveEntry {
+  /** Older persisted review manifests predate document classification. */
+  is_document?: boolean;
   name: string;
   size_bytes: number;
   file_type: string | null; // FileType value if importable, else null

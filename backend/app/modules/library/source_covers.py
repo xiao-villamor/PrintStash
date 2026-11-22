@@ -71,6 +71,7 @@ class SourceCoverCandidate:
     content_type: str
     publication: PendingPublication
     previous: PreparedOwnedDeletion | None
+    position: int = 0
 
 
 class SourceCoverChangedError(RuntimeError):
@@ -85,6 +86,7 @@ def prepare_candidate(
     actor_id: int | None,
     data: bytes,
     content_type: str | None,
+    position: int = 0,
     minimum_frame: tuple[int, int] | None = None,
 ) -> SourceCoverCandidate:
     """Publish private bytes without inserting a cover or changing visible bytes.
@@ -93,11 +95,13 @@ def prepare_candidate(
     can become visible only through attach_candidate followed by adoption in
     the caller's fenced transaction. Storage probes happen entirely here.
     """
+    if position < 0:
+        raise ValueError("invalid_source_image_position")
     processed = process_source_cover_upload(
         data, content_type, minimum_frame=minimum_frame
     )
     with session.no_autoflush:
-        existing = get(session, provenance_source_id)
+        existing = get(session, provenance_source_id, position=position)
         previous = (
             prepare_owned_key_deletion(
                 session,
@@ -131,6 +135,7 @@ def prepare_candidate(
         processed.content_type,
         publication,
         previous,
+        position,
     )
 
 
@@ -149,7 +154,10 @@ def attach_candidate(
         raise SourceCoverChangedError("source_cover_source_removed")
     cover = session.exec(
         select(ModelSourceCover)
-        .where(ModelSourceCover.provenance_source_id == candidate.provenance_source_id)
+        .where(
+            ModelSourceCover.provenance_source_id == candidate.provenance_source_id,
+            ModelSourceCover.position == candidate.position,
+        )
         .with_for_update()
         .execution_options(populate_existing=True)
     ).first()
@@ -160,6 +168,7 @@ def attach_candidate(
     if cover is None:
         cover = ModelSourceCover(
             provenance_source_id=candidate.provenance_source_id,
+            position=candidate.position,
             storage_key=receipt.key,
             created_by=candidate.actor_id,
             size_bytes=receipt.size,
@@ -522,11 +531,13 @@ def _create_durable_cover(
     destination_key: str,
     size_bytes: int,
     sha256: str,
+    position: int = 0,
 ) -> ModelSourceCover:
     """Create and commit a new cover row plus its recovery lease."""
     with _intent_session(session) as intent:
         cover = ModelSourceCover(
             provenance_source_id=provenance_source_id,
+            position=position,
             storage_key=destination_key,
             content_type="image/webp",
             size_bytes=size_bytes,
@@ -848,10 +859,13 @@ def reconcile_pending(session: Session, backend: StorageBackend) -> int:
     return expire_pending_many(session, backend, leases=leases)
 
 
-def get(session: Session, provenance_source_id: int) -> ModelSourceCover | None:
+def get(
+    session: Session, provenance_source_id: int, *, position: int = 0
+) -> ModelSourceCover | None:
     return session.exec(
         select(ModelSourceCover).where(
-            ModelSourceCover.provenance_source_id == provenance_source_id
+            ModelSourceCover.provenance_source_id == provenance_source_id,
+            ModelSourceCover.position == position,
         )
     ).first()
 
@@ -880,7 +894,10 @@ def delete(
     ).all()
     cover = session.exec(
         select(ModelSourceCover)
-        .where(ModelSourceCover.provenance_source_id == provenance_source_id)
+        .where(
+            ModelSourceCover.provenance_source_id == provenance_source_id,
+            ModelSourceCover.position == 0,
+        )
         .with_for_update()
         .execution_options(populate_existing=True)
     ).first()
@@ -904,10 +921,13 @@ def prepare_put(
     actor_id: int | None,
     data: bytes,
     content_type: str | None,
+    position: int = 0,
 ) -> SourceCoverWrite:
     """Publish normalized bytes with a transaction-bound ownership proof."""
+    if position < 0:
+        raise ValueError("invalid_source_image_position")
     processed = process_source_cover_upload(data, content_type)
-    existing = get(session, provenance_source_id)
+    existing = get(session, provenance_source_id, position=position)
     if existing is not None:
         # Keep old bytes until commit succeeds: a failed database commit can
         # then restore both the object and a current ownership receipt.
@@ -994,9 +1014,13 @@ def prepare_put(
     # storage keys as local paths. Both rows are committed in the dedicated
     # intent transaction before the first byte is published.
     key = backend.source_cover_key(provenance_source_id)
+    if position:
+        stem, separator, extension = key.rpartition(".")
+        key = f"{stem}.{position}.{extension}" if separator else f"{key}.{position}"
     cover = _create_durable_cover(
         session,
         provenance_source_id=provenance_source_id,
+        position=position,
         actor_id=actor_id,
         destination_key=key,
         size_bytes=len(processed.data),
@@ -1098,6 +1122,7 @@ def put(
     actor_id: int | None,
     data: bytes,
     content_type: str | None,
+    position: int = 0,
 ) -> SourceCoverWrite:
     result = prepare_put(
         session,
@@ -1106,6 +1131,7 @@ def put(
         actor_id=actor_id,
         data=data,
         content_type=content_type,
+        position=position,
     )
     session.flush()
     adopt_write(session, result)

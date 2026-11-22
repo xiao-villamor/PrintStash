@@ -1,3 +1,7 @@
+import type { ImportIntent } from "./import-status.ts";
+import { sourcePublication, SOURCE_PROVIDERS } from "./source-providers.ts";
+import { captureReviewUrl } from "./capture-result.ts";
+import { vaultFetch } from "./vault-fetch.ts";
 const SOURCE_RULES = [
   {
     source: "Printables",
@@ -41,7 +45,7 @@ const CAPTURE_SOURCE_FIELD_LIMITS = {
 
 import type { CaptureSourceDraft } from "./capture-adapter.ts";
 
-const CAPTURE_SOURCE_PROVIDERS = new Set(["printables", "makerworld", "thingiverse", "cults"]);
+const CAPTURE_SOURCE_PROVIDERS = new Set<string>(SOURCE_PROVIDERS.map((provider) => provider.code));
 
 export const BROWSER_EXTENSION_SETUP_STORAGE_KEY = "printstash.browser-extension-setup:v1";
 
@@ -66,9 +70,23 @@ function isPrivateIpv4(hostname: string) {
     octets[0] === 127 ||
     (octets[0] === 169 && octets[1] === 254) ||
     (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
-    (octets[0] === 192 && octets[1] === 168)
+    (octets[0] === 192 && octets[1] === 168) ||
+    // Carrier-grade NAT space, which Tailscale and other overlay VPNs assign.
+    (octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127)
   );
 }
+
+/** Names home routers, NAS systems and private DNS give to machines on the LAN. */
+const LAN_SUFFIXES = [
+  ".localhost",
+  ".local",
+  ".lan",
+  ".home",
+  ".home.arpa",
+  ".internal",
+  ".intranet",
+  ".localdomain",
+];
 
 function isLocalHostname(value: unknown) {
   const hostname = String(value ?? "")
@@ -79,9 +97,8 @@ function isLocalHostname(value: unknown) {
   if (!hostname) return false;
   if (
     hostname === "localhost" ||
-    hostname.endsWith(".localhost") ||
-    hostname.endsWith(".local") ||
-    hostname === "::1"
+    hostname === "::1" ||
+    LAN_SUFFIXES.some((suffix) => hostname.endsWith(suffix))
   ) {
     return true;
   }
@@ -123,6 +140,46 @@ export function normalizeVault(value: unknown): string {
   parsed.hash = "";
   parsed.pathname = parsed.pathname.replace(/\/+$/, "");
   return parsed.toString().replace(/\/$/, "");
+}
+
+/**
+ * The server addresses to try, in order, for what the user typed.
+ *
+ * A LAN name typed without a scheme is tried over HTTP, then HTTPS: home
+ * servers serve either, and the user should not need to know which. A public
+ * name always means HTTPS unless the user types `http://` themselves.
+ */
+export function vaultCandidates(value: unknown): string[] {
+  const primary = normalizeVault(value);
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(String(value).trim()) || !isLocalVault(primary)) {
+    return [primary];
+  }
+  return [primary, primary.replace(/^http:/, "https:")];
+}
+
+/** Plain HTTP beyond the local network sends pairing codes and keys unencrypted. */
+export function isPlainHttpToPublicHost(vault: string): boolean {
+  return new URL(vault).protocol === "http:" && !isLocalVault(vault);
+}
+
+/** Why the server could not be used, with the address the user should open. */
+export class VaultAccessError extends Error {
+  constructor(
+    readonly problem: "sign_in" | "unreachable",
+    readonly url: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "VaultAccessError";
+  }
+}
+
+function signInRequired(base: string) {
+  return new VaultAccessError(
+    "sign_in",
+    base,
+    `${new URL(base).host} shows a sign-in page in front of PrintStash. Open it in a tab, sign in, then connect again.`,
+  );
 }
 
 export function parseBrowserExtensionSetup(
@@ -173,12 +230,39 @@ export function classifyModelPage(value: string) {
     return null;
   }
   if (!["http:", "https:"].includes(parsed.protocol)) return null;
+  const publication = sourcePublication(value);
+  if (publication) return publication.label;
   const hostname = parsed.hostname.toLowerCase();
   const rule = SOURCE_RULES.find(
     (candidate) => candidate.host(hostname) && candidate.path.test(parsed.pathname),
   );
   if (rule) return rule.source;
   return DIRECT_FILE_PATH.test(parsed.pathname) ? "Direct file" : null;
+}
+
+const TITLE_SEPARATOR = /\s+[|–—-]\s+/;
+const SITE_BOILERPLATE = /\b(?:download|free|3d print(?:able)?|stl|model)\b/i;
+
+/**
+ * The model's name from a marketplace tab title, without the site's own suffix
+ * ("3D BENCHY by Prusa Research | Download free STL model | Printables.com").
+ * Trailing segments are dropped only while they name the source or are site
+ * boilerplate, so a title that legitimately contains a separator is kept.
+ */
+export function modelTitleFromPageTitle(title: string, source: string): string {
+  const segments = title.trim().split(TITLE_SEPARATOR);
+  const siteName = source.toLowerCase().replace(/[^a-z0-9]/g, "");
+  while (segments.length > 1) {
+    const last = segments.at(-1) as string;
+    const compact = last.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const namesSite = siteName.length > 0 && compact.startsWith(siteName);
+    if (!namesSite && !SITE_BOILERPLATE.test(last)) break;
+    segments.pop();
+  }
+  const separators = title.trim().match(new RegExp(TITLE_SEPARATOR, "g")) ?? [];
+  return segments.reduce((kept, segment, index) =>
+    index === 0 ? segment : `${kept}${separators[index - 1]}${segment}`,
+  );
 }
 
 export function captureUrlForVault(value: string): string {
@@ -278,15 +362,30 @@ async function responseDetail(response: Response, fallback: string): Promise<str
   return fallback;
 }
 
-async function browserPairingClaimError(response: Response): Promise<string> {
+export class PairingValidationError extends Error {
+  constructor(
+    message: string,
+    readonly field: "code" | "name",
+  ) {
+    super(message);
+  }
+}
+
+async function browserPairingClaimError(response: Response): Promise<Error> {
   const body = await response.json().catch(() => null);
   if (response.status === 400) {
-    return "That pairing code is invalid or expired. Create a new one in PrintStash.";
+    return new PairingValidationError(
+      "That pairing code is invalid or expired. Create a new one in PrintStash.",
+      "code",
+    );
   }
   if (response.status === 409 && body?.detail === "browser_device_name_in_use") {
-    return "A browser with this name is already paired. Revoke it in PrintStash or choose a different device name.";
+    return new PairingValidationError(
+      "A browser with this name is already paired. Choose a different name.",
+      "name",
+    );
   }
-  return "PrintStash could not complete pairing. Try again.";
+  return new Error("PrintStash could not complete pairing. Try again.");
 }
 
 function requireCredentials(username: unknown, apiKey: unknown) {
@@ -301,17 +400,38 @@ async function fetchVault(
   path: string,
   options: RequestInit = {},
 ) {
-  const local = isLocalVault(base);
   try {
     return await fetchImpl(`${base}${path}`, options);
-  } catch {
-    if (options.signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
-    throw new Error(
-      local
-        ? `Couldn't reach PrintStash at ${new URL(base).host}. Check that PrintStash is running and that this address opens in Chrome.`
-        : `Couldn't reach PrintStash at ${new URL(base).host}. Check the Vault URL, network, and HTTPS certificate.`,
-    );
+  } catch (error) {
+    // A cancelled attempt is not an unreachable server.
+    if (options.signal?.aborted || (error as { name?: unknown } | null)?.name === "AbortError")
+      throw new DOMException("The operation was aborted.", "AbortError");
+    throw await unreachableVault(fetchImpl, base);
   }
+}
+
+/** Explain a request that never got an HTTP response. */
+async function unreachableVault(fetchImpl: typeof fetch, base: string) {
+  // A sign-in proxy redirects to its own login host, which the extension has
+  // no access to, so the followed request fails like a network error. The
+  // redirect is still visible when it is not followed.
+  try {
+    const probe = await fetchImpl(`${base}/api/v1/health`, {
+      redirect: "manual",
+      cache: "no-store",
+    });
+    if (probe.type === "opaqueredirect") return signInRequired(base);
+  } catch {
+    // Unreachable either way; describe the address below.
+  }
+  const host = new URL(base).host;
+  return new VaultAccessError(
+    "unreachable",
+    base,
+    new URL(base).protocol === "https:"
+      ? `Couldn't reach PrintStash at ${host}. Check the address and that the server is running. If it uses a self-signed certificate, open it in a tab and accept the certificate, then connect again.`
+      : `Couldn't reach PrintStash at ${host}. Check the address and that PrintStash is running there.`,
+  );
 }
 
 async function vaultLogin({
@@ -330,6 +450,8 @@ async function vaultLogin({
   const login = await fetchVault(fetchImpl, base, "/api/v1/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    // PrintStash answers a login with its own session cookie. Accepting it
+    // here would sign a PrintStash tab in this browser into the key's account.
     credentials: "omit",
     signal,
     body: JSON.stringify({
@@ -348,20 +470,45 @@ async function vaultLogin({
   return loginBody.access_token;
 }
 
+const HEALTH_PATH = "/api/v1/health";
+
+/**
+ * Where PrintStash actually answered. A reverse proxy may move the server to
+ * HTTPS on the same host; a redirect to any other host is a sign-in page.
+ */
+function answeringBase(base: string, response: Response): string | null {
+  if (!response.redirected || !response.url) return base;
+  const final = new URL(response.url);
+  if (final.hostname !== new URL(base).hostname || !final.pathname.endsWith(HEALTH_PATH)) {
+    return null;
+  }
+  return `${final.origin}${final.pathname.slice(0, -HEALTH_PATH.length)}`;
+}
+
 async function verifyVaultHealth({ fetchImpl, base }: { fetchImpl: typeof fetch; base: string }) {
-  const health = await fetchVault(fetchImpl, base, "/api/v1/health", {
+  const health = await fetchVault(fetchImpl, base, HEALTH_PATH, {
     headers: { Accept: "application/json" },
-    credentials: "omit",
+    credentials: "include",
     cache: "no-store",
   });
+  const answered = answeringBase(base, health);
+  if (answered === null) throw signInRequired(base);
   const healthBody = await health.json().catch(() => null);
-  if (!health.ok || healthBody?.status !== "ok" || healthBody?.name !== "PrintStash") {
-    throw new Error("That URL is not a PrintStash server.");
+  if (health.ok && healthBody?.status === "ok" && healthBody?.name === "PrintStash") {
+    return {
+      base: answered,
+      ...(healthBody.capture_import_intent === true ? { importIntent: true as const } : {}),
+    };
   }
+  // Proxies refuse an unauthenticated API request instead of redirecting it.
+  if ([401, 403, 407].includes(health.status) && healthBody === null) {
+    throw signInRequired(base);
+  }
+  throw new Error("That URL is not a PrintStash server.");
 }
 
 export async function claimBrowserPairing({
-  fetchImpl = fetch,
+  fetchImpl = vaultFetch,
   vault,
   code,
   name,
@@ -371,43 +518,48 @@ export async function claimBrowserPairing({
   code: string;
   name?: string;
 }) {
-  const base = normalizeVault(vault);
   if (!String(code ?? "").trim()) throw new Error("Enter the pairing code from PrintStash.");
-  await verifyVaultHealth({ fetchImpl, base });
+  const { base, ...capabilities } = await verifyVaultHealth({
+    fetchImpl,
+    base: normalizeVault(vault),
+  });
   const claimed = await fetchVault(fetchImpl, base, "/api/v1/browser-pairings/claim", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    credentials: "omit",
+    credentials: "include",
     body: JSON.stringify({
       code: String(code).trim(),
       name: String(name || "Browser").trim() || "Browser",
     }),
   });
   if (!claimed.ok) {
-    throw new Error(await browserPairingClaimError(claimed));
+    throw await browserPairingClaimError(claimed);
   }
   const payload = await claimed.json().catch(() => null);
   if (!payload || typeof payload.credential !== "string" || !payload.credential) {
     throw new Error("PrintStash did not return a browser credential.");
   }
-  return { base, deviceCredential: payload.credential, device: payload.device || null };
+  return {
+    base,
+    ...capabilities,
+    deviceCredential: payload.credential,
+    device: payload.device || null,
+  };
 }
 
 /** Check public server reachability; paired credentials are authenticated when used for capture. */
 export async function verifyVaultReachability({
-  fetchImpl = fetch,
+  fetchImpl = vaultFetch,
   vault,
 }: {
   fetchImpl?: typeof fetch;
   vault: string;
 }) {
-  const base = normalizeVault(vault);
-  await verifyVaultHealth({ fetchImpl, base });
-  return { base };
+  return verifyVaultHealth({ fetchImpl, base: normalizeVault(vault) });
 }
 
 export async function verifyVaultConnection({
-  fetchImpl = fetch,
+  fetchImpl = vaultFetch,
   vault,
   username,
   apiKey,
@@ -417,10 +569,10 @@ export async function verifyVaultConnection({
   username: string;
   apiKey: string;
 }) {
-  const base = normalizeVault(vault);
+  const requested = normalizeVault(vault);
   requireCredentials(username, apiKey);
 
-  await verifyVaultHealth({ fetchImpl, base });
+  const { base, ...capabilities } = await verifyVaultHealth({ fetchImpl, base: requested });
 
   const accessToken = await vaultLogin({ fetchImpl, base, username, apiKey });
   const profile = await fetchVault(fetchImpl, base, "/api/v1/auth/me", {
@@ -428,7 +580,7 @@ export async function verifyVaultConnection({
       Accept: "application/json",
       Authorization: `Bearer ${accessToken}`,
     },
-    credentials: "omit",
+    credentials: "include",
     cache: "no-store",
   });
   if (!profile.ok) {
@@ -440,7 +592,7 @@ export async function verifyVaultConnection({
   if (!user || typeof user.username !== "string" || typeof user.is_superuser !== "boolean") {
     throw new Error("PrintStash returned an invalid user profile.");
   }
-  return { base, accessToken, user };
+  return { base, ...capabilities, accessToken, user };
 }
 
 /** A capture endpoint rejected the current browser or access credential. */
@@ -451,8 +603,30 @@ export class CaptureAuthenticationError extends Error {
   }
 }
 
+export class CaptureResponseError extends Error {
+  constructor(
+    message: string,
+    readonly diagnosticCode: string | undefined,
+  ) {
+    super(message);
+  }
+
+  static async from(response: Response, message: string) {
+    const body = await response.json().catch(() => null);
+    const detail: unknown = body?.detail;
+    const code =
+      typeof detail === "string" && /^[a-z][a-z0-9_]{0,127}$/.test(detail) ? detail : undefined;
+    return new CaptureResponseError(
+      code === "insufficient_scope"
+        ? "This PrintStash user does not have import permission."
+        : message,
+      code,
+    );
+  }
+}
+
 export async function captureModelPage({
-  fetchImpl = fetch,
+  fetchImpl = vaultFetch,
   vault,
   username,
   apiKey,
@@ -461,6 +635,10 @@ export async function captureModelPage({
   pageUrl,
   title,
   captureSource,
+  collectionId,
+  onReady,
+  importAgain,
+  tags,
   signal,
 }: {
   fetchImpl?: typeof fetch;
@@ -472,6 +650,10 @@ export async function captureModelPage({
   pageUrl: string;
   title?: string;
   captureSource?: CaptureSourceDraft;
+  collectionId?: number;
+  onReady?: ImportIntent;
+  importAgain?: boolean;
+  tags?: string[];
   signal?: AbortSignal;
 }) {
   const base = normalizeVault(vault);
@@ -507,6 +689,9 @@ export async function captureModelPage({
       url: sourceUrl,
       title: String(title ?? "").trim() || null,
       source_kind: "browser",
+      ...(onReady ? { on_ready: onReady, import_again: importAgain === true } : {}),
+      ...(collectionId !== undefined ? { collection_id: collectionId } : {}),
+      ...(tags?.length ? { tags } : {}),
       ...(captureSource
         ? { capture_source: validatedCaptureSource(captureSource, source.toLocaleLowerCase()) }
         : {}),
@@ -514,7 +699,8 @@ export async function captureModelPage({
   });
   if (captured.status === 401) throw new CaptureAuthenticationError();
   if (!captured.ok) {
-    throw new Error(await responseDetail(captured, `PrintStash returned ${captured.status}.`));
+    throw await CaptureResponseError.from(captured, "Capture could not be completed.");
   }
-  return { source, item: await captured.json(), inboxUrl: `${base}/inbox` };
+  const item = await captured.json();
+  return { source, item, inboxUrl: captureReviewUrl(base, item) };
 }

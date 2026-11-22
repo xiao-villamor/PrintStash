@@ -1,5 +1,8 @@
 "use client";
 
+import { useId } from "react";
+import { MarkdownView } from "@/components/markdown-view";
+
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -65,6 +68,7 @@ export function OverviewTab({
 
 export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
   useUiLocale();
+  const descriptionId = useId();
   const tagShown = editor.filteredTags.slice(0, 6);
   const tagItems = [...tagShown, ...(editor.canCreate ? [editor.tagInput.trim()] : [])];
   const tagNav = useComboboxNav(editor.tagInput ? tagItems.length : 0, {
@@ -138,16 +142,32 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
           </div>
           {/* Description */}
           <div>
-            <label className="block text-[13px] font-medium text-foreground mb-1.5">
+            <label
+              htmlFor={descriptionId}
+              className="block text-[13px] font-medium text-foreground mb-1.5"
+            >
               {uiText("Description")}
             </label>
             <textarea
+              id={descriptionId}
+              aria-describedby={`${descriptionId}-hint`}
               value={editor.description}
               onChange={(e) => editor.setDescription(e.target.value)}
               rows={3}
               className={inputClasses}
               placeholder={uiText("Optional description")}
             />
+            <p id={`${descriptionId}-hint`} className="mt-1.5 text-xs text-muted-foreground">
+              {uiText("Markdown supported: headings, lists, links and tables.")}
+            </p>
+            {editor.description.trim() && (
+              <details className="mt-2 rounded border border-border p-3">
+                <summary className="text-sm font-medium">{uiText("Preview")}</summary>
+                <div className="mt-3">
+                  <MarkdownView source={editor.description} />
+                </div>
+              </details>
+            )}
           </div>
           <h3 className="border-t border-border pt-5 text-sm font-semibold">
             {uiText("Discovery")}

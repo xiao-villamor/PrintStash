@@ -8,9 +8,40 @@
  * keep cancelled name drafts out of the saved Model.
  */
 import { test, expect } from "./helpers";
-import { openModelPage, clickModelAction, modelCard, uploadGcodeModel } from "./util";
+import { clickModelAction, modelCard, openModelPage, uploadGcodeModel } from "./util";
 
 test.describe("model detail", () => {
+  test("persists a Markdown description", async ({ page }) => {
+    const name = `e2e-markdown-${Date.now()}`;
+    await uploadGcodeModel(page, name);
+    await openModelPage(page, name);
+    const modelId = new URL(page.url()).pathname.split("/").at(-1);
+    await clickModelAction(page, "Edit details");
+    const description =
+      "## Assembly instructions\n\n- Fit **both** clips.\n- Check [the source](https://www.printables.com/).";
+    await page.getByRole("textbox", { name: "Description", exact: true }).fill(description);
+    await page
+      .getByRole("dialog", { name: "Edit Model details" })
+      .getByText("Preview", { exact: true })
+      .click();
+    await expect(page.getByRole("heading", { name: "Assembly instructions" })).toBeVisible();
+    await page
+      .getByRole("dialog", { name: "Edit Model details" })
+      .getByRole("button", { name: "Save changes", exact: true })
+      .click();
+    await page.reload();
+    const more = page.getByRole("button", { name: "Show more", exact: true });
+    if (await more.isVisible()) await more.click();
+    await expect(page.getByRole("heading", { name: "Assembly instructions" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "the source", exact: true })).toHaveAttribute(
+      "href",
+      "https://www.printables.com/",
+    );
+    const saved = await (await page.request.get(`/api/v1/models/${modelId}`)).json();
+    expect(saved.description).toBe(description);
+    expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
+  });
+
   test("reads a Model's detail once when opening it", async ({ page }) => {
     const name = `e2e-single-read-${Date.now()}`;
     await uploadGcodeModel(page, name);

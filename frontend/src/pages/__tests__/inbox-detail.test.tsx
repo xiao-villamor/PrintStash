@@ -145,6 +145,23 @@ describe("InboxDetailPage", () => {
     vi.mocked(api.updatePendingImport).mockResolvedValue(reviewItem);
   });
 
+  it("imports a direct capture as one selected file", async () => {
+    const item: InboxItem = {
+      ...reviewItem,
+      manifest: { kind: "direct", title: "cube.stl" },
+    };
+    vi.mocked(api.getPendingImport).mockResolvedValue(item);
+    vi.mocked(api.importPendingImport).mockResolvedValue({ ...item, state: "completed" });
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText("cube.stl", { selector: "span" })).toBeVisible();
+    const action = screen.getByRole("button", { name: "Import" });
+    expect(action).toBeEnabled();
+    await user.click(action);
+    await waitFor(() => expect(api.importPendingImport).toHaveBeenCalledWith(7, ["direct"]));
+  });
+
   it("defaults a new collection to the capture title and creates it on import", async () => {
     vi.mocked(api.getPendingImport).mockResolvedValue(reviewItem);
     vi.mocked(api.importPendingImport).mockResolvedValue({
@@ -155,13 +172,15 @@ describe("InboxDetailPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    expect(await screen.findByRole("combobox", { name: "Destination" })).toHaveValue("new");
+    expect(await screen.findByText("Calibration cube", { selector: "dd" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Edit destination" }));
+    expect(screen.getByRole("combobox", { name: "Collection" })).toHaveValue("new");
     expect(screen.getByRole("textbox", { name: "Collection name" })).toHaveValue(
       "Calibration cube",
     );
     expect(api.createCollection).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Import selected" }));
+    await user.click(screen.getByRole("button", { name: "Import" }));
 
     await waitFor(() =>
       expect(api.createCollection).toHaveBeenCalledWith({
@@ -187,7 +206,7 @@ describe("InboxDetailPage", () => {
     );
     vi.mocked(api.searchCollections).mockReturnValue(pending);
     const app = renderPage();
-    await userEvent.setup().click(await screen.findByRole("button", { name: "Import selected" }));
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Import" }));
     await waitFor(() => expect(api.searchCollections).toHaveBeenCalledTimes(1));
 
     await act(async () => {
@@ -226,7 +245,7 @@ describe("InboxDetailPage", () => {
     });
     renderPage([existing]);
 
-    await userEvent.setup().click(await screen.findByRole("button", { name: "Import selected" }));
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Import" }));
 
     await waitFor(() => expect(api.updatePendingImport).toHaveBeenCalled());
     expect(api.searchCollections).toHaveBeenCalledWith("Calibration cube", "edit", null);
@@ -266,7 +285,7 @@ describe("InboxDetailPage", () => {
     });
     renderPage();
 
-    await userEvent.setup().click(await screen.findByRole("button", { name: "Import selected" }));
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Import" }));
 
     await waitFor(() => expect(api.updatePendingImport).toHaveBeenCalled());
     expect(api.searchCollections).toHaveBeenNthCalledWith(
@@ -287,7 +306,7 @@ describe("InboxDetailPage", () => {
     vi.mocked(api.searchCollections).mockRejectedValue(new Error("Search unavailable"));
     renderPage();
 
-    await userEvent.setup().click(await screen.findByRole("button", { name: "Import selected" }));
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Import" }));
 
     await waitFor(() => expect(api.searchCollections).toHaveBeenCalledOnce());
     expect(api.createCollection).not.toHaveBeenCalled();
@@ -312,10 +331,11 @@ describe("InboxDetailPage", () => {
     const user = userEvent.setup();
     renderPage([parts]);
 
-    await user.selectOptions(await screen.findByRole("combobox", { name: "Destination" }), "pick");
-    expect(screen.getByRole("button", { name: "Import selected" })).toBeDisabled();
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Edit destination" }));
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Collection" }), "pick");
+    expect(screen.getByRole("button", { name: "Import" })).toBeDisabled();
     await user.click(await screen.findByRole("option", { name: /Parts/ }));
-    await user.click(screen.getByRole("button", { name: "Import selected" }));
+    await user.click(screen.getByRole("button", { name: "Import" }));
 
     await waitFor(() =>
       expect(api.updatePendingImport).toHaveBeenCalledWith(
@@ -341,7 +361,8 @@ describe("InboxDetailPage", () => {
     vi.mocked(api.getPendingImport).mockResolvedValue({ ...reviewItem, target_collection_id: 12 });
     renderPage([parts]);
 
-    const destination = await screen.findByRole("combobox", { name: "Destination" });
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Edit destination" }));
+    const destination = await screen.findByRole("combobox", { name: "Collection" });
     await waitFor(() =>
       expect(within(destination).getByRole("option", { name: "Parts" })).toBeVisible(),
     );
@@ -370,7 +391,7 @@ describe("InboxDetailPage", () => {
       .mockResolvedValueOnce(completedItem);
     vi.mocked(api.importPendingImport).mockResolvedValue(reviewItem);
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "Import selected" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Import" }));
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -389,6 +410,7 @@ describe("InboxDetailPage", () => {
       ...reviewItem,
       state: "completed",
       completion: "partial",
+      retryable: true,
       results: [
         {
           id: 11,
@@ -412,6 +434,7 @@ describe("InboxDetailPage", () => {
     renderPage();
 
     expect(await screen.findByText("Partial")).toBeInTheDocument();
+    expect(screen.getByText(/Retry failed files to try this file again/)).toBeInTheDocument();
     const retry = screen.getByRole("button", { name: "Retry failed files" });
     await userEvent.setup().click(retry);
     expect(api.retryPendingImport).toHaveBeenCalledWith(7);
@@ -443,18 +466,20 @@ describe("InboxDetailPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText("Calibration cube")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Calibration cube" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Abrir origen" })).toHaveAttribute(
       "href",
       reviewItem.source_url,
     );
     expect(screen.getByText("Archivos para importar")).toBeInTheDocument();
     expect(screen.getByLabelText("Seleccionar cube.stl")).toBeChecked();
-    expect(screen.getByText("Destino")).toBeInTheDocument();
+    expect(screen.getByText("Colección")).toBeInTheDocument();
+    expect(screen.getByText("Sin etiquetas")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Editar destino" }));
     expect(screen.getByPlaceholderText("separadas por comas")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Importar seleccionados" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Importar" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Eliminar importación" })).toBeInTheDocument();
-    expect(screen.getByText(/Example · example\.test/)).toBeInTheDocument();
+    expect(screen.getByText(/^example\.test ·/)).toBeInTheDocument();
     expect(screen.getByText("cube.stl")).toBeInTheDocument();
   });
 
@@ -463,7 +488,8 @@ describe("InboxDetailPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    const destination = await screen.findByRole("combobox", { name: "Destination" });
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Edit destination" }));
+    const destination = await screen.findByRole("combobox", { name: "Collection" });
     for (let step = 0; step < 20 && document.activeElement !== destination; step += 1) {
       await user.tab();
     }
@@ -523,7 +549,7 @@ describe("InboxDetailPage", () => {
       expect(await screen.findByText(new RegExp(`^${label} ·`))).toBeInTheDocument();
     });
 
-    it("capitalises a host it has no brand name for", async () => {
+    it("shows the full hostname when no provider is known", async () => {
       vi.mocked(api.getPendingImport).mockResolvedValue({
         ...reviewItem,
         source_hostname: "models.example.com",
@@ -531,10 +557,10 @@ describe("InboxDetailPage", () => {
 
       renderPage();
 
-      expect(await screen.findByText(/^Example ·/)).toBeInTheDocument();
+      expect(await screen.findByText(/^models\.example\.com ·/)).toBeInTheDocument();
     });
 
-    it("says the web when there is no host at all", async () => {
+    it("shows the preparation label when there is no host", async () => {
       vi.mocked(api.getPendingImport).mockResolvedValue({
         ...reviewItem,
         source_url: null,
@@ -543,13 +569,14 @@ describe("InboxDetailPage", () => {
 
       renderPage();
 
-      expect(await screen.findByText(/^Web ·/)).toBeInTheDocument();
+      expect(await screen.findByText(/^Source being prepared ·/)).toBeInTheDocument();
     });
   });
   it("preserves an Inbox review draft during polling", async () => {
     const user = userEvent.setup();
     vi.mocked(api.getPendingImport).mockResolvedValue(reviewItem);
     const app = renderPage();
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Edit destination" }));
     const tagsInput = await screen.findByRole("textbox", { name: "Tags" });
     await user.type(tagsInput, "my draft");
     vi.mocked(api.getPendingImport).mockResolvedValue({
@@ -583,12 +610,12 @@ describe("InboxDetailPage", () => {
     vi.mocked(api.searchCollections).mockReturnValue(pending);
     const user = userEvent.setup();
     renderPage([], <Link href="/inbox/8">Another import</Link>);
-    await user.click(await screen.findByRole("button", { name: "Import selected" }));
+    await user.click(await screen.findByRole("button", { name: "Import" }));
     await waitFor(() => expect(api.searchCollections).toHaveBeenCalledTimes(1));
 
     await user.click(screen.getByRole("link", { name: "Another import" }));
     expect(await screen.findByRole("heading", { name: "Current import" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Import selected" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Import" })).toBeEnabled();
     await act(async () => {
       resume({ items: [], next_cursor: null });
       await pending;
@@ -597,7 +624,7 @@ describe("InboxDetailPage", () => {
     expect(api.createCollection).not.toHaveBeenCalled();
     expect(api.updatePendingImport).not.toHaveBeenCalled();
     expect(api.importPendingImport).not.toHaveBeenCalled();
-    expect(screen.getByRole("textbox", { name: "Collection name" })).toHaveValue("Current import");
+    expect(screen.getByText("Current import", { selector: "dd" })).toBeVisible();
   });
 
   it("ignores an Inbox detail from an obsolete route", async () => {

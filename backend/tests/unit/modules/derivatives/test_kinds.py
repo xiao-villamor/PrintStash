@@ -15,13 +15,14 @@ from app.db.models import SENTINEL_FILE_HASH, DerivativeKind, File, FileType, Jo
 from app.modules.derivatives import kinds
 from tests.factories.library import detached_file
 
-METADATA, PLATES, THUMBNAIL, TOOLPATH, VIEWER_STL, PREVIEWS = (
+METADATA, PLATES, THUMBNAIL, TOOLPATH, VIEWER_STL, PREVIEWS, PROJECT_PROFILE = (
     DerivativeKind.METADATA,
     DerivativeKind.PLATES,
     DerivativeKind.THUMBNAIL,
     DerivativeKind.TOOLPATH,
     DerivativeKind.VIEWER_STL,
     DerivativeKind.PREVIEWS,
+    DerivativeKind.PROJECT_PROFILE,
 )
 
 
@@ -63,10 +64,11 @@ class TestRecipesFor:
             PREVIEWS,
         }
 
-    def test_a_3mf_also_gets_its_plates(self) -> None:
+    def test_a_3mf_gets_project_derivatives(self) -> None:
         assert set(kinds.recipes_for(_file(FileType.THREE_MF))) == {
             METADATA,
             PLATES,
+            PROJECT_PROFILE,
             THUMBNAIL,
             PREVIEWS,
         }
@@ -90,6 +92,7 @@ class TestRecipesFor:
         assert kinds.recipes_for(_file(FileType.THREE_MF)) == {
             METADATA: kinds.THREE_MF_GEOMETRY_RECIPE,
             PLATES: kinds.PLATES_RECIPE,
+            PROJECT_PROFILE: kinds.PROJECT_PROFILE_RECIPE,
             THUMBNAIL: kinds.THREE_MF_THUMBNAIL_RECIPE,
             PREVIEWS: kinds.PREVIEWS_RECIPE,
         }
@@ -195,6 +198,7 @@ class TestGroups:
         assert set(kinds.all_definitions()) == {
             JobKind.DERIVATIVES_MESH,
             JobKind.DERIVATIVES_PLATES,
+            JobKind.DERIVATIVES_PROJECT_PROFILE,
             JobKind.DERIVATIVES_GCODE,
             JobKind.DERIVATIVES_TOOLPATH,
             JobKind.DERIVATIVES_VIEWER_STL,
