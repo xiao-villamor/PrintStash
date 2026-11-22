@@ -57,8 +57,8 @@ cover, or use **Don’t include images** to omit the gallery.
 Connecting with **Allow supported marketplaces** on grants the server and every
 supported marketplace in one Chrome prompt; imports then never ask. With it
 off, the first import from a marketplace asks once, at the click, for all of
-that marketplace's hosts. If Chrome closes the toolbar popup after granting
-access, reopen it to continue.
+that marketplace's hosts. Chrome closes the toolbar popup while it asks;
+reopen the popup after choosing **Allow** and it finishes connecting.
 
 The extension reaches servers on the LAN (including `.lan`, `.home.arpa`,
 `.internal` names and Tailscale addresses), behind HTTPS reverse proxies, and
