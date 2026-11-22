@@ -266,7 +266,7 @@ def summaries(
         raise ValueError("shared_preview_root_needs_one_model")
     if not model_ids:
         return {}
-    images: dict[int, list[SourceImageRead]] = defaultdict(list)
+    source_images: dict[int, list[SourceImageRead]] = defaultdict(list)
     if root is None:
         for source, image in session.exec(
             select(ModelProvenanceSource, ModelSourceCover)
@@ -280,7 +280,7 @@ def summaries(
             version = hashlib.sha256(
                 f"{image.storage_key}:{image.updated_at.isoformat()}".encode()
             ).hexdigest()[:16]
-            images[source.model_id].append(
+            source_images[source.model_id].append(
                 SourceImageRead(
                     id=f"source-{image.id}",
                     source_id=source.id,
@@ -350,7 +350,7 @@ def summaries(
                     else None
                 ),
                 archive_images=archive_images,
-                source_images=images[model_id],
+                source_images=source_images[model_id],
                 large_cover_url=custom_url
                 or (archive_cover.url if archive_cover is not None else None),
             )
@@ -446,7 +446,7 @@ def summaries(
         else:
             state = PreviewState(current.state.value)
         result[model_id] = ArtifactPreviews(
-            source_images=images[model_id],
+            source_images=source_images[model_id],
             cover_image_kind=cover_kind,
             large_cover_image_kind=(
                 PreviewImageKind.PHOTO

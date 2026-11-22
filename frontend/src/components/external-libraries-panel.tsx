@@ -250,7 +250,7 @@ function ScheduleControl({
       </select>
       {!isPreset && (
         <input
-          className={`${inputClass}`}
+          className={`${inputClass} font-mono`}
           placeholder={uiText("*/30 * * * * (min hour dom mon dow)")}
           value={value}
           disabled={disabled}
@@ -625,11 +625,13 @@ function AdminLibrarySourcesPanel({
 
   return (
     <Localized>
-      <div className="settings-flat overflow-hidden border border-border bg-card">
+      <div className="overflow-hidden border border-border bg-card">
         <SettingsGroupHead
+          icon={FolderSync}
           level={3}
           title={uiText("Scanning")}
           description={uiText("Applies to every Library source.")}
+          className="settings-card-head--flush"
         />
         <div className="settings-section-body">
           <div className="settings-preference-row">
@@ -788,6 +790,7 @@ function AdminLibrarySourcesPanel({
           </section>
         )}
         <SettingsGroupHead
+          icon={FolderSync}
           level={3}
           title={uiText("Sources")}
           description={uiText(
@@ -802,6 +805,7 @@ function AdminLibrarySourcesPanel({
               {uiText("Add source")}
             </Button>
           }
+          className="settings-card-head--flush border-t"
         />
         {enabled && (
           <div className="settings-section-body space-y-4">
@@ -849,7 +853,7 @@ function AdminLibrarySourcesPanel({
                             </span>
                           )}
                         </p>
-                        <p className="settings-list-meta truncate">
+                        <p className="settings-list-meta truncate font-mono">
                           {describeSourceLocation(lib, connections)}
                         </p>
                         <p className="settings-list-meta">

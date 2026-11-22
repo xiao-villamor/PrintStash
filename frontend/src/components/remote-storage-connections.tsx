@@ -456,9 +456,10 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
       <section
         role="region"
         aria-label={uiText("Remote storage")}
-        className="settings-flat overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-sm"
+        className="overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-sm"
       >
         <SettingsGroupHead
+          icon={Cloud}
           level={2}
           title={uiText("Connections")}
           description={uiText(
@@ -476,11 +477,12 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
               {uiText("Add remote connection")}
             </Button>
           }
+          className="settings-card-head--flush"
         />
 
         {!formOpen && connectionReview}
         {connectionsFailed && connections.length > 0 && (
-          <div role="alert" className="flex items-center gap-2 py-3 text-sm">
+          <div role="alert" className="flex items-center gap-2 px-4 py-3 text-sm sm:px-5">
             <p>{i18n.t("storage.connectionsLoadFailed")}</p>
             <Button
               variant="outline"
@@ -493,7 +495,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
           </div>
         )}
         {catalogueFailed && (
-          <div role="alert" className="flex items-center gap-2 py-3 text-sm">
+          <div role="alert" className="flex items-center gap-2 px-4 py-3 text-sm sm:px-5">
             <p>{i18n.t("storage.providersLoadFailed")}</p>
             <Button variant="outline" size="sm" onClick={() => void providerQuery.refetch()}>
               {uiText("Retry")}
@@ -501,26 +503,26 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
           </div>
         )}
         {user?.is_superuser && editUnavailable && !connectionsFailed && (
-          <p role="alert" className="py-3 text-sm">
+          <p role="alert" className="px-4 py-3 text-sm sm:px-5">
             {i18n.t("storage.connectionUnavailable")}
           </p>
         )}
-        <div>
+        <div className="border-b border-border">
           {!user?.is_superuser ? (
-            <p className="pb-4 text-sm text-muted-foreground">
+            <p className="px-4 pb-4 text-sm text-muted-foreground sm:px-5">
               {i18n.t("storage.connectionsAdministratorRequired")}
             </p>
           ) : loading ? (
             <div
               role="status"
               aria-label={uiText("Loading connections…")}
-              className="space-y-3 pb-4"
+              className="space-y-3 px-4 pb-4 sm:px-5"
             >
               <Skeleton className="h-14 w-full" />
               <span className="sr-only">{uiText("Loading connections…")}</span>
             </div>
           ) : connectionsFailed && connections.length === 0 ? (
-            <div role="alert" className="flex items-center gap-2 pb-4 text-sm">
+            <div role="alert" className="flex items-center gap-2 px-4 pb-4 text-sm sm:px-5">
               <p>{i18n.t("storage.connectionsLoadFailed")}</p>
               <Button
                 variant="outline"
@@ -532,7 +534,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
               </Button>
             </div>
           ) : connections.length === 0 ? (
-            <p className="mt-3 rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+            <p className="mx-4 mb-4 rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground sm:mx-5">
               {uiText("No remote storage connected yet.")}
             </p>
           ) : (
@@ -547,7 +549,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                 return (
                   <li
                     key={connection.id}
-                    className="grid gap-3 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end"
+                    className="grid gap-3 px-4 py-3 sm:px-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end"
                   >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -671,7 +673,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
           <div
             role="status"
             aria-label={uiText("Add remote connection")}
-            className="space-y-5 py-4 sm:py-5"
+            className="space-y-5 px-4 py-4 sm:px-5 sm:py-5"
           >
             <Skeleton className="h-5 w-44" />
             <div className="grid gap-2 sm:grid-cols-2">

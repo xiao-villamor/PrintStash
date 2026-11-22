@@ -79,20 +79,25 @@ import { BackupRunHistory } from "@/components/backup-run-history";
 import { CollectionPicker } from "@/components/collection-picker";
 import {
   Bell,
+  ArrowRightLeft,
   Boxes,
   Check,
   CircleArrowUp,
+  Clock,
   Cloud,
   Database,
   Download,
   Eraser,
+  Eye,
   Gpu,
   Files,
   FolderSync,
+  Coins,
   FolderTree,
   HardDrive,
   HeartPulse,
   Activity,
+  FileText,
   Info,
   Images,
   KeyRound,
@@ -102,10 +107,12 @@ import {
   Printer,
   Puzzle,
   ShieldCheck,
+  RefreshCw,
   RotateCcw,
   Trash2,
   Search,
   Server,
+  Sun,
   Tag,
   UserPlus,
   Users,
@@ -2208,7 +2215,7 @@ export function SettingsPanel() {
           disabled={
             !user?.is_superuser || !remoteConfigData || remoteConfig.isError || trashRetentionBusy
           }
-          className={cn(INPUT, "w-20")}
+          className={cn(INPUT, "w-20 font-mono")}
         />
         <span className="text-foreground">{uiText("days")}</span>
         <span id="trash-retention-hint" className="text-xs text-muted-foreground">
@@ -2240,6 +2247,7 @@ export function SettingsPanel() {
     activeSection === "trash" ? (
       <SettingsCard
         className="border-0"
+        icon={Trash2}
         title={uiText("Trash retention")}
         description={uiText(
           "Soft-deleted models stay restorable until the retention window expires.",
@@ -2297,6 +2305,7 @@ export function SettingsPanel() {
       <SettingsCard
         hideHeader={trashPage}
         className="border-0"
+        icon={Boxes}
         title={uiText("trash.itemsTitle")}
         description={uiText("multipart.trashHelp")}
       >
@@ -2343,7 +2352,7 @@ export function SettingsPanel() {
               </span>
             )}
             {trashItems.some((item) => item.kind === "model") && (
-              <span className="ml-auto tabular-nums">
+              <span className="ml-auto font-mono tabular-nums">
                 {t("Known model storage: {size}", {
                   size: formatBytes(
                     trashItems.reduce(
@@ -2628,46 +2637,46 @@ export function SettingsPanel() {
           confirmLabel={uiText("Download & enable")}
         />
 
-        <div className={cn(!trashPage && sidebar && "settings-column")}>
-          <PageHeader
-            title={t(
-              trashPage
-                ? "settings.trash"
-                : (SETTINGS_SECTIONS.find((section) => section.id === activeSection)?.labelKey ??
-                    "settings.overview"),
-            )}
-            description={
-              trashPage
-                ? uiText(
-                    "Review trashed items by name before restoring or permanently removing them.",
-                  )
-                : t(SETTINGS_SUBTITLES[activeSection])
-            }
-            actions={
-              trashPage ? (
-                <>
-                  <Button size="sm" variant="outline" onClick={loadTrash} disabled={trashLoading}>
-                    {t("Refresh")}
-                  </Button>
-                  {reviewExpiredButton}
-                  <Button size="sm" variant="outline" onClick={() => changeSection("overview")}>
-                    {t("settings.title")}
-                  </Button>
-                </>
-              ) : settingsTrash ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => router.push("/settings?section=trash")}
-                >
-                  {t("Open Trash")}
+        <PageHeader
+          title={trashPage ? t("settings.trash") : t("settings.title")}
+          description={
+            trashPage ? (
+              uiText("Review trashed items by name before restoring or permanently removing them.")
+            ) : (
+              <>
+                {t(
+                  SETTINGS_SECTIONS.find((section) => section.id === activeSection)?.labelKey ??
+                    "settings.overview",
+                )}
+                {" · "}
+                {t(SETTINGS_SUBTITLES[activeSection])}
+              </>
+            )
+          }
+          actions={
+            trashPage ? (
+              <>
+                <Button size="sm" variant="outline" onClick={loadTrash} disabled={trashLoading}>
+                  {t("Refresh")}
                 </Button>
-              ) : activeSection === "spoolman" ? (
-                <div ref={setSpoolmanActionHost} className="flex flex-wrap items-center gap-2" />
-              ) : undefined
-            }
-          />
-        </div>
+                {reviewExpiredButton}
+                <Button size="sm" variant="outline" onClick={() => changeSection("overview")}>
+                  {t("settings.title")}
+                </Button>
+              </>
+            ) : settingsTrash ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => router.push("/settings?section=trash")}
+              >
+                {t("Open Trash")}
+              </Button>
+            ) : activeSection === "spoolman" ? (
+              <div ref={setSpoolmanActionHost} className="flex flex-wrap items-center gap-2" />
+            ) : undefined
+          }
+        />
 
         {!trashPage && (
           <div
@@ -2720,7 +2729,7 @@ export function SettingsPanel() {
                 )}
               >
                 {sidebar && (
-                  <h2 className="flex h-12 items-center px-1 text-[13px] font-semibold text-foreground">
+                  <h2 className="flex h-12 items-center px-1 font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
                     {t("settings.title")}
                   </h2>
                 )}
@@ -2735,7 +2744,13 @@ export function SettingsPanel() {
                       key={group.labelKey}
                       className="border-b border-border px-1 py-2 last:border-b-0"
                     >
-                      <p className="px-2 pb-1 text-xs font-medium text-muted-foreground">
+                      <p
+                        className={cn(
+                          "px-2 pb-1 font-mono text-2xs font-medium uppercase tracking-wider text-muted-foreground",
+                          group.labelKey === "Global settings" &&
+                            "pb-3 font-sans text-[13px] font-semibold normal-case tracking-normal text-foreground",
+                        )}
+                      >
                         {uiText(group.labelKey)}
                       </p>
                       {sections.map((section) => {
@@ -2766,10 +2781,7 @@ export function SettingsPanel() {
             </WorkbenchSidebarContent>
           )}
 
-          <main
-            ref={sectionMotion}
-            className={cn("settings-main min-w-0", !trashPage && sidebar && "settings-column")}
-          >
+          <main ref={sectionMotion} className="settings-main min-w-0">
             {user?.is_superuser &&
               !configDenied &&
               preferenceReview.phase !== "idle" &&
@@ -2898,8 +2910,8 @@ export function SettingsPanel() {
                   </SettingsNotice>
                 )}
                 <ImportCopyWarning storageHealth={storageHealth} />
-                <div>
-                  <div className="mb-9 grid grid-cols-2 gap-y-4 border-y border-border py-4 lg:grid-cols-4">
+                <div className="overflow-hidden border border-border bg-card">
+                  <div className="grid grid-cols-2 gap-y-4 border-b border-border p-4 sm:p-5 lg:grid-cols-4">
                     {kpiItems.map((item) => (
                       <div
                         key={item.label}
@@ -2917,9 +2929,10 @@ export function SettingsPanel() {
                     ))}
                   </div>
 
-                  <div className="settings-inline-groups">
+                  <div className="settings-inline-groups divide-y divide-border">
                     {user?.is_superuser && (
                       <SettingsCard
+                        icon={ShieldCheck}
                         title={t("Data safety")}
                         description={t("Review backups and file checks for this Vault.")}
                         action={
@@ -3036,6 +3049,7 @@ export function SettingsPanel() {
                     )}
                     {/* System information */}
                     <SettingsCard
+                      icon={Server}
                       title={uiText("System")}
                       description={uiText("Server status and vault configuration")}
                       action={
@@ -3061,13 +3075,21 @@ export function SettingsPanel() {
                               </p>
                               <p className="settings-row-hint">{item.desc}</p>
                             </div>
-                            <span className={cn("text-[13px] text-foreground")}>{item.value}</span>
+                            <span
+                              className={cn(
+                                "text-[13px] text-foreground",
+                                !("text" in item && item.text) && "font-mono",
+                              )}
+                            >
+                              {item.value}
+                            </span>
                           </div>
                         ))}
                       </div>
                     </SettingsCard>
 
                     <SettingsCard
+                      icon={Download}
                       title={uiText("Library migration")}
                       description={uiText(
                         "Portable archive with models, metadata, print history, and original artifacts",
@@ -3093,7 +3115,7 @@ export function SettingsPanel() {
                           </button>
                           {user?.is_superuser && (
                             <label
-                              className={`${BTN_SECONDARY} relative focus-within:ring-2 focus-within:ring-ring ${archiveBusy !== null ? "pointer-events-none opacity-50" : "cursor-action"}`}
+                              className={`${BTN_SECONDARY} ${archiveBusy !== null ? "pointer-events-none opacity-50" : "cursor-action"}`}
                             >
                               <Download className="h-3.5 w-3.5 rotate-180" />{" "}
                               {archiveBusy === "import"
@@ -3102,7 +3124,7 @@ export function SettingsPanel() {
                               <input
                                 type="file"
                                 accept=".zip,application/zip"
-                                className="absolute inset-0 cursor-action opacity-0"
+                                className="sr-only"
                                 disabled={archiveBusy !== null}
                                 onChange={(event) => {
                                   const file = event.target.files?.[0];
@@ -3118,6 +3140,7 @@ export function SettingsPanel() {
 
                     {/* Data export */}
                     <SettingsCard
+                      icon={Download}
                       title={uiText("Data export")}
                       description={uiText("Metadata only — no raw STL/3MF/G-code files")}
                     >
@@ -3158,6 +3181,7 @@ export function SettingsPanel() {
               <div className="settings-grouped">
                 {user?.is_superuser && (
                   <SettingsCard
+                    icon={Users}
                     title={uiText("Users")}
                     description={uiText(
                       "Create users, assign vault admins, disable accounts, and reset passwords.",
@@ -3407,6 +3431,7 @@ export function SettingsPanel() {
 
                 {user?.is_superuser && (
                   <SettingsCard
+                    icon={FolderTree}
                     title={uiText("Collection access")}
                     description={uiText(
                       "Assign view, edit, or admin access per user. Child collections inherit parent grants.",
@@ -3603,6 +3628,7 @@ export function SettingsPanel() {
 
                 {user?.is_superuser && (
                   <SettingsCard
+                    icon={Printer}
                     title={uiText("Printer access")}
                     description={uiText(
                       "Grant access per printer. Roles build from view to print, machine control, and administration.",
@@ -3833,6 +3859,7 @@ export function SettingsPanel() {
                 )}
 
                 <SettingsCard
+                  icon={KeyRound}
                   title={uiText("API keys")}
                   description={uiText(
                     "Create credentials for scripts and integrations, then exchange them for a JWT at login.",
@@ -3977,7 +4004,7 @@ export function SettingsPanel() {
                               >
                                 <div className="min-w-0 flex-1">
                                   <p className="truncate text-sm text-foreground">{key.name}</p>
-                                  <p className="text-2xs text-muted-foreground">
+                                  <p className="font-mono text-2xs text-muted-foreground">
                                     {key.prefix}... ·{" "}
                                     {key.last_used_at ? uiText("Used") : uiText("Never used")}
                                   </p>
@@ -4001,11 +4028,11 @@ export function SettingsPanel() {
                         <div className="border border-border p-3">
                           <p className="text-xs text-muted-foreground leading-relaxed">
                             {uiText("Use your username with this API key on")}{" "}
-                            <code>/api/v1/auth/login</code>
+                            <code className="font-mono">/api/v1/auth/login</code>
                             {uiText(
                               ". The hook exchanges it for a JWT Bearer token, then uploads with the normal",
                             )}{" "}
-                            <code>{uiText("Authorization")}</code>
+                            <code className="font-mono">{uiText("Authorization")}</code>
                             {uiText(" header.")}
                           </p>
                         </div>
@@ -4017,7 +4044,7 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "storage" && (
-              <div className="settings-storage">
+              <div className="settings-storage border border-border bg-card">
                 <TabBar
                   tabs={[
                     { key: "location", label: t("Location") },
@@ -4030,7 +4057,7 @@ export function SettingsPanel() {
                   ]}
                   active={storageTab}
                   onChange={setStorageTab}
-                  className="mb-6 flex-wrap gap-1"
+                  className="flex-wrap gap-1 px-5 pt-4"
                   tabClassName="px-2.5 py-1 text-sm text-muted-foreground hover:bg-muted"
                   activeTabClassName="bg-accent text-accent-foreground"
                   showIndicator={false}
@@ -4040,6 +4067,7 @@ export function SettingsPanel() {
                   {user?.is_superuser && (
                     <SettingsCard
                       className="settings-storage-migration"
+                      icon={ArrowRightLeft}
                       title={t("migration.title")}
                       description={t("migration.description")}
                       action={
@@ -4199,6 +4227,7 @@ export function SettingsPanel() {
                   </p>
                 )}
                 <SettingsCard
+                  icon={Clock}
                   title={t("settings.backupPolicyTitle")}
                   description={t("settings.backupPolicyDescription")}
                   stackActionOnMobile
@@ -4269,7 +4298,7 @@ export function SettingsPanel() {
                             backupConfigUnavailable ||
                             backupsLoading
                           }
-                          className={cn(inputClasses, "w-full")}
+                          className={cn(inputClasses, "w-full font-mono")}
                         />
                       </label>
                     </div>
@@ -4403,6 +4432,7 @@ export function SettingsPanel() {
                   </div>
                 </SettingsCard>
                 <SettingsCard
+                  icon={RefreshCw}
                   title={t("settings.backupRetentionTitle")}
                   description={t("settings.backupRetentionDescription")}
                   stackActionOnMobile
@@ -4462,7 +4492,7 @@ export function SettingsPanel() {
                             ? "backup-retention-hint backup-retention-error"
                             : "backup-retention-hint"
                         }
-                        className={cn(inputClasses, "w-full")}
+                        className={cn(inputClasses, "w-full font-mono")}
                       />
                     </div>
                     {parsedBackupRetentionDays === null && (
@@ -4477,6 +4507,7 @@ export function SettingsPanel() {
                   </div>
                 </SettingsCard>
                 <SettingsCard
+                  icon={HardDrive}
                   title={uiText("Manual backup")}
                   description={t("settings.backupManualDescription")}
                   stackActionOnMobile
@@ -4485,7 +4516,7 @@ export function SettingsPanel() {
                       <label
                         className={cn(
                           BTN_SECONDARY,
-                          "relative cursor-action focus-within:ring-2 focus-within:ring-ring",
+                          "cursor-action",
                           (!user?.is_superuser || uploadingBackup) &&
                             "pointer-events-none opacity-50",
                         )}
@@ -4496,7 +4527,7 @@ export function SettingsPanel() {
                           : t("settings.backupUploadAction")}
                         <input
                           type="file"
-                          className="absolute inset-0 cursor-action opacity-0"
+                          className="sr-only"
                           aria-label={t("settings.backupUploadTitle")}
                           accept=".tar.gz,application/gzip"
                           disabled={!user?.is_superuser || uploadingBackup}
@@ -4531,6 +4562,7 @@ export function SettingsPanel() {
                   <BackupRunHistory onPublished={() => void ownedBackupRead.refetch()} />
                 )}
                 <SettingsCard
+                  icon={RotateCcw}
                   title={uiText("Restore backup")}
                   description={uiText(
                     "Recover the vault database and stored files from a previous backup.",
@@ -4593,7 +4625,7 @@ export function SettingsPanel() {
                                 className="grid gap-3 border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
                               >
                                 <div className="min-w-0">
-                                  <p className="truncate text-xs text-foreground">
+                                  <p className="truncate font-mono text-xs text-foreground">
                                     {candidate.filename}
                                   </p>
                                   <p className="mt-1 text-xs text-muted-foreground">
@@ -4633,7 +4665,7 @@ export function SettingsPanel() {
                                 className="grid gap-3 border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
                               >
                                 <div className="min-w-0">
-                                  <p className="truncate text-xs text-foreground">
+                                  <p className="truncate font-mono text-xs text-foreground">
                                     {candidate.key}
                                   </p>
                                   <p className="mt-1 text-xs text-muted-foreground">
@@ -4664,7 +4696,7 @@ export function SettingsPanel() {
                                       })}
                                     </p>
                                   )}
-                                  <p className="mt-1 truncate text-2xs text-muted-foreground">
+                                  <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
                                     {t("settings.backupSha256", {
                                       digest: `${candidate.archive_sha256?.slice(0, 16) ?? uiText("unavailable")}…`,
                                     })}
@@ -4705,7 +4737,7 @@ export function SettingsPanel() {
                                 className="grid gap-3 border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
                               >
                                 <div className="min-w-0">
-                                  <p className="truncate text-xs text-foreground">
+                                  <p className="truncate font-mono text-xs text-foreground">
                                     {candidate.key}
                                   </p>
                                   <p className="mt-1 text-xs text-muted-foreground">
@@ -4716,7 +4748,7 @@ export function SettingsPanel() {
                                       value4: String(candidate.app_version ?? ""),
                                     })}
                                   </p>
-                                  <p className="mt-1 truncate text-2xs text-muted-foreground">
+                                  <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
                                     {t("settings.backupSha256", {
                                       digest: `${candidate.archive_sha256?.slice(0, 16) ?? uiText("unavailable")}…`,
                                     })}
@@ -4758,33 +4790,33 @@ export function SettingsPanel() {
                                   })}
                                 </span>
                               </div>
-                              <p className="mt-1 truncate text-2xs text-muted-foreground">
+                              <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
                                 {backup.backup_id}
                               </p>
-                              <p className="mt-1 truncate text-2xs text-muted-foreground">
+                              <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
                                 {t("settings.backupSourceLocator", {
                                   source: backup.namespace
                                     ? `${backup.namespace} · ${backup.source_ref?.slice(0, 16) ?? "legacy source"}`
                                     : (backup.source_ref?.slice(0, 16) ?? "legacy source"),
                                 })}
                               </p>
-                              <p className="mt-1 truncate text-2xs text-muted-foreground">
+                              <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
                                 {t("settings.backupProviderRef", {
                                   provider: shortOpaque(backup.provider_ref),
                                 })}
                               </p>
                               {backup.key && (
-                                <p className="mt-1 truncate text-2xs text-muted-foreground">
+                                <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
                                   {t("settings.backupExactKey", { key: backup.key })}
                                 </p>
                               )}
                               {backup.prefix && (
-                                <p className="mt-1 truncate text-2xs text-muted-foreground">
+                                <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
                                   {t("settings.backupPrefix", { prefix: backup.prefix })}
                                 </p>
                               )}
                               {backup.archive_sha256 && (
-                                <p className="mt-1 truncate text-2xs text-muted-foreground">
+                                <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
                                   {t("settings.backupSha256", {
                                     digest: shortOpaque(backup.archive_sha256),
                                   })}
@@ -4963,6 +4995,7 @@ export function SettingsPanel() {
                 )}
 
                 <SettingsCard
+                  icon={Sun}
                   title={t("Theme and language")}
                   description={t("Theme and language apply to this browser.")}
                 >
@@ -5006,6 +5039,7 @@ export function SettingsPanel() {
                 </SettingsCard>
 
                 <SettingsCard
+                  icon={Printer}
                   title={uiText("Printer cards")}
                   description={uiText(
                     "Choose whether printer cards include a visual. Plain cards remain more compact and information-dense.",
@@ -5021,20 +5055,39 @@ export function SettingsPanel() {
                           {uiText("Adds a brand-neutral printer visual above each card.")}
                         </p>
                       </div>
-                      <SettingsSwitch
-                        checked={showPrinterCardImage}
-                        onChange={(checked) => {
-                          if (checked) setPrinterImageWarningOpen(true);
-                          else updatePrinterCardImagePreference(false);
-                        }}
-                        label={uiText("Show printer image on printer cards")}
-                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-label={uiText("Show printer image on printer cards")}
+                          aria-checked={showPrinterCardImage}
+                          onClick={() => {
+                            if (showPrinterCardImage) updatePrinterCardImagePreference(false);
+                            else setPrinterImageWarningOpen(true);
+                          }}
+                          className={`relative inline-flex h-5 w-9 shrink-0 items-center border transition-colors ${
+                            showPrinterCardImage
+                              ? "border-primary bg-primary"
+                              : "border-input bg-muted"
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 bg-primary-foreground transition-transform ${
+                              showPrinterCardImage ? "translate-x-4" : "translate-x-0"
+                            }`}
+                          />
+                        </button>
+                        <span className="text-xs text-foreground">
+                          {showPrinterCardImage ? uiText("On") : uiText("Off")}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </SettingsCard>
 
                 {/* Print tracking behaviour */}
                 <SettingsCard
+                  icon={Printer}
                   title={uiText("Print tracking")}
                   description={uiText(
                     "Automatically promote a revision to known-good after its first successful print. A manual failed/archived verdict is never overridden.",
@@ -5045,24 +5098,43 @@ export function SettingsPanel() {
                       <span className="text-[13px] text-foreground">
                         {uiText("Auto-mark known good on successful print")}
                       </span>
-                      <SettingsSwitch
-                        checked={autoMarkKnownGood}
-                        onChange={saveAutoMarkKnownGood}
-                        label={uiText("Auto-mark known good on successful print")}
-                        disabled={
-                          !user?.is_superuser ||
-                          !remoteConfigData ||
-                          remoteConfig.isError ||
-                          preferenceCommand.blocked ||
-                          backupPolicy.isPending
-                        }
-                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-label={uiText("Auto-mark known good on successful print")}
+                          aria-checked={autoMarkKnownGood}
+                          disabled={
+                            !user?.is_superuser ||
+                            !remoteConfigData ||
+                            remoteConfig.isError ||
+                            preferenceCommand.blocked ||
+                            backupPolicy.isPending
+                          }
+                          onClick={() => saveAutoMarkKnownGood(!autoMarkKnownGood)}
+                          className={`relative inline-flex h-5 w-9 shrink-0 items-center border transition-colors disabled:opacity-50 ${
+                            autoMarkKnownGood
+                              ? "border-primary bg-primary"
+                              : "border-input bg-muted"
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform bg-white transition-transform ${
+                              autoMarkKnownGood ? "translate-x-4" : "translate-x-0"
+                            }`}
+                          />
+                        </button>
+                        <span className="text-xs text-foreground">
+                          {autoMarkKnownGood ? uiText("On") : uiText("Off")}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </SettingsCard>
 
                 {/* Currency for cost tracking */}
                 <SettingsCard
+                  icon={Coins}
                   title={uiText("Currency")}
                   description={uiText(
                     "Currency used to display cost figures in statistics and filament pricing.",
@@ -5098,6 +5170,7 @@ export function SettingsPanel() {
 
                 {/* Card metrics picker */}
                 <SettingsCard
+                  icon={Palette}
                   title={uiText("Model card metrics")}
                   description={uiText(
                     "Choose which 3 stats appear on each model card in the grid.",
@@ -5138,6 +5211,7 @@ export function SettingsPanel() {
                 </SettingsCard>
 
                 <SettingsCard
+                  icon={Info}
                   title={uiText("Model metadata")}
                   description={uiText("Choose which metadata fields appear on model detail pages.")}
                   action={
@@ -5197,6 +5271,7 @@ export function SettingsPanel() {
               <div className="settings-grouped">
                 {user?.is_superuser && (
                   <SettingsCard
+                    icon={Gpu}
                     title={t("gpu.server.title")}
                     description={t("gpu.server.description")}
                     action={
@@ -5214,6 +5289,7 @@ export function SettingsPanel() {
                   </SettingsCard>
                 )}
                 <SettingsCard
+                  icon={Gpu}
                   title={uiText("3D rendering")}
                   description={uiText("Choose how 3D models are rendered in this browser.")}
                 >
@@ -5262,6 +5338,7 @@ export function SettingsPanel() {
                 )}
 
                 <SettingsCard
+                  icon={Eye}
                   title={uiText("Interactive previews")}
                   description={uiText(
                     "Balance sharpness against GPU use in the 3D Model and G-code viewers. This preference is saved in this browser.",
@@ -5320,6 +5397,7 @@ export function SettingsPanel() {
                 </SettingsCard>
 
                 <SettingsCard
+                  icon={Images}
                   title={uiText("Model preview images")}
                   description={uiText(
                     "Choose the resolution of generated Model card images. Higher settings take longer to render and use more memory and storage.",
@@ -5483,7 +5561,7 @@ export function SettingsPanel() {
                     </div>
                   </>
                 ) : (
-                  <div className="settings-inline-groups">
+                  <div className="settings-inline-groups divide-y divide-border overflow-hidden border border-border bg-card">
                     {trashRetentionCard}
                     {trashItemsCard}
                   </div>
@@ -5494,6 +5572,7 @@ export function SettingsPanel() {
             {activeSection === "about" && (
               <div className="settings-grouped">
                 <SettingsCard
+                  icon={Info}
                   title={uiText("Version")}
                   description={uiText("Self-hosted asset management for 3D printing workflows.")}
                   action={
@@ -5569,7 +5648,7 @@ export function SettingsPanel() {
                               : uiText("API server status and version")}
                         </p>
                       </div>
-                      <span className="text-[13px] text-foreground">
+                      <span className="font-mono text-[13px] text-foreground">
                         {health?.version
                           ? uiText("v{value1}", { value1: health.version })
                           : uiText("Loading…")}
@@ -5577,12 +5656,15 @@ export function SettingsPanel() {
                     </div>
                     <div className="settings-readonly-row">
                       <p className="text-[13px] font-medium text-foreground">{uiText("Source")}</p>
-                      <span className="text-[13px] text-foreground">{GITHUB_REPO_LABEL}</span>
+                      <span className="font-mono text-[13px] text-foreground">
+                        {GITHUB_REPO_LABEL}
+                      </span>
                     </div>
                   </div>
                 </SettingsCard>
 
                 <SettingsCard
+                  icon={FileText}
                   title={uiText("Latest changes")}
                   description={uiText("What changed in the current release")}
                 >

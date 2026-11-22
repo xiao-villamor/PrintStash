@@ -1,4 +1,4 @@
-import { AlertCircle, AlertTriangle, CheckCircle2, Info } from "lucide-react";
+import { AlertCircle, AlertTriangle, CheckCircle2, Info, type LucideIcon } from "lucide-react";
 import type * as React from "react";
 import { useUiLocale } from "@/lib/i18n";
 import { uiText } from "@/lib/locale";
@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 
 // Consistent card shell used across every settings section.
 export function SettingsCard({
+  icon: Icon,
   title,
   description,
   action,
@@ -16,6 +17,7 @@ export function SettingsCard({
   stackActionOnMobile = false,
   hideHeader = false,
 }: {
+  icon?: LucideIcon;
   title: string;
   description?: string;
   action?: React.ReactNode;
@@ -37,6 +39,7 @@ export function SettingsCard({
     >
       {!hideHeader && (
         <SettingsGroupHead
+          icon={Icon}
           title={title}
           description={description}
           action={action}
@@ -153,11 +156,12 @@ export function SettingsStatus({
 }
 
 /**
- * The one group heading in Settings: the title, a description at reading
- * width and the group's actions on the right, above a fine rule. Panels
+ * The one group heading in Settings: a 32px icon tile, the title, a
+ * description at reading width and the group's actions on the right. Panels
  * that are not a SettingsCard use this directly instead of rebuilding it.
  */
 export function SettingsGroupHead({
+  icon: Icon,
   title,
   description,
   action,
@@ -166,6 +170,7 @@ export function SettingsGroupHead({
   stackActionOnMobile = false,
   className,
 }: {
+  icon?: LucideIcon;
   title: React.ReactNode;
   description?: React.ReactNode;
   action?: React.ReactNode;
@@ -184,11 +189,18 @@ export function SettingsGroupHead({
         className,
       )}
     >
-      <div className="min-w-0">
-        <Heading id={id} className="text-sm font-semibold text-foreground">
-          {title}
-        </Heading>
-        {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
+      <div className="flex min-w-0 items-start gap-3">
+        {Icon && (
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center bg-muted text-foreground">
+            <Icon className="h-4 w-4" aria-hidden />
+          </div>
+        )}
+        <div className="min-w-0">
+          <Heading id={id} className="text-sm font-semibold text-foreground">
+            {title}
+          </Heading>
+          {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
+        </div>
       </div>
       {action && (
         <div

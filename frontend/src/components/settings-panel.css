@@ -1,79 +1,97 @@
-/* Open rows: every section is one reading column. A group is a heading over a
-   fine rule and its rows; there is no frame, tile or indent around it. */
-.settings-column {
-  width: 100%;
-  max-width: 47.5rem;
-  margin-inline: auto;
+.settings-grouped {
+  border: 1px solid var(--border);
+  background: var(--card);
 }
 
-.settings-main .settings-card {
-  overflow: visible;
+.settings-imports {
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.settings-maintenance {
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.settings-notifications {
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.settings-maintenance > .bg-card {
   border: 0;
   border-radius: 0;
-  background: transparent;
   box-shadow: none;
 }
 
-.settings-main .settings-flat {
-  overflow: visible;
+.settings-maintenance > .bg-card + .bg-card {
+  border-top: 1px solid var(--border);
+}
+
+.settings-imports > .bg-card,
+.settings-imports fieldset > section {
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0;
+}
+
+.settings-imports > .bg-card {
+  border-top: 0;
+}
+
+.settings-imports fieldset {
+  margin-top: 0;
+}
+
+.settings-grouped > .settings-card,
+.settings-inline-groups > .settings-card {
   border: 0;
   border-radius: 0;
-  background: transparent;
   box-shadow: none;
 }
 
-.settings-main .settings-card + .settings-card,
-.settings-main .settings-flat + .settings-flat,
-.settings-main .settings-card-head:not(:first-child),
-.settings-storage-pane > * + * {
-  margin-top: 36px;
+.settings-grouped > .settings-card + .settings-card,
+.settings-inline-groups > .settings-card + .settings-card {
+  border-top: 1px solid var(--border);
 }
 
-.settings-main .settings-card-head {
-  padding: 0 0 10px;
-  border-bottom: 1px solid var(--border);
+.settings-grouped > .settings-card > .settings-card-head,
+.settings-inline-groups > .settings-card > .settings-card-head {
+  border: 0;
+  padding-bottom: 12px;
 }
 
-.settings-main .settings-card-head :is(h2, h3) {
-  font-size: 15px;
-}
-
-.settings-main .settings-card > :not(.settings-card-head):not(.settings-card-foot) {
-  padding-top: 8px;
-  padding-right: 0;
+.settings-grouped > .settings-card > :not(.settings-card-head),
+.settings-inline-groups > .settings-card > :not(.settings-card-head) {
+  margin-left: 64px;
+  padding-top: 0;
   padding-left: 0;
-}
-
-.settings-imports > * + * {
-  margin-top: 36px;
-}
-
-/* One typeface: technical values stay in the interface font too. */
-.settings-main :is(code, kbd, samp, pre) {
-  font-family: inherit;
-}
-
-/* Inline guided setup sits on the column edge; its dialog keeps its padding. */
-.settings-main .settings-flush > fieldset > :is(ol, div, section) {
-  padding-inline: 0;
-}
-
-.settings-main .settings-flush > fieldset > ol {
-  background: transparent;
 }
 
 .settings-grouped > [role="alert"],
 .settings-grouped > [role="status"] {
-  padding: 12px 0;
+  padding: 16px 20px;
 }
 
 .settings-card-foot {
   display: flex;
   justify-content: flex-end;
-  padding: 12px 0 0;
+  padding: 4px 20px 16px;
+}
+
+.settings-grouped > .settings-card > .settings-card-foot,
+.settings-inline-groups > .settings-card > .settings-card-foot {
+  padding-left: 0;
+}
+
+.settings-preference-fields {
+  padding-right: 20px;
+  padding-bottom: 12px;
 }
 
 .settings-safety-rows {
+  padding-right: 20px;
+  padding-bottom: 4px;
   font-size: 13px;
 }
 
@@ -95,7 +113,7 @@
 
 .settings-safety-rows dd {
   text-align: right;
-  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -120,6 +138,17 @@
   margin: 12px 0 0 auto;
 }
 
+.settings-storage-pane > .bg-card,
+.settings-storage-pane > [data-slot="card"] {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.settings-storage-pane > * + * {
+  border-top: 1px solid var(--border);
+}
+
 .settings-storage-summary > div {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -142,15 +171,21 @@
   max-width: 44ch;
   overflow-wrap: anywhere;
   text-align: right;
-  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
-.settings-main .settings-storage-migration > .settings-card-head {
+.settings-storage-migration > .settings-card-head {
   border-bottom: 0;
 }
 
 @media (max-width: 767px) {
+  .settings-grouped > .settings-card > :not(.settings-card-head),
+  .settings-inline-groups > .settings-card > :not(.settings-card-head) {
+    margin-left: 16px;
+    padding-right: 16px;
+  }
+
   .settings-preference-row {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
@@ -174,9 +209,8 @@
   line-height: 18px;
 }
 
-/* Keeps the shared menu arrow inside the field beside the selected value. */
 .settings-main select {
-  display: inline-flex;
+  padding-right: 28px;
 }
 
 .settings-main textarea {
@@ -194,6 +228,19 @@
   display: none;
 }
 
+.settings-main [role="switch"] {
+  border: 0;
+}
+
+.settings-main [role="switch"][aria-checked="false"] {
+  background: var(--input);
+}
+
+.settings-main [role="switch"] > span {
+  margin-left: 2px;
+  background: var(--card);
+}
+
 /* Statuses are aligned mono text, never pills. */
 .settings-main [data-slot="badge"] {
   height: auto;
@@ -202,7 +249,7 @@
   border-radius: 0;
   background: none;
   color: var(--muted-foreground);
-  font: 500 12px/1.4 var(--font-sans);
+  font: 500 12px/1.4 var(--font-mono);
   gap: 6px;
 }
 
@@ -225,7 +272,7 @@
   gap: 6px;
   white-space: nowrap;
   color: var(--muted-foreground);
-  font: 500 12px/1.4 var(--font-sans);
+  font: 500 12px/1.4 var(--font-mono);
 }
 
 .settings-status[data-tone="danger"] {
@@ -240,7 +287,7 @@
   background: var(--warning);
 }
 
-/* Group heads: title and description wrapped at reading width. */
+/* Group heads: 32px icon tile, title, description wrapped at reading width. */
 .settings-main .settings-card-head p {
   max-width: 72ch;
   line-height: 1.5;
@@ -252,7 +299,7 @@
 
 /* Rows: label and hint on the left, control on the right. */
 .settings-preference-row {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 280px);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 320px);
   align-items: center;
 }
 
@@ -413,7 +460,17 @@
 
 /* Body of a group inside panels that do not use the grouped indent rule. */
 .settings-section-body {
-  padding: 8px 0 0;
+  padding: 0 20px 16px 64px;
+}
+
+@media (max-width: 767px) {
+  .settings-section-body {
+    padding: 0 16px 16px;
+  }
+}
+
+.settings-grouped > .settings-card > .settings-section-body {
+  padding-left: 0;
 }
 
 .settings-main [role="alert"],
@@ -439,6 +496,12 @@
   .settings-preference-row > [role="switch"] {
     justify-self: start;
   }
+}
+
+/* A group head outside a SettingsCard: no rule under it, like grouped cards. */
+.settings-card-head.settings-card-head--flush {
+  border-bottom: 0;
+  padding-bottom: 12px;
 }
 
 .settings-main {

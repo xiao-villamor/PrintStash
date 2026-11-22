@@ -2,7 +2,7 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, HardDrive } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Database, HardDrive, ShieldCheck } from "lucide-react";
 
 import { AuditSchedulePanel } from "@/components/audit-schedule-panel";
 
@@ -165,18 +165,16 @@ export function MaintenancePanel() {
   if (commands.retired) return null;
   return (
     <div className="settings-grouped settings-maintenance">
-      <Card
-        role="region"
-        aria-labelledby="maintenance-heading"
-        className="settings-flat overflow-hidden"
-      >
+      <Card role="region" aria-labelledby="maintenance-heading" className="overflow-hidden">
         <SettingsGroupHead
+          icon={ShieldCheck}
           level={2}
           id="maintenance-heading"
           title={t("maintenance.checkNow")}
           description={t("maintenance.checkNowDescription")}
+          className="settings-card-head--flush"
         />
-        <CardContent className="space-y-4 p-0 pt-2">
+        <CardContent className="space-y-4 px-4 pb-4 pt-0 sm:pl-16 sm:pr-5">
           <div className="divide-y divide-border">
             <div className="flex flex-col items-stretch gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
@@ -433,6 +431,7 @@ export function MaintenancePanel() {
       <AuditSchedulePanel />
 
       <SettingsCard
+        icon={Database}
         title={t("maintenance.backupTitle")}
         description={t("maintenance.backupDescription")}
       >
@@ -476,7 +475,7 @@ export function MaintenancePanel() {
                         <summary className="cursor-action font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                           {t("maintenance.backupDetails")}
                         </summary>
-                        <div className="mt-2 space-y-1 break-all text-2xs">
+                        <div className="mt-2 space-y-1 break-all font-mono text-2xs">
                           <p>
                             {t("settings.backupSourceLocator", {
                               source: item.source_ref ?? t("settings.backupSourceUnavailable"),

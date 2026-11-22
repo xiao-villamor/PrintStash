@@ -35,7 +35,7 @@ test.describe("Library shell navigation", () => {
 
     await expect(page.getByRole("navigation", { name: "Settings sections" })).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Overview", exact: true, level: 1 }),
+      page.getByRole("heading", { name: "Settings", exact: true, level: 1 }),
     ).toBeVisible();
     await expect(rail.getByRole("link", { name: "Settings", exact: true })).toHaveAttribute(
       "aria-current",

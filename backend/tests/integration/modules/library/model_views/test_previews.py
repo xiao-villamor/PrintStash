@@ -42,6 +42,46 @@ class TestSummaries:
             for image in result.source_images
         )
 
+    def test_keeps_the_gallery_beside_embedded_archive_images(
+        self,
+        db_session,
+        make_model,
+        make_file,
+        make_derivative,
+        make_provenance_source,
+        make_cover,
+    ):
+        import json
+
+        from app.db.models import DerivativeKind, FileType
+
+        model = make_model()
+        archive = make_file(
+            model, filename="plate.gcode.3mf", file_type=FileType.THREE_MF
+        )
+        make_derivative(
+            archive,
+            DerivativeKind.METADATA,
+            output_json=json.dumps(
+                {
+                    "geometry": "gcode_only",
+                    "source_sha256": archive.sha256,
+                    "archive_images": [
+                        {
+                            "member": "Metadata/plate_1.png",
+                            "plate": 1,
+                            "media_type": "image/png",
+                        }
+                    ],
+                }
+            ),
+        )
+        source = make_provenance_source(model)
+        make_cover(source, position=0)
+        result = summaries(db_session, [model])[model.id]
+        assert [image.position for image in result.source_images] == [0]
+        assert [image.plate for image in result.archive_images] == [1]
+
     def test_does_not_publish_private_gallery_in_shared_previews(
         self, db_session, make_model, make_provenance_source, make_cover
     ):

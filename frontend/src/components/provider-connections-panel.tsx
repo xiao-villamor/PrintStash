@@ -6,6 +6,7 @@ import { SettingsGroupHead } from "@/components/settings-card";
 import { currentLocale } from "@/lib/locale";
 
 import { useEffect, useRef, useState } from "react";
+import { CloudUpload, ExternalLink } from "lucide-react";
 
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Modal } from "@/components/ui/modal";
@@ -243,15 +244,17 @@ export function ProviderConnectionsPanel({
       <fieldset disabled={busy !== null || Boolean(loadError)} className="min-w-0">
         <section
           aria-labelledby="provider-connections-title"
-          className="settings-flat overflow-hidden rounded border border-border bg-card"
+          className="overflow-hidden rounded border border-border bg-card"
         >
           <SettingsGroupHead
+            icon={CloudUpload}
             level={2}
             id="provider-connections-title"
             title={t("settings.providerConnections.title")}
             description={t("settings.providerConnections.description")}
+            className="settings-card-head--flush"
           />
-          <div className="pt-1">
+          <div className="space-y-0 px-4 pb-4 sm:pl-16 sm:pr-5">
             {error && (
               <p role="alert" className="text-sm text-destructive">
                 {error}
@@ -363,9 +366,10 @@ export function ProviderConnectionsPanel({
 
         <section
           aria-labelledby="paired-browsers-title"
-          className="settings-flat overflow-hidden rounded border border-border bg-card"
+          className="overflow-hidden rounded border border-border bg-card"
         >
           <SettingsGroupHead
+            icon={ExternalLink}
             level={2}
             id="paired-browsers-title"
             title={t("settings.pairedBrowsers.title")}
@@ -380,14 +384,15 @@ export function ProviderConnectionsPanel({
                 {t("settings.pairedBrowsers.createCode")}
               </Button>
             }
+            className="settings-card-head--flush"
           />
-          <div className="space-y-4 pt-3">
+          <div className="space-y-4 px-4 pb-4 sm:pl-16 sm:pr-5">
             {pairing && (
               <div className="border border-border bg-card p-3" role="status">
                 <p className="text-xs text-muted-foreground">
                   {t("settings.pairedBrowsers.codeHelp")}
                 </p>
-                <code className="mt-2 block select-all break-all border border-border bg-background px-3 py-2 text-sm text-foreground">
+                <code className="mt-2 block select-all break-all border border-border bg-background px-3 py-2 font-mono text-sm text-foreground">
                   {pairing.code}
                 </code>
                 <p className="mt-2 text-xs text-muted-foreground">

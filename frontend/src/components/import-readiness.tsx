@@ -20,7 +20,7 @@ export function ImportReadiness({
   const active = devices.filter((device) => device.revoked_at === null);
   return (
     <section
-      className="settings-flat overflow-hidden border border-border bg-card"
+      className="overflow-hidden border border-border bg-card"
       aria-label={uiText("Import readiness")}
     >
       <SettingsGroupHead
@@ -29,7 +29,7 @@ export function ImportReadiness({
           "Pairing, provider configuration and a tested download are different checks.",
         )}
       />
-      <dl className="grid grid-cols-2 gap-2 py-3 text-sm">
+      <dl className="grid grid-cols-2 gap-2 px-5 py-3 text-sm">
         <dt>{uiText("Vault connection")}</dt>
         <dd>{uiText("Responded at the last check")}</dd>
         <dt>{uiText("Paired browsers")}</dt>
@@ -46,14 +46,14 @@ export function ImportReadiness({
         <dt>{uiText("Staging capacity")}</dt>
         <dd>{uiText("Checked when reserving an upload")}</dd>
       </dl>
-      <p className="pb-3 text-xs text-muted-foreground">
+      <p className="px-5 pb-3 text-xs text-muted-foreground">
         {uiText("Status read at")}{" "}
         <time dateTime={new Date(checkedAt).toISOString()}>
           {new Date(checkedAt).toLocaleString()}
         </time>
       </p>
       {user?.is_superuser && (
-        <div className="flex flex-wrap gap-3 border-t border-border py-3 text-xs">
+        <div className="flex flex-wrap gap-3 border-t border-border px-5 py-3 text-xs">
           <Link className="underline" href="/settings?section=storage">
             {uiText("Storage")}
           </Link>

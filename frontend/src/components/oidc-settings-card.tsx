@@ -4,7 +4,7 @@ import { uiText } from "@/lib/locale";
 import { useI18n, useUiLocale } from "@/lib/i18n";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, ShieldCheck, SlidersHorizontal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { SettingsCard, SettingsSwitch } from "@/components/settings-card";
@@ -221,6 +221,7 @@ function OidcEditor({
     <Localized>
       <div className="settings-grouped">
         <SettingsCard
+          icon={ShieldCheck}
           title={uiText("OpenID Connect")}
           description={uiText(
             "Connect Authentik, Authelia, Keycloak, or another standards-compatible identity provider. Local login stays available.",
@@ -397,6 +398,7 @@ function OidcEditor({
         </SettingsCard>
 
         <SettingsCard
+          icon={SlidersHorizontal}
           title={uiText("Advanced mapping")}
           description={uiText("Scopes, claims and callback overrides for your identity provider.")}
           footer={

@@ -625,6 +625,7 @@ export function NotificationsPanel({
         <fieldset className="min-w-0" disabled={busy !== null || Boolean(settingsQuery.error)}>
           {/* Master switch */}
           <SettingsGroupHead
+            icon={Bell}
             level={3}
             title={uiText("Channels")}
             description={uiText(
@@ -637,8 +638,9 @@ export function NotificationsPanel({
                 </Button>
               ) : undefined
             }
+            className="settings-card-head--flush"
           />
-          <div>
+          <div className="px-4 sm:pl-16 sm:pr-5">
             <label className="settings-preference-row">
               <span>
                 <span className="block">{uiText("Notifications")}</span>
@@ -646,7 +648,7 @@ export function NotificationsPanel({
                   {uiText("Turn every channel on or off at once. Channels keep their settings.")}
                 </span>
               </span>
-              <span className="settings-row-switch inline-flex items-center gap-2">
+              <span className="inline-flex items-center gap-2">
                 <span className="relative inline-flex h-5 w-9 shrink-0 items-center">
                   <input
                     type="checkbox"
@@ -657,12 +659,12 @@ export function NotificationsPanel({
                   />
                   <span
                     aria-hidden
-                    className="absolute inset-0 border border-muted-foreground transition-colors duration-press peer-checked:border-primary peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:opacity-50"
+                    className="absolute inset-0 border border-input bg-muted peer-checked:border-primary peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:opacity-50"
                   >
                     <span
                       className={cn(
-                        "absolute left-0.5 top-0.5 h-3.5 w-3.5 transition-[background-color,transform] duration-press",
-                        enabled ? "translate-x-4 bg-primary-foreground" : "bg-muted-foreground",
+                        "absolute left-0 top-0 h-4 w-4 bg-primary-foreground transition-transform",
+                        enabled && "translate-x-4",
                       )}
                     />
                   </span>
@@ -721,7 +723,7 @@ export function NotificationsPanel({
 
           {/* Channel list */}
           {canEdit && (
-            <div>
+            <div className="px-4 sm:pl-16 sm:pr-5">
               {channels.length === 0 && !draft && (
                 <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
                   <Bell className="h-7 w-7 text-muted-foreground/50" />
@@ -910,14 +912,14 @@ export function NotificationsPanel({
         )}
         {deliveriesQuery.isPending && <p role="status">{uiText("Loading delivery history…")}</p>}
         {canEdit && !deliveriesQuery.error && deliveries && (
-          <div className="mt-9">
-            <div className="border-b border-border pb-2.5">
-              <h4 className="text-[15px] font-semibold text-foreground">
+          <div className="border-t border-border">
+            <div className="px-4 py-4 sm:px-5">
+              <h4 className="text-sm font-semibold text-foreground">
                 {uiText("Recent deliveries")}
               </h4>
             </div>
             {deliveries.length === 0 && (
-              <p className="pt-2 text-sm text-muted-foreground">
+              <p className="px-4 pb-4 text-sm text-muted-foreground sm:pl-16">
                 {uiText("No notification deliveries yet.")}
               </p>
             )}
@@ -929,7 +931,7 @@ export function NotificationsPanel({
                     key={d.id}
                     className="px-4 py-2 flex items-center justify-between gap-3 text-xs"
                   >
-                    <span className="text-muted-foreground truncate">
+                    <span className="font-mono text-muted-foreground truncate">
                       {EVENTS.find((e) => e.value === d.event_type)?.label ?? d.event_type}
                     </span>
                     <div className="flex items-center gap-2 flex-shrink-0">

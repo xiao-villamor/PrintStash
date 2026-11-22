@@ -227,9 +227,9 @@ export function SpoolmanConnectCard({
 
   return (
     <Localized>
-      <div className="settings-flat overflow-hidden border border-border bg-card">
+      <div className="overflow-hidden border border-border bg-card">
         {actionHost && actions ? createPortal(actions, actionHost) : null}
-        <div className="space-y-1">
+        <div className="space-y-1 p-4 sm:p-5">
           {!canEdit ? (
             <p className="text-xs text-muted-foreground italic">
               {uiText("Only an administrator can configure Spoolman.")}
@@ -439,7 +439,7 @@ export function SpoolmanConnectCard({
                             ) : null}
                           </span>
                         </span>
-                        <span className="text-xs text-muted-foreground flex-shrink-0">
+                        <span className="font-mono text-xs text-muted-foreground flex-shrink-0">
                           {uiText("{value1} left", {
                             value1: String(formatGrams(s.remaining_weight) ?? ""),
                           })}

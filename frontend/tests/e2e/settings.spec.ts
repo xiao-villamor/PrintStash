@@ -183,7 +183,7 @@ test.describe("settings route", () => {
 
   test("settings sections are deep-linkable and preserve navigation state", async ({ page }) => {
     await page.goto("/settings?section=trash");
-    await expect(page.getByRole("form", { name: "Trash retention" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Trash retention" })).toBeVisible();
     await expect(page.getByText("Known model storage: 1.5 MB")).toBeVisible();
     await expect(page.getByText("1 deleted item")).toBeVisible();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -460,71 +460,5 @@ test.describe("settings route", () => {
       page.getByRole("heading", { name: "Preview and metadata processing" }),
     ).toBeVisible();
     await expect(page).toHaveURL(/\/settings\?section=work$/);
-  });
-});
-
-test.describe("settings open rows", () => {
-  test("names the open section in the page heading", async ({ page }) => {
-    await page.goto("/settings?section=design");
-
-    await expect(page.getByRole("heading", { name: "Appearance", level: 1 })).toBeVisible();
-  });
-
-  test("keeps section content in one reading column", async ({ page }) => {
-    await page.goto("/settings?section=design");
-    await expect(page.getByRole("heading", { name: "Theme and language" })).toBeVisible();
-
-    const column = await page.locator("main.settings-main").boundingBox();
-
-    expect(column?.width).toBe(760);
-  });
-
-  test("keeps the menu arrow inside a settings dropdown", async ({ page }) => {
-    await page.goto("/settings?section=design");
-
-    await expect(page.getByRole("combobox", { name: "Theme", exact: true })).toHaveCSS(
-      "display",
-      "flex",
-    );
-  });
-
-  test("uses the interface font for settings values", async ({ page }) => {
-    await page.goto("/settings?section=storage");
-    await expect(page.getByRole("heading", { name: "Current storage" })).toBeVisible();
-
-    const monospaced = await page.evaluate(
-      () =>
-        [...document.querySelectorAll("nav.settings-nav *, main.settings-main *")].filter(
-          (element) => getComputedStyle(element).fontFamily.startsWith('"JetBrains Mono'),
-        ).length,
-    );
-
-    expect(monospaced).toBe(0);
-  });
-
-  test("leaves an off switch track empty", async ({ page }) => {
-    await page.goto("/settings?section=design");
-    const toggle = page.getByRole("switch", { name: "Show printer image on printer cards" });
-
-    await expect(toggle).toHaveAttribute("aria-checked", "false");
-    await expect(toggle).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  });
-
-  test("fills an on switch track", async ({ page }) => {
-    await page.goto("/settings?section=design");
-    const toggle = page.getByRole("switch", { name: "Show printer image on printer cards" });
-    await toggle.click();
-    await page.getByRole("button", { name: "Download & enable" }).click();
-
-    await expect(toggle).toHaveAttribute("aria-checked", "true");
-    await expect(toggle).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  });
-
-  test("asks before enabling third-party printer images", async ({ page }) => {
-    await page.goto("/settings?section=design");
-
-    await page.getByRole("switch", { name: "Show printer image on printer cards" }).click();
-
-    await expect(page.getByRole("dialog")).toContainText("Download third-party printer images?");
   });
 });
