@@ -1,3 +1,4 @@
+import { vaultFetch } from "./vault-fetch.ts";
 import { CaptureAuthenticationError } from "./core.ts";
 
 export interface CaptureDestination {
@@ -27,7 +28,7 @@ export async function captureDestinations(options: {
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<CaptureDestination[]> {
-  const response = await (options.fetchImpl ?? fetch)(
+  const response = await (options.fetchImpl ?? vaultFetch)(
     `${options.vault.replace(/\/$/, "")}/api/v1/inbox/capture-destinations?q=${encodeURIComponent(options.query)}`,
     {
       headers: { Authorization: `Bearer ${options.authorization}` },

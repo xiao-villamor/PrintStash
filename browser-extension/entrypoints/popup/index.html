@@ -253,6 +253,9 @@
               </div>
             </div>
             <p id="connection-feedback" class="connection-feedback" role="alert" hidden></p>
+            <button id="open-server" class="text-button text-action" type="button" hidden>
+              Open server in a tab
+            </button>
             <form id="connection-form">
               <label>
                 Server URL
@@ -341,6 +344,43 @@
                 />
               </label>
               <p id="device-name-error" class="connection-feedback" role="alert" hidden></p>
+              <div id="plain-http" class="plain-http" hidden>
+                <p id="plain-http-detail" class="connection-feedback" role="alert"></p>
+                <label class="launcher-switch">
+                  <span>Connect over HTTP anyway</span>
+                  <input
+                    id="plain-http-confirm"
+                    class="visually-hidden"
+                    type="checkbox"
+                    role="switch"
+                  />
+                  <span class="switch-track" aria-hidden="true"></span>
+                  <span class="switch-state" aria-hidden="true"
+                    ><span>Off</span><span>On</span></span
+                  >
+                </label>
+              </div>
+              <div id="marketplace-access-row">
+                <label class="launcher-switch">
+                  <span>Allow supported marketplaces</span>
+                  <input
+                    id="marketplace-access"
+                    class="visually-hidden"
+                    type="checkbox"
+                    role="switch"
+                    aria-describedby="marketplace-access-hint"
+                    checked
+                  />
+                  <span class="switch-track" aria-hidden="true"></span>
+                  <span class="switch-state" aria-hidden="true"
+                    ><span>Off</span><span>On</span></span
+                  >
+                </label>
+                <p id="marketplace-access-hint" class="section-description">
+                  One browser prompt covers this server and every supported marketplace, so imports
+                  and the page button don't ask again.
+                </p>
+              </div>
               <button id="connect" class="primary" type="submit">Pair browser</button>
             </form>
           </section>

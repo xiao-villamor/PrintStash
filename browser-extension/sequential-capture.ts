@@ -1,3 +1,6 @@
+import { vaultFetch } from "./vault-fetch.ts";
+import { uploadSlotBytes } from "./slot-upload.ts";
+import type { ByteProgress } from "./transfer-progress.ts";
 import type { ImportIntent } from "./import-status.ts";
 import { validateCaptureProfile } from "./print-profile.ts";
 import type { CaptureSourceDraft, BrowserCaptureMessage } from "./capture-adapter.ts";
@@ -140,11 +143,13 @@ export async function captureSequentialFiles(options: {
     remove(keys: string | string[]): Promise<void>;
   };
   progress(message: string): void;
+  /** Bytes of the file being sent, when it goes in parts. */
+  uploadProgress?: ByteProgress;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<{ id: number }> {
   const { vault, authorization, source, candidates, storage, signal, progress } = options;
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = options.fetchImpl ?? vaultFetch;
   const base = vault.replace(/\/$/, "");
   const headers = { Authorization: `Bearer ${authorization}`, "Content-Type": "application/json" };
   async function request(path: string, init?: RequestInit): Promise<Response> {
@@ -166,6 +171,21 @@ export async function captureSequentialFiles(options: {
     support !== null &&
     "resumable_slots" in support &&
     support.resumable_slots === true;
+  const parts =
+    typeof support === "object" &&
+    support !== null &&
+    "upload_parts" in support &&
+    support.upload_parts === true;
+  const sendSlot = (slotId: string, file: Blob, mediaType: string) =>
+    uploadSlotBytes({
+      send: request,
+      server: base,
+      slotId,
+      file,
+      mediaType,
+      parts,
+      progress: options.uploadProgress,
+    });
   if (capability.status === 404 || (capability.ok && !resumable)) {
     if (options.gallery?.length)
       throw new CaptureRecoveryError("Update PrintStash to preserve the provider gallery.");
@@ -398,11 +418,7 @@ export async function captureSequentialFiles(options: {
         "PrintStash returned an invalid capture slot receipt. No bytes were sent to that slot.",
       );
     progress(`Transferring ${index + 1}/${candidates.length}: ${candidate.filename}`);
-    const uploaded = await request(`/capture-upload-slots/${encodeURIComponent(slot.id)}`, {
-      method: "PUT",
-      headers: { "Content-Type": upload.mediaType },
-      body: upload.file,
-    });
+    const uploaded = await sendSlot(slot.id, upload.file, upload.mediaType);
     if (!uploaded.ok)
       throw await CaptureRecoveryError.from(
         uploaded,
@@ -467,11 +483,7 @@ export async function captureSequentialFiles(options: {
       )
         throw new CaptureRecoveryError("Invalid gallery slot receipt. No image bytes were sent.");
       progress(`Transferring gallery image ${position + 1}/${images.length}`);
-      const uploaded = await request(`/capture-upload-slots/${encodeURIComponent(slot.id)}`, {
-        method: "PUT",
-        headers: { "Content-Type": upload.mediaType },
-        body: upload.file,
-      });
+      const uploaded = await sendSlot(slot.id, upload.file, upload.mediaType);
       if (!uploaded.ok)
         throw await CaptureRecoveryError.from(
           uploaded,
@@ -481,13 +493,10 @@ export async function captureSequentialFiles(options: {
   }
   if (coverSlot?.cover && coverSlot.state === "pending" && preparedCover) {
     progress("Transferring selected cover…");
-    const uploaded = await request(
-      `/capture-upload-slots/${encodeURIComponent(coverSlot.cover.id)}`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": preparedCover.declaration.media_type },
-        body: preparedCover.file,
-      },
+    const uploaded = await sendSlot(
+      coverSlot.cover.id,
+      preparedCover.file,
+      preparedCover.declaration.media_type,
     );
     if (!uploaded.ok)
       throw await CaptureRecoveryError.from(

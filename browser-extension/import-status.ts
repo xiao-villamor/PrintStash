@@ -1,3 +1,4 @@
+import { vaultFetch } from "./vault-fetch.ts";
 import { CaptureAuthenticationError, CaptureResponseError } from "./core.ts";
 
 export type ImportIntent = "import" | "review";
@@ -38,7 +39,7 @@ interface CaptureProgress {
 }
 
 export function captureAccount(vault: string, authorization: string, signal: AbortSignal) {
-  return fetch(`${vault}/api/v1/inbox/capture-capabilities`, {
+  return vaultFetch(`${vault}/api/v1/inbox/capture-capabilities`, {
     headers: { Authorization: `Bearer ${authorization}` },
     signal,
   }).then(async (response) => {
@@ -55,7 +56,7 @@ export async function canResumeCapture(
   itemId: number,
   signal: AbortSignal,
 ): Promise<boolean> {
-  const response = await fetch(`${vault}/api/v1/inbox/${itemId}/capture-upload`, {
+  const response = await vaultFetch(`${vault}/api/v1/inbox/${itemId}/capture-upload`, {
     headers: { Authorization: `Bearer ${authorization}` },
     signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
   });
@@ -68,7 +69,7 @@ export async function captureProgress(
   itemId: number,
   signal: AbortSignal,
 ): Promise<CaptureProgress> {
-  const response = await fetch(`${vault}/api/v1/inbox/${itemId}/capture-status`, {
+  const response = await vaultFetch(`${vault}/api/v1/inbox/${itemId}/capture-status`, {
     headers: { Authorization: `Bearer ${authorization}` },
     signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
   });

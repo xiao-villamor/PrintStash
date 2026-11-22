@@ -47,7 +47,7 @@ describe("transfer progress", () => {
     expect(values).toEqual([[5, 5]]);
     expect(response.status).toBe(507);
     expect(await response.text()).toBe("capacity");
-    expect(UploadRequest.instances[0].withCredentials).toBe(false);
+    expect(UploadRequest.instances[0].withCredentials).toBe(true);
     expect(UploadRequest.instances[0].headers.get("Authorization")).toBe("Bearer test-device");
   });
   it("aborts a transfer on connection retirement", async () => {

@@ -1,3 +1,4 @@
+import { vaultFetch } from "./vault-fetch.ts";
 import { captureUrlForVault } from "./core.ts";
 import { readBoundedMetadataResponse } from "./capture-adapter.ts";
 
@@ -21,7 +22,7 @@ export async function previousCaptures(
   vault: string,
   authorization: string,
   sourceUrl: string,
-  fetchImpl = fetch,
+  fetchImpl = vaultFetch,
 ): Promise<PreviousCapture[]> {
   const source = captureUrlForVault(sourceUrl);
   const response = await fetchImpl(

@@ -3302,6 +3302,10 @@
             "const": "managed",
             "title": "Storage",
             "type": "string"
+          },
+          "upload_parts": {
+            "title": "Upload Parts",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3314,6 +3318,7 @@
           "capture_preferences",
           "resumable_cover",
           "resumable_gallery",
+          "upload_parts",
           "owner_user_id"
         ],
         "title": "CaptureCapabilitiesRead",
@@ -4046,6 +4051,20 @@
           "sha256"
         ],
         "title": "CaptureUploadFileDeclaration",
+        "type": "object"
+      },
+      "CaptureUploadPartRead": {
+        "description": "Bytes the slot's spool holds after one part; the next part starts here.",
+        "properties": {
+          "received_bytes": {
+            "title": "Received Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "received_bytes"
+        ],
+        "title": "CaptureUploadPartRead",
         "type": "object"
       },
       "CaptureUploadSlotRead": {
@@ -33296,6 +33315,115 @@
           }
         ],
         "summary": "Put Capture Upload Slot",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/capture-upload-slots/{slot_id}/complete": {
+      "post": {
+        "description": "Verify the parts against the declared size and hash, then publish them.",
+        "operationId": "complete_capture_upload_slot_api_v1_inbox_capture_upload_slots__slot_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "title": "Slot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureUploadSlotRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Complete Capture Upload Slot",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/capture-upload-slots/{slot_id}/parts/{offset}": {
+      "put": {
+        "description": "Store one part of a slot's file; ``complete`` publishes the whole.\n\nProxies in front of a server often cap one request's body (nginx at 1 MiB\nby default, Cloudflare at 100 MB). Parts keep each request under such a\ncap. The spool stays between parts; a part repeated after a lost response\nreplaces the bytes from its offset, and a part past the stored bytes is\nrefused with how many bytes the server really holds.",
+        "operationId": "put_capture_upload_part_api_v1_inbox_capture_upload_slots__slot_id__parts__offset__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "title": "Slot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "offset",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureUploadPartRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "The part does not continue the stored bytes."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Put Capture Upload Part",
         "tags": [
           "pending imports"
         ]

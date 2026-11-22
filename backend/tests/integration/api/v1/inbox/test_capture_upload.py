@@ -768,6 +768,142 @@ class TestPutCaptureUploadSlot:
         assert response.status_code == 401, response.text
 
 
+class TestCaptureUploadParts:
+    """A file sent in parts, for servers behind a proxy that caps request size."""
+
+    DATA = b"0123456789abcdef"
+
+    def _part(self, client, headers, slot_id: str, offset: int, data: bytes):
+        return client.put(
+            f"/api/v1/inbox/capture-upload-slots/{slot_id}/parts/{offset}",
+            headers={**headers, **OCTET},
+            content=data,
+        )
+
+    def _complete(self, client, headers, slot_id: str):
+        return client.post(
+            f"/api/v1/inbox/capture-upload-slots/{slot_id}/complete", headers=headers
+        )
+
+    def test_publishes_a_file_sent_in_parts(
+        self, client: TestClient, user_headers, slots
+    ) -> None:
+        headers = user_headers("parts-whole")
+        item_id, opened = slots(headers, self.DATA)
+        slot_id = opened[0]["id"]
+
+        received = [
+            self._part(client, headers, slot_id, offset, self.DATA[offset : offset + 6])
+            for offset in (0, 6, 12)
+        ]
+        completed = self._complete(client, headers, slot_id)
+
+        assert [r.json()["received_bytes"] for r in received] == [6, 12, 16]
+        assert completed.status_code == 200, completed.text
+        assert completed.json()["state"] == "uploaded"
+        finalized = client.post(
+            f"/api/v1/inbox/{item_id}/capture-upload-finalize", headers=headers
+        )
+        assert finalized.status_code == 200, finalized.text
+
+    def test_a_repeated_part_replaces_the_bytes_from_its_offset(
+        self, client: TestClient, user_headers, slots
+    ) -> None:
+        headers = user_headers("parts-repeat")
+        _, opened = slots(headers, self.DATA)
+        slot_id = opened[0]["id"]
+        self._part(client, headers, slot_id, 0, self.DATA[:8])
+        # The response to this part was lost; the extension sends it again.
+        self._part(client, headers, slot_id, 8, b"XXXXXXXX")
+        repeated = self._part(client, headers, slot_id, 8, self.DATA[8:])
+
+        assert repeated.json() == {"received_bytes": 16}
+        assert self._complete(client, headers, slot_id).status_code == 200
+
+    def test_refuses_a_part_past_the_stored_bytes_with_where_to_resume(
+        self, client: TestClient, user_headers, slots
+    ) -> None:
+        headers = user_headers("parts-gap")
+        _, opened = slots(headers, self.DATA)
+        slot_id = opened[0]["id"]
+        self._part(client, headers, slot_id, 0, self.DATA[:4])
+
+        gap = self._part(client, headers, slot_id, 10, self.DATA[10:])
+
+        assert gap.status_code == 409
+        assert gap.json() == {
+            "detail": "capture_upload_offset_mismatch",
+            "received_bytes": 4,
+        }
+
+    def test_refuses_bytes_past_the_declared_size(
+        self, client: TestClient, user_headers, slots
+    ) -> None:
+        headers = user_headers("parts-overflow")
+        _, opened = slots(headers, self.DATA)
+        slot_id = opened[0]["id"]
+
+        overflow = self._part(client, headers, slot_id, 0, self.DATA + b"!")
+
+        assert overflow.status_code == 413
+        assert overflow.json()["detail"] == "capture_upload_part_past_declared_size"
+
+    def test_refused_parts_restart_from_the_first_byte(
+        self, client: TestClient, user_headers, slots
+    ) -> None:
+        headers = user_headers("parts-wrong-hash")
+        _, opened = slots(headers, self.DATA)
+        slot_id = opened[0]["id"]
+        self._part(client, headers, slot_id, 0, b"not-the-declared")
+
+        refused = self._complete(client, headers, slot_id)
+        resumed = self._part(client, headers, slot_id, 8, self.DATA[8:])
+
+        assert refused.status_code == 400
+        assert "sha256" in refused.json()["detail"]
+        assert resumed.status_code == 409
+        assert resumed.json()["received_bytes"] == 0
+        self._part(client, headers, slot_id, 0, self.DATA)
+        assert self._complete(client, headers, slot_id).status_code == 200
+
+    def test_a_repeated_completion_returns_the_uploaded_slot(
+        self, client: TestClient, user_headers, slots
+    ) -> None:
+        headers = user_headers("parts-complete-twice")
+        _, opened = slots(headers, self.DATA)
+        slot_id = opened[0]["id"]
+        self._part(client, headers, slot_id, 0, self.DATA)
+        self._complete(client, headers, slot_id)
+
+        again = self._complete(client, headers, slot_id)
+        late_part = self._part(client, headers, slot_id, 0, self.DATA)
+
+        assert again.status_code == 200
+        assert again.json()["state"] == "uploaded"
+        assert late_part.status_code == 409
+
+    def test_refuses_parts_for_another_accounts_slot(
+        self, client: TestClient, user_headers, slots
+    ) -> None:
+        _, opened = slots(user_headers("parts-owner"), self.DATA)
+
+        stranger = user_headers("parts-stranger")
+        part = self._part(client, stranger, opened[0]["id"], 0, self.DATA)
+        completed = self._complete(client, stranger, opened[0]["id"])
+
+        assert part.status_code == 404
+        assert completed.status_code == 404
+
+    def test_advertises_parts_to_the_extension(
+        self, client: TestClient, user_headers
+    ) -> None:
+        response = client.get(
+            "/api/v1/inbox/capture-capabilities", headers=user_headers("parts-caps")
+        )
+
+        assert response.json()["upload_parts"] is True
+
+
 class TestFinalizeCaptureUpload:
     def test_moves_the_item_to_review_once_every_slot_arrived(
         self, client: TestClient, user_headers, slots
@@ -1383,8 +1519,8 @@ class TestCaptureCommandOwnership:
         cleanup = ExitStack()
         original = inbox_api._open_capture_spool
 
-        def observed_open(slot):
-            context, target = original(slot)
+        def observed_open(slot, start=0):
+            context, target = original(slot, start)
             retained.append((context, target))
             cleanup.callback(target.close)
             opened.set()

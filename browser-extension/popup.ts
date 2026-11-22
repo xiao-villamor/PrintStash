@@ -25,14 +25,12 @@ import {
   requestCultsInMainWorld,
   cultsCaptureFromPage,
   downloadCultsCandidate,
-  CULTS_DOWNLOAD_ORIGINS,
   type CultsPageResult,
 } from "./cults-capture.ts";
 import {
   readMyMiniFactoryInMainWorld,
   myMiniFactoryCaptureFromPage,
   downloadMyMiniFactoryCandidate,
-  MYMINIFACTORY_DOWNLOAD_ORIGINS,
   type MyMiniFactoryPageResult,
 } from "./myminifactory-capture.ts";
 import {
@@ -56,7 +54,12 @@ import {
   downloadThangsCandidate,
   type ThangsPageResult,
 } from "./thangs-capture.ts";
-import { type SourceProviderLabel } from "./source-providers.ts";
+import {
+  MARKETPLACE_ORIGINS,
+  sourcePublication,
+  type SourceProviderLabel,
+} from "./source-providers.ts";
+import { ALL_MARKETPLACE_ACCESS_ORIGINS, marketplaceAccessOrigins } from "./marketplace-access.ts";
 import { marketplaceOrigin } from "./marketplace-panel.ts";
 import { isMarketplacePanelEnabled } from "./panel-registration.ts";
 import { launcherButton, positionLauncher } from "./launcher.ts";
@@ -89,6 +92,9 @@ import {
   isLocalVault,
   modelTitleFromPageTitle,
   normalizeVault,
+  isPlainHttpToPublicHost,
+  vaultCandidates,
+  VaultAccessError,
   parseBrowserExtensionSetup,
   verifyVaultReachability,
   verifyVaultConnection,
@@ -141,7 +147,6 @@ import {
 } from "./makerworld-capture.ts";
 import {
   THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
-  THINGIVERSE_PERMISSION_ORIGINS,
   downloadThingiverseCandidate,
   requestThingiverseFilesInMainWorld,
   thingiverseFailureMessage,
@@ -258,6 +263,12 @@ const connectionFeedback = requiredElement("#connection-feedback", HTMLElement);
 const connectionPanel = requiredElement("#connection-panel", HTMLElement);
 const connectionForm = requiredElement("#connection-form", HTMLFormElement);
 const connectButton = requiredElement("#connect", HTMLButtonElement);
+const openServerButton = requiredElement("#open-server", HTMLButtonElement);
+const plainHttp = requiredElement("#plain-http", HTMLElement);
+const plainHttpDetail = requiredElement("#plain-http-detail", HTMLElement);
+const plainHttpConfirm = requiredElement("#plain-http-confirm", HTMLInputElement);
+const marketplaceAccessRow = requiredElement("#marketplace-access-row", HTMLElement);
+const marketplaceAccess = requiredElement("#marketplace-access", HTMLInputElement);
 const editButton = requiredElement("#edit-connection", HTMLButtonElement);
 const cancelButton = requiredElement("#cancel-edit", HTMLButtonElement);
 const disconnectButton = requiredElement("#disconnect", HTMLButtonElement);
@@ -1212,8 +1223,7 @@ function renderActivePage() {
   renderImportAvailability();
 }
 
-async function ensureVaultPermission(config: Config, requestPermission: boolean) {
-  const origins = [permissionOrigin(config)];
+async function ensureVaultPermission(origins: string[], requestPermission: boolean) {
   const granted = requestPermission
     ? await browser.permissions.request({ origins })
     : await browser.permissions.contains({ origins });
@@ -1226,9 +1236,43 @@ async function ensureVaultPermission(config: Config, requestPermission: boolean)
   }
 }
 
+/** The first address where the server answers; a pairing code is claimed only there. */
+async function answeringCandidate(candidates: string[], fetchImpl: typeof fetch) {
+  let failure: unknown = null;
+  for (const vault of candidates) {
+    try {
+      return (await verifyVaultReachability({ vault, fetchImpl })).base;
+    } catch (error) {
+      if (!(error instanceof VaultAccessError && error.problem === "unreachable")) throw error;
+      failure = error;
+    }
+  }
+  throw failure;
+}
+
+/** Ask the background to add the page button once marketplace access arrives. */
+function requestMarketplacePanels() {
+  for (const origin of MARKETPLACE_ORIGINS)
+    void browser.runtime
+      .sendMessage({ type: "printstash-enable-panel", origin })
+      .catch(() => false);
+}
+
 async function establishConnection(
   config: Config,
-  { requestPermission, persist }: { requestPermission: boolean; persist: boolean },
+  {
+    requestPermission,
+    persist,
+    candidates = [config.vault],
+    marketplaces = false,
+  }: {
+    requestPermission: boolean;
+    persist: boolean;
+    /** Addresses to try in order for what the user typed. */
+    candidates?: string[];
+    /** Grant every supported marketplace in the same browser prompt. */
+    marketplaces?: boolean;
+  },
 ) {
   if (connectionLocked) return false;
   const attempt: ConnectionAttempt = { controller: new AbortController(), phase: "verifying" };
@@ -1249,9 +1293,22 @@ async function establishConnection(
   lockConnection(true);
   cancelButton.disabled = !preservePrevious;
   showStatus();
+  renderOpenServer(null);
+  const candidateOrigins = [...new Set(candidates.map((vault) => permissionOrigin({ vault })))];
   try {
-    await ensureVaultPermission(config, requestPermission);
+    if (requestPermission && marketplaces) requestMarketplacePanels();
+    // One prompt: every address to try, plus the marketplaces when chosen.
+    await ensureVaultPermission(
+      requestPermission && marketplaces
+        ? [...candidateOrigins, ...ALL_MARKETPLACE_ACCESS_ORIGINS]
+        : candidateOrigins,
+      requestPermission,
+    );
     signal.throwIfAborted();
+    if (candidates.length > 1) {
+      config = { ...config, vault: await answeringCandidate(candidates, fetchImpl) };
+      signal.throwIfAborted();
+    }
     let verified;
     let normalized;
     if (config.pairingCode) {
@@ -1309,6 +1366,14 @@ async function establishConnection(
         .remove({ origins: [permissionOrigin(previous.config)] })
         .catch(() => false);
     }
+    // The other address was asked only to find where the server answers.
+    const unused = candidateOrigins.filter(
+      (origin) =>
+        origin !== permissionOrigin(normalized) &&
+        (!previous || origin !== permissionOrigin(previous.config)),
+    );
+    if (requestPermission && unused.length)
+      await browser.permissions.remove({ origins: unused }).catch(() => false);
 
     connectedConfig = normalized;
     const verifiedConnection = verified as {
@@ -1336,16 +1401,15 @@ async function establishConnection(
       void primeImportContext(normalized, captureAuthorization);
     return true;
   } catch (error) {
-    let failedOrigin = null;
     let previousOrigin = null;
     try {
-      failedOrigin = permissionOrigin(config);
       previousOrigin = previous ? permissionOrigin(previous.config) : null;
     } catch {
       // Invalid legacy settings have no origin permission to clean up.
     }
-    if (requestPermission && failedOrigin && failedOrigin !== previousOrigin) {
-      await browser.permissions.remove({ origins: [failedOrigin] }).catch(() => false);
+    const failedOrigins = candidateOrigins.filter((origin) => origin !== previousOrigin);
+    if (requestPermission && failedOrigins.length) {
+      await browser.permissions.remove({ origins: failedOrigins }).catch(() => false);
     }
     if (signal.aborted) return false;
     if (preservePrevious && previous) {
@@ -1360,6 +1424,7 @@ async function establishConnection(
       renderConnection(error instanceof PairingValidationError ? "disconnected" : "error", {
         detail: messageFrom(error),
       });
+      renderOpenServer(error);
     }
     connectionPanel.hidden = false;
     throw error;
@@ -2050,6 +2115,32 @@ for (const control of [vaultInput, deviceNameInput, usernameInput, pairingMethod
     rememberConnectionDraft,
   );
 pairingCodeInput.addEventListener("input", clearPairingError);
+vaultInput.addEventListener("input", () => {
+  plainHttp.hidden = true;
+  plainHttpConfirm.checked = false;
+});
+
+let openServerUrl: string | null = null;
+/** Offer the page the user must open: a sign-in page or a certificate to accept. */
+function renderOpenServer(error: unknown) {
+  openServerUrl = error instanceof VaultAccessError ? error.url : null;
+  openServerButton.hidden = openServerUrl === null;
+  openServerButton.textContent =
+    error instanceof VaultAccessError && error.problem === "sign_in"
+      ? "Open sign-in page"
+      : "Open server in a tab";
+}
+openServerButton.addEventListener("click", () => {
+  if (openServerUrl) void browser.tabs.create({ url: openServerUrl });
+});
+
+/** The marketplace switch disappears once every marketplace is granted. */
+async function renderMarketplaceAccess() {
+  const granted = await browser.permissions
+    .contains({ origins: [...ALL_MARKETPLACE_ACCESS_ORIGINS] })
+    .catch(() => false);
+  marketplaceAccessRow.hidden = granted;
+}
 
 function showConnectionFeedback(message: string) {
   connectionFeedback.textContent = message;
@@ -2062,14 +2153,29 @@ connectionForm.addEventListener("submit", async (event) => {
   clearPairingError();
   connectionFeedback.hidden = true;
   let config: Config;
+  let candidates: string[];
   try {
     config = configFromForm();
+    candidates = vaultCandidates(vaultInput.value);
   } catch (error) {
     showConnectionFeedback(messageFrom(error));
     return;
   }
+  if (isPlainHttpToPublicHost(config.vault) && !plainHttpConfirm.checked) {
+    plainHttpDetail.textContent = `${new URL(config.vault).host} is not on your local network, and HTTP sends the pairing code and this browser's key unencrypted. Use https:// if the server has a certificate.`;
+    plainHttp.hidden = false;
+    plainHttpConfirm.focus();
+    return;
+  }
   try {
-    if (await establishConnection(config, { requestPermission: true, persist: true })) {
+    if (
+      await establishConnection(config, {
+        requestPermission: true,
+        persist: true,
+        candidates,
+        marketplaces: !marketplaceAccessRow.hidden && marketplaceAccess.checked,
+      })
+    ) {
       showStatus("Connection verified. This browser is ready to import.");
     }
   } catch (error) {
@@ -2243,12 +2349,13 @@ async function runCapture(mode: "import" | "choose") {
   renderImportAvailability();
   showStatus();
   try {
-    const transferFetch = captureTransferFetch((loaded, total) => {
+    const transferProgress = (loaded: number, total: number | null) => {
       capture.assertCurrent();
       showStatus(
         `Transferring to PrintStash: ${progressLabel(loaded, total)}${total !== null && loaded === total ? " · awaiting confirmation" : ""}`,
       );
-    });
+    };
+    const transferFetch = captureTransferFetch(transferProgress);
     const onReady: ImportIntent | undefined = importIntentSupported
       ? reviewBeforeImporting.checked
         ? "review"
@@ -2261,27 +2368,12 @@ async function runCapture(mode: "import" | "choose") {
       tags: captureTags(tagsInput.value),
       cover: selectedCaptureCover(coverInput.files?.[0]),
     };
-    const downloadOrigins: string[] = [];
-    // Get the provider's known grants while the import click can still open
-    // Chrome's permission prompt. Discovering hosts during transfer can retire
-    // a native toolbar popup or run after its user activation has expired.
-    if (onReady && !pendingManualCapture) {
-      if (activeSource === "Printables")
-        downloadOrigins.push(
-          PRINTABLES_METADATA_PERMISSION_ORIGIN,
-          "https://files.printables.com/*",
-          "https://media.printables.com/*",
-        );
-      if (activeSource === "Thingiverse")
-        downloadOrigins.push(...THINGIVERSE_PERMISSION_ORIGINS, "https://resize.thingiverse.com/*");
-    }
-    if (pendingMarketplaceCapture?.source.provider === "cults")
-      downloadOrigins.push(...CULTS_DOWNLOAD_ORIGINS);
-    if (pendingMarketplaceCapture?.source.provider === "myminifactory")
-      downloadOrigins.push(...MYMINIFACTORY_DOWNLOAD_ORIGINS);
-    if (pendingMarketplaceCapture?.source.provider === "makeronline")
-      downloadOrigins.push("https://acop-prod-private.s3-accelerate.amazonaws.com/*");
-    if (downloadOrigins.length) await ensureOriginPermissions([...new Set(downloadOrigins)]);
+    // Ask for every host this marketplace can use while the import click can
+    // still open Chrome's prompt. A prompt shown after a lookup can retire the
+    // toolbar popup or arrive after the click's activation has expired.
+    const provider = activePage?.url ? sourcePublication(activePage.url)?.code : undefined;
+    if (provider && !pendingManualCapture)
+      await ensureOriginPermissions(marketplaceAccessOrigins(provider));
     capture.assertCurrent();
     if (activeSource === "Printables" && !pendingPrintablesCapture && !pendingManualCapture) {
       try {
@@ -2377,6 +2469,7 @@ async function runCapture(mode: "import" | "choose") {
       }
       const receipt = await capture.run((signal) =>
         captureSequentialFiles({
+          uploadProgress: transferProgress,
           ...preferences,
           fetchImpl: transferFetch,
           vault: capture.config.vault,
@@ -2987,6 +3080,7 @@ async function initialize() {
     permittedSite = origin;
   }
   renderLauncherPreferences();
+  await renderMarketplaceAccess();
   const prepared = await takePreparedSetup(activePage);
   if (prepared) {
     fillConnectionForm(prepared);

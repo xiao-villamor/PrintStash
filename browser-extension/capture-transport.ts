@@ -1,3 +1,5 @@
+import { vaultFetch } from "./vault-fetch.ts";
+import { refusedByProxy, uploadSlotBytes, UploadTooLargeError } from "./slot-upload.ts";
 import type { ImportIntent } from "./import-status.ts";
 import { runCaptureRequest } from "./capture-operation.ts";
 import { CaptureAuthenticationError, CaptureResponseError } from "./core.ts";
@@ -166,7 +168,7 @@ export async function captureDirectFile({
   sourceUrl,
   title,
   file,
-  fetchImpl = fetch,
+  fetchImpl = vaultFetch,
   signal,
 }: {
   vault: string;
@@ -188,6 +190,7 @@ export async function captureDirectFile({
     signal,
   });
   if (response.status === 401) throw new CaptureAuthenticationError();
+  if (await refusedByProxy(response)) throw new UploadTooLargeError(false);
   if (!response.ok) {
     throw await CaptureResponseError.from(
       response,
@@ -198,7 +201,7 @@ export async function captureDirectFile({
 }
 
 export async function captureRichFiles({
-  fetchImpl = fetch,
+  fetchImpl = vaultFetch,
   vault,
   authorization,
   sourceUrl,
@@ -298,18 +301,20 @@ export async function captureRichFiles({
     const plannedUploads = uploads.map((upload) => ({ upload, slot: matchingSlot(slots, upload) }));
     for (const { upload, slot } of plannedUploads) {
       const uploadSlot = async (signal?: AbortSignal) => {
-        const uploaded = await fetchImpl(
-          `${base}/api/v1/inbox/capture-upload-slots/${encodeURIComponent(slot.id)}`,
-          {
-            method: "PUT",
-            headers: {
-              Authorization: `Bearer ${authorization}`,
-              "Content-Type": upload.declaration.media_type,
-            },
-            signal,
-            body: upload.file,
-          },
-        );
+        // Servers on this path predate parts; a proxy's size refusal is named.
+        const uploaded = await uploadSlotBytes({
+          send: (path, init) =>
+            fetchImpl(`${base}/api/v1/inbox${path}`, {
+              ...init,
+              headers: { Authorization: `Bearer ${authorization}`, ...init.headers },
+              signal,
+            }),
+          server: base,
+          slotId: slot.id,
+          file: upload.file,
+          mediaType: upload.declaration.media_type,
+          parts: false,
+        });
         if (uploaded.status === 401) throw new CaptureAuthenticationError();
         if (!uploaded.ok)
           throw await CaptureResponseError.from(

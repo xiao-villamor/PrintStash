@@ -3,6 +3,8 @@ import { UploadRequest } from "./support/upload-request.ts";
 import { readFile } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeBrowser } from "@webext-core/fake-browser";
+import { ALL_MARKETPLACE_ACCESS_ORIGINS, marketplaceAccessOrigins } from "../marketplace-access.ts";
+import { MARKETPLACE_ORIGINS } from "../source-providers.ts";
 
 const popupHtml = await readFile("entrypoints/popup/index.html", "utf8");
 const extensionVersion = JSON.parse(await readFile("package.json", "utf8")).version;
@@ -433,14 +435,14 @@ describe("popup browser adapters", () => {
     expect(button("#open-inbox").hidden).toBe(true);
   });
 
-  it("requests the missing Printables hosts together before starting a transfer", async () => {
+  it("asks for the missing Printables hosts in one prompt before starting a transfer", async () => {
     fakeBrowser.tabs.query = vi
       .fn()
       .mockResolvedValue([
         { id: 42, title: "3D Benchy", url: "https://www.printables.com/model/3161-3d-benchy" },
       ]);
     await fakeBrowser.storage.local.set(pairedDevice);
-    const ungranted = ["https://files.printables.com/*", "https://media.printables.com/*"];
+    const ungranted = ["https://*.printables.com/*", "https://media.prusaprinters.org/*"];
     fakeBrowser.permissions.contains = vi.fn(async ({ origins }: { origins: string[] }) =>
       origins.every((origin) => !ungranted.includes(origin)),
     );
@@ -494,6 +496,133 @@ describe("popup browser adapters", () => {
     await settle();
     expect(requests).toEqual([{ code: "new-code", name: "MakerWorld validation" }]);
     expect(element("#connection-title").textContent).toBe("Connected");
+  });
+
+  describe("connecting to a server", () => {
+    function fillPairing(vault: string) {
+      requiredElement("#vault", HTMLInputElement).value = vault;
+      requiredElement("#vault", HTMLInputElement).dispatchEvent(new Event("input"));
+      requiredElement("#pairing-code", HTMLInputElement).value = "code";
+      requiredElement("#device-name", HTMLInputElement).value = "Chrome";
+    }
+    const pairingServer = () =>
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).endsWith("/browser-pairings/claim")
+          ? response({ credential: "device" })
+          : response({ status: "ok", name: "PrintStash" }),
+      );
+
+    it("grants the server and every marketplace in one browser prompt", async () => {
+      fakeBrowser.permissions.contains = vi.fn().mockResolvedValue(false);
+      fakeBrowser.runtime.sendMessage = vi.fn().mockResolvedValue(false);
+      vi.stubGlobal("fetch", pairingServer());
+      await import("../popup.ts");
+      await settle();
+      expect(element("#marketplace-access-row").hidden).toBe(false);
+      fillPairing("https://prints.example.com");
+      button("#connect").click();
+      await settle();
+
+      expect(fakeBrowser.permissions.request).toHaveBeenCalledExactlyOnceWith({
+        origins: ["https://prints.example.com/*", ...ALL_MARKETPLACE_ACCESS_ORIGINS],
+      });
+      // The background adds the page button when the grant arrives.
+      expect(vi.mocked(fakeBrowser.runtime.sendMessage).mock.calls.map(([m]) => m)).toEqual(
+        MARKETPLACE_ORIGINS.map((origin) => ({ type: "printstash-enable-panel", origin })),
+      );
+      expect(element("#connection-title").textContent).toBe("Connected");
+    });
+
+    it("asks for the server alone when marketplaces are switched off", async () => {
+      fakeBrowser.permissions.contains = vi.fn().mockResolvedValue(false);
+      fakeBrowser.runtime.sendMessage = vi.fn().mockResolvedValue(false);
+      vi.stubGlobal("fetch", pairingServer());
+      await import("../popup.ts");
+      await settle();
+      requiredElement("#marketplace-access", HTMLInputElement).checked = false;
+      fillPairing("https://prints.example.com");
+      button("#connect").click();
+      await settle();
+
+      expect(fakeBrowser.permissions.request).toHaveBeenCalledExactlyOnceWith({
+        origins: ["https://prints.example.com/*"],
+      });
+      expect(fakeBrowser.runtime.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("hides the marketplace switch once every marketplace is granted", async () => {
+      await import("../popup.ts");
+      await settle();
+      expect(element("#marketplace-access-row").hidden).toBe(true);
+    });
+
+    it("finds a LAN server over HTTPS when plain HTTP does not answer", async () => {
+      const claims: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.startsWith("http://")) throw new TypeError("Failed to fetch");
+          if (url.endsWith("/browser-pairings/claim")) {
+            claims.push(url);
+            return response({ credential: "device" });
+          }
+          return response({ status: "ok", name: "PrintStash" });
+        }),
+      );
+      await import("../popup.ts");
+      await settle();
+      fillPairing("nas.lan:3470");
+      button("#connect").click();
+      for (let attempt = 0; attempt < 4; attempt += 1) await settle();
+
+      expect(fakeBrowser.permissions.request).toHaveBeenCalledExactlyOnceWith({
+        origins: ["http://nas.lan/*", "https://nas.lan/*"],
+      });
+      // The pairing code is claimed once, at the address that answered.
+      expect(claims).toEqual(["https://nas.lan:3470/api/v1/browser-pairings/claim"]);
+      expect((await fakeBrowser.storage.local.get("vault")).vault).toBe("https://nas.lan:3470");
+      expect(fakeBrowser.permissions.remove).toHaveBeenCalledWith({
+        origins: ["http://nas.lan/*"],
+      });
+    });
+
+    it("waits for confirmation before plain HTTP beyond the local network", async () => {
+      const fetchImpl = pairingServer();
+      vi.stubGlobal("fetch", fetchImpl);
+      await import("../popup.ts");
+      await settle();
+      fillPairing("http://prints.example.com");
+      button("#connect").click();
+      await settle();
+
+      expect(element("#plain-http").hidden).toBe(false);
+      expect(element("#plain-http-detail").textContent).toContain("unencrypted");
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(fakeBrowser.permissions.request).not.toHaveBeenCalled();
+
+      requiredElement("#plain-http-confirm", HTMLInputElement).checked = true;
+      button("#connect").click();
+      await settle();
+      expect(element("#connection-title").textContent).toBe("Connected");
+    });
+
+    it("offers the sign-in page when a proxy answers instead of PrintStash", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response("<html>Sign in</html>", { status: 401 })),
+      );
+      await import("../popup.ts");
+      await settle();
+      fillPairing("https://prints.example.com");
+      button("#connect").click();
+      await settle();
+
+      expect(element("#connection-feedback").textContent).toContain("sign-in page");
+      expect(button("#open-server").hidden).toBe(false);
+      button("#open-server").click();
+      expect(fakeBrowser.tabs.create).toHaveBeenCalledWith({ url: "https://prints.example.com" });
+    });
   });
 
   it.each([
@@ -1380,19 +1509,21 @@ describe("popup browser adapters", () => {
     ).toBe(false);
   });
 
-  it("checks Printables API permission before page extraction or metadata fetch", async () => {
+  it("asks for Printables access before page extraction or metadata fetch", async () => {
     await fakeBrowser.storage.local.set({
       vault: "https://prints.example.com",
       username: "owner",
       apiKey: "psk_vault_secret",
     });
     const events: string[] = [];
-    fakeBrowser.permissions.contains = vi.fn(async ({ origins }: { origins: string[] }) => {
-      events.push(`contains:${origins[0]}`);
-      return origins[0] !== "https://api.printables.com/*";
-    });
+    // The browser grants API, file and media hosts through one subdomain pattern.
+    const granted = new Set<string>();
+    fakeBrowser.permissions.contains = vi.fn(async ({ origins }: { origins: string[] }) =>
+      origins.every((origin) => origin !== "https://*.printables.com/*" || granted.has(origin)),
+    );
     fakeBrowser.permissions.request = vi.fn(async ({ origins }: { origins: string[] }) => {
-      events.push(`request:${origins[0]}`);
+      events.push(`request:${origins.join(" ")}`);
+      origins.forEach((origin) => granted.add(origin));
       return true;
     });
     const fetchImpl = vi.fn(async (url: string) => {
@@ -1430,10 +1561,7 @@ describe("popup browser adapters", () => {
 
     const firstExecute = events.indexOf("executeScript");
     expect(firstExecute).toBeGreaterThanOrEqual(0);
-    expect(events.slice(0, firstExecute)).toEqual([
-      "contains:https://api.printables.com/*",
-      "request:https://api.printables.com/*",
-    ]);
+    expect(events.slice(0, firstExecute)).toEqual(["request:https://*.printables.com/*"]);
     expect(element("#candidate-panel").hidden).toBe(false);
   });
 
@@ -1630,8 +1758,11 @@ describe("popup browser adapters", () => {
     );
 
     expect(fakeBrowser.permissions.request).toHaveBeenCalledWith({
-      origins: ["https://acop-prod-private.s3-accelerate.amazonaws.com/*"],
+      origins: marketplaceAccessOrigins("makeronline"),
     });
+    expect(marketplaceAccessOrigins("makeronline")).toContain(
+      "https://acop-prod-private.s3-accelerate.amazonaws.com/*",
+    );
     expect(fakeBrowser.scripting.executeScript).not.toHaveBeenCalled();
   });
 

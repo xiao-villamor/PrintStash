@@ -1,3 +1,5 @@
+import { vaultFetch } from "./vault-fetch.ts";
+
 export type ByteProgress = (loaded: number, total: number | null) => void;
 
 /** Encoded Content-Length describes wire bytes, not the decoded stream we consume. */
@@ -24,7 +26,7 @@ export function progressLabel(loaded: number, total: number | null): string {
 /** XHR exposes upload byte events; fetch remains the owner of ordinary requests. */
 export function captureTransferFetch(
   progress: ByteProgress,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = vaultFetch,
 ): typeof fetch {
   return async (input, init) => {
     if (init?.method !== "PUT" || !(init.body instanceof Blob)) return fetchImpl(input, init);
@@ -44,8 +46,9 @@ export function captureTransferFetch(
       };
       request.open("PUT", String(input));
       request.timeout = 120_000;
-      // Bearer authorization is explicit. Never attach browser or provider cookies.
-      request.withCredentials = false;
+      // PrintStash authorization is the explicit Bearer header. Cookies for the
+      // server's host still go along, so a sign-in proxy in front of it passes.
+      request.withCredentials = true;
       for (const [name, value] of new Headers(init.headers)) request.setRequestHeader(name, value);
       request.upload.onprogress = (event) => {
         if (!signal?.aborted) progress(event.loaded, event.lengthComputable ? event.total : null);

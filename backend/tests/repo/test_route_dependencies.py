@@ -131,6 +131,8 @@ class TestRouteDependencies:
             ("/inbox/{item_id}/capture-upload", "GET"),
             ("/inbox/capture-upload-slots", "POST"),
             ("/inbox/capture-upload-slots/{slot_id}", "PUT"),
+            ("/inbox/capture-upload-slots/{slot_id}/parts/{offset}", "PUT"),
+            ("/inbox/capture-upload-slots/{slot_id}/complete", "POST"),
             ("/inbox/{item_id}/capture-upload-finalize", "POST"),
             ("/inbox/{item_id}/capture-upload", "DELETE"),
             ("/inbox/browser-upload", "POST"),

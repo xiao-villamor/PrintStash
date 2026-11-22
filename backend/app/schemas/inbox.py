@@ -114,6 +114,12 @@ class CaptureUploadSlotRead(BaseModel):
     state: Literal["pending", "uploaded"]
 
 
+class CaptureUploadPartRead(BaseModel):
+    """Bytes the slot's spool holds after one part; the next part starts here."""
+
+    received_bytes: int
+
+
 class InboxItemUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -291,6 +297,8 @@ class CaptureCapabilitiesRead(BaseModel):
     capture_preferences: bool
     resumable_cover: bool
     resumable_gallery: bool
+    # Slots accept a file in parts, so a proxy's request-size limit is no ceiling.
+    upload_parts: bool
     import_intent: bool = True
     owner_user_id: int
 

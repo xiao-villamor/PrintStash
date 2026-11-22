@@ -46,7 +46,7 @@ for the store's privacy-policy URL; the site also provides a Spanish version.
 ### Capture panel and recovery
 
 On an individual MakerWorld, Printables, Thingiverse, MyMiniFactory, Cults,
-Thangs, Creality Cloud or MakerOnline publication, use **Enable panel on this site** in the popup to grant that site's permission. The panel shows file
+Thangs, Creality Cloud or MakerOnline publication, use **Enable panel on this site** in the popup to grant that site's permission. When **Allow supported marketplaces** was on while connecting, the panel is already enabled everywhere. The panel shows file
 choices and your previous captures of the publication. That history is not a
 comparison of file bytes. Hide and reopen the panel without stopping a transfer.
 Reloading or closing the tab interrupts browser work: return to the same page,
@@ -124,10 +124,38 @@ extension. The one-time code expires after five minutes and locks after five
 failed exchange attempts. Chrome still asks for explicit approval before
 granting a new vault host permission.
 
-Local vaults may be entered as `localhost:8000`, `127.0.0.1:3000`, or a private
-LAN address without a scheme; the extension selects HTTP automatically. Its
-manifest grants network access only to loopback addresses up front, while LAN
-and remote Vaults continue to request a per-host permission when connected.
+With **Allow supported marketplaces** on (the default), that one Chrome prompt
+also covers every supported marketplace and its download and image hosts, so
+imports and the on-page button never ask again. Turned off, each marketplace
+asks once, at its first import click, for all of its hosts together.
+
+Server addresses:
+
+- Loopback, private LAN addresses (`10.x`, `172.16–31.x`, `192.168.x`),
+  Tailscale and other `100.64.0.0/10` addresses, and names ending in `.local`,
+  `.lan`, `.home`, `.home.arpa`, `.internal`, `.intranet` or `.localdomain`
+  (or with no dot at all) are LAN servers. Typed without a scheme, they are
+  tried over HTTP first, then HTTPS.
+- Any other name means HTTPS unless `http://` is typed. Plain HTTP to a server
+  outside the LAN sends the pairing code and browser key unencrypted, so the
+  popup asks for confirmation first.
+- A redirect to HTTPS on the same host is followed and saved.
+- A server behind a sign-in proxy (Cloudflare Access, Authelia, Authentik,
+  oauth2-proxy and similar) works once you sign in to it in a normal tab: the
+  extension sends the browser's cookies for the server's host, while PrintStash
+  itself only accepts the extension's own Bearer credential. When the proxy
+  answers instead of PrintStash, the popup says so and offers **Open sign-in
+  page**. Behind such a proxy, connect with a pairing code; the API key method
+  signs in without cookies.
+- An HTTPS server that cannot be reached may use a self-signed certificate:
+  **Open server in a tab**, accept the certificate, then connect again.
+- Uploads go in parts when the server supports it, so a proxy's request-size
+  limit (nginx defaults to 1 MiB, Cloudflare to 100 MB) is no ceiling: a part
+  the proxy refuses is resent at half the size, down to 256 KiB.
+
+The manifest grants network access only to loopback addresses up front; every
+other server and marketplace host is an optional permission granted in Chrome's
+prompt.
 
 The extension verifies the public PrintStash health endpoint before pairing.
 One selected model capture may include several files; PrintStash reserves their

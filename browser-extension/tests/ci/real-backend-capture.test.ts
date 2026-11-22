@@ -227,6 +227,57 @@ describe("production extension capture against a real backend", () => {
     expect(transferred.slots).toHaveLength(2);
     expect(saved).toEqual({});
 
+    // Behind a proxy with nginx's default 1 MiB body limit, a 3 MiB file still
+    // arrives: the extension sends it in parts the server reassembles.
+    const proxyLimit = 1024 * 1024;
+    const largest: number[] = [];
+    const proxied: typeof fetch = async (input, init) => {
+      const body = init?.body;
+      const bytes =
+        body instanceof Blob ? body.size : body instanceof ArrayBuffer ? body.byteLength : 0;
+      largest.push(bytes);
+      if (bytes > proxyLimit) return new Response("<html>413</html>", { status: 413 });
+      return fetch(input, init);
+    };
+    const large = randomBytes(3 * 1024 * 1024);
+    const progressed: number[] = [];
+    const partsSaved: Record<string, unknown> = {};
+    const behindProxy = await captureSequentialFiles({
+      vault,
+      authorization: claimed.deviceCredential,
+      source: capture.source,
+      fetchImpl: proxied,
+      candidates: [{ id: "large", filename: "large.3mf", fileType: "other" }],
+      download: async () => ({
+        id: "large",
+        filename: "large.3mf",
+        mediaType: "model/3mf",
+        file: new Blob([large]),
+      }),
+      storage: {
+        get: async () => partsSaved,
+        set: async (values) => {
+          Object.assign(partsSaved, values);
+        },
+        remove: async (keys) => {
+          for (const key of [keys].flat()) delete partsSaved[key];
+        },
+      },
+      progress: () => {},
+      uploadProgress: (loaded) => progressed.push(loaded),
+    });
+    const partsReceipt = await readJson<{ slots: Array<{ state: string; size_bytes: number }> }>(
+      await fetch(`${vault}/api/v1/inbox/${behindProxy.id}/capture-upload`, {
+        headers: { Authorization: `Bearer ${claimed.deviceCredential}` },
+      }),
+      "parts receipt",
+    );
+    expect(partsReceipt.slots).toEqual([
+      expect.objectContaining({ state: "uploaded", size_bytes: large.length }),
+    ]);
+    expect(progressed.at(-1)).toBe(large.length);
+    expect(largest.some((bytes) => bytes > proxyLimit)).toBe(true);
+
     const devices = await readJson<Array<{ id: number; name: string }>>(
       await fetch(`${vault}/api/v1/browser-pairings`, {
         headers: { Authorization: `Bearer ${setup.access_token}` },

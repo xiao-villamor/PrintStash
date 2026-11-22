@@ -54,10 +54,18 @@ publication’s model files. Use **Change** to pick different files. If the page
 lists competing packages without a clear default, choose one before importing.
 Publication images are included by default. Select a thumbnail to set the
 cover, or use **Don’t include images** to omit the gallery.
-The first capture from Printables or Thingiverse may ask Chrome for
-access to the provider's file and image hosts. PrintStash requests missing
-access together and uses the saved grants on later imports. If Chrome closes
-the toolbar popup after granting access, reopen it to continue.
+Connecting with **Allow supported marketplaces** on grants the server and every
+supported marketplace in one Chrome prompt; imports then never ask. With it
+off, the first import from a marketplace asks once, at the click, for all of
+that marketplace's hosts. If Chrome closes the toolbar popup after granting
+access, reopen it to continue.
+
+The extension reaches servers on the LAN (including `.lan`, `.home.arpa`,
+`.internal` names and Tailscale addresses), behind HTTPS reverse proxies, and
+behind sign-in proxies such as Cloudflare Access or Authelia once you sign in
+to them in a normal tab. Plain HTTP to a server outside the LAN needs explicit
+confirmation. Uploads go in parts, so a proxy's request-size limit does not
+cap file size; see the extension README for details.
 
 | Source | Capture path and current boundary |
 | --- | --- |

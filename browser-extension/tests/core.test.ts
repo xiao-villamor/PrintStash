@@ -7,10 +7,13 @@ import {
   claimBrowserPairing,
   classifyModelPage,
   isLocalVault,
+  isPlainHttpToPublicHost,
   modelTitleFromPageTitle,
   normalizeVault,
   parseBrowserExtensionSetup,
   verifyVaultConnection,
+  vaultCandidates,
+  VaultAccessError,
   verifyVaultReachability,
 } from "../core.ts";
 import { buildBrowserCaptureMessage } from "../capture-adapter.ts";
@@ -594,7 +597,7 @@ describe("capture authentication boundary", () => {
   });
 });
 
-test("checks vault reachability without authenticating a device", async () => {
+test("checks vault reachability with the host's cookies but no device credential", async () => {
   const requests: Array<{ url: string; options: RequestInit }> = [];
   const result = await verifyVaultReachability({
     vault: "https://prints.example.com/",
@@ -610,7 +613,8 @@ test("checks vault reachability without authenticating a device", async () => {
   assert.equal(request.url, "https://prints.example.com/api/v1/health");
   assert.equal(request.options.method ?? "GET", "GET");
   assert.equal(headerValue(request.options, "Authorization"), undefined);
-  assert.equal(request.options.credentials, "omit");
+  // A sign-in proxy in front of the server needs its own browser session.
+  assert.equal(request.options.credentials, "include");
   assert.equal(request.options.cache, "no-store");
 });
 
@@ -658,5 +662,118 @@ describe("model title from a marketplace tab title", () => {
 
   it("keeps a single-segment title unchanged", () => {
     expect(modelTitleFromPageTitle("Calibration cube", "Thingiverse")).toBe("Calibration cube");
+  });
+});
+
+describe("server addresses", () => {
+  it.each([
+    ["printstash.lan:3470", "http://printstash.lan:3470"],
+    ["nas.home.arpa", "http://nas.home.arpa"],
+    ["box.internal:8000", "http://box.internal:8000"],
+    ["server.localdomain", "http://server.localdomain"],
+    // Tailscale and other overlay networks hand out 100.64.0.0/10.
+    ["100.101.102.103:3000", "http://100.101.102.103:3000"],
+    ["100.128.0.1", "https://100.128.0.1"],
+    ["prints.example.com", "https://prints.example.com"],
+  ])("reads %s as %s", (typed, expected) => {
+    expect(normalizeVault(typed)).toBe(expected);
+  });
+
+  it("tries a LAN name over HTTP, then HTTPS, when no scheme is typed", () => {
+    expect(vaultCandidates("nas.lan:3470")).toEqual([
+      "http://nas.lan:3470",
+      "https://nas.lan:3470",
+    ]);
+  });
+
+  it.each(["http://nas.lan:3470", "https://nas.lan", "prints.example.com"])(
+    "tries only one address for %s",
+    (typed) => {
+      expect(vaultCandidates(typed)).toEqual([normalizeVault(typed)]);
+    },
+  );
+
+  it.each([
+    ["http://prints.example.com", true],
+    ["http://192.168.7.160:3470", false],
+    ["http://nas.lan", false],
+    ["https://prints.example.com", false],
+  ])("flags plain HTTP beyond the LAN for %s: %s", (vault, flagged) => {
+    expect(isPlainHttpToPublicHost(vault)).toBe(flagged);
+  });
+});
+
+describe("reaching a server", () => {
+  function redirectedTo(url: string, body: unknown) {
+    const answer = Response.json(body);
+    Object.defineProperty(answer, "redirected", { value: true });
+    Object.defineProperty(answer, "url", { value: url });
+    return answer;
+  }
+
+  async function accessProblem(fetchImpl: typeof fetch, vault = "https://prints.example.com") {
+    const error = await verifyVaultReachability({ vault, fetchImpl }).catch((failure) => failure);
+    expect(error).toBeInstanceOf(VaultAccessError);
+    return error as VaultAccessError;
+  }
+
+  it("follows a proxy that moves the server to HTTPS on the same host", async () => {
+    const result = await verifyVaultReachability({
+      vault: "http://nas.lan:3470/stash",
+      fetchImpl: async () =>
+        redirectedTo("https://nas.lan/stash/api/v1/health", { status: "ok", name: "PrintStash" }),
+    });
+    expect(result.base).toBe("https://nas.lan/stash");
+  });
+
+  it("recognizes a redirect to another host as a sign-in page", async () => {
+    const error = await accessProblem(async () =>
+      redirectedTo("https://team.cloudflareaccess.com/login", { status: "ok" }),
+    );
+    expect(error.problem).toBe("sign_in");
+    expect(error.url).toBe("https://prints.example.com");
+  });
+
+  it("recognizes a proxy that refuses the request with its own page", async () => {
+    const error = await accessProblem(
+      async () => new Response("<html>Authelia</html>", { status: 401 }),
+    );
+    expect(error.problem).toBe("sign_in");
+  });
+
+  it("recognizes a sign-in redirect the browser could not follow", async () => {
+    const error = await accessProblem(async (_input, init) => {
+      if (init?.redirect === "manual") {
+        const redirect = new Response(null, { status: 200 });
+        Object.defineProperty(redirect, "type", { value: "opaqueredirect" });
+        return redirect;
+      }
+      throw new TypeError("Failed to fetch");
+    });
+    expect(error.problem).toBe("sign_in");
+  });
+
+  it("mentions certificates when an HTTPS server cannot be reached", async () => {
+    const error = await accessProblem(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    expect(error.problem).toBe("unreachable");
+    expect(error.message).toContain("self-signed certificate");
+  });
+
+  it("leaves certificates out for an HTTP server that cannot be reached", async () => {
+    const error = await accessProblem(async () => {
+      throw new TypeError("Failed to fetch");
+    }, "http://192.168.7.160:3470");
+    expect(error.message).not.toContain("certificate");
+  });
+
+  it("still calls an ordinary website not a PrintStash server", async () => {
+    await expect(
+      verifyVaultReachability({
+        vault: "https://prints.example.com",
+        fetchImpl: async () => new Response("<html>Router</html>", { status: 200 }),
+      }),
+    ).rejects.toThrow("not a PrintStash server");
   });
 });

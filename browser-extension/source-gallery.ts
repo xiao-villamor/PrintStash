@@ -2,7 +2,7 @@ import { readBoundedMetadataResponse } from "./capture-adapter.ts";
 import { sourcePublication, type SourceProviderCode } from "./source-providers.ts";
 import { readMarketplaceFile } from "./marketplace-download.ts";
 
-const imageHosts: Record<SourceProviderCode, readonly string[]> = {
+export const SOURCE_IMAGE_HOSTS: Record<SourceProviderCode, readonly string[]> = {
   makerworld: ["makerworld.bblmw.com"],
   printables: ["media.printables.com", "media.prusaprinters.org"],
   thingiverse: ["cdn.thingiverse.com", "resize.thingiverse.com"],
@@ -87,7 +87,7 @@ export async function sourceGallery(pageUrl: string, raw: unknown): Promise<Sour
       url.username ||
       url.password ||
       url.hash ||
-      !imageHosts[publication.code].includes(url.hostname)
+      !SOURCE_IMAGE_HOSTS[publication.code].includes(url.hostname)
     )
       continue;
     // Thingiverse's resize URL wraps the original CDN image; retain that image once.

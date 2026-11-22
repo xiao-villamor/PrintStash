@@ -18,6 +18,10 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi import (
+    Path as PathParam,
+)
+from fastapi.responses import JSONResponse
 from sqlmodel import Session
 
 from app.api.command_actor import (
@@ -31,6 +35,7 @@ from app.api.command_execution import bounded_command, run_command
 from app.core.config import settings
 from app.core.security import require_auth, require_user
 from app.db.models import (
+    CaptureUploadSlotState,
     Collection,
     CollectionRole,
     InboxItem,
@@ -51,6 +56,7 @@ from app.schemas.inbox import (
     CaptureSourceStatusRead,
     CaptureStatusRead,
     CaptureUploadFileDeclaration,
+    CaptureUploadPartRead,
     CaptureUploadSlotRead,
     CaptureUploadSlotsCreate,
     CaptureUploadSlotsRead,
@@ -136,6 +142,7 @@ def capture_capabilities(
             capture_preferences=True,
             resumable_cover=True,
             resumable_gallery=True,
+            upload_parts=True,
             idempotent_requests=True,
             storage="managed",
             max_files=64,
@@ -330,10 +337,12 @@ def _prepare_capture_upload(actor: CommandActor, slot_id: str) -> Path:
 
 
 def _open_capture_spool(
-    slot_id: str,
+    slot_id: str, start: int = 0
 ) -> tuple[AbstractContextManager[BinaryIO], BinaryIO]:
     with get_session_factory().scoped_session() as session:
-        context = staging_leases.open_capture_slot_staging(session, slot_id=slot_id)
+        context = staging_leases.open_capture_slot_staging(
+            session, slot_id=slot_id, start=start
+        )
         target = context.__enter__()
         # The context retains an open, identity-checked descriptor. Its exit only
         # flushes and validates that descriptor/path; it does not access SQL.
@@ -341,10 +350,10 @@ def _open_capture_spool(
 
 
 @asynccontextmanager
-async def _capture_slot_writer(slot_id: str) -> AsyncIterator[BinaryIO]:
+async def _capture_slot_writer(slot_id: str, start: int = 0) -> AsyncIterator[BinaryIO]:
     exit_limiter = CapacityLimiter(1)
     with CancelScope(shield=True):
-        context, target = await run_command(_open_capture_spool, slot_id)
+        context, target = await run_command(_open_capture_spool, slot_id, start)
     try:
         yield target
     except BaseException as exc:
@@ -383,6 +392,113 @@ def _publish_capture_slot(
             stream=empty_stream,
             media_type=media_type,
             staged_path=staged_path,
+        )
+        return inbox.slot_read(uploaded)
+
+
+@router.put(
+    "/capture-upload-slots/{slot_id}/parts/{offset}",
+    response_model=CaptureUploadPartRead,
+    responses={409: {"description": "The part does not continue the stored bytes."}},
+)
+async def put_capture_upload_part(
+    slot_id: str,
+    request: Request,
+    offset: int = PathParam(ge=0),
+    actor: CommandActor = Depends(require_capture_actor),
+) -> CaptureUploadPartRead | JSONResponse:
+    """Store one part of a slot's file; ``complete`` publishes the whole.
+
+    Proxies in front of a server often cap one request's body (nginx at 1 MiB
+    by default, Cloudflare at 100 MB). Parts keep each request under such a
+    cap. The spool stays between parts; a part repeated after a lost response
+    replaces the bytes from its offset, and a part past the stored bytes is
+    refused with how many bytes the server really holds.
+    """
+    size_bytes = await run_command(_prepare_capture_part, actor, slot_id, offset)
+    received = offset
+    try:
+        async with _capture_slot_writer(slot_id, offset) as target:
+            async for chunk in request.stream():
+                received += len(chunk)
+                if received > size_bytes:
+                    raise HTTPException(
+                        status_code=413, detail="capture_upload_part_past_declared_size"
+                    )
+                await run_command(target.write, chunk)
+    except staging_leases.CaptureSpoolOffsetMismatch as exc:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "capture_upload_offset_mismatch",
+                "received_bytes": exc.received_bytes,
+            },
+        )
+    except staging_leases.StagingLeaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return CaptureUploadPartRead(received_bytes=received)
+
+
+def _prepare_capture_part(actor: CommandActor, slot_id: str, offset: int) -> int:
+    with command_session(actor) as (session, user):
+        slot = inbox.require_capture_slot(session, user, slot_id)
+        if slot.state != CaptureUploadSlotState.PENDING:
+            raise HTTPException(
+                status_code=409, detail="capture_upload_slot_not_uploadable"
+            )
+        if offset > slot.size_bytes:
+            raise HTTPException(
+                status_code=413, detail="capture_upload_part_past_declared_size"
+            )
+        if offset == 0:
+            # The first part claims a fresh spool, exactly like a whole upload.
+            staging_leases.prepare_capture_slot_staging(session, slot_id=slot_id)
+        return slot.size_bytes
+
+
+@router.post(
+    "/capture-upload-slots/{slot_id}/complete", response_model=CaptureUploadSlotRead
+)
+async def complete_capture_upload_slot(
+    slot_id: str,
+    actor: CommandActor = Depends(require_capture_actor),
+) -> CaptureUploadSlotRead:
+    """Verify the parts against the declared size and hash, then publish them."""
+    try:
+        return await run_command(_publish_capture_parts, actor, slot_id)
+    except storage.UploadTooLarge as exc:
+        raise HTTPException(status_code=413, detail="upload_too_large") from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409
+            if str(exc) == "capture_upload_slot_not_uploadable"
+            else 400,
+            detail=str(exc),
+        ) from exc
+    except staging_leases.StagingLeaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        # Published or refused, these parts are finished; a retry starts over.
+        with CancelScope(shield=True):
+            await to_thread.run_sync(
+                _cleanup_capture_slot_staging, slot_id, limiter=CapacityLimiter(1)
+            )
+
+
+def _publish_capture_parts(actor: CommandActor, slot_id: str) -> CaptureUploadSlotRead:
+    with command_session(actor) as (session, user), BytesIO() as empty_stream:
+        session.commit()
+        slot = inbox.require_capture_slot(session, user, slot_id)
+        if slot.state == CaptureUploadSlotState.UPLOADED:
+            # A repeated completion after a lost response.
+            return inbox.slot_read(slot)
+        uploaded = inbox.upload_capture_slot(
+            session,
+            slot,
+            stream=empty_stream,
+            # Parts carry no file media type; the declaration is the record.
+            media_type=slot.media_type,
+            staged_path=staging_leases.capture_slot_staging_path(slot_id),
         )
         return inbox.slot_read(uploaded)
 
