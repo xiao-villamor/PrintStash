@@ -1671,7 +1671,7 @@
   "storage.betaNote": "La compatibilidad con esta conexión está en beta.",
   "Automatic physical deletion requires a Verified probe.": "La eliminación automática estará disponible cuando PrintStash verifique este almacenamiento.",
   "nav.vault": "Bóveda",
-  "nav.inbox": "Importaciones pendientes",
+  "nav.inbox": "Pendientes",
   "nav.similar": "Similares",
   "nav.model": "Modelo",
   "nav.multipart": "Modelo multiparte",

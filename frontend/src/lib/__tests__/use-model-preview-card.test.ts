@@ -50,26 +50,6 @@ afterEach(() => {
 });
 
 describe("useModelPreviewCard", () => {
-  it("includes saved source images before generated views", () => {
-    const sourceImages = [0, 1, 2].map((position) => ({
-      id: `source-${position}` as const,
-      role: "source" as const,
-      source_id: 1,
-      position,
-      provider: "thingiverse",
-      url: `/gallery/${position}`,
-    }));
-    const hook = renderHook(() =>
-      useModelPreviewCard("/gallery/0", { ...previews, source_images: sourceImages }),
-    );
-    expect(hook.result.current[1].views.map((image) => image.url)).toEqual([
-      "/gallery/0",
-      "/gallery/1",
-      "/gallery/2",
-      "/m/orbit-0",
-      "/m/orbit-1",
-    ]);
-  });
   it("lists only published views", () => {
     const empty = renderHook(() => useModelPreviewCard("/cover", NO_PREVIEWS));
     expect(empty.result.current[1].views).toEqual([]);

@@ -1671,7 +1671,7 @@
   "storage.betaNote": "Support for this connection is in beta.",
   "Automatic physical deletion requires a Verified probe.": "Automatic deletion becomes available once PrintStash verifies this storage.",
   "nav.vault": "Vault",
-  "nav.inbox": "Pending Imports",
+  "nav.inbox": "Pending",
   "nav.similar": "Similar",
   "nav.model": "Model",
   "nav.multipart": "Multipart model",

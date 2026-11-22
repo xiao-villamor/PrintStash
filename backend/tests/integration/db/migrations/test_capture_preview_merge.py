@@ -2,6 +2,7 @@
 
 import pytest
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 
 from alembic import command
@@ -84,7 +85,9 @@ class TestCapturePreviewMerge:
             with engine.begin() as connection:
                 assert connection.execute(
                     text("SELECT version_num FROM alembic_version")
-                ).scalars().all() == ["005fa96dc55b"]
+                ).scalars().all() == [
+                    ScriptDirectory.from_config(config).get_current_head()
+                ]
                 assert connection.execute(
                     text(
                         "SELECT storage_key, position FROM model_source_covers WHERE id=9"
