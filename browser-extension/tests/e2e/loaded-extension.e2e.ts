@@ -109,6 +109,8 @@ describe("loaded extension", () => {
   it("uses a fixed toolbar width with a fluid embedded panel", async () => {
     const layouts = await browser.execute(async () => {
       const frame = document.createElement("iframe");
+      // Keep the fixture out of the popup's flex layout so it cannot shrink.
+      frame.style.position = "fixed";
       frame.style.width = "300px";
       frame.style.height = "650px";
       frame.style.border = "0";
@@ -129,7 +131,12 @@ describe("loaded extension", () => {
         toolbarMaximum: [document.documentElement, document.body].map(
           (el) => getComputedStyle(el).maxWidth,
         ),
-        panel: [width(panel?.documentElement), width(panel?.body)],
+        panelFrame: width(frame),
+        panelFillsViewport: Boolean(
+          panel &&
+          width(panel.documentElement) === panel.documentElement.clientWidth &&
+          width(panel.body) === panel.documentElement.clientWidth,
+        ),
         titleLines: getComputedStyle(document.querySelector("#page") as HTMLElement)
           .webkitLineClamp,
         headerDivider: getComputedStyle(document.querySelector("header") as HTMLElement)
@@ -145,7 +152,8 @@ describe("loaded extension", () => {
       toolbar: [360, 360],
       toolbarMinimum: ["360px", "360px"],
       toolbarMaximum: ["none", "none"],
-      panel: [300, 300],
+      panelFrame: 300,
+      panelFillsViewport: true,
       titleLines: "2",
       headerDivider: "1px",
       panelBorder: "0px",
@@ -171,32 +179,42 @@ describe("loaded extension", () => {
         const initial = capture.getBoundingClientRect();
         content.scrollTop = content.scrollHeight;
         const scrolled = capture.getBoundingClientRect();
-        const result = {
+        const statusBounds = status.getBoundingClientRect();
+        return {
           scrolls: content.scrollTop > 0,
           fixed: scrolled.top === initial.top && scrolled.top >= 0 && scrolled.bottom <= bottom,
           statusVisible:
-            status.getBoundingClientRect().bottom > content.getBoundingClientRect().bottom,
+            statusBounds.top >= content.getBoundingClientRect().bottom &&
+            statusBounds.bottom <= bottom,
+          geometry: { bottom, initialTop: initial.top, top: scrolled.top, end: scrolled.bottom },
         };
-        tallPicker.remove();
-        capture.hidden = true;
-        status.hidden = true;
-        return result;
       }
-      const toolbar = measure(document);
-      const frame = document.createElement("iframe");
-      frame.style.height = "400px";
-      frame.src = new URL("?panel=1", location.href).href;
-      const loaded = new Promise<void>((resolve) =>
-        frame.addEventListener("load", () => resolve()),
-      );
-      document.body.append(frame);
-      await loaded;
-      const panel = measure(frame.contentDocument!);
-      frame.remove();
+      async function measureInFrame(width: number, height: number, search: string) {
+        const frame = document.createElement("iframe");
+        frame.style.position = "fixed";
+        frame.style.width = `${width}px`;
+        frame.style.height = `${height}px`;
+        frame.style.border = "0";
+        frame.src = new URL(`popup.html${search}`, location.href).href;
+        const loaded = new Promise<void>((resolve) =>
+          frame.addEventListener("load", () => resolve(), { once: true }),
+        );
+        document.body.append(frame);
+        try {
+          await loaded;
+          return measure(frame.contentDocument!);
+        } finally {
+          frame.remove();
+        }
+      }
+      const toolbar = await measureInFrame(360, 600, "");
+      const panel = await measureInFrame(300, 400, "?panel=1");
       return { toolbar, panel };
     });
     const visible = { scrolls: true, fixed: true, statusVisible: true };
-    assert.deepEqual(layout, { toolbar: visible, panel: visible });
+    for (const [surface, { geometry, ...visibility }] of Object.entries(layout)) {
+      assert.deepEqual(visibility, visible, `${surface}: ${JSON.stringify(geometry)}`);
+    }
   });
 
   it("switches credential fields using the keyboard", async () => {
