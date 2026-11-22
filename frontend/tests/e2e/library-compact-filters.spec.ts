@@ -48,7 +48,25 @@ test.describe("compact Library filters", () => {
     await expect(menu.getByRole("checkbox", { checked: true })).toHaveCount(0);
   });
 
-  test("uses mutually exclusive checkbox choices for printed status", async ({ page }) => {
+  test("uses mutually exclusive quick choices for printed status", async ({ page }) => {
+    await page.goto("/?printed=no");
+    const menu = await openFilters(page);
+    const printed = menu.getByRole("group", { name: "Printed", exact: true });
+    await expect(printed.getByRole("button", { name: "Not printed", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await printed.getByRole("button", { name: "Printed", exact: true }).click();
+    await expect(page).toHaveURL(/printed=yes/);
+    await expect(printed.getByRole("button", { name: "Not printed", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    await printed.getByRole("button", { name: "Any", exact: true }).click();
+    await expect(page).not.toHaveURL(/printed=/);
+  });
+
+  test("keeps printed counts on searched choices", async ({ page }) => {
     await page.route("**/api/v1/models/facets**", (route) =>
       route.fulfill({
         json: {
@@ -68,16 +86,9 @@ test.describe("compact Library filters", () => {
     );
     await page.goto("/?printed=no");
     const menu = await openFilters(page);
-    await menu.getByRole("button", { name: /^Printed/ }).click();
+    await menu.getByRole("searchbox").fill("printed");
     await expect(menu.getByRole("checkbox", { name: "Not printed", exact: true })).toBeChecked();
     await expect(menu.getByText("0", { exact: true })).toBeVisible();
-    await menu.getByRole("checkbox", { name: "Printed", exact: true }).check();
-    await expect(page).toHaveURL(/printed=yes/);
-    await expect(
-      menu.getByRole("checkbox", { name: "Not printed", exact: true }),
-    ).not.toBeChecked();
-    await menu.getByRole("checkbox", { name: "Printed", exact: true }).uncheck();
-    await expect(page).not.toHaveURL(/printed=/);
   });
 
   test("preserves selected filters while their values load", async ({ page }) => {

@@ -5,6 +5,13 @@ import { aModelListItem } from "../../src/test-support/factories";
 
 useMockApi();
 
+declare global {
+  interface Window {
+    /** Starting transforms of card animations, recorded by the glide test. */
+    cardGlides: string[];
+  }
+}
+
 async function inspect(page: Page) {
   await page.goto("/?c=maraio&type=all");
   const card = page
@@ -115,6 +122,50 @@ test.describe("Library inline inspector", () => {
       await expect(page.getByRole("button", { name: "Refresh library", exact: true })).toBeHidden();
     });
   }
+
+  test("glides reflowed cards beside either panel", async ({ page }) => {
+    const models = Array.from({ length: 92 }, (_, index) =>
+      aModelListItem({ id: index + 1, name: `Part ${index + 1}` }),
+    );
+    await page.route("**/api/v1/models/browse?**", (route) =>
+      route.fulfill({
+        json: {
+          items: models.map((model) => ({ kind: "model", model })),
+          total: models.length,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      }),
+    );
+    await page.addInitScript(() => {
+      window.cardGlides = [];
+      const glides = window.cardGlides;
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (...args) {
+        const result = animate.apply(this, args);
+        const [frames] = args;
+        if (this.matches("main [data-library-key]") && Array.isArray(frames))
+          glides.push(String(frames[0]?.transform ?? "none"));
+        return result;
+      };
+    });
+    await page.goto("/?type=all&sort=date-desc");
+    await expect(page.getByRole("heading", { name: "Part 92", exact: true })).toBeVisible();
+
+    const glided = () =>
+      page.evaluate(
+        () => window.cardGlides.filter((start) => start.startsWith("translate(")).length,
+      );
+
+    // Both panels carry the cards the same way: neither may jump them.
+    await page.getByRole("button", { name: "Show or hide details", exact: true }).click();
+    await expect.poll(glided).toBeGreaterThan(0);
+    await page.waitForFunction(() => document.documentElement.dataset.paneMoving === undefined);
+    const afterDetails = await glided();
+    await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+    await expect.poll(glided).toBeGreaterThan(afterDetails);
+  });
 
   test("returns from the explicit full page to the same inspector", async ({ page }) => {
     const problems = await collectPageProblems(page);

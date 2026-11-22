@@ -7,20 +7,29 @@ useMockApi();
 test.use({ viewport: { width: 1440, height: 900 } });
 
 test.describe("Library shell navigation", () => {
-  test("Collections leaves Favorites", async ({ page }) => {
-    await page.goto("/?favorites=true");
-    await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
+  test("Search keeps the browsed collection until widened", async ({ page }) => {
+    const collection = aCollectionNode({ id: 4, name: "Shop parts", path: "parts" });
+    await page.route("**/api/v1/collections/lookup?**", (route) =>
+      route.fulfill({ json: { collection, ancestors: [] } }),
+    );
+    await page.goto("/?c=parts&cid=4");
+    await expect(page.getByRole("heading", { level: 1, name: "Shop parts" })).toBeVisible();
     const rail = page.getByRole("navigation", { name: "Navigation", exact: true });
 
-    await rail.getByRole("link", { name: "Collections", exact: true }).click();
+    await rail.getByRole("link", { name: "Search", exact: true }).click();
 
-    await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
-    expect(new URL(page.url()).searchParams.has("favorites")).toBe(false);
-    await expect(
-      page.getByRole("complementary", { name: "Collections", exact: true }),
-    ).toBeVisible();
-    await page.goBack();
-    await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
+    const panel = page.getByRole("complementary", { name: "Search panel" });
+    await expect(panel).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Shop parts" })).toBeVisible();
+    expect(new URL(page.url()).searchParams.get("c")).toBe("parts");
+    await panel.getByRole("searchbox").fill("bracket");
+    await expect.poll(() => new URL(page.url()).searchParams.get("q")).toBe("bracket");
+    expect(new URL(page.url()).searchParams.get("c")).toBe("parts");
+    await panel.getByRole("button", { name: "Whole library", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "All Models" })).toBeVisible();
+    expect(new URL(page.url()).searchParams.get("q")).toBe("bracket");
+    await panel.getByRole("button", { name: "Shop parts", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Shop parts" })).toBeVisible();
   });
 
   test("Settings stays directly reachable after Search", async ({ page }) => {

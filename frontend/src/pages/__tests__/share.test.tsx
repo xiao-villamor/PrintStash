@@ -74,6 +74,7 @@ function sharedModel(over: Partial<PublicModelRead> = {}): PublicModelRead {
     has_thumbnail: false,
     allow_download: false,
     files: [publicFile()],
+    preview_look: "sky",
     ...over,
   };
 }

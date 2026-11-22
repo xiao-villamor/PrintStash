@@ -29,13 +29,9 @@ describe("toolpath worker", () => {
 
     const [reply, transfer] = boundary.postMessage.mock.calls[0];
     expect(reply.kind).toBe("ready");
-    expect(transfer).toHaveLength(4);
-    expect(transfer.map((buffer) => buffer instanceof ArrayBuffer)).toEqual([
-      true,
-      true,
-      true,
-      true,
-    ]);
+    expect(transfer).toHaveLength(5);
+    expect(transfer.every((buffer) => buffer instanceof ArrayBuffer)).toBe(true);
+    expect(transfer).toContain(reply.kind === "ready" && reply.data.extrudeFeatures.buffer);
     expect(reply).toMatchObject({ data: { bounds: { sizeX: 10 } } });
   });
   it("reports segment refusal without transferring partial geometry", () => {

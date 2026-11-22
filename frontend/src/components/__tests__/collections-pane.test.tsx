@@ -31,6 +31,7 @@ function Controls() {
       <output aria-label="Pane state">{pane?.open ? "open" : "closed"}</output>
       <output aria-label="Location">{location.href}</output>
       <button onClick={pane?.toggle}>Toggle pane</button>
+      <button onClick={pane?.showSearch}>Show search</button>
       <button onClick={() => navigation.push("/models/1")}>Open detail</button>
       <div ref={pane?.attachBreadcrumbs} aria-label="Topbar breadcrumbs" />
     </>
@@ -129,6 +130,29 @@ describe("LibraryBreadcrumbs", () => {
   });
 });
 
+describe("CollectionsPaneProvider.showSearch", () => {
+  it("keeps the displayed collection when Search opens", async () => {
+    renderPane({ at: "/?c=parts&cid=4&tag=tools" });
+    await userEvent.click(screen.getByRole("button", { name: "Show search" }));
+    expect(screen.getByLabelText("Location")).toHaveTextContent("/?c=parts&cid=4&tag=tools");
+    expect(screen.getByRole("complementary", { name: "Search panel" })).toBeVisible();
+  });
+
+  it("moves the documents section to Models within the same collection", async () => {
+    renderPane({ at: "/?c=parts&cid=4&v=docs" });
+    await userEvent.click(screen.getByRole("button", { name: "Show search" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Location")).toHaveTextContent("/?c=parts&cid=4&v=models"),
+    );
+  });
+
+  it("opens the Library from another destination", async () => {
+    renderPane({ at: "/printers" });
+    await userEvent.click(screen.getByRole("button", { name: "Show search" }));
+    await waitFor(() => expect(screen.getByLabelText("Location")).toHaveTextContent("/?v=models"));
+  });
+});
+
 describe("CollectionsPaneHost", () => {
   it("remembers a submitted search in its actual panel", async () => {
     renderPane({ at: "/search?q=bracket" });
@@ -155,6 +179,24 @@ describe("CollectionsPaneHost", () => {
     localStorage.setItem("printstash.recent-searches.1", JSON.stringify(["private query"]));
     renderPane({ at: "/search", auth: memberSession() });
     expect(screen.queryByRole("button", { name: "private query" })).not.toBeInTheDocument();
+  });
+  it("removes one recent search", async () => {
+    localStorage.setItem("printstash.recent-searches.1", JSON.stringify(["bracket", "hinge"]));
+    renderPane({ at: "/search" });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove bracket from recent searches" }),
+    );
+    expect(JSON.parse(localStorage.getItem("printstash.recent-searches.1") ?? "[]")).toEqual([
+      "hinge",
+    ]);
+  });
+  it("clears every recent search", async () => {
+    localStorage.setItem("printstash.recent-searches.1", JSON.stringify(["bracket", "hinge"]));
+    renderPane({ at: "/search" });
+    const panel = screen.getByRole("complementary", { name: "Search panel" });
+    await userEvent.click(within(panel).getByRole("button", { name: "Clear" }));
+    expect(within(panel).getByText("Your searches will appear here.")).toBeVisible();
+    expect(localStorage.getItem("printstash.recent-searches.1")).toBe("[]");
   });
   it("rejects malformed persisted recent queries", () => {
     localStorage.setItem(

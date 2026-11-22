@@ -54,6 +54,8 @@ beforeEach(() => {
   document.documentElement.style.setProperty("--opacity-content-enter", "0.7");
   document.documentElement.style.setProperty("--duration-library-enter", "150ms");
   document.documentElement.style.setProperty("--ease-library-enter", "linear");
+  document.documentElement.style.setProperty("--duration-press", "100ms");
+  document.documentElement.style.setProperty("--ease-out", "ease-out");
 });
 
 afterEach(() => {
@@ -118,6 +120,16 @@ describe("useContentReveal", () => {
       expect(scroll === "self" ? parent.scrollTop : content.scrollTop).toBe(100);
     },
   );
+
+  it.each([
+    { timing: "content" as const, duration: 150, easing: "linear" },
+    { timing: "press" as const, duration: 100, easing: "ease-out" },
+  ])("reveals a $timing handoff over its own timing tokens", ({ timing, duration, easing }) => {
+    const { rerender } = render(<Content timing={timing} />);
+    rerender(<Content identity="second" timing={timing} />);
+    frames();
+    expect(animate.mock.calls[0][1]).toMatchObject({ duration, easing });
+  });
 
   it("does not animate content across unrelated scopes", () => {
     const { rerender } = render(<Content scope="one" />);

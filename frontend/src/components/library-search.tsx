@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Camera, History, Search, Sparkles, XCircle } from "lucide-react";
+import { Camera, Folder, History, Library, Search, Sparkles, X, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import { useI18n } from "@/lib/i18n";
 import { Link } from "@/lib/link";
 import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { collectionIdentity, useCollectionName } from "@/features/library/collection-navigation";
 
 type SearchMode = "lexical" | "hybrid";
 
@@ -32,10 +33,14 @@ export function LibrarySearch({
   placement = "header",
   recent = [],
   onSearchCommit,
+  onRecentRemove,
+  onRecentClear,
 }: {
   placement?: "header" | "sidebar" | "mobile";
   recent?: readonly string[];
   onSearchCommit?: (query: string) => void;
+  onRecentRemove?: (query: string) => void;
+  onRecentClear?: () => void;
 }) {
   const { t } = useI18n();
   const { user } = useAuth();
@@ -54,6 +59,35 @@ export function LibrarySearch({
   if (syncedMode !== routeMode) {
     setSyncedMode(routeMode);
     setMode(routeMode);
+  }
+  // The sidebar searches where the user is. The collection they came from
+  // stays one click away after widening the search to the whole library.
+  const libraryRoute = pathname === "/";
+  const scopedPath = libraryRoute ? searchParams.get("c") : null;
+  const scopedId = libraryRoute ? collectionIdentity(searchParams) : null;
+  const [origin, setOrigin] = useState(
+    scopedPath === null ? null : { path: scopedPath, id: scopedId },
+  );
+  if (scopedPath !== null && (origin?.path !== scopedPath || origin.id !== scopedId))
+    setOrigin({ path: scopedPath, id: scopedId });
+  const originName = useCollectionName(
+    sidebar && libraryRoute ? (origin?.path ?? null) : null,
+    origin?.id ?? null,
+  );
+  const scoped = scopedPath !== null;
+  function changeScope(next: "collection" | "library") {
+    if (!origin || next === (scoped ? "collection" : "library")) return;
+    const updated = new URLSearchParams(params);
+    updated.delete("scope");
+    if (next === "library") {
+      updated.delete("c");
+      updated.delete("cid");
+    } else {
+      updated.set("c", origin.path);
+      if (origin.id !== null) updated.set("cid", String(origin.id));
+    }
+    router.replace(`/?${updated}`);
+    input.current?.focus();
   }
   const [engaged, setEngaged] = useState(false);
   const [value, setValue] = useState(q);
@@ -279,8 +313,41 @@ export function LibrarySearch({
       </form>
       {sidebar && (
         <>
+          {libraryRoute && origin && (
+            <div
+              role="group"
+              aria-label={t("search.scope")}
+              className="mt-2 grid grid-cols-2 border border-border"
+            >
+              {(
+                [
+                  ["collection", Folder, originName ?? t("search.scopeCollection")],
+                  ["library", Library, t("search.scopeLibrary")],
+                ] as const
+              ).map(([key, Icon, label]) => {
+                const pressed = (key === "collection") === scoped;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={pressed}
+                    title={label}
+                    onClick={() => changeScope(key)}
+                    className={`flex h-8 min-w-0 items-center justify-center gap-1.5 px-2 text-xs transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${pressed ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <span className="truncate">{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            {t(aiActive ? "aiSearch.meaningHelp" : "aiSearch.keywordHelp")}
+            {aiActive
+              ? t("aiSearch.meaningHelp")
+              : scoped && originName
+                ? t("search.keywordHelpIn", { value1: originName })
+                : t("aiSearch.keywordHelp")}
           </p>
           {visualReady && (
             <Button
@@ -293,59 +360,88 @@ export function LibrarySearch({
             </Button>
           )}
           {!aiReady && (
-            <div className="mt-3 text-xs leading-relaxed text-muted-foreground">
-              <p role="status">
-                {t(
-                  status.isError
-                    ? "aiSearch.statusError"
-                    : status.isPending
-                      ? "Checking AI Search…"
-                      : aiEnabled
-                        ? "aiSearch.notReady"
-                        : "aiSearch.noActiveIndex",
-                )}
-              </p>
-              {status.isError ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-2"
-                  loading={status.isFetching}
-                  onClick={() => void status.refetch()}
-                >
-                  {t("Retry")}
-                </Button>
-              ) : user?.is_superuser && !status.isPending ? (
-                <Link
-                  href="/settings?section=ai-search"
-                  className="mt-1 inline-block underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {t(aiEnabled ? "aiSearch.viewPreparation" : "AI Search setup")}
-                </Link>
-              ) : null}
+            <div className="mt-3 flex items-start gap-2.5 border border-border bg-muted/40 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+              <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <p role="status">
+                  {t(
+                    status.isError
+                      ? "aiSearch.statusError"
+                      : status.isPending
+                        ? "Checking AI Search…"
+                        : aiEnabled
+                          ? "aiSearch.notReady"
+                          : "aiSearch.noActiveIndex",
+                  )}
+                </p>
+                {status.isError ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    loading={status.isFetching}
+                    onClick={() => void status.refetch()}
+                  >
+                    {t("Retry")}
+                  </Button>
+                ) : user?.is_superuser && !status.isPending ? (
+                  <Link
+                    href="/settings?section=ai-search"
+                    className="mt-1 inline-block font-medium text-foreground underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {t(aiEnabled ? "aiSearch.viewPreparation" : "AI Search setup")}
+                  </Link>
+                ) : null}
+              </div>
             </div>
           )}
-          <div className="mt-5 min-h-0 flex-1 overflow-y-auto border-t border-border pt-4 pb-3">
-            <h3 className="mb-2 px-1 text-xs font-medium text-muted-foreground">
-              {t("Recent searches")}
-            </h3>
-            {recent.length ? (
-              recent.map((query) => (
+          <div className="mt-4 min-h-0 flex-1 overflow-y-auto border-t border-border pt-3 pb-3">
+            <div className="mb-1 flex h-7 items-center justify-between px-1">
+              <h3 className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                {t("Recent searches")}
+              </h3>
+              {recent.length > 0 && onRecentClear && (
                 <Button
-                  key={query}
                   variant="ghost"
-                  size="sm"
-                  className="h-8 w-full justify-start gap-2 px-1 text-left text-xs font-normal"
-                  onClick={() => {
-                    setValue(query);
-                    searchFor(query, effectiveMode);
-                    onSearchCommit?.(query);
-                  }}
+                  size="xs"
+                  className="h-6 px-1.5 text-2xs"
+                  onClick={onRecentClear}
                 >
-                  <History className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                  <span className="truncate">{query}</span>
+                  {t("Clear")}
                 </Button>
-              ))
+              )}
+            </div>
+            {recent.length ? (
+              <ul>
+                {recent.map((query) => (
+                  <li key={query} className="group/recent relative">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-full justify-start gap-2 px-1 pr-8 text-left text-xs font-normal"
+                      onClick={() => {
+                        setValue(query);
+                        searchFor(query, effectiveMode);
+                        onSearchCommit?.(query);
+                      }}
+                    >
+                      <History className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                      <span className="truncate">{query}</span>
+                    </Button>
+                    {onRecentRemove && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0 top-1/2 h-7 w-7 -translate-y-1/2 text-muted-foreground opacity-0 transition-opacity duration-press group-focus-within/recent:opacity-100 group-hover/recent:opacity-100 focus-visible:opacity-100"
+                        aria-label={t("search.removeRecent", { value1: query })}
+                        onClick={() => onRecentRemove(query)}
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden />
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
             ) : (
               <p className="px-1 text-xs leading-relaxed text-muted-foreground">
                 {t("aiSearch.recentEmpty")}

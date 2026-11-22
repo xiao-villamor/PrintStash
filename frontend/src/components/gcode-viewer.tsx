@@ -31,10 +31,31 @@ import {
   viewerPresetDirection,
   VIEWER_POLE_MARGIN,
 } from "@/lib/thumbnail-camera";
-import type { ToolpathData } from "@/lib/gcode";
+import { bedCentre, type ToolpathData } from "@/lib/gcode";
+import { TOOLPATH_FEATURE_COLOURS, type ToolpathFeature } from "@/lib/gcode-features";
+import { createToolpathLines } from "@/lib/toolpath-lines";
 import { parseGcodeInWorker, ToolpathParseError } from "@/lib/gcode-worker-client";
 
 import type { ViewerControls, ViewerCameraPreset } from "@/components/stl-viewer";
+
+const FEATURE_LABELS = {
+  outer_wall: "Outer wall",
+  inner_wall: "Inner wall",
+  overhang_wall: "Overhang wall",
+  top_bottom: "Top and bottom",
+  solid_infill: "Solid infill",
+  sparse_infill: "Sparse infill",
+  bridge: "Bridge",
+  support: "Support",
+  skirt_brim: "Skirt and brim",
+  other: "Other",
+} as const satisfies Record<ToolpathFeature, string>;
+
+function featureSwatch(feature: ToolpathFeature): React.CSSProperties & {
+  "--toolpath-feature": string;
+} {
+  return { "--toolpath-feature": TOOLPATH_FEATURE_COLOURS[feature] };
+}
 
 // ---- Three.js Scene ----
 
@@ -42,6 +63,7 @@ function GcodeScene({
   data,
   currentLayer,
   onlyCurrentLayer,
+  hiddenFeatures,
   showTravel,
   showBed,
   printerBedMm,
@@ -53,6 +75,7 @@ function GcodeScene({
   data: ToolpathData;
   currentLayer: number;
   onlyCurrentLayer: boolean;
+  hiddenFeatures: ReadonlySet<ToolpathFeature>;
   showTravel: boolean;
   showBed: boolean;
   printerBedMm: { x: number; y: number } | null;
@@ -66,12 +89,7 @@ function GcodeScene({
   const interactionStart = useRef<THREE.Quaternion | null>(null);
   const presetRef = useRef<ViewerCameraPreset>("isometric");
 
-  const extrudeGeo = useMemo(() => {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(data.extrudePositions, 3));
-    geo.setAttribute("color", new THREE.BufferAttribute(data.extrudeColors, 3));
-    return geo;
-  }, [data]);
+  const extrusions = useMemo(() => createToolpathLines(data), [data]);
 
   const travelGeo = useMemo(() => {
     const geo = new THREE.BufferGeometry();
@@ -79,17 +97,12 @@ function GcodeScene({
     return geo;
   }, [data]);
 
-  const extrudeMat = useMemo(() => new THREE.LineBasicMaterial({ vertexColors: true }), []);
   const travelMat = useMemo(
     () => new THREE.LineBasicMaterial({ color: "#94a3b8", transparent: true, opacity: 0.2 }),
     [],
   );
 
   // Stable LineSegments objects — must be memoized so <primitive> identity is stable across renders
-  const extrudeLines = useMemo(
-    () => new THREE.LineSegments(extrudeGeo, extrudeMat),
-    [extrudeGeo, extrudeMat],
-  );
   const travelLines = useMemo(
     () => new THREE.LineSegments(travelGeo, travelMat),
     [travelGeo, travelMat],
@@ -104,20 +117,9 @@ function GcodeScene({
 
   // R3F does not own <primitive> resources. Release the previous plate's GPU
   // buffers when switching plates, including when the next preview fails.
-  useEffect(
-    () => () => {
-      extrudeGeo.dispose();
-      travelGeo.dispose();
-    },
-    [extrudeGeo, travelGeo],
-  );
-  useEffect(
-    () => () => {
-      extrudeMat.dispose();
-      travelMat.dispose();
-    },
-    [extrudeMat, travelMat],
-  );
+  useEffect(() => () => extrusions.dispose(), [extrusions]);
+  useEffect(() => () => travelGeo.dispose(), [travelGeo]);
+  useEffect(() => () => travelMat.dispose(), [travelMat]);
   useEffect(
     () => () => {
       bedGeo?.dispose();
@@ -126,17 +128,22 @@ function GcodeScene({
     [bedGeo, bedEdgesGeo],
   );
 
-  // Update drawRange directly on the stable geometry — no ref gymnastics needed
+  // Layers are counted in vertices; the tubes are drawn per segment (two vertices).
   useEffect(() => {
-    const count = data.cumulativeVertices[currentLayer + 1] ?? data.extrudePositions.length / 3;
+    const end = data.cumulativeVertices[currentLayer + 1] ?? data.extrudePositions.length / 3;
     const start = onlyCurrentLayer ? (data.cumulativeVertices[currentLayer] ?? 0) : 0;
-    extrudeGeo.setDrawRange(start, Math.max(count - start, 0));
+    extrusions.showSegments(start / 2, Math.max(end, start) / 2);
     invalidate();
-  }, [currentLayer, onlyCurrentLayer, data, extrudeGeo, invalidate]);
+  }, [currentLayer, onlyCurrentLayer, data, extrusions, invalidate]);
 
   useEffect(() => {
     invalidate();
   }, [invalidate, showBed, showGrid, showTravel]);
+
+  useEffect(() => {
+    extrusions.hideFeatures(hiddenFeatures);
+    invalidate();
+  }, [hiddenFeatures, extrusions, invalidate]);
 
   // One array per toolpath: R3F re-applies a changed `position` prop on every
   // render, so a fresh array would snap the camera back to its starting point
@@ -216,6 +223,7 @@ function GcodeScene({
       ? Math.max(printerBedMm.x, printerBedMm.y) * 0.6
       : (Math.max(data.bounds.sizeX, data.bounds.sizeY) / 2) * 1.1 || 10;
   const floorY = -(data.bounds.sizeZ / 2);
+  const bedPosition = printerBedMm ? bedCentre(data.bounds, printerBedMm) : null;
 
   return (
     <>
@@ -227,12 +235,15 @@ function GcodeScene({
         position={initialCameraPosition}
       />
       <ambientLight intensity={0.8} />
-      <primitive object={extrudeLines} />
+      <primitive object={extrusions.lines} />
       {showTravel && data.travelPositions.length > 0 && <primitive object={travelLines} />}
 
       {/* Bed platform (only in bed-fit mode) */}
-      {showBed && bedGeo && bedEdgesGeo && printerBedMm && (
-        <group position={[0, floorY - 0.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      {showBed && bedGeo && bedEdgesGeo && printerBedMm && bedPosition && (
+        <group
+          position={[bedPosition.x, floorY - 0.5, bedPosition.z]}
+          rotation={[-Math.PI / 2, 0, 0]}
+        >
           <mesh geometry={bedGeo}>
             <meshStandardMaterial
               color="#1e3a5f"
@@ -409,6 +420,9 @@ export function GcodeViewer({
   const [currentLayer, setCurrentLayer] = useState(0);
   const [layerEntry, setLayerEntry] = useState<string | null>(null);
   const [onlyCurrentLayer, setOnlyCurrentLayer] = useState(false);
+  const [hiddenFeatures, setHiddenFeatures] = useState<ReadonlySet<ToolpathFeature>>(
+    () => new Set(),
+  );
   const [showTravel, setShowTravel] = useState(false);
   const [showBed, setShowBed] = useState(true);
   const localControls = useRef<ViewerControls | null>(null);
@@ -622,6 +636,7 @@ export function GcodeViewer({
             data={data}
             currentLayer={currentLayer}
             onlyCurrentLayer={onlyCurrentLayer}
+            hiddenFeatures={hiddenFeatures}
             showTravel={showTravel}
             showBed={showBed}
             printerBedMm={printerBedMm ?? null}
@@ -706,6 +721,52 @@ export function GcodeViewer({
         className="toolpath-layer-slider"
       />
       {toggle(uiText("This layer"), onlyCurrentLayer, setOnlyCurrentLayer)}
+      {data.features.length > 0 && (
+        <section className="toolpath-features" aria-label={uiText("Features")}>
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="toolpath-section-title">{uiText("Features")}</h3>
+            {hiddenFeatures.size > 0 && (
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto p-0 text-xs"
+                onClick={() => setHiddenFeatures(new Set())}
+              >
+                {uiText("Show all")}
+              </Button>
+            )}
+          </div>
+          <ul className="toolpath-feature-list">
+            {data.features.map((feature) => {
+              const shown = !hiddenFeatures.has(feature);
+              return (
+                <li key={feature}>
+                  <button
+                    type="button"
+                    aria-pressed={shown}
+                    className="toolpath-feature"
+                    onClick={() =>
+                      setHiddenFeatures((previous) => {
+                        const next = new Set(previous);
+                        if (shown) next.add(feature);
+                        else next.delete(feature);
+                        return next;
+                      })
+                    }
+                  >
+                    <span
+                      aria-hidden
+                      className="toolpath-feature-swatch"
+                      style={featureSwatch(feature)}
+                    />
+                    <span>{uiText(FEATURE_LABELS[feature])}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
     </section>,
     <>
       {!sharedControls && (

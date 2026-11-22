@@ -24,3 +24,52 @@ export const PREVIEW_LOOK_COLOURS = {
   graphite: "#6E737C",
   sand: "#CDBCA8",
 } as const;
+/** Studio shading of generated images, in the camera frame (x right, y up, z to viewer). */
+export const PREVIEW_STUDIO = {
+  key: { direction: [-0.8, 0.9, 0.65], colour: [1, 1, 1] },
+  fill: { direction: [0.55, -0.25, 0.55], colour: [1, 1, 1] },
+  rim: { colour: [1, 1, 1], power: 3 },
+  specularPower: 24,
+  looks: {
+    sky: {
+      albedo: [0.6235294117647059, 0.7215686274509804, 0.8549019607843137],
+      key: 0.92,
+      fill: 0.28,
+      ambient: 0.26,
+      rim: 0.1,
+      specular: 0.16,
+    },
+    printstash_blue: {
+      albedo: [0.3686274509803922, 0.5450980392156862, 0.796078431372549],
+      key: 1.0,
+      fill: 0.3,
+      ambient: 0.24,
+      rim: 0.18,
+      specular: 0.22,
+    },
+    slate: {
+      albedo: [0.557, 0.592, 0.651],
+      key: 1.05,
+      fill: 0.3,
+      ambient: 0.22,
+      rim: 0.28,
+      specular: 0.18,
+    },
+    graphite: {
+      albedo: [0.43137254901960786, 0.45098039215686275, 0.48627450980392156],
+      key: 1.2,
+      fill: 0.3,
+      ambient: 0.22,
+      rim: 0.38,
+      specular: 0.22,
+    },
+    sand: {
+      albedo: [0.803921568627451, 0.7372549019607844, 0.6588235294117647],
+      key: 0.9,
+      fill: 0.26,
+      ambient: 0.26,
+      rim: 0.08,
+      specular: 0.12,
+    },
+  },
+} as const;

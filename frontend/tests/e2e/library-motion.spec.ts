@@ -209,6 +209,20 @@ test.describe("Library motion", () => {
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
   });
 
+  test("Upload never replays the library reveal", async ({ page }) => {
+    await page.goto("/?c=maraio");
+    await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.libraryReveals.length)).toBeGreaterThan(0);
+    const settled = await page.evaluate(() => window.libraryReveals.length);
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Upload model" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(new URL(page.url()).searchParams.has("upload")).toBe(false);
+    expect(await page.evaluate(() => window.libraryReveals.length)).toBe(settled);
+  });
+
   test("list layout reveals without scaling", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();

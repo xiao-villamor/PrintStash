@@ -1,6 +1,7 @@
 /** Mount the public viewer with real STL bytes, native workers and renderers. */
 import "../../src/globals.css";
 import { StrictMode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ViewerDisplayMode } from "../../src/components/stl-viewer";
 import { createRoot } from "react-dom/client";
 import { BoxGeometry, Mesh } from "three";
@@ -78,35 +79,41 @@ const ready = (index: number, value: boolean) => {
   readiness[index] = value;
   document.body.dataset.ready = String(readiness.every(Boolean));
 };
+// The viewer reads the library's preview look through React Query; fixtures pass it.
+const fixtureQueries = new QueryClient();
 root.render(
   <StrictMode>
-    <div style={{ display: "flex", height: "100%" }}>
-      <div style={{ width: 640, height: 480 }}>
-        <STLViewer
-          displayMode={displayMode}
-          url="/control.stl"
-          previewFetcher={previewFetcher}
-          comparisonCamera={camera}
-          onControlsReady={(value) => {
-            controls = value;
-          }}
-          onGeometrySize={(value) => {
-            document.body.dataset.geometrySize = String(value);
-          }}
-          onReadyChange={(value) => ready(0, value)}
-        />
-      </div>
-      {compare && (
+    <QueryClientProvider client={fixtureQueries}>
+      <div style={{ display: "flex", height: "100%" }}>
         <div style={{ width: 640, height: 480 }}>
           <STLViewer
-            url="/comparison.stl"
+            look="sky"
+            displayMode={displayMode}
+            url="/control.stl"
             previewFetcher={previewFetcher}
             comparisonCamera={camera}
-            onReadyChange={(value) => ready(1, value)}
+            onControlsReady={(value) => {
+              controls = value;
+            }}
+            onGeometrySize={(value) => {
+              document.body.dataset.geometrySize = String(value);
+            }}
+            onReadyChange={(value) => ready(0, value)}
           />
         </div>
-      )}
-    </div>
+        {compare && (
+          <div style={{ width: 640, height: 480 }}>
+            <STLViewer
+              look="sky"
+              url="/comparison.stl"
+              previewFetcher={previewFetcher}
+              comparisonCamera={camera}
+              onReadyChange={(value) => ready(1, value)}
+            />
+          </div>
+        )}
+      </div>
+    </QueryClientProvider>
   </StrictMode>,
 );
 window.meshViewerCheck = {

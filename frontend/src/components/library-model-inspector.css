@@ -344,7 +344,9 @@
 }
 
 /* Docked: the library reserves the inspector's column, so the grid reflows to
-   fewer columns instead of disappearing under the panel. Not animated. */
+   fewer columns instead of disappearing under the panel. The padding commits at
+   once; cards then reflow along the panel's spring, through the same path
+   as the Collections pane. */
 @media (min-width: 1024px) {
   main[data-inspector-layout] {
     --library-inspector-inset: 12px;
