@@ -1886,6 +1886,7 @@
   "inbox.deleteCompletedTitle": "Remove completed import?",
   "inbox.deleteCompletedDescription": "This removes the completed job from Pending Imports. Imported Models stay in your vault.",
   "inbox.queue": "Queue",
+  "inbox.openInbox": "Open inbox",
   "inbox.queueTitle": "Captures",
   "inbox.queueDescription": "Captures waiting for review or import.",
   "inbox.completedDescription": "Finished jobs. Imported Models remain in your vault.",

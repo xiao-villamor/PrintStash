@@ -18,6 +18,7 @@ import type { InboxItem } from "@/types";
 
 export function PendingSidebar() {
   const { t } = useI18n();
+  const pathname = usePathname();
   const query = useInboxSnapshot();
   const commands = useInboxCommands();
   const [target, setTarget] = useState<InboxItem | null>(null);
@@ -34,9 +35,16 @@ export function PendingSidebar() {
   }
   return (
     <aside aria-label={t("inbox.title")} className="flex h-full w-full shrink-0 flex-col">
-      <h2 className="flex h-12 shrink-0 items-center px-4 font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
-        {t("inbox.title")}
-      </h2>
+      <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-4">
+        <h2 className="font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
+          {t("inbox.title")}
+        </h2>
+        {pathname !== "/inbox" && (
+          <Button asChild size="xs" variant="outline">
+            <Link href="/inbox">{t("inbox.openInbox")}</Link>
+          </Button>
+        )}
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         {query.isPending && (
           <p role="status" className="py-2 text-xs text-muted-foreground">

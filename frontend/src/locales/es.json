@@ -1886,6 +1886,7 @@
   "inbox.deleteCompletedTitle": "¿Quitar la importación completada?",
   "inbox.deleteCompletedDescription": "Esto elimina el trabajo completado de Importaciones pendientes. Los modelos importados permanecen en tu bóveda.",
   "inbox.queue": "Cola",
+  "inbox.openInbox": "Abrir bandeja",
   "inbox.queueTitle": "Capturas",
   "inbox.queueDescription": "Capturas pendientes de revisión o importación.",
   "inbox.completedDescription": "Trabajos finalizados. Los modelos importados permanecen en tu bóveda.",
