@@ -149,13 +149,31 @@ registers each native connection, verifies upload-only against device storage,
 and compares PrintStash status and job history with the device through start,
 pause, resume, completion and cancellation of a second print.
 
-A second fresh project tests dispatch. It loads PLA in PrintStash’s Klipper
+To run a single profile’s lifecycle and its printer-specific checks, pass the
+runner’s profile name, for example:
+
+```sh
+./deploy/manual-testing/bin/farm-lab.sh --printer bambu
+```
+
+The default exercises all eleven profiles. Each printer-specific check also
+runs through the bundled app, with the corresponding emulator as the observer.
+
+| Profiles | Printer-specific checks |
+| --- | --- |
+| `klipper`, `elegoo-neptune4`, `elegoo-neptune4-plus` | Compare reported XYZ travel limits to the native toolhead, then home X, jog 1 mm and verify the position. The Neptune profiles have different travel limits. |
+| `bambu` | Check FTPS upload and byte size in the synced cache, the guard on deletion, and MQTT tray insertion and removal while an external spool stays loaded. |
+| `octoprint` | Pause from OctoPrint’s VIRTUAL printer and check that PrintStash status and history recognize its simultaneous printing and paused flags. |
+| `prusalink`, `prusa-mini`, `prusa-mk4s`, `prusa-core-one` | Identify the native model, register with Digest authentication, transfer a real PrusaSlicer binary G-code fixture without starting, verify its byte size on USB and in PrintStash, then delete it. |
+| `elegoo-centauri`, `elegoo-centauri-2` | Transfer G-code larger than one upload chunk over the respective native provider. Start it and verify the heater targets found only in the final chunk, then cancel through PrintStash. |
+
+The full run also creates a fresh two-printer project to test dispatch. It loads PLA in PrintStash’s Klipper
 manual inventory, changes a Bambu AMS tray on the emulator, waits for PrintStash
 to receive it over MQTT, then ingests a PETG Revision and submits it to the
 queue with automatic routing. The test checks the compatibility verdict for
 both printers, the queued job’s destination, the transferred file and progress
 on Bambu, and the absence of that file on idle Klipper. Each project removes
-its containers, network and volumes on exit. Either lane failing makes the
+its containers, network and volumes on exit. Any lane failing makes the
 command exit nonzero. Look for the profile names and `mixed-farm` in its output.
 
 ### Manual review with a shared Farm Lab
