@@ -73,6 +73,46 @@ async function selectRevision() {
 beforeEach(() => localStorage.clear());
 
 describe("Fleet Add to queue", () => {
+  it("shows the selected printer's routing hold in dispatch details", async () => {
+    setup({}, [aPrinter({ id: 8, name: "Workshop", status: "ready", drain_mode: true })]);
+    expect(screen.getByRole("complementary", { name: "Dispatch details" })).toHaveTextContent(
+      "Draining",
+    );
+    await userEvent.click(screen.getByRole("radio", { name: "Rush" }));
+    expect(screen.getByRole("complementary", { name: "Dispatch details" })).toHaveTextContent(
+      "Rush",
+    );
+  });
+
+  it("requires an explicit plate for a newly selected sliced Revision", async () => {
+    const app = setup({
+      "GET /api/v1/models/1": json({
+        ...model,
+        files: [{ ...file, original_filename: "bracket.gcode.3mf" }],
+      }),
+      "GET /api/v1/files/7/gcode-plates": json({
+        plates: [1, 2],
+        identities: [],
+        plate_metadata: [],
+      }),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Revision" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Bracket" }));
+    await userEvent.click(await screen.findByRole("button", { name: /Revision 1/ }));
+    const save = screen.getByRole("button", { name: "Save job" });
+    expect(save).toBeDisabled();
+    await userEvent.click(await screen.findByRole("radio", { name: "Plate 2" }));
+    await userEvent.click(save);
+    await waitFor(() =>
+      expect(
+        app
+          .requestsWithMethod("POST")
+          .some(
+            (r) => r.url.endsWith("/fleet/queue") && JSON.parse(r.body ?? "{}").plate_index === 2,
+          ),
+      ).toBe(true),
+    );
+  });
   it("selects a revision from an additional real cursor page", async () => {
     const app = setup({
       "GET /api/v1/models/page": (url) =>
@@ -114,7 +154,7 @@ describe("Fleet Add to queue", () => {
   it("sends administrator automatic routing to the existing queue owner", async () => {
     const app = setup();
     await selectRevision();
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Routing" }), "least_busy");
+    await userEvent.click(screen.getByRole("radio", { name: "Least busy" }));
     await userEvent.click(screen.getByRole("button", { name: "Save job" }));
     await waitFor(() => expect(app.onClose).toHaveBeenCalledOnce());
     const command = app
@@ -251,9 +291,8 @@ describe("Fleet Add to queue", () => {
     expect(
       app.requestsWithMethod("POST").some((request) => request.url.endsWith("/fleet/queue")),
     ).toBe(false);
-    await userEvent.selectOptions(
-      screen.getByRole("combobox", { name: "Material compatibility" }),
-      "allow_mismatch",
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: "Allow material or nozzle mismatch" }),
     );
     await userEvent.click(screen.getByRole("button", { name: "Save job" }));
     await waitFor(() => expect(app.onClose).toHaveBeenCalledOnce());

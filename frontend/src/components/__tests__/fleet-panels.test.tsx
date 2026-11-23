@@ -352,7 +352,19 @@ describe("FleetQueuePanel", () => {
 
   it("shows the empty state when there are no jobs", () => {
     renderQueuePanel({ printers: [] });
-    expect(screen.getByText("No jobs match these filters.")).toBeInTheDocument();
+    expect(screen.getByText("The queue is empty")).toBeInTheDocument();
+  });
+
+  it("clears an empty printer filter from the queue", async () => {
+    renderQueuePanel({
+      jobs: [makeJob({ remote_filename: "bracket.gcode", blocked_reason: "printer_unavailable" })],
+    });
+    const list = within(screen.getByRole("region", { name: "Queued print jobs" }));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Printer" }), "unassigned");
+    expect(list.getByText("No jobs match these filters.")).toBeVisible();
+    await userEvent.click(list.getByRole("button", { name: "Clear filters" }));
+    expect(list.getByText("bracket.gcode")).toBeVisible();
+    expect(list.getByText("Waiting for the printer to accept work")).toBeVisible();
   });
 
   it("moving a queued job down calls updateFleetJob with the new queue position", async () => {

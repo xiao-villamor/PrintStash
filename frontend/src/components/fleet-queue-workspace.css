@@ -1,0 +1,409 @@
+.queue-register {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.fleet-filter-row.queue-register-toolbar {
+  margin: 0;
+  align-items: center;
+  padding: 12px 16px;
+  gap: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.queue-register-toolbar h2,
+.queue-ticket h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.queue-register-toolbar h2 svg,
+.queue-ticket h3 svg {
+  color: var(--primary);
+}
+.queue-register-toolbar .farm-queue-scopes {
+  margin-right: auto;
+}
+.queue-register-toolbar select {
+  min-width: 120px;
+  max-width: 230px;
+}
+.queue-register-columns,
+.queue-register-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.7fr) minmax(120px, 1fr) minmax(100px, 0.8fr) minmax(
+      132px,
+      0.5fr
+    );
+  align-items: center;
+  gap: 16px;
+  padding: 9px 16px;
+}
+.queue-register-columns {
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--muted-foreground);
+  background: var(--muted);
+}
+.queue-register-row {
+  min-height: 64px;
+  border-top: 1px solid var(--border);
+}
+.queue-register-row strong,
+.queue-register-empty strong {
+  font-weight: 580;
+  font-size: 13px;
+}
+.queue-register-row small {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.queue-register-name,
+.queue-register-destination,
+.queue-register-actions,
+.queue-register-state strong,
+.queue-register-empty,
+.queue-register-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.queue-register-name > div,
+.queue-register-destination > div,
+.queue-register-state {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.queue-register-name strong,
+.queue-register-destination strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue-file-mark,
+.queue-register-empty > svg {
+  color: var(--primary);
+  background: var(--muted);
+  border-radius: 4px;
+}
+.queue-file-mark {
+  display: grid;
+  place-items: center;
+  width: 33px;
+  height: 35px;
+  flex: none;
+}
+.queue-register-destination > svg {
+  flex: none;
+  color: var(--muted-foreground);
+}
+.queue-register-actions {
+  justify-content: flex-end;
+  gap: 3px;
+}
+.queue-register-columns span:last-child {
+  text-align: end;
+}
+.queue-register-state i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+}
+.queue-register-state[data-state="held"] i,
+.queue-register-state[data-state="paused"] i {
+  background: var(--warning);
+}
+.queue-register-state[data-state="printing"] i {
+  background: var(--primary);
+}
+.queue-register-state[data-state="completed"] i {
+  background: var(--success);
+}
+.queue-register-progress progress {
+  height: 4px;
+  width: 65px;
+  accent-color: var(--primary);
+}
+.queue-register-progress span {
+  font-size: 11px;
+}
+.queue-register-empty {
+  padding: 17px 20px;
+  gap: 12px;
+}
+.queue-register-empty > svg {
+  width: 36px;
+  height: 36px;
+  padding: 7px;
+}
+.queue-register-empty button {
+  margin-left: auto;
+}
+.queue-compose-dialog {
+  width: min(880px, calc(100vw - 32px));
+  max-width: min(880px, calc(100vw - 32px));
+}
+.queue-compose-dialog .queue-compose-body {
+  padding: 0;
+  overflow-y: auto;
+}
+.queue-compose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 28%);
+  align-items: stretch;
+}
+.queue-compose-fields,
+.queue-ticket {
+  min-width: 0;
+  padding: 21px 24px;
+}
+.queue-compose-fields {
+  display: grid;
+  gap: 17px;
+}
+.queue-compose-group {
+  min-width: 0;
+}
+.queue-compose-group legend,
+.queue-compose-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.queue-compose-group legend {
+  margin-bottom: 7px;
+}
+.queue-revision-choice {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  background: var(--muted);
+  padding: 12px;
+  border-radius: 5px;
+}
+.queue-revision-choice > svg {
+  flex: none;
+  color: var(--primary);
+}
+.queue-revision-choice > div {
+  flex: 1;
+  min-width: 0;
+}
+.queue-revision-choice button[aria-haspopup] {
+  background: var(--card);
+}
+.queue-revision-choice label {
+  font-weight: 600;
+}
+.queue-options,
+.queue-printer-choices {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.queue-options label,
+.queue-printer-choices label {
+  position: relative;
+  min-width: 0;
+}
+.queue-options label {
+  flex: 1;
+}
+.queue-options input,
+.queue-printer-choices input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.queue-options label > span,
+.queue-printer-choices label > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+.queue-options label > span {
+  justify-content: center;
+  min-height: 35px;
+}
+.queue-options input:checked + span,
+.queue-printer-choices input:checked + span {
+  background: color-mix(in srgb, var(--primary) 12%, var(--card));
+  border-color: var(--primary);
+}
+.queue-options input:focus-visible + span,
+.queue-printer-choices input:focus-visible + span {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.queue-printer-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: 180px;
+  overflow: auto;
+  padding: 2px;
+}
+.queue-printer-choices label > span > span {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+.queue-printer-choices label b {
+  overflow-wrap: anywhere;
+  font-weight: 550;
+}
+.queue-printer-choices small,
+.queue-ticket small {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.queue-printer-choices svg {
+  flex: none;
+  color: var(--muted-foreground);
+}
+.queue-printer-choices label > span > svg:last-child {
+  opacity: 0;
+}
+.queue-printer-choices input:checked + span > svg:last-child {
+  opacity: 1;
+  color: var(--primary);
+}
+.queue-group-filter,
+.queue-material-policy {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+.queue-group-filter select {
+  margin-left: auto;
+  max-width: 65%;
+}
+.queue-material-policy input {
+  accent-color: var(--primary);
+}
+.queue-ticket {
+  background: var(--muted);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 19px;
+}
+.queue-ticket-route {
+  display: grid;
+  grid-template-columns: 19px minmax(0, 1fr);
+  column-gap: 9px;
+  row-gap: 20px;
+  position: relative;
+}
+.queue-ticket-route:before {
+  content: "";
+  position: absolute;
+  top: 9px;
+  bottom: 28px;
+  left: 7px;
+  width: 1px;
+  background: var(--border);
+}
+.queue-ticket-route svg {
+  margin-top: 3px;
+  color: var(--primary);
+  background: var(--muted);
+  position: relative;
+}
+.queue-ticket-route > div {
+  display: grid;
+  gap: 2px;
+}
+.queue-ticket-route b,
+.queue-ticket dd {
+  font-size: 13px;
+  font-weight: 570;
+  overflow-wrap: anywhere;
+}
+.queue-ticket dl {
+  border-top: 1px solid var(--border);
+  padding-top: 15px;
+  display: grid;
+  gap: 3px;
+}
+.queue-ticket dt,
+.queue-ticket p {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.queue-ticket p {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.queue-ticket p svg {
+  flex: none;
+}
+.queue-compose > p[role="alert"] {
+  grid-column: 1/-1;
+  padding: 12px 24px;
+  border-top: 1px solid var(--border);
+}
+@media (max-width: 700px) {
+  .queue-compose {
+    grid-template-columns: 1fr;
+  }
+  .queue-ticket {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .queue-register-columns {
+    display: none;
+  }
+  .queue-register-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .queue-register-destination {
+    grid-column: 1;
+  }
+  .queue-register-state {
+    grid-row: 1;
+    grid-column: 2;
+  }
+  .queue-register-actions {
+    grid-column: 2;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .queue-options label > span,
+  .queue-printer-choices label > span {
+    transition: none;
+  }
+}
+
+.queue-plates {
+  overflow: auto;
+  max-height: 120px;
+  padding: 2px;
+}
+.queue-plates label {
+  flex: 0 1 auto;
+  min-width: 70px;
+}
+.queue-ticket dl {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 7px;
+}
+.queue-ticket dd {
+  text-align: end;
+}

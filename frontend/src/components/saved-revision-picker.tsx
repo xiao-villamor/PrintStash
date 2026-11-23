@@ -17,12 +17,14 @@ import {
 } from "@/features/printers/saved-revision";
 
 export function SavedRevisionPicker({
+  emptyLabel,
   pickerOpen,
   onOpenChange,
   onChoose,
   file,
   chosen,
 }: {
+  emptyLabel?: string;
   pickerOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onChoose: (selection: RevisionSelection) => void;
@@ -80,7 +82,7 @@ export function SavedRevisionPicker({
             <span className="min-w-0 truncate">
               {file && chosen.data
                 ? `${chosen.data.name} · ${revisionLabel(file)}`
-                : uiText("Select")}
+                : (emptyLabel ?? uiText("Select"))}
             </span>
             <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
           </Button>
