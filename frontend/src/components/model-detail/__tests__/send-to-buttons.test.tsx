@@ -25,7 +25,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SendToButtons, type SendToCommands } from "@/components/model-detail/send-to-buttons";
 import { clearLogin } from "@/lib/auth-store";
 import { storeLogin } from "@/lib/auth";
-import { aRevision, aPrinter } from "@/test-support/factories";
+import { aRevision, aPrinter, aMetadata } from "@/test-support/factories";
 import { AuthContext, type AuthState } from "@/lib/auth-context";
 import { queryKeys } from "@/lib/query-client";
 import type {
@@ -564,6 +564,22 @@ describe("SendToQueue", () => {
 });
 
 describe("SendToButtons sliced archives", () => {
+  it("shows each named plate with its own estimates", async () => {
+    const { client } = renderPanel({ open: true, filename: "project.gcode.3mf", plates: [2, 10] });
+    act(() => {
+      client.setQueryData(["gcode-plates", 42], {
+        plates: [2, 10],
+        identities: [{ number: 2, name: "Wall mount" }],
+        plate_metadata: [
+          { number: 2, metadata: aMetadata({ estimated_time_s: 2465, filament_weight_g: 13.03 }) },
+        ],
+      });
+    });
+    expect(
+      await screen.findByRole("radio", { name: /Plate 02.*Wall mount.*41m 5s.*13.03 g/ }),
+    ).toBeVisible();
+  });
+
   it.each(["send", "queue"] as const)("carries the inspected plate into %s", async (mode) => {
     renderPanel({
       open: true,
@@ -572,13 +588,15 @@ describe("SendToButtons sliced archives", () => {
       filename: "project.gcode.3mf",
       plates: [2, 10],
     });
-    expect(await screen.findByLabelText("Sliced plate")).toHaveValue("10");
-    await userEvent.selectOptions(screen.getByLabelText("Sliced plate"), "2");
-    expect(screen.getByLabelText("Sliced plate")).toHaveValue("2");
+    expect(await screen.findByRole("radio", { name: /^Plate 10/ })).toBeChecked();
+    await userEvent.click(screen.getByRole("radio", { name: /^Plate 02/ }));
+    expect(screen.getByRole("radio", { name: /^Plate 02/ })).toBeChecked();
   });
   it("requires a choice when several plates exist", async () => {
     renderPanel({ open: true, filename: "project.gcode.3mf", plates: [2, 10] });
-    expect(await screen.findByLabelText("Sliced plate")).toHaveValue("");
+    for (const choice of await screen.findAllByRole("radio", { name: /^Plate / })) {
+      expect(choice).not.toBeChecked();
+    }
     expect(screen.getByRole("button", { name: "Send to printer" })).toBeDisabled();
     expect(sendToPrinter).not.toHaveBeenCalled();
   });
@@ -586,7 +604,7 @@ describe("SendToButtons sliced archives", () => {
   it("submits the chosen plate to the printer", async () => {
     sendToPrinter.mockResolvedValue(queuedJob);
     renderPanel({ open: true, filename: "project.GCODE.3MF", plates: [2, 10] });
-    await userEvent.selectOptions(await screen.findByLabelText("Sliced plate"), "10");
+    await userEvent.click(await screen.findByRole("radio", { name: /^Plate 10/ }));
     await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
     await waitFor(() =>
       expect(sendToPrinter).toHaveBeenCalledWith(
@@ -621,7 +639,7 @@ describe("SendToButtons sliced archives", () => {
       filename: "project.gcode.3mf",
       plates: [2, 10],
     });
-    await userEvent.selectOptions(await screen.findByLabelText("Sliced plate"), "2");
+    await userEvent.click(await screen.findByRole("radio", { name: /^Plate 02/ }));
     await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
     await waitFor(() =>
       expect(enqueueFleetJob).toHaveBeenCalledWith(
@@ -652,9 +670,11 @@ describe("SendToButtons sliced archives", () => {
       ],
     });
     client.setQueryData(["gcode-plates", 43], { plates: [2, 10] });
-    await userEvent.selectOptions(await screen.findByLabelText("Sliced plate"), "10");
+    await userEvent.click(await screen.findByRole("radio", { name: /^Plate 10/ }));
     await userEvent.click(screen.getByRole("radio", { name: /Rev 2/ }));
-    expect(await screen.findByLabelText("Sliced plate")).toHaveValue("");
+    for (const choice of await screen.findAllByRole("radio", { name: /^Plate / })) {
+      expect(choice).not.toBeChecked();
+    }
     expect(screen.getByRole("button", { name: "Send to printer" })).toBeDisabled();
     expect(sendToPrinter).not.toHaveBeenCalled();
   });
@@ -666,7 +686,7 @@ describe("SendToButtons sliced archives", () => {
       filename: "project.gcode.3mf",
       plates: [2, 10],
     });
-    await userEvent.selectOptions(await screen.findByLabelText("Sliced plate"), "10");
+    await userEvent.click(await screen.findByRole("radio", { name: /^Plate 10/ }));
     await userEvent.clear(screen.getByLabelText("Copies"));
     await userEvent.type(screen.getByLabelText("Copies"), "3");
     await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
@@ -679,7 +699,7 @@ describe("SendToButtons sliced archives", () => {
 
   it("selects the only available sliced plate", async () => {
     renderPanel({ open: true, filename: "project.gcode.3mf", plates: [10] });
-    expect(await screen.findByLabelText("Sliced plate")).toHaveValue("10");
+    expect(await screen.findByRole("radio", { name: /^Plate 10/ })).toBeChecked();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Send to printer" })).toBeEnabled(),
     );

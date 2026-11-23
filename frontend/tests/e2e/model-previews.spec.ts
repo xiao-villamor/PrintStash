@@ -215,33 +215,66 @@ test.describe("Model preview browsing", () => {
       test(`keeps ${controlName} readable in ${theme} mode`, async ({ page }) => {
         await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
         const { card, next } = await library(page);
-        await next.hover();
+        await card.locator('[data-model-preview="Bracket 1"]').hover();
+        await expect(card.locator("[data-preview-navigation]")).toHaveCSS("opacity", "1");
+        if (theme === "light") await next.hover();
         const control = card.getByRole("button", { name: controlName, exact: true });
-        const contrast = await control.evaluate((element) => {
-          const canvas = document.createElement("canvas");
-          canvas.width = canvas.height = 1;
-          const context = canvas.getContext("2d")!;
-          function luminance(color: string) {
-            context.clearRect(0, 0, 1, 1);
-            context.fillStyle = color;
-            context.fillRect(0, 0, 1, 1);
-            const [r, g, b] = [...context.getImageData(0, 0, 1, 1).data].map((value) => {
-              const channel = value / 255;
-              return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
-            });
-            return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-          }
-          const style = getComputedStyle(element);
-          const foreground = luminance(style.color);
-          const background = luminance(style.backgroundColor);
-          return (
-            (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05)
-          );
-        });
-        expect(contrast).toBeGreaterThanOrEqual(4.5);
+        const contrast = () =>
+          control.evaluate((element, theme) => {
+            const canvas = document.createElement("canvas");
+            canvas.width = canvas.height = 1;
+            const context = canvas.getContext("2d")!;
+            function luminance(color: string, backdrop?: string) {
+              context.clearRect(0, 0, 1, 1);
+              if (backdrop) {
+                context.fillStyle = backdrop;
+                context.fillRect(0, 0, 1, 1);
+              }
+              context.fillStyle = color;
+              context.fillRect(0, 0, 1, 1);
+              const [r, g, b] = [...context.getImageData(0, 0, 1, 1).data].map((value) => {
+                const channel = value / 255;
+                return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+              });
+              return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            }
+            const style = getComputedStyle(element);
+            const foreground = luminance(style.color);
+            // The palest image is worst for light icons, and vice versa for dark icons.
+            const background = luminance(
+              style.backgroundColor,
+              theme === "dark" ? "white" : "black",
+            );
+            return (
+              (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05)
+            );
+          }, theme);
+        await expect.poll(contrast).toBeGreaterThanOrEqual(4.5);
       });
     }
   }
+
+  test("lets the image show through dark card controls", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+    const { card, next } = await library(page);
+    await card.locator('[data-model-preview="Bracket 1"]').hover();
+    for (const control of [
+      next,
+      card.getByRole("button", { name: "Model views", exact: true }),
+      card.getByRole("link", { name: "Open full page", exact: true }),
+    ]) {
+      const alpha = await control.evaluate((element) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext("2d")!;
+        context.fillStyle = getComputedStyle(element).backgroundColor;
+        context.fillRect(0, 0, 1, 1);
+        return context.getImageData(0, 0, 1, 1).data[3];
+      });
+      expect(alpha).toBeGreaterThan(0);
+      expect(alpha).toBeLessThan(255);
+    }
+  });
 
   test("keeps card arrows compact over the image", async ({ page }) => {
     const { card, next } = await library(page);
@@ -266,7 +299,7 @@ test.describe("Model preview browsing", () => {
 
   test("browses views with the arrow keys inside the gallery", async ({ page }) => {
     const { card } = await library(page);
-    await card.getByRole("button", { name: "Model views", exact: true }).click();
+    await card.getByRole("button", { name: "Model views", exact: true }).press("Enter");
     const dialog = page.getByRole("dialog", { name: "Model views" });
     await dialog.getByRole("button", { name: "Next preview", exact: true }).focus();
 
@@ -274,9 +307,9 @@ test.describe("Model preview browsing", () => {
 
     await expect(dialog.locator("img[data-preview-view]")).toHaveAttribute(
       "data-preview-view",
-      "orbit-1",
+      "orbit-0",
     );
-    await expect(dialog.getByRole("button", { pressed: true })).toHaveAccessibleName(/Front right/);
+    await expect(dialog.getByRole("button", { pressed: true })).toHaveAccessibleName(/Front left/);
   });
 
   test("fills the dialog width with the gallery stage", async ({ page }) => {
@@ -290,7 +323,7 @@ test.describe("Model preview browsing", () => {
 
   test("centers the gallery view indicator", async ({ page }) => {
     const { card } = await library(page);
-    await card.getByRole("button", { name: "Model views", exact: true }).click();
+    await card.getByRole("button", { name: "Model views", exact: true }).press("Enter");
     const dialog = page.getByRole("dialog", { name: "Model views" });
 
     const stage = await dialog.locator("[data-model-preview]").boundingBox();
@@ -337,13 +370,13 @@ test.describe("Model preview browsing", () => {
     expect(overlaps).toBe(false);
   });
 
-  test("keeps keyboard-focused preview controls opaque", async ({ page }) => {
+  test("reveals preview controls for keyboard focus", async ({ page }) => {
     const { card, next } = await library(page);
     await page.mouse.move(0, 0);
     await next.focus();
     await expect(card.locator("[data-preview-navigation]")).toHaveCSS("opacity", "1");
     await next.press("Enter");
-    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+    await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");
   });
 
   test("keeps the preview image above the gallery toolbar", async ({ page }) => {

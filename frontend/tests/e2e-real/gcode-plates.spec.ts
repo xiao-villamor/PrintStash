@@ -314,9 +314,11 @@ test.describe("Sliced G-code plates", () => {
       await expect(page.getByRole("slider")).toBeVisible();
       await page.getByRole("button", { name: "Send to printer", exact: true }).last().click();
       const send = page.getByRole("dialog", { name: "Send Rev 2 to printer" });
-      await expect(send.getByRole("combobox", { name: "Sliced plate", exact: true })).toHaveValue(
-        "2",
-      );
+      await expect(
+        send
+          .getByRole("group", { name: "Sliced plate", exact: true })
+          .getByRole("radio", { name: /^Plate 02/ }),
+      ).toBeChecked();
       await send.getByRole("checkbox", { name: "Start print immediately" }).check();
       await page.screenshot({ path: test.info().outputPath("sliced-revision-send.png") });
       const sent = page.waitForResponse(

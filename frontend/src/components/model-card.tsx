@@ -407,7 +407,7 @@ function ModelCardInner({
                   <Button
                     variant="outline"
                     size="icon-sm"
-                    className="library-card-open-page library-preview-reveal pointer-events-auto"
+                    className="library-card-open-page library-preview-reveal pointer-events-auto dark:bg-card/75 dark:hover:bg-card/90 dark:focus-visible:bg-card/90"
                     asChild
                   >
                     <LibraryItemLink

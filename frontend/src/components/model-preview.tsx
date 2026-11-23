@@ -109,7 +109,7 @@ function ViewIndicator({ state, className }: { state: PreviewCard; className?: s
   return (
     <div
       className={cn(
-        "pointer-events-none flex min-w-0 items-center gap-2 bg-card px-2 py-1 text-2xs text-card-foreground",
+        "pointer-events-none flex min-w-0 items-center gap-2 bg-card px-2 py-1 text-2xs text-card-foreground dark:bg-card/75",
         className,
       )}
       aria-live="polite"
@@ -199,6 +199,7 @@ function PreviewArrows({ state, size }: { state: PreviewCard; size: "card" | "ga
                         "text-foreground hover:bg-card hover:text-card-foreground focus-visible:bg-card focus-visible:text-card-foreground",
                     )
                   : "h-11 w-8",
+                "dark:bg-card/75 dark:text-card-foreground dark:hover:bg-card/90 dark:focus-visible:bg-card/90",
                 index === 0
                   ? size === "card"
                     ? "left-1"
@@ -270,7 +271,7 @@ export function ModelPreviewControls({
               {...keepOffCard}
               variant="outline"
               size="xs"
-              className="library-preview-views pointer-events-auto h-6 px-1.5 py-0 text-2xs"
+              className="library-preview-views pointer-events-auto h-6 px-1.5 py-0 text-2xs dark:bg-card/75 dark:hover:bg-card/90 dark:focus-visible:bg-card/90"
               aria-label={uiText("modelPreview.gallery")}
               title={
                 views.length >= 2

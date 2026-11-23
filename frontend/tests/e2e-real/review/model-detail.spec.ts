@@ -398,9 +398,11 @@ test.describe("Existing Model review", () => {
             }
             await queue.click();
             const send = page.getByRole("dialog");
-            await expect(send.getByLabel("Sliced plate")).toHaveValue(
-              String(slicedPlates.plates[1]),
-            );
+            const plateOption = (number: number) =>
+              send.getByRole("group", { name: "Sliced plate", exact: true }).getByRole("radio", {
+                name: new RegExp("^Plate " + String(number).padStart(2, "0") + "\\b"),
+              });
+            await expect(plateOption(slicedPlates.plates[1])).toBeChecked();
             const copies = send.getByRole("spinbutton", { name: "Copies" });
             const submitQueue = send.getByRole("button", { name: "Add to queue", exact: true });
             const evidence = send.getByLabel("Queue details");
@@ -408,7 +410,7 @@ test.describe("Existing Model review", () => {
             if (sliced!.revision_status === "needs_test")
               await expect(evidence.getByText("Needs test", { exact: true })).toBeVisible();
             for (const number of slicedPlates.plates.slice(0, 2)) {
-              await send.getByLabel("Sliced plate").selectOption(String(number));
+              await plateOption(number).check();
               for (const value of expectedEstimates.get(number)!) {
                 await expect(evidence.getByText(value, { exact: true }).first()).toBeVisible();
               }
@@ -430,22 +432,16 @@ test.describe("Existing Model review", () => {
               await setupPage.close();
               await page.bringToFront();
               await expect(copies).toHaveValue("2");
-              await expect(send.getByLabel("Sliced plate")).toHaveValue(
-                String(slicedPlates.plates[1]),
-              );
+              await expect(plateOption(slicedPlates.plates[1])).toBeChecked();
             }
             await review.capture("queue-inspected-plate");
             await send.getByRole("radio", { name: "Send now", exact: true }).check();
-            await expect(send.getByLabel("Sliced plate")).toHaveValue(
-              String(slicedPlates.plates[1]),
-            );
+            await expect(plateOption(slicedPlates.plates[1])).toBeChecked();
             await expect(
               send.getByRole("button", { name: "Send to printer", exact: true }),
             ).toBeDisabled();
             await review.capture("send-inspected-plate");
-            await send
-              .getByRole("combobox", { name: "Sliced plate", exact: true })
-              .selectOption(String(slicedPlates.plates[1]));
+            await plateOption(slicedPlates.plates[1]).check();
             await review.capture("send-plate-selected");
             await send.getByRole("radio", { name: "Add to queue", exact: true }).check();
             await expect(send.getByRole("heading", { name: /^Queue Rev / })).toBeVisible();
