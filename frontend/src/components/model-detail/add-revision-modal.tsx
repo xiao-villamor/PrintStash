@@ -130,7 +130,7 @@ export function AddGcodeRevisionModal({
           {modelName && (
             <dl className="grid grid-cols-[1fr_2fr] gap-x-4 gap-y-2 bg-plate p-4 text-[13px]">
               <dt className="text-muted-foreground">{uiText("Model")}</dt>
-              <dd className="break-words">{modelName}</dd>
+              <dd className="min-w-0 wrap-anywhere">{modelName}</dd>
               <dt className="text-muted-foreground">{uiText("Current recommended Revision")}</dt>
               <dd>
                 {currentRecommendedRevision != null
@@ -168,7 +168,7 @@ export function AddGcodeRevisionModal({
                   <FileCode2 className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground">{file.name}</p>
+                  <p className="wrap-anywhere text-sm font-medium text-foreground">{file.name}</p>
                   <p className="mt-0.5 font-mono text-2xs uppercase tracking-wider text-muted-foreground">
                     {uiText("{value1} · G-code", { value1: String(formatBytes(file.size) ?? "") })}
                   </p>
