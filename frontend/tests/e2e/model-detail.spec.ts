@@ -1293,7 +1293,7 @@ test.describe("model detail route", () => {
     { width: 1908, height: 905 },
     { width: 390, height: 844 },
   ]) {
-    test(`keeps source facts beside a persistent preview at ${viewport.width}×${viewport.height}`, async ({
+    test(`keeps the model preview mounted across tabs at ${viewport.width}×${viewport.height}`, async ({
       page,
     }) => {
       await page.setViewportSize(viewport);
@@ -1303,7 +1303,7 @@ test.describe("model detail route", () => {
       const about = page.getByRole("region", { name: "About this model" });
       await expect(about).toBeVisible();
       await page.getByRole("tab", { name: "Print settings", exact: true }).click();
-      await expect(about).toBeVisible();
+      await expect(about).toBeHidden();
       expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
       await page.getByRole("tab", { name: "Overview", exact: true }).click();
       const tabs = (await page.getByRole("tablist").boundingBox())!;
@@ -1320,6 +1320,35 @@ test.describe("model detail route", () => {
       ).toBe(true);
     });
   }
+
+  test("keeps canvas size while inspecting model geometry", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto("/models/1");
+    const preview = page.getByRole("region", { name: "Preview", exact: true });
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+    if ((await sidebar.getAttribute("aria-expanded")) === "false") await sidebar.click();
+    const overview = page.getByRole("tab", { name: "Overview", exact: true });
+    const source = page.getByRole("tab", { name: "Source info", exact: true });
+    await expect(
+      page.getByRole("tabpanel", { name: "Overview" }).getByRole("heading", {
+        name: "About this model",
+      }),
+    ).toBeVisible();
+    const original = await preview.elementHandle();
+    const initialHeight = (await preview.boundingBox())!.height;
+    await overview.press("ArrowRight");
+    await expect(source).toBeFocused();
+    await expect(
+      page.getByRole("tabpanel", { name: "Source info" }).getByRole("heading", {
+        name: "Whole source geometry",
+      }),
+    ).toBeVisible();
+    await expect.poll(async () => (await preview.boundingBox())!.height).toBeCloseTo(initialHeight);
+    await overview.click();
+    await expect(page.getByRole("heading", { name: "About this model" })).toBeVisible();
+    await expect.poll(async () => (await preview.boundingBox())!.height).toBeCloseTo(initialHeight);
+    expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
+  });
 
   test("keeps an unresized inspector proportional to its available workspace", async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1080 });

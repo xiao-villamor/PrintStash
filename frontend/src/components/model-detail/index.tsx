@@ -18,7 +18,7 @@ import { ApiError } from "@/lib/errors";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { Modal } from "@/components/ui/modal";
 import { InlineTitleEditor } from "@/components/inline-title-editor";
-import { ModelInformation } from "./model-information";
+import { ModelGeometry, ModelInformation } from "./model-information";
 import { useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { RevisionPicker } from "./revision-picker";
 import { inspectedRevision } from "./inspected-revision";
@@ -854,6 +854,21 @@ function ModelDetailPresentation({
     filteredTags: editFilteredTags,
     canCreate: editCanCreate,
   };
+  const showPrintFirst = Boolean(inspectedGcode || gcodeOnly);
+  const modelInformation = (
+    <ModelInformation
+      model={model}
+      sourceFile={meshFile ?? null}
+      onFiles={() => openInspectorTab("files")}
+      onRevisions={() => openInspectorTab("revisions")}
+      canEdit={canEditModel}
+      onEdit={() => enterEdit("details")}
+      onTags={() => {
+        setTagDialogSession((value) => value + 1);
+        setTagDialogOpen(true);
+      }}
+    />
+  );
 
   return (
     <Localized>
@@ -1364,7 +1379,7 @@ function ModelDetailPresentation({
                   </div>
                 )}
                 {/* Source plate bounds are measured from the shown mesh, separately from
-                    the whole-source metadata shown below the preview. */}
+                    the whole-source metadata in Source info. */}
                 {viewerMode === "model" &&
                   showDimensions &&
                   viewerReady &&
@@ -1461,20 +1476,6 @@ function ModelDetailPresentation({
                 />
               )}
             </div>
-
-            <ModelInformation
-              model={model}
-              sourceFile={meshFile ?? null}
-              measurement={geometryMeasurement}
-              onFiles={() => openInspectorTab("files")}
-              onRevisions={() => openInspectorTab("revisions")}
-              canEdit={canEditModel}
-              onEdit={() => enterEdit("details")}
-              onTags={() => {
-                setTagDialogSession((value) => value + 1);
-                setTagDialogOpen(true);
-              }}
-            />
           </div>
 
           {/* Right: Settings & Files Panel */}
@@ -1545,6 +1546,7 @@ function ModelDetailPresentation({
               <div ref={detailTabBody} className="model-detail-tab-body space-y-4">
                 {activeTab === "overview" && (
                   <div className="space-y-4">
+                    {!showPrintFirst && modelInformation}
                     {!inspectedGcode && gcodeOnly ? (
                       slicedEstimates && (
                         <PlateEstimates
@@ -1596,6 +1598,9 @@ function ModelDetailPresentation({
                         printSettingRows={printSettingRows}
                         preferences={metadataPreferences}
                       />
+                    )}
+                    {showPrintFirst && (
+                      <div className="border-t border-border pt-4">{modelInformation}</div>
                     )}
                   </div>
                 )}
@@ -1658,7 +1663,14 @@ function ModelDetailPresentation({
 
                 {activeTab === "similar" && canEditModel && <SimilarityQueue modelId={model.id} />}
                 {activeTab === "source" && (
-                  <SourceTab modelName={model.name} modelId={model.id} canEdit={canEditModel} />
+                  <>
+                    <ModelGeometry
+                      modelId={model.id}
+                      sourceFile={meshFile ?? null}
+                      measurement={geometryMeasurement}
+                    />
+                    <SourceTab modelName={model.name} modelId={model.id} canEdit={canEditModel} />
+                  </>
                 )}
 
                 {activeTab === "revisions" && canViewPrinters && printerFileQuery.isError && (

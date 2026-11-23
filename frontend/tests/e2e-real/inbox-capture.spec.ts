@@ -135,17 +135,13 @@ test.describe("inbox-capture", () => {
     expect(result.state).toBe("completed");
     expect(result.results.map((r: { state: string }) => r.state)).toEqual(["imported", "imported"]);
     await page.goto(`/models/${result.results[0].model_id}`);
+    await page.setViewportSize({ width: 1265, height: 1000 });
+    await page.getByRole("tab", { name: "Source info", exact: true }).click();
     const geometry = page.getByRole("region", { name: "Geometry checks" });
     await expect(geometry).toBeVisible();
     await expect(geometry.getByText(/Advisory geometry evidence only/)).toBeVisible();
-    await page.setViewportSize({ width: 1265, height: 1000 });
-    await expect
-      .poll(() =>
-        page
-          .locator(".model-information")
-          .evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length),
-      )
-      .toBe(1);
+    await page.getByRole("tab", { name: "Overview", exact: true }).click();
+    await expect(geometry).toBeHidden();
     const profiles = page.getByRole("region", { name: "Profiles from this publication" });
     await expect(profiles.getByText("Provider estimate", { exact: true })).toHaveCount(2);
     const sibling = result.results[1];

@@ -24,22 +24,6 @@
 .model-detail-inspector {
   max-width: calc(100% - 21rem);
 }
-.model-information {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-  gap: 1rem;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-top: 0;
-  background: var(--card);
-}
-.model-information:not(:has(.model-information-geometry)) {
-  grid-template-columns: minmax(0, 1fr);
-}
-.model-information-geometry {
-  border-left: 1px solid var(--border);
-  padding-left: 1rem;
-}
 .model-information-facts {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -54,9 +38,6 @@
 .model-information-facts dd {
   margin: 0;
   overflow-wrap: anywhere;
-}
-.model-information-geometry dd {
-  font-family: var(--font-mono);
 }
 .detail-revision-picker {
   max-height: 14rem;
@@ -88,15 +69,6 @@
   text-align: right;
 }
 @media (max-width: 1100px) {
-  .model-information {
-    grid-template-columns: 1fr;
-  }
-  .model-information-geometry {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-    padding-left: 0;
-    padding-top: 0.75rem;
-  }
   .detail-revision-facts {
     grid-template-columns: 1fr;
   }
@@ -129,9 +101,6 @@
   }
   .model-detail-content {
     overflow: visible;
-  }
-  .model-information {
-    padding: 0.75rem;
   }
   .model-detail-tabs {
     margin-inline: 0.5rem;
@@ -481,9 +450,6 @@
 .model-detail-layout[data-expanded="true"] .model-detail-inspector {
   display: none;
 }
-.model-detail-layout[data-expanded="true"] .model-information {
-  display: none;
-}
 /* Controls occupy their own rows so loading/error content cannot be covered. */
 .model-detail-preview {
   display: grid;
@@ -491,9 +457,6 @@
   min-height: min-content;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto minmax(20rem, 1fr) auto auto;
-}
-.model-information {
-  flex-shrink: 0;
 }
 @media (min-width: 1100px) {
   .model-detail-layout {
@@ -852,23 +815,6 @@
   animation: none;
   border-radius: 2px;
 }
-/* Facts respond to their pane, including when the collection sidebar is open. */
-.model-detail-visual {
-  container-name: model-visual;
-  container-type: inline-size;
-}
-@container model-visual (max-width: 40rem) {
-  .model-information {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .model-information-geometry {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-    padding-left: 0;
-    padding-top: 0.75rem;
-  }
-}
-
 .detail-file-link {
   color: var(--foreground);
   text-decoration: underline;

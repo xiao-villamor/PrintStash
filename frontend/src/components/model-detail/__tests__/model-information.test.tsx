@@ -4,20 +4,15 @@ import { renderApp, json } from "@/test-support/render";
 import "@testing-library/jest-dom/vitest";
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { ModelInformation } from "../model-information";
+import { ModelGeometry, ModelInformation } from "../model-information";
 import { aMetadata, aModel, aRevision } from "@/test-support/factories";
 import type { FileRead } from "@/types";
 
-function show(
-  sourceUrl: string | null = null,
-  sourceFile: FileRead | null = null,
-  canEdit = false,
-  description: string | null = null,
-) {
+function show(sourceUrl: string | null = null, canEdit = false, description: string | null = null) {
   return renderApp(
     <ModelInformation
       model={aModel({ source_url: sourceUrl, description })}
-      sourceFile={sourceFile}
+      sourceFile={null}
       canEdit={canEdit}
       onEdit={() => {}}
       onTags={() => {}}
@@ -31,17 +26,21 @@ function show(
           edit_version: 1,
           sources: [],
         }),
-        "GET /api/v1/files/1/derivatives": json([]),
         "GET /api/v1/models/1/related-profiles": json({ items: [], has_more: false }),
       },
     },
   );
 }
 
+function showGeometry(sourceFile: FileRead | null) {
+  return renderApp(<ModelGeometry modelId={1} sourceFile={sourceFile} />, {
+    routes: { "GET /api/v1/files/1/derivatives": json([]) },
+  });
+}
+
 describe("ModelInformation", () => {
   it("renders a Markdown model description", () => {
     show(
-      null,
       null,
       false,
       "## Assembly\n\n- **Base**\n- Top\n\n[Guide](https://example.test/guide)\n\n| Part | Count |\n| --- | --- |\n| Screw | 4 |",
@@ -62,7 +61,6 @@ describe("ModelInformation", () => {
   it("rejects executable description content", () => {
     show(
       null,
-      null,
       false,
       '<script>window.unsafe=true</script>\n\n<img src="x" onerror="window.unsafe=true">\n\n[unsafe](javascript:alert(1))\n\nSafe instructions',
     );
@@ -70,7 +68,7 @@ describe("ModelInformation", () => {
     expect(screen.getByText("Safe instructions")).toBeInTheDocument();
   });
   it("preserves a plain description", () => {
-    show(null, null, false, "Print upright with supports.");
+    show(null, false, "Print upright with supports.");
     expect(screen.getByText("Print upright with supports.")).toBeInTheDocument();
   });
   it("normalizes safe source links", () => {
@@ -87,21 +85,30 @@ describe("ModelInformation", () => {
       expect(screen.queryByRole("link", { name: "Source model" })).not.toBeInTheDocument();
     },
   );
+  it("only offers editing to permitted users", () => {
+    const view = show();
+    expect(screen.queryByRole("button", { name: "Edit details" })).not.toBeInTheDocument();
+    view.unmount();
+    show(null, true);
+    expect(screen.getByRole("button", { name: "Edit details" })).toBeInTheDocument();
+  });
+});
+
+describe("ModelGeometry", () => {
   it("labels the mesh geometry as the whole source", () => {
-    show(null, aRevision({ file_type: "stl" }));
+    showGeometry(aRevision({ file_type: "stl" }));
     expect(screen.getByRole("heading", { name: "Whole source geometry" })).toBeInTheDocument();
   });
   it("explains unavailable mesh measurements", () => {
-    show(null, aRevision({ file_type: "stl" }));
+    showGeometry(aRevision({ file_type: "stl" }));
     expect(screen.getByText("Measurement unavailable")).toBeVisible();
   });
   it("hides geometry when there is no mesh", () => {
-    show();
+    showGeometry(null);
     expect(screen.queryByRole("heading", { name: "Whole source geometry" })).toBeNull();
   });
   it("does not discard recorded zero geometry", () => {
-    show(
-      null,
+    showGeometry(
       aRevision({
         file_type: "stl",
         metadata: aMetadata({
@@ -116,12 +123,5 @@ describe("ModelInformation", () => {
     expect(screen.getByText("0 × 12 × 30 mm")).toBeInTheDocument();
     expect(screen.getByText("0 cm³")).toBeInTheDocument();
     expect(screen.queryByText("Not recorded")).not.toBeInTheDocument();
-  });
-  it("only offers editing to permitted users", () => {
-    const view = show();
-    expect(screen.queryByRole("button", { name: "Edit details" })).not.toBeInTheDocument();
-    view.unmount();
-    show(null, null, true);
-    expect(screen.getByRole("button", { name: "Edit details" })).toBeInTheDocument();
   });
 });

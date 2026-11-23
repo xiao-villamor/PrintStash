@@ -11,6 +11,7 @@ import type { ComponentProps } from "react";
 function show(overrides: Partial<ComponentProps<typeof InspectedPrintCard>> = {}) {
   const onLogPrint = vi.fn<(state: "completed" | "failed") => void>();
   const onSend = vi.fn<(mode: "send" | "queue") => void>();
+  const onAddRevision = vi.fn<() => void>();
   renderApp(
     <InspectedPrintCard
       file={aRevision({ id: 12 })}
@@ -25,12 +26,12 @@ function show(overrides: Partial<ComponentProps<typeof InspectedPrintCard>> = {}
       onLogPrint={onLogPrint}
       onSend={onSend}
       onInspect={() => {}}
-      onAddRevision={() => {}}
+      onAddRevision={onAddRevision}
       onCompare={() => {}}
       {...overrides}
     />,
   );
-  return { onLogPrint, onSend };
+  return { onLogPrint, onSend, onAddRevision };
 }
 
 describe("InspectedPrintCard", () => {
@@ -137,10 +138,12 @@ describe("InspectedPrintCard", () => {
   });
   it("explains that a separate G-code revision is missing", () => {
     show({ file: null, revisionCount: 0, canEdit: false });
-    expect(
-      screen.getByText(
-        "No G-code revision yet. Add a revision to capture the settings that worked.",
-      ),
-    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "No G-code revision yet" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Add revision" })).toBeNull();
+  });
+  it("offers to add the first G-code revision to editors", () => {
+    const { onAddRevision } = show({ file: null, revisionCount: 0 });
+    fireEvent.click(screen.getByRole("button", { name: "Add revision" }));
+    expect(onAddRevision).toHaveBeenCalledOnce();
   });
 });

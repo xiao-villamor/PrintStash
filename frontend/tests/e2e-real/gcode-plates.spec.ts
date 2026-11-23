@@ -150,7 +150,7 @@ test.describe("Sliced G-code plates", () => {
         const information = await page
           .getByRole("region", { name: "About this model", exact: true })
           .boundingBox();
-        expect(information!.y).toBeGreaterThanOrEqual(previewBox!.y + previewBox!.height);
+        expect(information!.x).toBeGreaterThanOrEqual(previewBox!.x + previewBox!.width);
         await page.getByRole("button", { name: "Expand", exact: true }).click();
         await expect(page.getByRole("heading", { name: "About this model" })).toBeHidden();
         expect(await clippedControls(panel)).toEqual([]);

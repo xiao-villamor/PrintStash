@@ -61,12 +61,13 @@ export function InspectedPrintCard({
   useUiLocale();
   if (!file)
     return (
-      <section className="detail-overview">
+      <section className="detail-overview flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
         <h2>{uiText("No G-code revision yet")}</h2>
-        <p className="my-4 text-sm text-muted-foreground">
-          {uiText("No G-code revision yet. Add a revision to capture the settings that worked.")}
-        </p>
-        {canEdit && <Button onClick={onAddRevision}>{uiText("Add revision")}</Button>}
+        {canEdit && (
+          <Button size="sm" onClick={onAddRevision}>
+            {uiText("Add revision")}
+          </Button>
+        )}
       </section>
     );
   const meta = file.metadata;

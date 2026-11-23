@@ -1129,7 +1129,7 @@ describe("ModelDetail", () => {
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     });
 
-    it("offers direct tag editing in the header", async () => {
+    it("offers direct tag editing in the overview", async () => {
       renderDetail();
 
       expect(await screen.findByRole("button", { name: "Add tags to Benchy" })).toBeVisible();

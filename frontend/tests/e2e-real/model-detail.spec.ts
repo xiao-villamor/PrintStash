@@ -16,7 +16,7 @@ test.describe("model detail", () => {
     await uploadGcodeModel(page, name);
     await openModelPage(page, name);
     const modelId = new URL(page.url()).pathname.split("/").at(-1);
-    await clickModelAction(page, "Edit details");
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
     const description =
       "## Assembly instructions\n\n- Fit **both** clips.\n- Check [the source](https://www.printables.com/).";
     await page.getByRole("textbox", { name: "Description", exact: true }).fill(description);

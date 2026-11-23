@@ -357,6 +357,7 @@ test.describe("Existing Model review", () => {
             // ── Inspect dialogs without saving, uploading, sharing or starting prints ──
             await page.getByRole("button", { name: /^Source files \(\d+\)$/ }).click();
             await expect(inspector).toBeFocused();
+            await tab("Overview");
             await page.getByRole("button", { name: /^G-code revisions \(\d+\)$/ }).click();
             await expect(inspector).toBeFocused();
             await page.getByRole("button", { name: "More model actions", exact: true }).click();
@@ -365,6 +366,7 @@ test.describe("Existing Model review", () => {
             await review.capture("model-details-editor");
             await dismiss();
             await expect(revisionTab).toHaveAttribute("aria-selected", "true");
+            await tab("Overview");
             await page
               .getByRole("button", {
                 name: `${model.tags.length ? "Edit" : "Add"} tags ${model.tags.length ? "for" : "to"} ${model.name}`,
@@ -504,6 +506,7 @@ test.describe("Existing Model review", () => {
             await capturePanel("source-recovered");
           } else {
             // ── Source plates: capture before/after Fit instead of hiding framing faults ──
+            await tab("Source info");
             await expect(
               page.getByRole("heading", { name: "Whole source geometry", exact: true }),
             ).toBeVisible();
