@@ -121,7 +121,7 @@ comparing the two builds' numbers).
 ## CI
 
 Two real-backend flows run per PR (`.github/workflows/ci.yml`); all real and
-mock-API suites run nightly and on demand (`.github/workflows/deep-ci.yml`).
+mock-API suites run on manual dispatch (`.github/workflows/deep-ci.yml`).
 `retries` are on in CI only; a spec that needs
 the retry to pass is flaky — fix the wait, don't lean on the retry.
 

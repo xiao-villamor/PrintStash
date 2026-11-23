@@ -13,13 +13,14 @@ or tiers.
 
 For a backend change, run the new or changed tests and the existing tests for
 the affected behavior locally, including the relevant integration and E2E
-flows. Run lint and type checks. Use **Deep CI on the final commit** for the
-full backend handoff gate instead of also running local `full` or `coverage`.
+flows. Run lint and type checks. Regular PR CI is the required handoff gate.
+Deep CI adds full backend and coverage validation when the user explicitly
+requests a run.
 
 Deep CI's backend matrix runs exhaustive, disjoint `full-ordinary` and
 `full-resources` partitions of the same tests as `./scripts/test.sh full`, then
 combines coverage and checks the floors. Ordinary PR CI excludes slow and
-external-resource tests, so it does not replace that full gate. Deep CI also
+external-resource tests. Deep CI also
 includes other validation beyond the backend suite. When changing test paths,
 resource markers or workflow selection, verify that the partitions still cover
 the full selection; `backend/tests/repo/test_ci_workflows.py` checks their
@@ -35,7 +36,7 @@ Playwright spec when browser behavior is the point of the change.
 Expand from that set only for a concrete cross-component risk, a failure, or a
 shared seam whose consumers need checking. Choose the next affected files by
 that dependency, then stop once the behavior is verified. CI runs the full
-frontend test gate for PRs and coverage nightly or on demand; local full suites are for an explicit
+frontend test gate for PRs and coverage on manual dispatch; local full suites are for an explicit
 full-suite request, release validation, or work on the suite or coverage floors.
 
 ## Run the selected lanes cheapest-first
@@ -52,8 +53,8 @@ uv run ruff format --check app/core app/db app/schemas packages/printstash-core/
 uv run pyright
 ```
 
-After committing and pushing the final changes, reuse a Deep CI run for that
-exact SHA and inspect its results, or dispatch one from the repository:
+When the user explicitly requests Deep CI, commit and push the final changes,
+then use a run for that exact SHA. To start a requested run:
 
 ```bash
 gh workflow run deep-ci.yml --ref <branch>
@@ -136,8 +137,7 @@ button is *disabled* rather than toasting, `Checkbox` renders
 
 Use this loop when CI reports a floor failure or the task changes coverage
 floors. An ordinary localized UI edit uses its behavior matrix and affected
-tests locally; nightly `Deep CI` or a manual run on the release commit supplies
-the full floor result.
+tests locally. A manually dispatched Deep CI run supplies the full floor result.
 
 Every floor fails when coverage falls below it. Clearing it by more than its
 slack prints a maintenance notice; improvement does not fail the run.

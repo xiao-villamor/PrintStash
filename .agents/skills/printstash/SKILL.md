@@ -70,17 +70,11 @@ and changelog instead of reconstructing their contents.
    test for its headline capability.
 3. Run focused checks while iterating, then the applicable gate:
    - Backend: run the affected tests locally, plus `uv run ruff check app/ tests/`
-     and `uv run pyright` when feasible. Use **Deep CI's backend partitions and
-     combined coverage gate** on the final commit for the full backend handoff
-     gate: its parallel `full-ordinary` and `full-resources` partitions cover
-     the same backend tests as `full`, with
-     coverage checks added. After committing and pushing, reuse a run for that
-     exact SHA or dispatch `gh workflow run deep-ci.yml --ref <branch>` and
-     verify those jobs passed. Report the overall workflow result too, including
-     any failures outside that backend gate. Do not duplicate it with local
-     `full` or `coverage`;
-     see [references/running-tests.md](references/running-tests.md) for scope
-     selection and local fallbacks.
+     and `uv run pyright` when feasible. Use regular PR CI for the handoff.
+     Start Deep CI only when the user explicitly requests it. If requested,
+     verify its backend partitions and combined coverage gate on the exact
+     commit, and report the overall workflow result too. See
+     [references/running-tests.md](references/running-tests.md).
    - Frontend: `cd frontend && pnpm format:check && pnpm lint && pnpm typecheck`;
      run the affected Vitest files for logic and the applicable Playwright spec
      for a headline UI flow. A localized UI change does not call for the full

@@ -75,11 +75,9 @@ Files in `backend/alembic/versions/`, named `<rev>_snake_description.py`
 
 - Run the affected backend test files during development; use
   `./scripts/test.sh fast <affected paths> -q` when that lane fits the change.
-- Successful **Deep CI backend partitions and the combined coverage gate** on
-  the final commit supply the full backend handoff gate. They partition the
-  same tests as `full` and add coverage checks;
-  do not repeat the full suite locally. See [running-tests.md](running-tests.md)
-  for dispatch, reporting and local fallbacks.
+- Regular PR CI supplies the required handoff gate. Deep CI runs the full
+  backend partitions and combined coverage gate when explicitly requested.
+  See [running-tests.md](running-tests.md) for dispatch and reporting.
 - Report actual results; never claim a run you did not do.
 - Data-integrity and security fixes: write the failing test first
   (AGENTS.md rule 4).
@@ -143,7 +141,7 @@ Per-PR jobs in `.github/workflows/ci.yml` run disjoint shards of the backend
 `pr` lane, autonomous
 core tests, frontend tests, extension tests and two real-browser smokes in
 parallel. The stable `PR gate` check propagates any required job failure or skip.
-`.github/workflows/deep-ci.yml` runs nightly and on demand for coverage,
+`.github/workflows/deep-ci.yml` runs on manual dispatch for coverage,
 PostgreSQL/SeaweedFS contracts, compatibility matrices and full browser suites.
 The backend coverage job starts a real SeaweedFS through
 `backend/tests/containers.py`, so `S3StorageBackend`

@@ -903,9 +903,9 @@ class TestDeepSuite:
 
         assert job["timeout-minutes"] <= 30
 
-    def test_runs_expensive_work_only_on_schedule_or_dispatch(self) -> None:
+    def test_runs_expensive_work_only_on_manual_dispatch(self) -> None:
         events = _workflow("deep-ci.yml")[True]
-        assert set(events) == {"schedule", "workflow_dispatch"}
+        assert set(events) == {"workflow_dispatch"}
         assert "flaky-detection" not in _workflow("deep-ci.yml")["jobs"]
         assert "sqlite-async" not in _workflow("deep-ci.yml")["jobs"]
 

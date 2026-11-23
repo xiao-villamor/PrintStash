@@ -26,7 +26,7 @@ Lanes
              Includes real remote providers and therefore needs Docker.
   full       everything, including `slow`, minus the coverage gate and `scale`.
   scale      wall-clock budgets with a library seeded at the supported size
-             (25,000 collections, 100,000 Models). Deep CI runs it nightly;
+             (25,000 collections, 100,000 Models). Deep CI runs it on manual dispatch;
              every other lane deselects it. Deterministic scaling checks run
              in `pr` (tests/repo/test_read_scaling.py).
   full-ordinary  full-suite tests without container resource markers.
@@ -37,7 +37,7 @@ Lanes
   coverage   `full` under branch coverage, then the coverage gate: aggregate
              regression floor plus a per-module floor (tests/repo/test_coverage_floors.py).
              Writes term-missing, .coverage-html/index.html and coverage.json.
-             Deep CI runs this lane nightly and before a release.
+             Deep CI runs this lane on manual dispatch.
   affected   `--testmon`: only tests whose executed lines changed. Seed it with
              one full run first, and never use it as the only pre-merge gate.
   serial     `full` without xdist. For debugging an ordering or state bug.

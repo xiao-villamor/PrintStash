@@ -227,7 +227,7 @@ faster way in when a module has many.
 Every suite gates on lower bounds. Falling below a floor fails the run;
 exceeding it by more than its slack prints a maintenance notice. Raise a floor
 when reviewing coverage debt, without blocking a PR that improves coverage.
-The full gates run nightly in `Deep CI` and on the release commit before tagging.
+The full gates run in manually dispatched `Deep CI`, including release validation.
 
 There is also a floor **per module** (backend, `printstash-core`) or **per area**
 (frontend), because the aggregate is blunt: at 21,000 statements a 900-line
