@@ -78,8 +78,9 @@ _LIVE_PRINT_STATES = _IDLE_PRINT_STATES | {"printing", "paused"}
 # API, dispatch and provider clients are separate objects. Serialize commands
 # for the same Moonraker controller within this process, without retaining
 # locks for removed printers. Emergency stop always bypasses this queue.
-_COMMAND_LOCKS: WeakValueDictionary[tuple[asyncio.AbstractEventLoop, str], asyncio.Lock]
-_COMMAND_LOCKS = WeakValueDictionary()
+_COMMAND_LOCKS: WeakValueDictionary[
+    tuple[asyncio.AbstractEventLoop, str], asyncio.Lock
+] = WeakValueDictionary()
 
 
 def _coordinate(position: tuple[int | float, ...] | None, index: int) -> int | float:
@@ -149,7 +150,13 @@ class MoonrakerClient:
         return {}
 
     async def _request(
-        self, method: str, path: str, *, timeout: float | None = None, **kwargs: Any
+        self,
+        method: str,
+        path: str,
+        *,
+        timeout: float | None = None,
+        require_gcode_receipt: bool = False,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         try:
@@ -167,9 +174,18 @@ class MoonrakerClient:
                 f"moonraker {response.status_code}: {response.text[:200]}"
             )
         try:
-            return cast(dict[str, Any], response.json())
+            payload: object = response.json()
         except ValueError:
+            if require_gcode_receipt and response.text.strip().lower() != "ok":
+                raise MoonrakerError("no G-code receipt") from None
             return {"raw": response.text}
+        if not isinstance(payload, dict):
+            raise MoonrakerError("invalid Moonraker response: expected a JSON object")
+        if require_gcode_receipt and (
+            payload.get("result") != "ok" or "error" in payload
+        ):
+            raise MoonrakerError("no G-code receipt")
+        return payload
 
     async def info(self) -> dict[str, Any]:
         return await self._request("GET", "/printer/info")
@@ -319,7 +335,11 @@ class MoonrakerClient:
         self, script: str, *, timeout: float | None = None
     ) -> dict[str, Any]:
         return await self._request(
-            "POST", "/printer/gcode/script", params={"script": script}, timeout=timeout
+            "POST",
+            "/printer/gcode/script",
+            params={"script": script},
+            timeout=timeout,
+            require_gcode_receipt=True,
         )
 
     def _command_lock(self) -> asyncio.Lock:
@@ -338,7 +358,7 @@ class MoonrakerClient:
     def _validate_machine_state(
         report: dict[str, Any], *, idle: bool
     ) -> PrinterSnapshot:
-        result = report.get("result") if isinstance(report, Mapping) else None
+        result = report.get("result")
         if not isinstance(result, Mapping) or not isinstance(
             result.get("status"), Mapping
         ):
@@ -670,7 +690,7 @@ class MoonrakerClient:
 
     async def bed_measurement_supported(self) -> bool:
         report = await self._query_objects(_BED_MEASUREMENT_OBJECTS)
-        result = report.get("result") if isinstance(report, Mapping) else None
+        result = report.get("result")
         status = result.get("status") if isinstance(result, Mapping) else None
         if not isinstance(status, Mapping):
             raise MoonrakerError("invalid bed measurement status")
@@ -706,7 +726,7 @@ class MoonrakerClient:
                     receipt = await self._send_gcode(
                         _MEASURE_BED_COMMAND, timeout=_BED_MEASUREMENT_TIMEOUT
                     )
-                if not isinstance(receipt, Mapping) or receipt.get("result") != "ok":
+                if receipt.get("result") != "ok":
                     raise MoonrakerError("no bed measurement receipt")
             except (MoonrakerError, TimeoutError) as exc:
                 raise ProviderError(

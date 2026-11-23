@@ -266,6 +266,18 @@ class TestRequest:
 
 
 class TestQueryStatus:
+    @pytest.mark.parametrize("body", [b"null", b"[]", b'"ok"'])
+    @pytest.mark.asyncio
+    async def test_rejects_non_object_json_before_reading_status(
+        self, body: bytes
+    ) -> None:
+        client = _client(lambda _request: httpx.Response(200, content=body))
+        try:
+            with pytest.raises(MoonrakerError, match="expected a JSON object"):
+                await client.query_status()
+        finally:
+            await client.aclose()
+
     @pytest.mark.asyncio
     async def test_asks_for_every_subscribed_object(self) -> None:
         seen: list[httpx.URL] = []
@@ -592,6 +604,34 @@ class TestPrintActions:
             seen[0].params["script"]
             == "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=0"
         )
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            b"[]",
+            b"<html>Bad gateway</html>",
+            b'{"error": "failed"}',
+            b'{"result": null}',
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_rejects_malformed_gcode_receipt(self, body: bytes) -> None:
+        client = _client(lambda _request: httpx.Response(200, content=body))
+        try:
+            with pytest.raises(
+                MoonrakerError, match="expected a JSON object|no G-code receipt"
+            ):
+                await client.run_gcode("G28")
+        finally:
+            await client.aclose()
+
+    @pytest.mark.asyncio
+    async def test_accepts_bare_ok_gcode_receipt(self) -> None:
+        client = _client(lambda _request: httpx.Response(200, text="OK"))
+        try:
+            assert await client.run_gcode("G28") == {"raw": "OK"}
+        finally:
+            await client.aclose()
 
 
 class TestGetPrintHistory:

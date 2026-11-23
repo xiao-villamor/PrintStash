@@ -1125,7 +1125,7 @@ function PrinterDetailView({
               <div className="space-y-4">
                 <PrinterConfigEditor key={printerId} printerId={printerId} />
                 <details className="border bg-card">
-                  <summary className="cursor-pointer px-4 py-3 text-sm font-semibold">
+                  <summary className="px-4 py-3 text-sm font-semibold">
                     {uiText("Reported configuration")}
                   </summary>
                   <div className="border-t px-4">

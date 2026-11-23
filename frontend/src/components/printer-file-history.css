@@ -101,10 +101,6 @@
   color: var(--accent-foreground);
 }
 
-.printer-explorer-table tr[data-selected] {
-  cursor: pointer;
-}
-
 .printer-explorer-table tr[data-selected="false"]:hover {
   background: var(--muted);
 }
