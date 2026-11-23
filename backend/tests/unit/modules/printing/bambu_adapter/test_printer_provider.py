@@ -358,7 +358,7 @@ class TestBambuLanProvider:
             ("FINISH", "complete"),  # regression: was "finish" -> UNKNOWN downstream
             ("FAILED", "error"),
             ("IDLE", "standby"),
-            ("PREPARE", "standby"),
+            ("PREPARE", "printing"),  # Preparation occupies the printer for routing.
             ("SLICING", "standby"),
         ],
     )
