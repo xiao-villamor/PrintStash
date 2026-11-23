@@ -363,6 +363,7 @@ function ModelDetailPresentation({
   } | null>(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsOpener = useRef<HTMLElement | null>(null);
   const { createTag, deleteTag } = useTaxonomyCommands();
   const metadataClient = useQueryClient();
   const [deleteTagTarget, setDeleteTagTarget] = useState<TagRead | null>(null);
@@ -1058,6 +1059,7 @@ function ModelDetailPresentation({
         {/* Detail Header */}
         <DropdownMenu
           open={actionsOpen}
+          returnFocusRef={actionsOpener}
           onOpenChange={setActionsOpen}
           portal
           className="shrink-0"
@@ -1067,11 +1069,13 @@ function ModelDetailPresentation({
             <header
               onContextMenu={(event) => {
                 event.preventDefault();
+                actionsOpener.current = null;
                 setActionsOpen(true);
               }}
               onKeyDown={(event) => {
                 if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
                   event.preventDefault();
+                  actionsOpener.current = event.target instanceof HTMLElement ? event.target : null;
                   setActionsOpen(true);
                 }
               }}
@@ -1206,7 +1210,10 @@ function ModelDetailPresentation({
                     title={uiText("Model actions")}
                     aria-haspopup="menu"
                     aria-expanded={actionsOpen}
-                    onClick={() => setActionsOpen(!actionsOpen)}
+                    onClick={(event) => {
+                      actionsOpener.current = event.currentTarget;
+                      setActionsOpen(!actionsOpen);
+                    }}
                   >
                     <MoreHorizontal className="h-4 w-4" />
                     {uiText("nav.more")}
