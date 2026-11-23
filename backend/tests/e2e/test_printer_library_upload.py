@@ -161,3 +161,106 @@ class TestUploadFromLibrary:
         assert commands[0]["param"] == "Metadata/plate_2.gcode"
         assert commands[0]["url"] == f"file:///sdcard/cache/{name}"
         assert commands[0]["subtask_id"].isdigit()
+
+
+class TestBambuReconnect:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("interrupted_starts", "first_report", "expect_original"),
+        [
+            pytest.param(1, "RUNNING", True, id="unique-running"),
+            pytest.param(1, "PAUSE", True, id="unique-paused"),
+            pytest.param(2, "RUNNING", False, id="ambiguous"),
+            pytest.param(1, "FINISH", False, id="terminal-only"),
+        ],
+    )
+    async def test_first_identified_report_after_hub_restart_preserves_run_identity(
+        self,
+        api,
+        superuser_headers,
+        e2e_db,
+        bambu_cache,
+        interrupted_starts,
+        first_report,
+        expect_original,
+        monkeypatch,
+    ):
+        """A recent local start needs an identified active report to own the outcome."""
+        from app.main import app
+        from app.modules.printing.bambu_adapter import BambuLanProvider
+        from app.modules.printing.printer_hub import PrinterHub
+        from tests.fakes.mock_bambu import make_mqtt_factory
+
+        printer, _, _, sim = bambu_cache
+        revision = a_gcode_artifact(e2e_db, "restart-receipt")
+        get_backend().write_bytes(b"G28\n", revision.path)
+        path = f"/api/v1/printers/{printer.id}"
+        upload = await api.post(
+            f"{path}/send",
+            headers=superuser_headers,
+            json={"file_id": revision.id, "start_print": False},
+        )
+        assert upload.status_code == 200, upload.text
+        name = upload.json()["remote_filename"]
+        starts = set()
+        for _ in range(interrupted_starts):
+            if starts:
+                # The device stopped the first attempt while its observer was offline.
+                sim.cancel()
+            start = await api.post(
+                f"{path}/start",
+                headers=superuser_headers,
+                json={"remote_filename": name, "file_id": revision.id},
+            )
+            assert start.status_code == 200, start.text
+            starts.add(start.json()["id"])
+        assert sim.filename == name
+        assert len(starts) == interrupted_starts
+
+        # Recreate process-local observer state, retaining the application DB.
+        # The public MQTT double replays the printer's first identified report.
+        hub = PrinterHub()
+        monkeypatch.setattr(app.state, "printer_hub", hub)
+        packet = {
+            "print": {
+                "subtask_id": "device-run-42",
+                "gcode_file": f"/cache/{name}",
+                "subtask_name": name,
+            }
+        }
+        mqtt, _ = make_mqtt_factory(sim, pushall_report=packet)
+        monkeypatch.setattr(
+            BambuLanProvider, "_default_mqtt_client", staticmethod(mqtt)
+        )
+        provider = BambuLanProvider.build(printer)
+        for state in (first_report, "FINISH", "FINISH"):
+            packet["print"].update(
+                gcode_state=state, mc_percent=100 if state == "FINISH" else 40
+            )
+            status = await provider.query_status()
+            await hub._handle_status(printer.id, status["result"]["status"])
+
+        history = await api.get(f"{path}/jobs", headers=superuser_headers)
+        assert history.status_code == 200, history.text
+        runs = [row for row in history.json() if row["id"] != upload.json()["id"]]
+        completed = [row for row in runs if row["state"] == "completed"]
+        assert len(completed) == 1
+        assert completed[0]["external_subtask_id"] == "device-run-42"
+        assert completed[0]["finished_at"] is not None
+        queue = await api.get(
+            "/api/v1/fleet/queue",
+            headers=superuser_headers,
+            params={"history_limit": 0},
+        )
+        assert queue.status_code == 200, queue.text
+        active = {row["id"] for row in queue.json() if row["printer_id"] == printer.id}
+        if expect_original:
+            assert len(runs) == 1
+            assert completed[0]["id"] in starts
+            assert completed[0]["file_id"] == revision.id
+            assert active == set()
+        else:
+            assert len(runs) == len(starts) + 1
+            assert completed[0]["source"] == "external"
+            assert completed[0]["id"] not in starts
+            assert active == starts
