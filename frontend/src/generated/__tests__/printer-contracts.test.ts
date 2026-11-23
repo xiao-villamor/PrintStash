@@ -60,7 +60,8 @@ describe("PRINTER_CONTRACTS", () => {
 
     expect(supports("moonraker", "send_gcode")).toBe(true);
     expect(supports("bambu_lan", "upload")).toBe(true);
-    expect(supports("bambu_lan", "list_files")).toBe(false);
+    expect(supports("bambu_lan", "list_files")).toBe(true);
+    expect(supports("bambu_lan", "delete_file")).toBe(false);
     expect(supports("prusalink", "delete_file")).toBe(true);
     expect(supports("octoprint", "send_gcode")).toBe(false);
     expect(supports("elegoo_centauri", "upload")).toBe(true);

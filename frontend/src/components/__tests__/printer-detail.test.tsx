@@ -1995,16 +1995,25 @@ describe("PrinterDetailPage", () => {
       expect(within(fan).getByText("60%")).toBeVisible();
     });
 
-    it("shows reported Bambu card, chamber and job estimate independently", async () => {
+    it("shows an absent Bambu SD card on the machine panel", async () => {
       renderPrinter({ printer: aPrinter({ id: 4, provider: "bambu_lan" }) });
-      await pushSnapshot({
-        print_stats: { state: "printing", remaining_minutes: 37 },
-        bambu_storage: { card_present: false },
-        "temperature_sensor chamber": { temperature: 30 },
-      });
+      await pushSnapshot({ bambu_storage: { card_present: false } });
       const machine = within(screen.getByRole("region", { name: "Machine" }));
       expect(machine.getByText("Not inserted")).toBeVisible();
+      expect(machine.queryByText("Chamber")).not.toBeInTheDocument();
+    });
+
+    it("displays Bambu chamber temperature from a standalone reading", async () => {
+      renderPrinter({ printer: aPrinter({ id: 4, provider: "bambu_lan" }) });
+      await pushSnapshot({ "temperature_sensor chamber": { temperature: 30 } });
+      const machine = within(screen.getByRole("region", { name: "Machine" }));
       expect(machine.getByText("30 °C")).toBeVisible();
+      expect(machine.queryByText("SD card")).not.toBeInTheDocument();
+    });
+
+    it("shows the Bambu time estimate only during the active job", async () => {
+      renderPrinter({ printer: aPrinter({ id: 4, provider: "bambu_lan" }) });
+      await pushSnapshot({ print_stats: { state: "printing", remaining_minutes: 37 } });
       const job = within(screen.getByRole("region", { name: "Current job" }));
       expect(job.getByText("37 min")).toBeVisible();
       await pushUpdate({ print_stats: { remaining_minutes: 0 } });
