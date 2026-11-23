@@ -21,6 +21,8 @@ export interface InboxManifestV1 {
   schema_version?: 1;
   kind: "direct" | "archive" | "model_files" | "collection" | "browser_file";
   title?: string;
+  filename?: string;
+  size?: number;
   selected_ids?: string[];
   entries?: InboxManifestFile[];
   files?: InboxManifestFile[];
@@ -62,7 +64,7 @@ export interface InboxCapturedField {
   origin: "confirmed" | "inferred";
 }
 
-export type InboxManifest = InboxManifestV1 | InboxManifestV2;
+export type InboxManifest = InboxManifestV1 | InboxManifestV2 | InboxManifestV3;
 
 export interface InboxItemResult {
   id: number;
@@ -87,6 +89,10 @@ export interface InboxItem {
   display_title: string | null;
   source_hostname: string | null;
   state: InboxItemState;
+  on_ready?: "import" | "review";
+  review_reason?: "files_need_review" | "destination_not_editable" | "already_imported" | null;
+  thumbnail_url?: string | null;
+
   manifest: InboxManifest;
   target_collection_id: number | null;
   requested_tags: string[];
@@ -100,4 +106,21 @@ export interface InboxItem {
   updated_at: string;
   completed_at: string | null;
   completion: InboxItemCompletion | null;
+}
+
+export interface CaptureProfile {
+  id: string;
+  name: string;
+  origin: "provider" | "file";
+  author?: string | null;
+  creator_relationship?: "model_creator" | "other" | null;
+  printer?: string | null;
+  estimated_seconds?: number | null;
+  filament_grams?: number | null;
+  plate_count?: number | null;
+  materials?: string[];
+}
+export interface InboxManifestV3 extends Omit<InboxManifestV2, "schema_version"> {
+  schema_version: 3;
+  profiles: Record<string, CaptureProfile>;
 }

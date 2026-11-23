@@ -1581,6 +1581,8 @@ class TestVaultMigrations:
         collection.readme = (
             f"![embedded](/api/v1/collections/{collection.id}/images/photo.png)"
         )
+        cover_name = f"{'c' * 64}.png"
+        collection.cover_selection = {"kind": "image", "filename": cover_name}
         owner = build_user(db_session)
         item = build_inbox_item(db_session, owner)
         slot = build_capture_slot(
@@ -1603,6 +1605,7 @@ class TestVaultMigrations:
             source.document_file_key(document.id, document.filename),
             source.document_image_key(document.id, "diagram.png"),
             source.collection_image_key(collection.id, "photo.png"),
+            source.collection_image_key(collection.id, cover_name),
             slot.storage_key,
         }
         for key in managed - {primary.path}:

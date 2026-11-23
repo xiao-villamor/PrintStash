@@ -78,6 +78,52 @@ class WorkerExitCause(StrEnum):
     SUPERVISION_FAILED = "supervision_failed"
 
 
+class ThreeMFReader(StrEnum):
+    """Which reader produced a scene; each has its own memory weight per face."""
+
+    LIB3MF = "lib3mf"
+    XML = "xml"
+
+
+class NativeFallback(StrEnum):
+    """Why lib3mf could not answer exactly, so the XML reader read the package."""
+
+    BINDING_UNAVAILABLE = "lib3mf unavailable"
+    LIB3MF_REFUSED = "lib3mf refused the package"
+    DOCUMENT_TYPE = "document type declaration"
+    SECOND_MODEL = "second model element"
+    MODEL_SEMANTICS = "model semantics"
+    STRUCTURE_BEFORE_MODEL = "structure before the model element"
+    MODEL_BEYOND_WINDOW = "model element beyond the first window"
+    NOT_OPC = "not an OPC package"
+    UNREADABLE_PACKAGE = "unreadable package"
+    MIXED_UNITS = "mixed units"
+    PLACEMENT_PRECISION = "placement beyond single precision"
+    GEOMETRY_PRECISION = "geometry beyond single precision"
+    SCENE_RESOURCE_LIMIT = "scene resource limit"
+    BUILD_ITEMS_DIFFER = "build items differ from the root build"
+    MISSING_RESOURCE = "missing resource"
+    VERTEX_COUNT_CHANGED = "vertex count changed"
+    FACE_COUNT_CHANGED = "face count changed"
+    UNSUPPORTED_OBJECT = "unsupported object kind"
+
+
+@dataclass(frozen=True)
+class ReaderChoice:
+    """The 3MF reader used; the XML reader always has the reason lib3mf declined."""
+
+    reader: ThreeMFReader
+    fallback: NativeFallback | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.reader, ThreeMFReader):
+            raise TypeError("reader must be a ThreeMFReader")
+        if (self.reader is ThreeMFReader.XML) != isinstance(
+            self.fallback, NativeFallback
+        ):
+            raise ValueError("an XML read has exactly one fallback reason")
+
+
 @dataclass(frozen=True)
 class PhaseStats:
     phase: MeshPhase
@@ -86,6 +132,12 @@ class PhaseStats:
     output_bytes: int | None
     triangle_count: int | None
     outcome: PhaseOutcome
+    # Only the load stage reads a 3MF package.
+    reader: ReaderChoice | None = None
+
+    def __post_init__(self) -> None:
+        if self.reader is not None and self.phase is not MeshPhase.LOAD:
+            raise ValueError("only the load stage records a 3MF reader")
 
 
 @dataclass(frozen=True)
@@ -125,7 +177,7 @@ def _optional_counter(value: object) -> int | None:
 
 
 def encode_phase_stats(stats: tuple[PhaseStats, ...]) -> dict[str, object]:
-    payload = {"version": 1, "stages": [asdict(stat) for stat in stats]}
+    payload = {"version": 2, "stages": [asdict(stat) for stat in stats]}
     # The same strict boundary applies to locally generated frames.
     decode_phase_stats(payload)
     return payload
@@ -134,7 +186,7 @@ def encode_phase_stats(stats: tuple[PhaseStats, ...]) -> dict[str, object]:
 def decode_phase_stats(raw: object) -> tuple[PhaseStats, ...]:
     if not isinstance(raw, dict) or set(raw) != {"version", "stages"}:
         raise ValueError("invalid phase stats envelope")
-    if type(raw["version"]) is not int or raw["version"] != 1:
+    if type(raw["version"]) is not int or raw["version"] != 2:
         raise ValueError("unsupported phase stats version")
     stages = raw["stages"]
     if not isinstance(stages, list) or len(stages) > len(MeshPhase):
@@ -151,6 +203,7 @@ def decode_phase_stats(raw: object) -> tuple[PhaseStats, ...]:
             "output_bytes",
             "triangle_count",
             "outcome",
+            "reader",
         }:
             raise ValueError("invalid phase stats fields")
         phase = MeshPhase(stage["phase"])
@@ -165,9 +218,22 @@ def decode_phase_stats(raw: object) -> tuple[PhaseStats, ...]:
                 output_bytes=_optional_counter(stage["output_bytes"]),
                 triangle_count=_optional_counter(stage["triangle_count"]),
                 outcome=PhaseOutcome(stage["outcome"]),
+                reader=_reader(stage["reader"]),
             )
         )
     return tuple(result)
+
+
+def _reader(raw: object) -> ReaderChoice | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or set(raw) != {"reader", "fallback"}:
+        raise ValueError("invalid 3MF reader fields")
+    fallback = raw["fallback"]
+    return ReaderChoice(
+        ThreeMFReader(raw["reader"]),
+        None if fallback is None else NativeFallback(fallback),
+    )
 
 
 class PhaseRecorder:
@@ -188,6 +254,7 @@ class PhaseRecorder:
         output_bytes: int | None = None,
         triangle_count: int | None = None,
         outcome: PhaseOutcome = PhaseOutcome.COMPLETED,
+        reader: ReaderChoice | None = None,
     ) -> None:
         if self._active is None:
             raise RuntimeError("no active mesh stage")
@@ -200,6 +267,7 @@ class PhaseRecorder:
             output_bytes,
             triangle_count,
             outcome,
+            reader,
         )
         previous = self._stats.get(phase)
         if previous is not None:
@@ -218,6 +286,7 @@ class PhaseRecorder:
                 PhaseOutcome.FAILED
                 if PhaseOutcome.FAILED in (previous.outcome, outcome)
                 else outcome,
+                reader if reader is not None else previous.reader,
             )
         self._stats[phase] = current
 

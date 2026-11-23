@@ -4,7 +4,7 @@
  * left edge; every option must remain reachable without horizontal scrolling.
  */
 import { test as authenticatedTest, expect, authBundleFor, authedContext } from "./helpers";
-import { modelCard, uploadModel } from "./util";
+import { openModelPage, uploadModel } from "./util";
 
 const test = authenticatedTest.extend({
   page: async ({ page }, use) => {
@@ -128,7 +128,7 @@ test.describe("dropdown viewport placement", () => {
     let modelId: string | undefined;
     try {
       await uploadModel(page, name, { collection: collection.name });
-      await modelCard(page, name).click();
+      await openModelPage(page, name);
       await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
       modelId = new URL(page.url()).pathname.split("/").at(-1);
       const grant = await page.request.put(
@@ -142,8 +142,8 @@ test.describe("dropdown viewport placement", () => {
       try {
         await member.page.setViewportSize({ width: 390, height: 844 });
         await member.page.goto(`/models/${modelId}`);
-        const trigger = member.page.getByRole("button", { name: "Model actions" });
-        await trigger.click();
+        const trigger = member.page.getByRole("heading", { level: 1 });
+        await trigger.click({ button: "right" });
         const panel = member.page.getByRole("menu");
         await expect(panel).toHaveAttribute("data-state", "open");
         const bounds = await panel.boundingBox();

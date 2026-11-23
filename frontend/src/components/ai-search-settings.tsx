@@ -1,7 +1,8 @@
 import { SearchSettingsSnapshot } from "@/components/search-settings-snapshot";
+import { SettingsGroupHead } from "@/components/settings-card";
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { Settings2 } from "lucide-react";
 
 import { AiSearchSetup } from "@/components/ai-search-setup";
 import { InferenceEndpointForm } from "@/components/inference-endpoint-form";
@@ -11,7 +12,7 @@ import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
-import { TabBar } from "@/components/ui/tabs";
+import { Modal } from "@/components/ui/modal";
 import {
   searchSettingsOptions,
   useAiSearchCatalog,
@@ -392,6 +393,7 @@ function SettingsForm({
           >
             <p role="alert">{t("library.saveUnconfirmed")}</p>
             <Button
+              size="sm"
               type="button"
               variant="outline"
               loading={review.phase === "loading"}
@@ -418,6 +420,7 @@ function SettingsForm({
                   <p role="alert">{t("aiSearch.historyChanged")}</p>
                 )}
                 <Button
+                  size="sm"
                   type="button"
                   variant="outline"
                   onClick={() => {
@@ -434,6 +437,7 @@ function SettingsForm({
           </section>
         )}
         <Button
+          size="sm"
           type="submit"
           loading={save.isPending}
           disabled={Boolean(
@@ -452,6 +456,7 @@ export function AiSearchSettings() {
   const { t } = useI18n();
   const [section, setSection] = useState<"setup" | "indexes" | "servers" | "technical">("setup");
   const [editing, setEditing] = useState<number | "new" | null>(null);
+  const [changing, setChanging] = useState(false);
   const settings = useQuery(searchSettingsOptions());
   const denied = settings.isError && [401, 403, 404].includes(parseApiError(settings.error).status);
   const catalog = useAiSearchCatalog(!!settings.data && !denied);
@@ -461,40 +466,14 @@ export function AiSearchSettings() {
   };
   return (
     <Card className="overflow-hidden">
-      <div className="flex items-start gap-3 border-b border-border px-4 py-4 sm:px-5">
-        <Search className="h-8 w-8 shrink-0 rounded-md bg-muted p-1.5" aria-hidden />
-        <div>
-          <h2 className="text-sm font-semibold">{t("aiSearch.settingsTitle")}</h2>
-          <p className="mt-1 max-w-prose text-xs text-muted-foreground">
-            {t("aiSearch.settingsIntro")}
-          </p>
-        </div>
-      </div>
-      {settings.data && !denied && (
-        <div className="border-b border-border bg-muted/30 p-3">
-          <TabBar
-            tabs={[
-              { key: "setup", label: t("aiSearch.navSetup") },
-              { key: "indexes", label: t("aiSearch.navIndexes") },
-              { key: "servers", label: t("aiSearch.navServers") },
-              { key: "technical", label: t("aiSearch.navTechnical") },
-            ]}
-            active={section}
-            onChange={(next) => {
-              setSection(next);
-              if (next !== "servers") setEditing(null);
-            }}
-            showIndicator={false}
-            className="grid w-full grid-cols-2 gap-1 rounded-md bg-background p-1 ring-1 ring-border sm:flex sm:w-max"
-            tabClassName="min-h-10 rounded-md px-3 text-sm font-medium text-muted-foreground transition-[background-color,color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            activeTabClassName="bg-accent text-accent-foreground"
-          />
-        </div>
-      )}
       {settings.isError && (
         <EmptyState
           title={t("aiSearch.settingsLoadError")}
-          action={<Button onClick={refresh}>{t("aiSearch.retry")}</Button>}
+          action={
+            <Button size="sm" onClick={refresh}>
+              {t("aiSearch.retry")}
+            </Button>
+          }
         />
       )}
       {denied ? null : !settings.data ? (
@@ -503,103 +482,218 @@ export function AiSearchSettings() {
         </p>
       ) : (
         <>
-          {section === "setup" ? (
+          <fieldset disabled={settings.isError} className="min-w-0">
+            <AiSearchSetup
+              settings={settings.data}
+              catalog={catalog}
+              changing={false}
+              onChangingChange={setChanging}
+            />
+          </fieldset>
+          <Modal
+            open={changing}
+            onClose={() => setChanging(false)}
+            title={t("AI Search setup")}
+            description={t("Choose where search runs before preparing your Library.")}
+            bodyClassName="p-0"
+          >
             <fieldset disabled={settings.isError} className="min-w-0">
-              <AiSearchSetup settings={settings.data} catalog={catalog} />
+              <AiSearchSetup
+                settings={settings.data}
+                catalog={catalog}
+                changing
+                onChangingChange={setChanging}
+              />
             </fieldset>
-          ) : section === "indexes" ? (
-            <fieldset disabled={settings.isError} className="min-w-0">
-              <SearchGenerationControls settings={settings.data} catalog={catalog} />
-            </fieldset>
-          ) : section === "technical" ? (
-            <>
-              <SettingsForm initial={settings.data} catalog={catalog} readOnly={settings.isError} />
-            </>
-          ) : (
-            <fieldset disabled={settings.isError} className="min-w-0 space-y-5 p-4 sm:p-5">
-              <div>
-                <h3 className="text-base font-semibold">{t("aiSearch.endpoints")}</h3>
-                <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-                  {t("aiSearch.serversIntro")}
-                </p>
-              </div>
-              {editing === null ? (
-                <>
-                  {settings.data.endpoints.length ? (
-                    <ul className="divide-y divide-border rounded-md border border-border">
-                      {settings.data.endpoints.map((endpoint) => (
-                        <li
-                          key={endpoint.id}
-                          className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
-                        >
-                          <div className="min-w-0">
-                            <p className="break-words text-sm font-semibold">{endpoint.model}</p>
-                            <p className="mt-1 break-all text-xs text-muted-foreground">
-                              {endpoint.host} ·{" "}
-                              {t(
-                                endpoint.kind === "embedding"
-                                  ? "aiSearch.embeddingEndpoint"
-                                  : "aiSearch.chatEndpoint",
-                              )}
-                            </p>
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setEditing(endpoint.id)}
-                          >
-                            {t("aiSearch.editServer", { model: endpoint.model })}
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="rounded-md border border-border p-4 text-sm text-muted-foreground">
-                      {t("aiSearch.noServers")}
-                    </p>
-                  )}
-                  <Button onClick={() => setEditing("new")}>{t("aiSearch.newEndpoint")}</Button>
-                  {settings.data.environment_endpoints.map((kind) => (
-                    <Button
-                      key={kind}
-                      variant="outline"
-                      loading={fromEnvironment.isPending}
-                      onClick={() =>
-                        fromEnvironment.mutate(
-                          { kind, session: getSessionVersion() },
-                          { onError: toast.error },
-                        )
-                      }
-                    >
-                      {t(
-                        kind === "embedding"
-                          ? "aiSearch.importEmbeddingEnvironment"
-                          : "aiSearch.importChatEnvironment",
-                      )}
-                    </Button>
-                  ))}
-                </>
-              ) : (
-                <div className="space-y-4 rounded-md border border-border p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h4 className="text-sm font-semibold">
-                      {editing === "new" ? t("aiSearch.newEndpoint") : t("aiSearch.editEndpoint")}
-                    </h4>
-                    <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
-                      {t("aiSearch.backToServers")}
-                    </Button>
-                  </div>
-                  <InferenceEndpointForm
-                    key={editing}
-                    initial={settings.data.endpoints.find((endpoint) => endpoint.id === editing)}
-                    onSaved={() => {
-                      setEditing(null);
-                    }}
-                  />
+          </Modal>
+          <section className="border-t border-border">
+            <SettingsGroupHead
+              icon={Settings2}
+              level={2}
+              title={t("Setup and options")}
+              description={t("Search types, AI servers and technical limits.")}
+              className="settings-card-head--flush"
+            />
+            <div className="divide-y divide-border px-4 pb-4 sm:pl-16 sm:pr-5">
+              <div className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div>
+                  <p className="text-sm font-medium">{t("Guided setup")}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {t("Choose this machine or another server; prepare the Library.")}
+                  </p>
                 </div>
-              )}
-            </fieldset>
-          )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={settings.isError}
+                  onClick={() => setChanging(true)}
+                >
+                  {t(settings.data.settings.enabled ? "Change setup" : "Start setup")}
+                </Button>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div>
+                  <p className="text-sm font-medium">{t("aiSearch.navIndexes")}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {t("Text, thumbnail, multiple views and optional point-cloud geometry")}
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setSection("indexes")}>
+                  {t("Manage indexes")}
+                </Button>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div>
+                  <p className="text-sm font-medium">{t("aiSearch.navServers")}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {t("Embedding or chat endpoints with explicit data permissions")}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setEditing("new");
+                      setSection("servers");
+                    }}
+                  >
+                    {t("aiSearch.newEndpoint")}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setSection("servers")}>
+                    {t("Manage servers")}
+                  </Button>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div>
+                  <p className="text-sm font-medium">{t("Technical options")}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {t("Permissions, expansion, limits, retention and timeout")}
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setSection("technical")}>
+                  {t("Technical settings")}
+                </Button>
+              </div>
+            </div>
+          </section>
+          <Modal
+            open={section !== "setup"}
+            onClose={() => {
+              setSection("setup");
+              setEditing(null);
+            }}
+            title={
+              section === "indexes"
+                ? t("aiSearch.navIndexes")
+                : section === "servers"
+                  ? t("aiSearch.navServers")
+                  : t("Technical settings")
+            }
+            className="max-w-4xl"
+          >
+            {section === "indexes" ? (
+              <fieldset disabled={settings.isError} className="min-w-0">
+                <SearchGenerationControls settings={settings.data} catalog={catalog} />
+              </fieldset>
+            ) : section === "technical" ? (
+              <>
+                <SettingsForm
+                  initial={settings.data}
+                  catalog={catalog}
+                  readOnly={settings.isError}
+                />
+              </>
+            ) : (
+              <fieldset disabled={settings.isError} className="min-w-0 space-y-5 p-4 sm:p-5">
+                <div>
+                  <h3 className="text-base font-semibold">{t("aiSearch.endpoints")}</h3>
+                  <p className="mt-1 max-w-prose text-sm text-muted-foreground">
+                    {t("aiSearch.serversIntro")}
+                  </p>
+                </div>
+                {editing === null ? (
+                  <>
+                    {settings.data.endpoints.length ? (
+                      <ul className="divide-y divide-border rounded-md border border-border">
+                        {settings.data.endpoints.map((endpoint) => (
+                          <li
+                            key={endpoint.id}
+                            className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+                          >
+                            <div className="min-w-0">
+                              <p className="break-words text-sm font-semibold">{endpoint.model}</p>
+                              <p className="mt-1 break-all text-xs text-muted-foreground">
+                                {endpoint.host} ·{" "}
+                                {t(
+                                  endpoint.kind === "embedding"
+                                    ? "aiSearch.embeddingEndpoint"
+                                    : "aiSearch.chatEndpoint",
+                                )}
+                              </p>
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setEditing(endpoint.id)}
+                            >
+                              {t("aiSearch.editServer", { model: endpoint.model })}
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="rounded-md border border-border p-4 text-sm text-muted-foreground">
+                        {t("aiSearch.noServers")}
+                      </p>
+                    )}
+                    <Button size="sm" onClick={() => setEditing("new")}>
+                      {t("aiSearch.newEndpoint")}
+                    </Button>
+                    {settings.data.environment_endpoints.map((kind) => (
+                      <Button
+                        size="sm"
+                        key={kind}
+                        variant="outline"
+                        loading={fromEnvironment.isPending}
+                        onClick={() =>
+                          fromEnvironment.mutate(
+                            { kind, session: getSessionVersion() },
+                            { onError: toast.error },
+                          )
+                        }
+                      >
+                        {t(
+                          kind === "embedding"
+                            ? "aiSearch.importEmbeddingEnvironment"
+                            : "aiSearch.importChatEnvironment",
+                        )}
+                      </Button>
+                    ))}
+                  </>
+                ) : (
+                  <div className="space-y-4 rounded-md border border-border p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="text-sm font-semibold">
+                        {editing === "new" ? t("aiSearch.newEndpoint") : t("aiSearch.editEndpoint")}
+                      </h4>
+                      <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
+                        {t("aiSearch.backToServers")}
+                      </Button>
+                    </div>
+                    <InferenceEndpointForm
+                      key={editing}
+                      initial={settings.data.endpoints.find((endpoint) => endpoint.id === editing)}
+                      onSaved={() => {
+                        setEditing(null);
+                      }}
+                    />
+                  </div>
+                )}
+              </fieldset>
+            )}
+          </Modal>
         </>
       )}
     </Card>

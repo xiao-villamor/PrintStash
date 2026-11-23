@@ -7,9 +7,10 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Plus, Tag, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Localized } from "@/components/ui/localized";
 import { Modal } from "@/components/ui/modal";
 import { getSessionVersion } from "@/lib/session-transport";
@@ -224,7 +225,7 @@ export function ModelTagsDialog({
   if (session !== currentSession) return null;
   if (readDenied)
     return (
-      <Modal open={open} onClose={close} title={uiText("Model tags")} className="max-w-md">
+      <Modal open={open} onClose={close} title={uiText("Edit Model tags")} className="max-w-md">
         <div role="alert" className="space-y-3">
           <p>{uiText("Couldn’t load this model")}</p>
           <Button variant="outline" loading={reviewing} onClick={() => void reviewLatest()}>
@@ -236,7 +237,29 @@ export function ModelTagsDialog({
 
   return (
     <Localized>
-      <Modal open={open} onClose={close} title={uiText("Model tags")} className="max-w-md">
+      <Modal
+        open={open}
+        onClose={close}
+        title={uiText("Edit Model tags")}
+        className="max-w-md"
+        description={<span className="wrap-anywhere">{model.name}</span>}
+        footer={
+          <>
+            <Button type="button" variant="outline" size="sm" disabled={busy} onClick={close}>
+              {uiText("Cancel")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              loading={busy}
+              disabled={!hasChanges || problem !== null || editDenied || reviewing}
+              onClick={() => void save()}
+            >
+              {uiText("Save tags")}
+            </Button>
+          </>
+        }
+      >
         {problem && (
           <div
             role="alert"
@@ -275,30 +298,17 @@ export function ModelTagsDialog({
             )}
           </div>
         )}
-        <div className="space-y-5">
-          <div className="rounded border border-border bg-muted/40 p-3">
-            <div className="flex items-start gap-2.5">
-              <Tag className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-foreground">{model.name}</p>
-                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                  {uiText(
-                    "Choose an existing tag or create a new one to group and find this Model.",
-                  )}
-                </p>
-              </div>
-            </div>
-          </div>
-
+        <div className="space-y-3">
           <div>
             <label
               htmlFor={`model-tags-${model.id}`}
-              className="mb-1.5 block font-mono text-3xs uppercase tracking-wider text-muted-foreground"
+              className="mb-1.5 block text-[13px] font-medium text-foreground"
             >
-              {uiText("Search or create a tag")}
+              {uiText("Find or create tag")}
             </label>
             <div className="relative">
-              <input
+              <Input
+                data-autofocus
                 id={`model-tags-${model.id}`}
                 value={query}
                 maxLength={255}
@@ -309,13 +319,12 @@ export function ModelTagsDialog({
                   nav.setActiveIndex(-1);
                 }}
                 {...nav.inputProps}
-                className="h-10 w-full rounded border border-input bg-background px-3 font-mono text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
               {query && options.length > 0 && (
                 <div
                   id={nav.listboxId}
                   role="listbox"
-                  className="pop-in absolute left-0 right-0 top-full z-dropdown mt-1 max-h-44 overflow-y-auto rounded border border-border bg-popover py-1 text-popover-foreground shadow-lg"
+                  className="mt-1 max-h-40 divide-y divide-border overflow-y-auto border border-border"
                 >
                   {matching.map((tag, index) => (
                     <button
@@ -325,10 +334,12 @@ export function ModelTagsDialog({
                       role="option"
                       aria-selected={index === nav.activeIndex}
                       onClick={() => commit(tag.name)}
-                      className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left font-mono text-xs hover:bg-popover-hover ${index === nav.activeIndex ? "bg-popover-hover" : ""}`}
+                      className={`flex w-full items-center justify-between gap-2 px-2 py-2 text-left text-sm hover:bg-popover-hover ${index === nav.activeIndex ? "bg-popover-hover" : ""}`}
                     >
                       <span className="truncate">{tag.name}</span>
-                      <span className="text-muted-foreground">{tag.model_count}</span>
+                      <span className="text-muted-foreground">
+                        {tag.model_count} {uiText("Models")}
+                      </span>
                     </button>
                   ))}
                   {canCreate && (
@@ -338,68 +349,47 @@ export function ModelTagsDialog({
                       role="option"
                       aria-selected={matching.length === nav.activeIndex}
                       onClick={() => commit(query)}
-                      className={`flex w-full items-center gap-2 px-3 py-2 text-left font-mono text-xs text-primary hover:bg-popover-hover ${matching.length === nav.activeIndex ? "bg-popover-hover" : ""}`}
+                      className={`flex w-full items-center gap-2 px-2 py-2 text-left text-sm text-primary hover:bg-popover-hover ${matching.length === nav.activeIndex ? "bg-popover-hover" : ""}`}
                     >
-                      <Plus className="h-3.5 w-3.5" />
-                      {uiText(' Create tag "')}
-                      {query.trim()}
-                      {uiText('"')}
+                      <Plus className="size-3.5 shrink-0" aria-hidden="true" />
+                      <span className="min-w-0 wrap-anywhere">
+                        {uiText(' Create tag "')}
+                        {query.trim()}
+                        {uiText('"')}
+                      </span>
                     </button>
                   )}
                 </div>
               )}
             </div>
           </div>
-
-          <div>
-            <p className="mb-2 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-              {uiText("Assigned tags")}
-            </p>
-            {selected.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
-                {selected.map((name) => (
-                  <span
-                    key={normalized(name)}
-                    className="inline-flex items-center gap-1 rounded border border-primary-soft bg-accent py-1 pl-2.5 pr-1.5 font-mono text-xs font-semibold text-accent-foreground"
+          {selected.length > 0 && (
+            <div role="group" aria-label={uiText("Tags")} className="flex flex-wrap gap-1.5">
+              {selected.map((name) => (
+                <span
+                  key={normalized(name)}
+                  className="inline-flex min-w-0 items-center gap-1 rounded-sm bg-accent py-0.5 pl-2 pr-1 text-sm text-accent-foreground"
+                >
+                  <span className="min-w-0 wrap-anywhere">{name}</span>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    className="size-6 shrink-0"
+                    disabled={busy || editDenied}
+                    onClick={() =>
+                      setSelected((current) =>
+                        current.filter((tag) => normalized(tag) !== normalized(name)),
+                      )
+                    }
+                    aria-label={uiText("Remove {value1}", { value1: name })}
                   >
-                    {name}
-                    <button
-                      type="button"
-                      disabled={busy || editDenied}
-                      onClick={() =>
-                        setSelected((current) =>
-                          current.filter((tag) => normalized(tag) !== normalized(name)),
-                        )
-                      }
-                      aria-label={uiText("Remove {value1}", { value1: String(name) })}
-                      className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="rounded border border-dashed border-border px-3 py-5 text-center text-sm text-muted-foreground">
-                {uiText("No tags assigned yet.")}
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-6 flex justify-end gap-2">
-          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={close}>
-            {uiText("Cancel")}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            loading={busy}
-            disabled={!hasChanges || problem !== null || editDenied || reviewing}
-            onClick={() => void save()}
-          >
-            {uiText("Save tags")}
-          </Button>
+                    <X className="size-3.5" aria-hidden="true" />
+                  </Button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </Modal>
     </Localized>

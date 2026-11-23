@@ -5,7 +5,15 @@ import { useI18n } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
 import type { FileRead } from "@/types";
 
-function HashValue({ sha, label, filename }: { sha: string; label: string; filename: string }) {
+export function HashValue({
+  sha,
+  label,
+  filename,
+}: {
+  sha: string;
+  label: string;
+  filename: string;
+}) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   async function copy() {

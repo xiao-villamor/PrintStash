@@ -104,14 +104,15 @@ describe("SearchPreparationStages", () => {
     expect(steps().every((step) => step?.endsWith("(done)"))).toBe(true);
     expect(screen.getByText(/Every check passed/)).toBeVisible();
   });
-  it("rejects a phase a preparing index cannot be in", () => {
-    expect(() =>
-      renderApp(
-        <SearchPreparationStages
-          generation={aSearchGeneration({ state: "building", phase: "draining" })}
-        />,
-      ),
-    ).toThrow("search_generation_phase_invalid");
+  it("shows safe recovery for an invalid preparation phase", () => {
+    renderApp(
+      <SearchPreparationStages
+        generation={aSearchGeneration({ state: "building", phase: "draining" })}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Page unavailable" })).toBeVisible();
+    expect(screen.queryByText("search_generation_phase_invalid")).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Preparation steps" })).not.toBeInTheDocument();
   });
 });
 

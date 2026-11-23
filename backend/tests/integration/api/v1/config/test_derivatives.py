@@ -3,10 +3,19 @@
 import pytest
 
 from app.db.models import SystemConfig
-from app.modules.derivatives.policy import SETTINGS
+from app.modules.derivatives.policy import SettingName
+
+SETTING_DEFAULTS = {
+    SettingName.MESH: True,
+    SettingName.GCODE: True,
+    SettingName.TOOLPATH: True,
+    SettingName.PREVIEWS: False,
+    SettingName.PREVIEW_POLES: False,
+    SettingName.RECREATE_EMBEDDED_COVERS: False,
+}
 
 
-@pytest.mark.parametrize("name", list(SETTINGS.values()))
+@pytest.mark.parametrize("name", list(SettingName))
 class TestDerivativeControls:
     def test_boolean_sets_an_override(self, client, auth_headers, db_session, name):
         response = client.put(
@@ -19,17 +28,18 @@ class TestDerivativeControls:
     def test_null_clears_an_override(
         self, client, auth_headers, db_session, make_system_config, name
     ):
-        make_system_config(**{name: False})
+        default = SETTING_DEFAULTS[name]
+        make_system_config(**{name: not default})
         response = client.put("/api/v1/config", headers=auth_headers, json={name: None})
         assert response.status_code == 200, response.text
-        assert response.json()[name] is True
+        assert response.json()[name] is default
         db_session.expire_all()
         assert getattr(db_session.get(SystemConfig, 1), name) is None
 
     def test_omission_preserves_other_overrides(
         self, client, auth_headers, db_session, make_system_config, name
     ):
-        other = next(candidate for candidate in SETTINGS.values() if candidate != name)
+        other = next(candidate for candidate in SettingName if candidate != name)
         make_system_config(**{other: False})
         response = client.put("/api/v1/config", headers=auth_headers, json={name: True})
         assert response.status_code == 200, response.text

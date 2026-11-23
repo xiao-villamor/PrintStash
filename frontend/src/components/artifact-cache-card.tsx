@@ -195,6 +195,7 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
             <div role="alert" className="space-y-2">
               <p>{uiText("Cache settings could not be loaded.")}</p>
               <Button
+                size="sm"
                 variant="outline"
                 disabled={owner.busy}
                 onClick={() => void owner.query.refetch()}
@@ -226,6 +227,7 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
                 )}
               </p>
               <Button
+                size="sm"
                 disabled={owner.busy || review.phase === "loading"}
                 onClick={() => void reviewCurrent()}
               >
@@ -256,6 +258,7 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
                     ))}
                   </dl>
                   <Button
+                    size="sm"
                     disabled={owner.busy}
                     onClick={() => {
                       setDraft({
@@ -270,6 +273,7 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
                     {uiText("Use current values")}
                   </Button>
                   <Button
+                    size="sm"
                     disabled={
                       owner.busy ||
                       review.snapshot.edit_epoch !== (draft?.base ?? value)?.edit_epoch
@@ -496,10 +500,11 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
                 </p>
               )}
               <div className="flex flex-wrap gap-2">
-                <Button type="submit" disabled={busy}>
+                <Button size="sm" type="submit" disabled={busy}>
                   {uiText("Save cache settings")}
                 </Button>
                 <Button
+                  size="sm"
                   type="button"
                   variant="outline"
                   disabled={busy}
@@ -508,6 +513,7 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
                   {uiText("Reset to environment defaults")}
                 </Button>
                 <Button
+                  size="sm"
                   type="button"
                   variant="outline"
                   disabled={busy}

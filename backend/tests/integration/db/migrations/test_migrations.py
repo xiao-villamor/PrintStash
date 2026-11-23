@@ -45,6 +45,7 @@ from sqlmodel import Session, SQLModel
 
 import app.db.models  # noqa: F401 — register all tables on SQLModel.metadata
 from alembic import command
+from app.db import library_browse_v3
 from app.db import migrate as migrate_mod
 from app.db.session import _is_alembic_managed, init_db
 from tests.factories import build_user
@@ -1067,6 +1068,50 @@ class TestInitDb:
 
 
 class TestUpgrade:
+    @pytest.mark.parametrize(
+        "parent_revision",
+        ["16c087bb845e", "55535d2c13e3"],
+        ids=["library-browse", "model-previews"],
+    )
+    def test_upgrades_existing_vault_from_either_merge_parent(
+        self, tmp_path: Path, parent_revision: str
+    ) -> None:
+        db_path = tmp_path / "parent.sqlite"
+        config = _upgrade_to(db_path, parent_revision)
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            with engine.begin() as connection:
+                seed_schema_row(connection, "system_config", id=1, currency="EUR")
+                seed_schema_row(
+                    connection,
+                    "models",
+                    id=7,
+                    name="Existing Model",
+                    slug="existing",
+                    hash="a" * 64,
+                    edit_version=1,
+                )
+            command.upgrade(config, "head")
+            with engine.connect() as connection:
+                assert library_browse_v3.installed(connection)
+                assert (
+                    connection.execute(
+                        text(
+                            "SELECT derivatives_previews_enabled FROM system_config WHERE id=1"
+                        )
+                    ).scalar_one()
+                    is None
+                )
+                assert (
+                    connection.execute(
+                        text("SELECT name FROM models WHERE id=7")
+                    ).scalar_one()
+                    == "Existing Model"
+                )
+            assert migrate_mod._current_revision(engine) == _head_revision()
+        finally:
+            engine.dispose()
+
     def test_alembic_upgrade_creates_expected_schema(
         self, tmp_path: Path, monkeypatch
     ) -> None:
@@ -1438,3 +1483,50 @@ class TestOfflineRendering:
             )
 
         assert "_alembic_tmp" not in buffer.getvalue()
+
+
+class TestMeshDiscoveryOrderMigration:
+    def test_existing_cursor_keeps_its_scan_position(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "existing-mesh-cursor.sqlite"
+        cfg = _upgrade_to(db_path, "8d0710caf97a")
+        engine = create_engine(_url(tmp_path, db_path.name))
+        try:
+            with engine.begin() as connection:
+                seed_schema_row(
+                    connection,
+                    "reconcile_cursors",
+                    source="derivatives.mesh",
+                    scan_position=11,
+                    scan_high_water=37,
+                    discovery_next_priority="interactive",
+                )
+
+            command.upgrade(cfg, "aac0f6b39802")
+
+            with engine.connect() as connection:
+                row = connection.execute(
+                    text(
+                        "SELECT scan_position, scan_high_water, discovery_next_priority, "
+                        "mesh_discovery_order FROM reconcile_cursors WHERE source = 'derivatives.mesh'"
+                    )
+                ).one()
+                assert tuple(row) == (11, 37, "interactive", "smallest")
+                with pytest.raises(IntegrityError):
+                    connection.execute(
+                        text(
+                            "UPDATE reconcile_cursors SET mesh_discovery_order = 'invalid'"
+                        )
+                    )
+
+            command.downgrade(cfg, "8d0710caf97a")
+
+            with engine.connect() as connection:
+                row = connection.execute(
+                    text(
+                        "SELECT scan_position, scan_high_water, discovery_next_priority "
+                        "FROM reconcile_cursors WHERE source = 'derivatives.mesh'"
+                    )
+                ).one()
+                assert tuple(row) == (11, 37, "interactive")
+        finally:
+            engine.dispose()

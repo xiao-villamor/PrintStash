@@ -14,7 +14,7 @@ const canObserveResize = "ResizeObserver" in globalThis;
 
 export interface TabBarProps<K extends string> {
   tabs: TabItem<K>[];
-  active: K;
+  active: K | null;
   onChange: (key: K) => void;
   className?: string;
   tabClassName?: string;
@@ -24,7 +24,7 @@ export interface TabBarProps<K extends string> {
   showIndicator?: boolean;
 }
 
-/** ARIA tablist with roving tabindex and a sliding active underline. */
+/** ARIA tablist with roving tabindex and a measured active underline. */
 export function TabBar<K extends string>({
   tabs,
   active,
@@ -60,15 +60,21 @@ export function TabBar<K extends string>({
     return () => ro.disconnect();
   }, [active, tabs.length]);
 
+  const activeIndex = tabs.findIndex((tab) => tab.key === active);
+
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     const buttons = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
     if (buttons.length === 0) return;
     e.preventDefault();
     const focused = buttons.findIndex((button) => button === document.activeElement);
-    const idx = focused >= 0 ? focused : tabs.findIndex((tab) => tab.key === active);
+    const index = focused >= 0 ? focused : activeIndex;
     const next =
-      e.key === "ArrowRight" ? (idx + 1) % tabs.length : (idx - 1 + tabs.length) % tabs.length;
+      e.key === "ArrowRight"
+        ? (index + 1) % tabs.length
+        : index < 0
+          ? tabs.length - 1
+          : (index - 1 + tabs.length) % tabs.length;
     // Route-backed selection can commit later. Move focus to the requested
     // button now, rather than reading the old active tab on the next frame.
     buttons[next].focus();
@@ -82,7 +88,7 @@ export function TabBar<K extends string>({
       onKeyDown={onKeyDown}
       className={cn("relative flex", className)}
     >
-      {tabs.map((tab) => {
+      {tabs.map((tab, index) => {
         const isActive = tab.key === active;
         return (
           <button
@@ -90,7 +96,7 @@ export function TabBar<K extends string>({
             type="button"
             role="tab"
             aria-selected={isActive}
-            tabIndex={isActive ? 0 : -1}
+            tabIndex={isActive || (activeIndex < 0 && index === 0) ? 0 : -1}
             data-active={isActive ? "true" : undefined}
             onClick={() => onChange(tab.key)}
             className={cn(tabClassName, isActive && activeTabClassName)}
@@ -102,7 +108,7 @@ export function TabBar<K extends string>({
       {showIndicator && indicator && (
         <span
           aria-hidden
-          className="absolute bottom-0 left-0 h-0.5 w-px origin-left rounded-full bg-primary transition-transform duration-fast ease-in-out motion-reduce:transition-none"
+          className="absolute bottom-0 left-0 h-0.5 w-px origin-left bg-foreground"
           style={{
             transform: `translateX(${indicator.left + indicatorInset}px) scaleX(${Math.max(0, indicator.width - indicatorInset * 2)})`,
           }}

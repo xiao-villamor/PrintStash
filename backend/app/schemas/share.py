@@ -11,9 +11,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
+from printstash_core.mesh.preview_profile import PreviewLook
 from pydantic import BaseModel
 
 from app.db.models import FileRevisionStatus
+from app.schemas.previews import ModelPreviewRead
 
 
 class ShareLinkCreate(BaseModel):
@@ -83,6 +85,9 @@ class PublicModelRead(BaseModel):
 
     name: str
     description: Optional[str] = None
+    previews: ModelPreviewRead
     has_thumbnail: bool
     allow_download: bool
     files: list[PublicFileRead]
+    preview_look: PreviewLook
+    """The look generated images use, so the 3D view is shaded to match."""

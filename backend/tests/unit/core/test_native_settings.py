@@ -13,6 +13,11 @@ def fresh_projection(monkeypatch):
 
 
 class TestCapture:
+    def test_worker_receives_the_3mf_cover_preference(self, monkeypatch):
+        monkeypatch.setitem(_overlay, "prefer_rendered_3mf_preview", False)
+
+        assert native_settings.capture()["prefer_rendered_3mf_preview"] is False
+
     def test_captures_runtime_overrides(self, monkeypatch):
         monkeypatch.setitem(_overlay, "model_thumbnail_width", 640)
 

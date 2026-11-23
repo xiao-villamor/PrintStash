@@ -1,5 +1,6 @@
 "use client";
 
+import { MarkdownView } from "@/components/markdown-view";
 import { translate } from "@/lib/locale";
 import { revisionStatusLabel } from "@/components/model-detail/presentation";
 import { currentLocale } from "@/lib/locale";
@@ -7,8 +8,8 @@ import { uiText } from "@/lib/locale";
 import { useI18n, useUiLocale } from "@/lib/i18n";
 
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
-import { AlertTriangle, Box, Download, Layers, Loader2 } from "lucide-react";
+import { useParams } from "@tanstack/react-router";
+import { Box, Download, Layers, Loader2 } from "lucide-react";
 
 import type { STLViewerControls, ViewerDisplayMode } from "@/components/stl-viewer";
 import { getAssetUrl } from "@/lib/api";
@@ -16,9 +17,9 @@ import { sharedDownloadUrl, sharedGcodeUrl, sharedStlUrl } from "@/lib/api/share
 import { formatBytes, formatDuration } from "@/lib/format";
 import { PublicFileRead } from "@/types";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
 import { parseApiError } from "@/lib/errors";
 import { sharedModelOptions } from "@/lib/queries/share";
+import { PageFailure } from "@/components/page-failure";
 import { MeshPreviewGate } from "@/components/mesh-preview-gate";
 import { getPublicDerivedBlob, getPublicDerivedText } from "@/lib/api/request";
 
@@ -47,7 +48,7 @@ function revisionTitle(file: PublicFileRead) {
 }
 
 export default function SharePage() {
-  const { token = "" } = useParams();
+  const { token = "" } = useParams({ strict: false });
   return <ShareScope key={token} token={token} />;
 }
 
@@ -115,18 +116,24 @@ function ShareContent({ token }: { token: string }) {
   if (query.isError) {
     const denied = [401, 403, 404, 410].includes(parseApiError(query.error).status);
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-surface px-6 text-center">
-        <AlertTriangle className="h-8 w-8 text-amber-500" />
-        <p className="font-mono text-sm text-on-surface-variant">
-          {denied
-            ? uiText("This share link is invalid, expired, or revoked.")
-            : t("share.loadError")}
-        </p>
-        {!denied && (
-          <Button variant="outline" onClick={() => void query.refetch()}>
-            {t("Retry")}
-          </Button>
-        )}
+      <div className="min-h-screen grid">
+        <PageFailure
+          kind={
+            denied
+              ? "not-found"
+              : parseApiError(query.error).code === "network_unreachable"
+                ? "offline"
+                : "unavailable"
+          }
+          title={uiText("Share unavailable")}
+          description={
+            denied
+              ? uiText("This share link is invalid, expired, or revoked.")
+              : t("share.loadError")
+          }
+          onRetry={denied ? undefined : () => void query.refetch()}
+          retrying={query.isFetching}
+        />
       </div>
     );
   }
@@ -182,7 +189,9 @@ function ShareContent({ token }: { token: string }) {
           </div>
         </div>
         {model.description && (
-          <p className="text-sm text-on-surface-variant mt-1 max-w-2xl">{model.description}</p>
+          <div className="text-sm text-on-surface-variant mt-1 max-w-2xl">
+            <MarkdownView source={model.description} />
+          </div>
         )}
       </header>
 
@@ -219,6 +228,7 @@ function ShareContent({ token }: { token: string }) {
               >
                 <STLViewer
                   url={getAssetUrl(sharedStlUrl(token, meshFile.id))}
+                  look={model.preview_look}
                   previewFetcher={getPublicDerivedBlob}
                   onControlsReady={(api) => {
                     viewerControls.current = api;

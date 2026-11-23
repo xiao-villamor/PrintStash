@@ -11,24 +11,31 @@ const PRINTER_CARD_IMAGE_EVENT = "printstash:printer-card-image-changed";
 const isBrowser = (): boolean => "window" in globalThis;
 
 // The current document retains a choice while optional persistence is unavailable.
-let documentChoice: { value: boolean; pending: boolean } | null = null;
+export type PrinterArtworkPreference = "local" | "model" | "off";
 
-export function readPrinterCardImagePreference(): boolean {
-  if (!isBrowser()) return false;
+let documentChoice: { value: PrinterArtworkPreference; pending: boolean } | null = null;
+
+function readPrinterArtworkPreference(): PrinterArtworkPreference {
+  if (!isBrowser()) return "local";
   if (documentChoice?.pending) return documentChoice.value;
   try {
-    const value = window.localStorage.getItem(PRINTER_CARD_IMAGE_STORAGE_KEY) === "true";
+    const stored = window.localStorage.getItem(PRINTER_CARD_IMAGE_STORAGE_KEY);
+    const value = stored === null ? "local" : stored === "true" ? "model" : "off";
     documentChoice = { value, pending: false };
     return value;
   } catch {
-    return documentChoice?.value ?? false;
+    return documentChoice?.value ?? "local";
   }
+}
+
+export function readPrinterCardImagePreference(): boolean {
+  return readPrinterArtworkPreference() !== "off";
 }
 
 export function writePrinterCardImagePreference(showImage: boolean): void {
   if (!isBrowser()) return;
   const raw = String(showImage);
-  documentChoice = { value: showImage, pending: true };
+  documentChoice = { value: showImage ? "model" : "off", pending: true };
   try {
     window.localStorage.setItem(PRINTER_CARD_IMAGE_STORAGE_KEY, raw);
     documentChoice.pending = false;
@@ -51,10 +58,14 @@ function subscribePrinterCardImagePreference(onChange: () => void): () => void {
   };
 }
 
-export function usePrinterCardImagePreference(): boolean {
+export function usePrinterArtworkPreference(): PrinterArtworkPreference {
   return useSyncExternalStore(
     subscribePrinterCardImagePreference,
-    readPrinterCardImagePreference,
-    () => false,
+    readPrinterArtworkPreference,
+    () => "local",
   );
+}
+
+export function usePrinterCardImagePreference(): boolean {
+  return usePrinterArtworkPreference() !== "off";
 }

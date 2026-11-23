@@ -57,9 +57,19 @@ class ModelProvenanceSource(SQLModel, table=True):
 
 
 class ModelSourceCover(SQLModel, table=True):
-    """One private, normalized representative image for a provenance source."""
+    """One private, normalized image in an ordered provenance gallery."""
 
     __tablename__ = "model_source_covers"
+    __table_args__ = (
+        UniqueConstraint(
+            "provenance_source_id", "position", name="uq_source_image_position"
+        ),
+        CheckConstraint("position >= 0", name="ck_source_image_position"),
+    )
+
+    position: int = Field(
+        default=0, sa_column=Column(Integer, nullable=False, server_default="0")
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     provenance_source_id: int = Field(
@@ -67,7 +77,6 @@ class ModelSourceCover(SQLModel, table=True):
             Integer,
             ForeignKey("model_provenance_sources.id", ondelete="CASCADE"),
             nullable=False,
-            unique=True,
             index=True,
         )
     )

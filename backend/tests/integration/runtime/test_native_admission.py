@@ -94,6 +94,53 @@ def orphan(tmp_path, request):
 
 
 class TestLocalResourcePool:
+    def test_admits_concurrent_claims_by_resident_credit(self, tmp_path):
+        pool = LocalResourcePool(tmp_path)
+        capacity = Resources(2, 100)
+
+        def checkpoint():
+            assert time.monotonic() < deadline, "claims should fit together"
+
+        deadline = time.monotonic() + 3
+        with (
+            pool.reserve(
+                Resources(1, 65), capacity, hard_bytes=100, checkpoint=checkpoint
+            ),
+            pool.reserve(
+                Resources(1, 35), capacity, hard_bytes=70, checkpoint=checkpoint
+            ) as permit,
+        ):
+            assert permit.resources == Resources(1, 35)
+
+    def test_inherits_the_hard_worker_ceiling(self, tmp_path):
+        pool = LocalResourcePool(tmp_path)
+        capacity = Resources(2, 100)
+
+        with (
+            pool.reserve(
+                Resources(1, 65), capacity, hard_bytes=100, checkpoint=lambda: None
+            ) as parent,
+            NativePermit.inherit(parent.fileno, parent.path) as child,
+        ):
+            assert child.hard_bytes == 100
+
+    @pytest.mark.parametrize(
+        "hard", [64, 101, True], ids=["below-credit", "above-pool", "boolean"]
+    )
+    def test_refuses_an_invalid_hard_ceiling(self, tmp_path, hard):
+        pool = LocalResourcePool(tmp_path)
+
+        with (
+            pytest.raises(ValueError, match="invalid hard resource ceiling"),
+            pool.reserve(
+                Resources(1, 65),
+                Resources(2, 100),
+                hard_bytes=hard,
+                checkpoint=lambda: None,
+            ),
+        ):
+            pytest.fail("invalid hard ceiling received admission")
+
     def test_observes_changed_live_admission_receipts(self, tmp_path):
         from contextlib import ExitStack
         from dataclasses import replace
@@ -106,13 +153,42 @@ class TestLocalResourcePool:
         ) as permit:
             with ExitStack() as recovery, pool._coordinator(lambda: None):
                 original = pool._live(recovery)[0][0]
-                changed = replace(original, request=Resources(1, 41))
+                changed = replace(original, request=Resources(1, 41), hard_bytes=41)
                 with permit.path.open("r+b", buffering=0) as handle:
                     pool._write(handle, changed)
                 live, _ = pool._live(recovery)
 
                 assert live == [changed]
                 assert _Ticket.read(permit.fileno).request.bytes == 41
+
+    def test_observes_a_state_rewrite_within_one_timestamp_tick(
+        self, tmp_path, monkeypatch
+    ):
+        """Coarse file clocks: a same-size rewrite can keep every stat field.
+
+        An admitted claim read back as QUEUED stays the queue head, and every
+        later claim waits behind it until it ends (seen at 3 CPU / 8 GB).
+        """
+        from contextlib import ExitStack
+        from dataclasses import replace
+
+        from app.runtime import native_admission
+        from app.runtime.native_admission import _State
+
+        pool = LocalResourcePool(tmp_path)
+        with pool.reserve(
+            Resources(1, 40), Resources(2, 100), checkpoint=lambda: None
+        ) as permit:
+            frozen = os.fstat(permit.fileno)
+            monkeypatch.setattr(native_admission.os, "fstat", lambda _fd: frozen)
+            with ExitStack() as recovery, pool._coordinator(lambda: None):
+                (active,) = pool._live(recovery)[0]
+                queued = replace(active, state=_State.QUEUED)
+                assert len(queued.encode()) == len(active.encode())
+                with permit.path.open("r+b", buffering=0) as handle:
+                    pool._write(handle, queued)
+
+                assert pool._live(recovery)[0] == [queued]
 
     def test_rejects_corrupted_cached_receipts(self, tmp_path):
         from contextlib import ExitStack

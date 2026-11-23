@@ -14,16 +14,17 @@ import asyncio
 import tempfile
 import threading
 import time
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict
 from urllib.parse import unquote, urlparse
 
 from printstash_core.printers import ArtifactCaptureClient
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.core.time import utcnow
+from app.core.time import ensure_utc, utcnow
 from app.db.models import (
     FileType,
     JobKind,
@@ -389,9 +390,7 @@ class PrinterHub:
                 if isinstance(initial_status, dict) and initial_status:
                     await self._handle_status(printer_id, initial_status, client=client)
             except Exception as exc:  # noqa: BLE001 - provider-specific failures
-                await self._mark_status(
-                    printer_id, PrinterStatus.OFFLINE, error=str(exc)
-                )
+                await self._provider_offline(printer_id, str(exc))
                 logger.warning(
                     "printer worker[%s] initial status query failed: %s",
                     printer_id,
@@ -408,20 +407,25 @@ class PrinterHub:
                 logger.exception(
                     "printer worker[%s] subscribe crash: %s", printer_id, exc
                 )
-                await self._mark_status(
-                    printer_id, PrinterStatus.OFFLINE, error=str(exc)
-                )
+                await self._provider_offline(printer_id, str(exc))
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 30.0)
+
+    async def _provider_offline(self, printer_id: int, error: str) -> None:
+        self.snapshots.pop(printer_id, None)
+        self._last_job_sync_write.pop(printer_id, None)
+        await self._mark_status(printer_id, PrinterStatus.OFFLINE, error=error)
+        await self._broadcast(printer_id, {"type": "offline", "printer_id": printer_id})
 
     async def _handle_status(
         self, printer_id: int, status: Dict[str, Any], *, client: Any | None = None
     ) -> None:
         # Merge into in-memory snapshot.
         snap = self.snapshots.setdefault(printer_id, {})
-        for obj_name, fields in status.items():
-            if not isinstance(fields, dict):
-                continue
+        changes = {
+            name: fields for name, fields in status.items() if isinstance(fields, dict)
+        }
+        for obj_name, fields in changes.items():
             existing = snap.setdefault(obj_name, {})
             existing.update(fields)
 
@@ -484,9 +488,11 @@ class PrinterHub:
                     )
                 )
 
+        # Stream the observations in this frame. The full cache is for new
+        # subscribers, so an unrelated delta cannot replay an old sensor value.
         await self._broadcast(
             printer_id,
-            {"type": "update", "printer_id": printer_id, "data": snap},
+            {"type": "update", "printer_id": printer_id, "data": changes},
         )
 
     def _spoolman_config(self) -> tuple[str, str | None] | None:
@@ -737,13 +743,18 @@ class PrinterHub:
         progress: float,
         print_stats: Dict[str, Any],
     ) -> tuple[int, str] | None:
-        """Reflect Moonraker state onto the most-recent matching PrintJob row.
+        """Reflect the normalized provider state onto the matching PrintJob row.
 
         If no matching PrintJob exists and the printer is actively printing
         or paused, a placeholder row with source="external" is created so
         externally-initiated jobs are captured in the vault history.
         """
-        if not filename and ms_state not in _NO_ACTIVE_JOB_STATES:
+        if not filename and ms_state not in (
+            *_NO_ACTIVE_JOB_STATES,
+            "complete",
+            "cancelled",
+        ):
+            self._last_job_sync_write.pop(printer_id, None)
             return None
         now = time.monotonic()
         breaker = self._job_sync_breakers.get(printer_id)
@@ -790,6 +801,38 @@ class PrinterHub:
             return None
         finally:
             end_mutating_operation()
+
+    def _observed_terminal_job(
+        self,
+        session: Session,
+        printer_id: int,
+        ms_state: str,
+        print_stats: Dict[str, Any],
+    ) -> PrintJob | None:
+        # Some transports retire the job endpoint before publishing its
+        # outcome. Only the exact row observed running on this connection
+        # can receive an anonymous terminal report.
+        previous = self._last_job_sync_write.get(printer_id)
+        cached = self._active_job_cache.get(printer_id)
+        if (
+            ms_state not in ("complete", "cancelled")
+            or previous is None
+            or previous[1] not in ("printing", "paused")
+            or cached is None
+            or previous[0] != cached[0]
+            or _bambu_identity(print_stats)
+        ):
+            return None
+        return session.exec(
+            select(PrintJob).where(
+                PrintJob.id == cached[1],
+                PrintJob.printer_id == printer_id,
+                PrintJob.state.in_(_OBSERVED_ACTIVE_JOB_STATES),  # type: ignore[union-attr]
+                PrintJob.finished_at.is_(None),  # type: ignore[union-attr]
+                PrintJob.dedupe_absorbed_at.is_(None),  # type: ignore[union-attr]
+                live(PrintJob),
+            )
+        ).first()
 
     def _sync_active_job_db(
         self,
@@ -839,9 +882,16 @@ class PrinterHub:
                     session.commit()
                 self._active_job_cache.pop(printer_id, None)
                 return None
-            if not filename:
-                return None
             job = None
+            if not filename:
+                job = self._observed_terminal_job(
+                    session, printer_id, ms_state, print_stats
+                )
+                if job is None:
+                    return None
+                filename = job.remote_filename
+                if ms_state == "cancelled":
+                    progress = job.progress
             printer = session.get(Printer, printer_id)
             bambu_printer = (
                 printer is not None and printer.provider == PrinterProvider.BAMBU_LAN
@@ -860,7 +910,7 @@ class PrinterHub:
             )
             cached = self._active_job_cache.get(printer_id)
             incoming_identity = _bambu_identity(print_stats)
-            if cached is not None:
+            if job is None and cached is not None:
                 cached_job = session.get(PrintJob, cached[1])
                 # Keep identity continuity ahead of the printer's transient
                 # provider_job_id. Bambu commonly emits project-only and
@@ -907,6 +957,24 @@ class PrinterHub:
                     if _bambu_identity_matches(incoming_identity, candidate_identity):
                         job = candidate
                         break
+                # A locally started project receives a unique subtask ID before upload.
+                # The first MQTT report can precede the command acknowledgement.
+                subtask = incoming_identity.get("external_subtask_id")
+                if job is None and bambu_printer and subtask:
+                    job = next(
+                        (
+                            row
+                            for row in rows
+                            if row.source == "vault"
+                            and row.plate_index is not None
+                            and row.provider_job_id == subtask
+                            and row.finished_at is None
+                            and not _bambu_identity(row)
+                            and row.state
+                            in (PrintJobState.UPLOADING, PrintJobState.STARTED)
+                        ),
+                        None,
+                    )
                 # A project-only -> task-only transition has no overlapping
                 # value. Match only that active external row by the same
                 # reported filename; filename alone is never an identity.
@@ -917,6 +985,34 @@ class PrinterHub:
                         ):
                             job = candidate
                             break
+                if (
+                    job is None
+                    and bambu_printer
+                    and incoming_identity
+                    and ms_state in ("printing", "paused")
+                ):
+                    # Plain G-code starts have no client subtask ID. Bind the first
+                    # report only to a single recent, acknowledged start of the
+                    # exact cache path. Old unresolved jobs remain operator-owned.
+                    remote_path = print_stats.get("external_gcode_file")
+                    now = ensure_utc(utcnow())
+                    starting = [
+                        row
+                        for row in rows
+                        if row.source == "vault"
+                        and row.plate_index is None
+                        and row.state == PrintJobState.STARTED
+                        and row.started_at is not None
+                        and row.finished_at is None
+                        and not _bambu_identity(row)
+                        and row.provider_job_id is None
+                        and remote_path == f"/cache/{row.remote_filename}"
+                        and timedelta(0)
+                        <= now - ensure_utc(row.started_at)
+                        <= timedelta(seconds=60)
+                    ]
+                    if len(starting) == 1:
+                        job = starting[0]
                 # Provider-neutral reports (Moonraker, OctoPrint, PrusaLink,
                 # manual vault dispatch, and identityless Bambu external
                 # runs) have only a filename to reconcile to an active row.

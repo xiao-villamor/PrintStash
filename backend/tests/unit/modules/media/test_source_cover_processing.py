@@ -26,6 +26,7 @@ class TestProcessSourceCoverUpload:
             ("image/jpeg", "JPEG"),
             ("image/png", "PNG"),
             ("image/webp", "WEBP"),
+            ("image/gif", "GIF"),
         ],
     )
     def test_normalizes_each_allowed_source_format_to_webp(
@@ -39,27 +40,7 @@ class TestProcessSourceCoverUpload:
         with Image.open(io.BytesIO(processed.data)) as output:
             assert output.format == "WEBP"
 
-    def test_uses_shared_thumbnail_conversion_seam(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        source = _image_bytes()
-        converted = b"shared-thumbnail-result"
-        calls: list[bytes] = []
-
-        def _to_webp(data: bytes) -> bytes:
-            calls.append(data)
-            return converted
-
-        monkeypatch.setattr(source_cover_processing.thumbnail, "to_webp", _to_webp)
-
-        processed = source_cover_processing.process_source_cover_upload(
-            source, "image/png"
-        )
-
-        assert processed.data == converted
-        assert calls == [source]
-
-    def test_resizes_to_the_configured_thumbnail_width(
+    def test_keeps_source_resolution_for_large_surfaces(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setitem(_overlay, "model_thumbnail_width", 320)
@@ -69,7 +50,7 @@ class TestProcessSourceCoverUpload:
         )
 
         with Image.open(io.BytesIO(processed.data)) as output:
-            assert output.size == (320, 240)
+            assert output.size == (800, 600)
 
     def test_strips_every_metadata_block_from_the_source(
         self, monkeypatch: pytest.MonkeyPatch
@@ -121,9 +102,11 @@ class TestValidateSourceCover:
         self, monkeypatch: pytest.MonkeyPatch, content_type: str | None, payload: bytes
     ) -> None:
         monkeypatch.setattr(
-            source_cover_processing.thumbnail,
-            "to_webp",
-            lambda _data: pytest.fail("invalid source cover reached conversion"),
+            source_cover_processing,
+            "encode_rendered_pixels",
+            lambda *_args, **_kwargs: pytest.fail(
+                "invalid source cover reached conversion"
+            ),
         )
 
         with pytest.raises(source_cover_processing.SourceCoverProcessingError) as exc:
@@ -156,9 +139,11 @@ class TestValidateSourceCover:
     ) -> None:
         monkeypatch.setattr(source_cover_processing, "MAX_SOURCE_COVER_PIXELS", 100)
         monkeypatch.setattr(
-            source_cover_processing.thumbnail,
-            "to_webp",
-            lambda _data: pytest.fail("oversized source cover reached conversion"),
+            source_cover_processing,
+            "encode_rendered_pixels",
+            lambda *_args, **_kwargs: pytest.fail(
+                "oversized source cover reached conversion"
+            ),
         )
 
         with pytest.raises(source_cover_processing.SourceCoverProcessingError) as exc:
@@ -189,3 +174,49 @@ class TestValidateSourceCover:
             source_cover_processing.process_source_cover_upload(payload, "image/png")
 
         assert str(exc.value) == "source_cover_invalid"
+
+
+class TestGalleryGifProcessing:
+    def test_gif_gallery_uses_only_the_first_frame(self):
+        buffer = io.BytesIO()
+        Image.new("RGB", (8, 8), "red").save(
+            buffer,
+            format="GIF",
+            save_all=True,
+            append_images=[Image.new("RGB", (8, 8), "blue")],
+            duration=100,
+            loop=0,
+        )
+        processed = source_cover_processing.process_source_cover_upload(
+            buffer.getvalue(), "image/gif"
+        )
+        with Image.open(io.BytesIO(processed.data)) as image:
+            assert getattr(image, "n_frames", 1) == 1
+            red, green, blue = image.convert("RGB").getpixel(
+                (image.width // 2, image.height // 2)
+            )
+            assert red > 200 and green < 30 and blue < 30
+
+
+class TestMultiPictureJpeg:
+    def test_multipicture_jpeg_uses_the_primary_photo(self):
+        source = _image_bytes(
+            "MPO",
+            size=(8, 8),
+            save_all=True,
+            append_images=[Image.new("RGB", (8, 8), "yellow")],
+        )
+        with Image.open(io.BytesIO(source)) as input_image:
+            assert input_image.format == "MPO"
+
+        processed = source_cover_processing.process_source_cover_upload(
+            source, "image/jpeg"
+        )
+
+        with Image.open(io.BytesIO(processed.data)) as output:
+            assert output.format == "WEBP"
+            assert getattr(output, "n_frames", 1) == 1
+            red, green, blue = output.convert("RGB").getpixel(
+                (output.width // 2, output.height // 2)
+            )
+            assert blue > 90 and red < 30 and green < 30

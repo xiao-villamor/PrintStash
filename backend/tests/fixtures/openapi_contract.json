@@ -1,6 +1,78 @@
 {
   "components": {
     "schemas": {
+      "ActiveBedMesh": {
+        "properties": {
+          "mesh_max": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Mesh Max",
+            "type": "array"
+          },
+          "mesh_min": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Mesh Min",
+            "type": "array"
+          },
+          "probed_matrix": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "title": "Probed Matrix",
+            "type": "array"
+          },
+          "profile_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Name"
+          },
+          "state": {
+            "const": "active",
+            "title": "State",
+            "type": "string"
+          },
+          "variation_mm": {
+            "title": "Variation Mm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "state",
+          "profile_name",
+          "mesh_min",
+          "mesh_max",
+          "probed_matrix",
+          "variation_mm"
+        ],
+        "title": "ActiveBedMesh",
+        "type": "object"
+      },
       "ActiveJobResolution": {
         "additionalProperties": false,
         "properties": {
@@ -120,6 +192,67 @@
         "title": "ApiKeyRead",
         "type": "object"
       },
+      "ArchiveImageRead": {
+        "properties": {
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "image_kind": {
+            "enum": [
+              "photo",
+              "slicer_render"
+            ],
+            "title": "Image Kind",
+            "type": "string"
+          },
+          "plate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image_kind",
+          "file_id",
+          "url",
+          "plate"
+        ],
+        "title": "ArchiveImageRead",
+        "type": "object"
+      },
+      "ArchivePart": {
+        "additionalProperties": false,
+        "properties": {
+          "entry_name": {
+            "minLength": 1,
+            "title": "Entry Name",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_name",
+          "name"
+        ],
+        "title": "ArchivePart",
+        "type": "object"
+      },
       "ArchiveSelectRequest": {
         "description": "Body for POST /ingest/archive/{archive_id}/select.",
         "properties": {
@@ -141,6 +274,31 @@
             },
             "title": "Entry Ids",
             "type": "array"
+          },
+          "intake": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "multipart": "#/components/schemas/MultipartIntake",
+                    "separate": "#/components/schemas/SeparateIntake"
+                  },
+                  "propertyName": "mode"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/SeparateIntake"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MultipartIntake"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intake"
           },
           "names": {
             "default": [],
@@ -240,6 +398,128 @@
           "file_id"
         ],
         "title": "ArtifactOutcomeRead",
+        "type": "object"
+      },
+      "ArtifactPreviews": {
+        "description": "The view set of the one mesh Artifact selected for this Model.",
+        "properties": {
+          "archive_images": {
+            "items": {
+              "$ref": "#/components/schemas/ArchiveImageRead"
+            },
+            "title": "Archive Images",
+            "type": "array"
+          },
+          "cover_camera": {
+            "const": "unknown",
+            "default": "unknown",
+            "title": "Cover Camera",
+            "type": "string"
+          },
+          "cover_image_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewImageKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "artifact",
+            "default": "artifact",
+            "title": "Kind",
+            "type": "string"
+          },
+          "large_cover_image_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewImageKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "large_cover_thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Large Cover Thumbnail Url"
+          },
+          "large_cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Large Cover Url"
+          },
+          "large_cover_view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ViewId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "published": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublishedPreviewRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "source_images": {
+            "items": {
+              "$ref": "#/components/schemas/SourceImageRead"
+            },
+            "title": "Source Images",
+            "type": "array"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PreviewState"
+          }
+        },
+        "required": [
+          "kind",
+          "cover_camera",
+          "source_images",
+          "file_id",
+          "state",
+          "reason",
+          "published"
+        ],
+        "title": "ArtifactPreviews",
         "type": "object"
       },
       "ArtifactRequirementRead": {
@@ -1185,6 +1465,21 @@
         "title": "AuthProvidersRead",
         "type": "object"
       },
+      "AutomaticCover": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "automatic",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "AutomaticCover",
+        "type": "object"
+      },
       "BatchCreate": {
         "additionalProperties": false,
         "properties": {
@@ -1196,6 +1491,18 @@
             "exclusiveMinimum": 0.0,
             "title": "File Id",
             "type": "integer"
+          },
+          "plate_index": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
           },
           "printer_id": {
             "anyOf": [
@@ -1351,6 +1658,19 @@
           }
         },
         "title": "BatchRouting",
+        "type": "object"
+      },
+      "BedMeasurementAvailability": {
+        "properties": {
+          "supported": {
+            "title": "Supported",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "supported"
+        ],
+        "title": "BedMeasurementAvailability",
         "type": "object"
       },
       "Body_add_gcode_revision_api_v1_models__model_id__gcode_revisions_post": {
@@ -1689,6 +2009,20 @@
         "title": "Body_inspect_archive_background_api_v1_ingest_archive_inspect_post",
         "type": "object"
       },
+      "Body_put_model_cover_api_v1_models__model_id__cover_put": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_put_model_cover_api_v1_models__model_id__cover_put",
+        "type": "object"
+      },
       "Body_put_model_source_cover_api_v1_models__model_id__provenance__source_id__cover_put": {
         "properties": {
           "file": {
@@ -1764,6 +2098,18 @@
             "title": "File",
             "type": "string"
           },
+          "model_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
           "multipart_model_id": {
             "anyOf": [
               {
@@ -1806,6 +2152,14 @@
         ],
         "title": "Body_upload_document_image_api_v1_documents__document_id__images_post",
         "type": "object"
+      },
+      "BrowseKind": {
+        "enum": [
+          "model",
+          "multipart"
+        ],
+        "title": "BrowseKind",
+        "type": "string"
       },
       "BrowseModel": {
         "properties": {
@@ -1853,6 +2207,10 @@
             "title": "Browse Revision",
             "type": "string"
           },
+          "effective_direct": {
+            "title": "Effective Direct",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "discriminator": {
@@ -1897,7 +2255,8 @@
           "next_cursor",
           "total",
           "browse_revision",
-          "authorization_revision"
+          "authorization_revision",
+          "effective_direct"
         ],
         "title": "BrowsePage",
         "type": "object"
@@ -1926,6 +2285,24 @@
             "title": "Model Id",
             "type": "integer"
           },
+          "previews": {
+            "discriminator": {
+              "mapping": {
+                "artifact": "#/components/schemas/ArtifactPreviews",
+                "none": "#/components/schemas/NoPreviewSubject"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NoPreviewSubject"
+              },
+              {
+                "$ref": "#/components/schemas/ArtifactPreviews"
+              }
+            ],
+            "title": "Previews"
+          },
           "thumbnail_url": {
             "anyOf": [
               {
@@ -1939,6 +2316,7 @@
           }
         },
         "required": [
+          "previews",
           "model_id",
           "thumbnail_url"
         ],
@@ -2986,6 +3364,96 @@
         "title": "CaptionRead",
         "type": "object"
       },
+      "CaptureCapabilitiesRead": {
+        "properties": {
+          "capture_preferences": {
+            "title": "Capture Preferences",
+            "type": "boolean"
+          },
+          "idempotent_requests": {
+            "title": "Idempotent Requests",
+            "type": "boolean"
+          },
+          "import_intent": {
+            "default": true,
+            "title": "Import Intent",
+            "type": "boolean"
+          },
+          "max_file_bytes": {
+            "title": "Max File Bytes",
+            "type": "integer"
+          },
+          "max_files": {
+            "title": "Max Files",
+            "type": "integer"
+          },
+          "owner_user_id": {
+            "title": "Owner User Id",
+            "type": "integer"
+          },
+          "resumable_cover": {
+            "title": "Resumable Cover",
+            "type": "boolean"
+          },
+          "resumable_gallery": {
+            "title": "Resumable Gallery",
+            "type": "boolean"
+          },
+          "resumable_slots": {
+            "title": "Resumable Slots",
+            "type": "boolean"
+          },
+          "schema_versions": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Schema Versions",
+            "type": "array"
+          },
+          "storage": {
+            "const": "managed",
+            "title": "Storage",
+            "type": "string"
+          },
+          "upload_parts": {
+            "title": "Upload Parts",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schema_versions",
+          "resumable_slots",
+          "idempotent_requests",
+          "storage",
+          "max_files",
+          "max_file_bytes",
+          "capture_preferences",
+          "resumable_cover",
+          "resumable_gallery",
+          "upload_parts",
+          "owner_user_id"
+        ],
+        "title": "CaptureCapabilitiesRead",
+        "type": "object"
+      },
+      "CaptureDestinationRead": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "CaptureDestinationRead",
+        "type": "object"
+      },
       "CaptureFieldDraft": {
         "additionalProperties": false,
         "properties": {
@@ -3007,6 +3475,28 @@
           "origin"
         ],
         "title": "CaptureFieldDraft",
+        "type": "object"
+      },
+      "CaptureImageIntent": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "CaptureImageIntent",
         "type": "object"
       },
       "CaptureManifestFileRead": {
@@ -3086,6 +3576,175 @@
         "title": "CaptureManifestV2Read",
         "type": "object"
       },
+      "CaptureManifestV3Read": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/CaptureManifestFileRead"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "kind": {
+            "const": "model_files",
+            "title": "Kind",
+            "type": "string"
+          },
+          "profiles": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CaptureProfileDraft"
+            },
+            "title": "Profiles",
+            "type": "object"
+          },
+          "schema_version": {
+            "const": 3,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "selected_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected Ids",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/CaptureSourceDraft"
+          }
+        },
+        "required": [
+          "schema_version",
+          "kind",
+          "source",
+          "files",
+          "selected_ids",
+          "profiles"
+        ],
+        "title": "CaptureManifestV3Read",
+        "type": "object"
+      },
+      "CaptureProfileDraft": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "creator_relationship": {
+            "anyOf": [
+              {
+                "enum": [
+                  "model_creator",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creator Relationship"
+          },
+          "estimated_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 31622400.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Seconds"
+          },
+          "filament_grams": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000000.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filament Grams"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "materials": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Materials",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "provider",
+              "file"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "plate_count": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Count"
+          },
+          "printer": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "origin"
+        ],
+        "title": "CaptureProfileDraft",
+        "type": "object"
+      },
       "CaptureProvider": {
         "enum": [
           "myminifactory",
@@ -3093,6 +3752,177 @@
         ],
         "title": "CaptureProvider",
         "type": "string"
+      },
+      "CaptureRecoveryRead": {
+        "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "item": {
+            "$ref": "#/components/schemas/InboxItemRead"
+          },
+          "recoverable": {
+            "title": "Recoverable",
+            "type": "boolean"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/CaptureUploadSlotRead"
+            },
+            "title": "Slots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "item",
+          "slots",
+          "expires_at",
+          "recoverable"
+        ],
+        "title": "CaptureRecoveryRead",
+        "type": "object"
+      },
+      "CaptureSessionCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "capture_source": {
+            "$ref": "#/components/schemas/CaptureSourceDraft"
+          },
+          "collection_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CaptureUploadFileDeclaration"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/CaptureManifestFileRead"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Files",
+            "type": "array"
+          },
+          "gallery": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CaptureImageIntent"
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gallery"
+          },
+          "import_again": {
+            "default": false,
+            "title": "Import Again",
+            "type": "boolean"
+          },
+          "on_ready": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxImportIntent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "profiles": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/CaptureProfileDraft"
+                },
+                "maxProperties": 64,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profiles"
+          },
+          "request_key": {
+            "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "schema_version": {
+            "default": 2,
+            "enum": [
+              2,
+              3
+            ],
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "source_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Source Url",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "request_key",
+          "source_url",
+          "capture_source",
+          "files"
+        ],
+        "title": "CaptureSessionCreate",
+        "type": "object"
       },
       "CaptureSourceDraft": {
         "additionalProperties": false,
@@ -3124,7 +3954,10 @@
               "printables",
               "thingiverse",
               "myminifactory",
-              "cults"
+              "cults",
+              "thangs",
+              "crealitycloud",
+              "makeronline"
             ],
             "title": "Provider",
             "type": "string"
@@ -3170,6 +4003,126 @@
         "title": "CaptureSourceDraft",
         "type": "object"
       },
+      "CaptureSourceStatusRead": {
+        "properties": {
+          "completion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxItemCompletion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "resulting_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resulting Model Id"
+          },
+          "state": {
+            "$ref": "#/components/schemas/InboxItemState"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "completion",
+          "updated_at"
+        ],
+        "title": "CaptureSourceStatusRead",
+        "type": "object"
+      },
+      "CaptureStatusRead": {
+        "properties": {
+          "collection_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Name"
+          },
+          "completion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxItemCompletion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "resulting_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resulting Model Id"
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxReviewReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/InboxItemState"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "review_reason",
+          "error_code",
+          "resulting_model_id",
+          "collection_name",
+          "completion"
+        ],
+        "title": "CaptureStatusRead",
+        "type": "object"
+      },
       "CaptureUploadFileDeclaration": {
         "additionalProperties": false,
         "properties": {
@@ -3212,6 +4165,20 @@
         "title": "CaptureUploadFileDeclaration",
         "type": "object"
       },
+      "CaptureUploadPartRead": {
+        "description": "Bytes the slot's spool holds after one part; the next part starts here.",
+        "properties": {
+          "received_bytes": {
+            "title": "Received Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "received_bytes"
+        ],
+        "title": "CaptureUploadPartRead",
+        "type": "object"
+      },
       "CaptureUploadSlotRead": {
         "properties": {
           "filename": {
@@ -3221,6 +4188,17 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "image_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Position"
           },
           "media_type": {
             "title": "Media Type",
@@ -3310,6 +4288,33 @@
             "minItems": 1,
             "title": "Files",
             "type": "array"
+          },
+          "import_again": {
+            "default": false,
+            "title": "Import Again",
+            "type": "boolean"
+          },
+          "on_ready": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxImportIntent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_key": {
+            "anyOf": [
+              {
+                "pattern": "^[a-zA-Z0-9_-]{1,64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Key"
           },
           "source_url": {
             "maxLength": 2048,
@@ -3794,6 +4799,11 @@
               }
             ]
           },
+          "has_custom_cover": {
+            "default": false,
+            "title": "Has Custom Cover",
+            "type": "boolean"
+          },
           "has_readme": {
             "default": false,
             "title": "Has Readme",
@@ -3925,6 +4935,39 @@
         "title": "CollectionPermissionUpdate",
         "type": "object"
       },
+      "CollectionPreviewRead": {
+        "properties": {
+          "authorization_revision": {
+            "title": "Authorization Revision",
+            "type": "string"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryPreviewItem"
+            },
+            "maxItems": 4,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "authorization_revision"
+        ],
+        "title": "CollectionPreviewRead",
+        "type": "object"
+      },
       "CollectionRead": {
         "properties": {
           "effective_role": {
@@ -3936,6 +4979,11 @@
                 "type": "null"
               }
             ]
+          },
+          "has_custom_cover": {
+            "default": false,
+            "title": "Has Custom Cover",
+            "type": "boolean"
           },
           "has_readme": {
             "default": false,
@@ -4576,6 +5624,65 @@
         "title": "ComputeStatus",
         "type": "object"
       },
+      "ConfirmBedMeasurement": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmed": {
+            "const": true,
+            "title": "Confirmed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "confirmed"
+        ],
+        "title": "ConfirmBedMeasurement",
+        "type": "object"
+      },
+      "ConsoleCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Command",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "ConsoleCommand",
+        "type": "object"
+      },
+      "ConsoleEntry": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "time": {
+            "title": "Time",
+            "type": "number"
+          },
+          "type": {
+            "enum": [
+              "command",
+              "response"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "time",
+          "type",
+          "message"
+        ],
+        "title": "ConsoleEntry",
+        "type": "object"
+      },
       "CultsConnectRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4788,6 +5895,8 @@
         "enum": [
           "metadata",
           "plates",
+          "project_profile",
+          "previews",
           "thumbnail",
           "toolpath",
           "viewer_stl"
@@ -5049,6 +6158,17 @@
           "kind": {
             "$ref": "#/components/schemas/DocumentKind"
           },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
           "multipart_model_id": {
             "anyOf": [
               {
@@ -5076,6 +6196,7 @@
           "id",
           "name",
           "kind",
+          "model_id",
           "updated_at"
         ],
         "title": "DocumentListItem",
@@ -5154,6 +6275,17 @@
           "kind": {
             "$ref": "#/components/schemas/DocumentKind"
           },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
           "multipart_model_id": {
             "anyOf": [
               {
@@ -5181,6 +6313,7 @@
           "id",
           "name",
           "kind",
+          "model_id",
           "updated_at"
         ],
         "title": "DocumentRead",
@@ -5571,6 +6704,23 @@
         ],
         "title": "ExternalLibraryWatchMode",
         "type": "string"
+      },
+      "ExtrudeFilament": {
+        "additionalProperties": false,
+        "properties": {
+          "distance": {
+            "description": "Signed filament distance in millimeters. Magnitude must be at least 0.1.",
+            "maximum": 50.0,
+            "minimum": -50.0,
+            "title": "Distance",
+            "type": "number"
+          }
+        },
+        "required": [
+          "distance"
+        ],
+        "title": "ExtrudeFilament",
+        "type": "object"
       },
       "FacetValueRead": {
         "properties": {
@@ -5991,6 +7141,41 @@
         "title": "FilePlatesRead",
         "type": "object"
       },
+      "FileProjectProfileRead": {
+        "properties": {
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/DerivativeStatus"
+          }
+        },
+        "required": [
+          "state",
+          "profile",
+          "failure_reason"
+        ],
+        "title": "FileProjectProfileRead",
+        "type": "object"
+      },
       "FileRead": {
         "properties": {
           "file_type": {
@@ -6089,6 +7274,16 @@
           "size_bytes": {
             "title": "Size Bytes",
             "type": "integer"
+          },
+          "sliced_geometry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SlicedGeometry"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "tags": {
             "default": [],
@@ -6240,6 +7435,48 @@
         "title": "FileType",
         "type": "string"
       },
+      "FleetLoadedSlot": {
+        "properties": {
+          "color_hex": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Hex"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "material_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Type"
+          },
+          "slot_key": {
+            "title": "Slot Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot_key",
+          "label",
+          "material_type",
+          "color_hex"
+        ],
+        "title": "FleetLoadedSlot",
+        "type": "object"
+      },
       "FleetPrinterBoardRead": {
         "properties": {
           "current_job_id": {
@@ -6289,6 +7526,13 @@
               }
             ],
             "title": "Group"
+          },
+          "loaded_material_slots": {
+            "items": {
+              "$ref": "#/components/schemas/FleetLoadedSlot"
+            },
+            "title": "Loaded Material Slots",
+            "type": "array"
           },
           "loaded_slots": {
             "items": {
@@ -6369,9 +7613,30 @@
             ],
             "title": "Progress"
           },
+          "remaining_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining Minutes"
+          },
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "telemetry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetPrinterTelemetry"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6380,6 +7645,47 @@
           "status"
         ],
         "title": "FleetPrinterBoardRead",
+        "type": "object"
+      },
+      "FleetPrinterTelemetry": {
+        "properties": {
+          "bed_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bed C"
+          },
+          "nozzle_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nozzle C"
+          },
+          "part_fan_speed": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Part Fan Speed"
+          }
+        },
+        "title": "FleetPrinterTelemetry",
         "type": "object"
       },
       "FleetSummary": {
@@ -6443,9 +7749,278 @@
         "title": "GcApprovalRequest",
         "type": "object"
       },
+      "GcodePlateIdentityRead": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "object_count": {
+            "title": "Object Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "number",
+          "name",
+          "object_count"
+        ],
+        "title": "GcodePlateIdentityRead",
+        "type": "object"
+      },
+      "GcodePlateMetadata": {
+        "properties": {
+          "bed_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bed Temperature C"
+          },
+          "bottom_shell_layers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bottom Shell Layers"
+          },
+          "estimated_time_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Time S"
+          },
+          "filament_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filament Cost"
+          },
+          "filament_length_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filament Length Mm"
+          },
+          "filament_weight_g": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filament Weight G"
+          },
+          "first_layer_height_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Layer Height Mm"
+          },
+          "infill_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Infill Percent"
+          },
+          "layer_height_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layer Height Mm"
+          },
+          "material_brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Brand"
+          },
+          "material_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Type"
+          },
+          "nozzle_diameter_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nozzle Diameter Mm"
+          },
+          "nozzle_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nozzle Temperature C"
+          },
+          "printer_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer Model"
+          },
+          "slicer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slicer Name"
+          },
+          "slicer_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slicer Version"
+          },
+          "support_material": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Support Material"
+          },
+          "top_shell_layers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top Shell Layers"
+          },
+          "wall_loops": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Loops"
+          }
+        },
+        "title": "GcodePlateMetadata",
+        "type": "object"
+      },
+      "GcodePlateMetadataRead": {
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/GcodePlateMetadata"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "number",
+          "metadata"
+        ],
+        "title": "GcodePlateMetadataRead",
+        "type": "object"
+      },
       "GcodePlatesRead": {
         "description": "Numbers of the sliced plates actually present in a 3MF archive.",
         "properties": {
+          "identities": {
+            "items": {
+              "$ref": "#/components/schemas/GcodePlateIdentityRead"
+            },
+            "title": "Identities",
+            "type": "array"
+          },
+          "plate_metadata": {
+            "items": {
+              "$ref": "#/components/schemas/GcodePlateMetadataRead"
+            },
+            "title": "Plate Metadata",
+            "type": "array"
+          },
           "plates": {
             "items": {
               "type": "integer"
@@ -6455,7 +8030,9 @@
           }
         },
         "required": [
-          "plates"
+          "plates",
+          "plate_metadata",
+          "identities"
         ],
         "title": "GcodePlatesRead",
         "type": "object"
@@ -6892,6 +8469,27 @@
         "title": "HomeAxes",
         "type": "object"
       },
+      "ImageCover": {
+        "additionalProperties": false,
+        "properties": {
+          "filename": {
+            "pattern": "^[a-f0-9]{64}\\.(?:jpg|png|gif|webp)$",
+            "title": "Filename",
+            "type": "string"
+          },
+          "kind": {
+            "const": "image",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "filename"
+        ],
+        "title": "ImageCover",
+        "type": "object"
+      },
       "ImportedPrintJobRead": {
         "properties": {
           "end_time": {
@@ -6959,6 +8557,20 @@
         "title": "ImportedPrintJobRead",
         "type": "object"
       },
+      "InactiveBedMesh": {
+        "properties": {
+          "state": {
+            "const": "inactive",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "InactiveBedMesh",
+        "type": "object"
+      },
       "InboxBatchRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6994,6 +8606,11 @@
             "maxItems": 100,
             "title": "Tags",
             "type": "array"
+          },
+          "use_default_destination": {
+            "default": false,
+            "title": "Use Default Destination",
+            "type": "boolean"
           }
         },
         "required": [
@@ -7002,6 +8619,14 @@
         ],
         "title": "InboxBatchRequest",
         "type": "object"
+      },
+      "InboxImportIntent": {
+        "enum": [
+          "review",
+          "import"
+        ],
+        "title": "InboxImportIntent",
+        "type": "string"
       },
       "InboxImportRequest": {
         "additionalProperties": false,
@@ -7050,6 +8675,21 @@
               }
             ],
             "title": "Collection Id"
+          },
+          "import_again": {
+            "default": false,
+            "title": "Import Again",
+            "type": "boolean"
+          },
+          "on_ready": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxImportIntent"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_kind": {
             "$ref": "#/components/schemas/InboxSourceKind",
@@ -7164,10 +8804,16 @@
                 "$ref": "#/components/schemas/CaptureManifestV2Read"
               },
               {
+                "$ref": "#/components/schemas/CaptureManifestV3Read"
+              },
+              {
                 "$ref": "#/components/schemas/LegacyInboxManifestRead"
               }
             ],
             "title": "Manifest"
+          },
+          "on_ready": {
+            "$ref": "#/components/schemas/InboxImportIntent"
           },
           "owner_user_id": {
             "title": "Owner User Id",
@@ -7201,6 +8847,16 @@
           "retryable": {
             "title": "Retryable",
             "type": "boolean"
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxReviewReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_hostname": {
             "anyOf": [
@@ -7241,6 +8897,17 @@
             ],
             "title": "Target Collection Id"
           },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -7252,6 +8919,7 @@
           "owner_user_id",
           "source_kind",
           "state",
+          "on_ready",
           "retryable",
           "attempt_count",
           "created_at",
@@ -7427,6 +9095,15 @@
         },
         "title": "InboxItemUpdate",
         "type": "object"
+      },
+      "InboxReviewReason": {
+        "enum": [
+          "files_need_review",
+          "destination_not_editable",
+          "already_imported"
+        ],
+        "title": "InboxReviewReason",
+        "type": "string"
       },
       "InboxSourceKind": {
         "enum": [
@@ -7722,7 +9399,9 @@
           "backups.trash_gc",
           "derivatives.gcode",
           "derivatives.mesh",
+          "derivatives.previews",
           "derivatives.plates",
+          "derivatives.project_profile",
           "derivatives.toolpath",
           "derivatives.viewer_stl",
           "identity.retention",
@@ -7739,6 +9418,7 @@
           "ingestion.upload_recovery",
           "ingestion.url",
           "ingestion.url_selection",
+          "ingestion.samples",
           "ingestion.scratch_cleanup",
           "notifications.deliver",
           "notifications.retention",
@@ -8097,6 +9777,27 @@
         "title": "JobStatus",
         "type": "object"
       },
+      "JogPrinter": {
+        "additionalProperties": false,
+        "properties": {
+          "axis": {
+            "$ref": "#/components/schemas/MotionAxis"
+          },
+          "distance": {
+            "description": "Signed distance in millimeters. Magnitude must be at least 0.1.",
+            "maximum": 10.0,
+            "minimum": -10.0,
+            "title": "Distance",
+            "type": "number"
+          }
+        },
+        "required": [
+          "axis",
+          "distance"
+        ],
+        "title": "JogPrinter",
+        "type": "object"
+      },
       "LaneName": {
         "description": "A lane: a concurrency class of work, and the engine queue behind it.",
         "enum": [
@@ -8319,6 +10020,35 @@
           }
         },
         "title": "LibraryPathScan",
+        "type": "object"
+      },
+      "LibraryPreviewItem": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/BrowseKind"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "thumbnail_url"
+        ],
+        "title": "LibraryPreviewItem",
         "type": "object"
       },
       "LibraryRead": {
@@ -10655,6 +12385,51 @@
         "title": "ModelBatchTags",
         "type": "object"
       },
+      "ModelBoundingBoxRead": {
+        "description": "Measured extent of a Model's mesh, in millimetres; all three or none.",
+        "properties": {
+          "x_mm": {
+            "title": "X Mm",
+            "type": "number"
+          },
+          "y_mm": {
+            "title": "Y Mm",
+            "type": "number"
+          },
+          "z_mm": {
+            "title": "Z Mm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x_mm",
+          "y_mm",
+          "z_mm"
+        ],
+        "title": "ModelBoundingBoxRead",
+        "type": "object"
+      },
+      "ModelCoverSource": {
+        "additionalProperties": false,
+        "properties": {
+          "position": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Position",
+            "type": "integer"
+          },
+          "source_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Source Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_id"
+        ],
+        "title": "ModelCoverSource",
+        "type": "object"
+      },
       "ModelEditBatchResult": {
         "properties": {
           "failed": {
@@ -11002,6 +12777,16 @@
       },
       "ModelListItem": {
         "properties": {
+          "bounding_box": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelBoundingBoxRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "collection": {
             "anyOf": [
               {
@@ -11059,6 +12844,11 @@
             "title": "File Count",
             "type": "integer"
           },
+          "gcode_file_count": {
+            "default": 0,
+            "title": "Gcode File Count",
+            "type": "integer"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -11077,6 +12867,24 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "previews": {
+            "discriminator": {
+              "mapping": {
+                "artifact": "#/components/schemas/ArtifactPreviews",
+                "none": "#/components/schemas/NoPreviewSubject"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NoPreviewSubject"
+              },
+              {
+                "$ref": "#/components/schemas/ArtifactPreviews"
+              }
+            ],
+            "title": "Previews"
           },
           "print_summary": {
             "anyOf": [
@@ -11168,6 +12976,7 @@
         "required": [
           "edit_epoch",
           "edit_version",
+          "previews",
           "id",
           "name",
           "slug",
@@ -11691,6 +13500,10 @@
             "title": "Files",
             "type": "array"
           },
+          "has_custom_cover": {
+            "title": "Has Custom Cover",
+            "type": "boolean"
+          },
           "hash": {
             "title": "Hash",
             "type": "string"
@@ -11702,6 +13515,24 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "previews": {
+            "discriminator": {
+              "mapping": {
+                "artifact": "#/components/schemas/ArtifactPreviews",
+                "none": "#/components/schemas/NoPreviewSubject"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NoPreviewSubject"
+              },
+              {
+                "$ref": "#/components/schemas/ArtifactPreviews"
+              }
+            ],
+            "title": "Previews"
           },
           "similarity": {
             "$ref": "#/components/schemas/ModelSimilarityRead"
@@ -11762,6 +13593,8 @@
         "required": [
           "edit_epoch",
           "edit_version",
+          "previews",
+          "has_custom_cover",
           "id",
           "name",
           "slug",
@@ -11982,6 +13815,32 @@
         "title": "ModelValidationRead",
         "type": "object"
       },
+      "ModelsCover": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "models",
+            "title": "Kind",
+            "type": "string"
+          },
+          "model_ids": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "type": "integer"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Model Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "model_ids"
+        ],
+        "title": "ModelsCover",
+        "type": "object"
+      },
       "MoonrakerConfigRead": {
         "properties": {
           "klipper_config": {
@@ -12015,6 +13874,15 @@
         "title": "MoonrakerConfigRead",
         "type": "object"
       },
+      "MotionAxis": {
+        "enum": [
+          "x",
+          "y",
+          "z"
+        ],
+        "title": "MotionAxis",
+        "type": "string"
+      },
       "MultipartChoiceWrite": {
         "additionalProperties": false,
         "properties": {
@@ -12040,6 +13908,57 @@
           "model_id"
         ],
         "title": "MultipartChoiceWrite",
+        "type": "object"
+      },
+      "MultipartIntake": {
+        "additionalProperties": false,
+        "properties": {
+          "cover": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover"
+          },
+          "documents": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Documents",
+            "type": "array"
+          },
+          "mode": {
+            "const": "multipart",
+            "title": "Mode",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/ArchivePart"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Parts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "mode",
+          "name",
+          "parts"
+        ],
+        "title": "MultipartIntake",
         "type": "object"
       },
       "MultipartMemberRead": {
@@ -12846,6 +14765,85 @@
         "title": "MultipartTrashPurgeRead",
         "type": "object"
       },
+      "NoPreviewSubject": {
+        "description": "The Model has no live mesh Artifact; only its cover can be shown.",
+        "properties": {
+          "archive_images": {
+            "items": {
+              "$ref": "#/components/schemas/ArchiveImageRead"
+            },
+            "title": "Archive Images",
+            "type": "array"
+          },
+          "cover_camera": {
+            "const": "unknown",
+            "default": "unknown",
+            "title": "Cover Camera",
+            "type": "string"
+          },
+          "cover_image_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewImageKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "const": "none",
+            "default": "none",
+            "title": "Kind",
+            "type": "string"
+          },
+          "large_cover_image_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewImageKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "large_cover_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Large Cover Url"
+          },
+          "large_cover_view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ViewId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_images": {
+            "items": {
+              "$ref": "#/components/schemas/SourceImageRead"
+            },
+            "title": "Source Images",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "cover_camera",
+          "source_images"
+        ],
+        "title": "NoPreviewSubject",
+        "type": "object"
+      },
       "NotCalculatedVolumeRead": {
         "additionalProperties": false,
         "properties": {
@@ -13424,6 +15422,11 @@
                 "type": "null"
               }
             ]
+          },
+          "has_custom_cover": {
+            "default": false,
+            "title": "Has Custom Cover",
+            "type": "boolean"
           },
           "has_readme": {
             "default": false,
@@ -14359,6 +16362,43 @@
         "title": "PlanRequest",
         "type": "object"
       },
+      "PlateEstimate": {
+        "properties": {
+          "estimated_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Seconds"
+          },
+          "filament_grams": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filament Grams"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "number",
+          "estimated_seconds",
+          "filament_grams"
+        ],
+        "title": "PlateEstimate",
+        "type": "object"
+      },
       "PlateRegionRead": {
         "description": "A plate's rectangle of the build, in the package's millimetres.",
         "properties": {
@@ -14424,6 +16464,138 @@
         ],
         "title": "PreflightRequest",
         "type": "object"
+      },
+      "PreviewActivity": {
+        "description": "Enabled cover and multi-angle tasks at their current recipes across the library.",
+        "properties": {
+          "completed": {
+            "minimum": 0.0,
+            "title": "Completed",
+            "type": "integer"
+          },
+          "failed": {
+            "minimum": 0.0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "remaining": {
+            "minimum": 0.0,
+            "title": "Remaining",
+            "type": "integer"
+          },
+          "skipped": {
+            "minimum": 0.0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "completed",
+          "remaining",
+          "skipped",
+          "failed"
+        ],
+        "title": "PreviewActivity",
+        "type": "object"
+      },
+      "PreviewImageKind": {
+        "enum": [
+          "photo",
+          "render",
+          "slicer_render"
+        ],
+        "title": "PreviewImageKind",
+        "type": "string"
+      },
+      "PreviewImageRead": {
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ViewId"
+          },
+          "image_kind": {
+            "const": "render",
+            "default": "render",
+            "title": "Image Kind",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ViewRole"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "url"
+        ],
+        "title": "PreviewImageRead",
+        "type": "object"
+      },
+      "PreviewLook": {
+        "enum": [
+          "sky",
+          "printstash_blue",
+          "slate",
+          "graphite",
+          "sand"
+        ],
+        "title": "PreviewLook",
+        "type": "string"
+      },
+      "PreviewLookRead": {
+        "description": "The look generated Model images currently use.",
+        "properties": {
+          "preview_look": {
+            "$ref": "#/components/schemas/PreviewLook"
+          }
+        },
+        "required": [
+          "preview_look"
+        ],
+        "title": "PreviewLookRead",
+        "type": "object"
+      },
+      "PreviewSize": {
+        "enum": [
+          "full",
+          "thumbnail"
+        ],
+        "title": "PreviewSize",
+        "type": "string"
+      },
+      "PreviewState": {
+        "enum": [
+          "disabled",
+          "pending",
+          "queued",
+          "running",
+          "ready",
+          "failed",
+          "cancelled",
+          "unsupported"
+        ],
+        "title": "PreviewState",
+        "type": "string"
       },
       "PrintArtifactFormat": {
         "description": "Stored print formats a provider can accept without conversion.",
@@ -14909,6 +17081,17 @@
           "operator_gate_state": {
             "$ref": "#/components/schemas/OperatorGateState",
             "default": "not_required"
+          },
+          "plate_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
           },
           "printer_id": {
             "anyOf": [
@@ -15529,6 +17712,79 @@
         "title": "PrinterCapabilities",
         "type": "object"
       },
+      "PrinterConfigFile": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Revision",
+            "type": "string"
+          },
+          "writable": {
+            "title": "Writable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "content",
+          "revision",
+          "writable"
+        ],
+        "title": "PrinterConfigFile",
+        "type": "object"
+      },
+      "PrinterConfigFileEntry": {
+        "properties": {
+          "modified": {
+            "title": "Modified",
+            "type": "number"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "writable": {
+            "title": "Writable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "size_bytes",
+          "modified",
+          "writable"
+        ],
+        "title": "PrinterConfigFileEntry",
+        "type": "object"
+      },
+      "PrinterConfigFiles": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/PrinterConfigFileEntry"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "PrinterConfigFiles",
+        "type": "object"
+      },
       "PrinterCreate": {
         "additionalProperties": false,
         "properties": {
@@ -15883,6 +18139,17 @@
             ],
             "title": "Original Filename"
           },
+          "plate_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
+          },
           "printer_id": {
             "title": "Printer Id",
             "type": "integer"
@@ -15940,6 +18207,37 @@
           "updated_at"
         ],
         "title": "PrinterFileRead",
+        "type": "object"
+      },
+      "PrinterHeaterHistory": {
+        "properties": {
+          "extruder": {
+            "items": {
+              "$ref": "#/components/schemas/RecordedHeaterSample"
+            },
+            "title": "Extruder",
+            "type": "array"
+          },
+          "heater_bed": {
+            "items": {
+              "$ref": "#/components/schemas/RecordedHeaterSample"
+            },
+            "title": "Heater Bed",
+            "type": "array"
+          },
+          "sample_interval_ms": {
+            "const": 1000,
+            "description": "Moonraker's nominal cadence. The store omits timestamps.",
+            "title": "Sample Interval Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sample_interval_ms",
+          "extruder",
+          "heater_bed"
+        ],
+        "title": "PrinterHeaterHistory",
         "type": "object"
       },
       "PrinterMaterialStateRead": {
@@ -17031,6 +19329,98 @@
         "title": "ProfileSettingsKind",
         "type": "string"
       },
+      "ProjectProfile": {
+        "properties": {
+          "infill_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Infill Percent"
+          },
+          "layer_height_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layer Height Mm"
+          },
+          "materials": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Materials",
+            "type": "array"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "nozzle_diameters_mm": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Nozzle Diameters Mm",
+            "type": "array"
+          },
+          "plates": {
+            "items": {
+              "$ref": "#/components/schemas/PlateEstimate"
+            },
+            "title": "Plates",
+            "type": "array"
+          },
+          "printer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer"
+          },
+          "wall_loops": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Loops"
+          }
+        },
+        "required": [
+          "name",
+          "printer",
+          "materials",
+          "nozzle_diameters_mm",
+          "layer_height_mm",
+          "wall_loops",
+          "infill_percent",
+          "plates"
+        ],
+        "title": "ProjectProfile",
+        "type": "object"
+      },
       "ProvenanceCaptureSummaryRead": {
         "properties": {
           "adapter_version": {
@@ -17407,6 +19797,43 @@
         "title": "ProviderDelivery",
         "type": "object"
       },
+      "PublishedPreviewRead": {
+        "properties": {
+          "cover_view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ViewId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "manifest_url": {
+            "title": "Manifest Url",
+            "type": "string"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ViewProfile"
+          },
+          "views": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewImageRead"
+            },
+            "maxItems": 7,
+            "minItems": 1,
+            "title": "Views",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profile",
+          "manifest_url",
+          "views"
+        ],
+        "title": "PublishedPreviewRead",
+        "type": "object"
+      },
       "QueueJobCreate": {
         "additionalProperties": false,
         "properties": {
@@ -17418,6 +19845,18 @@
             "exclusiveMinimum": 0.0,
             "title": "File Id",
             "type": "integer"
+          },
+          "plate_index": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
           },
           "printer_id": {
             "anyOf": [
@@ -17596,6 +20035,45 @@
         "title": "Reason",
         "type": "string"
       },
+      "RecordedHeaterSample": {
+        "properties": {
+          "age_ms": {
+            "description": "Nominal age relative to the newest store slot.",
+            "minimum": 0.0,
+            "title": "Age Ms",
+            "type": "integer"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature"
+          }
+        },
+        "required": [
+          "age_ms",
+          "temperature",
+          "target"
+        ],
+        "title": "RecordedHeaterSample",
+        "type": "object"
+      },
       "RefreshRequest": {
         "additionalProperties": false,
         "properties": {
@@ -17620,6 +20098,70 @@
         ],
         "title": "RegenerateMode",
         "type": "string"
+      },
+      "RelatedProfileRead": {
+        "properties": {
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "integer"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/CaptureProfileDraft"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "model_name",
+          "file_id",
+          "filename",
+          "provider",
+          "captured_at",
+          "profile"
+        ],
+        "title": "RelatedProfileRead",
+        "type": "object"
+      },
+      "RelatedProfilesRead": {
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RelatedProfileRead"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "title": "RelatedProfilesRead",
+        "type": "object"
       },
       "RetainRequest": {
         "properties": {
@@ -18592,6 +21134,18 @@
             "title": "File Id",
             "type": "integer"
           },
+          "plate_index": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
+          },
           "remote_filename": {
             "anyOf": [
               {
@@ -18648,6 +21202,29 @@
           "file_id"
         ],
         "title": "SendToPrinter",
+        "type": "object"
+      },
+      "SeparateIntake": {
+        "additionalProperties": false,
+        "properties": {
+          "documents": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Documents",
+            "type": "array"
+          },
+          "mode": {
+            "const": "separate",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "SeparateIntake",
         "type": "object"
       },
       "SetTemperature": {
@@ -18985,6 +21562,19 @@
           "access_token"
         ],
         "title": "SetupResponse",
+        "type": "object"
+      },
+      "SetupSampleChoice": {
+        "properties": {
+          "include": {
+            "title": "Include",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "include"
+        ],
+        "title": "SetupSampleChoice",
         "type": "object"
       },
       "SetupSessionResponse": {
@@ -19658,6 +22248,13 @@
         "title": "ShareLinkRead",
         "type": "object"
       },
+      "SlicedGeometry": {
+        "enum": [
+          "gcode_only"
+        ],
+        "title": "SlicedGeometry",
+        "type": "string"
+      },
       "SlicerProfilePage": {
         "properties": {
           "items": {
@@ -19758,6 +22355,45 @@
           "settings"
         ],
         "title": "SlicerProfileRead",
+        "type": "object"
+      },
+      "SourceImageRead": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "role": {
+            "const": "source",
+            "default": "source",
+            "title": "Role",
+            "type": "string"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source_id",
+          "position",
+          "provider",
+          "url"
+        ],
+        "title": "SourceImageRead",
         "type": "object"
       },
       "SpoolRead": {
@@ -21084,6 +23720,36 @@
         "title": "TrashedSourceFileRead",
         "type": "object"
       },
+      "TunePrinter": {
+        "additionalProperties": false,
+        "properties": {
+          "control": {
+            "$ref": "#/components/schemas/TuningControl"
+          },
+          "percent": {
+            "description": "0–100 for the part-cooling fan and 50–150 for speed or flow.",
+            "maximum": 150.0,
+            "minimum": 0.0,
+            "title": "Percent",
+            "type": "number"
+          }
+        },
+        "required": [
+          "control",
+          "percent"
+        ],
+        "title": "TunePrinter",
+        "type": "object"
+      },
+      "TuningControl": {
+        "enum": [
+          "fan",
+          "speed",
+          "flow"
+        ],
+        "title": "TuningControl",
+        "type": "string"
+      },
       "UnavailableVolumeRead": {
         "additionalProperties": false,
         "properties": {
@@ -21118,6 +23784,20 @@
           "cause"
         ],
         "title": "UnavailableVolumeRead",
+        "type": "object"
+      },
+      "UnconfiguredBedMesh": {
+        "properties": {
+          "state": {
+            "const": "unconfigured",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "UnconfiguredBedMesh",
         "type": "object"
       },
       "UrlIngestRequest": {
@@ -21785,6 +24465,14 @@
             "title": "Derivatives Mesh Enabled",
             "type": "boolean"
           },
+          "derivatives_previews_enabled": {
+            "title": "Derivatives Previews Enabled",
+            "type": "boolean"
+          },
+          "derivatives_previews_include_poles": {
+            "title": "Derivatives Previews Include Poles",
+            "type": "boolean"
+          },
           "derivatives_toolpath_enabled": {
             "title": "Derivatives Toolpath Enabled",
             "type": "boolean"
@@ -21894,6 +24582,17 @@
             "title": "Oidc Username Claim",
             "type": "string"
           },
+          "prefer_rendered_3mf_preview": {
+            "title": "Prefer Rendered 3Mf Preview",
+            "type": "boolean"
+          },
+          "preview_floor_grid": {
+            "title": "Preview Floor Grid",
+            "type": "boolean"
+          },
+          "preview_look": {
+            "$ref": "#/components/schemas/PreviewLook"
+          },
           "s3_access_key": {
             "default": "",
             "title": "S3 Access Key",
@@ -21987,7 +24686,12 @@
           "edit_version",
           "derivatives_mesh_enabled",
           "derivatives_gcode_enabled",
-          "derivatives_toolpath_enabled"
+          "derivatives_toolpath_enabled",
+          "derivatives_previews_enabled",
+          "derivatives_previews_include_poles",
+          "prefer_rendered_3mf_preview",
+          "preview_look",
+          "preview_floor_grid"
         ],
         "title": "VaultConfigRead",
         "type": "object"
@@ -22152,6 +24856,28 @@
               }
             ],
             "title": "Derivatives Mesh Enabled"
+          },
+          "derivatives_previews_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivatives Previews Enabled"
+          },
+          "derivatives_previews_include_poles": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivatives Previews Include Poles"
           },
           "derivatives_toolpath_enabled": {
             "anyOf": [
@@ -22331,6 +25057,38 @@
               }
             ],
             "title": "Oidc Username Claim"
+          },
+          "prefer_rendered_3mf_preview": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefer Rendered 3Mf Preview"
+          },
+          "preview_floor_grid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Floor Grid"
+          },
+          "preview_look": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewLook"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "s3_access_key": {
             "anyOf": [
@@ -22512,6 +25270,41 @@
         ],
         "title": "VaultStatsRead",
         "type": "object"
+      },
+      "ViewId": {
+        "enum": [
+          "orbit-0",
+          "orbit-1",
+          "orbit-2",
+          "orbit-3",
+          "top",
+          "bottom",
+          "face",
+          "reverse",
+          "edge"
+        ],
+        "title": "ViewId",
+        "type": "string"
+      },
+      "ViewProfile": {
+        "enum": [
+          "orbit",
+          "planar"
+        ],
+        "title": "ViewProfile",
+        "type": "string"
+      },
+      "ViewRole": {
+        "enum": [
+          "orbit",
+          "top",
+          "bottom",
+          "face",
+          "reverse",
+          "edge"
+        ],
+        "title": "ViewRole",
+        "type": "string"
       },
       "VolumeEvidence": {
         "properties": {
@@ -23442,6 +26235,32 @@
           }
         ],
         "summary": "Set (or reset) a lane's concurrency at runtime",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/v1/admin/work/preview-activity": {
+      "get": {
+        "operationId": "get_preview_activity_api_v1_admin_work_preview_activity_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewActivity"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Preview Activity",
         "tags": [
           "jobs"
         ]
@@ -26052,6 +28871,165 @@
         ]
       }
     },
+    "/api/v1/collections/{collection_id}/cover": {
+      "get": {
+        "operationId": "get_collection_cover_api_v1_collections__collection_id__cover_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "title": "Collection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "automatic": "#/components/schemas/AutomaticCover",
+                      "image": "#/components/schemas/ImageCover",
+                      "models": "#/components/schemas/ModelsCover"
+                    },
+                    "propertyName": "kind"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AutomaticCover"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ImageCover"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ModelsCover"
+                    }
+                  ],
+                  "title": "Response Get Collection Cover Api V1 Collections  Collection Id  Cover Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read a collection's cover selection",
+        "tags": [
+          "taxonomy"
+        ]
+      },
+      "put": {
+        "operationId": "set_collection_cover_api_v1_collections__collection_id__cover_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "title": "Collection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "discriminator": {
+                  "mapping": {
+                    "automatic": "#/components/schemas/AutomaticCover",
+                    "image": "#/components/schemas/ImageCover",
+                    "models": "#/components/schemas/ModelsCover"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/AutomaticCover"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ImageCover"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ModelsCover"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "automatic": "#/components/schemas/AutomaticCover",
+                      "image": "#/components/schemas/ImageCover",
+                      "models": "#/components/schemas/ModelsCover"
+                    },
+                    "propertyName": "kind"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AutomaticCover"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ImageCover"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ModelsCover"
+                    }
+                  ],
+                  "title": "Response Set Collection Cover Api V1 Collections  Collection Id  Cover Put"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Set a collection's cover selection",
+        "tags": [
+          "taxonomy"
+        ]
+      }
+    },
     "/api/v1/collections/{collection_id}/images": {
       "post": {
         "operationId": "upload_collection_image_api_v1_collections__collection_id__images_post",
@@ -26103,7 +29081,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Upload an image for a collection's readme",
+        "summary": "Upload an image for a collection",
         "tags": [
           "taxonomy"
         ]
@@ -26157,7 +29135,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Serve an image embedded in a collection's readme",
+        "summary": "Serve a collection image",
         "tags": [
           "taxonomy"
         ]
@@ -27715,6 +30693,150 @@
         ]
       }
     },
+    "/api/v1/config/preview-example": {
+      "get": {
+        "operationId": "preview_example_api_v1_config_preview_example_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "look",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PreviewLook"
+            }
+          },
+          {
+            "in": "query",
+            "name": "floor_grid",
+            "required": true,
+            "schema": {
+              "title": "Floor Grid",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Preview Example",
+        "tags": [
+          "config"
+        ]
+      }
+    },
+    "/api/v1/config/preview-look": {
+      "get": {
+        "description": "Lets every signed-in viewer shade interactive 3D views like the cards.",
+        "operationId": "get_preview_look_api_v1_config_preview_look_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewLookRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get the look generated Model images use",
+        "tags": [
+          "config"
+        ]
+      }
+    },
+    "/api/v1/config/sample-collection": {
+      "post": {
+        "operationId": "add_sample_collection_api_v1_config_sample_collection_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/SetupSampleChoice"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Setup"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": "Response Add Sample Collection Api V1 Config Sample Collection Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Add Sample Collection",
+        "tags": [
+          "config"
+        ]
+      }
+    },
     "/api/v1/config/storage-roots/enroll": {
       "post": {
         "operationId": "enroll_storage_root_api_v1_config_storage_roots_enroll_post",
@@ -27781,6 +30903,23 @@
                 }
               ],
               "title": "Collection"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Model Id"
             }
           },
           {
@@ -28652,6 +31791,74 @@
         ]
       }
     },
+    "/api/v1/files/{file_id}/archive-images/{index}": {
+      "get": {
+        "operationId": "archive_image_api_v1_files__file_id__archive_images__index__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "title": "Index",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "framing",
+            "required": false,
+            "schema": {
+              "default": "source",
+              "enum": [
+                "source",
+                "photo"
+              ],
+              "title": "Framing",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read a sliced archive image",
+        "tags": [
+          "files"
+        ]
+      }
+    },
     "/api/v1/files/{file_id}/derivatives": {
       "get": {
         "description": "Every derivative kind that applies to the Artifact (metadata, thumbnail, toolpath, and requested viewer STL) with its state. `pending` means no attempt exists yet at the current recipe, so every value the kind supplies is still unknown.",
@@ -29054,6 +32261,53 @@
           }
         ],
         "summary": "The preview a slicer saved for one plate of a 3MF",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/v1/files/{file_id}/project-profile": {
+      "get": {
+        "operationId": "file_project_profile_api_v1_files__file_id__project_profile_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileProjectProfileRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Saved settings and per-plate estimates of a 3MF project",
         "tags": [
           "files"
         ]
@@ -30585,6 +33839,208 @@
         ]
       }
     },
+    "/api/v1/inbox/capture-capabilities": {
+      "get": {
+        "operationId": "capture_capabilities_api_v1_inbox_capture_capabilities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureCapabilitiesRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Capture Capabilities",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/capture-destinations": {
+      "get": {
+        "operationId": "capture_destinations_api_v1_inbox_capture_destinations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 128,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CaptureDestinationRead"
+                  },
+                  "title": "Response Capture Destinations Api V1 Inbox Capture Destinations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Capture Destinations",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/capture-sessions": {
+      "post": {
+        "operationId": "start_capture_session_api_v1_inbox_capture_sessions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptureSessionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureRecoveryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Start Capture Session",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/capture-source-status": {
+      "get": {
+        "operationId": "capture_source_status_api_v1_inbox_capture_source_status_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_url",
+            "required": true,
+            "schema": {
+              "maxLength": 2048,
+              "minLength": 1,
+              "title": "Source Url",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CaptureSourceStatusRead"
+                  },
+                  "title": "Response Capture Source Status Api V1 Inbox Capture Source Status Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Capture Source Status",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
     "/api/v1/inbox/capture-upload-slots": {
       "post": {
         "operationId": "create_capture_upload_slots_api_v1_inbox_capture_upload_slots_post",
@@ -30673,6 +34129,115 @@
           }
         ],
         "summary": "Put Capture Upload Slot",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/capture-upload-slots/{slot_id}/complete": {
+      "post": {
+        "description": "Verify the parts against the declared size and hash, then publish them.",
+        "operationId": "complete_capture_upload_slot_api_v1_inbox_capture_upload_slots__slot_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "title": "Slot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureUploadSlotRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Complete Capture Upload Slot",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/capture-upload-slots/{slot_id}/parts/{offset}": {
+      "put": {
+        "description": "Store one part of a slot's file; ``complete`` publishes the whole.\n\nProxies in front of a server often cap one request's body (nginx at 1 MiB\nby default, Cloudflare at 100 MB). Parts keep each request under such a\ncap. The spool stays between parts; a part repeated after a lost response\nreplaces the bytes from its offset, and a part past the stored bytes is\nrefused with how many bytes the server really holds.",
+        "operationId": "put_capture_upload_part_api_v1_inbox_capture_upload_slots__slot_id__parts__offset__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "title": "Slot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "offset",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureUploadPartRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "The part does not continue the stored bytes."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Put Capture Upload Part",
         "tags": [
           "pending imports"
         ]
@@ -30818,6 +34383,176 @@
         ]
       }
     },
+    "/api/v1/inbox/{item_id}/capture-files": {
+      "post": {
+        "operationId": "declare_capture_file_api_v1_inbox__item_id__capture_files_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptureUploadFileDeclaration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureUploadSlotRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Declare Capture File",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/{item_id}/capture-images/{position}": {
+      "post": {
+        "operationId": "declare_capture_image_api_v1_inbox__item_id__capture_images__position__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "position",
+            "required": true,
+            "schema": {
+              "title": "Position",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptureUploadFileDeclaration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureUploadSlotRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Declare Capture Image",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/{item_id}/capture-status": {
+      "get": {
+        "operationId": "capture_status_api_v1_inbox__item_id__capture_status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureStatusRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Capture Status",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
     "/api/v1/inbox/{item_id}/capture-upload": {
       "delete": {
         "description": "Release an unfinished capture's exact slot leases after extension failure.",
@@ -30854,6 +34589,51 @@
           }
         ],
         "summary": "Cancel Capture Upload",
+        "tags": [
+          "pending imports"
+        ]
+      },
+      "get": {
+        "operationId": "recover_capture_upload_api_v1_inbox__item_id__capture_upload_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureRecoveryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Recover Capture Upload",
         "tags": [
           "pending imports"
         ]
@@ -31052,6 +34832,51 @@
           }
         ],
         "summary": "Retry Item",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/{item_id}/thumbnail": {
+      "get": {
+        "operationId": "capture_thumbnail_api_v1_inbox__item_id__thumbnail_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Capture Thumbnail",
         "tags": [
           "pending imports"
         ]
@@ -33835,6 +37660,18 @@
             }
           },
           {
+            "description": "Expand an empty direct listing to its subtree in the same read.",
+            "in": "query",
+            "name": "auto_scope",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Expand an empty direct listing to its subtree in the same read.",
+              "title": "Auto Scope",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "query",
             "name": "view",
             "required": false,
@@ -33910,6 +37747,55 @@
           }
         ],
         "summary": "Revision-checked mixed library cards",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/browse/collection-preview": {
+      "get": {
+        "operationId": "collection_preview_api_v1_models_browse_collection_preview_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "maxLength": 2048,
+              "minLength": 1,
+              "title": "Collection",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionPreviewRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read four authorized collection cover references without card metadata",
         "tags": [
           "models"
         ]
@@ -35841,6 +39727,332 @@
         ]
       }
     },
+    "/api/v1/models/{model_id}/cover": {
+      "delete": {
+        "operationId": "reset_model_cover_api_v1_models__model_id__cover_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Reset the Model cover to automatic",
+        "tags": [
+          "models"
+        ]
+      },
+      "put": {
+        "operationId": "put_model_cover_api_v1_models__model_id__cover_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_put_model_cover_api_v1_models__model_id__cover_put"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Choose an uploaded Model cover",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/cover/content": {
+      "get": {
+        "operationId": "get_model_cover_api_v1_models__model_id__cover_content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": "original",
+              "enum": [
+                "thumbnail",
+                "original"
+              ],
+              "title": "Size",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the Model's chosen cover",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/cover/source": {
+      "post": {
+        "operationId": "select_model_cover_source_api_v1_models__model_id__cover_source_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelCoverSource"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Choose a source image as the Model cover",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/v1/models/{model_id}/files/{file_id}": {
       "delete": {
         "operationId": "trash_source_file_api_v1_models__model_id__files__file_id__delete",
@@ -36194,6 +40406,131 @@
           }
         ],
         "summary": "Add a G-code revision to an existing model",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/previews/{generation}": {
+      "get": {
+        "operationId": "get_model_preview_manifest_api_v1_models__model_id__previews__generation__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "title": "Generation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Model Preview Manifest",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/previews/{generation}/{view_id}": {
+      "get": {
+        "operationId": "get_model_preview_image_api_v1_models__model_id__previews__generation___view_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "title": "Generation",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ViewId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PreviewSize",
+              "default": "full"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Model Preview Image",
         "tags": [
           "models"
         ]
@@ -36825,6 +41162,17 @@
               "title": "Source Id",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "position",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Position",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -36910,6 +41258,53 @@
           }
         ],
         "summary": "Permanently delete a model from the trash",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/related-profiles": {
+      "get": {
+        "operationId": "get_related_profiles_api_v1_models__model_id__related_profiles_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelatedProfilesRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Related Profiles",
         "tags": [
           "models"
         ]
@@ -41460,6 +45855,174 @@
         ]
       }
     },
+    "/api/v1/printers/{printer_id}/bed-mesh": {
+      "get": {
+        "operationId": "printer_bed_mesh_api_v1_printers__printer_id__bed_mesh_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "active": "#/components/schemas/ActiveBedMesh",
+                      "inactive": "#/components/schemas/InactiveBedMesh",
+                      "unconfigured": "#/components/schemas/UnconfiguredBedMesh"
+                    },
+                    "propertyName": "state"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ActiveBedMesh"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InactiveBedMesh"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnconfiguredBedMesh"
+                    }
+                  ],
+                  "title": "Response Printer Bed Mesh Api V1 Printers  Printer Id  Bed Mesh Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read Klipper's active bed mesh",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/bed-mesh/measurement": {
+      "get": {
+        "operationId": "printer_bed_measurement_availability_api_v1_printers__printer_id__bed_mesh_measurement_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BedMeasurementAvailability"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Check for automatic bed measurement",
+        "tags": [
+          "printers"
+        ]
+      },
+      "post": {
+        "operationId": "measure_printer_bed_api_v1_printers__printer_id__bed_mesh_measurement_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmBedMeasurement"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveBedMesh"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Measure the bed with Klipper's automatic probe",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
     "/api/v1/printers/{printer_id}/cancel": {
       "post": {
         "operationId": "cancel_printer_api_v1_printers__printer_id__cancel_post",
@@ -41551,6 +46114,294 @@
           }
         ],
         "summary": "Get Moonraker and Klipper configuration",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/config/file": {
+      "get": {
+        "operationId": "read_printer_config_file_api_v1_printers__printer_id__config_file_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrinterConfigFile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read an existing Moonraker configuration file",
+        "tags": [
+          "printers"
+        ]
+      },
+      "put": {
+        "operationId": "save_printer_config_file_api_v1_printers__printer_id__config_file_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "base_revision": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "title": "Base Revision",
+                    "type": "string"
+                  },
+                  "content": {
+                    "maxLength": 262144,
+                    "title": "Content",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content",
+                  "base_revision"
+                ],
+                "title": "PrinterConfigFileUpdate",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrinterConfigFile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Save an existing Moonraker configuration file and verify readback",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/config/files": {
+      "get": {
+        "operationId": "list_printer_config_files_api_v1_printers__printer_id__config_files_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrinterConfigFiles"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List existing Moonraker configuration files",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/console": {
+      "get": {
+        "operationId": "klipper_console_api_v1_printers__printer_id__console_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleEntry"
+                  },
+                  "title": "Response Klipper Console Api V1 Printers  Printer Id  Console Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read recent Klipper commands and responses",
+        "tags": [
+          "printers"
+        ]
+      },
+      "post": {
+        "operationId": "send_klipper_command_api_v1_printers__printer_id__console_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Send a Klipper console command",
         "tags": [
           "printers"
         ]
@@ -41650,6 +46501,65 @@
           }
         ],
         "summary": "Immediately halt the printer (Klipper emergency stop)",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/extrude": {
+      "post": {
+        "operationId": "extrude_filament_api_v1_printers__printer_id__extrude_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtrudeFilament"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Extrude Filament Api V1 Printers  Printer Id  Extrude Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Feed or retract filament",
         "tags": [
           "printers"
         ]
@@ -41817,6 +46727,53 @@
         ]
       }
     },
+    "/api/v1/printers/{printer_id}/heater-history": {
+      "get": {
+        "operationId": "printer_heater_history_api_v1_printers__printer_id__heater_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrinterHeaterHistory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read Moonraker's recent heater samples",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
     "/api/v1/printers/{printer_id}/home": {
       "post": {
         "operationId": "home_printer_api_v1_printers__printer_id__home_post",
@@ -41932,6 +46889,116 @@
           }
         ],
         "summary": "List recent print jobs for a printer",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/jog": {
+      "post": {
+        "operationId": "jog_printer_api_v1_printers__printer_id__jog_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JogPrinter"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Jog Printer Api V1 Printers  Printer Id  Jog Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Jog a homed axis by a signed distance",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/macros": {
+      "get": {
+        "operationId": "klipper_macros_api_v1_printers__printer_id__macros_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Response Klipper Macros Api V1 Printers  Printer Id  Macros Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List macros loaded by Klipper",
         "tags": [
           "printers"
         ]
@@ -42522,6 +47589,65 @@
           }
         ],
         "summary": "Set a heater target temperature",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/tune": {
+      "post": {
+        "operationId": "tune_printer_api_v1_printers__printer_id__tune_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TunePrinter"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Tune Printer Api V1 Printers  Printer Id  Tune Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Set a fan, speed, or flow percentage",
         "tags": [
           "printers"
         ]
@@ -44292,6 +49418,121 @@
           }
         },
         "summary": "Toolpath only for download-authorized shares",
+        "tags": [
+          "share"
+        ]
+      }
+    },
+    "/api/v1/share/{token}/previews/{generation}": {
+      "get": {
+        "operationId": "get_shared_preview_manifest_api_v1_share__token__previews__generation__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "title": "Generation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Shared Preview Manifest",
+        "tags": [
+          "share"
+        ]
+      }
+    },
+    "/api/v1/share/{token}/previews/{generation}/{view_id}": {
+      "get": {
+        "operationId": "get_shared_preview_image_api_v1_share__token__previews__generation___view_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "title": "Generation",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ViewId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PreviewSize",
+              "default": "full"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Shared Preview Image",
         "tags": [
           "share"
         ]

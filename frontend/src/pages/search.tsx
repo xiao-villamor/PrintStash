@@ -1,18 +1,21 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, LayoutGrid, List, Search } from "lucide-react";
+import { LayoutGrid, List, Search } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
 import { SearchFilterControls } from "@/components/search-filter-controls";
 import { SearchPreferences } from "@/components/search-preferences";
 import { SearchSavedViews } from "@/components/search-saved-views";
+import { LibrarySearch } from "@/components/library-search";
+import { useMediaQuery } from "@/lib/use-media-query";
 import {
   readSearchFilters,
   writeSearchFilters,
   hasSearchFilters,
   searchSorts,
 } from "@/lib/search-filters";
-import { SearchSubjectPreview } from "@/components/search-evidence";
+import { SearchResultItem } from "@/components/search-evidence";
 import { SearchImageInput } from "@/components/search-image-input";
+import { uiText } from "@/lib/locale";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -26,7 +29,6 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { ApiError, parseApiError } from "@/lib/errors";
 import { useI18n } from "@/lib/i18n";
-import { Link } from "@/lib/link";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import type { SearchSubjectType } from "@/types/search";
 
@@ -43,6 +45,7 @@ export default function SearchPage() {
 }
 
 function SearchContent() {
+  const desktop = useMediaQuery("(min-width: 768px)");
   const { t } = useI18n();
   const { user } = useAuth();
   const router = useRouter();
@@ -123,6 +126,10 @@ function SearchContent() {
   const pages = inaccessible ? [] : (results.data?.pages ?? []);
   const first = pages[0];
   const items = pages.flatMap((page) => page.items);
+  const resultCount = t(
+    results.hasNextPage ? "aiSearch.resultsCountMore" : "aiSearch.resultsCount",
+    { count: items.length },
+  );
   const capability =
     status.isError && [401, 403, 404].includes(parseApiError(status.error).status)
       ? undefined
@@ -141,17 +148,27 @@ function SearchContent() {
       (leg) => leg === "thumbnail" || leg === "multiview" || leg === "point_cloud",
     ) ??
       false);
+  function applySearch(next: typeof filters, query: string, order: typeof sort) {
+    const updated = writeSearchFilters(next, query, order);
+    if (mode === "lexical") updated.set("mode", mode);
+    types.forEach((type) => updated.append("type", type));
+    router.push(`/search?${updated}`);
+  }
   return (
     <div className="h-full overflow-y-auto bg-background pb-24 md:pb-0">
-      <div className="border-b border-border px-4 py-5 sm:px-6">
+      <div className="px-4 pb-3 pt-3.5 sm:px-6 [&>div]:flex-row [&>div]:justify-between [&_h1]:text-xl [&_p]:truncate">
         <PageHeader
           actions={
-            <Button variant="outline" onClick={() => router.push("/")}>
-              <ArrowLeft className="h-4 w-4" aria-hidden />
+            <Button
+              variant="outline"
+              size="xs"
+              className="shrink-0"
+              onClick={() => router.push("/")}
+            >
               {t("aiSearch.backToLibrary")}
             </Button>
           }
-          title={t("aiSearch.resultsTitle")}
+          title={uiText("Search")}
           description={
             modelId
               ? t("aiSearch.relatedModels")
@@ -164,57 +181,91 @@ function SearchContent() {
         />
       </div>
       {!imageMode && !modelId && (
-        <section
-          aria-label={t("aiSearch.searchOptions")}
-          className="border-b border-border bg-muted/20 px-4 py-2 sm:px-6 sm:py-3"
-        >
-          <SearchFilterControls
-            key={q}
-            filters={filters}
-            q={q}
-            sort={sort}
-            showQuery={false}
-            onChange={(next, query, order) => {
-              const updated = writeSearchFilters(next, query, order);
-              if (mode === "lexical") updated.set("mode", mode);
-              types.forEach((type) => updated.append("type", type));
-              router.push(`/search?${updated}`);
-            }}
-          />
-          <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 sm:mt-3">
-            <div
-              className="flex flex-wrap items-center gap-1"
-              role="group"
-              aria-label={t("aiSearch.resultTypes")}
-            >
-              <span className="sr-only mr-2 text-xs font-medium text-muted-foreground sm:not-sr-only">
-                {t("aiSearch.resultTypes")}
-              </span>
-              {subjectTypes.map((type) => (
-                <Button
-                  key={type}
-                  size="sm"
-                  variant="ghost"
-                  className={`px-2 text-xs sm:px-3 sm:text-sm ${types.includes(type) ? "bg-accent text-accent-foreground" : ""}`}
-                  aria-pressed={types.includes(type)}
-                  onClick={() => changeType(type)}
-                >
-                  {t(`aiSearch.type.${type}`)}
-                </Button>
-              ))}
+        <section aria-label={t("aiSearch.searchOptions")} className="px-4 sm:px-6">
+          {!desktop && (
+            <div className="mb-4">
+              <LibrarySearch />
             </div>
-            {user && (
-              <div className="flex flex-wrap items-center gap-1 lg:ml-auto">
-                <SearchSavedViews
-                  userId={user.id}
-                  filters={{ ...filters, q, sort }}
-                  onSelect={(value) => router.push(`/search?${writeSearchFilters(value)}`)}
-                />
-                {preference.data && !preferencesInaccessible && (
-                  <SearchPreferences userId={user.id} value={preference.data} />
-                )}
-              </div>
-            )}
+          )}
+          <div
+            className="flex gap-6 overflow-x-auto border-b border-border"
+            role="group"
+            aria-label={t("aiSearch.resultTypes")}
+          >
+            <button
+              type="button"
+              className={`shrink-0 border-b-2 pb-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${types.length === 0 ? "border-foreground font-semibold" : "border-transparent"}`}
+              aria-pressed={types.length === 0}
+              onClick={() => {
+                const next = new URLSearchParams(params);
+                next.delete("type");
+                router.push(`/search?${next}`);
+              }}
+            >
+              {uiText("All results")}
+            </button>
+            {subjectTypes.map((type) => (
+              <button
+                key={type}
+                type="button"
+                className={`shrink-0 border-b-2 pb-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${types.includes(type) ? "border-foreground font-semibold" : "border-transparent"}`}
+                aria-pressed={types.includes(type)}
+                onClick={() => changeType(type)}
+              >
+                {t(`aiSearch.type.${type}`)}
+              </button>
+            ))}
+          </div>
+          <div className="mt-2">
+            <SearchFilterControls
+              key={q}
+              filters={filters}
+              q={q}
+              sort={sort}
+              showQuery={false}
+              onChange={applySearch}
+              actions={
+                <div className="ml-auto flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    className="h-9"
+                    disabled={!visualReady}
+                    onClick={() => router.push("/search?image=1")}
+                  >
+                    {uiText("Image search")}
+                  </Button>
+                  {user && (
+                    <SearchSavedViews
+                      userId={user.id}
+                      filters={{ ...filters, q, sort }}
+                      onSelect={(value) => router.push(`/search?${writeSearchFilters(value)}`)}
+                    />
+                  )}
+                  {!!items.length && (
+                    <span role="status" className="whitespace-nowrap">
+                      {resultCount}
+                    </span>
+                  )}
+                  <div className="flex gap-1" role="group" aria-label={t("aiSearch.resultView")}>
+                    {(["grid", "list"] as const).map((mode) => (
+                      <Button
+                        key={mode}
+                        variant="ghost"
+                        size="xs"
+                        className={view === mode ? "bg-accent text-accent-foreground" : undefined}
+                        aria-label={t(mode === "grid" ? "aiSearch.gridView" : "aiSearch.listView")}
+                        aria-pressed={view === mode}
+                        onClick={() => setView(mode)}
+                      >
+                        {uiText(mode === "grid" ? "Grid" : "List")}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              }
+            />
           </div>
         </section>
       )}
@@ -234,7 +285,8 @@ function SearchContent() {
             {t("aiSearch.searchWithWords")}
           </Button>
         ) : (
-          visualReady && (
+          visualReady &&
+          !!modelId && (
             <Button
               variant="outline"
               className="mb-4"
@@ -311,76 +363,47 @@ function SearchContent() {
             />
           ) : items.length ? (
             <section aria-label={t("aiSearch.resultsTitle")}>
-              <div className="mb-4 flex items-center justify-between gap-3 text-sm text-muted-foreground">
-                <span role="status">{t("aiSearch.resultsShown", { count: items.length })}</span>
-                <div className="flex gap-1" role="group" aria-label={t("aiSearch.resultView")}>
-                  <Button
-                    variant="ghost"
-                    className={view === "grid" ? "bg-accent text-accent-foreground" : undefined}
-                    size="icon-sm"
-                    aria-label={t("aiSearch.gridView")}
-                    aria-pressed={view === "grid"}
-                    onClick={() => setView("grid")}
-                  >
-                    <LayoutGrid className="h-4 w-4" aria-hidden />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className={view === "list" ? "bg-accent text-accent-foreground" : undefined}
-                    size="icon-sm"
-                    aria-label={t("aiSearch.listView")}
-                    aria-pressed={view === "list"}
-                    onClick={() => setView("list")}
-                  >
-                    <List className="h-4 w-4" aria-hidden />
-                  </Button>
+              {(imageMode || !!modelId) && (
+                <div className="mb-4 flex items-center justify-between gap-3 text-sm text-muted-foreground">
+                  <span role="status">{resultCount}</span>
+                  <div className="flex gap-1" role="group" aria-label={t("aiSearch.resultView")}>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className={view === "grid" ? "bg-accent text-accent-foreground" : undefined}
+                      aria-label={t("aiSearch.gridView")}
+                      aria-pressed={view === "grid"}
+                      onClick={() => setView("grid")}
+                    >
+                      <LayoutGrid className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className={view === "list" ? "bg-accent text-accent-foreground" : undefined}
+                      aria-label={t("aiSearch.listView")}
+                      aria-pressed={view === "list"}
+                      onClick={() => setView("list")}
+                    >
+                      <List className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              )}
               <ul
                 aria-label={t("aiSearch.resultsTitle")}
                 className={
                   view === "grid"
-                    ? "grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] xl:grid-cols-[repeat(auto-fill,minmax(280px,1fr))]"
+                    ? "grid grid-cols-[repeat(auto-fill,minmax(min(100%,236px),1fr))] gap-4"
                     : "divide-y divide-border border-y border-border"
                 }
               >
                 {items.map((item) => (
-                  <li
+                  <SearchResultItem
                     key={`${item.subject_type}:${item.subject_id}`}
-                    className={
-                      view === "grid"
-                        ? "min-w-0 overflow-hidden rounded-md border border-border bg-card transition-colors duration-press hover:border-primary"
-                        : "min-w-0"
-                    }
-                  >
-                    <Link
-                      href={item.href}
-                      aria-label={item.name}
-                      aria-describedby={`search-result-type-${item.subject_type}-${item.subject_id}`}
-                      className={
-                        view === "grid"
-                          ? "group block h-full p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                          : "group flex min-w-0 items-center gap-3 px-2 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                      }
-                    >
-                      <SearchSubjectPreview
-                        path={item.model?.thumbnail_url}
-                        subjectType={item.subject_type}
-                        large={view === "grid"}
-                      />
-                      <div className={view === "grid" ? "min-w-0 px-1 pb-1 pt-3" : "min-w-0"}>
-                        <h2 className="break-words text-sm font-semibold leading-snug text-foreground group-hover:text-primary sm:text-base">
-                          {item.name}
-                        </h2>
-                        <p
-                          id={`search-result-type-${item.subject_type}-${item.subject_id}`}
-                          className="mt-1 text-xs text-muted-foreground"
-                        >
-                          {t(`aiSearch.type.${item.subject_type}`)}
-                        </p>
-                      </div>
-                    </Link>
-                  </li>
+                    item={item}
+                    view={view}
+                  />
                 ))}
               </ul>
             </section>
@@ -442,6 +465,11 @@ function SearchContent() {
               {t("aiSearch.loadMore")}
             </Button>
           )
+        )}
+        {user && preference.data && !preferencesInaccessible && !imageMode && !modelId && (
+          <div className="mt-4 flex justify-start">
+            <SearchPreferences userId={user.id} value={preference.data} />
+          </div>
         )}
         {pages.some((page) => page.truncated) && (
           <p className="mt-4 text-xs text-muted-foreground">{t("aiSearch.boundedResults")}</p>

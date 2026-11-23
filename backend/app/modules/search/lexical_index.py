@@ -10,12 +10,12 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from printstash_core.search.lexical import frequencies
-from sqlalchemy import delete, text, update
+from sqlalchemy import bindparam, delete, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import aliased
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.db.derived_objects import SEARCH_FTS as FTS_NAME
 from app.db.models.search import (
@@ -121,48 +121,58 @@ def replace(
     )
     current = state(session)
     old_length = old.token_count if old is not None else 0
-    if terms != previous or length != old_length:
-        insert = (
-            sqlite_insert if session.get_bind().dialect.name == "sqlite" else pg_insert
+    added = terms.keys() - previous.keys()
+    removed = previous.keys() - terms.keys()
+    changed = [
+        {"passage_id": row.id, "term": term, "frequency": frequency}
+        for term, frequency in terms.items()
+        if previous.get(term) != frequency
+    ]
+    dialect = session.get_bind().dialect.name
+    insert = sqlite_insert if dialect == "sqlite" else pg_insert
+    connection = session.connection()
+    if added:
+        statement = insert(SearchLexicalTerm)
+        connection.execute(
+            statement.on_conflict_do_update(
+                index_elements=["term"],
+                set_={"document_frequency": SearchLexicalTerm.document_frequency + 1},
+            ),
+            [{"term": term, "document_frequency": 1} for term in sorted(added)],
         )
-        for term in previous.keys() | terms.keys():
-            delta = int(term in terms) - int(term in previous)
-            if delta > 0:
-                statement = insert(SearchLexicalTerm).values(
-                    term=term, document_frequency=1
-                )
-                session.exec(
-                    statement.on_conflict_do_update(
-                        index_elements=["term"],
-                        set_={
-                            "document_frequency": SearchLexicalTerm.document_frequency
-                            + 1
-                        },
-                    )
-                )
-            elif delta < 0:
-                session.exec(
-                    update(SearchLexicalTerm)
-                    .where(SearchLexicalTerm.term == term)
-                    .values(document_frequency=SearchLexicalTerm.document_frequency - 1)
-                )
-                session.exec(
-                    delete(SearchLexicalTerm).where(
-                        SearchLexicalTerm.term == term,
-                        SearchLexicalTerm.document_frequency <= 0,
-                    )
-                )
-        session.exec(
+    if removed:
+        parameters = [{"removed_term": term} for term in sorted(removed)]
+        removed_term = bindparam("removed_term")
+        connection.execute(
+            update(SearchLexicalTerm)
+            .where(col(SearchLexicalTerm.term) == removed_term)
+            .values(document_frequency=SearchLexicalTerm.document_frequency - 1),
+            parameters,
+        )
+        connection.execute(
+            delete(SearchLexicalTerm).where(
+                col(SearchLexicalTerm.term) == removed_term,
+                col(SearchLexicalTerm.document_frequency) <= 0,
+            ),
+            parameters,
+        )
+        connection.execute(
             delete(SearchLexicalPosting).where(
-                SearchLexicalPosting.passage_id == row.id
-            )
+                col(SearchLexicalPosting.passage_id) == row.id,
+                col(SearchLexicalPosting.term) == removed_term,
+            ),
+            parameters,
         )
-        session.add_all(
-            [
-                SearchLexicalPosting(passage_id=row.id, term=term, frequency=frequency)
-                for term, frequency in terms.items()
-            ]
+    if changed:
+        statement = insert(SearchLexicalPosting)
+        connection.execute(
+            statement.on_conflict_do_update(
+                index_elements=["passage_id", "term"],
+                set_={"frequency": statement.excluded.frequency},
+            ),
+            changed,
         )
+    if length != old_length:
         session.exec(
             update(SearchLexicalState)
             .where(SearchLexicalState.id == 1)
@@ -176,7 +186,7 @@ def replace(
     row.token_count = length
     session.add(row)
     session.flush()
-    if session.get_bind().dialect.name != "sqlite" or current.native_phase not in {
+    if dialect != "sqlite" or current.native_phase not in {
         "building",
         "ready",
     }:

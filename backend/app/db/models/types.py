@@ -121,6 +121,17 @@ class InboxSourceKind(str, Enum):
     EXTERNAL = "external"
 
 
+class InboxImportIntent(str, Enum):
+    REVIEW = "review"
+    IMPORT = "import"
+
+
+class InboxReviewReason(str, Enum):
+    FILES_NEED_REVIEW = "files_need_review"
+    DESTINATION_NOT_EDITABLE = "destination_not_editable"
+    ALREADY_IMPORTED = "already_imported"
+
+
 class InboxItemState(str, Enum):
     CAPTURED = "captured"
     RESOLVING = "resolving"
@@ -196,7 +207,9 @@ class JobKind(StrEnum):
     BACKUPS_TRASH_GC = "backups.trash_gc"
     DERIVATIVES_GCODE = "derivatives.gcode"
     DERIVATIVES_MESH = "derivatives.mesh"
+    DERIVATIVES_PREVIEWS = "derivatives.previews"
     DERIVATIVES_PLATES = "derivatives.plates"
+    DERIVATIVES_PROJECT_PROFILE = "derivatives.project_profile"
     DERIVATIVES_TOOLPATH = "derivatives.toolpath"
     DERIVATIVES_VIEWER_STL = "derivatives.viewer_stl"
     IDENTITY_RETENTION = "identity.retention"
@@ -213,6 +226,7 @@ class JobKind(StrEnum):
     INGESTION_UPLOAD_RECOVERY = "ingestion.upload_recovery"
     INGESTION_URL = "ingestion.url"
     INGESTION_URL_SELECTION = "ingestion.url_selection"
+    INGESTION_SAMPLES = "ingestion.samples"
     INGESTION_SCRATCH_CLEANUP = "ingestion.scratch_cleanup"
     NOTIFICATIONS_DELIVER = "notifications.deliver"
     NOTIFICATIONS_RETENTION = "notifications.retention"
@@ -254,6 +268,8 @@ class DerivativeKind(StrEnum):
 
     METADATA = "metadata"
     PLATES = "plates"
+    PROJECT_PROFILE = "project_profile"
+    PREVIEWS = "previews"
     THUMBNAIL = "thumbnail"
     TOOLPATH = "toolpath"
     VIEWER_STL = "viewer_stl"

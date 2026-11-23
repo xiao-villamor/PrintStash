@@ -92,6 +92,7 @@ class ScriptedMqttClient(FakeMqttClient):
         self.peer_common_name = peer_common_name
         self.calls: list[tuple[Any, ...]] = []
         self.on_connect: Any = None
+        self.on_disconnect: Any = None
         self.on_message: Any = None
 
     # `_validate_mqtt_peer` skips the identity check entirely when the client

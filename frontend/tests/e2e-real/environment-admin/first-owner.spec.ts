@@ -21,7 +21,9 @@ test.describe("Environment-provisioned owner", () => {
     // ── The gate sends the owner to the storage step ──
     await expect(page).toHaveURL(/\/getting-started$/);
     await expect(page.getByRole("heading", { name: "Your files", exact: true })).toBeVisible();
-    await expect(page.getByLabel("Models directory", { exact: true })).not.toHaveValue("");
+    await expect(page.getByRole("textbox", { name: "Your files", exact: true })).not.toHaveValue(
+      "",
+    );
     await page.screenshot({ path: testInfo.outputPath("choose-storage.png"), fullPage: true });
 
     // ── Any other page still leads back there until storage is chosen ──
@@ -29,6 +31,7 @@ test.describe("Environment-provisioned owner", () => {
     await expect(page).toHaveURL(/\/getting-started$/);
 
     // ── Choosing storage finishes setup ──
+    await expect(page.getByRole("button", { name: "Use this storage" })).toBeEnabled();
     await page.getByRole("button", { name: "Use this storage" }).press("Enter");
     await expect(page.getByRole("button", { name: "Upload my first files" })).toBeVisible();
 
@@ -48,6 +51,8 @@ test.describe("Environment-provisioned owner", () => {
 
     // ── Storage no longer blocks the rest of the app ──
     await page.goto("/settings");
-    await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Settings", exact: true, level: 1 }),
+    ).toBeVisible();
   });
 });

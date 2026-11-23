@@ -2,7 +2,7 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { useNavigate } from "react-router-dom";
+import { useRouter } from "@/lib/navigation";
 import { useState } from "react";
 import { LibraryStartupProvider } from "@/lib/library-startup-provider";
 import { useLibraryStartup } from "@/lib/library-startup-context";
@@ -10,7 +10,7 @@ import { renderApp } from "@/test-support/render";
 
 function Probe() {
   const startup = useLibraryStartup();
-  const navigate = useNavigate();
+  const navigation = useRouter();
   const [previous, setPrevious] = useState(() => startup.settle);
   return (
     <>
@@ -20,7 +20,7 @@ function Probe() {
       <button
         onClick={() => {
           setPrevious(() => startup.settle);
-          navigate("/?c=next");
+          navigation.push("/?c=next");
         }}
       >
         navigate

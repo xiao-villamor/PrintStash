@@ -5,7 +5,7 @@ from app.db import (
     browser_edit_contracts_v1 as _browser_edit_contracts_v1,  # noqa: F401, E402
 )
 from app.db import (
-    config_edit_contracts_v1 as _config_edit_contracts_v1,  # noqa: F401, E402
+    config_edit_contracts_v5 as _config_edit_contracts_v5,  # noqa: F401, E402
 )
 from app.db import (
     connection_edit_contracts_v1 as _connection_edit_contracts_v1,  # noqa: F401, E402
@@ -14,6 +14,7 @@ from app.db import (
     library_authorization_v2 as _library_authorization_v2,  # noqa: F401, E402
 )
 from app.db import library_browse_v2 as _library_browse_v2  # noqa: F401, E402
+from app.db import library_browse_v3 as _library_browse_v3  # noqa: F401, E402
 from app.db import library_contracts_v1 as _library_contracts_v1  # noqa: F401, E402
 from app.db import (
     notification_edit_contracts_v1 as _notification_edit_contracts_v1,  # noqa: F401, E402
@@ -154,6 +155,7 @@ from .library import (
 from .library import (
     Model as Model,
 )
+from .library import ModelCover as ModelCover
 from .library import (
     ModelStar as ModelStar,
 )
@@ -365,6 +367,9 @@ from .types import (
     GcRunState as GcRunState,
 )
 from .types import (
+    InboxImportIntent as InboxImportIntent,
+)
+from .types import (
     InboxItemCompletion as InboxItemCompletion,
 )
 from .types import (
@@ -372,6 +377,9 @@ from .types import (
 )
 from .types import (
     InboxItemState as InboxItemState,
+)
+from .types import (
+    InboxReviewReason as InboxReviewReason,
 )
 from .types import (
     InboxSourceKind as InboxSourceKind,

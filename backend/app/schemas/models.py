@@ -9,9 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.core.time import ensure_utc
 from app.db.models import CollectionRole, FileRevisionStatus, FileType, PrintJobState
+from app.modules.media.sliced_archive import SlicedGeometry
 from app.schemas.editing import EditingBase
 from app.schemas.mesh_measurements import VolumeMeasurementRead
 from app.schemas.orca import OrcaNativeContext
+from app.schemas.previews import ModelPreviewRead
 from app.schemas.printers import (
     PrintJobIdentityRead,
     PrintJobReportedMetadataRead,
@@ -67,6 +69,9 @@ class MetadataRead(BaseModel):
 
 
 class FileRead(BaseModel):
+    sliced_geometry: SlicedGeometry | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     id: int
     model_id: int
     original_filename: str
@@ -158,6 +163,8 @@ class ModelSimilarityRead(BaseModel):
 
 
 class ModelRead(EditingBase):
+    previews: ModelPreviewRead
+    has_custom_cover: bool
     similarity: ModelSimilarityRead = Field(default_factory=ModelSimilarityRead)
     id: int
     name: str
@@ -263,7 +270,16 @@ class PrintSummaryRead(BaseModel):
     total_cost: Optional[float] = None
 
 
+class ModelBoundingBoxRead(BaseModel):
+    """Measured extent of a Model's mesh, in millimetres; all three or none."""
+
+    x_mm: float
+    y_mm: float
+    z_mm: float
+
+
 class ModelListItem(EditingBase):
+    previews: ModelPreviewRead
     similarity: ModelSimilarityRead = Field(default_factory=ModelSimilarityRead)
     id: int
     name: str
@@ -279,6 +295,11 @@ class ModelListItem(EditingBase):
     file_count: int
     # Newest mesh file (STL/3MF/OBJ) — lets the UI preload the 3D preview.
     mesh_file_id: Optional[int] = None
+    # Extent of the newest measured mesh, so a card shows its size without
+    # reading the Model detail. None until a mesh has been measured.
+    bounding_box: Optional[ModelBoundingBoxRead] = None
+    # Live G-code revisions; a card reads the Model detail only when it has one.
+    gcode_file_count: int = 0
     printer_presence: List[ModelPrinterPresenceRead] = []
     updated_at: datetime
     print_summary: Optional[PrintSummaryRead] = None
@@ -557,6 +578,13 @@ class PrintStatisticsRead(BaseModel):
     cost_over_time: List[TimeBucketRead] = []
 
 
+class ModelCoverSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: int = Field(gt=0)
+    position: int = Field(default=0, ge=0)
+
+
 class ModelUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -627,6 +655,7 @@ class CollectionRead(BaseModel):
     # Lets a folder view skip the readme request for the folders (most of them)
     # that have none.
     has_readme: bool = False
+    has_custom_cover: bool = False
 
 
 class CollectionNodeRead(CollectionRead):

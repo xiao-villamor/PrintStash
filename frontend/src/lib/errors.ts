@@ -112,7 +112,7 @@ const ERROR_MESSAGES = {
   invalid_credentials: "Invalid username or password.",
   provider_not_configured:
     "MyMiniFactory is not configured on this PrintStash server. Ask the administrator to set its OAuth credentials.",
-  provider_auth_failed: "Cults rejected those credentials. Check the username and password.",
+  provider_auth_failed: "inbox.error.providerAuth",
   provider_retry_exhausted: "The provider is temporarily unavailable. Try again later.",
   provider_transport_failed: "PrintStash could not reach the provider. Try again later.",
   provider_request_failed: "The provider rejected the request. Try again later.",
@@ -131,6 +131,20 @@ const ERROR_MESSAGES = {
   // Printers
   printer_not_found: "This printer no longer exists.",
   printer_offline: "The printer is offline.",
+  printer_not_ready: "The printer is not ready. Check its live status.",
+  printer_not_idle: "Wait until the printer is idle to use this control.",
+  axis_not_homed: "Home this axis before moving it.",
+  move_out_of_bounds: "The move would go outside the printer's travel limits.",
+  extruder_too_cold: "Heat the hotend before moving filament.",
+  machine_control_unavailable: "The printer did not report the state needed for this command.",
+  bed_measurement_axes_not_homed: "Home X, Y and Z before measuring the bed.",
+  bed_measurement_unsupported: "This printer does not report an automatic bed mesh probe.",
+  bed_measurement_unknown:
+    "The measurement outcome is unknown. Wait for the printer to stop, then refresh the bed mesh.",
+  bed_measurement_mesh_unavailable:
+    "The printer finished measuring, but the new grid could not be read. Refresh the bed mesh.",
+  part_cooling_fan_unavailable: "The printer did not report a controllable part cooling fan.",
+  operation_not_supported_for_provider: "This action is unavailable for the printer integration.",
   provider_transport_error:
     "Could not connect to the printer. Check its address and network connection, then retry.",
   printer_permission_denied: "Your role does not allow this printer action.",
@@ -168,7 +182,15 @@ const ERROR_MESSAGES = {
   url_scheme_not_allowed: "Only http(s) URLs can be imported.",
   url_host_missing: "That URL has no host.",
   url_dns_resolution_failed: "Couldn't resolve that host.",
-  url_target_not_public: "That URL points to a private or local address.",
+  url_target_not_public: "inbox.error.privateAddress",
+  staging_expired: "inbox.error.stagingExpired",
+  resolve_failed: "inbox.error.resolve",
+  browser_device_name_in_use: "inbox.error.browserName",
+  files_need_review: "inbox.error.reviewFiles",
+  destination_not_editable: "inbox.error.destination",
+  already_imported: "inbox.error.duplicate",
+  capture_already_pending: "inbox.error.alreadyPending",
+  capture_upload_slots_incomplete: "inbox.error.partialTransfer",
   url_too_many_redirects: "The URL redirected too many times.",
   url_redirect_without_location: "The server redirected without a destination.",
   download_too_large: "The download exceeds the size limit.",
@@ -206,6 +228,18 @@ const ERROR_MESSAGES = {
     "An Artifact changed or failed its integrity check. Run a Vault audit, then try again.",
   archive_unsafe_entry: "The archive contains an unsafe file path.",
   archive_format_unavailable: "This archive is compressed in a way this server can't extract.",
+  document_import_result_missing:
+    "A saved guide was removed. Review or restore it before retrying.",
+  document_import_intent_mismatch:
+    "A saved guide was moved or assigned elsewhere. Review that change before retrying.",
+  multipart_model_slug_exists:
+    "A Multipart with this name already exists. Rename it or review a new import with another name.",
+  source_cover_invalid:
+    "The selected cover is not a valid JPEG, PNG or WebP image within the size limits.",
+  archive_document_missing:
+    "A selected guide is missing from the archive. Prepare and review the archive again.",
+  archive_cover_missing:
+    "The selected cover is missing from the archive. Prepare and review the archive again.",
   // Collection import
   collection_import_failed:
     "None of the collection's models could be imported. Check that the source is reachable, and for MakerWorld that the account is connected under Settings → Imports.",

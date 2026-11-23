@@ -14,7 +14,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -36,6 +36,7 @@ function TestCanvas(_props: { children: React.ReactNode }) {
 }
 
 const TOOLPATH = "G90\nM82\nG1 Z0.2\nG1 X10 Y0 E0.1\nG1 X20 Y0 E0.2\n";
+const THREE_LAYERS = "G1 Z0.2\nG1 X10 E1\nG1 Z0.4\nG1 X20 E2\nG1 Z0.6\nG1 X30 E3";
 
 function textResponse(text: string, status = 200): Response {
   return new Response(text, { status });
@@ -54,6 +55,210 @@ beforeEach(() => {
 });
 
 describe("GcodeViewer", () => {
+  it("toggles one slicer feature from its legend", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(
+      textResponse(
+        "M83\nG1 Z0.2\n;TYPE:External perimeter\nG1 X10 E1\n;TYPE:Internal infill\nG1 Y10 E1\n",
+      ),
+    );
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    const features = await screen.findByRole("region", { name: "Features" });
+    const infill = within(features).getByRole("button", { name: "Sparse infill" });
+    expect(
+      within(features)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Outer wall", "Sparse infill"]);
+
+    await user.click(infill);
+    expect(infill).toHaveAttribute("aria-pressed", "false");
+    await user.click(within(features).getByRole("button", { name: "Show all" }));
+    expect(infill).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("offers no feature legend for G-code without slicer markers", async () => {
+    fetchMock.mockResolvedValue(textResponse(THREE_LAYERS));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    await screen.findByRole("slider", { name: "Current layer" });
+    expect(screen.queryByRole("region", { name: "Features" })).toBeNull();
+  });
+
+  it("jumps directly to a printable layer", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(THREE_LAYERS));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    const entry = await screen.findByRole("spinbutton", { name: "Layer number" });
+
+    await user.clear(entry);
+    await user.type(entry, "2{Enter}");
+
+    expect(entry).toHaveValue(2);
+    expect(screen.getByRole("slider", { name: "Current layer" })).toHaveAttribute(
+      "aria-valuetext",
+      "Layer 2 / 3",
+    );
+    expect(screen.getByText("0.4 mm")).toBeVisible();
+  });
+
+  it.each(["0", "4", "1.5", ""])("rejects out-of-range layer entries (%s)", async (value) => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(THREE_LAYERS));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    const entry = await screen.findByRole("spinbutton", { name: "Layer number" });
+
+    entry.focus();
+    fireEvent.change(entry, { target: { value } });
+    await user.click(screen.getByRole("heading", { name: "Layers" }));
+
+    expect(entry).toHaveValue(3);
+    expect(screen.getByRole("slider", { name: "Current layer" })).toHaveValue("2");
+  });
+
+  it("discards an unfinished layer entry on Escape", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(THREE_LAYERS));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    const entry = await screen.findByRole("spinbutton", { name: "Layer number" });
+
+    await user.clear(entry);
+    await user.type(entry, "1{Escape}");
+
+    expect(entry).toHaveValue(3);
+    expect(screen.getByRole("slider", { name: "Current layer" })).toHaveValue("2");
+  });
+
+  it("labels the scope of the displayed toolpath bounds", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(TOOLPATH));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    await user.click(await screen.findByRole("tab", { name: "View" }));
+    expect(
+      screen.getByText("Extrusion bounds (includes any purge; excludes travel)"),
+    ).toBeVisible();
+  });
+
+  it("identifies the grid as illustrative when the printer bed is unknown", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(TOOLPATH));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    await user.click(await screen.findByRole("tab", { name: "View" }));
+    expect(screen.getByText("Printer bed size unknown; grid is illustrative")).toBeVisible();
+  });
+
+  it("identifies the placement of a recognized bed as illustrative", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(TOOLPATH));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        printerBedMm={{ x: 256, y: 256 }}
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    await user.click(await screen.findByRole("tab", { name: "View" }));
+    expect(screen.getByRole("button", { name: "Bed 256×256" })).toBeVisible();
+    expect(screen.getByText("Bed position is illustrative")).toBeVisible();
+  });
+
+  it("explains which moves the travel control shows", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(TOOLPATH));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    await user.click(await screen.findByRole("tab", { name: "View" }));
+    expect(
+      within(screen.getByRole("button", { name: "Travel" })).getByText("Non-printing moves"),
+    ).toBeVisible();
+  });
+
+  it("leaves shared controls to the parent toolbar", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(TOOLPATH));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        sharedControls
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    await user.click(await screen.findByRole("tab", { name: "View" }));
+    expect(screen.queryByRole("combobox", { name: "Camera view" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Dimensions" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Travel" })).toBeVisible();
+  });
+
+  it("toggles dimensions in the side panel", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(TOOLPATH));
+    render(
+      <GcodeViewer
+        url="/toolpath"
+        canvasRenderer={TestCanvas}
+        toolpathParser={async (text) => parseGcode(text)}
+      />,
+    );
+    await user.click(await screen.findByRole("tab", { name: "View" }));
+    const toggle = screen.getByRole("button", { name: "Dimensions" });
+    const bounds = screen.getByRole("region", { name: "Toolpath bounds" });
+    expect(within(bounds).getByText("X")).toBeVisible();
+    expect(within(bounds).getByText("20")).toBeVisible();
+    expect(within(bounds).getByText("mm")).toBeVisible();
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("region", { name: "Toolpath bounds" })).not.toBeInTheDocument();
+  });
   it("keeps a public Gcode viewer outside private events", async () => {
     storeLogin("", { id: 1, username: "owner", email: null, is_superuser: true });
     const factory = vi.fn<EventSocketFactory>(async () => ({
@@ -111,7 +316,7 @@ describe("GcodeViewer", () => {
     await act(async () => pending.resolve({ ready: false, state: "running" }));
   });
 
-  it("exposes an accessible layer slider and pressed states for travel/bed toggles", async () => {
+  it("exposes toolpath control states to assistive technology", async () => {
     const user = userEvent.setup();
     fetchMock.mockResolvedValue(textResponse(TOOLPATH));
 
@@ -128,23 +333,97 @@ describe("GcodeViewer", () => {
 
     const slider = await screen.findByRole("slider", { name: "Current layer" });
     expect(slider).toHaveAttribute("max", "0");
-    expect(screen.getByText(/Layer 1 \/ 1/)).toBeInTheDocument();
+    expect(slider).toHaveAttribute("aria-valuetext", "Layer 1 / 1");
 
-    const travel = screen.getByRole("button", { name: "Show travel moves" });
-    const bed = screen.getByRole("button", { name: "Hide build plate" });
+    await user.click(screen.getByRole("tab", { name: "View" }));
+    const travel = screen.getByRole("button", { name: "Travel" });
+    const bed = screen.getByRole("button", { name: "Bed 220×220" });
     expect(travel).toHaveAttribute("aria-pressed", "false");
     expect(bed).toHaveAttribute("aria-pressed", "true");
 
     await user.click(travel);
     await user.click(bed);
 
-    expect(screen.getByRole("button", { name: "Hide travel moves" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "Show build plate" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Travel" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Bed 220×220" })).toHaveAttribute(
       "aria-pressed",
       "false",
+    );
+  });
+
+  it("preserves a compact camera choice across layer changes", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(textResponse(TOOLPATH));
+
+    render(
+      <I18nProvider>
+        <GcodeViewer
+          url="/api/v1/files/7/toolpath-preview"
+          canvasRenderer={TestCanvas}
+          toolpathParser={async (text) => parseGcode(text)}
+        />
+      </I18nProvider>,
+    );
+
+    await user.click(await screen.findByRole("tab", { name: "View" }));
+    const view = screen.getByRole("combobox", { name: "Camera view" });
+    expect(view).toHaveValue("isometric");
+    expect(Array.from(view.querySelectorAll("option")).map((option) => option.textContent)).toEqual(
+      ["Isometric", "Front", "Top"],
+    );
+
+    await user.selectOptions(view, "top");
+    await user.click(screen.getByRole("tab", { name: "Layers" }));
+    fireEvent.change(screen.getByRole("slider", { name: "Current layer" }), {
+      target: { value: "0" },
+    });
+
+    await user.click(screen.getByRole("tab", { name: "View" }));
+    expect(screen.getByRole("combobox", { name: "Camera view" })).toHaveValue("top");
+    await user.click(screen.getByRole("button", { name: "Fit to view" }));
+    expect(screen.getByRole("combobox", { name: "Camera view" })).toHaveValue("isometric");
+  });
+
+  it("isolates the layer selected with the rail", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue(
+      textResponse("G1 Z0.2 F600\nG1 X1 Y1 E1\nG1 Z0.4\nG1 X2 Y2 E2\nG1 Z0.6\nG1 X3 Y3 E3\n"),
+    );
+
+    render(
+      <I18nProvider>
+        <GcodeViewer
+          url="/api/v1/files/7/toolpath-preview"
+          canvasRenderer={TestCanvas}
+          toolpathParser={async (text) => parseGcode(text)}
+        />
+      </I18nProvider>,
+    );
+
+    const slider = await screen.findByRole("slider", { name: "Current layer" });
+    const last = Number(slider.getAttribute("max"));
+    expect(last).toBeGreaterThan(0);
+    const next = screen.getByRole("button", { name: "Next layer" });
+    const previous = screen.getByRole("button", { name: "Previous layer" });
+    // The preview opens on the finished print: the top layer.
+    expect(slider).toHaveValue(String(last));
+    expect(next).toBeDisabled();
+
+    await user.click(previous);
+    expect(slider).toHaveValue(String(last - 1));
+    expect(slider).toHaveAttribute("aria-valuetext", `Layer ${last} / ${last + 1}`);
+    await user.click(next);
+    expect(slider).toHaveValue(String(last));
+
+    fireEvent.change(slider, { target: { value: "0" } });
+    expect(screen.getByRole("button", { name: "Previous layer" })).toBeDisabled();
+
+    const only = screen.getByRole("button", { name: "This layer" });
+    expect(only).toHaveAttribute("aria-pressed", "false");
+    await user.click(only);
+    expect(screen.getByRole("button", { name: "This layer" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
   });
 

@@ -293,6 +293,15 @@ class DiscoveryBudget:
 
 
 @runtime_checkable
+class InteractiveBacklogSource(WorkSource, Protocol):
+    """A source that can tell, by a read alone, that a person waits on work it
+    has not yet turned into Jobs. Definitions that yield to its Jobs also wait
+    for that work, which between discovery batches has no active Job."""
+
+    def owes_interactive(self, session: Session, *, now: datetime) -> bool: ...
+
+
+@runtime_checkable
 class PrioritizedWorkSource(WorkSource, Protocol):
     """A source that respects separate finite pending quotas."""
 
@@ -342,6 +351,9 @@ class JobDefinition:
     retry: RetryHook = _no_retry_hook
     # Sources this definition's completions should nudge (always its own).
     completion_nudges: tuple[JobKind, ...] = ()
+    # Keep an interactive reserve for a prioritized source that tends to
+    # receive bursts. Refill on the low-water claim, ahead of completions.
+    batch_interactive_discovery: bool = False
     # On a partitioned lane: the partition a subject belongs to (a printer id,
     # a notification channel). Required there and refused elsewhere.
     partition: Callable[[str], str] | None = None
@@ -352,6 +364,11 @@ class JobDefinition:
     # What discovery does while the library is still being added to. The last
     # addition to settle nudges every definition that held back.
     during_additions: DuringAdditions = DuringAdditions.RUNS
+    # Hold discovery for these definitions' queued or interrupted interactive
+    # Jobs, and for unpublished intent their InteractiveBacklogSource owes.
+    # Running Jobs can overlap discovery. The start that clears the wait
+    # nudges this definition, with a final settlement nudge for recovery.
+    yields_to: tuple[JobKind, ...] = ()
     # Whether each step is admitted as a write-capable operation (drained by a
     # restore, deferred while one holds the fence). Only work that itself takes
     # the restore fence (a vault migration's cutover) opts out and gates itself.
@@ -372,6 +389,10 @@ class JobDefinition:
     admission: Callable[["Session"], SkipReason | None] = _allow_admission
 
     def __post_init__(self) -> None:
+        if self.batch_interactive_discovery and not isinstance(
+            self.source, PrioritizedWorkSource
+        ):
+            raise ValueError("batched_discovery_requires_prioritized_source")
         if not self.steps:
             raise ValueError("job_definition_without_steps")
         if len({step.name for step in self.steps}) != len(self.steps):

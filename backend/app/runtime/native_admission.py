@@ -91,35 +91,46 @@ class _Ticket:
     request: Resources
     capacity: Resources
     priority: WorkPriority
+    hard_bytes: int
 
     def __post_init__(self) -> None:
         if not isinstance(self.priority, WorkPriority):
             raise TypeError("priority must be a WorkPriority")
+        if (
+            type(self.hard_bytes) is not int
+            or not self.request.bytes <= self.hard_bytes <= self.capacity.bytes
+        ):
+            raise ValueError("invalid hard resource ceiling")
 
     def encode(self) -> bytes:
-        return json.dumps(
-            {
-                "version": 2,
-                "name": self.name,
-                "order": self.order,
-                "state": self.state.value,
-                "request": [self.request.slots, self.request.bytes],
-                "capacity": [self.capacity.slots, self.capacity.bytes],
-                "priority": self.priority.value,
-            },
-            separators=(",", ":"),
-        ).encode("ascii")
+        data = {
+            "version": 2,
+            "name": self.name,
+            "order": self.order,
+            "state": self.state.value,
+            "request": [self.request.slots, self.request.bytes],
+            "capacity": [self.capacity.slots, self.capacity.bytes],
+            "priority": self.priority.value,
+        }
+        if self.hard_bytes != self.request.bytes:
+            # Only split claims need the new record shape. Drain old native
+            # claimants before starting processes that write split tickets.
+            data.update(version=3, hard_bytes=self.hard_bytes)
+        return json.dumps(data, separators=(",", ":")).encode("ascii")
 
     @classmethod
     def read(cls, descriptor: int) -> _Ticket:
+        return cls.decode(_read_record(descriptor))
+
+    @classmethod
+    def decode(cls, raw: bytes) -> _Ticket:
         try:
-            raw = os.pread(descriptor, _MAX_RECORD_BYTES + 1, 0)
             if len(raw) > _MAX_RECORD_BYTES:
                 raise ValueError("oversized record")
             data = json.loads(raw)
             if (
                 type(data["version"]) is not int
-                or data["version"] not in (1, 2)
+                or data["version"] not in (1, 2, 3)
                 or not isinstance(data["name"], str)
                 or len(data["name"]) != 32
                 or any(c not in "0123456789abcdef" for c in data["name"])
@@ -141,21 +152,31 @@ class _Ticket:
                 if type(data["priority"]) is not str:
                     raise TypeError("invalid priority representation")
                 priority = WorkPriority(data["priority"])
+            request = Resources(*data["request"])
+            hard_bytes = request.bytes
+            if data["version"] == 3:
+                required.add("hard_bytes")
+                hard_bytes = data["hard_bytes"]
             if set(data) != required:
                 raise ValueError("invalid ticket fields")
             ticket = cls(
                 data["name"],
                 data["order"],
                 _State(data["state"]),
-                Resources(*data["request"]),
+                request,
                 Resources(*data["capacity"]),
                 priority,
+                hard_bytes,
             )
             if not ticket.request.fits(ticket.capacity):
                 raise ValueError("invalid ticket resources")
             return ticket
         except (ValueError, KeyError, TypeError, UnicodeError) as exc:
             raise AdmissionCorrupted("invalid live resource ticket") from exc
+
+
+def _read_record(descriptor: int) -> bytes:
+    return os.pread(descriptor, _MAX_RECORD_BYTES + 1, 0)
 
 
 def _open(path: Path, *, exclusive: bool = False) -> BinaryIO:
@@ -185,6 +206,7 @@ class NativePermit:
     resources: Resources
     identity: str
     path: Path
+    hard_bytes: int
 
     @property
     def fileno(self) -> int:
@@ -215,7 +237,7 @@ class NativePermit:
                     raise AdmissionCorrupted("inherited descriptor does not own credit")
             finally:
                 os.close(probe)
-            yield cls(owned, ticket.request, ticket.name, path)
+            yield cls(owned, ticket.request, ticket.name, path, ticket.hard_bytes)
 
 
 class LocalResourcePool:
@@ -224,7 +246,7 @@ class LocalResourcePool:
     ) -> None:
         self.directory = directory
         self._reclaim = reclaim
-        self._records: dict[tuple[int, int, int, int, int], _Ticket] = {}
+        self._records: dict[bytes, _Ticket] = {}
 
     @contextmanager
     def _coordinator(self, checkpoint: Callable[[], None]) -> Iterator[None]:
@@ -258,21 +280,17 @@ class LocalResourcePool:
                         recovery.enter_context(opened.pop_all())
                         abandoned.append((path, handle))
                     continue
-                # Decode only changed receipts, but re-prove descriptor custody
-                # every scan. ctime also invalidates writes that restore mtime;
-                # dead/inode-replaced receipts never inherit cached authority.
-                stat = os.fstat(handle.fileno())
-                key = (
-                    stat.st_dev,
-                    stat.st_ino,
-                    stat.st_size,
-                    stat.st_mtime_ns,
-                    stat.st_ctime_ns,
-                )
-                ticket = self._records.get(key)
+                # Decode only changed receipts, but read every record and
+                # re-prove descriptor custody every scan. The cache is keyed by
+                # the record's bytes, never by stat: file timestamps advance by
+                # a coarse clock tick, so a same-size QUEUED -> ACTIVE rewrite
+                # within one tick keeps every stat field, and an admitted claim
+                # would stay a queued head that blocks every later claim.
+                raw = _read_record(handle.fileno())
+                ticket = self._records.get(raw)
                 if ticket is None:
-                    ticket = _Ticket.read(handle.fileno())
-                records[key] = ticket
+                    ticket = _Ticket.decode(raw)
+                records[raw] = ticket
                 if path.name != ticket.name + ".ticket":
                     raise AdmissionCorrupted("ticket path does not match identity")
                 live.append(ticket)
@@ -341,6 +359,7 @@ class LocalResourcePool:
         *,
         checkpoint: Callable[[], None],
         priority: WorkPriority = WorkPriority.INTERACTIVE,
+        hard_bytes: int | None = None,
     ) -> Iterator[NativePermit]:
         if not isinstance(priority, WorkPriority):
             raise TypeError("priority must be a WorkPriority")
@@ -356,6 +375,7 @@ class LocalResourcePool:
                 request,
                 capacity,
                 priority,
+                request.bytes if hard_bytes is None else hard_bytes,
             )
             handle = _open(self.directory / (ticket.name + ".ticket"), exclusive=True)
             try:
@@ -379,6 +399,7 @@ class LocalResourcePool:
                                 request,
                                 capacity,
                                 priority,
+                                ticket.hard_bytes,
                             )
                             self._write(handle, ticket)
                             break
@@ -393,10 +414,19 @@ class LocalResourcePool:
                             ):
                                 raise AdmissionCorrupted("recovery ticket was replaced")
                             path.unlink()
+                if abandoned:
+                    # Retiring a finished claim's record frees its share: look
+                    # again at once. Waiting here for a release that already
+                    # happened cost each reservation a full wait interval.
+                    continue
                 _releases.wait(seen, _WAIT_SECONDS)
             checkpoint()
             yield NativePermit(
-                handle, request, ticket.name, self.directory / (ticket.name + ".ticket")
+                handle,
+                request,
+                ticket.name,
+                self.directory / (ticket.name + ".ticket"),
+                ticket.hard_bytes,
             )
         finally:
             # Never unlink here: a child may still hold this exact descriptor.

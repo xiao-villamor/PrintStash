@@ -384,6 +384,18 @@ class TestServerInfo:
 
 class TestQueryStatus:
     @pytest.mark.asyncio
+    async def test_finished_printer_with_retired_job_reports_full_progress(
+        self,
+    ) -> None:
+        client = make_client(
+            responding(**{"/api/v1/status": {"printer": {"state": "FINISHED"}}})
+        )
+        snapshot = await client.query_snapshot()
+        assert snapshot.state == "complete"
+        assert snapshot.progress == 1.0
+        assert snapshot.filename is None
+
+    @pytest.mark.asyncio
     async def test_normalizes_a_printing_status_into_the_shared_envelope(self) -> None:
         client = make_client(
             responding(

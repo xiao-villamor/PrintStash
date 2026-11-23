@@ -34,13 +34,13 @@ export const TABS: { key: TabKey; label: string }[] = [
   {
     key: "source",
     get label() {
-      return uiText("Source");
+      return uiText("Source info");
     },
   },
   {
     key: "settings",
     get label() {
-      return uiText("Settings");
+      return uiText("Print settings");
     },
   },
   {
@@ -103,6 +103,13 @@ export function revisionStatusClass(status: FileRevisionStatus | null): string {
     default:
       return "border-border bg-muted text-muted-foreground";
   }
+}
+
+export function slicerDisplayName(meta: MetadataRead | null | undefined) {
+  const name = meta?.slicer_name?.trim();
+  const version = meta?.slicer_version?.trim();
+  if (!name || !version) return name || version || null;
+  return version.toLowerCase().startsWith(name.toLowerCase()) ? version : `${name} ${version}`;
 }
 
 export function revisionStatusLabel(status: FileRevisionStatus | null): string {

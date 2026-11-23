@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import delete, func, update
+from sqlalchemy import and_, delete, func, or_, update
 from sqlmodel import Session, col, select
 
 from app.core.config import settings
@@ -174,6 +174,66 @@ def begin(
 
 
 @dataclass(frozen=True)
+class PriorClaim:
+    """What ``begin`` overwrote on an existing row, so a claim can be undone."""
+
+    state: DerivativeState
+    attempt_token: str | None
+    attempts: int
+    next_attempt_at: datetime | None
+    failure_reason: str | None
+    updated_at: datetime
+
+
+def begin_reversible(
+    session: Session, file: File, kind: DerivativeKind, recipe: int, *, now: datetime
+) -> tuple[ArtifactDerivative, PriorClaim | None]:
+    """``begin``, keeping what it replaced; None when the row is new."""
+    assert file.id is not None
+    existing = session.exec(
+        select(ArtifactDerivative).where(
+            ArtifactDerivative.file_id == file.id,
+            ArtifactDerivative.kind == kind,
+            ArtifactDerivative.recipe_version == recipe,
+        )
+    ).first()
+    prior = (
+        None
+        if existing is None
+        else PriorClaim(
+            existing.state,
+            existing.attempt_token,
+            existing.attempts,
+            existing.next_attempt_at,
+            existing.failure_reason,
+            existing.updated_at,
+        )
+    )
+    return begin(session, file, kind, recipe, now=now), prior
+
+
+def release(
+    session: Session, attempt: "DerivativeAttempt", prior: PriorClaim | None
+) -> None:
+    """Undo a claim that never started its work, exactly as it found the row.
+
+    The owner gives the output back to whoever finds it next, without spending
+    an attempt or waiting out a retry backoff.
+    """
+    _, row = claim_running(session, attempt)
+    if prior is None:
+        session.delete(row)
+        return
+    row.state = prior.state
+    row.attempt_token = prior.attempt_token
+    row.attempts = prior.attempts
+    row.next_attempt_at = prior.next_attempt_at
+    row.failure_reason = prior.failure_reason
+    row.updated_at = prior.updated_at
+    session.add(row)
+
+
+@dataclass(frozen=True)
 class ArtifactSource:
     sha256: str
     file_type: FileType
@@ -277,8 +337,8 @@ def require_context(session: Session, attempt: DerivativeAttempt) -> File:
         if attempt.execution is not None:
             require_execution(session, attempt.execution)
         policy.lock_generation(session)
-        model = session.exec(
-            select(Model)
+        model_id = session.exec(
+            select(Model.id)
             .where(Model.id == attempt.source.model_id, live(Model))
             .with_for_update()
         ).first()
@@ -288,7 +348,11 @@ def require_context(session: Session, attempt: DerivativeAttempt) -> File:
             .with_for_update()
             .execution_options(populate_existing=True)
         ).first()
-        if model is None or file is None or ArtifactSource.of(file) != attempt.source:
+        if (
+            model_id is None
+            or file is None
+            or ArtifactSource.of(file) != attempt.source
+        ):
             raise AttemptSuperseded()
         regen = regenerations(
             session, definitions=[g.definition for g in groups_for(file)]
@@ -341,6 +405,7 @@ def mark_ready(
     now: datetime,
     storage_key: str | None = None,
     output: dict[str, Any] | None = None,
+    has_embedded_3mf_preview: bool | None = None,
     duration_ms: int | None = None,
     peak_rss_bytes: int | None = None,
 ) -> File:
@@ -349,6 +414,7 @@ def mark_ready(
     row.state = DerivativeState.READY
     row.storage_key = storage_key if storage_key is not None else row.storage_key
     row.output_json = json.dumps(output or {}, separators=(",", ":"), default=str)
+    row.has_embedded_3mf_preview = has_embedded_3mf_preview
     row.failure_reason = None
     row.next_attempt_at = None
     row.duration_ms = duration_ms
@@ -451,6 +517,60 @@ def fail_in_flight(
     return changed
 
 
+def fail_unfinished(
+    session: Session,
+    file: File,
+    reason: str,
+    *,
+    now: datetime,
+    kinds: dict[DerivativeKind, int],
+) -> None:
+    """Persist the group's failure even when its producer failed before begin.
+
+    Missing rows are discoverable intent. Leaving them absent after an early
+    exception bypasses backoff and the attempt limit, creating a new Job each
+    time the source runs. Preserve completed/cancelled outputs and already
+    settled failures; only this group's unfinished current recipes failed.
+    """
+    if not kinds:
+        return
+    assert file.id is not None
+    begin_write(session, immediate=True)
+    current = {
+        row.kind: row
+        for row in session.exec(
+            select(ArtifactDerivative)
+            .where(
+                ArtifactDerivative.file_id == file.id,
+                or_(
+                    *(
+                        and_(
+                            col(ArtifactDerivative.kind) == kind,
+                            col(ArtifactDerivative.recipe_version) == recipe,
+                        )
+                        for kind, recipe in kinds.items()
+                    )
+                ),
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    }
+    regen = regenerations(session, definitions=[g.definition for g in groups_for(file)])
+    for kind, recipe in kinds.items():
+        row = current.get(kind)
+        in_flight = row is not None and row.state in {
+            DerivativeState.QUEUED,
+            DerivativeState.RUNNING,
+        }
+        if not in_flight and satisfied(row, now=now, regenerated_at=regen.get(kind)):
+            continue
+        if row is None:
+            row = ArtifactDerivative(file_id=file.id, kind=kind, recipe_version=recipe)
+        row.attempts = max(1, row.attempts) if in_flight else row.attempts + 1
+        _mark_failed(session, row, reason, now=now, deterministic=False)
+
+
 def cancel(
     session: Session, file: File, kinds: dict[DerivativeKind, int], *, now: datetime
 ) -> None:
@@ -481,6 +601,40 @@ def cancel(
         session.add(row)
 
 
+def _retain_preview_output(
+    session: Session, file_id: int, recipe: int, *, failed_only: bool
+) -> bool:
+    """Retry intent must not retire the last readable bundle."""
+    predicate = [
+        col(ArtifactDerivative.file_id) == file_id,
+        col(ArtifactDerivative.kind) == DerivativeKind.PREVIEWS,
+        col(ArtifactDerivative.recipe_version) == recipe,
+        col(ArtifactDerivative.storage_key).is_not(None),
+    ]
+    if failed_only:
+        predicate.append(
+            col(ArtifactDerivative.state).in_(
+                (DerivativeState.FAILED, DerivativeState.CANCELLED)
+            )
+        )
+    return (
+        affected(
+            session,
+            update(ArtifactDerivative)
+            .where(*predicate)
+            .values(
+                state=DerivativeState.QUEUED,
+                attempt_token=None,
+                attempts=0,
+                failure_reason=None,
+                next_attempt_at=None,
+                updated_at=utcnow() - STALE_IN_FLIGHT,
+            ),
+        )
+        == 1
+    )
+
+
 def reset(
     session: Session, file: File, kinds: dict[DerivativeKind, int] | None = None
 ) -> int:
@@ -490,6 +644,12 @@ def reset(
     wanted = recipes if kinds is None else kinds
     removed = 0
     for kind, recipe in wanted.items():
+        if kind is DerivativeKind.PREVIEWS and _retain_preview_output(
+            session, file.id, recipe, failed_only=True
+        ):
+            removed += 1
+            continue
+
         removed += affected(
             session,
             delete(ArtifactDerivative).where(
@@ -517,6 +677,11 @@ def invalidate(session: Session, file: File, kinds: list[DerivativeKind]) -> int
     for kind in kinds:
         if kind not in recipes:
             raise ValueError(f"derivative_not_applicable:{kind}")
+        if kind is DerivativeKind.PREVIEWS and _retain_preview_output(
+            session, file.id, recipes[kind], failed_only=False
+        ):
+            removed += 1
+            continue
         removed += affected(
             session,
             delete(ArtifactDerivative).where(
@@ -529,11 +694,15 @@ def invalidate(session: Session, file: File, kinds: list[DerivativeKind]) -> int
 
 
 def read(
-    session: Session, file: File, *, now: datetime | None = None
+    session: Session,
+    file: File,
+    *,
+    now: datetime | None = None,
+    current_rows: dict[DerivativeKind, ArtifactDerivative] | None = None,
 ) -> list[DerivativeRead]:
     """Every applicable kind of ``file`` at its current recipe, pending included."""
     now = now or utcnow()
-    current = rows_for(session, file)
+    current = rows_for(session, file) if current_rows is None else current_rows
     regen = regenerations(session, definitions=[g.definition for g in groups_for(file)])
     controls = policy.resolve(session)
     enabled = {

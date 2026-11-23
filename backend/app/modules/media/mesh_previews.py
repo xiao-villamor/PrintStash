@@ -10,7 +10,12 @@ from pathlib import Path, PurePosixPath
 from typing import Optional
 
 from app.core.logging import get_logger
+from app.core.native_settings import settings
 from app.modules.media import mesh_policy
+from app.modules.media.three_mf_preview import (
+    EmbeddedGcodeError,
+    check_zip_directory_limits,
+)
 
 logger = get_logger(__name__)
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -21,13 +26,18 @@ _MAX_3MF_ENTRIES = 4096
 _MAX_3MF_TOTAL_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 _MAX_3MF_COMPRESSION_RATIO = 200
 _MAX_3MF_ENTRY_NAME_BYTES = 1024
-_3MF_THUMBNAIL_DIRS = ("metadata/", "3d/thumbnails/", "thumbnails/")
+_3MF_THUMBNAIL_DIRS = (
+    "metadata/",
+    "3d/thumbnails/",
+    "thumbnails/",
+    "auxiliaries/.thumbnails/",
+)
 
 
 def extract_embedded_3mf_thumbnail(
     path: Path, *, validate_image: bool = False, file_type: str | None = None
 ) -> Optional[bytes]:
-    """Return one semantically unambiguous PNG preview from a 3MF, or None.
+    """Return the largest admissible embedded PNG preview from a 3MF, or None.
 
     3MF files are ZIP archives; slicers store a rendered plate preview next to
     the mesh. Using it skips the software rasteriser entirely and matches what
@@ -39,6 +49,13 @@ def extract_embedded_3mf_thumbnail(
     if mesh_policy.canonical_suffix(path, file_type) != ".3mf":
         return None
     try:
+        check_zip_directory_limits(
+            path,
+            path.stat().st_size,
+            max_entries=_MAX_3MF_ENTRIES,
+            max_central_directory_bytes=settings.three_mf_preview_max_central_directory_mb
+            * 1024**2,
+        )
         with zipfile.ZipFile(path) as zf:
             infos = zf.infolist()
             if len(infos) > _MAX_3MF_ENTRIES:
@@ -99,18 +116,30 @@ def extract_embedded_3mf_thumbnail(
                     return (1, name)
                 if "plate_1" in basename or "plate_01" in basename:
                     return (2, name)
-                return (3, name)
+                auxiliary_order = (
+                    "thumbnail_3mf.png",
+                    "thumbnail_middle.png",
+                    "thumbnail_small.png",
+                )
+                if (
+                    name.startswith("auxiliaries/.thumbnails/")
+                    and basename in auxiliary_order
+                ):
+                    return (3 + auxiliary_order.index(basename), name)
+                return (6, name)
 
             candidates.sort(key=semantic_rank)
             best_rank = semantic_rank(candidates[0])[0]
-            if best_rank == 3 and len(candidates) > 1:
+            if best_rank == 6 and len(candidates) > 1:
                 logger.warning(
                     "mesh_processing: ambiguous embedded 3MF thumbnails",
                     extra={"count": len(candidates)},
                 )
                 return None
             aggregate_bytes = 0
+            best: tuple[int, str, bytes] | None = None
             for candidate in candidates:
+                area = 0
                 if candidate.file_size > _MAX_3MF_THUMBNAIL_BYTES:
                     logger.warning(
                         "mesh_processing: embedded 3MF thumbnail exceeds limit",
@@ -130,7 +159,7 @@ def extract_embedded_3mf_thumbnail(
                 try:
                     with zf.open(candidate) as source:
                         data = source.read(candidate.file_size + 1)
-                except (OSError, RuntimeError, zipfile.BadZipFile):
+                except OSError, RuntimeError, zipfile.BadZipFile:
                     logger.warning(
                         "mesh_processing: embedded 3MF thumbnail candidate is unreadable",
                         extra={"entry": candidate.filename},
@@ -144,7 +173,8 @@ def extract_embedded_3mf_thumbnail(
                         png_width, png_height = struct.unpack(">II", data[16:24])
                     except struct.error:
                         continue
-                    if png_width * png_height > 25_000_000:
+                    area = png_width * png_height
+                    if not 0 < area <= 25_000_000:
                         continue
                 elif validate_image:
                     continue
@@ -166,13 +196,19 @@ def extract_embedded_3mf_thumbnail(
                             extra={"entry": candidate.filename},
                         )
                         continue
+                # The candidate list gives precedence for equal-sized images.
+                # A larger preview always wins over a slicer's small companion.
+                if best is None or area > best[0]:
+                    best = (area, candidate.filename, data)
+            if best is not None:
+                _, name, data = best
                 logger.info(
                     "mesh_processing: using embedded 3MF thumbnail %s (%d bytes)",
-                    candidate.filename,
+                    name,
                     len(data),
                 )
                 return data
-    except (zipfile.BadZipFile, OSError, KeyError):
+    except EmbeddedGcodeError, zipfile.BadZipFile, OSError, KeyError:
         logger.warning(
             "mesh_processing: embedded 3MF thumbnail read failed for %s",
             path.name,

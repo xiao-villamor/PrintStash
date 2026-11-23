@@ -3,10 +3,13 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { FolderInput, Pencil, Plus, Tag, Trash2, X } from "lucide-react";
 import { CollectionNodeRead, TagRead } from "@/types";
 import { CollectionPicker } from "@/components/collection-picker";
+import { FormField } from "@/components/ui/form-field";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
@@ -218,6 +221,23 @@ function MoveDialog({
       onClose={onClose}
       title={uiText("items.move", { value1: String(count), count: Number(count) })}
       className="max-w-md"
+      footer={
+        <>
+          <Button variant="outline" type="button" onClick={onClose} disabled={busy}>
+            {uiText("Cancel")}
+          </Button>
+          <Button
+            type="button"
+            onClick={() => {
+              if (target === null) return;
+              onConfirm(target.path, target.id);
+            }}
+            disabled={busy || target === null}
+          >
+            {uiText("Move here")}
+          </Button>
+        </>
+      }
     >
       <CollectionPicker
         minRole="edit"
@@ -233,27 +253,6 @@ function MoveDialog({
         excludePaths={blockedPaths}
         emptyLabel={uiText("No valid destinations")}
       />
-      <div className="mt-5 flex gap-3">
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={busy}
-          className="flex-1 h-9 rounded border border-border text-sm font-mono uppercase tracking-wider text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-        >
-          {uiText("Cancel")}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            if (target === null) return;
-            onConfirm(target.path, target.id);
-          }}
-          disabled={busy || target === null}
-          className="flex-1 h-9 rounded bg-primary text-primary-foreground text-sm font-mono uppercase tracking-wider hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-disabled"
-        >
-          {uiText("Move here")}
-        </button>
-      </div>
     </Modal>
   );
 }
@@ -288,41 +287,29 @@ function RenameCollectionsDialog({
         count: Number(collections.length),
       })}
       className="max-w-md"
+      footer={
+        <>
+          <Button variant="outline" type="button" onClick={onClose} disabled={busy}>
+            {uiText("Cancel")}
+          </Button>
+          <Button type="button" onClick={() => onConfirm(values)} disabled={busy || !valid}>
+            {uiText("Rename")}
+          </Button>
+        </>
+      }
     >
-      <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
+      <div className="max-h-72 space-y-4 overflow-y-auto pr-1">
         {collections.map((collection) => (
-          <label key={collection.id} className="block space-y-1">
-            <span className="block truncate font-mono text-3xs text-muted-foreground">
-              {collection.display_path}
-            </span>
-            <input
+          <FormField key={collection.id} label={collection.display_path}>
+            <Input
               value={values[collection.id]}
               onChange={(event) =>
                 setNames((current) => ({ ...current, [collection.id]: event.target.value }))
               }
               maxLength={100}
-              className="h-9 w-full rounded border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
-          </label>
+          </FormField>
         ))}
-      </div>
-      <div className="mt-5 flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={busy}
-          className="h-9 rounded border border-border px-4 text-sm text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
-        >
-          {uiText("Cancel")}
-        </button>
-        <button
-          type="button"
-          onClick={() => onConfirm(values)}
-          disabled={busy || !valid}
-          className="h-9 rounded bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover disabled:opacity-50"
-        >
-          {uiText("Rename")}
-        </button>
       </div>
     </Modal>
   );
@@ -361,6 +348,31 @@ function TagDialog({
       }}
       title={uiText("models.tag", { value1: String(count), count: Number(count) })}
       className="max-w-md"
+      footer={
+        <>
+          <Button
+            variant="outline"
+            type="button"
+            onClick={() => {
+              reset();
+              onClose();
+            }}
+            disabled={busy}
+          >
+            {uiText("Cancel")}
+          </Button>
+          <Button
+            type="button"
+            onClick={() => {
+              onConfirm(add, remove);
+              reset();
+            }}
+            disabled={busy || (add.length === 0 && remove.length === 0)}
+          >
+            {uiText("Apply")}
+          </Button>
+        </>
+      }
     >
       <div className="space-y-4">
         <ChipEditor
@@ -377,30 +389,6 @@ function TagDialog({
           onChange={setRemove}
           accent="remove"
         />
-      </div>
-      <div className="mt-5 flex gap-3">
-        <button
-          type="button"
-          onClick={() => {
-            reset();
-            onClose();
-          }}
-          disabled={busy}
-          className="flex-1 h-9 rounded border border-border text-sm font-mono uppercase tracking-wider text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-        >
-          {uiText("Cancel")}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            onConfirm(add, remove);
-            reset();
-          }}
-          disabled={busy || (add.length === 0 && remove.length === 0)}
-          className="flex-1 h-9 rounded bg-primary text-primary-foreground text-sm font-mono uppercase tracking-wider hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-disabled"
-        >
-          {uiText("Apply")}
-        </button>
       </div>
     </Modal>
   );
@@ -421,6 +409,7 @@ function ChipEditor({
 }) {
   useUiLocale();
   const [input, setInput] = useState("");
+  const inputId = useId();
   const needle = input.trim().toLowerCase();
   const filtered = needle
     ? suggestions
@@ -451,12 +440,10 @@ function ChipEditor({
     accent === "add" ? "bg-accent text-accent-foreground" : "bg-destructive/10 text-destructive";
 
   return (
-    <div>
-      <label className="block font-mono text-3xs text-muted-foreground tracking-wider uppercase mb-1.5">
-        {label}
-      </label>
+    <FormField label={label} htmlFor={inputId}>
       <div className="relative">
-        <input
+        <Input
+          id={inputId}
           value={input}
           onChange={(e) => {
             setInput(e.target.value);
@@ -475,7 +462,6 @@ function ChipEditor({
               ? uiText("Search or create — press Enter")
               : uiText("Search tags — press Enter")
           }
-          className="w-full h-10 bg-background text-foreground font-mono text-sm border border-border rounded px-3 focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
         />
         {input && (filtered.length > 0 || canCreate) && (
           <div
@@ -535,6 +521,6 @@ function ChipEditor({
           ))}
         </div>
       )}
-    </div>
+    </FormField>
   );
 }

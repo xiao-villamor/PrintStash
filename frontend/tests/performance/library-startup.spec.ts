@@ -155,7 +155,7 @@ async function sample(page: Page, label: string) {
     await page.goto(`${base}${destination}`, { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => performance.getEntriesByName("observed:ready").length > 0);
     await expect(
-      page.locator("aside").getByRole("button", { name: "Collection 01", exact: true }),
+      page.locator("aside").getByRole("treeitem", { name: "Collection 01", exact: true }),
     ).toBeVisible();
     if (!baseline) {
       await page.waitForFunction(
@@ -266,7 +266,10 @@ async function sample(page: Page, label: string) {
     observation = { ready: record.ready, thumbnailsObserved: record.thumbnailsObserved, decoded };
     expect(record.serviceWorker).toBe(true);
     // A real navigation proves the rendered tree handles input, beyond marks/skeletons.
-    await page.locator("aside").getByRole("button", { name: "Collection 02", exact: true }).click();
+    await page
+      .locator("aside")
+      .getByRole("treeitem", { name: "Collection 02", exact: true })
+      .click();
     await expect(page).toHaveURL(/c=collection-02/);
     await page.waitForLoadState("networkidle");
     outcome = "passed";

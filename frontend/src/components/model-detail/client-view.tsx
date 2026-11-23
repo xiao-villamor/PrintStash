@@ -6,7 +6,7 @@ import { useUiLocale } from "@/lib/i18n";
 import { Loader2 } from "lucide-react";
 
 import { useModelDetail } from "@/features/library/model-detail";
-import { Button } from "@/components/ui/button";
+import { PageFailure } from "@/components/page-failure";
 import { parseApiError } from "@/lib/errors";
 import { ModelRead } from "@/types";
 
@@ -32,27 +32,43 @@ export function ModelDetailClientView({
     const notFound = error?.status === 404;
     const needsAuth = !query.active || error?.status === 401 || error?.status === 403;
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-center px-6">
-        <p className="text-lg font-semibold text-on-surface">
-          {notFound
+      <PageFailure
+        kind={
+          notFound
+            ? "not-found"
+            : error?.status === 403
+              ? "forbidden"
+              : needsAuth
+                ? "authentication"
+                : error?.code === "network_unreachable"
+                  ? "offline"
+                  : "unavailable"
+        }
+        title={
+          notFound
             ? uiText("Model not found")
-            : needsAuth
-              ? uiText("Sign in to view this model")
-              : uiText("Couldn’t load this model")}
-        </p>
-        <p className="text-sm text-on-surface-variant">
-          {notFound
+            : error?.status === 403
+              ? uiText("Access restricted")
+              : needsAuth
+                ? uiText("Sign in to view this model")
+                : error?.code === "network_unreachable"
+                  ? uiText("Unable to connect")
+                  : uiText("Couldn’t load this model")
+        }
+        description={
+          notFound
             ? uiText("This model doesn’t exist or has been deleted.")
             : needsAuth
               ? uiText("This model lives in a collection you need access to.")
-              : uiText("A server error occurred. Reload to try again.")}
-        </p>
-        {!notFound && !needsAuth && (
-          <Button variant="outline" onClick={() => void query.refetch()} loading={query.isFetching}>
-            {uiText("Retry")}
-          </Button>
-        )}
-      </div>
+              : error?.code === "network_unreachable"
+                ? uiText(
+                    "Couldn't reach the server. Check that PrintStash is running and try again.",
+                  )
+                : uiText("A server error occurred. Reload to try again.")
+        }
+        onRetry={!notFound && !needsAuth ? () => void query.refetch() : undefined}
+        retrying={query.isFetching}
+      />
     );
   }
 

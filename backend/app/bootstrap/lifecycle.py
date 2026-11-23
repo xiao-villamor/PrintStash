@@ -10,6 +10,7 @@ and is the same in every process; nothing here starts a loop.
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 import sqlite3
 from contextlib import asynccontextmanager
@@ -184,12 +185,24 @@ def _prepare_storage_for_startup(
                 "reconciled %d interrupted pending import(s)", interrupted_imports
             )
     if recover_publications:
-        from app.modules.ingestion.staging_cleanup import prune_expired, reconcile_jobs
+        from app.core.time import utcnow
+        from app.modules.ingestion.staging_cleanup import (
+            prune_expired,
+            reconcile_jobs,
+            sweep_unreceipted_incoming,
+        )
 
         with get_session_factory().scoped_session() as session:
             reconcile_jobs(session)
             prune_expired(session, backend=backend)
             session.commit()
+            orphaned = sweep_unreceipted_incoming(
+                session, incoming=settings.incoming_dir, now=utcnow()
+            )
+            if orphaned:
+                logger.warning(
+                    "removed %d unreceipted upload(s) from staging", orphaned
+                )
     return backend
 
 
@@ -293,7 +306,7 @@ def prepare_process(*, owner: bool) -> PreparedProcess:
                     ),
                 )
             )
-    except (OSError, RuntimeError, ValueError, sqlite3.Error):
+    except OSError, RuntimeError, ValueError, sqlite3.Error:
         logger.exception("artifact cache unavailable; source reads remain enabled")
         bind_materializer(None, configured_root=Path(settings.artifact_cache_root))
 
@@ -430,6 +443,10 @@ async def lifespan(app: FastAPI):
     # Validate environment-time paths before even creating the process-lock
     # rendezvous beside the database.
     validate_runtime_storage_paths()
+    # FastAPI resolves included route/dependency graphs lazily. Preparing the
+    # public schema also resolves those graphs before traffic is admitted,
+    # instead of blocking concurrent first requests on the HTTP event loop.
+    await asyncio.to_thread(app.openapi)
     process_lock = acquire_process_lock()
     app.state.process_lock = process_lock
     logger.info("starting %s v%s", settings.app_name, settings.app_version)
@@ -464,6 +481,10 @@ async def lifespan(app: FastAPI):
         await watcher.start_all()
     except Exception:
         logger.exception("library watcher failed to start; scheduled scans still run")
+    # Establish the long-lived heap after route and runtime initialization.
+    # Otherwise an early request can trigger the first full collection of that
+    # large graph. Automatic collection and its thresholds stay unchanged.
+    await asyncio.to_thread(gc.collect)
     yield
     from app.bootstrap.work import stop as stop_work
     from app.modules.storage.materializer_runtime import bind_materializer

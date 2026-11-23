@@ -1,4 +1,6 @@
+import type { ModelPreviews } from "./previews";
 import type { EditingBase } from "./editing";
+import type { PreviewLook } from "./config";
 import type {
   PrintJobIdentityRead,
   PrintJobReportedMetadataRead,
@@ -84,6 +86,7 @@ export type FileRevisionStatus = "known_good" | "needs_test" | "failed" | "archi
 export type CollectionRole = "view" | "edit" | "admin";
 
 export interface FileRead {
+  sliced_geometry?: "gcode_only" | null;
   id: number;
   model_id: number;
   original_filename: string;
@@ -133,6 +136,8 @@ export interface ModelSimilarityRead {
 }
 
 export interface ModelRead {
+  previews: ModelPreviews;
+  has_custom_cover: boolean;
   edit_epoch: string;
   edit_version: number;
   similarity?: ModelSimilarityRead;
@@ -171,6 +176,12 @@ export interface ModelPrinterPresenceRead {
   printer_id: number;
   printer_name: string;
   file_count: number;
+}
+
+export interface ModelBoundingBoxRead {
+  x_mm: number;
+  y_mm: number;
+  z_mm: number;
 }
 
 export interface ModelPrintJobRead {
@@ -231,6 +242,7 @@ export interface PrintSummaryRead {
 }
 
 export interface ModelListItem {
+  previews: ModelPreviews;
   edit_epoch: string;
   edit_version: number;
   similarity?: ModelSimilarityRead;
@@ -246,8 +258,12 @@ export interface ModelListItem {
   tags: string[];
   thumbnail_url: string | null;
   file_count: number;
+  /** Live G-code revisions; a card reads the Model detail only when it has one. */
+  gcode_file_count: number;
   /** Newest mesh file (STL/3MF/OBJ), used to preload the 3D preview. */
   mesh_file_id: number | null;
+  /** Extent of the newest measured mesh; null until a mesh is measured. */
+  bounding_box: ModelBoundingBoxRead | null;
   printer_presence: ModelPrinterPresenceRead[];
   updated_at: string;
   print_summary: PrintSummaryRead | null;
@@ -477,7 +493,9 @@ export type JobKind =
   | "backups.trash_gc"
   | "derivatives.gcode"
   | "derivatives.mesh"
+  | "derivatives.previews"
   | "derivatives.plates"
+  | "derivatives.project_profile"
   | "derivatives.toolpath"
   | "derivatives.viewer_stl"
   | "identity.retention"
@@ -494,6 +512,7 @@ export type JobKind =
   | "ingestion.upload_recovery"
   | "ingestion.url"
   | "ingestion.url_selection"
+  | "ingestion.samples"
   | "ingestion.scratch_cleanup"
   | "notifications.deliver"
   | "notifications.retention"
@@ -528,7 +547,14 @@ export type LaneName =
   | "similarity";
 
 /** An output derived from an Artifact's bytes: the backend's `DerivativeKind`. */
-export type DerivativeKind = "metadata" | "plates" | "thumbnail" | "toolpath" | "viewer_stl";
+export type DerivativeKind =
+  | "metadata"
+  | "plates"
+  | "project_profile"
+  | "previews"
+  | "thumbnail"
+  | "toolpath"
+  | "viewer_stl";
 
 export type WorkPriority = "interactive" | "backfill";
 
@@ -676,6 +702,15 @@ export interface WorkExecutor {
   stale: boolean;
 }
 
+/** Each task produces one cover image or one multi-angle set for an Artifact. */
+export interface PreviewActivity {
+  total: number;
+  completed: number;
+  remaining: number;
+  skipped: number;
+  failed: number;
+}
+
 /** `GET /api/v1/admin/work`: the Background work settings page. */
 export interface WorkOverview {
   lanes: WorkLane[];
@@ -701,6 +736,16 @@ export interface IngestJobResultItem {
  * import reports counts plus per-member outcomes, and a plain single-artifact
  * ingest reports whether it created a new Model.
  */
+export type ArchiveIntake =
+  | { mode: "separate"; documents: string[] }
+  | {
+      mode: "multipart";
+      name: string;
+      parts: { entry_name: string; name: string }[];
+      cover?: string | null;
+      documents: string[];
+    };
+
 export interface IngestJobResult {
   kind?: "archive_manifest" | "model_files_manifest" | "collection_manifest" | "collection_import";
   // kind === "archive_manifest"
@@ -721,6 +766,8 @@ export interface IngestJobResult {
   imported?: number;
   total?: number;
   items?: IngestJobResultItem[];
+  documents?: { name: string; document_id: number }[];
+  multipart_model_id?: number;
   // Plain single-artifact ingest.
   created?: boolean;
   resumed?: boolean;
@@ -741,6 +788,8 @@ export interface IngestJobResult {
 }
 
 export interface ArchiveEntry {
+  /** Older persisted review manifests predate document classification. */
+  is_document?: boolean;
   name: string;
   size_bytes: number;
   file_type: string | null; // FileType value if importable, else null
@@ -819,6 +868,8 @@ export interface PublicModelRead {
   has_thumbnail: boolean;
   allow_download: boolean;
   files: PublicFileRead[];
+  /** The look generated images use, so the 3D view is shaded to match. */
+  preview_look: PreviewLook;
 }
 
 export interface ShareLinkRead {
@@ -1000,7 +1051,13 @@ export interface CollectionRead {
   tags: string[];
   /** False lets a folder view skip the readme request entirely. */
   has_readme: boolean;
+  has_custom_cover?: boolean;
 }
+
+export type CollectionCover =
+  | { kind: "automatic" }
+  | { kind: "image"; filename: string }
+  | { kind: "models"; model_ids: number[] };
 
 /** One collection of the lazily loaded tree (`/collections/children`, `/lookup`, `/search`). */
 export interface CollectionNodeRead extends CollectionRead {

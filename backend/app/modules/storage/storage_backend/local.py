@@ -637,6 +637,9 @@ class LocalStorageBackend(StorageBackend):
     def document_image_key(self, document_id: int, name: str) -> str:
         return str(self.thumb_dir / "document-images" / str(document_id) / name)
 
+    def model_cover_key(self, model_id: int, name: str) -> str:
+        return str(self.thumb_dir / "model-covers" / str(model_id) / name)
+
     def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
         return str(self.thumb_dir / "multipart-covers" / str(multipart_model_id) / name)
 

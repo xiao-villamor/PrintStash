@@ -13,9 +13,9 @@ import math
 import os
 from pathlib import Path, PurePosixPath
 
-# One native job per usable CPU plus one: measured on a mixed corpus, the extra
-# job keeps every core busy while another waits on its source or its outputs.
-EXTRA_NATIVE_JOBS = 1
+# One native job per usable CPU. An extra job once hid admission stalls; with
+# the queue admitting promptly it only oversubscribes the CPU quota: at 3 CPUs,
+# four jobs throttled 14 s and cost 21 CPU-s more than three, finishing later.
 # A job that fits the pool alongside others claims at least the thumbnail
 # floor; more jobs than that only queue for memory.
 NATIVE_JOB_FLOOR_BYTES = 640 * 1024**2
@@ -128,7 +128,7 @@ def native_jobs_for(cpus: int, pool_bytes: int) -> int:
         raise ValueError("a process has at least one CPU")
     return min(
         MAX_DEFAULT_NATIVE_JOBS,
-        cpus + EXTRA_NATIVE_JOBS,
+        cpus,
         fitting_native_jobs(pool_bytes),
     )
 

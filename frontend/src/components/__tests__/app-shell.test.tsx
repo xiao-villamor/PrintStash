@@ -24,9 +24,11 @@ import { StrictMode } from "react";
 import { createTask, listTasks, resetTasksForNewSetup } from "@/lib/task-center";
 import { storeLogin } from "@/lib/auth-store";
 import { screen, waitFor } from "@testing-library/react";
-import { useLocation } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { requestArchiveReview } from "@/lib/archive-review-events";
+import { toast } from "@/lib/toast";
 import { AppShell } from "@/components/app-shell";
 import { queryClient, queryKeys } from "@/lib/query-client";
 import { aJob } from "@/test-support/factories";
@@ -122,6 +124,35 @@ describe("AppShell", () => {
     );
   });
 
+  it("dismisses the ready notice when its archive review opens", async () => {
+    const job = aJob({
+      job_id: "review-toast",
+      kind: "ingestion.archive_inspect",
+      state: "completed",
+      result: {
+        kind: "archive_manifest",
+        archive_id: "archive-toast",
+        archive_name: "parts.zip",
+        entries: [],
+      },
+    });
+    renderShell({ routes: { "GET /api/v1/jobs/review-toast": json(job) } });
+    await screen.findByText("at /");
+    toast.error("Keep this unrelated message.");
+    window.dispatchEvent(new CustomEvent("printstash:import-job-terminal", { detail: job }));
+    // AppShell and renderApp each mount the real Toaster; both receive the notice.
+    expect((await screen.findAllByRole("button", { name: "Choose files" })).length).toBeGreaterThan(
+      0,
+    );
+    requestArchiveReview(job.job_id);
+    await waitFor(() =>
+      expect(screen.queryAllByRole("button", { name: "Choose files" })).toHaveLength(0),
+    );
+    for (const notice of screen.getAllByText("Keep this unrelated message."))
+      expect(notice).toBeVisible();
+    expect(await screen.findByRole("dialog")).toBeVisible();
+  });
+
   it("notifies the user when ZIP preparation fails", async () => {
     renderShell();
     await screen.findByText("at /");
@@ -140,6 +171,12 @@ describe("AppShell", () => {
   });
 
   describe("a signed-in user", () => {
+    it("shows the authenticated getting-started guide inside the workspace", async () => {
+      renderShell({ at: "/getting-started" });
+
+      expect(await screen.findByText("at /getting-started")).toBeVisible();
+      expect(screen.getAllByRole("navigation").length).toBeGreaterThan(0);
+    });
     it("renders the page inside the frame", async () => {
       renderShell();
 

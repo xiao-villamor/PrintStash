@@ -55,11 +55,14 @@ def admit(
     capacity: Resources,
     *,
     checkpoint: Callable[[], None],
+    hard_bytes: int | None = None,
 ) -> Iterator[NativePermit]:
     """Nested synchronous work consumes its existing permit, never a new share."""
     active = current_permit()
     if active is not None:
-        if not request.fits(active.resources):
+        if not request.fits(active.resources) or (
+            hard_bytes is not None and hard_bytes != active.hard_bytes
+        ):
             raise AdmissionTooLarge("nested work exceeds its native resource permit")
         checkpoint()
         yield active
@@ -68,7 +71,11 @@ def admit(
     if pool is None:
         raise RuntimeError("native resource pool is not bound by process bootstrap")
     with pool.reserve(
-        request, capacity, checkpoint=checkpoint, priority=current_priority()
+        request,
+        capacity,
+        checkpoint=checkpoint,
+        priority=current_priority(),
+        hard_bytes=hard_bytes,
     ) as permit:
         _local.permit = permit
         try:

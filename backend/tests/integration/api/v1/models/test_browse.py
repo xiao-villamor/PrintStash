@@ -1,17 +1,69 @@
 """Authoritative mixed cards preserve membership, server order and refresh boundaries."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import text
 
 from app.db.models import CollectionRole, FileType, PrintJobState
 
+# Models without a live mesh Artifact expose only their cover.
+NO_PREVIEWS = {"kind": "none", "cover_camera": "unknown", "source_images": []}
 BROWSE = "/api/v1/models/browse"
 TIED = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 class TestBrowseModels:
+    def test_keeps_the_automatic_subtree_scope_on_continuation(
+        self, client, auth_headers, make_collection, make_model
+    ):
+        root = make_collection("Hardware")
+        child = make_collection("Brackets", parent=root)
+        older = make_model(collection=child, updated_at=TIED)
+        newer = make_model(collection=child, updated_at=TIED + timedelta(seconds=1))
+        params = {
+            "collection": root.path,
+            "direct": True,
+            "auto_scope": True,
+            "limit": 1,
+        }
+
+        first = client.get(BROWSE, params=params, headers=auth_headers)
+        assert first.status_code == 200, first.text
+        page = first.json()
+        assert page["effective_direct"] is False
+        assert page["total"] == 2
+        assert [row["model"]["id"] for row in page["items"]] == [newer.id]
+
+        second = client.get(
+            BROWSE,
+            params={**params, "cursor": page["next_cursor"]},
+            headers=auth_headers,
+        )
+
+        assert second.status_code == 200, second.text
+        assert second.json()["effective_direct"] is False
+        assert [row["model"]["id"] for row in second.json()["items"]] == [older.id]
+        assert second.json()["next_cursor"] is None
+
+    def test_prefers_direct_entries_when_automatic_scope_has_a_match(
+        self, client, auth_headers, make_collection, make_model
+    ):
+        root = make_collection("Hardware")
+        child = make_collection("Brackets", parent=root)
+        direct = make_model(collection=root)
+        make_model(collection=child)
+
+        response = client.get(
+            BROWSE,
+            params={"collection": root.path, "direct": True, "auto_scope": True},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["effective_direct"] is True
+        assert [row["model"]["id"] for row in response.json()["items"]] == [direct.id]
+
     def test_denies_unauthenticated_library_browsing(self, client):
         response = client.get(BROWSE)
 
@@ -670,6 +722,83 @@ class TestBrowseAccessRevision:
         assert checked.json() == before
 
 
+class TestCollectionPreview:
+    def test_returns_four_current_covers_in_browse_order(
+        self, client, auth_headers, make_collection, make_model, make_multipart_model
+    ):
+        folder = make_collection("Hardware")
+        child = make_collection("Brackets", parent=folder)
+        cover = "https://example.test/cover.webp"
+        group = make_multipart_model(
+            collection=folder,
+            updated_at=TIED + timedelta(seconds=5),
+            cover_image_url=cover,
+        )
+        latest = make_model(
+            collection=child,
+            updated_at=TIED + timedelta(seconds=4),
+            thumbnail_path="123.png",
+        )
+        middle = make_model(collection=folder, updated_at=TIED + timedelta(seconds=3))
+        last = make_model(collection=folder, updated_at=TIED + timedelta(seconds=2))
+        make_model(collection=folder, updated_at=TIED + timedelta(seconds=1))
+        make_model(
+            collection=folder, updated_at=TIED + timedelta(seconds=6), trashed=True
+        )
+
+        response = client.get(
+            BROWSE + "/collection-preview",
+            params={"collection": folder.path},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["items"] == [
+            {"kind": "multipart", "id": group.id, "thumbnail_url": cover},
+            {
+                "kind": "model",
+                "id": latest.id,
+                "thumbnail_url": "/api/v1/files/123/thumbnail",
+            },
+            {"kind": "model", "id": middle.id, "thumbnail_url": None},
+            {"kind": "model", "id": last.id, "thumbnail_url": None},
+        ]
+        revision = client.get(BROWSE + "/revision", headers=auth_headers).json()
+        assert (
+            response.json()["authorization_revision"]
+            == revision["authorization_revision"]
+        )
+
+    def test_previews_multipart_without_visible_member_models(
+        self,
+        client,
+        make_user,
+        headers_for,
+        make_collection,
+        make_model,
+        make_multipart_model,
+        grant_role,
+    ):
+        user = make_user()
+        root = make_collection("Catalog")
+        allowed = make_collection("Allowed", parent=root)
+        hidden = make_collection("Hidden", parent=root)
+        make_model(collection=hidden)
+        group = make_multipart_model(collection=allowed)
+        grant_role(user, allowed, CollectionRole.VIEW)
+
+        response = client.get(
+            BROWSE + "/collection-preview",
+            params={"collection": root.path},
+            headers=headers_for(user),
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["items"] == [
+            {"kind": "multipart", "id": group.id, "thumbnail_url": None},
+        ]
+
+
 class TestBrowseThumbnails:
     def test_returns_thumbnails_in_first_occurrence_order(
         self, client, auth_headers, make_model
@@ -687,8 +816,12 @@ class TestBrowseThumbnails:
         )
         assert response.status_code == 200, response.text
         assert response.json()["items"] == [
-            {"model_id": second.id, "thumbnail_url": "/api/v1/files/123/thumbnail"},
-            {"model_id": first.id, "thumbnail_url": None},
+            {
+                "model_id": second.id,
+                "thumbnail_url": "/api/v1/files/123/thumbnail",
+                "previews": {**NO_PREVIEWS, "cover_image_kind": "render"},
+            },
+            {"model_id": first.id, "thumbnail_url": None, "previews": NO_PREVIEWS},
         ]
         authority = client.get(BROWSE + "/revision", headers=auth_headers).json()
         assert (
@@ -732,7 +865,7 @@ class TestBrowseThumbnails:
         )
         assert response.status_code == 200, response.text
         assert response.json()["items"] == [
-            {"model_id": allowed.id, "thumbnail_url": None}
+            {"model_id": allowed.id, "thumbnail_url": None, "previews": NO_PREVIEWS}
         ]
 
     def test_superuser_omits_models_in_trashed_folders(
@@ -772,6 +905,7 @@ class TestBrowseThumbnails:
                 {
                     "model_id": model.id,
                     "thumbnail_url": f"/api/v1/files/{file.id}/thumbnail?v={version}",
+                    "previews": {**NO_PREVIEWS, "cover_image_kind": "render"},
                 }
             ],
             "authorization_revision": original["authorization_revision"],

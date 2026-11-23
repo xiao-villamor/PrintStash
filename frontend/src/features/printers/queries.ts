@@ -106,6 +106,8 @@ export function usePrinterMaintenance(ids: readonly number[], api = maintenanceA
   return {
     windows: enabled ? windowQueries.flatMap((query) => query.data ?? []) : [],
     logs: enabled ? logQueries.flatMap((query) => query.data ?? []) : [],
+    loadingWindows: enabled && windowQueries.some((query) => query.isPending),
+    loadingLogs: enabled && logQueries.some((query) => query.isPending),
     error: [...windowQueries, ...logQueries].find((query) => query.error)?.error ?? null,
     retry: () =>
       Promise.all(
@@ -173,10 +175,14 @@ export function useMaintenanceMutation(api = maintenanceApi) {
   });
 }
 
-export function printerDetailOptions(id: number) {
+export function printerDetailOptions(id: number | null) {
   return queryOptions({
-    queryKey: printerKeys.detail(id),
-    queryFn: ({ signal }) => getPrinter(id, { signal }),
+    queryKey: id === null ? [...printerKeys.all, "detail", "empty"] : printerKeys.detail(id),
+    queryFn: ({ signal }) => {
+      if (id === null) throw new Error("Printer id is required");
+      return getPrinter(id, { signal });
+    },
+    enabled: id !== null,
     staleTime: 30_000,
   });
 }
@@ -268,15 +274,11 @@ export function usePrinterResources(id: number, initialPrinter?: PrinterRead) {
     diagnostics: canAdmin ? (diagnostics.data ?? null) : null,
     config: canConfigure ? (config.data ?? null) : null,
     checkingDiagnostics: diagnostics.isFetching,
+    diagnosticsCheckedAt: diagnostics.dataUpdatedAt,
+    diagnosticsError: canAdmin ? diagnostics.error : null,
     loadingConfig: config.isFetching,
-    error:
-      [
-        detail,
-        jobs,
-        files,
-        ...(canAdmin ? [diagnostics] : []),
-        ...(canConfigure ? [config] : []),
-      ].find((query) => query.error)?.error ?? null,
+    configError: canConfigure ? config.error : null,
+    error: [detail, jobs, files].find((query) => query.error)?.error ?? null,
     refresh,
     refreshAll,
   };

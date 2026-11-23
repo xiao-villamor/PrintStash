@@ -77,8 +77,8 @@ class TestSettings:
     @pytest.mark.parametrize(
         ("cpus", "memory_gib", "jobs"),
         [
-            pytest.param(2, 4, 3, id="two-cpus-four-gib"),
-            pytest.param(4, 8, 5, id="four-cpus-eight-gib"),
+            pytest.param(2, 4, 2, id="two-cpus-four-gib"),
+            pytest.param(4, 8, 4, id="four-cpus-eight-gib"),
             pytest.param(12, 8, 6, id="twelve-cpus-eight-gib"),
         ],
     )
@@ -118,7 +118,7 @@ class TestSettings:
         monkeypatch.setattr(host_cpus, "usable_cpus", lambda: 2)
         monkeypatch.setattr(host_memory, "memory_limit_bytes", lambda: 4 * 1024**3)
 
-        assert FrozenSettings(_env_file=None).max_render_jobs == 3
+        assert FrozenSettings(_env_file=None).max_render_jobs == 2
 
     def test_an_explicit_render_jobs_value_wins(
         self, monkeypatch: pytest.MonkeyPatch
@@ -254,11 +254,15 @@ class TestConfigResolver:
 
 
 class TestDerivativeDefaults:
-    def test_all_producer_groups_default_to_enabled(self, monkeypatch):
+    def test_only_optional_multiangle_generation_defaults_to_disabled(
+        self, monkeypatch
+    ):
         for name in SETTINGS.values():
             monkeypatch.delenv(f"VAULT_{name.upper()}", raising=False)
         configured = FrozenSettings(_env_file=None)
-        assert all(getattr(configured, name) is True for name in SETTINGS.values())
+        for name in SETTINGS.values():
+            assert getattr(configured, name) is (name != "derivatives_previews_enabled")
+        assert configured.derivatives_previews_include_poles is False
 
     @pytest.mark.parametrize("name", list(SETTINGS.values()))
     def test_reads_a_disabled_environment_default(self, monkeypatch, name):

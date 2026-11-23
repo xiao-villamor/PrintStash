@@ -24,6 +24,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from printstash_core.mesh.preview_profile import PreviewLook
 from sqlmodel import Session
 
 from app.core.time import utcnow
@@ -107,6 +108,22 @@ class TestPublicModelView:
 
         assert response.status_code == 200, response.text
         assert response.json()["name"] == "Shared"
+
+    def test_carries_the_preview_look_for_the_3d_view(
+        self,
+        client: TestClient,
+        db_session: Session,
+        auth_headers: dict[str, str],
+        make_system_config: Any,
+    ) -> None:
+        make_system_config(preview_look=PreviewLook.SAND)
+        model = _make_model(db_session, name="Shaded", slug="shaded", hash_="l" * 64)
+        created = _create_share(client, auth_headers, model.id)
+
+        response = client.get(f"/api/v1/share/{created['token']}")
+
+        assert response.status_code == 200, response.text
+        assert response.json()["preview_look"] == "sand"
 
     def test_does_not_reach_another_models_file(
         self, client: TestClient, db_session: Session, auth_headers: dict[str, str]

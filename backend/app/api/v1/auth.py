@@ -50,6 +50,9 @@ from app.schemas.auth import (
     UserRead,
 )
 
+# Drops this origin's HTTP cache (immutable thumbnails) at sign-in and sign-out.
+CLEAR_BROWSER_CACHE = '"cache"'
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 # Separate limiters: a login flood must not lock out clients that only need
@@ -241,6 +244,9 @@ def login(
         else None
     )
     set_session_cookie(response, access_token, max_age=max_age)
+    # Versioned thumbnails are cached as immutable; a new sign-in on a shared
+    # browser must not see the previous account's cached pictures.
+    response.headers["Clear-Site-Data"] = CLEAR_BROWSER_CACHE
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -302,6 +308,7 @@ def logout(
     invalidate_user_sessions(session, current_user)
     session.commit()
     clear_session_cookie(response)
+    response.headers["Clear-Site-Data"] = CLEAR_BROWSER_CACHE
     return {"ok": True}
 
 

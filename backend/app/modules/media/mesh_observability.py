@@ -58,6 +58,12 @@ _phase_bytes = Counter(
     ("phase", "direction"),
     registry=registry,
 )
+_three_mf_reads = Counter(
+    "printstash_mesh_3mf_reads_total",
+    "3MF packages read, by reader and why lib3mf declined (none when it read).",
+    ("reader", "fallback"),
+    registry=registry,
+)
 _phase_triangles = Histogram(
     "printstash_mesh_phase_triangles",
     "Known triangle counts at the stage boundary.",
@@ -144,6 +150,17 @@ def record_estimate(stats: EstimateStats) -> None:
         logger.exception("failed to publish mesh estimate metrics")
 
 
+def _execution_fields() -> dict[str, str | None]:
+    """The Job execution a native wait or worker belongs to; null outside Jobs."""
+    from app.core.execution_scope import current_execution
+
+    execution = current_execution()
+    return {
+        "job_id": execution.job_id if execution is not None else None,
+        "job_execution_id": execution.execution_id if execution is not None else None,
+    }
+
+
 def record_admission(stats: AdmissionStats) -> None:
     try:
         logger.info(
@@ -153,6 +170,7 @@ def record_admission(stats: AdmissionStats) -> None:
                     "version": 1,
                     "process_id": os.getpid(),
                     "process_role": settings.process_role.value,
+                    **_execution_fields(),
                     **asdict(stats),
                 },
                 allow_nan=False,
@@ -177,6 +195,7 @@ def record_supervision(stats: SupervisionStats) -> None:
                     "version": 1,
                     "process_id": os.getpid(),
                     "process_role": settings.process_role.value,
+                    **_execution_fields(),
                     **asdict(stats),
                 },
                 allow_nan=False,
@@ -194,16 +213,25 @@ def record_supervision(stats: SupervisionStats) -> None:
         logger.exception("failed to publish mesh supervision metrics")
 
 
-def record_phases(stats: tuple[PhaseStats, ...], supervision: SupervisionStats) -> None:
+def record_phases(
+    stats: tuple[PhaseStats, ...],
+    supervision: SupervisionStats | None = None,
+    *,
+    file_id: int | None = None,
+) -> None:
     try:
         logger.info(
             "mesh_phases %s",
             json.dumps(
                 {
                     "version": 1,
-                    "execution_id": supervision.execution_id,
+                    "execution_id": supervision.execution_id
+                    if supervision is not None
+                    else None,
                     "process_id": os.getpid(),
                     "process_role": settings.process_role.value,
+                    **_execution_fields(),
+                    "file_id": file_id,
                     "stages": [asdict(stage) for stage in stats],
                 },
                 allow_nan=False,
@@ -221,5 +249,11 @@ def record_phases(stats: tuple[PhaseStats, ...], supervision: SupervisionStats) 
                 _phase_bytes.labels(phase, "output").inc(stage.output_bytes)
             if stage.triangle_count is not None:
                 _phase_triangles.labels(phase).observe(stage.triangle_count)
+            if stage.reader is not None:
+                fallback = stage.reader.fallback
+                _three_mf_reads.labels(
+                    stage.reader.reader.value,
+                    "none" if fallback is None else fallback.name.lower(),
+                ).inc()
     except Exception:
         logger.exception("failed to publish mesh phase metrics")

@@ -277,3 +277,35 @@ class TestCancel:
             assert state.spools[1]["remaining_weight"] == start_weight
         finally:
             running.stop()
+
+
+class TestTuningSubscription:
+    @pytest.mark.asyncio
+    async def test_moonraker_stream_reports_tuned_overrides_from_firmware(self):
+        from printstash_core.printers import TuningControl
+
+        fake, _state = create_app()
+        running = start_server(fake)
+        try:
+            client = MoonrakerClient(running.base_url)
+            received = asyncio.Event()
+            subscribed = asyncio.Event()
+
+            async def on_snapshot(snapshot):
+                subscribed.set()
+                if snapshot.gcode_move.speed_factor == 1.25:
+                    assert snapshot.gcode_move.absolute_coordinates is True
+                    assert snapshot.gcode_move.absolute_extrude is True
+                    assert snapshot.extruder.can_extrude is False
+                    assert snapshot.axis_maximum == (250, 250, 250, 0)
+                    received.set()
+
+            async with asyncio.TaskGroup() as tasks:
+                tasks.create_task(
+                    client.subscribe_snapshots(on_snapshot, stop_event=received)
+                )
+                await asyncio.wait_for(subscribed.wait(), timeout=5)
+                await client.tune(TuningControl.SPEED, 125)
+                await asyncio.wait_for(received.wait(), timeout=5)
+        finally:
+            running.stop()

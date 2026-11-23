@@ -16,7 +16,7 @@ from app.db.models import (
     JobKind,
     JobState,
 )
-from app.modules.derivatives import policy, producers, records, repair
+from app.modules.derivatives import policy, previews, producers, records, repair
 from app.modules.derivatives.kinds import GROUPS
 from app.modules.derivatives.source import DerivativeSource, subject_key
 from app.modules.work import service
@@ -24,6 +24,13 @@ from app.modules.work.jobs import jobs
 from app.modules.work.reconciler import run_pass
 from app.modules.work.submission import submit
 from app.schemas.jobs import RegenerateMode
+
+
+@pytest.fixture(autouse=True)
+def enabled_preview_default(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings.frozen, "derivatives_previews_enabled", True)
 
 
 @pytest.fixture(params=GROUPS, ids=lambda item: item.definition.value)
@@ -35,10 +42,12 @@ def producer_group(request):
 def artifact(producer_group, make_model, make_file):
     filename = {
         JobKind.DERIVATIVES_MESH: "part.stl",
+        JobKind.DERIVATIVES_PREVIEWS: "part.stl",
         JobKind.DERIVATIVES_GCODE: "part.gcode",
         JobKind.DERIVATIVES_TOOLPATH: "part.bgcode",
         JobKind.DERIVATIVES_VIEWER_STL: "part.3mf",
         JobKind.DERIVATIVES_PLATES: "part.3mf",
+        JobKind.DERIVATIVES_PROJECT_PROFILE: "part.3mf",
     }[producer_group.definition]
     return make_file(
         make_model(),
@@ -73,6 +82,28 @@ class TestResolution:
             True,
             True,
         )
+
+    @pytest.mark.parametrize(
+        ("setting", "disabled", "enabled"),
+        [
+            (
+                "derivatives_previews_enabled",
+                JobKind.DERIVATIVES_PREVIEWS,
+                JobKind.DERIVATIVES_MESH,
+            ),
+            (
+                "derivatives_mesh_enabled",
+                JobKind.DERIVATIVES_MESH,
+                JobKind.DERIVATIVES_PREVIEWS,
+            ),
+        ],
+    )
+    def test_previews_are_controlled_apart_from_covers(
+        self, db_session, make_system_config, setting, disabled, enabled
+    ):
+        make_system_config(**{setting: False})
+        controls = policy.resolve(db_session)
+        assert (controls[disabled].enabled, controls[enabled].enabled) == (False, True)
 
     def test_independent_sessions_read_the_saved_policy(
         self, db_session, producer_group
@@ -187,8 +218,10 @@ class TestDiscovery:
         )
 
     def test_reenable_offers_missing_outputs(
-        self, db_session, producer_group, artifact
+        self, db_session, producer_group, artifact, make_derivative
     ):
+        if producer_group.definition is JobKind.DERIVATIVES_PREVIEWS:
+            make_derivative(artifact, DerivativeKind.THUMBNAIL)
         name = policy.SETTINGS[producer_group.definition]
         policy.update(db_session, {name: False})
         policy.update(db_session, {name: True})
@@ -242,10 +275,12 @@ class TestAdmission:
         make_system_config(**{policy.SETTINGS[producer_group.definition]: False})
         producer = {
             JobKind.DERIVATIVES_MESH: producers.derive_mesh,
+            JobKind.DERIVATIVES_PREVIEWS: previews.derive,
             JobKind.DERIVATIVES_GCODE: producers.derive_gcode,
             JobKind.DERIVATIVES_TOOLPATH: producers.derive_toolpath,
             JobKind.DERIVATIVES_VIEWER_STL: producers.derive_viewer_stl,
             JobKind.DERIVATIVES_PLATES: producers.derive_plates,
+            JobKind.DERIVATIVES_PROJECT_PROFILE: producers.derive_project_profile,
         }[producer_group.definition]
         with pytest.raises(OperationError, match="derivative_group_disabled"):
             producer(artifact.id)
@@ -318,8 +353,10 @@ class TestAdmission:
         assert all(jobs.get(job.id).state is JobState.CANCELLED for job in backlog)
 
     def test_policy_cancellations_do_not_trigger_submission_cooldown(
-        self, db_session, artifact, producer_group, make_job
+        self, db_session, artifact, producer_group, make_job, make_derivative
     ):
+        if producer_group.definition is JobKind.DERIVATIVES_PREVIEWS:
+            make_derivative(artifact, DerivativeKind.THUMBNAIL)
         for _ in range(settings.jobs_resubmit_burst + 1):
             make_job(
                 kind=producer_group.definition,

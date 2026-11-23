@@ -16,7 +16,7 @@ import {
   TrendingUp,
   Trash2,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link } from "@/lib/link";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -795,7 +795,7 @@ export function StorageInventoryPanel() {
                             size="sm"
                             className="h-auto w-full justify-start gap-3 px-1 py-3 text-left"
                           >
-                            <Link to={`/models/${model.model_id}`}>
+                            <Link href={`/models/${model.model_id}`}>
                               <Box className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
                               <span
                                 className="min-w-0 flex-1 truncate text-sm font-medium"
@@ -1039,12 +1039,12 @@ export function StorageInventoryPanel() {
                         )}
                         {preview.owner === "trash" && (
                           <Button asChild variant="outline" size="sm">
-                            <Link to="/settings?section=trash">{t("Review eligible trash")}</Link>
+                            <Link href="/settings?section=trash">{t("Review eligible trash")}</Link>
                           </Button>
                         )}
                         {preview.owner === "backups" && (
                           <Button asChild variant="outline" size="sm">
-                            <Link to="/settings?section=backups">
+                            <Link href="/settings?section=backups">
                               {t("Review retained backups")}
                             </Link>
                           </Button>

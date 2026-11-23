@@ -13,6 +13,8 @@ from .contracts import ComputeUnavailable, Reason
 if TYPE_CHECKING:
     from app.modules.media.compute_geometry import GeometryLayout
 
+# One maximal visual body is 96,000,000 bytes. The queue can charge
+# two copies of that body while the separate cache can pin the decoded owner.
 INPUT_QUEUE_BYTES = 192 * 1024**2
 INPUT_CACHE_BYTES = 128 * 1024**2
 OUTPUT_QUEUE_BYTES = 192 * 1024**2

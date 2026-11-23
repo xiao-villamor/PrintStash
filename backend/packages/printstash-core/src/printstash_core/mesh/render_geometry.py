@@ -8,6 +8,7 @@ an entire placed triangle array. No parser or Trimesh dependency belongs here.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
@@ -24,6 +25,9 @@ if TYPE_CHECKING:
     IntArray = NDArray[np.int64]
 
 _POINT_CHUNK_SIZE = 64_000
+_CORNER_PAIR_BUDGET = 256_000
+_CREASE_COSINE = math.cos(math.radians(30))
+_COPLANAR_COSINE = 1.0 - 1e-6
 
 
 class RenderableMesh(Protocol):
@@ -192,19 +196,99 @@ def _validate_chunk(size: int) -> None:
 
 
 @dataclass(frozen=True)
-class PreparedRender:
+class PreparedRender(PreparedRenderGeometry):
     """Owned camera-independent positions, identities and angle-weighted normals.
 
     Scene face storage is proportional to unique source resources; expanded
-    positions and welded normals remain whole. Iterators expose read-only,
+    positions and face-corner normals remain whole. Iterators expose read-only,
     bounded indices in the original placement order.
     """
 
-    vertices: RenderPositions
-    face_count: int
-    face_chunks: Callable[[int], Iterator[IntArray]]
+    position_ids: IntArray
+    corner_normals: RenderPositions
+
+
+@dataclass(frozen=True)
+class FrozenRender(PreparedRenderGeometry):
+    """The welded smooth normals pinned by the similarity and reference recipes."""
+
     position_ids: IntArray
     smooth_normals: FloatArray
+
+    def normals_for(self, faces: IntArray) -> FloatArray:
+        import numpy as np
+
+        points = self.vertices[faces]
+        flat = np.cross(points[:, 1] - points[:, 0], points[:, 2] - points[:, 0])
+        lengths = np.linalg.norm(flat, axis=1, keepdims=True)
+        flat = flat / np.where(lengths == 0, 1.0, lengths)
+        smooth = self.smooth_normals[self.position_ids[faces]]
+        cosine = np.sum(smooth * flat[:, None, :], axis=2)
+        t = np.clip((cosine - 0.75) / (0.92 - 0.75), 0.0, 1.0)
+        t = (t * t * (3.0 - 2.0 * t))[..., None]
+        normals = t * smooth + (1.0 - t) * flat[:, None, :]
+        lengths = np.linalg.norm(normals, axis=2, keepdims=True)
+        return normals / np.where(lengths == 0, 1.0, lengths)
+
+
+def prepare_frozen_render(
+    geometry: PreparedRenderGeometry, *, face_chunk_size: int = 64_000
+) -> FrozenRender:
+    """Keep the original accumulation order and precision for encoder inputs."""
+    import numpy as np
+
+    _validate_chunk(face_chunk_size)
+    verts = geometry.vertices
+    pos_id = weld_positions(geometry)
+    n_pos = int(pos_id.max()) + 1
+
+    # Angle-weighted object-space normals are shared across every camera.
+    # Accumulate bounded facet chunks into the whole welded-position table.
+    vacc = np.zeros((n_pos, 3), dtype=np.float64)
+    for fc in geometry.face_chunks(face_chunk_size):
+        f_obj = verts[fc]  # (c, 3, 3)
+        fn = np.cross(f_obj[:, 1] - f_obj[:, 0], f_obj[:, 2] - f_obj[:, 0])
+        normal_lengths = np.linalg.norm(fn, axis=1, keepdims=True)
+        fn = fn / np.where(normal_lengths == 0, 1.0, normal_lengths)
+        del normal_lengths
+        # Angle-weighted normals (Thürmer–Wüthrich): weight each face's
+        # contribution to a vertex by the triangle's interior angle there.
+        # Plain incident-face averaging over-counts directions that simply
+        # have more (or thinner) triangles — which skews the normal at mesh
+        # "poles" (many triangles fanning into one vertex) and irregular
+        # tessellation, the source of the radial "fan" streaks. Angle weights
+        # make the smoothed normal independent of how the surface is cut up.
+        e_ab = f_obj[:, [1, 2, 0]] - f_obj  # edge to "next" corner, per corner
+        e_ac = f_obj[:, [2, 0, 1]] - f_obj  # edge to "prev" corner, per corner
+        e_ab /= np.maximum(np.linalg.norm(e_ab, axis=2, keepdims=True), 1e-20)
+        e_ac /= np.maximum(np.linalg.norm(e_ac, axis=2, keepdims=True), 1e-20)
+        ang = np.arccos(np.clip(np.sum(e_ab * e_ac, axis=2), -1.0, 1.0))  # (c,3)
+        flat_pos = pos_id[fc].ravel()  # (3c,) welded id per face corner
+        # Each corner contributes its face normal scaled by that corner angle.
+        fn_per_corner = np.repeat(fn, 3, axis=0) * ang.ravel()[:, None]  # (3c,3)
+        for a in range(3):
+            vacc[:, a] += np.bincount(
+                flat_pos, weights=fn_per_corner[:, a], minlength=n_pos
+            )
+        del f_obj, fn, flat_pos, fn_per_corner, e_ab, e_ac, ang
+    accumulated_lengths = np.linalg.norm(vacc, axis=1, keepdims=True)
+    vsm = vacc / np.where(accumulated_lengths == 0, 1.0, accumulated_lengths)
+    del vacc, accumulated_lengths
+
+    pos_id.flags.writeable = False
+    vsm.flags.writeable = False
+    return FrozenRender(verts, geometry.face_count, geometry.face_chunks, pos_id, vsm)
+
+
+def prepare_frozen_mesh_render(
+    mesh: RenderableMesh | None, *, face_chunk_size: int = 64_000
+) -> FrozenRender | None:
+    geometry = prepare_mesh(mesh)
+    return (
+        None
+        if geometry is None
+        else prepare_frozen_render(geometry, face_chunk_size=face_chunk_size)
+    )
 
 
 def prepare_mesh_render(
@@ -225,7 +309,7 @@ def prepare_scene_render(
 
 
 def weld_positions(geometry: PreparedRenderGeometry) -> IntArray:
-    """Return canonical position identities without preparing smooth normals."""
+    """Return canonical position identities without computing corner normals."""
     import numpy as np
 
     verts = geometry.vertices
@@ -270,39 +354,107 @@ def _prepare_normals(
         raise ValueError("invalid_render_welding")
     n_pos = int(pos_id.max()) + 1
 
-    # Angle-weighted object-space normals are shared across every camera.
-    # Accumulate bounded facet chunks into the whole welded-position table.
-    vacc = np.zeros((n_pos, 3), dtype=np.float64)
-    for fc in geometry.face_chunks(face_chunk_size):
-        f_obj = verts[fc]  # (c, 3, 3)
-        fn = np.cross(f_obj[:, 1] - f_obj[:, 0], f_obj[:, 2] - f_obj[:, 0])
-        normal_lengths = np.linalg.norm(fn, axis=1, keepdims=True)
-        fn = fn / np.where(normal_lengths == 0, 1.0, normal_lengths)
-        del normal_lengths
-        # Angle-weighted normals (Thürmer–Wüthrich): weight each face's
-        # contribution to a vertex by the triangle's interior angle there.
-        # Plain incident-face averaging over-counts directions that simply
-        # have more (or thinner) triangles — which skews the normal at mesh
-        # "poles" (many triangles fanning into one vertex) and irregular
-        # tessellation, the source of the radial "fan" streaks. Angle weights
-        # make the smoothed normal independent of how the surface is cut up.
-        e_ab = f_obj[:, [1, 2, 0]] - f_obj  # edge to "next" corner, per corner
-        e_ac = f_obj[:, [2, 0, 1]] - f_obj  # edge to "prev" corner, per corner
-        e_ab /= np.maximum(np.linalg.norm(e_ab, axis=2, keepdims=True), 1e-20)
-        e_ac /= np.maximum(np.linalg.norm(e_ac, axis=2, keepdims=True), 1e-20)
-        ang = np.arccos(np.clip(np.sum(e_ab * e_ac, axis=2), -1.0, 1.0))  # (c,3)
-        flat_pos = pos_id[fc].ravel()  # (3c,) welded id per face corner
-        # Each corner contributes its face normal scaled by that corner angle.
-        fn_per_corner = np.repeat(fn, 3, axis=0) * ang.ravel()[:, None]  # (3c,3)
-        for a in range(3):
-            vacc[:, a] += np.bincount(
-                flat_pos, weights=fn_per_corner[:, a], minlength=n_pos
-            )
-        del f_obj, fn, flat_pos, fn_per_corner, e_ab, e_ac, ang
-    accumulated_lengths = np.linalg.norm(vacc, axis=1, keepdims=True)
-    vsm = vacc / np.where(accumulated_lengths == 0, 1.0, accumulated_lengths)
-    del vacc, accumulated_lengths
-
+    face_normals = np.empty((geometry.face_count, 3), dtype=np.float32)
+    corner_angles = np.empty((geometry.face_count, 3), dtype=np.float32)
+    corner_positions = np.empty((geometry.face_count, 3), dtype=np.int32)
+    start = 0
+    for faces in geometry.face_chunks(face_chunk_size):
+        end = start + len(faces)
+        # Wide intermediates avoid overflow when normalizing cross products
+        # from finite float32 positions with a large coordinate range.
+        points = verts[faces].astype(np.float64)
+        edges = points[:, [1, 2, 0]] - points
+        normals = np.cross(edges[:, 0], -edges[:, 2])
+        lengths = np.linalg.norm(normals, axis=1, keepdims=True)
+        face_normals[start:end] = normals / np.where(lengths == 0, 1, lengths)
+        edge_lengths = np.linalg.norm(edges, axis=2, keepdims=True)
+        edges /= np.where(edge_lengths == 0, 1, edge_lengths)
+        cosines = -np.sum(edges * edges[:, [2, 0, 1]], axis=2)
+        corner_angles[start:end] = np.arccos(np.clip(cosines, -1, 1))
+        corner_positions[start:end] = pos_id[faces]
+        start = end
+    if start != geometry.face_count:
+        raise ValueError("invalid_render_face_count")
+    corner_normals = _crease_normals(
+        face_normals, corner_angles.ravel(), corner_positions.ravel(), n_pos
+    )
     pos_id.flags.writeable = False
-    vsm.flags.writeable = False
-    return PreparedRender(verts, geometry.face_count, geometry.face_chunks, pos_id, vsm)
+    corner_normals.flags.writeable = False
+    return PreparedRender(
+        verts, geometry.face_count, geometry.face_chunks, pos_id, corner_normals
+    )
+
+
+def _crease_normals(
+    face_normals: RenderPositions,
+    angles: NDArray[np.float32],
+    corner_positions: NDArray[np.int32],
+    position_count: int,
+) -> RenderPositions:
+    """Evaluate the same crease filter for every incident face at a welded vertex.
+
+    Group by valence to batch a ragged adjacency table into rectangular tiles.
+    Even a single unusually high-valence vertex only allocates bounded tiles.
+    Preserve the face normal exactly when all contributing normals are coplanar.
+    """
+    import numpy as np
+
+    degrees = np.bincount(corner_positions, minlength=position_count)
+    ordered_corners = np.argsort(corner_positions, kind="stable")
+    offsets = np.concatenate(([0], np.cumsum(degrees)))
+    by_degree = np.argsort(degrees, kind="stable")
+    degree_values, group_counts = np.unique(degrees, return_counts=True)
+    output = np.repeat(face_normals, 3, axis=0)
+    group_start = 0
+
+    def resolve(
+        sums: RenderPositions, own: RenderPositions, varied: NDArray[np.bool_]
+    ) -> RenderPositions:
+        lengths = np.linalg.norm(sums, axis=-1, keepdims=True)
+        valid = varied[..., None] & (lengths > 0)
+        np.divide(sums, lengths, out=sums, where=valid)
+        return np.where(valid, sums, own)
+
+    for degree, group_count in zip(
+        degree_values.tolist(), group_counts.tolist(), strict=True
+    ):
+        positions = by_degree[group_start : group_start + group_count]
+        group_start += group_count
+        if degree < 2:
+            continue
+        if degree * degree <= _CORNER_PAIR_BUDGET:
+            batch_size = max(1, _CORNER_PAIR_BUDGET // (degree * degree))
+            incident = np.arange(degree)
+            for start in range(0, len(positions), batch_size):
+                first = offsets[positions[start : start + batch_size]]
+                corners = ordered_corners[first[:, None] + incident]
+                normals = face_normals[corners // 3]
+                dots = normals @ normals.swapaxes(1, 2)
+                match = dots >= _CREASE_COSINE
+                sums = match @ (normals * angles[corners, None])
+                varied = np.any(match & (dots < _COPLANAR_COSINE), axis=-1)
+                output[corners] = resolve(sums, normals, varied)
+            continue
+        for position in positions:
+            corners = ordered_corners[offsets[position] : offsets[position + 1]]
+            normals = face_normals[corners // 3]
+            # Fans on a plane often have hundreds of duplicate directions.
+            # They share one contribution per direction instead of expanding
+            # a quadratic array of repeated face-corner pairs.
+            directions, mapping = np.unique(normals, axis=0, return_inverse=True)
+            weights = np.bincount(mapping, weights=angles[corners]).astype(np.float32)
+            weighted = directions * weights[:, None]
+            result = np.empty_like(directions)
+            tile = math.isqrt(_CORNER_PAIR_BUDGET)
+            for start in range(0, len(directions), tile):
+                own = directions[start : start + tile]
+                sums = np.zeros_like(own)
+                varied = np.zeros(len(own), dtype=bool)
+                for neighbor in range(0, len(directions), tile):
+                    dots = own @ directions[neighbor : neighbor + tile].T
+                    match = dots >= _CREASE_COSINE
+                    sums += match @ weighted[neighbor : neighbor + tile]
+                    varied |= np.any(match & (dots < _COPLANAR_COSINE), axis=-1)
+                result[start : start + len(own)] = resolve(sums, own, varied)
+            output[corners] = result[mapping]
+    return output.reshape(-1, 3, 3)

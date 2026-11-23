@@ -99,6 +99,28 @@ afterEach(() => {
 });
 
 describe("resetTasksForNewSetup", () => {
+  it("preserves archive result destinations across reload", async () => {
+    tc.trackImportJob("archive-results", "Import assembly");
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "archive-results",
+        kind: "ingestion.archive_selection",
+        state: "completed",
+        result: { multipart_model_id: 7, documents: [{ name: "Manual", document_id: 9 }] },
+      }),
+    ]);
+    await tc.syncImportJobs();
+    expect(tc.listTasks()[0]).toMatchObject({
+      multipartModelId: 7,
+      importedDocuments: [{ name: "Manual", document_id: 9 }],
+    });
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    expect(tc.listTasks()[0]).toMatchObject({
+      multipartModelId: 7,
+      importedDocuments: [{ name: "Manual", document_id: 9 }],
+    });
+  });
   it("forgets old installation tasks before syncing a new installation", async () => {
     tc.trackImportJob("old-job", "reconcile");
 

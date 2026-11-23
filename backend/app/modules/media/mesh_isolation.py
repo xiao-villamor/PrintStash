@@ -69,6 +69,8 @@ from app.modules.media.mesh_protocol import (
     OutputSink,
     PreparedThumbnailOutput,
     ThumbnailOutput,
+    ViewsReady,
+    ViewsRefused,
 )
 from app.modules.media.mesh_telemetry import (
     SupervisedReply,
@@ -78,14 +80,16 @@ from app.modules.media.mesh_telemetry import (
     encode_phase_stats,
 )
 from app.modules.media.native_budget import (
+    MIN_NATIVE_MEMORY,
     AnalysisWork,
     GeometryWork,
     MeshSource,
+    NativeBudget,
     RasterCodec,
     RasterWork,
     WorkProfile,
-    estimate_sources,
     optimistic_step_claim,
+    plan_sources,
 )
 from app.modules.media.native_execution import admission
 from app.modules.media.worker_bootstrap import (
@@ -107,6 +111,11 @@ if TYPE_CHECKING:
 
 REPLY_MAGIC = b"MSH1"
 MAX_REPLY_BYTES = 32 * 1024 * 1024
+# The warm template already holds the 3MF reader, NumPy and trimesh.
+# Geometry-only passes with a full 512 MiB floor can use a fixed startup
+# margin instead of requiring half the template size again. Source allocations
+# still use the existing per-file claim and the worker's hard ceiling.
+_THREE_MF_GEOMETRY_TEMPLATE_HEADROOM = 80 * 1024**2
 # Output wakes the supervisor at once; this is only how often it samples the
 # worker's memory and looks for a cancel or deadline while the worker is quiet.
 # The worker's own address-space limit is the hard ceiling in between.
@@ -411,6 +420,7 @@ def supervise_result(
     reply_limit: int = MAX_REPLY_BYTES,
     withdrawn: Callable[[], bool] | None = None,
     on_chunk: Callable[[bytes], None] | None = None,
+    template_headroom_bytes: int | None = None,
 ) -> SupervisedReply:
     """Own the process lifecycle and retain observed costs on every exit.
 
@@ -468,6 +478,7 @@ def supervise_result(
                 descriptors=inherited.descriptors if inherited is not None else (),
                 cwd=Path(application_file).resolve().parent.parent,
                 warm=settings.mesh_worker_template_enabled,
+                template_headroom_bytes=template_headroom_bytes,
             )
         except OSError as exc:
             raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED) from exc
@@ -737,20 +748,25 @@ def _run_worker(
         if deadline is not None and time.monotonic() >= deadline:
             raise MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
 
+    from printstash_core.mesh.preview_profile import preview_appearance
+
+    spec = {"preview_appearance": asdict(preview_appearance()), **spec}
     check()
     if isinstance(work, (RasterWork, AnalysisWork)):
         warm_render()
         check()
     existing = current_permit()
     capacity = Resources(native_process.native_capacity().slots, memory_budget_bytes())
-    amount = (
-        existing.resources
+    budget = (
+        NativeBudget(existing.resources, existing.hard_bytes)
         if existing is not None
-        else amount
+        else NativeBudget.full(amount)
         if amount is not None
-        else estimate_sources(capacity, sources, work=work)
+        else plan_sources(capacity, sources, work=work)
     )
-    with admission(amount, capacity, checkpoint=check) as permit:
+    with admission(
+        budget.admission, capacity, checkpoint=check, hard_bytes=budget.hard_bytes
+    ) as permit:
         check()
         if module == "app.modules.media.mesh_worker":
             from app.core.native_settings import capture
@@ -761,11 +777,19 @@ def _run_worker(
         command = worker_command(
             module,
             [json.dumps(payload)],
-            permit.resources.bytes,
+            permit.hard_bytes,
+        )
+        template_headroom = (
+            _THREE_MF_GEOMETRY_TEMPLATE_HEADROOM
+            if isinstance(work, GeometryWork)
+            and len(sources) == 1
+            and sources[0].file_type.lower().lstrip(".") == "3mf"
+            and permit.hard_bytes >= MIN_NATIVE_MEMORY
+            else None
         )
         return supervise_result(
             command,
-            memory_budget=permit.resources.bytes,
+            memory_budget=permit.hard_bytes,
             timeout_seconds=(
                 float(settings.mesh_worker_timeout_seconds)
                 if deadline is None
@@ -774,6 +798,7 @@ def _run_worker(
             permit=permit,
             lifecycle=WorkerLifecycle.GUARDED,
             on_chunk=on_chunk,
+            template_headroom_bytes=template_headroom,
         )
 
 
@@ -807,6 +832,7 @@ def prepared_worker_result(
     sources: tuple[MeshSource, ...],
     work: WorkProfile,
     reply_limit: int = MAX_REPLY_BYTES,
+    on_chunk: Callable[[bytes], None] | None = None,
 ) -> Iterator[tuple[SupervisedReply, Path]]:
     """Supervise native work, then retain staged custody through publication.
 
@@ -816,15 +842,20 @@ def prepared_worker_result(
     """
     existing = current_permit()
     capacity = Resources(native_process.native_capacity().slots, memory_budget_bytes())
-    amount = (
-        existing.resources
+    budget = (
+        NativeBudget(existing.resources, existing.hard_bytes)
         if existing is not None
-        else estimate_sources(capacity, sources, work=work)
+        else plan_sources(capacity, sources, work=work)
     )
     with worker_output_directory(workspace) as directory:
         owned = directory.lstat()
         identity = (owned.st_dev, owned.st_ino)
-        with admission(amount, capacity, checkpoint=checkpoint) as permit:
+        with admission(
+            budget.admission,
+            capacity,
+            checkpoint=checkpoint,
+            hard_bytes=budget.hard_bytes,
+        ) as permit:
             command = worker_command(
                 module,
                 [
@@ -836,16 +867,17 @@ def prepared_worker_result(
                         }
                     )
                 ],
-                permit.resources.bytes,
+                permit.hard_bytes,
             )
             reply = supervise_result(
                 command,
-                memory_budget=permit.resources.bytes,
+                memory_budget=permit.hard_bytes,
                 timeout_seconds=float(settings.mesh_worker_timeout_seconds),
                 permit=permit,
                 lifecycle=WorkerLifecycle.GUARDED,
                 temporary_directory=directory,
                 reply_limit=reply_limit,
+                on_chunk=on_chunk,
             )
         try:
             current = directory.lstat()
@@ -883,9 +915,31 @@ def read_spec(argv: list[str]) -> dict[str, Any]:
     return spec
 
 
+def worker_appearance(spec: dict[str, Any]):
+    """Scope a render to the appearance supplied by its supervising process."""
+    from printstash_core.mesh.preview_profile import (
+        DEFAULT_APPEARANCE,
+        appearance_scope,
+        decode_appearance,
+    )
+
+    appearance = (
+        decode_appearance(spec["preview_appearance"])
+        if "preview_appearance" in spec
+        else DEFAULT_APPEARANCE
+    )
+    return appearance_scope(appearance)
+
+
 def _work_profile(request: ThumbnailRequest) -> WorkProfile:
     raster: RasterWork | None = None
-    if request.include_thumbnail:
+    if request.views is not None:
+        from app.modules.media.preview_contracts import height_for
+
+        # Views are encoded one at a time: one live raster, like the batch.
+        width = request.views.width
+        raster = RasterWork(width, height_for(width), 1, RasterCodec.WEBP)
+    elif request.include_thumbnail:
         width = int(request.width or settings.model_thumbnail_width)
         height = int(request.height or round(width * 3 / 4))
         raster = RasterWork(
@@ -996,7 +1050,7 @@ def _generate_once(
             elif isinstance(output, PreparedThumbnailOutput):
                 prepared_output = output
                 continue
-            else:
+            elif not isinstance(output, ViewsReady | ViewsRefused):
                 continue
             if on_output is not None:
                 checkpoint(force=True)
@@ -1009,10 +1063,20 @@ def _generate_once(
         "height": request.height,
         "include_geometry": request.include_geometry,
         "include_thumbnail": request.include_thumbnail,
+        "check_embedded_3mf_preview": request.check_embedded_3mf_preview,
         "include_fingerprint": request.include_fingerprint,
         "triangle_cap": request.triangle_cap,
         "output_format": request.output_format,
         "reason": request.reason,
+        "views": None
+        if request.views is None
+        else {
+            "recipe": request.views.recipe,
+            "include_poles": request.views.include_poles,
+            "source_sha256": request.views.source_sha256,
+            "width": request.views.width,
+            "planar_cover": request.views.planar_cover,
+        },
     }
     work = _work_profile(request)
     with ExitStack() as resources:
@@ -1214,7 +1278,10 @@ def _render_packet_cpu(
     )
     with admission(amount, capacity, checkpoint=handoff.check) as permit:
         handoff.check(force=True)
+        from printstash_core.mesh.preview_profile import preview_appearance
+
         spec = {
+            "preview_appearance": asdict(preview_appearance()),
             "overrides": {**runtime_overrides(), "compute_mode": "cpu"},
             "directory": str(directory),
             "directory_identity": directory_identity,
@@ -1226,9 +1293,9 @@ def _render_packet_cpu(
             worker_command(
                 "app.modules.media.thumbnail_cpu_worker",
                 [json.dumps(spec)],
-                permit.resources.bytes,
+                permit.hard_bytes,
             ),
-            memory_budget=permit.resources.bytes,
+            memory_budget=permit.hard_bytes,
             timeout_seconds=max(0.001, handoff.deadline - time.monotonic()),
             permit=permit,
             lifecycle=WorkerLifecycle.GUARDED,

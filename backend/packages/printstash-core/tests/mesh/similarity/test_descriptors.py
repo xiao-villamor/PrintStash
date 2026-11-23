@@ -310,7 +310,7 @@ class TestViews:
         surface = prepare_surface(*tetra)
         preparations = []
         renders = []
-        prepare = render_geometry.prepare_mesh_render
+        prepare = render_geometry.prepare_frozen_mesh_render
         render = rasterizer.render_prepared_pixels
 
         def observe_preparation(mesh, *args, **kwargs):
@@ -323,7 +323,10 @@ class TestViews:
             return render(prepared, name, *args, **kwargs)
 
         monkeypatch.setattr(
-            descriptors, "prepare_mesh_render", observe_preparation, raising=False
+            descriptors,
+            "prepare_frozen_mesh_render",
+            observe_preparation,
+            raising=False,
         )
         monkeypatch.setattr(
             descriptors, "render_prepared_pixels", observe_render, raising=False
@@ -410,7 +413,9 @@ class TestViews:
         assert backgrounds == [rasterizer.RGBBackground.IGNORE_ALPHA] * 6
 
     def test_missing_preparation_has_explicit_reason(self, tetra, monkeypatch):
-        monkeypatch.setattr(descriptors, "prepare_mesh_render", lambda *a, **k: None)
+        monkeypatch.setattr(
+            descriptors, "prepare_frozen_mesh_render", lambda *a, **k: None
+        )
 
         with pytest.raises(GeometryError) as raised:
             descriptors.view_hashes(prepare_surface(*tetra), ambiguous_frame=False)

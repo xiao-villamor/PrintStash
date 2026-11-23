@@ -1,7 +1,7 @@
 /** Real-browser acceptance of coherent Library snapshots and private retirement. */
 import { expect, test, type Page } from "@playwright/test";
 import { useMockApi } from "./_setup";
-import { scrollToEnd } from "./_scroll";
+import { scrollToEnd, scrollToLibraryEntry } from "./_scroll";
 import {
   aCollectionNode,
   aCollectionPage,
@@ -157,7 +157,10 @@ async function releaseResponse(page: Page, gate: ReturnType<typeof holdResponse>
 }
 
 async function visitRecent(page: Page, label: string) {
-  await page.getByRole("main").getByRole("button", { name: "Recent", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Breadcrumbs" })
+    .getByRole("button", { name: "Recent", exact: true })
+    .click();
   await page.getByRole("menuitem", { name: `Snapshot ${label}`, exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`c=snapshot-${label.toLowerCase()}`));
 }
@@ -166,8 +169,8 @@ async function expectSnapshot(page: Page, label: string) {
   const main = page.getByRole("main");
   await expect(main.getByRole("heading", { name: `Snapshot ${label}`, exact: true })).toBeVisible();
   await expect(
-    main.getByRole("navigation").getByRole("button", { name: `Snapshot ${label}`, exact: true }),
-  ).toBeVisible();
+    page.getByRole("navigation", { name: "Breadcrumbs" }).locator('[aria-current="page"]'),
+  ).toHaveText(`Snapshot ${label}`);
   await expect(main.getByText(`tag-snapshot-${label}`, { exact: true })).toBeVisible();
   await expect(main.getByText(`README Snapshot ${label}`, { exact: true })).toBeVisible();
   await expect(main.getByText(`Snapshot ${label} child`, { exact: true })).toBeVisible();
@@ -187,7 +190,9 @@ async function watchSnapshots(page: Page, mode: "coherent" | "retired") {
       const heading = main?.querySelector("h1")?.textContent ?? "";
       // Recent-menu labels are navigation choices, not displayed snapshot metadata.
       const surfaces = Array.from(
-        main?.querySelectorAll("h1, nav > span > button, span[title], p, a") ?? [],
+        document.querySelectorAll(
+          'main h1, nav[aria-label="Breadcrumbs"] [aria-current="page"], main span[title], main p, main a',
+        ),
       )
         .map((node) => node.textContent ?? "")
         .join(" ");
@@ -373,8 +378,8 @@ test.describe("Library snapshots", () => {
       await page.goto("/?c=snapshot-a&type=all&sort=date-desc");
       const first = page.locator('main [data-library-entry="/models/110"]');
       await first.scrollIntoViewIfNeeded();
-      const firstTop = await first.evaluate((node) => node.getBoundingClientRect().top);
-      const firstKey = await page.evaluate(() => history.state.key);
+      let firstTop = await first.evaluate((node) => node.getBoundingClientRect().top);
+      const firstKey = await page.evaluate(() => history.state.__TSR_key);
       const href = page.url();
       await page.route("**/api/v1/models/110", (route) =>
         route.fulfill({
@@ -382,11 +387,21 @@ test.describe("Library snapshots", () => {
         }),
       );
       await first.click();
+      await expect(page.locator("#model-drawer")).toBeVisible();
+      await scrollToLibraryEntry(page, first);
+      firstTop = await first.evaluate((node) => node.getBoundingClientRect().top);
+      await page
+        .locator("#model-drawer")
+        .getByRole("link", { name: "Open page", exact: true })
+        .click();
       await expect(
         page.getByRole("heading", { name: "History card 10", exact: true }),
       ).toBeVisible();
       // The header's Library link pushes a new visit; detail Back would reuse the old visit.
-      await page.getByRole("link", { name: "PrintStash", exact: true }).click();
+      await page
+        .getByRole("navigation", { name: "Navigation", exact: true })
+        .getByRole("link", { name: "PrintStash", exact: true })
+        .click();
       await expect(page).toHaveURL(href);
       await expect(page.getByRole("heading", { name: "Snapshot A", exact: true })).toBeVisible();
       const second = page.locator('main [data-library-entry="/models/130"]');
@@ -406,9 +421,9 @@ test.describe("Library snapshots", () => {
             { once: true },
           );
         });
-      await second.scrollIntoViewIfNeeded();
+      await scrollToLibraryEntry(page, second);
       const secondTop = await second.evaluate((node) => node.getBoundingClientRect().top);
-      const secondKey = await page.evaluate(() => history.state.key);
+      const secondKey = await page.evaluate(() => history.state.__TSR_key);
       expect(secondKey).not.toBe(firstKey);
 
       await page.goBack();
@@ -417,7 +432,7 @@ test.describe("Library snapshots", () => {
       ).toBeVisible();
       await page.goBack();
       await expect(page).toHaveURL(href);
-      expect(await page.evaluate(() => history.state.key)).toBe(firstKey);
+      expect(await page.evaluate(() => history.state.__TSR_key)).toBe(firstKey);
       await expect
         .poll(() => first.evaluate((node) => node.getBoundingClientRect().top))
         .toBeCloseTo(firstTop, 0);
@@ -427,7 +442,7 @@ test.describe("Library snapshots", () => {
       ).toBeVisible();
       await page.goForward();
       await expect(page).toHaveURL(href);
-      expect(await page.evaluate(() => history.state.key)).toBe(secondKey);
+      expect(await page.evaluate(() => history.state.__TSR_key)).toBe(secondKey);
       await expect
         .poll(() => second.evaluate((node) => node.getBoundingClientRect().top))
         .toBeCloseTo(secondTop, 0);

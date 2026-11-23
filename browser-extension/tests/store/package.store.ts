@@ -6,6 +6,7 @@
 import { readFile } from "node:fs/promises";
 import { unzipSync, strFromU8 } from "fflate";
 import { describe, expect, it } from "vitest";
+import { MARKETPLACE_ORIGINS } from "../../source-providers";
 
 const metadata = JSON.parse(await readFile("package.json", "utf8"));
 const files = unzipSync(await readFile(`.output/${metadata.name}-${metadata.version}-chrome.zip`));
@@ -53,7 +54,7 @@ describe("Chrome Web Store ZIP", () => {
   it("limits the ZIP to production assets", () => {
     const unexpected = Object.keys(files).filter(
       (path) =>
-        !/^(?:manifest\.json|(?:popup|help)\.html|icon(?:-\d+\.png|\.svg)|chunks\/[\w-]+\.js|assets\/[\w-]+\.css)$/.test(
+        !/^(?:manifest\.json|(?:background|marketplace)\.js|(?:popup|help)\.html|icon(?:-\d+\.png|\.svg)|chunks\/[\w-]+\.js|assets\/[\w-]+\.css)$/.test(
           path,
         ),
     );
@@ -70,7 +71,15 @@ describe("Chrome Web Store ZIP", () => {
     ]);
     expect(manifest.optional_host_permissions).toEqual(["http://*/*", "https://*/*"]);
     expect(manifest.content_scripts).toBeUndefined();
-    expect(manifest.background).toBeUndefined();
+    expect(manifest.background).toEqual({ service_worker: "background.js" });
+    expect(files[manifest.background.service_worker]?.length).toBeGreaterThan(0);
+    expect(files["marketplace.js"]?.length).toBeGreaterThan(0);
+    expect(manifest.web_accessible_resources).toEqual([
+      {
+        resources: ["popup.html", "chunks/*", "assets/*", "icon.svg"],
+        matches: MARKETPLACE_ORIGINS,
+      },
+    ]);
     expect(manifest.externally_connectable).toBeUndefined();
   });
 

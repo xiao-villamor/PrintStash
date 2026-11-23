@@ -3,6 +3,21 @@ import { editHeaders, requireEditingReceipt } from "./editing";
 import { getJson, sendAction, sendForm, sendJson, type GetJsonOptions } from "@/lib/api/request";
 import type { DocumentListItem, DocumentRead } from "@/types";
 
+export const MODEL_DOCUMENT_PAGE_SIZE = 100;
+
+export function listModelDocuments(
+  modelId: number,
+  offset: number,
+  options?: GetJsonOptions,
+): Promise<DocumentListItem[]> {
+  const query = new URLSearchParams({
+    model_id: String(modelId),
+    limit: String(MODEL_DOCUMENT_PAGE_SIZE + 1),
+    offset: String(offset),
+  });
+  return getJson<DocumentListItem[]>(`/api/v1/documents?${query}`, options);
+}
+
 export function listDocuments(
   collection: string | null,
   options?: GetJsonOptions,
@@ -28,13 +43,15 @@ export function uploadDocument(
   file: File,
   collectionId: number | null,
   name?: string,
-  multipartModelId?: number,
+  owner?: { multipartModelId: number } | { modelId: number },
 ): Promise<DocumentRead> {
   const form = new FormData();
   form.append("file", file);
   if (collectionId != null) form.append("collection_id", String(collectionId));
   if (name) form.append("name", name);
-  if (multipartModelId != null) form.append("multipart_model_id", String(multipartModelId));
+  if (owner && "multipartModelId" in owner)
+    form.append("multipart_model_id", String(owner.multipartModelId));
+  if (owner && "modelId" in owner) form.append("model_id", String(owner.modelId));
   return sendForm<DocumentRead>("/api/v1/documents/upload", form);
 }
 

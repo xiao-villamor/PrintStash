@@ -10,6 +10,7 @@ deadlock on PostgreSQL. SQLite has one writer at a time and needs nothing.
 
 from __future__ import annotations
 
+from sqlalchemy import update
 from sqlmodel import Session, col, select
 
 from app.db.models import LibraryRevision
@@ -23,4 +24,13 @@ def lock_library_revision(session: Session) -> None:
         select(col(LibraryRevision.id))
         .where(col(LibraryRevision.id) == 1)
         .with_for_update()
+    )
+
+
+def invalidate_library_browse(session: Session) -> None:
+    """Retire cached pages when configuration changes their projected contents."""
+    session.execute(
+        update(LibraryRevision)
+        .where(col(LibraryRevision.id) == 1)
+        .values(revision=col(LibraryRevision.revision) + 1)
     )

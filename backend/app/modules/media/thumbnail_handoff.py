@@ -27,6 +27,8 @@ from .thumbnail_pixels import check_deadline, encode_pixels
 logger = get_logger(__name__)
 
 HOST_CEILING = 384 * 1024**2
+# The byte ceiling also limits concurrency: at 640×480 it fits three
+# worst-case packets. Keep the fourth slot available for lower pixel costs.
 HOST_SLOTS = 4
 CODEC_BASE_BYTES = 64 * 1024**2
 CODEC_PIXEL_BYTES = 64

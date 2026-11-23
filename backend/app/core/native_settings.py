@@ -44,6 +44,7 @@ _NAMES = frozenset(
         "three_mf_preview_max_ratio",
         "three_mf_preview_max_uncompressed_mb",
         "use_embedded_3mf_preview_for_large_files",
+        "prefer_rendered_3mf_preview",
     )
 )
 _snapshot: MappingProxyType[str, str | int | float | bool | None] | None = None

@@ -12,7 +12,12 @@ retention. This file pins the project's domain language.
 A printable logical asset deduplicated by source-mesh sha256; owns versioned
 Files and remains independently addressable and reusable even when referenced
 by Multipart Models. Everything shows each eligible Model independently of
-its references, alongside eligible Multipart Models.
+its references, alongside eligible Multipart Models. A chosen Model cover is a
+Model-owned image snapshot: uploaded, captured from the current 3D view, or copied
+from a source image. It takes precedence over the automatic Artifact thumbnail
+and survives derivative regeneration and later source-cover changes. Resetting
+the cover reveals the latest automatic thumbnail. Chosen covers are primary
+data included in backups and storage migrations and reclaimed on Model purge.
 _Avoid_: asset, item, part
 
 **Artifact** (File):
@@ -40,9 +45,15 @@ by any number of Multipart Models and keeps its own Artifacts, preview, G-code
 Revisions and print history.
 _Avoid_: Part Option, source file option, revision
 
+**Model Document**:
+A Document owned by one Model for supporting material such as a PDF, image or
+video. It inherits the Model's current Collection access, is hidden while
+the Model is in Trash and is purged with the Model. Binary downloads preserve
+the original file bytes.
+
 **Multipart Guide**:
 A Document linked to one Multipart Model for assembly or printing guidance.
-Guides may be Markdown, PDF or raster images and remain visible in Documents.
+Guides may be Markdown, PDF, raster images or videos and remain visible in Documents.
 Moving a grouping to Trash retains its guide links; permanent purge detaches
 them as ordinary Documents.
 _Avoid_: Model file, Artifact, attachment
@@ -225,6 +236,14 @@ A WebP preview stored under `thumbnail_key()` (`{file_id}.webp`);
 `thumbnail.to_webp()` is the single conversion seam every write goes
 through. Pre-WebP installs left PNGs under `legacy_thumbnail_key()` —
 read/delete only, never written.
+
+**Generated Model views**:
+A secondary `previews` Derivative belongs to one selected live mesh Artifact
+and a versioned Recipe. Its immutable manifest describes source-relative
+cameras and image ranges in one owned StorageBackend bundle. It never replaces
+a chosen Model cover. Publication preserves previous valid images while
+replacement runs; primary metadata and thumbnails have independent lifecycles.
+See [Model previews](docs/model-previews.md).
 
 ### Library sources
 

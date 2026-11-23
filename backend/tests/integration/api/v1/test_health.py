@@ -159,7 +159,7 @@ class TestHealth:
     def test_discloses_safe_liveness_storage_metadata(self, client: TestClient) -> None:
         body = client.get("/api/v1/health").json()
 
-        assert set(body) == {"status", "name", "storage"}
+        assert set(body) == {"status", "name", "storage", "capture_import_intent"}
         assert set(body["storage"]) == {
             "provider",
             "capabilities",

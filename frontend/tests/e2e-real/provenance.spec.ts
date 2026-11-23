@@ -1,4 +1,5 @@
 /** A Source draft conflicts against the real Model version, then saves only after review. */
+import { selectModelDetailTab } from "../model-detail-navigation";
 import { createHash } from "node:crypto";
 import { test, expect } from "./helpers";
 import { gcodeFor } from "./util";
@@ -66,7 +67,7 @@ test.describe("Source editing", () => {
       ).json();
       const writePath = `${readPath}/${initial.sources[0].id}`;
       await page.goto(`/models/${modelId}`);
-      await page.getByRole("tab", { name: "Source", exact: true }).click();
+      await selectModelDetailTab(page, "Source info");
       await page.getByRole("button", { name: "Edit Title" }).click();
       const draft = page.getByRole("textbox", { name: "Title override" });
       await draft.fill("My reviewed source draft");
@@ -83,10 +84,10 @@ test.describe("Source editing", () => {
         (response) =>
           new URL(response.url()).pathname === writePath && response.request().method() === "PATCH",
       );
-      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await page.getByRole("button", { name: "Save override", exact: true }).click();
       expect((await rejected).status()).toBe(412);
       await expect(draft).toHaveValue("My reviewed source draft");
-      await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Save override", exact: true })).toBeDisabled();
       await page.getByRole("button", { name: "Review latest version" }).click();
       await expect(
         page
@@ -103,7 +104,12 @@ test.describe("Source editing", () => {
       expect(await acknowledgement.request().headerValue("If-Match")).toBe(
         `"model-${modelId}-e${current.edit_epoch}-v${current.edit_version}"`,
       );
-      await expect(page.getByText("My reviewed source draft", { exact: true })).toBeVisible();
+      await expect(page.getByRole("dialog", { name: "Edit Title" })).toBeHidden();
+      await expect(
+        page
+          .getByTestId("model-detail-sidebar")
+          .getByText("My reviewed source draft", { exact: true }),
+      ).toBeVisible();
       const persisted: ModelProvenanceRead = await (
         await page.request.get(`${API}${readPath}`)
       ).json();

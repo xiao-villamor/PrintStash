@@ -11,10 +11,11 @@ from typing import Literal, cast
 
 from printstash_core.inference import EmbeddingError, EmbeddingSpace
 from printstash_core.inference.vectors import normalize
-from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+from printstash_core.mesh.preview_profile import REFERENCE_THUMBNAIL_PROFILE
 
 VisualProfile = Literal["thumbnail", "multiview"]
 Aggregation = Literal["mean", "max"]
+ENCODER_THUMBNAIL_RECIPE = REFERENCE_THUMBNAIL_PROFILE.recipe_fingerprint + "-w640"
 
 
 @dataclass(frozen=True)
@@ -24,7 +25,7 @@ class VisualRecipe:
     profile: VisualProfile
     aggregation: Aggregation = "mean"
     version: str = "canonical-views-media-thumbnail-v6"
-    thumbnail_recipe: str = PREVIEW_PROFILE.recipe_fingerprint + "-w640"
+    thumbnail_recipe: str = ENCODER_THUMBNAIL_RECIPE
 
     def __post_init__(self):
         if (
@@ -37,7 +38,7 @@ class VisualRecipe:
             or self.profile == "thumbnail"
             and self.aggregation != "mean"
             or self.version != "canonical-views-media-thumbnail-v6"
-            or self.thumbnail_recipe != PREVIEW_PROFILE.recipe_fingerprint + "-w640"
+            or self.thumbnail_recipe != ENCODER_THUMBNAIL_RECIPE
         ):
             raise EmbeddingError("search_visual_recipe_invalid")
 

@@ -16,8 +16,8 @@
  * the kind of regression that ships unnoticed.
  */
 
-import { act, render, screen } from "@testing-library/react";
-import { useRef } from "react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useMountTransition, useOverlayBehavior } from "../overlay";
@@ -155,6 +155,91 @@ describe("useMountTransition", () => {
 });
 
 describe("useOverlayBehavior", () => {
+  it("closes only the foremost overlay", () => {
+    const parentClose = vi.fn<() => void>();
+    const childClose = vi.fn<() => void>();
+    const view = render(
+      <Overlay open onClose={parentClose}>
+        <button type="button">Parent</button>
+      </Overlay>,
+    );
+    view.rerender(
+      <Overlay open onClose={parentClose}>
+        <button type="button">Parent</button>
+        <Overlay open onClose={childClose}>
+          <button type="button">Child</button>
+        </Overlay>
+      </Overlay>,
+    );
+    press("Escape");
+    expect(childClose).toHaveBeenCalledOnce();
+    expect(parentClose).not.toHaveBeenCalled();
+  });
+  it("retains parent scroll ownership after a child closes", () => {
+    function Nested() {
+      const [child, setChild] = useState(false);
+      return (
+        <Overlay open onClose={() => {}}>
+          <button type="button" onClick={() => setChild(true)}>
+            Open evidence
+          </button>
+          <Overlay open={child} onClose={() => setChild(false)}>
+            <button type="button">Preview</button>
+          </Overlay>
+        </Overlay>
+      );
+    }
+    render(<Nested />);
+    screen.getByRole("button", { name: "Open evidence" }).focus();
+    fireEvent.click(screen.getByRole("button", { name: "Open evidence" }));
+    press("Escape");
+    expect(document.body.style.overflow).toBe("hidden");
+    expect(screen.getByRole("button", { name: "Open evidence" })).toHaveFocus();
+  });
+  it("restores the preexisting body scroll style", () => {
+    document.body.style.overflow = "clip";
+    const view = render(<Overlay open onClose={() => {}} />);
+    view.unmount();
+    expect(document.body.style.overflow).toBe("clip");
+    document.body.style.overflow = "";
+  });
+  it("does not move focus when a lower overlay closes", () => {
+    const parent = render(
+      <Overlay open onClose={() => {}}>
+        <button type="button">Parent</button>
+      </Overlay>,
+    );
+    render(
+      <Overlay open onClose={() => {}}>
+        <button type="button">Child</button>
+      </Overlay>,
+    );
+    screen.getByRole("button", { name: "Child" }).focus();
+    parent.unmount();
+    expect(screen.getByRole("button", { name: "Child" })).toHaveFocus();
+    expect(document.body.style.overflow).toBe("hidden");
+  });
+  it("leaves an Escape consumed by a focused menu to that menu", () => {
+    const close = vi.fn<() => void>();
+    render(
+      <Overlay open onClose={close}>
+        <button
+          type="button"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }}
+        >
+          Menu
+        </button>
+      </Overlay>,
+    );
+    fireEvent.keyDown(screen.getByRole("button", { name: "Menu" }), { key: "Escape" });
+    expect(close).not.toHaveBeenCalled();
+  });
+
   it("moves focus into the panel when it opens", () => {
     render(<Overlay open={true} onClose={vi.fn<() => void>()} />);
 
@@ -188,6 +273,26 @@ describe("useOverlayBehavior", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves Escape to an open native select", () => {
+    const onClose = vi.fn<() => void>();
+    const supports = vi.spyOn(CSS, "supports").mockReturnValue(true);
+    render(
+      <Overlay open={true} onClose={onClose}>
+        <select aria-label="Material" />
+      </Overlay>,
+    );
+    const openSelect = vi
+      .spyOn(screen.getByTestId("panel"), "querySelector")
+      .mockReturnValue(screen.getByLabelText("Material"));
+
+    const event = press("Escape");
+
+    expect(openSelect).toHaveBeenCalledWith("select:open");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+    supports.mockRestore();
+  });
+
   it("locks the page behind it from scrolling", () => {
     render(<Overlay open={true} onClose={vi.fn<() => void>()} />);
 
@@ -200,6 +305,21 @@ describe("useOverlayBehavior", () => {
     rerender(<Overlay open={false} onClose={vi.fn<() => void>()} />);
 
     expect(document.body.style.overflow).toBe("");
+  });
+
+  it("returns from an initially focused field to the opener", () => {
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    opener.focus();
+    const view = render(
+      <Overlay open onClose={() => {}}>
+        <input aria-label="Profile name" data-autofocus />
+      </Overlay>,
+    );
+    expect(screen.getByRole("textbox", { name: "Profile name" })).toHaveFocus();
+    view.rerender(<Overlay open={false} onClose={() => {}} />);
+    expect(opener).toHaveFocus();
+    opener.remove();
   });
 
   it("returns focus to whatever opened it", () => {
@@ -288,6 +408,22 @@ describe("useOverlayBehavior", () => {
 
     expect(event.defaultPrevented).toBe(false);
     expect(middle).toHaveFocus();
+  });
+
+  it.each([false, true])("recaptures escaped focus when Shift is %s", (shiftKey) => {
+    render(
+      <>
+        <button type="button">Outside</button>
+        <Overlay open onClose={() => {}}>
+          <button type="button">First</button>
+          <button type="button">Last</button>
+        </Overlay>
+      </>,
+    );
+    screen.getByRole("button", { name: "Outside" }).focus();
+    const event = press("Tab", { shiftKey });
+    expect(event.defaultPrevented).toBe(true);
+    expect(screen.getByRole("button", { name: shiftKey ? "Last" : "First" })).toHaveFocus();
   });
 
   it("swallows Tab when the panel has nothing focusable", () => {

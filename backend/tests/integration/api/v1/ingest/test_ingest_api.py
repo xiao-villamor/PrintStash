@@ -950,8 +950,10 @@ class TestIngestModel:
         client: TestClient,
         db_session: Session,
         auth_headers: dict[str, str],
+        make_system_config,
     ) -> None:
         use_local_storage(tmp_path)
+        make_system_config(derivatives_previews_enabled=True)
 
         payload = completed_job(
             client,
@@ -991,7 +993,8 @@ class TestIngestModel:
         assert purged.json() == {
             "purged_model_ids": [model_id],
             "purged_count": 1,
-            "storage_completed": 2,
+            # Original bytes, primary cover and the multi-angle preview bundle.
+            "storage_completed": 3,
             "storage_pending": 0,
             "storage_blocked": 0,
             "storage_cleanup_status": "completed",

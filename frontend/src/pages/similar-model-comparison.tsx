@@ -1,5 +1,6 @@
 import { useDeferredValue, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams } from "@tanstack/react-router";
+import { useSearchParams } from "@/lib/navigation";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ScanSearch } from "lucide-react";
 import { SimilarityComparison } from "@/components/similarity-comparison";
@@ -481,8 +482,8 @@ function comparisonReturnHref(value: string | null): string {
 }
 
 export default function SimilarModelComparisonPage() {
-  const { id } = useParams();
-  const [searchParams] = useSearchParams();
+  const { id } = useParams({ strict: false });
+  const searchParams = useSearchParams();
   const returnHref = comparisonReturnHref(searchParams.get("returnTo"));
   const candidateId = Number(id);
   const validId = Number.isSafeInteger(candidateId) && candidateId > 0;

@@ -156,6 +156,17 @@ class TestCreateGcPlan:
         with pytest.raises(gc_planner.GcSafetyError, match="gc_plan_active"):
             gc_planner.create_plan(db_session, retention_days=30, requested_by=admin.id)
 
+    def test_candidate_metrics_include_the_chosen_cover(
+        self, db_session, make_model, make_model_cover
+    ):
+        model = make_model(trashed=True)
+        make_model_cover(model, size_bytes=512)
+
+        candidate = gc_planner._model_candidate(db_session, model)
+
+        assert candidate.key_count == 1
+        assert candidate.size_bytes == 512
+
     def test_candidate_metrics_count_owned_storage_evidence(
         self, db_session: Session
     ) -> None:
@@ -205,6 +216,7 @@ class TestCreateGcPlan:
         collection.readme = (
             f"/api/v1/collections/{collection.id}/images/{'c' * 64}.webp"
         )
+        collection.cover_selection = {"kind": "image", "filename": f"{'d' * 64}.webp"}
         db_session.add_all([document, collection])
         db_session.commit()
 
@@ -216,7 +228,7 @@ class TestCreateGcPlan:
         assert model_candidate.size_bytes == 123
         assert gc_planner._file_metrics(external) == (0, 0)  # noqa: SLF001
         assert document_candidate.key_count == 2
-        assert collection_candidate.key_count == 1
+        assert collection_candidate.key_count == 2
 
     def test_batch_limits_stop_before_unsafe_candidates(
         self, db_session: Session
@@ -1651,3 +1663,27 @@ class TestScheduledGcPublicationRecovery:
         db_session.refresh(preview)
         assert row.state is StorageObjectState.RETIRING
         assert preview.state is GcRunState.PREVIEW
+
+
+class TestModelGcPlan:
+    def test_model_gc_candidate_includes_document_storage_once(
+        self,
+        db_session: Session,
+    ) -> None:
+        model = _expired_model(db_session, "model-with-document")
+        document = Document(
+            model_id=model.id,
+            name="Guide",
+            kind=DocumentKind.PDF,
+            filename="guide.pdf",
+            size_bytes=123,
+            deleted_at=model.deleted_at,
+        )
+        db_session.add(document)
+        db_session.commit()
+
+        candidates = gc_planner._candidate_pool(db_session, utcnow())
+        assert [
+            (row.kind, row.resource_id, row.key_count, row.size_bytes)
+            for row in candidates
+        ] == [("model", model.id, 1, 123)]

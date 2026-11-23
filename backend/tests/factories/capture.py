@@ -87,6 +87,8 @@ def build_inbox_item(
     state: InboxItemState = InboxItemState.CAPTURED,
     source_kind: InboxSourceKind = InboxSourceKind.URL,
     manifest: dict[str, Any] | None = None,
+    capture_request_key: str | None = None,
+    source_identity_key: str | None = None,
     **overrides: Any,
 ) -> InboxItem:
     """A pending import owned by *owner*.
@@ -94,6 +96,7 @@ def build_inbox_item(
     `owner_user_id` is not nullable and the whole surface is owner-scoped, so the
     user is positional rather than an override a test can forget.
     """
+    overrides.setdefault("gallery_json", "[]")
     overrides.setdefault("source_url", DEFAULT_SOURCE_URL)
     overrides.setdefault(
         "manifest_json",
@@ -105,6 +108,8 @@ def build_inbox_item(
             owner_user_id=owner.id,
             source_kind=source_kind,
             state=state,
+            capture_request_key=capture_request_key,
+            source_identity_key=source_identity_key,
             **overrides,
         ),
     )
@@ -128,6 +133,7 @@ def build_capture_slot(
     reject_aliases(
         overrides, {"state": "uploaded", "storage_key": "uploaded"} if uploaded else {}
     )
+    overrides.setdefault("image_position", None)
     index = nth("capture_slot")
     overrides.setdefault("id", f"slot-{index}")
     overrides.setdefault("filename", f"capture-{index}.3mf")

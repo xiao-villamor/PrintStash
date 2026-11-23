@@ -62,6 +62,16 @@ from tests.factories.library_scale import build_library_at_scale
 
 
 class TestGeneratedIdentities:
+    def test_model_cover_builder_exposes_an_independent_selection(self, db_session):
+        model = factories.build_model(db_session)
+        cover = factories.build_model_cover(db_session, model)
+        db_session.refresh(model)
+
+        assert model.cover_filename == cover.filename
+        assert model.thumbnail_file_id is None
+        assert cover.size_bytes > 0
+        assert len(cover.sha256) == 64
+
     def test_search_dependency_builder_tracks_removed_sources(self, db_session):
         from app.db.projections import ContentSource
         from app.modules.search.projection import affected_subjects
@@ -309,6 +319,7 @@ class TestBuildFile:
             pytest.param("part.stl", FileType.STL, id="stl"),
             pytest.param("plate.3mf", FileType.THREE_MF, id="3mf"),
             pytest.param("rev.gcode", FileType.GCODE, id="gcode"),
+            pytest.param("rev.GCODE.3MF", FileType.GCODE, id="sliced-3mf"),
         ],
     )
     def test_derives_the_type_from_the_filename(
@@ -447,6 +458,15 @@ class TestBuildPrinter:
 
 
 class TestBuildPrintJob:
+    @pytest.mark.parametrize("plate", [None, 10])
+    def test_preserves_selected_plate(self, db_session: Session, plate) -> None:
+        artifact = factories.build_file(
+            db_session, factories.build_model(db_session), filename="project.gcode.3mf"
+        )
+        job = factories.build_print_job(db_session, artifact, plate_index=plate)
+        db_session.refresh(job)
+        assert job.plate_index == plate
+
     def test_derives_its_model_from_the_artifact(self, db_session: Session) -> None:
         model = factories.build_model(db_session)
         gcode = factories.build_file(db_session, model)
@@ -456,6 +476,15 @@ class TestBuildPrintJob:
         # A job whose model does not own its file is unreachable in production and
         # makes every read path that joins the two return nothing.
         assert job.model_id == model.id
+
+
+class TestBuildPrinterFile:
+    @pytest.mark.parametrize("plate", [None, 10])
+    def test_preserves_selected_plate(self, db_session: Session, plate) -> None:
+        printer = factories.build_printer(db_session)
+        remote = factories.build_printer_file(db_session, printer, plate_index=plate)
+        db_session.refresh(remote)
+        assert remote.plate_index == plate
 
 
 class TestBuildExternalLibrary:
@@ -533,6 +562,29 @@ class TestCaptureManifests:
         assert source["provider"]
         assert source["canonical_url"]
         assert source["source_item_id"]
+
+
+class TestBuildInboxItem:
+    def test_retains_capture_recovery_identity(self, db_session: Session) -> None:
+        user = factories.build_user(db_session)
+
+        item = factories.build_inbox_item(
+            db_session,
+            user,
+            capture_request_key="test-request",
+            source_identity_key="a" * 64,
+        )
+
+        assert item.capture_request_key == "test-request"
+        assert item.source_identity_key == "a" * 64
+
+    def test_preserves_legacy_missing_identity(self, db_session: Session) -> None:
+        user = factories.build_user(db_session)
+
+        item = factories.build_inbox_item(db_session, user)
+
+        assert item.capture_request_key is None
+        assert item.source_identity_key is None
 
 
 class TestBuildCaptureSlot:

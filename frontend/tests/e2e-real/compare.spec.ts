@@ -7,7 +7,7 @@
  * question wrongly rather than not at all.
  */
 import { test, expect } from "./helpers";
-import { modelCard, uploadModel } from "./util";
+import { openModelPage, uploadModel } from "./util";
 
 // Compare Artifacts (0.10.0): with two G-code revisions on a model, the compare
 // panel appears and shows a field-level diff — matching values render plain,
@@ -33,16 +33,16 @@ test.describe("revision comparison", () => {
       },
     });
 
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await page.getByRole("tab", { name: /Revisions/ }).click();
     await expect(page.getByText("Rev 1", { exact: true }).first()).toBeVisible();
 
     // A second revision with a very different estimated print time — that field
     // should show up as a highlighted diff once compared.
-    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await page.getByRole("button", { name: "Add revision", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Add G-code revision" })).toBeVisible();
-    await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
+    await page.locator('input[accept=".gcode,.g,.gco,.bgcode,.gcode.3mf"]').setInputFiles({
       name: "rev2.gcode",
       mimeType: "text/plain",
       buffer: Buffer.from(
@@ -53,28 +53,29 @@ test.describe("revision comparison", () => {
         ].join("\n"),
       ),
     });
-    await page.getByRole("button", { name: "Add revision" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Add revision", exact: true })
+      .click();
     await expect(page.getByText("Rev 2", { exact: true }).first()).toBeVisible();
 
-    const compare = page.getByRole("heading", { name: /Compare Artifacts/ }).locator("..");
+    await page.getByRole("button", { name: "Compare", exact: true }).click();
+    const compare = page
+      .getByRole("heading", { name: "Compare revisions", exact: true })
+      .locator("../..");
     await expect(compare).toBeVisible();
 
-    // The two selects default to the most recent revisions, but which side gets
-    // which is an implementation detail — pin them explicitly to rev1 vs rev2 so
-    // the diff assertion below is deterministic.
-    const selects = compare.locator("select");
-    const rev1Value = await selects
-      .nth(0)
-      .locator("option", { hasText: "rev1.gcode" })
-      .getAttribute("value");
-    const rev2Value = await selects
-      .nth(1)
-      .locator("option", { hasText: "rev2.gcode" })
-      .getAttribute("value");
-    await selects.nth(0).selectOption(rev1Value!);
-    await selects.nth(1).selectOption(rev2Value!);
+    await compare
+      .getByRole("group", { name: "Inspecting", exact: true })
+      .getByRole("button", { name: /^Rev 1(?: · Recommended)?$/ })
+      .click();
+    await compare
+      .getByRole("group", { name: "Compare with", exact: true })
+      .getByRole("button", { name: /^Rev 2(?: · Recommended)?$/ })
+      .click();
 
-    const estTimeRow = compare.getByRole("row", { name: /^Est\. time/ });
+    const estTimeRow = compare.getByRole("row", { name: /^Estimated time/ });
     await expect(estTimeRow.getByRole("cell")).toHaveText(["30m 12s", "2h 5m"]);
+    await expect(estTimeRow.locator("mark")).toHaveCount(2);
   });
 });

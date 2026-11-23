@@ -252,6 +252,48 @@ class TestDownloadArtifact:
 
 class TestStart:
     @pytest.mark.asyncio
+    async def test_addresses_the_selected_plate_in_the_cached_project(
+        self,
+    ):
+        sent = []
+        client = make_client()
+        client._send_command = _recorder(sent)  # type: ignore[method-assign]
+        await client.start_project("hinge #2.3mf", 2, "1742")
+        request = sent[0]["print"]
+        assert request["url"] == "file:///sdcard/cache/hinge%20%232.3mf"
+        assert request["param"] == "Metadata/plate_2.gcode"
+        assert request["subtask_id"] == "1742"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("name", "plate"),
+        [
+            ("../part.3mf", 2),
+            ("part.gcode", 2),
+            ("part.3mf", -1),
+            ("part.3mf", True),
+        ],
+    )
+    async def test_invalid_project_or_plate_is_rejected_before_mqtt(self, name, plate):
+        sent = []
+        client = make_client()
+        client._send_command = _recorder(sent)  # type: ignore[method-assign]
+        with pytest.raises(ProviderError):
+            await client.start_project(name, plate, "1742")
+        assert not sent
+
+    @pytest.mark.asyncio
+    async def test_plain_start_accepts_only_text_toolpaths(self):
+        sent = []
+        client = make_client()
+        client._send_command = _recorder(sent)  # type: ignore[method-assign]
+        await client.start("Fixtures/Test plate.GCODE")
+        assert sent[0]["print"]["param"] == "/cache/Fixtures/Test plate.GCODE"
+        with pytest.raises(ProviderError, match="artifact_format_not_supported"):
+            await client.start("Fixtures/Test plate.3mf")
+        assert len(sent) == 1
+
+    @pytest.mark.asyncio
     async def test_sends_the_absolute_cache_path_bambu_expects(self) -> None:
         payloads: list[dict[str, Any]] = []
         client = make_client(sequence_id_factory=lambda: "sequence-42")
@@ -269,10 +311,8 @@ class TestStart:
         ]
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("remote_filename", ["folder/cube.gcode", "/cube.gcode"])
-    async def test_refuses_a_name_that_is_not_a_bare_filename(
-        self, remote_filename: str
-    ) -> None:
+    @pytest.mark.parametrize("remote_filename", ["../cube.gcode", "/cube.gcode"])
+    async def test_refuses_paths_outside_the_cache(self, remote_filename: str) -> None:
         client = make_client()
 
         with pytest.raises(ProviderError) as error:
@@ -321,7 +361,6 @@ class TestUnsupportedOperations:
     @pytest.mark.parametrize(
         ("method", "arguments"),
         [
-            ("list_files", ()),
             ("delete_file", ("cube.gcode",)),
             ("run_gcode", ("G28",)),
             ("emergency_stop", ()),

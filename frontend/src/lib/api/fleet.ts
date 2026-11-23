@@ -19,16 +19,20 @@ import type {
   PrintBatchRead,
 } from "@/types";
 
-export function getFleetSummary(): Promise<FleetSummary> {
-  return getJson<FleetSummary>("/api/v1/fleet/summary", {});
+export function getFleetSummary(options: GetJsonOptions = {}): Promise<FleetSummary> {
+  return getJson<FleetSummary>("/api/v1/fleet/summary", options);
 }
 
-export function listFleetQueue(historyLimit = 20, historyOffset = 0): Promise<PrintJobRead[]> {
+export function listFleetQueue(
+  historyLimit = 20,
+  historyOffset = 0,
+  options: GetJsonOptions = {},
+): Promise<PrintJobRead[]> {
   const params = new URLSearchParams({
     history_limit: String(historyLimit),
     history_offset: String(historyOffset),
   });
-  return getJson<PrintJobRead[]>(`/api/v1/fleet/queue?${params}`, {});
+  return getJson<PrintJobRead[]>(`/api/v1/fleet/queue?${params}`, options);
 }
 
 export function enqueueFleetJob(payload: QueueJobCreate): Promise<PrintJobRead> {

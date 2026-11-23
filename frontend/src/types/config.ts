@@ -79,10 +79,20 @@ export interface SetupResponse {
   token_type: string;
 }
 
-export interface VaultConfigRead extends EditingBase {
+export type PreviewLook = "sky" | "printstash_blue" | "slate" | "graphite" | "sand";
+
+export interface PreviewAppearance {
+  preview_look: PreviewLook;
+  preview_floor_grid: boolean;
+}
+
+export interface VaultConfigRead extends EditingBase, PreviewAppearance {
   derivatives_mesh_enabled: boolean;
   derivatives_gcode_enabled: boolean;
   derivatives_toolpath_enabled: boolean;
+  derivatives_previews_enabled: boolean;
+  derivatives_previews_include_poles: boolean;
+  prefer_rendered_3mf_preview: boolean;
 
   storage_backend: string;
   storage_provider: string;
@@ -132,10 +142,13 @@ export interface VaultConfigRead extends EditingBase {
   oidc_allow_insecure_http: boolean;
 }
 
-export interface VaultConfigUpdate {
+export interface VaultConfigUpdate extends Partial<PreviewAppearance> {
   derivatives_mesh_enabled?: boolean | null;
   derivatives_gcode_enabled?: boolean | null;
   derivatives_toolpath_enabled?: boolean | null;
+  derivatives_previews_enabled?: boolean | null;
+  derivatives_previews_include_poles?: boolean | null;
+  prefer_rendered_3mf_preview?: boolean | null;
 
   storage_backend?: string;
   storage_provider?: string;

@@ -11,15 +11,17 @@ Two routers with very different trust levels:
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlmodel import Session
 
 from app.api.v1.files import serve_artifact, stl_response, thumbnail_response
 from app.core.ratelimit import rate_limit
 from app.core.security import require_user
-from app.db.models import CollectionRole, FileType, Model, ShareLink, User
+from app.db.models import CollectionRole, FileType, Model, ShareLink, SystemConfig, User
 from app.db.session import get_session
 from app.modules.identity import rbac, share
+from app.modules.library import model_covers
+from app.modules.media.preview_contracts import PreviewSize, ViewId
 from app.modules.storage.artifact_delivery import DeliveryPurpose
 from app.schemas.share import ShareLinkCreate, ShareLinkCreated, ShareLinkRead
 
@@ -52,7 +54,20 @@ router = APIRouter(
 def get_shared_model(token: str, session: Session = Depends(get_session)):
     link = share.resolve_share(session, token)
     share.record_access(session, link)
-    return share.public_detail(session, link)
+    from app.modules.library.model_views import previews
+
+    model = session.get(Model, link.model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail="not_found")
+    preview = previews.summaries(session, [model], root=f"/api/v1/share/{token}")[
+        link.model_id
+    ]
+    if preview.kind == "artifact":
+        share.share_file_or_404(session, link, preview.file_id)
+    from app.modules.derivatives.policy import render_appearance
+
+    look = render_appearance(session.get(SystemConfig, 1)).look
+    return share.public_detail(session, link, preview, look)
 
 
 @router.get("/{token}/thumbnail", summary="Thumbnail of a shared model")
@@ -63,6 +78,19 @@ def get_shared_thumbnail(
 ):
     link = share.resolve_share(session, token)
     model = session.get(Model, link.model_id)
+    if model is not None and model.cover_filename is not None:
+        from app.modules.media.thumbnail import PhotoSize, to_photo_webp
+
+        return Response(
+            content=to_photo_webp(
+                model_covers.content(model), size=PhotoSize.THUMBNAIL
+            ).data,
+            media_type="image/webp",
+            headers={
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
     if model is None or model.thumbnail_file_id is None:
         raise HTTPException(status_code=404, detail="not_found")
     return thumbnail_response(
@@ -220,3 +248,32 @@ def get_shared_toolpath(
         raise HTTPException(status_code=403, detail="download_disabled")
     file = share.share_file_or_404(session, link, file_id)
     return toolpath_response(session, file)
+
+
+@router.get("/{token}/previews/{generation}")
+def get_shared_preview_manifest(
+    token: str, generation: str, session: Session = Depends(get_session)
+):
+    from app.modules.library.model_views import previews
+
+    link = share.resolve_share(session, token)
+    _, manifest = previews.resolve(session, link.model_id, generation)
+    share.share_file_or_404(session, link, manifest.file_id)
+    return manifest
+
+
+@router.get("/{token}/previews/{generation}/{view_id}")
+def get_shared_preview_image(
+    token: str,
+    generation: str,
+    view_id: ViewId,
+    size: PreviewSize = PreviewSize.FULL,
+    session: Session = Depends(get_session),
+):
+    from app.api.preview_response import preview_response
+    from app.modules.library.model_views import previews
+
+    link = share.resolve_share(session, token)
+    row, manifest = previews.resolve(session, link.model_id, generation)
+    share.share_file_or_404(session, link, manifest.file_id)
+    return preview_response(row, manifest, view_id, shared=True, size=size)

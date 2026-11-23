@@ -127,15 +127,15 @@ test.describe("mounted library source root recovery", () => {
       await expect(title).toBeVisible({ timeout: 30_000 });
       await expect(title).toHaveCSS("text-transform", "none");
       const library = page.getByRole("main");
-      await expect(library.getByRole("button", { name: parentName, exact: true })).toBeVisible();
-      await expect(library.getByRole("button", { name: childName, exact: true })).toBeVisible();
+      await expect(library.getByRole("link", { name: parentName, exact: true })).toBeVisible();
+      await expect(library.getByRole("heading", { name: childName, exact: true })).toBeVisible();
 
       await page.getByRole("button", { name: "Upload", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: "Upload model" });
       await expect(
         dialog.getByRole("button", { name: `${parentName}/${childName}` }),
       ).toBeVisible();
-      await dialog.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
+      await dialog.locator('input[accept=".gcode,.g,.gco,.bgcode,.gcode.3mf"]').setInputFiles({
         name: `${uploadName}.gcode`,
         mimeType: "text/plain",
         buffer: Buffer.from(`; uploaded ${uploadName}\nG28\n`),
@@ -325,7 +325,7 @@ test.describe("mounted library source root recovery", () => {
       await page.goto("/");
       await page.getByRole("button", { name: "Upload", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: "Upload model" });
-      await dialog.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
+      await dialog.locator('input[accept=".gcode,.g,.gco,.bgcode,.gcode.3mf"]').setInputFiles({
         name: `${name}.gcode`,
         mimeType: "text/plain",
         buffer: Buffer.from(`; external root test ${name}\nG28\n`),

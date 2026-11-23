@@ -75,7 +75,17 @@ class TestLibraryBrowse:
         assert response.status_code == 200, response.text
         assert response.json() == {
             "items": [
-                {"model_id": model.id, "thumbnail_url": "/api/v1/files/123/thumbnail"}
+                {
+                    "model_id": model.id,
+                    "thumbnail_url": "/api/v1/files/123/thumbnail",
+                    # No live mesh Artifact: only the cover can be shown.
+                    "previews": {
+                        "kind": "none",
+                        "cover_camera": "unknown",
+                        "source_images": [],
+                        "cover_image_kind": "render",
+                    },
+                }
             ],
             "authorization_revision": displayed["authorization_revision"],
         }

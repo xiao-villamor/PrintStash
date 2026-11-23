@@ -42,6 +42,11 @@ import pytest
 from PIL import Image
 
 from printstash_core.mesh import rasterizer, render_mesh_thumbnail
+from printstash_core.mesh.preview_profile import (
+    RASTERIZER_RECIPE,
+    PreviewAppearance,
+    appearance_scope,
+)
 from printstash_core.mesh.rasterizer import (
     RasterBudget,
     RenderedPixels,
@@ -62,7 +67,7 @@ from printstash_core.mesh.similarity.components import (
 
 from ..paths import FIXTURES_DIR
 
-_FROZEN_RENDER = json.loads((FIXTURES_DIR / "render-prepared-v1.json").read_text())
+_FROZEN_RENDER = json.loads((FIXTURES_DIR / "render-prepared-v2.json").read_text())
 _FROZEN_FRAMES = [
     pytest.param(case, view, id=f"{case['name']}-{index}")
     for case in _FROZEN_RENDER["cases"]
@@ -88,8 +93,6 @@ def frozen_frame(case, view):
 
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-# 25°, the tilt a flat mesh is viewed at so recesses read.
-FLAT_TILT = np.radians(25.0)
 
 
 def box_mesh() -> SimpleNamespace:
@@ -175,6 +178,27 @@ class RecordingLogger:
 
 
 class TestRenderMeshThumbnail:
+    def test_lights_upward_faces_from_above(self) -> None:
+        brightness = []
+        for slope in (0.75, -0.75):
+            mesh = SimpleNamespace(
+                vertices=np.array([[-1, -1, -slope], [0, 1, slope], [1, -1, -slope]]),
+                faces=np.array([[0, 1, 2]]),
+            )
+            rendered = render_mesh_thumbnail(
+                mesh,
+                "inclined",
+                width=96,
+                height=96,
+                view_rotation=np.eye(3),
+                matte=False,
+            )
+            assert rendered is not None
+            rgba = pixels(rendered)
+            brightness.append(np.median(rgba[rgba[..., 3] == 255, :3]))
+
+        assert brightness[0] > brightness[1] + 40
+
     @pytest.mark.parametrize("unused_position", ["before", "after", "interleaved"])
     def test_ignores_unreferenced_vertices(self, unused_position: str) -> None:
         mesh = box_mesh()
@@ -411,15 +435,17 @@ class TestRenderMeshThumbnail:
 
     def test_compresses_native_rendered_frames(self) -> None:
         mesh = box_mesh()
-        png = render_mesh_thumbnail(mesh, "box.stl", width=640, height=480)
+        # Compare codecs on the model. The grid's fine lines have a different
+        # compression ratio from the shaded surface and are tested separately.
+        with appearance_scope(PreviewAppearance(floor_grid=False)):
+            png = render_mesh_thumbnail(mesh, "box.stl", width=640, height=480)
+            encoded = render_mesh_thumbnail(
+                mesh, "box.stl", width=640, height=480, output_format="WEBP"
+            )
         assert png is not None
         original = Image.open(io.BytesIO(png))
         lossless = io.BytesIO()
         original.save(lossless, format="WEBP", lossless=True, exact=True, method=6)
-
-        encoded = render_mesh_thumbnail(
-            mesh, "box.stl", width=640, height=480, output_format="WEBP"
-        )
 
         assert encoded is not None
         assert len(encoded) < len(lossless.getvalue()) * 0.6
@@ -646,13 +672,28 @@ class TestSelectViewRotation:
     def test_views_a_flat_mesh_face_on(self) -> None:
         rotation = rasterizer._select_view_rotation(flat_mesh(thin_axis=2))
 
-        cosine, sine = np.cos(FLAT_TILT), np.sin(FLAT_TILT)
-        expected = np.array(
-            [[1, 0, 0], [0, cosine, -sine], [0, sine, cosine]], dtype=np.float64
-        ) @ np.diag([1.0, 1.0, -1.0])
-        # A badge or a sign viewed at the hero angle renders as an
-        # unrecognisable edge-on sliver.
-        np.testing.assert_allclose(rotation, expected, atol=1e-12)
+        # The face remains readable while its edges run diagonally on the card.
+        normal = rotation @ np.array([0.0, 0.0, 1.0])
+        assert abs(normal[2]) > 0.9
+
+    def test_composes_flat_parts_diagonally(self) -> None:
+        rotation = rasterizer._select_view_rotation(flat_mesh(thin_axis=2))
+
+        edge = rotation @ np.array([1.0, 0.0, 0.0])
+
+        assert abs(edge[0]) > 0.4
+        assert abs(edge[1]) > 0.4
+
+    @pytest.mark.parametrize("long_axis", [0, 1, 2], ids=["x", "y", "z"])
+    def test_keeps_slender_solids_in_hero_view(self, long_axis) -> None:
+        rod = box_mesh().vertices.copy()
+        rod[:, long_axis] *= 10
+
+        rotation = rasterizer._select_view_rotation(rod)
+
+        np.testing.assert_allclose(
+            rotation, rasterizer._select_view_rotation(box_mesh().vertices)
+        )
 
     @pytest.mark.parametrize("thin_axis", [0, 1, 2])
     def test_looks_along_whichever_axis_is_thin(self, thin_axis: int) -> None:
@@ -1251,7 +1292,7 @@ class TestRenderPreparedPixels:
         original = (
             prepared_box.vertices.tobytes(),
             prepared_box.position_ids.tobytes(),
-            prepared_box.smooth_normals.tobytes(),
+            prepared_box.corner_normals.tobytes(),
         )
         first = render_prepared_pixels(
             prepared_box,
@@ -1283,7 +1324,7 @@ class TestRenderPreparedPixels:
         assert (
             prepared_box.vertices.tobytes(),
             prepared_box.position_ids.tobytes(),
-            prepared_box.smooth_normals.tobytes(),
+            prepared_box.corner_normals.tobytes(),
         ) == original
 
     def test_renders_without_image_codec_roundtrip(self, prepared_box, monkeypatch):
@@ -1650,12 +1691,9 @@ class TestRenderPreparedThumbnail:
 
 class TestFrozenPreparedRender:
     @pytest.mark.parametrize("case,view", _FROZEN_FRAMES)
-    def test_preserves_frozen_legacy_pixels(self, case, view, frozen_frame):
+    def test_preserves_frozen_studio_pixels(self, case, view, frozen_frame):
         mesh, options = frozen_frame
-        assert (
-            _FROZEN_RENDER["provenance"]["source_commit"]
-            == "59e91d25172ca53c47f26b1ec773992defddc57a"
-        )
+        assert _FROZEN_RENDER["provenance"]["recipe"] == RASTERIZER_RECIPE
         assert (
             hashlib.sha256(mesh.vertices.tobytes()).hexdigest()
             == case["vertices_sha256"]
@@ -1678,7 +1716,7 @@ class TestFrozenPreparedRender:
         assert hashlib.sha256(gray).hexdigest() == view["gray_sha256"]
 
     @pytest.mark.parametrize("case,view", _FROZEN_FRAMES)
-    def test_preserves_frozen_legacy_png(self, case, view, frozen_frame):
+    def test_preserves_frozen_studio_png(self, case, view, frozen_frame):
         mesh, options = frozen_frame
         prepared = prepare_mesh_render(mesh)
         assert prepared is not None

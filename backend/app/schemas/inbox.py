@@ -12,7 +12,13 @@ from pydantic import (
     model_validator,
 )
 
-from app.db.models import InboxItemCompletion, InboxItemState, InboxSourceKind
+from app.db.models import (
+    InboxImportIntent,
+    InboxItemCompletion,
+    InboxItemState,
+    InboxReviewReason,
+    InboxSourceKind,
+)
 
 
 class CaptureFieldDraft(BaseModel):
@@ -28,7 +34,14 @@ class CaptureSourceDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     provider: Literal[
-        "makerworld", "printables", "thingiverse", "myminifactory", "cults"
+        "makerworld",
+        "printables",
+        "thingiverse",
+        "myminifactory",
+        "cults",
+        "thangs",
+        "crealitycloud",
+        "makeronline",
     ]
     canonical_url: str = Field(min_length=1, max_length=2048)
     source_item_id: str | None = Field(default=None, max_length=255)
@@ -40,6 +53,9 @@ class CaptureSourceDraft(BaseModel):
 
 class InboxItemCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    on_ready: InboxImportIntent | None = None
+    import_again: bool = False
 
     url: str = Field(min_length=1, max_length=2048)
     title: str | None = Field(default=None, max_length=255)
@@ -62,6 +78,10 @@ class CaptureUploadFileDeclaration(BaseModel):
 class CaptureUploadSlotsCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    on_ready: InboxImportIntent | None = None
+    import_again: bool = False
+
+    request_key: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
     source_url: str = Field(min_length=1, max_length=2048)
     capture_source: CaptureSourceDraft
     title: str | None = Field(default=None, max_length=255)
@@ -85,12 +105,19 @@ class CaptureUploadSlotRead(BaseModel):
 
     id: str
     role: Literal["file", "cover"]
+    image_position: int | None = None
     source_file_id: str | None = None
     filename: str
     media_type: str
     size_bytes: int
     sha256: str
     state: Literal["pending", "uploaded"]
+
+
+class CaptureUploadPartRead(BaseModel):
+    """Bytes the slot's spool holds after one part; the next part starts here."""
+
+    received_bytes: int
 
 
 class InboxItemUpdate(BaseModel):
@@ -113,6 +140,7 @@ class InboxBatchRequest(BaseModel):
 
     item_ids: list[int] = Field(min_length=1, max_length=500)
     action: str
+    use_default_destination: bool = False
     collection_id: int | None = Field(default=None, gt=0)
     tags: list[str] = Field(default_factory=list, max_length=100)
 
@@ -150,6 +178,23 @@ class CaptureManifestFileRead(BaseModel):
     size: int | None = None
 
 
+class CaptureProfileDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    id: str = Field(min_length=1, max_length=256)
+    name: str = Field(min_length=1, max_length=512)
+    origin: Literal["provider", "file"]
+    author: str | None = Field(default=None, min_length=1, max_length=512)
+    creator_relationship: Literal["model_creator", "other"] | None = None
+    printer: str | None = Field(default=None, min_length=1, max_length=512)
+    estimated_seconds: float | None = Field(
+        default=None, strict=True, gt=0, le=31622400
+    )
+    filament_grams: float | None = Field(default=None, strict=True, gt=0, le=1000000)
+    plate_count: int | None = Field(default=None, strict=True, gt=0, le=1000)
+    materials: list[str] = Field(default_factory=list, max_length=64)
+
+
 class CaptureManifestV2Read(BaseModel):
     """Strict additive read shape for a finalized rich capture manifest."""
 
@@ -162,17 +207,30 @@ class CaptureManifestV2Read(BaseModel):
     selected_ids: list[str]
 
 
+class CaptureManifestV3Read(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[3]
+    kind: Literal["model_files"]
+    source: CaptureSourceDraft
+    files: list[CaptureManifestFileRead]
+    selected_ids: list[str]
+    profiles: dict[str, CaptureProfileDraft]
+
+
 class LegacyInboxManifestRead(RootModel[dict[str, Any]]):
     """Compatibility wrapper for the pre-capture manifest variants."""
 
     @model_validator(mode="after")
     def reject_v2_fallback(self) -> LegacyInboxManifestRead:
-        if self.root.get("schema_version") == 2:
+        if self.root.get("schema_version") in (2, 3):
             raise ValueError("invalid_v2_capture_manifest")
         return self
 
 
-InboxManifestRead = CaptureManifestV2Read | LegacyInboxManifestRead
+InboxManifestRead = (
+    CaptureManifestV2Read | CaptureManifestV3Read | LegacyInboxManifestRead
+)
 
 
 class InboxItemRead(BaseModel):
@@ -182,7 +240,10 @@ class InboxItemRead(BaseModel):
     source_url: str | None = None
     display_title: str | None = None
     source_hostname: str | None = None
+    thumbnail_url: str | None = None
     state: InboxItemState
+    on_ready: InboxImportIntent
+    review_reason: InboxReviewReason | None = None
     manifest: InboxManifestRead = Field(default_factory=LegacyInboxManifestRead)
     target_collection_id: int | None = None
     requested_tags: list[str] = Field(default_factory=list)
@@ -201,3 +262,85 @@ class InboxItemRead(BaseModel):
 class CaptureUploadSlotsRead(BaseModel):
     item: InboxItemRead
     slots: list[CaptureUploadSlotRead]
+
+
+class CaptureRecoveryRead(CaptureUploadSlotsRead):
+    expires_at: datetime | None
+    recoverable: bool
+
+
+class CaptureSourceStatusRead(BaseModel):
+    id: int
+    state: InboxItemState
+    completion: InboxItemCompletion | None
+    updated_at: datetime
+    resulting_model_id: int | None = None
+
+
+class CaptureStatusRead(BaseModel):
+    id: int
+    state: InboxItemState
+    review_reason: InboxReviewReason | None
+    error_code: str | None
+    resulting_model_id: int | None
+    collection_name: str | None
+    completion: InboxItemCompletion | None
+
+
+class CaptureCapabilitiesRead(BaseModel):
+    schema_versions: list[int]
+    resumable_slots: bool
+    idempotent_requests: bool
+    storage: Literal["managed"]
+    max_files: int
+    max_file_bytes: int
+    capture_preferences: bool
+    resumable_cover: bool
+    resumable_gallery: bool
+    # Slots accept a file in parts, so a proxy's request-size limit is no ceiling.
+    upload_parts: bool
+    import_intent: bool = True
+    owner_user_id: int
+
+
+class CaptureDestinationRead(BaseModel):
+    id: int
+    label: str
+
+
+class CaptureImageIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^[a-f0-9]{64}$")
+    name: str = Field(min_length=1, max_length=512)
+
+
+class CaptureSessionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    on_ready: InboxImportIntent | None = None
+    import_again: bool = False
+
+    gallery: list[CaptureImageIntent] | None = Field(
+        default=None, min_length=1, max_length=64
+    )
+
+    cover: CaptureUploadFileDeclaration | None = None
+
+    schema_version: Literal[2, 3] = 2
+    profiles: dict[str, CaptureProfileDraft] | None = Field(default=None, max_length=64)
+
+    @model_validator(mode="after")
+    def profile_version(self) -> CaptureSessionCreate:
+        if (self.schema_version == 3) != (self.profiles is not None):
+            raise ValueError("profiles_require_capture_version_3")
+        return self
+
+    collection_id: int | None = Field(default=None, gt=0)
+    tags: list[str] = Field(default_factory=list, max_length=100)
+
+    request_key: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    source_url: str = Field(min_length=1, max_length=2048)
+    capture_source: CaptureSourceDraft
+    title: str | None = Field(default=None, max_length=255)
+    files: list[CaptureManifestFileRead] = Field(min_length=1, max_length=64)

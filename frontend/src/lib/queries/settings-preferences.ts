@@ -10,8 +10,21 @@ import { useVaultConfigCommand, vaultConfigOptions } from "./settings-config";
 import type { EditingBase } from "@/types/editing";
 import type { VaultConfigRead, VaultConfigUpdate } from "@/types";
 
+export type PreviewMode = "single" | "oblique" | "oblique-poles";
+export function previewMode(
+  config:
+    | Pick<VaultConfigRead, "derivatives_previews_enabled" | "derivatives_previews_include_poles">
+    | undefined,
+): PreviewMode {
+  return !config?.derivatives_previews_enabled
+    ? "single"
+    : config.derivatives_previews_include_poles
+      ? "oblique-poles"
+      : "oblique";
+}
 export type PreferenceIntent =
-  | { kind: "auto-mark"; value: boolean }
+  | { kind: "multi-angle"; value: PreviewMode }
+  | { kind: "recreate-embedded-covers" | "auto-mark"; value: boolean }
   | { kind: "currency"; value: string }
   | { kind: "backup-retention" | "trash-retention"; value: number; draft: string }
   | { kind: "thumbnail-width"; value: NonNullable<VaultConfigUpdate["model_thumbnail_width"]> };
@@ -28,6 +41,13 @@ type PreferenceReview =
 
 function payload(intent: PreferenceIntent): VaultConfigUpdate {
   switch (intent.kind) {
+    case "multi-angle":
+      return {
+        derivatives_previews_enabled: intent.value !== "single",
+        derivatives_previews_include_poles: intent.value === "oblique-poles",
+      };
+    case "recreate-embedded-covers":
+      return { prefer_rendered_3mf_preview: intent.value };
     case "auto-mark":
       return { auto_mark_known_good: intent.value };
     case "currency":
@@ -42,6 +62,10 @@ function payload(intent: PreferenceIntent): VaultConfigUpdate {
 }
 export function savedPreference(snapshot: VaultConfigRead, intent: PreferenceIntent) {
   switch (intent.kind) {
+    case "multi-angle":
+      return previewMode(snapshot);
+    case "recreate-embedded-covers":
+      return snapshot.prefer_rendered_3mf_preview;
     case "auto-mark":
       return snapshot.auto_mark_known_good;
     case "currency":

@@ -7,7 +7,8 @@
  * and dropping one of this plate's hides a part the user is about to print.
  */
 import { describe, expect, it } from "vitest";
-import { trianglesOnPlate, type TriangleArrays } from "../plate-geometry";
+import * as THREE from "three";
+import { geometryDimensions, trianglesOnPlate, type TriangleArrays } from "../plate-geometry";
 
 const PLATE_ONE = { min_x: 0, min_y: 0, max_x: 256, max_y: 256 };
 
@@ -55,5 +56,24 @@ describe("trianglesOnPlate", () => {
     expect(() => trianglesOnPlate({ positions, normals: new Float32Array(8) }, PLATE_ONE)).toThrow(
       "mesh_arrays_misaligned",
     );
+  });
+});
+
+describe("geometryDimensions", () => {
+  it("measures the displayed source geometry in its original axes", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute([10, 20, 30, 14, 26, 38], 3),
+    );
+    expect(geometryDimensions(geometry)).toEqual({ x: 4, y: 6, z: 8 });
+    geometry.dispose();
+  });
+
+  it("does not invent bounds for an empty plate", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([], 3));
+    expect(geometryDimensions(geometry)).toBeNull();
+    geometry.dispose();
   });
 });

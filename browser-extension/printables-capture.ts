@@ -1,3 +1,4 @@
+import { downloadProgress, type ByteProgress } from "./transfer-progress.ts";
 import { readBoundedMetadataResponse } from "./capture-adapter.ts";
 
 /**
@@ -119,6 +120,7 @@ export async function readBoundedPrintablesResponse(
   response: Response,
   expectedSize?: number,
   signal?: AbortSignal,
+  progress?: ByteProgress,
 ): Promise<Blob> {
   if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
   if (
@@ -150,6 +152,7 @@ export async function readBoundedPrintablesResponse(
       "user_file_required: Printables did not provide a bounded file stream. Choose a downloaded Printables file to attach it in Pending Imports.",
     );
   }
+  const report = downloadProgress(response, progress);
   const reader = response.body.getReader();
   const chunks: ArrayBuffer[] = [];
   let total = 0;
@@ -178,6 +181,7 @@ export async function readBoundedPrintablesResponse(
       const copy = new ArrayBuffer(next.value.byteLength);
       new Uint8Array(copy).set(next.value);
       chunks.push(copy);
+      report(total);
     }
   } finally {
     signal?.removeEventListener("abort", abortReader);

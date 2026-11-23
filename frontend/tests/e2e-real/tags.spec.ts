@@ -6,21 +6,28 @@
  * edit form — so the flow asks first, and this test is what keeps it asking.
  */
 import { test, expect } from "./helpers";
-import { clickModelAction, modelCard, uploadModel } from "./util";
+import { openModelPage, clickModelAction, modelCard, uploadModel } from "./util";
 
 test.describe("tags", () => {
-  test("assigns a newly created tag from the model card", async ({ page }) => {
+  test("assigns a newly created tag from the model overview", async ({ page }) => {
     const tag = `e2e-quick-tag-${Date.now()}`;
     const model = `e2e-quick-tagged-${Date.now()}`;
 
     await uploadModel(page, model);
+    await openModelPage(page, model);
     await page.getByRole("button", { name: `Add tags to ${model}` }).click();
-    const dialog = page.getByRole("dialog", { name: "Model tags" });
-    await dialog.getByLabel("Search or create a tag").fill(tag);
-    await dialog.getByRole("option", { name: /Create tag/ }).click();
+    const dialog = page.getByRole("dialog", { name: "Edit Model tags" });
+    const search = dialog.getByRole("combobox", { name: "Find or create tag" });
+    await expect(search).toBeFocused();
+    await search.fill(tag);
+    await search.press("Enter");
     await dialog.getByRole("button", { name: "Save tags" }).click();
+    await expect(dialog).toBeHidden();
 
-    await expect(modelCard(page, model)).toContainText(tag);
+    await page.reload();
+    await expect(
+      page.getByRole("region", { name: "About this model" }).getByText(tag, { exact: true }),
+    ).toBeVisible();
   });
 
   test("reviews a conflicting quick-tag draft before replacing current tags", async ({ page }) => {
@@ -34,9 +41,10 @@ test.describe("tags", () => {
     const id = Number(href?.match(/^\/models\/(\d+)/)?.[1]);
     expect(Number.isSafeInteger(id)).toBe(true);
     try {
-      await page.getByRole("button", { name: `Add tags to ${name}` }).click();
-      const dialog = page.getByRole("dialog", { name: "Model tags" });
-      await dialog.getByLabel("Search or create a tag").fill(draftTag);
+      await modelCard(page, name).click({ button: "right" });
+      await page.getByRole("menuitem", { name: `Add tags to ${name}` }).click();
+      const dialog = page.getByRole("dialog", { name: "Edit Model tags" });
+      await dialog.getByLabel("Find or create tag").fill(draftTag);
       await dialog.getByRole("option", { name: /Create tag/ }).click();
       const before = await (await page.request.get(`/api/v1/models/${id}`)).json();
       const competing = await page.request.patch(`/api/v1/models/${id}`, {
@@ -81,7 +89,7 @@ test.describe("tags", () => {
     expect(href).toMatch(/^\/models\/\d+/);
     const id = Number(href?.match(/^\/models\/(\d+)/)?.[1]);
     expect(Number.isSafeInteger(id)).toBe(true);
-    await modelCard(page, model).click();
+    await openModelPage(page, model);
     await clickModelAction(page, "Edit details");
     await page.getByRole("button", { name: `Remove ${tag}` }).click();
     await page.getByPlaceholder("Search or create — press Enter").fill(tag);
@@ -92,7 +100,10 @@ test.describe("tags", () => {
     const deleted = page.waitForResponse(
       (response) => /\/tags\/\d+$/.test(response.url()) && response.request().method() === "DELETE",
     );
-    await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
+    await page
+      .getByRole("dialog", { name: "Delete tag?" })
+      .getByRole("button", { name: "Delete", exact: true })
+      .click();
     expect((await deleted).ok()).toBe(true);
     await expect(del).toHaveCount(0);
     const persisted = await (await page.request.get(`/api/v1/models/${id}`)).json();

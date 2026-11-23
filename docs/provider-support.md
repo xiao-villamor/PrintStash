@@ -7,6 +7,14 @@ certification claim.
 PrintStash is Moonraker/Klipper-first. Other printer providers can exist, but
 they must make unsupported actions explicit in the API and UI.
 
+## Sliced G-code archives (Unreleased)
+
+Files named `.gcode.3mf` can be stored as one Revision with several sliced plates.
+Sending, queuing or batching requires a selected plate when more than one exists.
+Bambu LAN receives the original archive over FTPS and starts the selected plate with
+a project command. Other providers receive the extracted G-code for that plate.
+Slice for the target printer before sending. Ordinary unsliced `.3mf` projects remain source files.
+
 ## Material and tool state
 
 Every provider supports operator-managed tools and material feeds in PrintStash.
@@ -18,7 +26,7 @@ as an advisory only.
 
 - Bambu LAN reports AMS trays, empty trays, the external spool feed, colors, and
   the installed nozzle when firmware includes it. Incremental MQTT reports are
-  merged with the last full state. Provider state becomes stale while offline.
+  merged with the last full state. Firmware that reports individually addressed external inputs can show feeds 254 and 255 separately. These readouts do not assign a feed to a nozzle or change print commands. Provider state becomes stale while offline.
 - Moonraker reports the single active Spoolman spool ID configured through its
   integration. PrintStash resolves material/color only when the same spool is
   available from PrintStash's configured Spoolman inventory. This state is
@@ -29,19 +37,74 @@ as an advisory only.
 Provider synchronization can be disabled per printer. Manual state is never
 deleted by a provider failure and remains valid until an operator changes it.
 
+## Printer dashboard
+
+Fleet printer artwork uses [OrcaSlicer printer profile cover images](https://github.com/SoftFever/OrcaSlicer/tree/main/resources/profiles) when available.
+
+Opening a printer shows the current job, heater chart, materials and the controls
+its integration supports. Operators can change a heater target, jog or tune a
+Klipper printer and watch the controller report the result on the same page.
+
+The graphs retain up to five minutes of reported heater readings.
+Moonraker starts with the available controller temperature store and continues
+with live readings. The controller supplies a nominal one-second interval,
+so placement of stored readings on the timeline is approximate. Bambu starts
+with live readings when the detail page opens. The graph uses observations,
+and the current target is shown separately. Fan percentage is the reported output level,
+with no speed displayed when the printer omits it. Add to queue opens the
+saved-Revision picker with this printer fixed as its destination. The usual
+format, material compatibility, routing holds and printer permissions apply.
+For an eligible completed Vault print, **Queue again** in Jobs preselects the
+same Revision, plate and printer for review before submission.
+
+In **Files**, browse the printer’s folders or search by filename, path or
+matched Model name. Select a file to inspect its details and available actions.
+Use **Upload from library** to transfer a saved Revision to this printer. For a
+multi-plate Revision, select the plate to transfer. A successful transfer shows
+the remote filename. Starting that file is a separate action.
+In **Jobs**, search runs or filter by outcome, then select a run for timestamps,
+evidence and repeat printing. **Materials & maintenance** puts the loaded feeds,
+nozzle, service history and scheduling controls together. **Diagnostics** shows
+individual check results and the capabilities reported for the integration.
+
 ## Moonraker / Klipper
+
+Printer admins can send a single G-code command from **Status → Console**. The console shows the latest 100 commands and firmware replies, newest first. Select a past command or a loaded macro to edit it in the prompt, then press Enter or **Send**. **Refresh macros** reloads the list after a Klipper configuration change.
 
 Support level: stable.
 
 Current behavior:
 
-- live printer status over WebSocket
+- live printer status over WebSocket, including nozzle and bed readings and
+  targets, toolhead position and homing, extrusion readiness, speed and flow
+  overrides, and the part-cooling output when the Klipper `fan` object is
+  configured
+- heater targets, per-axis or all-axis homing, signed axis jogs and manual
+  filament feed/retract on the printer dashboard. Homing and motion require
+  ready firmware with no print running or paused. Jogging requires the
+  selected axis to be homed. Manual filament motion requires the primary
+  extruder to be active and report that it can extrude.
+- part-cooling fan (0–100%), print speed (50–150%) and extrusion flow
+  (50–150%) tuning on ready, printing, and paused machines. Fan tuning
+  requires a configured Klipper `fan`.
+- Bed surface inspection on the printer dashboard when Klipper reports
+  an active mesh, including the probe grid, profile, extents and height variation
+- Measure bed for Control operators on a ready, idle printer with X, Y and Z
+  homed, a configured Klipper bed mesh and an automatic probe. Clear the bed
+  before confirming. The measured mesh becomes active for the current firmware
+  session. PrintStash leaves the firmware configuration on disk untouched.
 - upload Vault G-code to Moonraker
 - optionally start a just-uploaded file
 - pause, resume, and cancel active prints
 - sync remote G-code file inventory
 - start an already-present remote G-code file
 - import matching print-history entries into a model's print history
+
+Pause automatic routing to the printer and use one controlling application
+during manual motion. PrintStash checks fresh firmware state, and Moonraker
+can accept other commands between the state check and the move. Klipper
+enforces travel and extrusion limits. Manual moves use the current firmware
+feed rate within those limits.
 
 Recommended smoke test:
 
@@ -50,6 +113,27 @@ Recommended smoke test:
 3. Sync printer files.
 4. Send a small known-good G-code file without auto-start.
 5. Start, pause, resume, and cancel only on a printer where that is safe.
+6. With the print ended and clear travel, home one axis and jog it. Verify
+   the reported position and homed axes. With a hot primary extruder,
+   verify a short manual feed and retract. Change each available tuning
+   control and confirm the new reported value.
+
+### Source configuration files
+
+On a Moonraker printer, the Config tab lets printer administrators browse
+existing `.cfg` and `.conf` files in Moonraker's `config` root, including nested
+files. It reads and saves UTF-8 text up to 256 KiB per file. Source files retain
+their existing line endings and trailing text when editing other lines.
+Moonraker's root and file permissions determine whether the editor can save.
+The Config URL identifies the selected file, so reloading it, going Back, or
+opening the same URL in another tab keeps that file selected. If it becomes
+unavailable, choose a file from the browser.
+
+PrintStash checks the file's revision immediately before uploading and verifies
+the saved bytes by reading them back. If an external edit is detected, review
+the printer's version beside the draft. If a save cannot be confirmed, reread
+the printer file before retrying. Structured configuration reported by Moonraker
+is available under **Reported configuration**. Saving never restarts firmware.
 
 ## Bambu LAN
 
@@ -57,9 +141,13 @@ Support level: beta.
 
 Current behavior:
 
-- local status polling
-- upload plain-text Vault G-code over LAN FTPS
-- explicitly start a just-uploaded G-code file; upload alone never starts it
+- local MQTT status, including nozzle and bed readings and targets and
+  part-cooling output, current layer counts, estimated minutes remaining, chamber
+  temperature and SD card presence when supplied by the installed firmware
+- upload plain-text G-code and sliced Library projects over LAN FTPS. File transfers offer the authenticated TLS session on the passive data connection for firmware that requires session reuse
+- use **Files → Sync printer files** to browse G-code and 3MF files under
+  `/cache`, including nested folders. **Start** accepts plain-text G-code and a PrintStash-uploaded project with a recorded plate. For other projects, import the sliced Revision and select its plate.
+- choose upload only, send and start, or queue. The Queue map connects each queued Revision to its routing rule and assigned printer. Drag its output port to another printer, or select the job and choose **Edit routing**, then **Save job**. Printer nodes show reported progress and time remaining during a print. Select a printer to inspect its current job and next job. Switch to **Table** for a list of printers and routing holds.
 - pause, resume, and cancel controls
 - record externally-started jobs with the task, subtask, project, profile,
   plate, layer, nozzle, and G-code identity fields the printer actually reports
@@ -69,16 +157,17 @@ Current behavior:
 
 Safety rules:
 
-- PrintStash checks that the printer is idle before a Bambu Vault send.
-- Start requires the user to select **Start print immediately** in the send
-  dialog; the default is upload-only.
+- PrintStash checks readiness before a Bambu Vault send or a start from Files. A printer reporting `PREPARE` is already busy with its next print.
+- **Upload from library** transfers the file. Choose **Start** in Files or select
+  **Start print immediately** in the send dialog to run it.
 - Upload and start remain beta until validated against more firmware versions.
 
 Not supported:
 
-- remote file inventory
+- browsing storage outside the printer’s FTPS `/cache` directory
 - delete remote files
-- raw G-code controls
+- manual homing, jogging, filament feed/retract, heater targets, or fan,
+  speed, and flow tuning through PrintStash
 - measured filament consumption
 - cloud printer control
 

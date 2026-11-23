@@ -24,7 +24,7 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test-support/router";
 
 import { PrintJobReproducibility } from "@/components/print-job-reproducibility";
 import { Localized } from "@/components/ui/localized";
@@ -88,9 +88,9 @@ describe("PrintJobReproducibility", () => {
     expect(resolved.downloadUrl).toBeNull();
 
     render(
-      <MemoryRouter>
+      <TestRouter>
         <PrintJobReproducibility job={job} />
-      </MemoryRouter>,
+      </TestRouter>,
     );
     expect(screen.getByTestId("reproducibility-level")).toHaveTextContent("Partially reproducible");
     expect(screen.getByText("real-plate.gcode")).toBeInTheDocument();
@@ -107,7 +107,7 @@ describe("PrintJobReproducibility", () => {
   it("shows all evidence levels and only downloads an exact archived artifact", async () => {
     const user = userEvent.setup();
     const { rerender } = render(
-      <MemoryRouter>
+      <TestRouter>
         <PrintJobReproducibility
           job={makeJob({
             artifact_evidence: "gcode_archived",
@@ -130,7 +130,7 @@ describe("PrintJobReproducibility", () => {
           previewHref="/models/7"
           downloadFile={downloadAuthenticatedFile}
         />
-      </MemoryRouter>,
+      </TestRouter>,
     );
 
     expect(screen.getByTestId("reproducibility-level")).toHaveTextContent("Exactly reproducible");
@@ -143,9 +143,9 @@ describe("PrintJobReproducibility", () => {
     expect(downloadAuthenticatedFile).toHaveBeenCalledWith("/api/v1/files/7/download");
 
     rerender(
-      <MemoryRouter>
+      <TestRouter>
         <PrintJobReproducibility job={makeJob({ artifact_evidence: "capture_failed" })} />
-      </MemoryRouter>,
+      </TestRouter>,
     );
     expect(screen.getByTestId("reproducibility-level")).toHaveTextContent(
       "External/basic evidence",
@@ -178,9 +178,9 @@ describe("PrintJobReproducibility", () => {
     });
 
     const { rerender } = render(
-      <MemoryRouter>
+      <TestRouter>
         <PrintJobReproducibility job={exactArchivedJob} downloadFile={downloadAuthenticatedFile} />
-      </MemoryRouter>,
+      </TestRouter>,
     );
     expect(screen.getByText("Archived artifact", { exact: true })).toBeInTheDocument();
     expect(screen.queryByText("subtask-name", { exact: true })).not.toBeInTheDocument();
@@ -189,14 +189,14 @@ describe("PrintJobReproducibility", () => {
     expect(downloadAuthenticatedFile).toHaveBeenCalledWith("/api/v1/files/7/download");
 
     rerender(
-      <MemoryRouter>
+      <TestRouter>
         <PrintJobReproducibility
           job={{
             ...exactArchivedJob,
             artifact_evidence: "capture_failed",
           }}
         />
-      </MemoryRouter>,
+      </TestRouter>,
     );
     expect(
       screen.queryByRole("button", { name: /download archived artifact/i }),
@@ -205,14 +205,14 @@ describe("PrintJobReproducibility", () => {
     expect(screen.queryByText("Archived artifact", { exact: true })).not.toBeInTheDocument();
 
     rerender(
-      <MemoryRouter>
+      <TestRouter>
         <PrintJobReproducibility
           job={makeJob({
             remote_filename: "subtask-name",
             artifact_evidence: "metadata_only",
           })}
         />
-      </MemoryRouter>,
+      </TestRouter>,
     );
     expect(screen.getByText("External print evidence", { exact: true })).toBeInTheDocument();
     expect(screen.queryByText("Archived artifact", { exact: true })).not.toBeInTheDocument();
@@ -244,9 +244,9 @@ describe("PrintJobReproducibility", () => {
     });
 
     const { rerender } = render(
-      <MemoryRouter>
+      <TestRouter>
         <PrintJobReproducibility job={noPreviewJob} toolpathViewer={TestToolpathViewer} />
-      </MemoryRouter>,
+      </TestRouter>,
     );
     expect(screen.queryByRole("button", { name: "Preview toolpath" })).not.toBeInTheDocument();
 
@@ -271,9 +271,9 @@ describe("PrintJobReproducibility", () => {
       },
     };
     rerender(
-      <MemoryRouter>
+      <TestRouter>
         <PrintJobReproducibility job={previewJob} toolpathViewer={TestToolpathViewer} />
-      </MemoryRouter>,
+      </TestRouter>,
     );
     const trigger = screen.getByRole("button", { name: "Preview toolpath" });
     await user.click(trigger);
@@ -342,7 +342,7 @@ describe("PrintJobReproducibility", () => {
 
     render(
       <I18nProvider>
-        <MemoryRouter>
+        <TestRouter>
           <Localized>
             <PrintJobReproducibility
               job={makeJob({
@@ -352,7 +352,7 @@ describe("PrintJobReproducibility", () => {
               })}
             />
           </Localized>
-        </MemoryRouter>
+        </TestRouter>
       </I18nProvider>,
       { container },
     );
@@ -377,7 +377,7 @@ describe("PrintJobReproducibility", () => {
     const user = userEvent.setup();
     render(
       <I18nProvider>
-        <MemoryRouter>
+        <TestRouter>
           <PrintJobReproducibility
             job={makeJob({
               artifact_evidence: "project_archived",
@@ -400,7 +400,7 @@ describe("PrintJobReproducibility", () => {
             })}
             toolpathViewer={TestToolpathViewer}
           />
-        </MemoryRouter>
+        </TestRouter>
       </I18nProvider>,
     );
 

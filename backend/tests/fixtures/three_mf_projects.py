@@ -223,3 +223,16 @@ def build_sliced_project(
                 f"G1 X{number * 10} Y10 E2\nG1 Z0.4\nG1 X0 Y10 E3\n",
             )
     return stream.getvalue()
+
+
+def build_profile_project(settings: dict, *, slices: str | None = None) -> bytes:
+    """A real mesh package with caller-selected saved project settings."""
+    output = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(build_3d_builder_component_project())) as source:
+        with zipfile.ZipFile(output, "w") as archive:
+            for info in source.infolist():
+                archive.writestr(info, source.read(info))
+            archive.writestr("Metadata/project_settings.config", json.dumps(settings))
+            if slices is not None:
+                archive.writestr("Metadata/slice_info.config", slices)
+    return output.getvalue()

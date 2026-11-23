@@ -1,7 +1,8 @@
-"""A catalog where some work adds to the library and some holds back for it.
+"""Catalogs where some work adds to the library or runs for a person, and
+other work holds back for it.
 
 Shared by the catalog, reconciler, runner and submission tests of
-``adds_to_library`` and ``during_additions``.
+``adds_to_library``, ``during_additions`` and ``yields_to``.
 """
 
 from __future__ import annotations
@@ -58,6 +59,37 @@ def additions_engine() -> InlineJobEngine:
                 PACED, source=_OnePending(), during_additions=DuringAdditions.PACED
             ),
             definition(EAGER, source=_OnePending()),
+        ],
+        lanes={**default_lanes(), lane: Lane(lane, 4)},
+    )
+    built = InlineJobEngine(catalog)
+    built.launch(listen_lanes=None)
+    catalog_module.bind(built, catalog)
+    return built
+
+
+INTERACTIVE_WORK = JobKind.DERIVATIVES_MESH
+YIELDING = JobKind.SEARCH_PROJECT
+
+
+@pytest.fixture
+def yielding_engine() -> InlineJobEngine:
+    """One definition whose discovery yields to interactive Jobs of another."""
+    lane = LaneName.MAINTENANCE
+
+    def definition(name: JobKind, **kw) -> JobDefinition:
+        return JobDefinition(
+            name=name,
+            lane=lane,
+            steps=(Step(f"{name}.run", _noop),),
+            label=name.value,
+            **kw,
+        )
+
+    catalog = WorkCatalog(
+        [
+            definition(INTERACTIVE_WORK, source=_OnePending()),
+            definition(YIELDING, source=_OnePending(), yields_to=(INTERACTIVE_WORK,)),
         ],
         lanes={**default_lanes(), lane: Lane(lane, 4)},
     )

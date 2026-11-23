@@ -20,7 +20,7 @@ import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test-support/router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { InboxItem } from "@/types";
@@ -80,20 +80,75 @@ describe("InboxPage", () => {
   it.each([
     { label: "empty", items: [] },
     { label: "populated", items: [pendingImport] },
-  ])("offers the import dialog from an $label queue", async ({ items }) => {
+  ])("offers URL capture from an $label queue", async ({ items }) => {
     renderApp(<InboxPage />, {
       at: "/inbox",
       routePath: "/inbox",
       routes: { "GET /api/v1/inbox": json(items) },
     });
 
-    expect(await screen.findByRole("link", { name: "Open import dialog" })).toHaveAttribute(
-      "href",
-      "/?upload=1",
-    );
-    expect(
-      screen.getByText("Open the import dialog, then choose From URL to add a model link."),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Add URL" })).toBeEnabled();
+  });
+
+  describe("adding a URL", () => {
+    const url = "https://example.test/model/1";
+
+    async function openCapture(routes = {}) {
+      const user = userEvent.setup();
+      const app = renderApp(<InboxPage />, {
+        at: "/inbox",
+        routePath: "/inbox",
+        routes: {
+          "GET /api/v1/inbox": json([]),
+          "POST /api/v1/inbox": json({ ...pendingImport, id: 3 }),
+          ...routes,
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Add URL" }));
+      return { app, user, field: screen.getByRole("textbox", { name: "Source URL" }) };
+    }
+
+    it("waits for a URL before capture", async () => {
+      const { field } = await openCapture();
+
+      expect(field).toHaveAttribute("type", "url");
+      expect(screen.getByRole("button", { name: "Capture for review" })).toBeDisabled();
+    });
+
+    it("rejects malformed URL syntax before sending a request", async () => {
+      const { app, field, user } = await openCapture();
+      await user.type(field, "not-a-url");
+
+      await user.click(screen.getByRole("button", { name: "Capture for review" }));
+
+      expect(field).toBeInvalid();
+      expect(app.requestsWithMethod("POST")).toEqual([]);
+    });
+
+    it("captures the pasted URL for review", async () => {
+      const { app, field, user } = await openCapture();
+      await user.type(field, url);
+
+      await user.click(screen.getByRole("button", { name: "Capture for review" }));
+
+      await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+      expect(JSON.parse(app.requestsWithMethod("POST")[0].body)).toMatchObject({ url });
+      await waitFor(() => expect(screen.queryByRole("textbox", { name: "Source URL" })).toBeNull());
+    });
+
+    it("keeps a refused URL for correction", async () => {
+      const { field, user } = await openCapture({
+        "POST /api/v1/inbox": json({ detail: "url_not_allowed" }, 400),
+      });
+      await user.type(field, url);
+
+      await user.click(screen.getByRole("button", { name: "Capture for review" }));
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Capture for review" })).toBeEnabled(),
+      );
+      expect(field).toHaveValue(url);
+    });
   });
 
   it("localizes Inbox UI while preserving dynamic source data", async () => {
@@ -102,9 +157,9 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );
@@ -112,7 +167,7 @@ describe("InboxPage", () => {
     expect(
       await screen.findByRole("heading", { name: "Importaciones pendientes" }),
     ).toBeInTheDocument();
-    expect(await screen.findByText("Necesita revisión")).toBeInTheDocument();
+    expect(await screen.findByText(/· Necesita revisión$/)).toBeInTheDocument();
     expect(screen.getByText("printables.com")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Revisar" })).toHaveAttribute("href", "/inbox/1");
   });
@@ -134,14 +189,14 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("Partial")).toBeInTheDocument();
+    expect(await screen.findByText(/· Partial$/)).toBeInTheDocument();
     const retry = screen.getByRole("button", { name: "Retry" });
     await userEvent.setup().click(retry);
     await waitFor(() => expect(retryPendingImport).toHaveBeenCalledWith(2));
@@ -180,14 +235,14 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );
 
-    const queue = await screen.findByRole("list", { name: "Import queue" });
+    const queue = await screen.findByRole("list", { name: "Captures" });
     expect(queue).toHaveTextContent("Clean model");
     expect(queue).toHaveTextContent("Printables");
     expect(queue).toHaveTextContent("Files: 2");
@@ -205,14 +260,14 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("Resolving")).toBeInTheDocument();
+    expect(await screen.findByText(/· Resolving$/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete import" })).not.toBeInTheDocument();
   });
 
@@ -226,9 +281,9 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );
@@ -260,9 +315,9 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );
@@ -294,9 +349,9 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );
@@ -316,7 +371,7 @@ describe("InboxPage", () => {
       await vi.advanceTimersByTimeAsync(1_501);
     });
     expect(listPendingImports).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("Needs review")).toBeInTheDocument();
+    expect(screen.getByText(/· Needs review$/)).toBeInTheDocument();
   });
 
   it("restarts polling when clearing completed imports fails while work is active", async () => {
@@ -339,9 +394,9 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );

@@ -5,6 +5,7 @@ import { Cover } from "@/components/multipart-model-presentation";
 import { SearchSubjectPreview } from "@/components/search-evidence";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { retirePrivateSessionScope } from "@/lib/auth-store";
+import { acquireAssetUrl } from "@/lib/asset-cache";
 
 beforeEach(() => {
   vi.stubGlobal("IntersectionObserver", undefined);
@@ -39,9 +40,60 @@ describe("ProtectedThumbnail", () => {
       },
     });
     await act(async () => fireEvent.load(image));
-    expect(image.parentElement).toHaveAttribute("data-library-thumbnail", "failed");
+    expect(screen.getByText("Fallback").parentElement).toHaveAttribute(
+      "data-library-thumbnail",
+      "failed",
+    );
+    expect(image).not.toBeInTheDocument();
     expect(screen.getByText("Fallback")).toBeVisible();
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("paints cached bytes on mount without waiting for viewport admission", async () => {
+    const lease = acquireAssetUrl("/cached/remount");
+    await lease.url;
+    // An observer that never reports: only the cache can make the image visible.
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    try {
+      render(
+        <ProtectedThumbnail
+          path="/cached/remount"
+          alt="Remounted"
+          placeholder={<span>Missing</span>}
+        />,
+      );
+      expect(screen.getByAltText("Remounted")).toHaveAttribute("src", "blob:decoded");
+      expect(fetch).toHaveBeenCalledOnce();
+    } finally {
+      lease.release();
+    }
+  });
+
+  it("waits for admission before downloading an uncached image", () => {
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    render(
+      <ProtectedThumbnail
+        path="/uncached/offscreen"
+        alt="Offscreen"
+        placeholder={<span>Missing</span>}
+      />,
+    );
+    expect(screen.queryByAltText("Offscreen")).not.toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("starts an admitted image without another visibility gate", async () => {
@@ -149,7 +201,11 @@ describe("ProtectedThumbnail", () => {
     );
     const image = await screen.findByAltText("Part");
     fireEvent.error(image);
-    expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("failed");
+    expect(screen.getByText("Missing").parentElement).toHaveAttribute(
+      "data-library-thumbnail",
+      "failed",
+    );
+    expect(image).not.toBeInTheDocument();
   });
   it("keeps missing image semantics", () => {
     render(<ProtectedThumbnail path={null} alt="Part" placeholder={<span>Missing</span>} />);
@@ -197,7 +253,11 @@ describe("ProtectedThumbnail", () => {
       },
     });
     await act(async () => fireEvent.load(image));
-    expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("failed");
+    expect(screen.getByText("Missing").parentElement).toHaveAttribute(
+      "data-library-thumbnail",
+      "failed",
+    );
+    expect(image).not.toBeInTheDocument();
   });
 
   it("ignores a previous URL decode after image reassignment", async () => {

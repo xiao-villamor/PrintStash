@@ -30,10 +30,13 @@ from app.modules.ingestion import (
     requests,
     scratch_windows,
 )
+from app.modules.ingestion.archive_plan import ArchiveIntake
 from app.modules.ingestion.batch_contracts import (
     ArchiveSource,
+    BatchSupplement,
     CollectionSource,
     EntrySpec,
+    FinalizationFailure,
     RemoteSource,
 )
 from app.modules.ingestion.batch_session import BatchSession
@@ -350,6 +353,7 @@ def archive_manifest(
                 size_bytes=e.size_bytes,
                 file_type=e.file_type,
                 is_image=e.is_image,
+                is_document=e.is_document,
             )
             for e in entries
         ],
@@ -739,6 +743,7 @@ def run_archive_selection(
     source_url: Optional[str],
     actor_user_id: int,
     session_factory: SessionFactory,
+    intake: ArchiveIntake | None = None,
 ) -> None:
     """Consume the reviewed selection with one disposable expanded entry."""
     checkpoint(force=True)
@@ -753,8 +758,10 @@ def run_archive_selection(
     )
     batch.begin(None)
     source_id = f"archive:{job_context.job_id}"
+    supplement = None
     try:
-        if not _confirmed_source(batch, source_id):
+        confirmed = _confirmed_source(batch, source_id)
+        if not confirmed or intake is not None:
             kind = importer.archive_format(archive, archive_name)
             if kind is None:
                 raise importer.ImportError_("archive_invalid")
@@ -766,23 +773,45 @@ def run_archive_selection(
                 ),
                 session_factory=session_factory,
             ) as view:
-                _consume_archive(
-                    batch,
-                    view,
-                    names,
-                    source_id=source_id,
-                    source_url=source_url,
-                    only_source=True,
-                )
+                if not confirmed:
+                    _consume_archive(
+                        batch,
+                        view,
+                        names,
+                        source_id=source_id,
+                        source_url=source_url,
+                        only_source=True,
+                    )
+                if intake is not None:
+                    from .archive_intake import finalize
+
+                    supplement = finalize(
+                        batch,
+                        archive=view,
+                        plan=intake,
+                        source_id=source_id,
+                        collection_path=importer.archive_collection_path(
+                            collection, archive_name
+                        ),
+                        actor_user_id=actor_user_id,
+                    )
         batch.discovery_complete()
-        batch.finish()
+        batch.finish(supplement=supplement)
     except importer.WindowReleaseError, scratch_windows.WindowCleanupError:
         raise
     except Exception as exc:  # noqa: BLE001 — one archive's expanded units
         code = _entry_error(exc)
         _record_source_failure(batch, _download_spec(source_id, archive_name), code)
         batch.discovery_complete()
-        batch.finish(failure_code=code)
+        batch.finish(
+            failure_code=code,
+            supplement=(
+                BatchSupplement(failures=(FinalizationFailure(archive_name, code),))
+                if intake is not None
+                and all(record.published for record in batch.source_entries(source_id))
+                else None
+            ),
+        )
 
 
 async def run_file_selection_import(

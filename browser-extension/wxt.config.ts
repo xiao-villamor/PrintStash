@@ -1,3 +1,4 @@
+import { MARKETPLACE_ORIGINS } from "./source-providers.ts";
 import { defineConfig } from "wxt";
 import { resolve } from "node:path";
 
@@ -17,8 +18,7 @@ export default defineConfig({
   },
   manifest: ({ browser }) => ({
     name: "PrintStash",
-    description:
-      "Send models from MakerWorld, Printables, Thingiverse, or direct file links to PrintStash.",
+    description: "Send selected marketplace models and print profiles to PrintStash for review.",
     permissions: ["activeTab", "scripting", "storage"],
     host_permissions: ["http://localhost/*", "http://127.0.0.1/*", "http://[::1]/*"],
     optional_host_permissions: ["http://*/*", "https://*/*"],
@@ -34,6 +34,12 @@ export default defineConfig({
             },
           }
         : undefined,
+    web_accessible_resources: [
+      {
+        resources: ["popup.html", "chunks/*", "assets/*", "icon.svg"],
+        matches: MARKETPLACE_ORIGINS,
+      },
+    ],
     action: {
       default_title: "PrintStash",
       default_icon: {

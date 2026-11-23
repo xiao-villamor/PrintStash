@@ -120,7 +120,10 @@ def build_cover(
     **overrides: Any,
 ) -> ModelSourceCover:
     """The row for a source's representative image, without publishing bytes."""
-    overrides.setdefault("storage_key", f"covers/source-{source.id}.webp")
+    overrides.setdefault("position", 0)
+    overrides.setdefault(
+        "storage_key", f"covers/source-{source.id}-{overrides['position']}.webp"
+    )
     overrides.setdefault("size_bytes", 1024)
     return save(
         session,

@@ -1,7 +1,7 @@
 /** An actual PrusaSlicer BGCODE can be inspected without changing its original bytes. */
 import { readFile } from "node:fs/promises";
 import { test, expect } from "./helpers";
-import { modelCard } from "./util";
+import { openModelPage, modelCard } from "./util";
 
 const API = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}/api/v1`;
 
@@ -14,7 +14,7 @@ test.describe("BGCODE toolpath", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Upload model" });
-    await dialog.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
+    await dialog.locator('input[accept=".gcode,.g,.gco,.bgcode,.gcode.3mf"]').setInputFiles({
       name: "cube.bgcode",
       mimeType: "application/octet-stream",
       buffer: original,
@@ -33,8 +33,8 @@ test.describe("BGCODE toolpath", () => {
       await page.reload();
       await expect(modelCard(page, name)).toBeVisible({ timeout: 5000 });
     }).toPass({ timeout: 60000 });
-    await modelCard(page, name).click();
-    await page.getByRole("button", { name: "GCode", exact: true }).click();
+    await openModelPage(page, name);
+    await page.getByRole("button", { name: "Layers", exact: true }).click();
     const slider = page.getByRole("slider", { name: "Current layer" });
     await expect(slider).toBeVisible({ timeout: 30000 });
     // The upstream fixture has exactly 31 printed layers; travel lifts add none.
@@ -42,8 +42,8 @@ test.describe("BGCODE toolpath", () => {
     await slider.focus();
     await slider.press("Home");
     await expect(slider).toHaveValue("0");
-    await page.getByRole("button", { name: "Show travel moves" }).click();
-    await expect(page.getByRole("button", { name: "Hide travel moves" })).toHaveAttribute(
+    await page.getByRole("button", { name: "Travel", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Travel", exact: true })).toHaveAttribute(
       "aria-pressed",
       "true",
     );

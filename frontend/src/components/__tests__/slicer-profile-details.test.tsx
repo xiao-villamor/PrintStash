@@ -1,5 +1,5 @@
 /** Profiles expose grouped read-only observations with paginated source evidence. */
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { ProfileSettingsDetails } from "@/components/slicer-profile-details";
@@ -157,6 +157,10 @@ describe("ProfileSettingsDetails", () => {
     const user = await openDetails();
     await user.click(screen.getByRole("button", { name: "View settings" }));
     await user.click(screen.getByRole("button", { name: "Hide settings" }));
-    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("link", { name: "bracket.gcode · Bracket" }),
+      ).not.toBeInTheDocument(),
+    );
   });
 });

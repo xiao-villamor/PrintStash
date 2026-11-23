@@ -12,18 +12,45 @@ import {
   screenshotHasForeground,
   screenshotDimensions,
   visibleCanvasBackground,
+  viewerPresetDirection,
 } from "@/lib/thumbnail-camera";
 
 describe("thumbnail camera", () => {
   it("keeps the hero camera above the build plane", () => {
     const direction = heroCameraDirection();
 
-    expect(direction.y).toBeGreaterThan(0);
+    expect(direction.y).toBeCloseTo(0.5);
     expect(direction.length()).toBeCloseTo(1);
     // Same object-to-camera direction as printstash-core after the viewer's
     // Z-up mesh is mapped into Three.js' Y-up scene.
-    expect(direction.x).toBeCloseTo(-0.5455, 3);
-    expect(direction.z).toBeCloseTo(-0.7791, 3);
+    expect(direction.x).toBeCloseTo(-0.4967, 3);
+    expect(direction.z).toBeCloseTo(-0.7094, 3);
+  });
+
+  it("fits toolpath isometric views from the same direction as the source mesh", () => {
+    const size = new THREE.Vector3(240, 150, 250);
+    const source = fitCameraToBounds(size, 1.6, 45).position.normalize();
+    const toolpath = fitCameraToBounds(
+      size,
+      1.6,
+      45,
+      viewerPresetDirection("isometric"),
+    ).position.normalize();
+
+    expect(toolpath.distanceTo(source)).toBeLessThan(1e-10);
+  });
+
+  it("keeps the front view on the common front axis", () => {
+    expect(viewerPresetDirection("front").toArray()).toEqual([0, 0, 1]);
+  });
+
+  it("fits the offset top camera", () => {
+    const size = new THREE.Vector3(240, 150, 250);
+    const camera = fitCameraToBounds(size, 1.6, 45, viewerPresetDirection("top"));
+
+    expect(Number.isFinite(camera.distance)).toBe(true);
+    expect(camera.position.y).toBeGreaterThan(0);
+    expect(camera.position.z / camera.position.y).toBeCloseTo(Math.tan(0.02), 5);
   });
 
   it.each([

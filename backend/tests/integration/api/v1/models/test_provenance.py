@@ -1046,3 +1046,70 @@ class TestConditionalProvenance:
 
         assert response.status_code == 200, response.text
         assert response.json()["edit_version"] == 1
+
+
+class TestRelatedProfilesAuthorization:
+    def test_requires_authentication(self, client, model):
+        assert (
+            client.get(f"/api/v1/models/{model.id}/related-profiles").status_code == 401
+        )
+
+    def test_requires_access_to_the_requested_model(
+        self, client, model, db_session, make_user, headers_for
+    ):
+        private = build_collection(
+            db_session,
+            name="Private profiles",
+            slug="private-profiles",
+            path="private-profiles",
+        )
+        model.collection_id = private.id
+        db_session.add(model)
+        db_session.commit()
+        outsider = make_user("profile-outsider")
+        assert (
+            client.get(
+                f"/api/v1/models/{model.id}/related-profiles",
+                headers=headers_for(outsider),
+            ).status_code
+            == 403
+        )
+
+
+class TestGalleryContentAccess:
+    def test_gallery_content_requires_model_access(
+        self,
+        client,
+        db_session,
+        auth_headers,
+        make_model,
+        make_provenance_source,
+        make_cover,
+        make_user,
+        headers_for,
+    ):
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        model = make_model()
+        source = make_provenance_source(model)
+        image = make_cover(source, position=1)
+        import io
+
+        from PIL import Image
+
+        gallery = io.BytesIO()
+        Image.new("RGB", (8, 8), "red").save(gallery, "WEBP")
+        get_backend().write_bytes(gallery.getvalue(), image.storage_key)
+        db_session.commit()
+        url = (
+            f"/api/v1/models/{model.id}/provenance/{source.id}/cover/content?position=1"
+        )
+        assert client.get(url).status_code == 401
+        outsider = make_user(superuser=False)
+        assert client.get(url, headers=headers_for(outsider)).status_code == 403
+        allowed = client.get(url, headers=auth_headers)
+        assert allowed.status_code == 200
+        with Image.open(io.BytesIO(allowed.content)) as served:
+            assert served.format == "WEBP"
+            assert served.size == (8, 8)
+        assert "private" in allowed.headers["Cache-Control"]

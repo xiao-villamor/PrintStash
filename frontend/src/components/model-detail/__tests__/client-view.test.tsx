@@ -1,4 +1,5 @@
 /** The SPA route shares one authorized Model read and distinguishes recovery from lost access. */
+import { NO_PREVIEWS } from "@/types/previews";
 
 import "@testing-library/jest-dom/vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
@@ -14,6 +15,8 @@ const FROZEN_NOW = "2026-01-01T00:00:00Z";
 
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    previews: NO_PREVIEWS,
+    has_custom_cover: false,
     edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 1,
@@ -42,6 +45,8 @@ function renderView(options: RenderAppOptions & { initialModel?: ModelRead | nul
   return renderApp(<ModelDetailClientView id={1} initialModel={initialModel} />, {
     routes: {
       "GET /api/v1/models/1/print-jobs": json([]),
+      "GET /api/v1/models/1/related-profiles": json({ items: [], has_more: false }),
+      "GET /api/v1/models/1/provenance": json({ edit_version: 1, sources: [] }),
       "GET /api/v1/models/1/printer-files": json([]),
       "GET /api/v1/printers": json([]),
       "GET /api/v1/collections": json([]),
@@ -53,6 +58,14 @@ function renderView(options: RenderAppOptions & { initialModel?: ModelRead | nul
 }
 
 beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   window.localStorage.clear();
 });
 
@@ -67,6 +80,23 @@ describe("ModelDetailClientView", () => {
     await screen.findByText("Couldn’t load this model");
     view.route({ "GET /api/v1/models/1": json(aModel()) });
 
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("Benchy")).toBeVisible();
+  });
+
+  it("retries a disconnected initial read without navigation", async () => {
+    const user = userEvent.setup();
+    const view = renderView({
+      routes: {
+        "GET /api/v1/models/1": () => {
+          throw new TypeError("Failed to fetch");
+        },
+      },
+    });
+
+    expect(await screen.findByRole("heading", { name: "Unable to connect" })).toBeVisible();
+    view.route({ "GET /api/v1/models/1": json(aModel()) });
     await user.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(await screen.findByText("Benchy")).toBeVisible();
@@ -202,6 +232,9 @@ describe("ModelDetailClientView", () => {
       expect(
         await screen.findByText("This model lives in a collection you need access to."),
       ).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Access restricted" })).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /Sign in/ })).not.toBeInTheDocument();
     });
 
     it("invites a retry for a server error", async () => {

@@ -1377,7 +1377,7 @@ class TestActiveJobQueryPlans:
 
         definition = work_catalog.definition(JobKind.DERIVATIVES_MESH)
         lane = work_catalog.lanes[definition.lane]
-        interactive = max(0, lane.concurrency - 1)
+        interactive = lane.concurrency * 3 - 1
         with emitted_job_queries() as queries:
             budget = _discovery_budget(db_session, definition)
         assert budget == DiscoveryBudget(

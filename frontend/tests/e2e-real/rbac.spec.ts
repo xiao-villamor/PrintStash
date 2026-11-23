@@ -8,10 +8,10 @@
  */
 import { test, expect, authBundleFor, authedContext } from "./helpers";
 import {
+  openModelPage,
   clickModelAction,
   createCollectionViaVault,
   modelActionItem,
-  modelCard,
   uploadModel,
 } from "./util";
 
@@ -55,9 +55,10 @@ async function grant(
 async function createUser(page: import("@playwright/test").Page, username: string) {
   await page.goto("/settings");
   await page.getByRole("button", { name: "Users & Access" }).click();
+  await page.getByRole("button", { name: "Create user", exact: true }).click();
   await page.getByLabel("Username").fill(username);
   await page.getByLabel("Initial password").fill(USER_PW);
-  await page.getByRole("button", { name: "Create" }).click();
+  await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.getByRole("paragraph").filter({ hasText: username })).toBeVisible();
 }
 
@@ -79,9 +80,10 @@ test.describe("role-based access", () => {
     // ── Admin: create a regular user ────────────────────────────────────────────
     await page.goto("/settings");
     await page.getByRole("button", { name: "Users & Access" }).click();
+    await page.getByRole("button", { name: "Create user", exact: true }).click();
     await page.getByLabel("Username").fill(username);
     await page.getByLabel("Initial password").fill(USER_PW);
-    await page.getByRole("button", { name: "Create" }).click();
+    await page.getByRole("button", { name: "Create", exact: true }).click();
     await expect(page.getByRole("paragraph").filter({ hasText: username })).toBeVisible();
 
     // ── Admin: grant the user "view" on the granted collection only ─────────────
@@ -93,8 +95,8 @@ test.describe("role-based access", () => {
     try {
       await userPage.goto("/");
       const sidebar = userPage.locator("aside");
-      await expect(sidebar.getByRole("button", { name: granted, exact: true })).toBeVisible();
-      await expect(sidebar.getByRole("button", { name: hidden, exact: true })).toHaveCount(0);
+      await expect(sidebar.getByRole("treeitem", { name: granted, exact: true })).toBeVisible();
+      await expect(sidebar.getByRole("treeitem", { name: hidden, exact: true })).toHaveCount(0);
     } finally {
       await context.close();
     }
@@ -113,7 +115,7 @@ test.describe("role-based access", () => {
     // Admin: collection + a model inside it; capture the model URL.
     await createCollectionViaVault(page, col);
     await uploadModel(page, model, { collection: col });
-    await modelCard(page, model).click();
+    await openModelPage(page, model);
     await expect(page.getByRole("heading", { name: model })).toBeVisible();
     const modelUrl = page.url();
 
@@ -129,7 +131,7 @@ test.describe("role-based access", () => {
     try {
       await v.page.goto(modelUrl);
       await expect(v.page.getByRole("heading", { name: model })).toBeVisible();
-      await v.page.getByRole("button", { name: "Model actions" }).click();
+      await v.page.getByRole("heading", { level: 1 }).click({ button: "right" });
       await expect(modelActionItem(v.page, "Edit details")).toBeDisabled();
       await expect(modelActionItem(v.page, "Delete model")).toBeDisabled();
     } finally {
@@ -143,8 +145,8 @@ test.describe("role-based access", () => {
       await e.page.goto(modelUrl);
       await clickModelAction(e.page, "Edit details");
       const renamed = `${model}-edited`;
-      await e.page.getByPlaceholder("Model name").fill(renamed);
-      await e.page.getByRole("button", { name: /^Save$/ }).click();
+      await e.page.getByRole("textbox", { name: "Name (required)", exact: true }).fill(renamed);
+      await e.page.getByRole("button", { name: "Save changes", exact: true }).click();
       await expect(e.page.getByRole("heading", { name: renamed })).toBeVisible();
 
       // Delete is enabled for an edit-role user; deleting sends it to trash and

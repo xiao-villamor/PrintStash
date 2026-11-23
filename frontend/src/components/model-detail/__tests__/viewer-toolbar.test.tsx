@@ -1,6 +1,7 @@
 /*
  * The model screenshot control stays inert until the WebGL preview is ready,
  * then delegates to the viewer's asynchronous capture boundary exactly once.
+ * Mode and grid buttons expose their current selection to assistive technology.
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -17,28 +18,35 @@ function renderToolbar(
   screenshot = vi.fn<() => Promise<void>>(async () => {}),
   actions: {
     fit?: () => void;
+    setView?: STLViewerControls["setView"];
     setShowGrid?: (visible: boolean) => void;
     notifyScreenshotError?: (message: string) => void;
+    viewerMode?: "model" | "gcode";
+    displayMode?: "solid" | "xray" | "wireframe";
+    showGrid?: boolean;
+    hasGcode?: boolean;
   } = {},
 ) {
   const controls = createRef<STLViewerControls>();
   controls.current = {
+    setView: actions.setView ?? vi.fn<STLViewerControls["setView"]>(),
     zoomIn: vi.fn<() => void>(),
     zoomOut: vi.fn<() => void>(),
     resetView: vi.fn<() => void>(),
     fit: actions.fit ?? vi.fn<() => void>(),
     screenshot,
+    captureImage: vi.fn<() => Promise<Blob>>().mockResolvedValue(new Blob()),
   };
   render(
     <ViewerToolbar
-      displayMode="solid"
+      displayMode={actions.displayMode ?? "solid"}
       setDisplayMode={vi.fn<(mode: "solid" | "xray" | "wireframe") => void>()}
-      showGrid
+      showGrid={actions.showGrid ?? true}
       setShowGrid={actions.setShowGrid ?? vi.fn<(visible: boolean) => void>()}
       controls={controls}
-      viewerMode="model"
+      viewerMode={actions.viewerMode ?? "model"}
       setViewerMode={vi.fn<(mode: "model" | "gcode") => void>()}
-      hasGcode={false}
+      hasGcode={actions.hasGcode ?? false}
       viewerReady={viewerReady}
       notifyScreenshotError={actions.notifyScreenshotError}
     />,
@@ -49,14 +57,8 @@ function renderToolbar(
 describe("ViewerToolbar screenshot", () => {
   it("keeps model controls inert until the preview is ready", () => {
     renderToolbar(false);
-    for (const name of [
-      "Solid",
-      "X-Ray",
-      "Wire",
-      "Fit to view",
-      "Screenshot",
-      "Build plate grid",
-    ]) {
+    expect(screen.getByRole("combobox", { name: "Display" })).toBeDisabled();
+    for (const name of ["Fit to view", "Screenshot", "Build plate grid"]) {
       expect(screen.getByRole("button", { name })).toBeDisabled();
     }
   });
@@ -95,6 +97,31 @@ describe("ViewerToolbar screenshot", () => {
     );
   });
 
+  it.each([
+    ["Front", "front"],
+    ["Top", "top"],
+    ["Isometric", "isometric"],
+  ] as const)("selects the %s camera preset", async (label, preset) => {
+    const user = userEvent.setup();
+    const setView = vi.fn<STLViewerControls["setView"]>();
+    renderToolbar(true, undefined, { setView });
+    await user.click(screen.getByRole("button", { name: label }));
+    expect(setView).toHaveBeenCalledWith(preset);
+    expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("resets the camera selection when fitting the model", async () => {
+    const user = userEvent.setup();
+    renderToolbar(true);
+    await user.click(screen.getByRole("button", { name: "Front" }));
+    await user.click(screen.getByRole("button", { name: "Fit to view" }));
+    expect(screen.getByRole("button", { name: "Isometric" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Front" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("delegates visible preview controls", async () => {
     const user = userEvent.setup();
     const fit = vi.fn<() => void>();
@@ -106,5 +133,72 @@ describe("ViewerToolbar screenshot", () => {
 
     expect(fit).toHaveBeenCalledOnce();
     expect(setShowGrid).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("ViewerToolbar selection", () => {
+  it("keeps mesh display controls out of the toolpath preview", () => {
+    renderToolbar(true, undefined, { hasGcode: true, viewerMode: "gcode" });
+
+    expect(screen.queryByRole("combobox", { name: "Display" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Build plate grid" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Fit to view" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Front" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Screenshot" })).toBeEnabled();
+  });
+  it("restores the selected camera when switching preview modes", async () => {
+    const user = userEvent.setup();
+    const controls = createRef<STLViewerControls>();
+    const setView = vi.fn<STLViewerControls["setView"]>();
+    controls.current = {
+      setView,
+      zoomIn: () => {},
+      zoomOut: () => {},
+      resetView: () => {},
+      fit: () => {},
+      screenshot: async () => {},
+      captureImage: async () => new Blob(),
+    };
+    const props = {
+      displayMode: "solid" as const,
+      setDisplayMode: () => {},
+      showGrid: true,
+      setShowGrid: () => {},
+      controls,
+      setViewerMode: () => {},
+      hasGcode: true,
+      viewerReady: true,
+    };
+    const view = render(<ViewerToolbar {...props} viewerMode="model" />);
+    await user.click(screen.getByRole("button", { name: "Front" }));
+    setView.mockClear();
+    view.rerender(<ViewerToolbar {...props} viewerMode="gcode" />);
+    expect(setView).toHaveBeenCalledWith("front");
+    expect(screen.getByRole("button", { name: "Front" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("announces the active preview mode", () => {
+    renderToolbar(true, undefined, { hasGcode: true, viewerMode: "gcode" });
+
+    expect(screen.getByRole("button", { name: "3D model" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByRole("button", { name: "G-code" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("announces the active rendering style", () => {
+    renderToolbar(true, undefined, { displayMode: "xray" });
+
+    expect(screen.getByRole("combobox", { name: "Display" })).toHaveValue("xray");
+  });
+
+  it.each([true, false])("announces grid visibility when it is %s", (visible) => {
+    renderToolbar(true, undefined, { showGrid: visible });
+
+    expect(screen.getByRole("button", { name: "Build plate grid" })).toHaveAttribute(
+      "aria-pressed",
+      String(visible),
+    );
   });
 });

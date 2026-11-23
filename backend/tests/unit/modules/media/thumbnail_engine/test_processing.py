@@ -23,7 +23,9 @@ from app.modules.media.mesh_contracts import (
     GeometryReady,
     PreviewCoverage,
     SourceScanState,
+    ThumbnailStrategy,
 )
+from tests.factories.geometry import three_mf
 from tests.fixtures.mesh_analysis import analyze, is_partial_render
 
 from .._meshes import (
@@ -68,26 +70,27 @@ class TestAnalyzeMesh:
         assert geometry["triangle_count"] is not None
         assert thumb is not None
 
-    def test_valid_embedded_3mf_preview_precedes_mesh_render(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        """A valid slicer preview is preferred even when mesh loading is safe."""
+    def test_uses_the_slicer_picture_by_default(self, tmp_path: Path) -> None:
         png = _valid_preview_png((220, 40, 120))
-        p = tmp_path / "preview-first.3mf"
-        with zipfile.ZipFile(p, "w") as zf:
-            zf.writestr("3D/3dmodel.model", b"<mesh/>")
-            zf.writestr("Metadata/thumbnail.png", png)
-
-        monkeypatch.setattr(mesh_loading, "load_mesh", lambda _p: _fake_mesh(10))
-        monkeypatch.setattr(
-            mesh_render,
-            "render_mesh_thumbnail",
-            lambda *args, **kwargs: b"RENDERED-MESH",
-        )
+        p = tmp_path / "embedded-cover.3mf"
+        p.write_bytes(three_mf(extras={"Metadata/thumbnail.png": png}))
 
         result = analyze(p)
-        _geometry, thumb = result.geometry, result.image
-        assert thumb == png
+
+        assert result.image == png
+        assert result.strategy is ThumbnailStrategy.EMBEDDED
+
+    def test_renders_the_cover_when_enabled(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setitem(_overlay, "prefer_rendered_3mf_preview", True)
+        png = _valid_preview_png((220, 40, 120))
+        p = tmp_path / "recreated-cover.3mf"
+        p.write_bytes(three_mf(extras={"Metadata/thumbnail.png": png}))
+
+        result = analyze(p)
+
+        assert result.image is not None
+        assert result.image != png
+        assert result.strategy is ThumbnailStrategy.FULL
 
     def test_refuses_thumbnail_when_source_validation_exceeds_budget(
         self, tmp_path: Path, monkeypatch
@@ -112,6 +115,7 @@ class TestAnalyzeMesh:
         )
         path.write_text("solid truncated\n" + (facet * 20) + "endsolid truncated\n")
         monkeypatch.setattr(mesh_policy, "estimate_triangle_count", lambda _p: None)
+
         def refuse_source(*_args):
             raise GeometryError("invalid_source")
 
@@ -147,6 +151,7 @@ class TestAnalyzeMesh:
         )
         path.write_text("solid truncated\n" + (facet * 20) + "endsolid truncated\n")
         monkeypatch.setattr(mesh_policy, "estimate_triangle_count", lambda _p: None)
+
         def refuse_source(*_args):
             raise GeometryError("invalid_source")
 

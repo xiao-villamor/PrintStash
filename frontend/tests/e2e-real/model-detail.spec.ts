@@ -8,9 +8,40 @@
  * keep cancelled name drafts out of the saved Model.
  */
 import { test, expect } from "./helpers";
-import { clickModelAction, modelCard, uploadGcodeModel } from "./util";
+import { clickModelAction, modelCard, openModelPage, uploadGcodeModel } from "./util";
 
 test.describe("model detail", () => {
+  test("persists a Markdown description", async ({ page }) => {
+    const name = `e2e-markdown-${Date.now()}`;
+    await uploadGcodeModel(page, name);
+    await openModelPage(page, name);
+    const modelId = new URL(page.url()).pathname.split("/").at(-1);
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    const description =
+      "## Assembly instructions\n\n- Fit **both** clips.\n- Check [the source](https://www.printables.com/).\n\n| Part | Count |\n| --- | --- |\n| Clip | 2 |";
+    const editor = page.getByRole("dialog", { name: "Edit Model details" });
+    const input = editor.getByRole("textbox", { name: "Description", exact: true });
+    await input.fill(description);
+    await editor.getByRole("tab", { name: "Write", exact: true }).press("ArrowRight");
+    const preview = editor.getByRole("tabpanel", { name: "Preview", exact: true });
+    await expect(preview.getByRole("heading", { name: "Assembly instructions" })).toBeVisible();
+    await expect(preview.getByRole("table")).toBeVisible();
+    await editor.getByRole("tab", { name: "Write", exact: true }).click();
+    await expect(input).toHaveValue(description);
+    await editor.getByRole("button", { name: "Save changes", exact: true }).click();
+    await expect(editor).toBeHidden();
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Assembly instructions" })).toBeVisible();
+    await expect(page.getByRole("table").getByRole("cell", { name: "Clip" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "the source", exact: true })).toHaveAttribute(
+      "href",
+      "https://www.printables.com/",
+    );
+    const saved = await (await page.request.get(`/api/v1/models/${modelId}`)).json();
+    expect(saved.description).toBe(description);
+    expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
+  });
+
   test("reads a Model's detail once when opening it", async ({ page }) => {
     const name = `e2e-single-read-${Date.now()}`;
     await uploadGcodeModel(page, name);
@@ -77,7 +108,7 @@ test.describe("model detail", () => {
     const name = `e2e-quick-rename-${Date.now()}`;
     const renamed = `${name}-renamed`;
     await uploadGcodeModel(page, name);
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
 
     // ── Double-click the heading and persist the new name ──
     await page.getByRole("heading", { name, exact: true }).dblclick();
@@ -125,7 +156,7 @@ test.describe("model detail", () => {
     const printerName = `E2E Rig ${Date.now()}`;
     await uploadGcodeModel(page, name);
 
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await page.getByRole("tab", { name: /History/ }).click();
     await page.getByRole("button", { name: /Add Record/ }).click();
@@ -150,13 +181,13 @@ test.describe("model detail", () => {
     const keepTag = `e2e-keep-${stamp}`;
     await uploadGcodeModel(page, name);
 
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
 
     const tagInput = page.getByPlaceholder("Search or create — press Enter");
 
     // Cancel discards: inline-create a tag in edit mode, then cancel.
-    await page.getByRole("button", { name: "Model actions" }).click();
+    await page.getByRole("heading", { level: 1 }).click({ button: "right" });
     await page.getByRole("menuitem", { name: "Edit details" }).click();
     await tagInput.fill(dropTag);
     await tagInput.press("Enter");
@@ -164,7 +195,7 @@ test.describe("model detail", () => {
     await expect(page.getByText(dropTag, { exact: true })).toHaveCount(0);
 
     // Save persists: inline-create a different tag and save — it shows as a chip.
-    await page.getByRole("button", { name: "Model actions" }).click();
+    await page.getByRole("heading", { level: 1 }).click({ button: "right" });
     await page.getByRole("menuitem", { name: "Edit details" }).click();
     await tagInput.fill(keepTag);
     await tagInput.press("Enter");
@@ -176,13 +207,13 @@ test.describe("model detail", () => {
     const name = `e2e-dl-${Date.now()}`;
     await uploadGcodeModel(page, name);
 
-    await modelCard(page, name).click();
+    await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await page.getByRole("tab", { name: "Revisions" }).click();
 
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      page.getByTitle("Download").first().click(),
+      page.getByRole("button", { name: "Download", exact: true }).first().click(),
     ]);
     expect(download.suggestedFilename()).toBe(`${name}.gcode`);
   });

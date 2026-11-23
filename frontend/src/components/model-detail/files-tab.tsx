@@ -15,6 +15,7 @@ import {
 import type { StlPreviewFailure } from "@/lib/use-stl-preview";
 import { formatBytes } from "@/lib/format";
 import { useTags } from "@/lib/queries";
+import { copyText } from "@/lib/clipboard";
 import { toast } from "@/lib/toast";
 import { FileRead, ModelRead, TrashedSourceFileRead } from "@/types";
 
@@ -35,6 +36,7 @@ export function FilesTab({
   trashedSourceFiles = [],
   canEdit,
   onModel,
+  onCompare,
 }: {
   modelId: number;
   sourceFiles: FileRead[];
@@ -42,6 +44,7 @@ export function FilesTab({
   trashedSourceFiles?: TrashedSourceFileRead[];
   canEdit: boolean;
   onModel: (model: ModelRead) => void;
+  onCompare?: () => void;
 }) {
   useUiLocale();
   const { data: availableTags = [] } = useTags();
@@ -105,9 +108,19 @@ export function FilesTab({
           }
           confirmLabel={uiText("Move to trash")}
         />
-        <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant">
-          {uiText("Source Files")}
-        </h2>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-base font-semibold">
+            {uiText("Source files")}{" "}
+            <span className="ml-1 text-xs font-normal text-muted-foreground">
+              {sourceFiles.length}
+            </span>
+          </h2>
+          {onCompare && (
+            <Button variant="ghost" size="xs" data-compare-origin onClick={onCompare}>
+              {uiText("Compare")}
+            </Button>
+          )}
+        </div>
         {sourceFiles.length === 0 && (
           <p className="font-mono text-xs text-on-surface-variant">
             {uiText(
@@ -115,19 +128,20 @@ export function FilesTab({
             )}
           </p>
         )}
-        <div className="space-y-2">
+        <div>
           {sourceFiles.map((f) => (
             <article
               key={f.id}
+              id={`artifact-${f.id}`}
               aria-label={f.original_filename}
-              className="@container/source-file min-w-0 space-y-3 p-3 border border-outline-variant rounded hover:border-primary hover:shadow-sm transition-[border-color,box-shadow] group bg-surface"
+              className="@container/source-file min-w-0 space-y-3 border-b border-border py-5.5 @lg/source-file:py-5"
             >
-              <div className="grid min-w-0 grid-cols-1 items-start gap-2 @sm/source-file:grid-cols-[minmax(0,1fr)_auto]">
-                <div className="flex items-start gap-3 min-w-0">
-                  <FileText className="h-5 w-5 flex-shrink-0 text-outline group-hover:text-primary" />
+              <div className="flex min-w-0 flex-col gap-3 @lg/source-file:grid @lg/source-file:gap-x-6 @lg/source-file:gap-y-1.5">
+                <div className="flex min-w-0 items-start gap-2 @lg/source-file:col-start-1 @lg/source-file:row-start-1">
+                  <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
                     <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm text-on-surface font-medium">
-                      <span className="min-w-0 break-all">{f.original_filename}</span>
+                      <span className="min-w-0 wrap-anywhere">{f.original_filename}</span>
                       {f.is_external && (
                         <span
                           title={uiText(
@@ -140,20 +154,20 @@ export function FilesTab({
                         </span>
                       )}
                     </p>
-                    <p className="font-mono text-2xs text-on-surface-variant">
-                      {uiText("{value1} · v{value2} · Source", {
-                        value1: String(formatBytes(f.size_bytes) ?? ""),
-                        value2: String(f.version ?? ""),
-                      })}
-                    </p>
                   </div>
                 </div>
-                <div className="flex items-center justify-self-end gap-0.5 flex-shrink-0">
+                <p className="-mt-1.5 ml-6 text-xs text-muted-foreground @lg/source-file:col-start-1 @lg/source-file:row-start-2 @lg/source-file:mt-0 @lg/source-file:ml-6">
+                  {f.file_type.toUpperCase()} · {uiText("v{value1}", { value1: String(f.version) })}{" "}
+                  · {formatBytes(f.size_bytes)} · {new Date(f.uploaded_at).toLocaleDateString()}
+                </p>
+                <div className="flex flex-wrap items-center gap-1 @lg/source-file:col-start-1 @lg/source-file:col-span-2 @lg/source-file:row-start-3 @lg/source-file:mt-1.5">
                   {SLICEABLE_TYPES.has(f.file_type) && (
-                    <SlicerOpenButton fileId={f.id} fileType={f.file_type} />
+                    <SlicerOpenButton fileId={f.id} fileType={f.file_type} size="sm" showLabel />
                   )}
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="xs"
                     onClick={() =>
                       downloadAuthenticatedFile(
                         `/api/v1/files/${f.id}/download`,
@@ -161,19 +175,31 @@ export function FilesTab({
                       ).catch((e) => toast.error(e))
                     }
                     title={uiText("Download")}
-                    className="text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors"
                   >
-                    <Download className="h-5 w-5" />
-                  </button>
+                    <Download className="h-3.5 w-3.5" />
+                    {uiText("Download")}
+                  </Button>
+                  <EntityTagsDialog
+                    triggerMode="command"
+                    entityLabel={f.original_filename}
+                    tags={f.tags}
+                    availableTags={availableTags}
+                    canEdit={canEdit}
+                    help={uiText(
+                      "Artifact tags make the owning Model discoverable without changing the Model’s direct tags.",
+                    )}
+                    onSave={(tags) => saveTags(f, tags)}
+                  />
                   <DropdownMenu
                     open={menuFileId === f.id}
                     onOpenChange={(open) => setMenuFileId(open ? f.id : null)}
+                    portal
                     trigger={
                       <Button
                         type="button"
                         data-menu-trigger
                         variant="ghost"
-                        size="icon-sm"
+                        size="xs"
                         aria-haspopup="menu"
                         aria-expanded={menuFileId === f.id}
                         aria-label={uiText("Actions for {value1}", {
@@ -181,11 +207,26 @@ export function FilesTab({
                         })}
                         onClick={() => setMenuFileId(menuFileId === f.id ? null : f.id)}
                       >
-                        <MoreHorizontal className="h-4 w-4" />
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                        {uiText("nav.more")}
                       </Button>
                     }
                     contentClassName="w-56 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg"
                   >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted focus-visible:bg-muted"
+                      onClick={() => {
+                        setMenuFileId(null);
+                        void copyText(f.sha256).then(
+                          () => toast.success(uiText("modelHashes.copied")),
+                          () => toast.error(uiText("modelHashes.copyFailed")),
+                        );
+                      }}
+                    >
+                      {uiText("Copy SHA-256")}
+                    </button>
                     {f.is_external ? (
                       <p className="px-3 py-2 text-xs text-muted-foreground">
                         {uiText("Linked source files stay in their Library source.")}
@@ -214,23 +255,11 @@ export function FilesTab({
                 canRetry={canEdit}
                 previewFailure={previewFailure?.fileId === f.id ? previewFailure.reason : null}
               />
-              <div className="mt-1.5">
-                <EntityTagsDialog
-                  entityLabel={f.original_filename}
-                  tags={f.tags}
-                  availableTags={availableTags}
-                  canEdit={canEdit}
-                  help={uiText(
-                    "Artifact tags make the owning Model discoverable without changing the Model’s direct tags.",
-                  )}
-                  onSave={(tags) => saveTags(f, tags)}
-                />
-              </div>
             </article>
           ))}
         </div>
         {trashedSourceFiles.length > 0 && (
-          <div className="mt-6 border-t border-outline-variant pt-4">
+          <div className="mt-4">
             <h3 className="mb-2 text-sm font-medium text-on-surface">
               {uiText("Trashed source files")}
             </h3>
@@ -238,7 +267,7 @@ export function FilesTab({
               {trashedSourceFiles.map((file) => (
                 <div
                   key={file.id}
-                  className="flex items-center justify-between gap-3 rounded border border-outline-variant bg-surface-container-low p-3"
+                  className="flex items-center justify-between gap-3 border-b border-dashed border-border py-3"
                 >
                   <span className="min-w-0 truncate text-sm text-on-surface-variant">
                     {file.original_filename}

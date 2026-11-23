@@ -1,0 +1,30 @@
+/* Shared by the application and standalone UI consumers. The curve samples a
+   critically damped spring with a 200ms response across a 300ms settle. */
+@layer base {
+  :root {
+    --ease-content-settle: linear(
+      0 0%,
+      0.08161 5%,
+      0.24309 10%,
+      0.41289 15%,
+      0.56196 20%,
+      0.6819 25%,
+      0.77355 30%,
+      0.84124 35%,
+      0.89003 40%,
+      0.92457 45%,
+      0.94868 50%,
+      0.96532 55%,
+      0.97671 60%,
+      0.98443 65%,
+      0.98964 70%,
+      0.99313 75%,
+      0.99546 80%,
+      0.99701 85%,
+      0.99804 90%,
+      0.99871 95%,
+      1 100%
+    );
+    --scale-content-enter: 0.98;
+  }
+}

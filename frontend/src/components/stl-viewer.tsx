@@ -18,7 +18,7 @@ import {
 } from "@/lib/comparison-camera";
 import { AlertTriangle, Loader2 } from "lucide-react";
 
-import { trianglesOnPlate } from "@/lib/plate-geometry";
+import { geometryDimensions, trianglesOnPlate } from "@/lib/plate-geometry";
 import { useParsedStl, type ParsedStl } from "@/lib/use-parsed-stl";
 import { createMeshRenderer, type MeshRenderer, type RendererFallback } from "@/lib/mesh-renderer";
 import type { CameraPose } from "@/lib/comparison-camera";
@@ -28,19 +28,36 @@ import {
   usePreviewPreferences,
   type ScreenshotScale,
 } from "@/lib/preview-preferences";
-import { fitCameraToBounds, heroCameraDirection } from "@/lib/thumbnail-camera";
+import {
+  fitCameraToBounds,
+  heroCameraDirection,
+  viewerPresetDirection,
+  VIEWER_POLE_MARGIN,
+} from "@/lib/thumbnail-camera";
 import { useViewerReadiness } from "@/lib/use-viewer-readiness";
 import { useStlPreview, stlPreviewMessage, type StlPreviewFailure } from "@/lib/use-stl-preview";
 import type { PlateRegion } from "@/types";
+import type { PreviewLook } from "@/types/config";
+import { useQuery } from "@tanstack/react-query";
+import { getPreviewLook } from "@/lib/api/config";
+import { queryKeys } from "@/lib/query-client";
+import { DEFAULT_PREVIEW_LOOK, studioMatcap } from "@/lib/studio-matcap";
 
 export type ViewerDisplayMode = "solid" | "xray" | "wireframe";
 
-export interface STLViewerControls {
+export type ViewerCameraPreset = "isometric" | "front" | "top";
+
+export interface ViewerControls {
+  setView: (preset: ViewerCameraPreset) => void;
   zoomIn: () => void;
   zoomOut: () => void;
   resetView: () => void;
   fit: () => void;
   screenshot: () => Promise<void>;
+}
+
+export interface STLViewerControls extends ViewerControls {
+  captureImage: () => Promise<Blob>;
 }
 
 export interface STLPreviewFeedback {
@@ -57,6 +74,9 @@ export interface STLViewerProps {
   onFailureChange?: (feedback: STLPreviewFeedback) => void;
   /** Largest loaded dimension, before viewer normalization, in source units. */
   onGeometrySize?: (size: number) => void;
+  onOrbit?: () => void;
+  /** Bounds of the displayed mesh, in source coordinates before normalization. */
+  onGeometryDimensions?: (dimensions: { x: number; y: number; z: number } | null) => void;
   displayMode?: ViewerDisplayMode;
   showGrid?: boolean;
   screenshotName?: string;
@@ -65,6 +85,8 @@ export interface STLViewerProps {
   overlay?: { url: string; comparison: MeshComparison };
   /** Show only the geometry over this plate of a multi-plate 3MF. */
   plate?: PlateRegion;
+  /** The generated images' look; read from the library when omitted. */
+  look?: PreviewLook;
 }
 
 // The camera needs both shapes: R3F takes the tuple as a JSX prop, the orbit
@@ -76,7 +98,6 @@ const ZOOM_FACTOR = 0.75;
 const NORMALIZED_SIZE = 10;
 // The orbit reaches every side of the mesh but stops short of looking straight
 // along the up axis, where the camera's heading is undefined.
-const POLE_MARGIN = 0.02;
 
 const box = new THREE.Box3();
 const sizeVec = new THREE.Vector3();
@@ -90,7 +111,9 @@ function Mesh({
   onGeometrySize,
   comparison,
   overlay = false,
+  look,
 }: {
+  look: PreviewLook;
   geometry: THREE.BufferGeometry;
   displayMode: ViewerDisplayMode;
   onSized: (size: THREE.Vector3) => void;
@@ -139,15 +162,28 @@ function Mesh({
 
   return (
     <mesh ref={meshRef} geometry={geometry} onAfterRender={onRendered}>
-      <meshStandardMaterial
-        color={overlay ? "#497bbd" : "#8a93a6"}
-        roughness={0.45}
-        metalness={0.1}
-        wireframe={displayMode === "wireframe"}
-        transparent={overlay || displayMode === "xray"}
-        opacity={overlay ? 0.42 : displayMode === "xray" ? 0.3 : 1}
-        depthWrite={!overlay && displayMode !== "xray"}
-      />
+      {overlay ? (
+        <meshStandardMaterial
+          color="#497bbd"
+          roughness={0.45}
+          metalness={0.1}
+          wireframe={displayMode === "wireframe"}
+          transparent
+          opacity={0.42}
+          depthWrite={false}
+        />
+      ) : (
+        // The card thumbnails' studio shade, keyed by the camera-relative
+        // normal, so the 3D view colours every surface like its thumbnail.
+        <meshMatcapMaterial
+          matcap={studioMatcap(look)}
+          toneMapped={false}
+          wireframe={displayMode === "wireframe"}
+          transparent={displayMode === "xray"}
+          opacity={displayMode === "xray" ? 0.3 : 1}
+          depthWrite={displayMode !== "xray"}
+        />
+      )}
     </mesh>
   );
 }
@@ -162,6 +198,7 @@ function Scene({
   onControlsReady,
   onLoadedChange,
   onGeometrySize,
+  onOrbit,
   displayMode,
   showGrid,
   screenshotName,
@@ -169,6 +206,7 @@ function Scene({
   comparison,
   comparisonCamera,
   overlay,
+  look,
 }: Required<
   Omit<
     STLViewerProps,
@@ -178,13 +216,15 @@ function Scene({
     | "onReadyChange"
     | "onFailureChange"
     | "onGeometrySize"
+    | "onOrbit"
+    | "onGeometryDimensions"
     | "comparison"
     | "comparisonCamera"
     | "overlay"
     | "plate"
   >
 > &
-  Pick<STLViewerProps, "comparison" | "comparisonCamera" | "overlay"> & {
+  Pick<STLViewerProps, "comparison" | "comparisonCamera" | "overlay" | "onOrbit"> & {
     onControlsReady?: (api: STLViewerControls) => void;
     onLoadedChange?: (loaded: boolean) => void;
     onGeometrySize?: (size: number) => void;
@@ -197,6 +237,7 @@ function Scene({
   }) {
   useUiLocale();
   const orbitRef = useRef<OrbitControlsImpl>(null);
+  const interactionStart = useRef<THREE.Quaternion | null>(null);
   const syncing = useRef(false);
   const poseApplied = useRef(false);
   const initialComparisonPose = useRef(restoredPose.current);
@@ -207,6 +248,9 @@ function Scene({
     () => new THREE.Vector3(NORMALIZED_SIZE, NORMALIZED_SIZE, NORMALIZED_SIZE),
   );
   const { loaded, setLoaded } = useViewerReadiness(url);
+  useEffect(() => {
+    invalidate();
+  }, [invalidate, showGrid]);
   const overlayComparison = overlay?.comparison;
   const comparisonSize = useMemo(() => {
     if (!comparison) return null;
@@ -251,6 +295,7 @@ function Scene({
 
   const handleSized = useCallback(
     (nextSize: THREE.Vector3) => {
+      sizeRef.current = nextSize;
       setModelSize((current) => (current.equals(nextSize) ? current : nextSize));
       setLoaded(true);
       invalidate();
@@ -268,7 +313,20 @@ function Scene({
   const gridSize = Math.max(modelSize.x, modelSize.z) * 2.6 || NORMALIZED_SIZE * 2.6;
   const floorY = -modelSize.y / 2;
 
+  const presetRef = useRef<ViewerCameraPreset>("isometric");
   const controlsApi: STLViewerControls = {
+    setView: (preset) => {
+      controlsApi.fit();
+      presetRef.current = preset;
+      const cam = cameraRef.current;
+      if (!cam || preset === "isometric") return;
+      const direction = viewerPresetDirection(preset);
+      const aspect = canvasSize.width / Math.max(canvasSize.height, 1);
+      cam.position.copy(fitCameraToBounds(sizeRef.current, aspect, cam.fov, direction).position);
+      cam.lookAt(0, 0, 0);
+      orbitRef.current?.update();
+      invalidate();
+    },
     zoomIn: () => {
       if (cameraRef.current) {
         cameraRef.current.position.multiplyScalar(ZOOM_FACTOR);
@@ -287,6 +345,7 @@ function Scene({
       controlsApi.fit();
     },
     fit: () => {
+      presetRef.current = "isometric";
       const cam = cameraRef.current;
       if (!cam) return;
       if (comparisonSize && comparisonCamera) {
@@ -301,12 +360,13 @@ function Scene({
           )
         : fitCameraToBounds(sizeRef.current, aspect, cam.fov).position;
       orbitRef.current?.target?.set(0, 0, 0);
+      cam.up.set(0, 1, 0);
       cam.position.copy(position);
       cam.lookAt(0, 0, 0);
       orbitRef.current?.update();
       invalidate();
     },
-    screenshot: async () => {
+    captureImage: async () => {
       if (!loaded) throw new Error("preview_not_ready");
       let captured;
       try {
@@ -327,6 +387,10 @@ function Scene({
           else reject(new Error("screenshot_encoding_failed"));
         }, "image/png");
       });
+      return blob;
+    },
+    screenshot: async () => {
+      const blob = await controlsApi.captureImage();
       const dataUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = dataUrl;
@@ -369,13 +433,14 @@ function Scene({
         orbitRef.current.target.fromArray(pose.target);
         orbitRef.current.update();
         invalidate();
-      } else controlsApi.fit();
+      } else controlsApi.setView(presetRef.current);
       if (comparisonSize) poseApplied.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     loaded,
     modelSize,
+    geometry,
     comparisonSize,
     comparisonCamera,
     canvasSize.width,
@@ -394,6 +459,7 @@ function Scene({
       <>
         <Mesh
           key={url}
+          look={look}
           geometry={geometry}
           displayMode={displayMode}
           onSized={handleSized}
@@ -403,6 +469,7 @@ function Scene({
         />
         {overlay && overlayGeometry && (
           <Mesh
+            look={look}
             geometry={overlayGeometry}
             displayMode="solid"
             onSized={() => {}}
@@ -419,10 +486,22 @@ function Scene({
         enablePan
         enableZoom
         enableRotate
-        minPolarAngle={POLE_MARGIN}
-        maxPolarAngle={Math.PI - POLE_MARGIN}
+        minPolarAngle={VIEWER_POLE_MARGIN}
+        maxPolarAngle={Math.PI - VIEWER_POLE_MARGIN}
+        onStart={() => {
+          interactionStart.current = cameraRef.current?.quaternion.clone() ?? null;
+        }}
+        onEnd={() => {
+          interactionStart.current = null;
+        }}
         onChange={() => {
           invalidate();
+          const start = interactionStart.current;
+          const orientation = cameraRef.current?.quaternion;
+          if (start && orientation && 1 - Math.abs(start.dot(orientation)) > 1e-8) {
+            interactionStart.current = null;
+            onOrbit?.();
+          }
           if (cameraRef.current && orbitRef.current) {
             const pose = {
               position: cameraRef.current.position.toArray(),
@@ -594,6 +673,8 @@ export function STLViewer({
   onReadyChange,
   onFailureChange,
   onGeometrySize,
+  onOrbit,
+  onGeometryDimensions,
   displayMode = "solid",
   showGrid = true,
   screenshotName = "model",
@@ -601,8 +682,17 @@ export function STLViewer({
   comparisonCamera,
   overlay,
   plate,
+  look,
 }: STLViewerProps) {
   useUiLocale();
+  const libraryLook = useQuery({
+    queryKey: queryKeys.previewLook,
+    queryFn: ({ signal }) => getPreviewLook({ signal }),
+    enabled: look === undefined,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const shownLook = look ?? libraryLook.data?.preview_look ?? DEFAULT_PREVIEW_LOOK;
   // Tracking *which* url has loaded, rather than a bare boolean, makes the url
   // swap reset the overlay during render instead of through a reset effect.
   const previewPreferences = usePreviewPreferences();
@@ -614,6 +704,14 @@ export function STLViewer({
   const parsed = useParsedStl(preview.state === "ready" ? preview.url : null);
   const parsedOverlay = useParsedStl(overlayPreview.state === "ready" ? overlayPreview.url : null);
   const shownGeometry = usePlateGeometry(parsed, plate);
+  const dimensions = useMemo(() => geometryDimensions(shownGeometry), [shownGeometry]);
+  const dimensionsCallback = useRef(onGeometryDimensions);
+  useEffect(() => {
+    dimensionsCallback.current = onGeometryDimensions;
+  }, [onGeometryDimensions]);
+  useEffect(() => {
+    dimensionsCallback.current?.(dimensions);
+  }, [dimensions]);
 
   useEffect(() => {
     onReadyChange?.(meshLoaded && preview.state === "ready");
@@ -696,12 +794,14 @@ export function STLViewer({
         onControlsReady={onControlsReady}
         onLoadedChange={setMeshLoaded}
         onGeometrySize={onGeometrySize}
+        onOrbit={onOrbit}
         displayMode={displayMode}
         showGrid={showGrid}
         screenshotName={screenshotName}
         screenshotScale={previewPreferences.screenshotScale}
         comparison={comparison}
         comparisonCamera={comparisonCamera}
+        look={shownLook}
         overlay={
           overlay !== undefined && overlayPreview.state === "ready"
             ? { ...overlay, url: overlayPreview.url }

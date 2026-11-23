@@ -73,6 +73,13 @@ def _pass_sources(engine) -> list[JobKind]:
     )
 
 
+@pytest.fixture(autouse=True)
+def enabled_preview_default(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings.frozen, "derivatives_previews_enabled", True)
+
+
 class TestDefinitions:
     @pytest.mark.parametrize(
         ("name", "lane"),
@@ -104,9 +111,11 @@ class TestDerivation:
         derivative_jobs.nudge_for(db_session, artifact)
         drain_work()
 
+        # The cover pass renders the view set from the same load.
         assert _states(db_session, artifact.id) == {
             DerivativeKind.METADATA: DerivativeState.READY,
             DerivativeKind.THUMBNAIL: DerivativeState.READY,
+            DerivativeKind.PREVIEWS: DerivativeState.READY,
         }
         job = _job(db_session, JobKind.DERIVATIVES_MESH)
         assert job.state == JobState.COMPLETED
@@ -114,6 +123,7 @@ class TestDerivation:
             "derivatives": {
                 DerivativeKind.METADATA: "ready",
                 DerivativeKind.THUMBNAIL: "ready",
+                DerivativeKind.PREVIEWS: "ready",
             }
         }
 
@@ -165,16 +175,20 @@ class TestDerivation:
         drain_work()
 
         assert _job(db_session, JobKind.DERIVATIVES_MESH).state == JobState.FAILED
-        assert set(_states(db_session, artifact.id).values()) == {
-            DerivativeState.FAILED
-        }
+        states = _states(db_session, artifact.id)
+        assert {
+            states[DerivativeKind.METADATA],
+            states[DerivativeKind.THUMBNAIL],
+        } == {DerivativeState.FAILED}
+        # The independent secondary group is not taken down by the primary crash.
+        assert states[DerivativeKind.PREVIEWS] is DerivativeState.READY
 
 
 class TestNudgeFor:
     @pytest.mark.parametrize(
         ("filename", "definitions"),
         [
-            ("part.stl", [JobKind.DERIVATIVES_MESH]),
+            ("part.stl", [JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_PREVIEWS]),
             ("plate.gcode", [JobKind.DERIVATIVES_GCODE]),
             ("plate.bgcode", [JobKind.DERIVATIVES_GCODE, JobKind.DERIVATIVES_TOOLPATH]),
         ],
@@ -195,7 +209,7 @@ class TestNudgeFor:
     def test_disabled_groups_emit_no_nudge(
         self, db_session, make_model, make_file, monkeypatch, disabled
     ):
-        from app.modules.derivatives.kinds import group, groups_for
+        from app.modules.derivatives.kinds import groups_for
 
         derivative_jobs.policy.update(
             db_session, {derivative_jobs.policy.SETTINGS[disabled]: False}
@@ -207,8 +221,12 @@ class TestNudgeFor:
 
         derivative_jobs.nudge_for(db_session, artifact)
 
+        # Groups sharing one setting (mesh, previews, viewer STL…) disable together.
+        setting = derivative_jobs.policy.SETTINGS[disabled]
         assert sorted(nudged) == sorted(
-            g.definition for g in groups_for(artifact) if g != group(disabled)
+            g.definition
+            for g in groups_for(artifact)
+            if derivative_jobs.policy.SETTINGS[g.definition] != setting
         )
 
 
@@ -223,7 +241,10 @@ class TestNudgeWithCommit:
 
         db_session.commit()
 
-        assert (before, _pass_sources(work_engine)) == ([], [JobKind.DERIVATIVES_MESH])
+        assert (before, _pass_sources(work_engine)) == (
+            [],
+            [JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_PREVIEWS],
+        )
 
     def test_a_rolled_back_transaction_nudges_nothing(
         self, db_session, make_model, make_file, work_engine
@@ -249,7 +270,8 @@ class TestNudgeWithCommit:
 
         db_session.commit()
 
-        assert _pass_sources(work_engine) == []
+        # Previews have their own control; they stay owed only behind a cover.
+        assert _pass_sources(work_engine) == [JobKind.DERIVATIVES_PREVIEWS]
 
 
 class TestCancel:
@@ -354,9 +376,28 @@ class TestOnFailure:
         )
         db_session.commit()
 
-        assert _states(db_session, artifact.id) == {
-            DerivativeKind.METADATA: DerivativeState.FAILED
+        assert _recipes(db_session, artifact.id) == {
+            DerivativeKind.METADATA: (
+                DerivativeState.FAILED,
+                kinds.THREE_MF_GEOMETRY_RECIPE,
+            ),
+            DerivativeKind.THUMBNAIL: (
+                DerivativeState.FAILED,
+                kinds.THREE_MF_THUMBNAIL_RECIPE,
+            ),
         }
+
+    def test_backs_off_after_failure_before_derivation_starts(
+        self, db_session: Session, make_model, make_file
+    ) -> None:
+        artifact = make_file(make_model(), filename="part.stl")
+        definition = DEFINITIONS[JobKind.DERIVATIVES_MESH]
+
+        definition.on_failure(db_session, subject_key(artifact.id), "lost")
+        db_session.commit()
+
+        assert definition.source is not None
+        assert definition.source.pending(db_session, now=utcnow(), limit=10) == []
 
     def test_leaves_a_3mf_row_of_the_shared_recipe_in_flight(
         self, db_session: Session, make_model, make_file, make_derivative
@@ -366,7 +407,7 @@ class TestOnFailure:
         artifact = make_file(
             make_model(), filename="part.3mf", file_type=FileType.THREE_MF
         )
-        make_derivative(
+        earlier = make_derivative(
             artifact,
             DerivativeKind.METADATA,
             recipe_version=kinds.MESH_GEOMETRY_RECIPE,
@@ -378,9 +419,8 @@ class TestOnFailure:
         )
         db_session.commit()
 
-        assert _states(db_session, artifact.id) == {
-            DerivativeKind.METADATA: DerivativeState.RUNNING
-        }
+        db_session.refresh(earlier)
+        assert earlier.state is DerivativeState.RUNNING
 
     def test_a_failure_for_a_purged_artifact_changes_nothing(
         self, db_session: Session, make_model, make_file, make_derivative
@@ -475,10 +515,12 @@ class TestProducerAdmission:
             make_model(),
             filename={
                 JobKind.DERIVATIVES_MESH: "part.stl",
+                JobKind.DERIVATIVES_PREVIEWS: "part.stl",
                 JobKind.DERIVATIVES_GCODE: "part.bgcode",
                 JobKind.DERIVATIVES_TOOLPATH: "part.bgcode",
                 JobKind.DERIVATIVES_VIEWER_STL: "part.3mf",
                 JobKind.DERIVATIVES_PLATES: "part.3mf",
+                JobKind.DERIVATIVES_PROJECT_PROFILE: "part.3mf",
             }[definition],
             viewer_requested_at=utcnow()
             if definition is JobKind.DERIVATIVES_VIEWER_STL

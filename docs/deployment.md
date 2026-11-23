@@ -8,18 +8,15 @@ settings you need. For every setting, PostgreSQL or S3, see
 
 ## Install
 
-Install Docker with the Compose plugin, then:
-
-```bash
-mkdir -p printstash && cd printstash
-curl -fsSL https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/docker-compose.yml -o docker-compose.yml
-docker compose up -d
-```
+Install Docker with the Compose plugin, then follow the
+[Quick Start](../README.md#quick-start) to download the Compose file and pin
+the published image. If you already have PrintStash, follow the
+[upgrade guide](../UPGRADE.md) using your existing Compose project and data.
 
 Open `http://localhost:3000` or `http://<server-ip>:3000`. Use a trusted network and create your administrator account in the browser.
 The first person to complete registration owns the installation.
-There is no default account. The API generates a new token on each start until
-setup is complete. Database migrations run automatically at startup.
+There is no default account. Follow [First use from the browser](first-run.md)
+to complete setup. Database migrations run automatically at startup.
 
 From a repository checkout, `docker compose up -d` in the repository root uses
 the same file. The commands below work in either place.
@@ -408,12 +405,37 @@ path outside a persistent mount loses state on container replacement.
 
 ### Background work
 
+The image's SQLite notification adapter is on by default. The image build
+applies an exact-source-checked patch to the locked DBOS 3.5.0 SDK and sets
+`VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS=true`; startup verifies the patch's
+manifest and adapter hash, and an incompatible or missing patch refuses to
+start. A build with `--build-arg PRINTSTASH_DBOS_NOTIFICATIONS=false` keeps the
+unpatched SDK and polling. Source installs poll unless patched and opted in.
+This is a maintained local dependency patch, not an upstream DBOS API. A DBOS
+upgrade requires reviewing and regenerating the patch.
+For a disposable development environment, run `backend/scripts/experimental_dbos_notifications.py`
+with that environment's `site-packages/dbos` directory; never patch a running
+or shared interpreter. `uv sync` can replace the patch, so verify again after it.
+
+Notifications wake local SQLite dispatchers after work commits and after capacity
+is released. Durable claims, concurrency limits and recovery stay in DBOS. A
+missed or external-process hint is recovered by a 30-second scan; dispatch failures
+instead retry after 0.25 seconds, doubling to 2 seconds (with 5% jitter). This
+retry delay is additional to any time spent inside a database call. Limited
+queues retain their configured timed checks. PostgreSQL keeps its normal path.
+Startup logs the active mode and shutdown logs per-queue wake, scan and failure
+counts. To return to polling, set the runtime flag to `false` and restart; no
+schema or stored-work conversion is needed. The adapter avoids polling-boost
+writes while notifications are active. On a 3-CPU, 8 GB host a 60-file archive's
+thumbnails finished 2.5 s sooner with notifications, and idle CPU fell from 11%
+to 2% of a core.
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `VAULT_PROCESS_ROLE` | `all` | `all` runs HTTP and every background Job; `api` is the one HTTP process of a deployment with [workers](#background-work-and-workers). |
 | `VAULT_API_RUNS_JOBS` | `true` | With `api`, whether the API also runs Jobs; `false` leaves them to the workers. |
 | `VAULT_SHARED_STORAGE` | `false` | Declares that every process mounts the same volumes; required with workers. |
-| `VAULT_MAX_RENDER_JOBS` | one per usable CPU plus one, no more than fit the native memory pool (640 MiB each), 1–8 | Native mesh job slots across processes sharing a local data root. Usable CPUs include the container's CPU limit (`--cpus`, `cpus:`), with positive fractional quotas rounded up to whole CPUs; the pool is `VAULT_MESH_MEMORY_BUDGET_FRACTION` of the detected memory limit. Full-pool memory claims run alone; other claims may overlap within the same budget. It is also the default number of similarity pairs verified at once (one slot shortlisting), unless `VAULT_JOBS_SIMILARITY_CONCURRENCY` is set. An explicit value also limits local AI inference in each process, which otherwise runs one per two CPUs (1–4). Set `1` to render strictly one at a time. Settings → Background work → Worker settings → *Models processed at once* overrides it from the UI, up to what the pool fits, and applies at once; separate worker processes apply it when they restart. |
+| `VAULT_MAX_RENDER_JOBS` | one per usable CPU, no more than fit the native memory pool (640 MiB each), 1–8 | Native mesh job slots across processes sharing a local data root. Usable CPUs include the container's CPU limit (`--cpus`, `cpus:`), with positive fractional quotas rounded up to whole CPUs; the pool is `VAULT_MESH_MEMORY_BUDGET_FRACTION` of the detected memory limit. Full-pool memory claims run alone; other claims may overlap within the same budget. It is also the default number of similarity pairs verified at once (one slot shortlisting), unless `VAULT_JOBS_SIMILARITY_CONCURRENCY` is set. An explicit value also limits local AI inference in each process, which otherwise runs one per two CPUs (1–4). Set `1` to render strictly one at a time. Settings → Background work → Worker settings → *Models processed at once* overrides it from the UI, up to what the pool fits, and applies at once; separate worker processes apply it when they restart. |
 | `VAULT_JOBS_INGEST_CONCURRENCY` | `2` | Uploads and imports committed at once. |
 
 Settings → Background work overrides each kind of work's concurrency at runtime,
@@ -556,13 +578,22 @@ after a restore. Tuning settings are listed in
 
 Settings → Background work provides independent administrator controls for mesh
 metadata/previews, G-code metadata/embedded thumbnails, and binary G-code
-toolpaths. All groups default to enabled. Deployment defaults are:
+toolpaths. Optional multi-angle previews default to disabled; ordinary thumbnails remain enabled. Deployment defaults are:
 
 | Environment variable | Default |
 | --- | --- |
 | `VAULT_DERIVATIVES_MESH_ENABLED` | `true` |
 | `VAULT_DERIVATIVES_GCODE_ENABLED` | `true` |
 | `VAULT_DERIVATIVES_TOOLPATH_ENABLED` | `true` |
+| `VAULT_DERIVATIVES_PREVIEWS_ENABLED` | `false` |
+| `VAULT_DERIVATIVES_PREVIEWS_INCLUDE_POLES` | `false` |
+
+Settings → Previews offers one thumbnail (the default), four consistent oblique
+views, or oblique views plus top and bottom. Multi-angle views render in the
+same pass as the cover, at the Model image quality setting, and need mesh
+processing enabled. Changing the angle selection
+regenerates existing view sets in the background. Single-thumbnail mode hides
+existing extra views without deleting them.
 
 A saved Boolean overrides the environment; **Use deployment default** clears it.
 The controls persist in the application database and take effect in running API

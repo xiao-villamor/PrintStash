@@ -1,63 +1,66 @@
 import type { ReactNode } from "react";
 import { Check } from "lucide-react";
-import { BrandMark } from "@/components/brand-mark";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { LocaleToggle } from "@/components/locale-toggle";
-import { Card } from "@/components/ui/card";
+import { AuthFrame } from "@/components/auth-frame";
 import { useI18n } from "@/lib/i18n";
+import { useContentReveal } from "@/lib/use-content-reveal";
 import { cn } from "@/lib/utils";
 
-export function SetupFrame({ step, children }: { step: 1 | 2 | 3; children: ReactNode }) {
+const STEPS = ["stepAccount", "stepStorage", "stepReview", "stepAppearance"] as const;
+
+export function SetupFrame({
+  step,
+  actions,
+  children,
+}: {
+  step: 1 | 2 | 3 | 4;
+  actions: ReactNode;
+  children: ReactNode;
+}) {
   const { t } = useI18n();
+  const content = useContentReveal(String(step), { scroll: "parent" });
+
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-6 sm:py-10">
-      <Card
-        role="region"
-        aria-label={t("setup.welcome")}
-        className="w-full max-w-2xl overflow-hidden border-outline-variant bg-surface-container-low"
-      >
-        <header className="flex items-center justify-between gap-4 px-5 py-5 sm:px-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <BrandMark className="h-7 w-7" />
-            </div>
-            <span className="text-base font-semibold tracking-tight">PrintStash</span>
-            <h1 className="sr-only">{t("setup.welcome")}</h1>
-          </div>
-          <div className="flex items-center gap-4">
-            <LocaleToggle />
-            <ThemeToggle />
-          </div>
-        </header>
-        <ol
-          aria-label={t("setup.progress")}
-          className="grid grid-cols-3 gap-2 border-y border-outline-variant bg-muted/30 px-5 py-3 sm:px-8"
-        >
-          {(["account", "files", "start"] as const).map((key, index) => (
-            <li
-              key={key}
-              aria-current={step === index + 1 ? "step" : undefined}
-              className={cn(
-                "flex items-center justify-center gap-2 text-xs",
-                step === index + 1 ? "font-semibold text-foreground" : "text-muted-foreground",
-              )}
-            >
-              <span
+    <AuthFrame
+      cardClassName={cn("setup-card", step === 4 && "setup-card-appearance")}
+      label={t("setup.welcome")}
+    >
+      <div className="min-w-0 border-b border-border p-4 md:border-b-0 md:border-r md:p-6">
+        <h1 className="text-base font-semibold text-foreground">{t("setup.welcome")}</h1>
+        <ol aria-label={t("setup.progress")} className="mt-4 grid grid-cols-4 gap-1 md:grid-cols-1">
+          {STEPS.map((key, index) => {
+            const position = index + 1;
+            const current = step === position;
+            const done = step > position;
+            return (
+              <li
+                key={key}
+                aria-current={current ? "step" : undefined}
                 className={cn(
-                  "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-2xs",
-                  step === index + 1
-                    ? "bg-accent text-accent-foreground"
-                    : "bg-muted text-muted-foreground",
+                  "flex min-w-0 items-center gap-1 px-1.5 py-2 text-[13px] md:gap-2 md:px-2.5",
+                  current && "bg-accent font-medium text-accent-foreground",
+                  done && "text-foreground",
+                  !current && !done && "text-muted-foreground",
                 )}
               >
-                {step > index + 1 ? <Check className="h-3 w-3" aria-hidden /> : index + 1}
-              </span>
-              {t(`setup.${key}`)}
-            </li>
-          ))}
+                <span className="flex w-4 shrink-0 items-center justify-center font-mono text-xs">
+                  {done ? <Check className="h-3.5 w-3.5" aria-hidden /> : position}
+                </span>
+                <span className="min-w-0 break-words">{t(`setup.${key}`)}</span>
+              </li>
+            );
+          })}
         </ol>
-        <div className="min-w-0 p-5 sm:p-8">{children}</div>
-      </Card>
-    </main>
+      </div>
+      <div className="flex min-h-0 min-w-0 flex-col">
+        <div className="min-h-0 flex-1 md:overflow-y-auto md:[scrollbar-gutter:stable]">
+          <div ref={content} className="p-4 md:p-6">
+            {children}
+          </div>
+        </div>
+        <div className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-3 md:px-6">
+          {actions}
+        </div>
+      </div>
+    </AuthFrame>
   );
 }

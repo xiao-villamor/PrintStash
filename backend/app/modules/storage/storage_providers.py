@@ -221,10 +221,14 @@ class _ProviderConfig(BaseModel):
 class LocalProviderConfig(_ProviderConfig):
     provider: Literal["local", "synology", "truenas", "qnap", "unraid"]
     data_dir: str = _config_field(
-        "Models directory", "Directory for model files", input_type="path"
+        "Your files",
+        "Where uploaded models are saved. With Docker, enter the path inside the container.",
+        input_type="path",
     )
     thumb_dir: str = _config_field(
-        "Thumbnail directory", "Directory for generated images", input_type="path"
+        "Previews",
+        "Where generated thumbnails and previews are saved.",
+        input_type="path",
     )
 
 

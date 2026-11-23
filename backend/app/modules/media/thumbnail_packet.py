@@ -10,12 +10,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .compute_geometry_wire import MAX_GEOMETRY_BYTES, body_size, descriptor
+from .compute_geometry_wire import (
+    MAX_FACES,
+    MAX_GEOMETRY_HEADER_BYTES,
+    MAX_GEOMETRY_PACKET_BYTES,
+    body_size,
+    descriptor,
+)
 
 if TYPE_CHECKING:
     from .gpu_normals import RenderInput
 
-MAX_PACKET_BYTES = MAX_GEOMETRY_BYTES + 4100
+MAX_PACKET_BYTES = MAX_GEOMETRY_PACKET_BYTES
 PACKET_NAME = "geometry.bin"
 
 
@@ -33,7 +39,7 @@ class PacketDescriptor:
             or len(self.sha256) != 64
             or any(c not in "0123456789abcdef" for c in self.sha256)
             or type(self.face_count) is not int
-            or not 0 < self.face_count <= 2_000_000
+            or not 0 < self.face_count <= MAX_FACES
         ):
             raise ValueError("invalid_thumbnail_packet_descriptor")
 
@@ -42,7 +48,7 @@ def validate_payload(payload: bytes, width: int, height: int) -> int:
     if type(payload) is not bytes or not 4 < len(payload) <= MAX_PACKET_BYTES:
         raise ValueError("invalid_thumbnail_packet_size")
     size = struct.unpack_from("!I", payload)[0]
-    if not 0 < size <= 4096 or 4 + size >= len(payload):
+    if not 0 < size <= MAX_GEOMETRY_HEADER_BYTES or 4 + size >= len(payload):
         raise ValueError("invalid_thumbnail_packet_header")
     header, layout = descriptor(payload[4 : 4 + size])
     if (

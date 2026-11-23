@@ -801,6 +801,9 @@ class S3StorageBackend(StorageBackend):
     def document_image_key(self, document_id: int, name: str) -> str:
         return f"{self._prefix()}document-images/{document_id}/{name}"
 
+    def model_cover_key(self, model_id: int, name: str) -> str:
+        return f"{self._prefix()}model-covers/{model_id}/{name}"
+
     def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
         return f"{self._prefix()}multipart-covers/{multipart_model_id}/{name}"
 

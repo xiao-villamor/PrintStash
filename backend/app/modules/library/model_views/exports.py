@@ -8,7 +8,7 @@ import json
 from collections import defaultdict
 from typing import Any
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.core.config import settings
 from app.core.time import utcnow
@@ -113,6 +113,7 @@ def export_payload(session: Session, user: User) -> dict:
         captures_by_source: dict[int, list[ProvenanceCapture]] = defaultdict(list)
         links_by_source: dict[int, list[ArtifactProvenanceLink]] = defaultdict(list)
         covers_by_source: dict[int, ModelSourceCover] = {}
+        gallery_by_source: dict[int, list[dict[str, object]]] = defaultdict(list)
         if source_ids:
             for row in session.exec(
                 select(ProvenanceCapture)
@@ -130,10 +131,27 @@ def export_payload(session: Session, user: User) -> dict:
                 row.provenance_source_id: row
                 for row in session.exec(
                     select(ModelSourceCover).where(
-                        ModelSourceCover.provenance_source_id.in_(source_ids)  # type: ignore[union-attr]
+                        ModelSourceCover.provenance_source_id.in_(source_ids),  # type: ignore[union-attr]
+                        ModelSourceCover.position == 0,
                     )
                 ).all()
             }
+            source_by_id = {source.id: source for source in source_rows}
+            for image in session.exec(
+                select(ModelSourceCover)
+                .where(col(ModelSourceCover.provenance_source_id).in_(source_ids))
+                .order_by(ModelSourceCover.position)
+            ).all():
+                owner = source_by_id[image.provenance_source_id]
+                gallery_by_source[image.provenance_source_id].append(
+                    {
+                        "position": image.position,
+                        "content_api_ref": f"/api/v1/models/{owner.model_id}/provenance/{owner.id}/cover/content?position={image.position}",
+                        "content_type": image.content_type,
+                        "size_bytes": image.size_bytes,
+                        "updated_at": image.updated_at.isoformat(),
+                    }
+                )
         for source in source_rows:
             # `id` is the primary key and `model_id` is NOT NULL, and these rows came
             # straight out of a SELECT — the same holds for `link.file_id` below. The
@@ -181,6 +199,11 @@ def export_payload(session: Session, user: User) -> dict:
                     "captures": captures,
                     "artifacts": artifacts,
                     "cover": cover_summary,
+                    **(
+                        {"images": gallery_by_source[source.id]}
+                        if gallery_by_source[source.id]
+                        else {}
+                    ),
                 }
             )
     if not model_ids:

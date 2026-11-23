@@ -13,17 +13,12 @@ test.describe("users and access", () => {
     const username = `e2e-mgmt-${Date.now()}`;
     await page.goto("/settings");
     await page.getByRole("button", { name: "Users & Access" }).click();
+    await page.getByRole("button", { name: "Create user", exact: true }).click();
     await page.getByLabel("Username").fill(username);
     await page.getByLabel("Initial password").fill("initpass123");
-    await page.getByRole("button", { name: "Create" }).click();
+    await page.getByRole("button", { name: "Create", exact: true }).click();
 
-    // The user's row: scoped by its username + its own password-reset field.
-    const row = () =>
-      page
-        .locator("div")
-        .filter({ has: page.getByRole("paragraph").filter({ hasText: username }) })
-        .filter({ has: page.getByPlaceholder("New password") })
-        .last();
+    const row = () => page.getByRole("group", { name: `User: ${username}`, exact: true });
     await expect(row()).toBeVisible();
 
     // Promote to admin and back.
@@ -39,8 +34,10 @@ test.describe("users and access", () => {
     await expect(row().getByText("Disabled", { exact: true })).toHaveCount(0);
 
     // Reset the password; the new one then authenticates against the real backend.
-    await row().getByPlaceholder("New password").fill("newpass4567");
-    await row().getByRole("button", { name: "Reset password" }).click();
+    await row().getByRole("button", { name: "Reset password", exact: true }).click();
+    const reset = page.getByRole("dialog", { name: "Reset password", exact: true });
+    await reset.getByLabel("New password").fill("newpass4567");
+    await reset.getByRole("button", { name: "Reset password", exact: true }).click();
     await expect
       .poll(async () => {
         try {

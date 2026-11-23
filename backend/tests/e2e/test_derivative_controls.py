@@ -18,7 +18,12 @@ class TestDerivativeControls:
     ):
         headers = superuser_headers
         disabled = await api.put(
-            "/api/v1/config", headers=headers, json={"derivatives_mesh_enabled": False}
+            "/api/v1/config",
+            headers=headers,
+            json={
+                "derivatives_mesh_enabled": False,
+                "derivatives_previews_enabled": True,
+            },
         )
         assert disabled.status_code == 200, disabled.text
         upload = await api.post(
@@ -34,7 +39,12 @@ class TestDerivativeControls:
         assert job["state"] == "completed", job
         file_id = job["file_id"]
         before = await api.get(f"/api/v1/files/{file_id}/derivatives", headers=headers)
-        assert {row["state"] for row in before.json()} == {"disabled"}
+        # Previews have their own control; they wait behind the disabled cover.
+        assert {row["kind"]: row["state"] for row in before.json()} == {
+            "metadata": "disabled",
+            "previews": "pending",
+            "thumbnail": "disabled",
+        }
         # A fresh session is how another process reads the persisted setting.
         with Session(e2e_db.get_bind()) as fresh:
             assert fresh.get(SystemConfig, 1).derivatives_mesh_enabled is False

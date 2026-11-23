@@ -69,7 +69,7 @@ def preview_capacity() -> Iterator[None]:
             _capacity_active -= 1
 
 
-def _zip_footer_limits(
+def check_zip_directory_limits(
     archive_path: Path,
     archive_size: int,
     *,
@@ -96,6 +96,8 @@ def _zip_footer_limits(
         locator_at = tail.rfind(_ZIP64_EOCD_LOCATOR, 0, footer_at)
         if locator_at >= 0 and locator_at + 20 <= len(tail):
             zip64_offset = struct.unpack_from("<Q", tail, locator_at + 8)[0]
+            if zip64_offset > archive_size - 56:
+                raise EmbeddedGcodeError("embedded_gcode_malformed")
             with archive_path.open("rb") as source:
                 source.seek(zip64_offset)
                 record = source.read(56)
@@ -204,7 +206,7 @@ def _open_archive(
         archive_size = archive_path.stat().st_size
         if archive_size > archive_cap:
             raise EmbeddedGcodeError("embedded_gcode_archive_too_large")
-        _zip_footer_limits(
+        check_zip_directory_limits(
             archive_path,
             archive_size,
             max_entries=entry_cap,

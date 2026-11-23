@@ -187,7 +187,8 @@ class TestFingerprintExtraction:
         # pass. P11's separate bounded header probe remains legitimate I/O.
         assert [count for count in reads if count >= source_bytes] == [source_bytes]
 
-    def test_embedded_preview_still_computes_geometry(self, tmp_path):
+    def test_embedded_preview_still_computes_geometry(self, tmp_path, monkeypatch):
+        monkeypatch.setitem(_overlay, "prefer_rendered_3mf_preview", False)
         path = tmp_path / "embedded.3mf"
         preview = content.png()
         path.write_bytes(three_mf(extras={"Metadata/thumbnail.png": preview}))

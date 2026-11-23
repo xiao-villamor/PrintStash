@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlmodel import Session
 
+from app.bootstrap.dependencies import get_hub
 from app.core.security import require_user
 from app.db.models import (
     CollectionRole,
@@ -17,6 +18,7 @@ from app.db.session import get_session
 from app.modules.identity import printer_rbac, rbac
 from app.modules.printing import fleet, materials
 from app.modules.printing.jobs import wake_dispatch
+from app.modules.printing.printer_hub import PrinterHub
 from app.modules.printing.printer_jobs import reproducibility_payload
 from app.schemas.fleet import (
     ActiveJobResolution,
@@ -64,9 +66,17 @@ def _print_job_read(session: Session, job: PrintJob) -> PrintJobRead:
 def get_fleet_summary(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    hub: PrinterHub = Depends(get_hub),
 ) -> FleetSummary:
     printer_ids = printer_rbac.accessible_printer_ids(session, current_user)
-    return FleetSummary(**fleet.fleet_summary(session, printer_ids))
+    return FleetSummary.model_validate(
+        fleet.fleet_summary(
+            session,
+            printer_ids,
+            snapshots=hub.snapshots,
+            include_unassigned_queue=current_user.is_superuser,
+        )
+    )
 
 
 @router.get("/queue", response_model=list[PrintJobRead])
@@ -82,6 +92,7 @@ def get_queue(
         history_limit=history_limit,
         history_offset=history_offset,
         visible_printer_ids=visible_ids,
+        include_unassigned_queue=current_user.is_superuser,
     )
     return [_print_job_read(session, job) for job in rows]
 

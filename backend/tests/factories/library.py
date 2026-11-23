@@ -41,6 +41,7 @@ from app.db.models import (
     FileType,
     Metadata,
     Model,
+    ModelCover,
     ModelTagLink,
     MultipartModel,
     MultipartModelStar,
@@ -245,7 +246,7 @@ def _type_from(filename: str | None) -> FileType:
     the chance to disagree; pass `file_type=` explicitly when the mismatch is
     the thing under test.
     """
-    if filename is None:
+    if filename is None or filename.lower().endswith(".gcode.3mf"):
         return FileType.GCODE
     suffix = filename.rsplit(".", 1)[-1].lower()
     try:
@@ -363,3 +364,14 @@ def tag_collection(
 def tag_file(session: Session, file: File, tag: Tag) -> FileTagLink:
     """Attach an existing tag directly to an artifact."""
     return save(session, FileTagLink(file_id=file.id, tag_id=tag.id))
+
+
+def build_model_cover(session: Session, model: Model, **overrides: Any) -> ModelCover:
+    """A Model-owned cover row; storage tests publish its bytes separately."""
+    if model.id is None:
+        raise ValueError("model cover requires a persisted Model")
+    digest = unique_hash("model-cover")
+    overrides.setdefault("filename", f"{digest}.webp")
+    overrides.setdefault("size_bytes", 128)
+    overrides.setdefault("sha256", digest)
+    return save(session, ModelCover(model_id=model.id, **overrides))

@@ -1,11 +1,12 @@
 import { acceptsEditingSnapshot } from "@/features/library/editing";
 import type { EditingBase } from "@/types/editing";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createDocument,
   deleteDocument,
   getDocument,
   listDocuments,
+  listModelDocuments,
   updateDocument,
   uploadDocument,
 } from "@/lib/api/documents";
@@ -15,19 +16,30 @@ import type { DocumentListItem, DocumentRead } from "@/types";
 export const documentKeys = {
   all: ["documents"] as const,
   lists: ["documents", "list"] as const,
-  list: (collection: string | null) => ["documents", "list", collection] as const,
+  list: (collection: string | null) => ["documents", "list", "collection", collection] as const,
+  modelList: (id: number, offset: number) => ["documents", "list", "model", id, offset] as const,
   detail: (id: number | null) => ["documents", "detail", id] as const,
 };
 
-export function useDocuments(collection: string | null) {
+type DocumentScope =
+  | { kind: "collection"; path: string | null }
+  | { kind: "model"; id: number; offset: number };
+
+export function useDocuments(scope: DocumentScope) {
   return useQuery({
-    queryKey: documentKeys.list(collection),
-    queryFn: ({ signal }) => listDocuments(collection, { signal }),
+    queryKey:
+      scope.kind === "model"
+        ? documentKeys.modelList(scope.id, scope.offset)
+        : documentKeys.list(scope.path),
+    queryFn: ({ signal }) =>
+      scope.kind === "model"
+        ? listModelDocuments(scope.id, scope.offset, { signal })
+        : listDocuments(scope.path, { signal }),
   });
 }
 
-export function useDocument(id: number | null) {
-  return useQuery({
+export function documentDetailOptions(id: number | null) {
+  return queryOptions({
     queryKey: documentKeys.detail(id),
     queryFn: ({ signal }) => {
       if (id === null) throw new Error("Document id is required");
@@ -35,6 +47,10 @@ export function useDocument(id: number | null) {
     },
     enabled: id !== null,
   });
+}
+
+export function useDocument(id: number | null) {
+  return useQuery(documentDetailOptions(id));
 }
 
 /** Confirmed writes publish only after obsolete reads have been cancelled. */
@@ -75,13 +91,17 @@ export function useDocumentMutations() {
     })) {
       assertSession(version);
       if (!items) continue;
-      const collection = key[2];
+      const scope = key[3];
       client.setQueryData(
         key,
         items.flatMap((item) => {
           if (item.id !== document.id || !acceptsEditingSnapshot(item, document, observedEpoch))
             return [item];
-          return collection === null || collection === document.collection ? [document] : [];
+          const matches =
+            key[2] === "model"
+              ? document.model_id === scope
+              : document.model_id === null && (scope === null || scope === document.collection);
+          return matches ? [document] : [];
         }),
       );
     }
@@ -119,14 +139,21 @@ export function useDocumentMutations() {
       mutationFn: ({
         file,
         collectionId,
+        modelId,
         session,
       }: {
         file: File;
         collectionId: number | null;
+        modelId?: number;
         session: number;
       }) => {
         requireSessionVersion(session);
-        return uploadDocument(file, collectionId);
+        return uploadDocument(
+          file,
+          collectionId,
+          undefined,
+          modelId === undefined ? undefined : { modelId },
+        );
       },
       onMutate: prepare,
       onSuccess: async (document, _, version) => {

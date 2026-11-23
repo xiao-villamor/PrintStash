@@ -3,6 +3,72 @@ import { describe, expect, it } from "vitest";
 import { parseGcode } from "../gcode";
 
 describe("Toolpath geometry", () => {
+  it("previews arc-heavy builds at every printable layer", () => {
+    const layers = Array.from(
+      { length: 750 },
+      (_, index) => `G1 Z${(index + 1) * 0.2}\nG2 I-100 E1\nG2 I-100 E1`,
+    );
+
+    const result = parseGcode(`G1 X100\nM83\n${layers.join("\n")}`);
+
+    expect(result.totalLayers).toBe(750);
+    expect(result.layerRanges.every((layer) => layer.vertexCount > 0)).toBe(true);
+    expect(result.bounds.sizeX).toBeCloseTo(200, 1);
+    expect(result.bounds.sizeY).toBeCloseTo(200, 1);
+    expect(result.bounds.sizeZ).toBeCloseTo(149.8);
+  });
+
+  it("previews more than one million linear moves", () => {
+    const count = 1_000_001;
+
+    const result = parseGcode(`G91\nM83\n${"G1 X.001 E.001\n".repeat(count)}`);
+
+    expect(result.extrudePositions).toHaveLength(count * 6);
+    expect(result.totalLayers).toBe(1);
+    expect(result.bounds.sizeX).toBeCloseTo(count * 0.001, 4);
+    expect(result.cumulativeVertices.at(-1)).toBe(count * 2);
+  });
+
+  it.each([16383, 16384, 16385, 32769])(
+    "preserves geometry across storage chunks (%s moves)",
+    (count) => {
+      const result = parseGcode(`G91\nM83\n${"G1 X1 E1\nG1 Y1\n".repeat(count)}G1 Z1\nG1 X1 E1`);
+
+      expect(result.extrudePositions).toHaveLength((count + 1) * 6);
+      expect(result.travelPositions).toHaveLength((count + 1) * 6);
+      expect(Array.from(result.extrudePositions.filter((_, index) => index % 6 === 0))).toEqual(
+        Array.from({ length: count + 1 }, (_, index) => index - (count + 1) / 2),
+      );
+      expect(Array.from(result.travelPositions.filter((_, index) => index % 6 === 0))).toEqual(
+        Array.from(
+          { length: count + 1 },
+          (_, index) => Math.min(index + 1, count) - (count + 1) / 2,
+        ),
+      );
+      expect(Array.from(result.extrudePositions.slice(-6))).toEqual([
+        (count - 1) / 2,
+        0.5,
+        -count / 2,
+        (count + 1) / 2,
+        0.5,
+        -count / 2,
+      ]);
+      expect(Array.from(result.travelPositions.slice(-6))).toEqual([
+        (count - 1) / 2,
+        -0.5,
+        -count / 2,
+        (count - 1) / 2,
+        0.5,
+        -count / 2,
+      ]);
+      expect(result.layerRanges).toEqual([
+        { z: 0, vertexStart: 0, vertexCount: count * 2 },
+        { z: 1, vertexStart: count * 2, vertexCount: 2 },
+      ]);
+      expect(Array.from(result.cumulativeVertices)).toEqual([0, count * 2, (count + 1) * 2]);
+    },
+  );
+
   it("includes a full-circle extrusion in its printable layer", () => {
     const result = parseGcode("G1 X10 Z.2\nG2 I-10 J0 E1");
     expect(result.layerRanges).toHaveLength(1);
@@ -92,7 +158,7 @@ describe("Toolpath geometry", () => {
   it("resets every logical axis when G92 has no coordinates", () => {
     const result = parseGcode("G1 X10 Y10 Z10 E1\nG92\nG1 X5 Y5 Z5 E1");
 
-    expect(result.bounds).toEqual({ sizeX: 15, sizeY: 15, sizeZ: 15, maxDim: 15 });
+    expect(result.bounds).toMatchObject({ sizeX: 15, sizeY: 15, sizeZ: 15, maxDim: 15 });
   });
   it("rejects coordinates outside finite numeric range", () => {
     expect(() => parseGcode(`G1 X${"9".repeat(400)} E1`)).toThrow("toolpath_invalid_coordinate");

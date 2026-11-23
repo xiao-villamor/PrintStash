@@ -2,6 +2,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "./helpers";
+import { scrollToLibraryEntry } from "../e2e/_scroll";
 
 test.describe("confirmed favorite removal", () => {
   test("preserves the reading position after a confirmed favorite removal", async ({ page }) => {
@@ -23,27 +24,23 @@ test.describe("confirmed favorite removal", () => {
       );
       expect(response.ok()).toBe(true);
       const models: { id: number; name: string }[] = await response.json();
+      models.sort((a, b) => a.name.localeCompare(b.name));
       expect(models).toHaveLength(24);
       for (const model of models) {
         const starred = await page.request.put(`/api/v1/models/${model.id}/star`);
         expect(starred.ok(), await starred.text()).toBe(true);
       }
-      await page.goto(`/?c=${encodeURIComponent(seeded.folder.path)}&favorites=true`);
-      const cards = page.locator("main article");
-      await expect(cards).toHaveCount(24);
-      const target = cards.nth(9);
-      const neighbor = cards.nth(10);
-      const targetLink = target.locator("[data-library-entry]");
-      const neighborLink = neighbor.locator("[data-library-entry]");
-      const targetHref = await targetLink.getAttribute("data-library-entry");
-      const neighborHref = await neighborLink.getAttribute("data-library-entry");
-      if (!targetHref || !neighborHref) throw new Error("Missing favorite identity");
-      // The removed card is the first visible reading anchor, not an arbitrary
-      // card below an unaffected anchor (whose neighbors should normally reflow).
+      await page.goto(`/?c=${encodeURIComponent(seeded.folder.path)}&favorites=true&sort=name-asc`);
+      const targetHref = `/models/${models[9].id}`;
+      const neighborHref = `/models/${models[10].id}`;
+      const targetLink = page.locator(`main [data-library-entry="${targetHref}"]`);
+      const target = targetLink.locator("xpath=ancestor::article");
+      await scrollToLibraryEntry(page, targetLink);
+      // The removed card is the first visible anchor in the virtual scroll surface.
       await targetLink.evaluate((node) => {
-        const main = node.closest("main");
-        if (!main) throw new Error("Missing Library scroll container");
-        main.scrollTop += node.getBoundingClientRect().top - main.getBoundingClientRect().top;
+        const scroll = node.closest<HTMLElement>("[data-library-list]") ?? node.closest("main");
+        if (!scroll) throw new Error("Missing Library scroll container");
+        scroll.scrollTop += node.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
       });
       const surviving = page.locator(`main [data-library-entry="${neighborHref}"]`);
       const beforeClick = await surviving.boundingBox();
@@ -77,9 +74,13 @@ test.describe("confirmed favorite removal", () => {
           return after ? Math.abs(after.y - before.y) : Infinity;
         })
         .toBeLessThanOrEqual(2);
-      expect(await page.locator("main").evaluate((element) => element.scrollTop)).toBeGreaterThan(
-        0,
-      );
+      expect(
+        await page
+          .getByRole("main")
+          .evaluate(
+            (main) => (main.querySelector<HTMLElement>("[data-library-list]") ?? main).scrollTop,
+          ),
+      ).toBeGreaterThan(0);
     } finally {
       release.resolve();
       expect(

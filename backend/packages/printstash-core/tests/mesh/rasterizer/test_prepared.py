@@ -3,7 +3,7 @@
 import numpy as np
 
 from printstash_core.mesh.rasterizer import render_prepared_pixels
-from printstash_core.mesh.render_geometry import PreparedRender
+from printstash_core.mesh.render_geometry import FrozenRender
 
 
 class Backend:
@@ -24,7 +24,7 @@ class Backend:
 class TestPreparedRasterizer:
     def test_keeps_common_frame_processing(self):
         vertices = np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32)
-        geometry = PreparedRender(
+        geometry = FrozenRender(
             vertices,
             1,
             lambda size: iter([np.asarray([[0, 1, 2]])]),

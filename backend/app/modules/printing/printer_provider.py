@@ -9,13 +9,22 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional, Protocol, cast, runtime_checkable
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Literal,
+    Optional,
+    Protocol,
+    cast,
+    runtime_checkable,
+)
 
 from printstash_core.printers import (
-    BambuConfig,
     Capability,
     ElegooCentauriConfig,
     MoonrakerConfig,
+    MotionAxis,
     OctoPrintConfig,
     PrinterClient,
     PrinterConfig,
@@ -24,6 +33,7 @@ from printstash_core.printers import (
     ProviderId,
     ProviderRegistry,
     PrusaLinkConfig,
+    TuningControl,
 )
 from printstash_core.printers.catalog import PROVIDER_DEFINITIONS
 
@@ -287,20 +297,73 @@ class MoonrakerProvider(DelegatingProvider):
     def __init__(self, base_url: str, api_key: str | None = None) -> None:
         super().__init__(MoonrakerClient(base_url, api_key))
 
+    async def server_info(self) -> dict[str, Any]:
+        return await self._call("server_info")
+
+    @staticmethod
+    def config_from_model(printer: Printer) -> MoonrakerConfig:
+        return MoonrakerConfig(
+            base_url=printer.moonraker_url or "",
+            api_key=printer.api_key,
+            variant=printer.provider_variant,
+        )
+
+    @classmethod
+    def from_config(cls, config: MoonrakerConfig) -> MoonrakerProvider:
+        return cls(config.base_url, config.api_key)
+
     @classmethod
     def build(cls, printer: Printer) -> MoonrakerProvider:
         _require(printer, "moonraker_url")
-        return cls(printer.moonraker_url, printer.api_key)
+        return cls.from_config(cls.config_from_model(printer))
 
     async def list_files(self) -> list[dict[str, Any]]:
         body = await self._call("list_files")
         result = body.get("result", [])
         return result if isinstance(result, list) else []
 
+    async def console_history(self) -> dict[str, Any]:
+        return await self._call("console_history")
+
+    async def printer_objects(self) -> dict[str, Any]:
+        return await self._call("printer_objects")
+
+    async def temperature_store(self) -> dict[str, Any]:
+        return await self._call("temperature_store")
+
+    async def bed_mesh_status(self) -> dict[str, Any]:
+        return await self._call("bed_mesh_status")
+
+    async def bed_measurement_supported(self) -> bool:
+        return await self._call("bed_measurement_supported")
+
+    async def measure_bed(self) -> dict[str, Any]:
+        return await self._machine_command("measure_bed")
+
     async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
         return await self._call(
             "upload", local_path, remote_filename, start_print=False
         )
+
+    async def home(self, axes: tuple[MotionAxis, ...]) -> dict[str, Any]:
+        return await self._machine_command("home", axes)
+
+    async def jog(self, axis: MotionAxis, distance: float) -> dict[str, Any]:
+        return await self._machine_command("jog", axis, distance)
+
+    async def extrude(self, distance: float) -> dict[str, Any]:
+        return await self._machine_command("extrude", distance)
+
+    async def tune(self, control: TuningControl, percent: float) -> dict[str, Any]:
+        return await self._machine_command("tune", control, percent)
+
+    async def _machine_command(
+        self,
+        method: Literal["home", "jog", "extrude", "tune", "measure_bed"],
+        *args: Any,
+    ) -> dict[str, Any]:
+        self._check("run_gcode")
+        return await self._call(method, *args)
 
 
 register(BambuLanProvider)
@@ -312,6 +375,28 @@ class PrusaLinkProvider(DelegatingProvider):
     capabilities = PROVIDER_DEFINITIONS[ProviderId.PRUSALINK].capabilities
     client_error = PrusaLinkError
 
+    @staticmethod
+    def config_from_model(printer: Printer) -> PrusaLinkConfig:
+        return PrusaLinkConfig(
+            base_url=printer.prusalink_url or "",
+            auth_mode=printer.prusalink_auth_mode or "",
+            username=printer.prusalink_username,
+            password=printer.prusalink_password,
+            api_key=printer.prusalink_api_key,
+        )
+
+    @classmethod
+    def from_config(cls, config: PrusaLinkConfig) -> PrusaLinkProvider:
+        return cls(
+            PrusaLinkClient(
+                config.base_url,
+                auth_mode=config.auth_mode,
+                username=config.username,
+                password=config.password,
+                api_key=config.api_key,
+            )
+        )
+
     @classmethod
     def build(cls, printer: Printer) -> PrusaLinkProvider:
         _require(printer, "prusalink_url", "prusalink_auth_mode")
@@ -319,15 +404,7 @@ class PrusaLinkProvider(DelegatingProvider):
             _require(printer, "prusalink_username", "prusalink_password")
         if printer.prusalink_auth_mode == "api_key":
             _require(printer, "prusalink_api_key")
-        return cls(
-            PrusaLinkClient(
-                cast(str, printer.prusalink_url),
-                auth_mode=cast(str, printer.prusalink_auth_mode),
-                username=printer.prusalink_username,
-                password=printer.prusalink_password,
-                api_key=printer.prusalink_api_key,
-            )
-        )
+        return cls.from_config(cls.config_from_model(printer))
 
 
 @register
@@ -336,15 +413,21 @@ class OctoPrintProvider(DelegatingProvider):
     capabilities = PROVIDER_DEFINITIONS[ProviderId.OCTOPRINT].capabilities
     client_error = OctoPrintError
 
+    @staticmethod
+    def config_from_model(printer: Printer) -> OctoPrintConfig:
+        return OctoPrintConfig(
+            base_url=printer.octoprint_url or "",
+            api_key=printer.octoprint_api_key or "",
+        )
+
+    @classmethod
+    def from_config(cls, config: OctoPrintConfig) -> OctoPrintProvider:
+        return cls(OctoPrintClient(config.base_url, api_key=config.api_key))
+
     @classmethod
     def build(cls, printer: Printer) -> OctoPrintProvider:
         _require(printer, "octoprint_url", "octoprint_api_key")
-        return cls(
-            OctoPrintClient(
-                cast(str, printer.octoprint_url),
-                api_key=cast(str, printer.octoprint_api_key),
-            )
-        )
+        return cls.from_config(cls.config_from_model(printer))
 
 
 @register
@@ -353,6 +436,26 @@ class ElegooCentauriProvider(DelegatingProvider):
     capabilities = PROVIDER_DEFINITIONS[ProviderId.ELEGOO_CENTAURI].capabilities
     client_error = ElegooCentauriError
     _VARIANTS = {"elegoo_centauri_carbon", "elegoo_centauri_carbon_2"}
+
+    @staticmethod
+    def config_from_model(printer: Printer) -> ElegooCentauriConfig:
+        return ElegooCentauriConfig(
+            host=printer.elegoo_centauri_host or "",
+            model=printer.provider_variant or "",
+            access_code=printer.elegoo_centauri_access_code,
+            mainboard_id=printer.elegoo_centauri_mainboard_id,
+        )
+
+    @classmethod
+    def from_config(cls, config: ElegooCentauriConfig) -> ElegooCentauriProvider:
+        return cls(
+            ElegooCentauriClient(
+                config.host,
+                model=config.model,
+                access_code=config.access_code,
+                mainboard_id=config.mainboard_id,
+            )
+        )
 
     @classmethod
     def build(cls, printer: Printer) -> ElegooCentauriProvider:
@@ -363,14 +466,7 @@ class ElegooCentauriProvider(DelegatingProvider):
             )
         if printer.provider_variant == "elegoo_centauri_carbon_2":
             _require(printer, "elegoo_centauri_access_code")
-        return cls(
-            ElegooCentauriClient(
-                cast(str, printer.elegoo_centauri_host),
-                model=cast(str, printer.provider_variant),
-                access_code=printer.elegoo_centauri_access_code,
-                mainboard_id=printer.elegoo_centauri_mainboard_id,
-            )
-        )
+        return cls.from_config(cls.config_from_model(printer))
 
 
 def capabilities_for_provider(provider: PrinterProvider) -> ProviderCapabilities:
@@ -380,39 +476,10 @@ def capabilities_for_provider(provider: PrinterProvider) -> ProviderCapabilities
 def printer_config_from_model(printer: Printer) -> PrinterConfig:
     """Copy one ORM record into an immutable, persistence-neutral config."""
 
-    if printer.provider == PrinterProvider.MOONRAKER:
-        return MoonrakerConfig(
-            base_url=printer.moonraker_url or "",
-            api_key=printer.api_key,
-            variant=printer.provider_variant,
-        )
-    if printer.provider == PrinterProvider.BAMBU_LAN:
-        return BambuConfig(
-            host=printer.bambu_host or "",
-            serial=printer.bambu_serial or "",
-            access_code=printer.bambu_access_code or "",
-        )
-    if printer.provider == PrinterProvider.PRUSALINK:
-        return PrusaLinkConfig(
-            base_url=printer.prusalink_url or "",
-            auth_mode=printer.prusalink_auth_mode or "",
-            username=printer.prusalink_username,
-            password=printer.prusalink_password,
-            api_key=printer.prusalink_api_key,
-        )
-    if printer.provider == PrinterProvider.OCTOPRINT:
-        return OctoPrintConfig(
-            base_url=printer.octoprint_url or "",
-            api_key=printer.octoprint_api_key or "",
-        )
-    if printer.provider == PrinterProvider.ELEGOO_CENTAURI:
-        return ElegooCentauriConfig(
-            host=printer.elegoo_centauri_host or "",
-            model=printer.provider_variant or "",
-            access_code=printer.elegoo_centauri_access_code,
-            mainboard_id=printer.elegoo_centauri_mainboard_id,
-        )
-    raise ProviderError("unknown_provider", code="unknown_provider")
+    adapter = PROVIDERS.get(printer.provider)
+    if adapter is None:
+        raise ProviderError("unknown_provider", code="unknown_provider")
+    return cast(PrinterConfig, adapter.config_from_model(printer))
 
 
 class _ProductProviderFactory:
@@ -424,36 +491,7 @@ class _ProductProviderFactory:
         self.capabilities = cast(ProviderCapabilities, adapter_type.capabilities)
 
     def build(self, config: PrinterConfig) -> PrinterClient:
-        if isinstance(config, MoonrakerConfig):
-            adapter = MoonrakerProvider(config.base_url, config.api_key)
-        elif isinstance(config, BambuConfig):
-            adapter = BambuLanProvider(config.host, config.serial, config.access_code)
-        elif isinstance(config, PrusaLinkConfig):
-            adapter = PrusaLinkProvider(
-                PrusaLinkClient(
-                    config.base_url,
-                    auth_mode=config.auth_mode,
-                    username=config.username,
-                    password=config.password,
-                    api_key=config.api_key,
-                )
-            )
-        elif isinstance(config, OctoPrintConfig):
-            adapter = OctoPrintProvider(
-                OctoPrintClient(config.base_url, api_key=config.api_key)
-            )
-        elif isinstance(config, ElegooCentauriConfig):
-            adapter = ElegooCentauriProvider(
-                ElegooCentauriClient(
-                    config.host,
-                    model=config.model,
-                    access_code=config.access_code,
-                    mainboard_id=config.mainboard_id,
-                )
-            )
-        else:  # pragma: no cover - the union is intentionally exhaustive
-            raise ProviderError("unknown_provider", code="unknown_provider")
-        return cast(PrinterClient, adapter)
+        return cast(PrinterClient, self._adapter_type.from_config(config))
 
 
 def build_provider_registry() -> ProviderRegistry:

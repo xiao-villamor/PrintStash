@@ -87,6 +87,14 @@ class StagingLeaseError(RuntimeError):
     """A requested lease transition cannot safely be applied."""
 
 
+class CaptureSpoolOffsetMismatch(StagingLeaseError):
+    """A part does not continue the bytes the slot's spool already holds."""
+
+    def __init__(self, received_bytes: int) -> None:
+        super().__init__("capture_upload_offset_mismatch")
+        self.received_bytes = received_bytes
+
+
 class StagingLeaseNotFoundError(StagingLeaseError):
     """No lease exists for the requested owner."""
 
@@ -514,17 +522,24 @@ class _CaptureSpoolReceipt:
 
 
 def open_capture_slot_staging(
-    session: Session, *, slot_id: str, truncate: bool = True
+    session: Session, *, slot_id: str, start: int = 0
 ) -> AbstractContextManager[BinaryIO]:
     """Resolve one lease now, then return a descriptor-only spool context.
 
     The caller owns the Session only for this synchronous resolution. The
     returned context retains an immutable inode receipt and can be entered or
     exited after that Session has closed, without loading detached ORM state.
+
+    ``start`` continues a spool uploaded in parts: bytes past it (a part whose
+    response was lost) are dropped, and a spool shorter than it raises
+    ``CaptureSpoolOffsetMismatch`` carrying the bytes it really holds.
     """
     lease = _capture_slot_lease(session, slot_id)
     path = capture_slot_staging_path(slot_id)
     device, inode = lease.device, lease.inode
+    if start > 0 and (device is None or not os.path.lexists(path)):
+        # Startup reconciliation or a refused completion removed the parts.
+        raise CaptureSpoolOffsetMismatch(0)
     if (
         lease.path != str(path)
         or device is None
@@ -533,13 +548,13 @@ def open_capture_slot_staging(
     ):
         raise StagingLeaseError("capture_upload_staging_collision")
     return _open_capture_spool_descriptor(
-        _CaptureSpoolReceipt(path, device, inode), truncate=truncate
+        _CaptureSpoolReceipt(path, device, inode), start=start
     )
 
 
 @contextmanager
 def _open_capture_spool_descriptor(
-    receipt: _CaptureSpoolReceipt, *, truncate: bool
+    receipt: _CaptureSpoolReceipt, *, start: int
 ) -> Iterator[BinaryIO]:
     """Keep only FD/path identity across a request's network-body waits."""
     path = receipt.path
@@ -553,8 +568,10 @@ def _open_capture_spool_descriptor(
         if opened.st_dev != receipt.device or opened.st_ino != receipt.inode:
             raise StagingLeaseError("capture_upload_staging_collision")
         # Opening must not alter a replacement inode before identity is proven.
-        if truncate:
-            os.ftruncate(fd, 0)
+        if opened.st_size < start:
+            raise CaptureSpoolOffsetMismatch(opened.st_size)
+        os.ftruncate(fd, start)
+        os.lseek(fd, start, os.SEEK_SET)
         with os.fdopen(fd, "wb") as target:
             fd = -1
             yield target

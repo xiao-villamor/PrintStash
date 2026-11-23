@@ -13,6 +13,7 @@ self.onmessage = (event) => {
     self.postMessage({ kind: "ready", data }, [
       data.extrudePositions.buffer,
       data.extrudeColors.buffer,
+      data.extrudeFeatures.buffer,
       data.travelPositions.buffer,
       data.cumulativeVertices.buffer,
     ]);

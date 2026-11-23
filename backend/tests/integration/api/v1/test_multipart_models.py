@@ -11,7 +11,6 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.api.v1 import multipart_models as multipart_router
 from app.core.time import utcnow
 from app.db.models import (
     CollectionRole,
@@ -2087,7 +2086,9 @@ class TestCoverUploadExecution:
         aggregate = make_multipart_model("Cover boundary")
         loop = asyncio.get_running_loop()
         observations = []
-        publish = multipart_router.prepare_bytes
+        from app.modules.library import multipart_covers
+
+        publish = multipart_covers.prepare_bytes
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -2103,7 +2104,7 @@ class TestCoverUploadExecution:
                     observations.append(None)
                 return publish(*args, **kwargs)
 
-            monkeypatch.setattr(multipart_router, "prepare_bytes", delayed_publication)
+            monkeypatch.setattr(multipart_covers, "prepare_bytes", delayed_publication)
             response = await client.put(
                 f"/api/v1/multipart-models/{aggregate.id}/cover",
                 headers=auth_headers,

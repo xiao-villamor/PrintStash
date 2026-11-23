@@ -465,6 +465,7 @@ def health() -> dict:
     return {
         "status": "ok",
         "name": settings.app_name,
+        "capture_import_intent": True,
         "storage": {
             "provider": storage.get("provider"),
             "capabilities": storage.get("capabilities", {}),

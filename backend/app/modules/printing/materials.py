@@ -197,6 +197,8 @@ def replace_manual_state(
         )
     ).all():
         session.delete(row)
+    # Retire the old unique tool and slot keys before inserting their replacements.
+    session.flush()
     now = utcnow()
     for item in payload.tools:
         session.add(

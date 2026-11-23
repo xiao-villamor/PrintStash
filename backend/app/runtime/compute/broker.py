@@ -229,7 +229,10 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                         if (
                             isinstance(candidate.request, type(ticket.request))
                             and candidate.request.priority == Priority.BACKGROUND
-                            and candidate.request.recipe == ticket.request.recipe
+                            and (
+                                isinstance(ticket.request, BinaryRenderRequest)
+                                or candidate.request.recipe == ticket.request.recipe
+                            )
                             and not candidate.cancelled.is_set()
                             and candidate.request.deadline > time.monotonic()
                             and render_batch_fits(

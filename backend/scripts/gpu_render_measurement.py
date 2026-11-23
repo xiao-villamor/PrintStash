@@ -365,6 +365,8 @@ def measure(spec: PilotSpec) -> dict[str, object]:
                             logger=diagnostics,
                             view_rotation=rotation,
                             matte=matte,
+                            reference_thumbnail=spec.flow is Flow.MULTIVIEW
+                            and view == 0,
                         )
                         rendering_ms = (time.perf_counter() - before) * 1000
                         if result is None:

@@ -35,3 +35,16 @@ export function setupErrorMessage(error: Error, translate: (key: MessageKey) => 
   if (/dir|path|writable|readable/.test(raw)) return translate("setup.paths");
   return translate("setup.failed");
 }
+
+/**
+ * The local folder fields a failed storage check is about, so the form can
+ * mark them. A failure naming one folder marks that folder; a path failure
+ * naming neither marks both; anything else (sessions, remote access) marks none.
+ */
+export function setupErrorFields(error: Error): ("data_dir" | "thumb_dir")[] {
+  const raw = error.message;
+  const named = (["data_dir", "thumb_dir"] as const).filter((field) => raw.includes(field));
+  if (named.length > 0) return named;
+  if (/setup_|already_configured|users_already_exist/.test(raw)) return [];
+  return /not_empty|dir|path|writable|readable/.test(raw) ? ["data_dir", "thumb_dir"] : [];
+}

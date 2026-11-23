@@ -50,16 +50,24 @@ export const FEATURE_PUBLIC_MODULES = new Set([
   "src/features/setup/entry.ts",
   "src/features/setup/guide.ts",
   "src/features/work/queries.ts",
+  "src/features/printers/artifact-identity.ts",
+  "src/features/printers/config-workspace.tsx",
+  "src/features/printers/controls.ts",
+  "src/features/printers/inspection.ts",
   "src/features/printers/queries.ts",
   "src/features/printers/materials.ts",
+  "src/features/printers/saved-revision.ts",
   "src/features/printers/settings-edit.ts",
   "src/features/printers/settings-review.tsx",
+  "src/features/printers/telemetry.ts",
   ...[
     "authority",
     "batch-edits",
     "browse",
+    "card-detail",
     "builds",
     "collection-navigation",
+    "collection-overview",
     "filters",
     "model-detail",
     "moves",
@@ -138,6 +146,7 @@ export function readDependencyProject(root: string): DependencyProject {
     }
   };
   ROOTS.forEach(visit);
+  files.set("package.json", "");
   const config: { compilerOptions: { paths: Record<string, string[]> } } = JSON.parse(
     readFileSync(join(root, "tsconfig.json"), "utf8"),
   );

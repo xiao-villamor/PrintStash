@@ -16,7 +16,7 @@ import {
 } from "@/lib/artifact-upload";
 
 import { CheckCircle2, ChevronDown, Loader2, XCircle, MinusCircle } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link } from "@/lib/link";
 import { useAuth } from "@/lib/auth-context";
 
 import type { TaskItem } from "@/lib/task-center";
@@ -118,7 +118,11 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
             </span>
           </div>
           {(task.detail || task.stage) && (
-            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{taskDetail(task)}</p>
+            <p
+              className={`mt-0.5 text-xs text-muted-foreground ${task.ambient ? "" : "line-clamp-2"}`}
+            >
+              {taskDetail(task)}
+            </p>
           )}
           {task.status === "completed" && task.uploadedModel && (
             <div className="mt-2 space-y-1 text-xs">
@@ -130,7 +134,7 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
                 )}
               </p>
               <Link
-                to={`/models/${task.uploadedModel.id}`}
+                href={`/models/${task.uploadedModel.id}`}
                 onClick={onNavigate}
                 className="inline-flex rounded px-2 py-1 font-medium text-primary underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
@@ -138,6 +142,25 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
               </Link>
             </div>
           )}
+          {task.status === "completed" && task.multipartModelId !== undefined && (
+            <Link
+              href={`/multipart-models/${task.multipartModelId}`}
+              onClick={onNavigate}
+              className="mt-2 inline-block text-xs text-primary underline underline-offset-2"
+            >
+              {uiText("Open Multipart Model")}
+            </Link>
+          )}
+          {task.importedDocuments?.map((document) => (
+            <Link
+              key={document.document_id}
+              href={`/documents/${document.document_id}`}
+              onClick={onNavigate}
+              className="mt-1 block break-words text-xs text-primary underline underline-offset-2"
+            >
+              {document.name}
+            </Link>
+          ))}
           {task.archiveUploading && task.archiveSizeBytes !== undefined && (
             <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
               <p>
@@ -230,13 +253,13 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
             />
           )}
           {task.retryable && !active && !task.uploadSessionId && (
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent("printstash:review-import"))}
-              className="mt-2 rounded border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            <Link
+              href="/inbox"
+              onClick={onNavigate}
+              className="mt-2 inline-block rounded border border-border px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {uiText("Review and retry")}
-            </button>
+            </Link>
           )}
           {task.uploadSessionId && task.status !== "completed" && <UploadControls task={task} />}
           {isArchiveTransferActive(task.id) && (
@@ -261,7 +284,7 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
           )}
           {task.similarityRunId !== undefined && (
             <Link
-              to="/library/similar"
+              href="/library/similar"
               className="mt-2 inline-block text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {uiText("similarity.viewAnalysis")}
@@ -271,7 +294,7 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
             task.status === "completed" &&
             user?.is_superuser && (
               <Link
-                to="/settings?section=work"
+                href="/settings?section=work"
                 className="mt-2 inline-block text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {uiText("View preview activity")}

@@ -1,0 +1,419 @@
+.library-collection-header {
+  padding-top: 14px;
+  padding-bottom: 0;
+}
+.library-collection-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.library-collection-identity h1 {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+.library-collection-title > button {
+  width: 30px;
+  height: 30px;
+}
+.library-collection-meta {
+  min-height: 22px;
+  gap: 4px 8px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.collection-header-tags {
+  display: inline-flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.collection-header-tag {
+  box-sizing: content-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  max-width: 100%;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 500;
+}
+.collection-header-tag > button {
+  width: 24px;
+  height: 20px;
+  padding: 0;
+  color: var(--muted-foreground);
+}
+.collection-header-tags .collection-add-tag {
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+.collection-header-tags .collection-add-tag:hover {
+  border-color: var(--primary);
+  color: var(--foreground);
+  background: var(--muted);
+}
+.collection-header-tags .collection-add-tag:hover > svg {
+  color: var(--primary);
+}
+.collection-header-tags .collection-add-tag:focus-visible {
+  border-color: var(--primary);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+.collection-header-tag-input {
+  box-sizing: border-box;
+  height: 22px;
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 0 8px 0 10px;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.collection-header-tag-input > input {
+  width: 120px;
+  height: 20px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+}
+.library-collections-region {
+  position: relative;
+  flex-shrink: 0;
+}
+.library-collections-region[data-open="false"] {
+  height: 0;
+}
+.library-collections-region[data-open="false"] > .library-collections-row {
+  position: absolute;
+  inset: 0 0 auto;
+  opacity: 0;
+  clip-path: inset(0 0 100% 0);
+}
+.library-subcollections {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+.library-model-toolbar-wrap {
+  padding-top: 12px;
+  padding-bottom: 0;
+}
+.collection-overview-toolbar-wrap {
+  padding-top: 28px;
+  padding-bottom: 4px;
+}
+.library-subcollections.library-subcollections-overview {
+  margin-top: 12px;
+  margin-bottom: 24px;
+}
+.collection-overview-actions > [role="group"] {
+  display: contents;
+  flex-basis: auto;
+  order: initial;
+}
+.collection-overview-actions > [role="group"] > button,
+.collection-overview-actions > [role="group"] > a {
+  height: 36px;
+}
+.library-status-filters {
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  background: var(--muted);
+}
+.library-status-filters > button {
+  height: 28px;
+  padding: 0 10px;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--secondary);
+}
+.library-status-filters > button[aria-checked="true"] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.library-status-filters > button:disabled {
+  opacity: 1;
+  color: var(--muted-foreground);
+}
+.library-status-filters > button > span.rounded-full {
+  width: 7px;
+  height: 7px;
+}
+.library-status-filters > button > span.font-mono {
+  font-size: 12px;
+  font-weight: 400;
+}
+.library-status-test {
+  background: var(--status-test-dot);
+}
+.library-status-none {
+  background: var(--border-strong);
+}
+.library-description {
+  order: -1;
+}
+.collection-header-readme .prose {
+  max-width: 80ch;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--secondary);
+}
+.collection-header-readme .prose p {
+  margin-block: 0;
+}
+.collection-readme-clamp {
+  max-height: 18px;
+  overflow: hidden;
+}
+.collection-header-readme .collection-readme-clamp + div button {
+  height: 18px;
+  padding-block: 0;
+}
+.library-folder-search {
+  width: 220px;
+  flex: 1 1 220px;
+}
+.library-folder-search input::placeholder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.library-folder-search input {
+  text-overflow: ellipsis;
+}
+.library-toolbar-filters,
+.library-display-controls {
+  max-width: 100%;
+}
+.library-display-controls {
+  width: max-content;
+}
+.library-model-toolbar [aria-label="Sort models"] {
+  justify-content: flex-start;
+  font-weight: 500;
+  color: var(--secondary);
+}
+.library-model-toolbar [aria-label="Sort models"] > span {
+  text-align: left;
+}
+.library-model-toolbar select {
+  appearance: none;
+}
+
+.library-collection-title {
+  position: relative;
+  min-height: 30px;
+}
+.library-collection-title .library-collection-name {
+  box-sizing: content-box;
+  line-height: 1.4;
+  position: absolute;
+  left: -9px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: calc(100% - 9px);
+  min-width: 0;
+  max-width: 720px;
+  height: 38px;
+  margin: 0;
+  padding: 0 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  outline: none;
+  box-shadow: none;
+}
+.library-collection-title .library-collection-name:focus {
+  border-color: var(--ring);
+}
+
+.collection-description-editor {
+  max-width: 80ch;
+}
+.collection-description-editor > textarea {
+  min-height: 64px;
+  resize: vertical;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.collection-description-editor .collection-description-actions {
+  justify-content: flex-end;
+  gap: 6px;
+}
+.collection-description-editor .collection-description-actions > button:first-child {
+  order: 2;
+}
+.collection-description-editor .collection-description-actions > button:nth-child(2) {
+  order: 1;
+}
+.collection-description-editor .collection-description-actions > span {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+@media (hover: hover) {
+  .library-collection-title > button {
+    opacity: 0.55;
+  }
+  .library-collection-title:hover > button,
+  .library-collection-title > button:focus-visible {
+    opacity: 1;
+  }
+}
+
+.collection-header-tag-input:focus-within {
+  border-color: var(--ring);
+}
+.collection-header-tag-input > input,
+.collection-header-tag-input > input:focus-visible {
+  height: auto;
+  outline: none;
+  box-shadow: none;
+  line-height: 1.4;
+}
+.collection-tag-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.collection-description-empty {
+  display: block;
+  border: 0;
+  background: transparent;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+
+.library-meta-part + .library-meta-part::before {
+  content: "·";
+  margin-right: 8px;
+}
+
+@container library (width < 1250px) {
+  .library-folder-search {
+    flex-basis: 9rem;
+  }
+}
+
+@container library (width < 768px) {
+  .library-display-controls {
+    width: 100%;
+  }
+}
+
+.collection-header-meta-placeholder {
+  display: flex;
+  align-items: center;
+  height: 22px;
+  width: 15rem;
+  max-width: 100%;
+}
+
+/* Compact only where the docked inspector leaves a narrower toolbar. */
+@media (min-width: 1024px) {
+  [data-inspector-open][data-inspector-compact-dock]
+    :is(.library-collection-header, .library-model-toolbar-wrap) {
+    padding-inline: 12px;
+  }
+  @container library (720px <= width < 1250px) {
+    [data-inspector-open] .library-model-toolbar .library-toolbar-label {
+      display: none;
+    }
+    [data-inspector-open] .library-model-toolbar button:has(> .library-toolbar-label) {
+      width: 32px;
+      padding-inline: 0;
+    }
+    /* Compact icons must not move the cards beneath the toolbar. */
+    [data-inspector-open] .library-model-toolbar {
+      min-height: 36px;
+    }
+    [data-inspector-open] .library-model-toolbar,
+    [data-inspector-open] .library-model-toolbar .library-toolbar-filters,
+    [data-inspector-open] .library-model-toolbar .library-display-controls {
+      flex-wrap: nowrap;
+    }
+    [data-inspector-open] .library-model-toolbar .library-toolbar-filters {
+      flex: none;
+    }
+    [data-inspector-open] .library-model-toolbar .library-display-controls {
+      flex: 1 1 auto;
+      justify-content: flex-end;
+      width: auto;
+    }
+    [data-inspector-open]
+      .library-model-toolbar
+      .library-display-controls
+      > :not(.library-folder-search) {
+      flex: none;
+    }
+    [data-inspector-open] .library-model-toolbar .library-folder-search {
+      width: auto;
+      min-width: 96px;
+      max-width: 160px;
+      flex: 1 1 160px;
+    }
+    [data-inspector-open] .library-model-toolbar .library-toolbar-printer {
+      width: 32px;
+      padding-inline: 0;
+    }
+    [data-inspector-open] .library-model-toolbar .library-toolbar-printer > :not(:first-child) {
+      display: none;
+    }
+    [data-inspector-open] .library-model-toolbar .library-status-filters > button {
+      padding-inline: 6px;
+    }
+    [data-inspector-open]
+      .library-model-toolbar
+      .library-display-controls
+      button:not([class*="library-toolbar-sort"]):has(> svg:only-child) {
+      width: 32px;
+      height: 32px;
+    }
+  }
+  @container library (720px <= width < 800px) {
+    [data-inspector-open] .library-model-toolbar .library-toolbar-filter-label {
+      display: none;
+    }
+    [data-inspector-open] .library-model-toolbar button:has(> .library-toolbar-filter-label) {
+      width: 32px;
+      padding-inline: 0;
+    }
+  }
+  @container library (720px <= width < 960px) {
+    [data-inspector-open] .library-model-toolbar .library-toolbar-sort {
+      width: 32px;
+      justify-content: center;
+      padding-inline: 0;
+    }
+    [data-inspector-open] .library-model-toolbar .library-toolbar-sort > :not(:first-child) {
+      display: none;
+    }
+  }
+}

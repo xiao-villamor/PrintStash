@@ -271,7 +271,7 @@ class TestExtractEmbeddedGcode:
         )
         monkeypatch.setattr(
             three_mf_preview,
-            "_zip_footer_limits",
+            "check_zip_directory_limits",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("bad footer")),
         )
 
@@ -294,6 +294,7 @@ class TestExtractEmbeddedGcode:
             external_profile_id=None,
             external_gcode_file="benchy.gcode",
             external_plate_index=plate_index,
+            plate_index=None,
             external_current_layer=None,
             external_total_layers=None,
             external_nozzle_diameter=None,
@@ -352,7 +353,7 @@ class TestZipFooterLimits:
             tmp_path / "central-runtime.3mf", {"Metadata/plate_1.gcode": b"G28\n"}
         )
         monkeypatch.setattr(
-            three_mf_preview, "_zip_footer_limits", lambda *args, **kwargs: None
+            three_mf_preview, "check_zip_directory_limits", lambda *args, **kwargs: None
         )
 
         real_zip_file = zipfile.ZipFile
@@ -378,7 +379,7 @@ class TestZipFooterLimits:
             {"Metadata/extra.txt": b"x", "Metadata/plate_1.gcode": b"G28\n"},
         )
         monkeypatch.setattr(
-            three_mf_preview, "_zip_footer_limits", lambda *args, **kwargs: None
+            three_mf_preview, "check_zip_directory_limits", lambda *args, **kwargs: None
         )
 
         with pytest.raises(EmbeddedGcodeError) as failure:
@@ -603,7 +604,7 @@ class TestZipfile:
         # The footer scanner is deliberately conservative: an unrecognised tail
         # is left for ZipFile to classify as malformed.
         assert (
-            three_mf_preview._zip_footer_limits(
+            three_mf_preview.check_zip_directory_limits(
                 path,
                 path.stat().st_size,
                 max_entries=10,
@@ -639,7 +640,7 @@ class TestZipfile:
         path.write_bytes(b"x" * zip64_offset + bytes(record) + locator + classic)
 
         assert (
-            three_mf_preview._zip_footer_limits(
+            three_mf_preview.check_zip_directory_limits(
                 path,
                 path.stat().st_size,
                 max_entries=2,

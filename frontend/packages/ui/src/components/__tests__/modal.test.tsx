@@ -219,6 +219,25 @@ describe("Modal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("announces the description beside the dialog title", () => {
+    open(
+      <Modal
+        open
+        onClose={vi.fn<() => void>()}
+        closeLabel="Close"
+        title="Delete Model"
+        description="This removes the Model permanently."
+        footer={<button type="button">Delete</button>}
+      >
+        Confirm the deletion.
+      </Modal>,
+    );
+    expect(screen.getByRole("dialog", { name: "Delete Model" })).toHaveAccessibleDescription(
+      "This removes the Model permanently.",
+    );
+    expect(screen.getByRole("button", { name: "Delete" })).toBeVisible();
+  });
+
   it("still offers a close button without a title", () => {
     open(
       <Modal open onClose={vi.fn<() => void>()} closeLabel="Dismiss dialog">

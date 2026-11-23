@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import Optional
 
+from printstash_core.mesh.preview_profile import PreviewLook
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -16,6 +17,7 @@ from sqlmodel import Field
 
 from app.core.time import utcnow
 from app.db.encrypted import EncryptedText
+from app.db.enum_columns import EnumText, enum_check
 
 from .base import SQLModel
 from .types import (
@@ -40,6 +42,7 @@ class SystemConfig(SQLModel, table=True):
     """
 
     __tablename__ = "system_config"
+    __table_args__ = (enum_check("preview_look", PreviewLook),)
 
     id: Optional[int] = Field(default=1, primary_key=True)
     # Only the vault-config editing aggregate. Operational bookkeeping and
@@ -169,6 +172,17 @@ class SystemConfig(SQLModel, table=True):
     derivatives_mesh_enabled: Optional[bool] = None
     derivatives_gcode_enabled: Optional[bool] = None
     derivatives_toolpath_enabled: Optional[bool] = None
+    derivatives_previews_enabled: Optional[bool] = None
+    derivatives_previews_include_poles: Optional[bool] = None
+    prefer_rendered_3mf_preview: Optional[bool] = None
+    preview_look: PreviewLook = Field(
+        default=PreviewLook.SKY,
+        sa_column=Column(EnumText(PreviewLook), nullable=False, server_default="sky"),
+    )
+    preview_floor_grid: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False, server_default=text("true")),
+    )
 
     # Behaviour toggles
     # When true, a file's revision is auto-marked known_good after its first
@@ -233,6 +247,9 @@ class SystemConfig(SQLModel, table=True):
     makerworld_token_updated_at: Optional[datetime] = Field(default=None)
 
     configured_at: Optional[datetime] = Field(default=None, index=True)
+    samples_initialized: bool = Field(
+        default=False, sa_column=Column(Boolean, nullable=False, server_default="0")
+    )
     setup_storage_pending: bool = Field(
         default=False, sa_column=Column(Boolean, nullable=False, server_default="0")
     )

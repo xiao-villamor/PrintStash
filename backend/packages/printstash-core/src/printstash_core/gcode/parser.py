@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from pathlib import Path
 
@@ -141,6 +142,46 @@ _DURATION_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([dhms])", re.IGNORECASE)
 _DURATION_UNITS = {"d": 86400, "h": 3600, "m": 60, "s": 1}
 _CURA_METERS_RE = re.compile(r"filament used\s*:\s*[\d.]+\s*m", re.IGNORECASE)
 _MM_LENGTH_RE = re.compile(r"filament[^\r\n]*\[mm\]", re.IGNORECASE)
+
+# These are slicer config values, not the translated labels shown in its UI.
+_PLATE_TEMPERATURE_KEYS = {
+    "cool plate": "cool_plate_temp",
+    "engineering plate": "eng_plate_temp",
+    "high temp plate": "hot_plate_temp",
+    "hot plate": "hot_plate_temp",
+    "supertack plate": "supertack_plate_temp",
+    "textured cool plate": "textured_cool_plate_temp",
+    "textured pei plate": "textured_plate_temp",
+}
+_BED_TYPE_RE = re.compile(
+    r"^[ \t]*;[ \t]*curr_bed_type[ \t]*=[ \t]*([^\r\n]*)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _bed_temperature(text: str) -> float | None:
+    plate = _BED_TYPE_RE.search(text)
+    if plate is None:
+        # Older files and other slicers do not identify a build plate.
+        return _to_float(_value(text, "bed_temperature_c"))
+    key = _PLATE_TEMPERATURE_KEYS.get(plate.group(1).strip().casefold())
+    if key is None:
+        return None
+    temperature = re.search(
+        rf"^[ \t]*;[ \t]*{key}[ \t]*=[ \t]*([^\r\n]*)",
+        text,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    if temperature is None:
+        return None
+    # Keep the existing single-value summary of a per-filament setting. Never
+    # substitute another plate or the initial-layer setting for missing data.
+    first = re.split(r"[,;]", temperature.group(1), maxsplit=1)[0].strip()
+    try:
+        value = float(first)
+    except ValueError:
+        return None
+    return value if math.isfinite(value) and value >= 0 else None
 
 
 def parse_duration(value: str) -> int | None:
@@ -338,7 +379,7 @@ def parse(path: Path) -> GcodeMetadata:
         bottom_shell_layers=_to_int(_value(text, "bottom_shell_layers")),
         support_material=_to_bool(_value(text, "support_material_raw")),
         nozzle_temperature_c=_to_float(_value(text, "nozzle_temperature_c")),
-        bed_temperature_c=_to_float(_value(text, "bed_temperature_c")),
+        bed_temperature_c=_bed_temperature(text),
         estimated_time_s=(
             parse_duration(estimated_time) if estimated_time is not None else None
         ),

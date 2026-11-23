@@ -1,5 +1,5 @@
 import { useCallback, useState, type ReactNode } from "react";
-import { peekCachedAssetUrl } from "@/lib/asset-cache";
+import { peekCachedAssetUrl, type AssetPriority } from "@/lib/asset-cache";
 import { useAuthenticatedAsset } from "@/lib/use-authenticated-asset-url";
 import { useViewportAdmission } from "@/lib/use-viewport-admission";
 import { cn } from "@/lib/utils";
@@ -9,22 +9,32 @@ export function ProtectedThumbnail({
   path,
   alt,
   placeholder,
+  loadingPlaceholder,
   className,
   imageClassName,
   fade = false,
+  eager = false,
+  priority = "primary",
+  previewView,
   children,
 }: {
   path: string | null | undefined;
   alt: string;
   placeholder: ReactNode;
+  /** Loading stays distinct from a genuinely missing or failed preview. */
+  loadingPlaceholder?: ReactNode;
   className?: string;
   imageClassName?: string;
   fade?: boolean;
+  eager?: boolean;
+  /** Collection mosaics are "background": they never delay the cards' own images. */
+  priority?: AssetPriority;
+  /** Names the presented Model view, when this image is one of several. */
+  previewView?: string;
   children?: ReactNode;
 }) {
-  const { ref, admitted } = useViewportAdmission();
+  const { ref, admitted: inView } = useViewportAdmission();
   const external = path?.startsWith("https://") || path?.startsWith("http://") ? path : null;
-  const asset = useAuthenticatedAsset(external ? null : path, admitted);
   // Capture reuse before admission starts a download. A remounted cached image
   // stays visible; a replacement blob still gets its own reveal.
   const [cachedSource, setCachedSource] = useState(() => ({
@@ -34,12 +44,18 @@ export function ProtectedThumbnail({
   if (cachedSource.path !== path) {
     setCachedSource({ path, url: path && !external ? peekCachedAssetUrl(path) : null });
   }
+  // Admission gates downloads. Bytes already in memory need no gate: a card
+  // remounted by a reflow paints its thumbnail in its first frame, not after
+  // an intersection round trip that leaves a blank frame.
+  const admitted = eager || inView || cachedSource.url !== null;
+  const asset = useAuthenticatedAsset(external ? null : path, admitted, priority);
   const url = admitted ? (external ?? asset.url) : null;
   const [decoded, setDecoded] = useState<string | null>(null);
   const ready = url !== null && decoded === url;
   const reveal = fade && url !== cachedSource.url;
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const failed = asset.status === "failed" || (url !== null && failedSource === url);
+  const cover = path && !failed ? (loadingPlaceholder ?? placeholder) : placeholder;
 
   const decode = useCallback(async (image: HTMLImageElement, loaded = false) => {
     const source = image.getAttribute("src");
@@ -76,18 +92,20 @@ export function ProtectedThumbnail({
       className={cn(fade && "relative", className)}
       data-library-thumbnail={!path ? "missing" : failed ? "failed" : ready ? "ready" : "pending"}
     >
-      {url ? (
+      {url && !failed ? (
         <img
           key={url}
           src={url}
           alt={alt}
+          data-preview-view={previewView}
           draggable={false}
           loading="eager"
           decoding="async"
           className={cn(
             imageClassName,
             reveal && "thumbnail-reveal transition-opacity duration-slow ease-out",
-            fade && (failed || (reveal && !ready) ? "opacity-0" : "opacity-100"),
+            reveal && loadingPlaceholder && "library-thumbnail-fill",
+            fade && (reveal && !ready ? "opacity-0" : "opacity-100"),
           )}
           onError={(event) => setFailedSource(event.currentTarget.getAttribute("src"))}
           onLoad={(event) => {
@@ -96,17 +114,18 @@ export function ProtectedThumbnail({
           ref={bindImage}
         />
       ) : (
-        placeholder
+        cover
       )}
-      {url && fade && (
+      {url && !failed && fade && (
         <div
           aria-hidden
           className={cn(
             "pointer-events-none absolute inset-0 transition-opacity duration-slow ease-out",
-            failed || (reveal && !ready) ? "opacity-100" : "opacity-0",
+            loadingPlaceholder && "library-thumbnail-fill",
+            reveal && !ready ? "opacity-100" : "opacity-0",
           )}
         >
-          {placeholder}
+          {cover}
         </div>
       )}
       {children}

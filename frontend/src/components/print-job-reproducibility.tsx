@@ -92,12 +92,14 @@ export function PrintJobReproducibility({
   previewLabel = "Open model detail",
   downloadFile = downloadAuthenticatedFile,
   toolpathViewer = LazyGcodeViewer,
+  presentation = "card",
 }: {
   job: PrintJobReproducibilityInput;
   previewHref?: string | null;
   previewLabel?: string;
   downloadFile?: DownloadFile;
   toolpathViewer?: ToolpathViewer;
+  presentation?: "card" | "history";
 }) {
   useUiLocale();
   const i18n = useOptionalI18n();
@@ -135,7 +137,11 @@ export function PrintJobReproducibility({
 
   return (
     <div
-      className="mt-2 space-y-2 rounded border border-border bg-muted/30 p-2.5"
+      className={
+        presentation === "history"
+          ? "detail-history-evidence"
+          : "mt-2 space-y-2 rounded border border-border bg-muted/30 p-2.5"
+      }
       data-testid="print-job-reproducibility"
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -207,7 +213,7 @@ export function PrintJobReproducibility({
       )}
 
       {(canDownload || canPreview || resolved.toolpathPreviewUrl) && (
-        <div className="flex flex-wrap gap-2 border-t border-border pt-2">
+        <div className="print-artifact-actions flex flex-wrap gap-2 border-t border-border pt-2">
           {canDownload && (
             <Button
               type="button"

@@ -11,13 +11,14 @@ import { test, expect, authBundleFor, ADMIN } from "./helpers";
 // Resolve the unique name to the server-ID label in one DOM read. Retaining
 // an ordinal locator would follow a different row if the refreshed list sorts.
 async function inputByValue(scope: Locator, labelRe: RegExp, value: string): Promise<Locator> {
+  const page = scope.page();
+  const existing = page.getByRole("dialog");
+  if (await existing.count())
+    await existing.getByRole("button", { name: "Close", exact: true }).click();
   const row = scope.getByRole("region", { name: `Profile: ${value}`, exact: true });
-  const opener = row.getByRole("button", { name: `View details for ${value}`, exact: true });
-  await expect(row).toBeVisible();
-  if (await opener.count()) await opener.click();
-  const editor = row.getByRole("button", { name: `Edit profile ${value}`, exact: true });
-  if (await editor.count()) await editor.click();
-  const inputs = scope.getByLabel(labelRe);
+  await row.getByRole("button").click();
+  await page.getByRole("button", { name: `Edit profile ${value}`, exact: true }).click();
+  const inputs = page.getByLabel(labelRe);
   let label: string | null = null;
   await expect
     .poll(async () => {
@@ -31,13 +32,13 @@ async function inputByValue(scope: Locator, labelRe: RegExp, value: string): Pro
     })
     .not.toBeNull();
   if (!label) throw new Error(`no input with value ${value}`);
-  const input = scope.getByLabel(label, { exact: true });
+  const input = page.getByLabel(label, { exact: true });
   await expect(input).toHaveValue(value);
   return input;
 }
 
 function rowOf(input: Locator): Locator {
-  return input.locator("xpath=ancestor::div[@role='region'][1]");
+  return input.locator("xpath=ancestor::div[@role='dialog'][1]");
 }
 
 test.describe("profiles", () => {
@@ -52,7 +53,7 @@ test.describe("profiles", () => {
           writes.push(request.url());
         }
       });
-      const opener = page.getByRole("button", { name: `New ${kind}`, exact: true });
+      const opener = page.getByRole("button", { name: `New ${kind} profile`, exact: true });
       await opener.click();
       const form = page.getByRole("form", { name: `Create ${kind} preset` });
       for (const field of await form.getByRole("textbox").all()) await field.fill("12");
@@ -64,7 +65,7 @@ test.describe("profiles", () => {
       await opener.press("Enter");
       for (const field of await form.getByRole("textbox").all())
         await expect(field).toHaveValue("");
-      await expect(form.getByRole("button", { name: "Add preset", exact: true })).toBeDisabled();
+      await expect(form.getByRole("button", { name: "Add profile", exact: true })).toBeDisabled();
       expect(writes).toEqual([]);
       await form.getByRole("button", { name: "Cancel", exact: true }).click();
     });
@@ -76,11 +77,11 @@ test.describe("profiles", () => {
 
     const section = page.locator("section", { hasText: "Filament presets" });
     await page.getByRole("button", { name: /New filament/ }).click();
-    const createForm = section.getByRole("form", { name: "Create filament preset" });
+    const createForm = page.getByRole("form", { name: "Create filament preset" });
     await createForm.getByLabel("Name").fill(name);
     await createForm.getByLabel("Material").fill("PLA");
     await createForm.getByLabel("Cost per kg").fill("25");
-    await createForm.getByRole("button", { name: "Add preset" }).click();
+    await createForm.getByRole("button", { name: "Add profile" }).click();
 
     const nameInput = await inputByValue(section, /^Filament preset name/, name);
     await expect(nameInput).toBeVisible();
@@ -94,7 +95,7 @@ test.describe("profiles", () => {
         (r) =>
           /\/api\/v1\/filament-profiles\/\d+/.test(r.url()) && r.request().method() === "PATCH",
       ),
-      section.getByRole("heading", { name: "Filament presets" }).click(), // blur the row
+      page.getByRole("dialog", { name: "Edit filament preset" }).getByRole("heading").click(), // blur the row
     ]);
 
     // Cost persisted.
@@ -124,11 +125,14 @@ test.describe("profiles", () => {
     await page.goto("/profiles");
     const section = page.locator("section", { hasText: "Filament presets" });
     const add = async (value: string) => {
+      const editor = page.getByRole("dialog");
+      if (await editor.count())
+        await editor.getByRole("button", { name: "Close", exact: true }).click();
       await page.getByRole("button", { name: /New filament/ }).click();
-      const form = section.getByRole("form", { name: "Create filament preset" });
+      const form = page.getByRole("form", { name: "Create filament preset" });
       await form.getByLabel("Name").fill(value);
       await form.getByLabel("Cost per kg").fill("25");
-      await form.getByRole("button", { name: "Add preset" }).click();
+      await form.getByRole("button", { name: "Add profile" }).click();
       return inputByValue(section, /^Filament preset name/, value);
     };
     const first = await add(name);
@@ -136,10 +140,11 @@ test.describe("profiles", () => {
     await cost.fill("-1");
 
     await add(second);
+    await inputByValue(section, /^Filament preset name/, name);
 
     await expect(cost).toHaveValue("-1");
     await expect(cost).toHaveAttribute("aria-invalid", "true");
-    await expect(section.getByText("Cost must be 0 or more.")).toBeVisible();
+    await expect(page.getByRole("dialog").getByText("Cost must be 0 or more.")).toBeVisible();
     await cost.fill("42");
     await Promise.all([
       page.waitForResponse(
@@ -147,7 +152,7 @@ test.describe("profiles", () => {
           /\/api\/v1\/filament-profiles\/\d+/.test(response.url()) &&
           response.request().method() === "PATCH",
       ),
-      section.getByRole("heading", { name: "Filament presets" }).click(),
+      page.getByRole("dialog", { name: "Edit filament preset" }).getByRole("heading").click(),
     ]);
     await expect(cost).toBeEnabled();
     await page.reload();
@@ -173,10 +178,10 @@ test.describe("profiles", () => {
     await page.getByRole("tab", { name: /Printers/ }).click();
     const section = page.locator("section", { hasText: "Printer presets" });
     await page.getByRole("button", { name: /New printer/ }).click();
-    const createForm = section.getByRole("form", { name: "Create printer preset" });
+    const createForm = page.getByRole("form", { name: "Create printer preset" });
     await createForm.getByLabel("Name").fill(name);
     await createForm.getByLabel("Printer model").fill("Voron 2.4");
-    await createForm.getByRole("button", { name: "Add preset" }).click();
+    await createForm.getByRole("button", { name: "Add profile" }).click();
 
     const nameInput = await inputByValue(section, /^Printer preset name/, name);
     await expect(nameInput).toBeVisible();
@@ -225,9 +230,15 @@ test.describe("profiles", () => {
           await page.getByRole("tab", { name: /Printers/ }).click();
           await second.getByRole("tab", { name: /Printers/ }).click();
         }
-        await page.getByRole("button", { name: `View details for ${name}`, exact: true }).click();
+        await page
+          .getByRole("region", { name: `Profile: ${name}`, exact: true })
+          .getByRole("button")
+          .click();
         await page.getByRole("button", { name: `Edit profile ${name}`, exact: true }).click();
-        await second.getByRole("button", { name: `View details for ${name}`, exact: true }).click();
+        await second
+          .getByRole("region", { name: `Profile: ${name}`, exact: true })
+          .getByRole("button")
+          .click();
         await second.getByRole("button", { name: `Edit profile ${name}`, exact: true }).click();
         // An invalid number captures the second editor's base without allowing
         // blur between browser tabs to save it before the competing edit.
@@ -240,7 +251,10 @@ test.describe("profiles", () => {
             r.url().endsWith(`/api/v1/${kind}-profiles/${profile.id}`) &&
             r.request().method() === "PATCH",
         );
-        await page.getByRole("heading", { name: `${label} presets`, exact: true }).click();
+        await page
+          .getByRole("dialog", { name: `Edit ${kind} preset`, exact: true })
+          .getByRole("heading")
+          .click();
         expect((await firstSave).status()).toBe(200);
         await second.getByRole("textbox", { name: numericLabel, exact: true }).fill(nextValue);
         const staleSave = second.waitForResponse(
@@ -248,7 +262,10 @@ test.describe("profiles", () => {
             r.url().endsWith(`/api/v1/${kind}-profiles/${profile.id}`) &&
             r.request().method() === "PATCH",
         );
-        await second.getByRole("heading", { name: `${label} presets`, exact: true }).click();
+        await second
+          .getByRole("dialog", { name: `Edit ${kind} preset`, exact: true })
+          .getByRole("heading")
+          .click();
         expect((await staleSave).status()).toBe(412);
         await expect(second.getByRole("textbox", { name: numericLabel, exact: true })).toHaveValue(
           nextValue,
@@ -268,7 +285,10 @@ test.describe("profiles", () => {
         expect((await revisedSave).status()).toBe(200);
         await second.reload();
         if (kind === "printer") await second.getByRole("tab", { name: /Printers/ }).click();
-        await second.getByRole("button", { name: `View details for ${name}`, exact: true }).click();
+        await second
+          .getByRole("region", { name: `Profile: ${name}`, exact: true })
+          .getByRole("button")
+          .click();
         await second.getByRole("button", { name: `Edit profile ${name}`, exact: true }).click();
         await expect(second.getByRole("textbox", { name: numericLabel, exact: true })).toHaveValue(
           nextValue,

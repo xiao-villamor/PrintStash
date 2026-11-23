@@ -2,16 +2,218 @@
 
 ## Unreleased
 
+### Performance
+
+- Search indexing can start while the final cover thumbnails are still rendering after an import. Cover generation also does less database work per thumbnail.
+
+- Cover and plate work refills in batches during imports. When a GPU is ready to render covers, discovery can start one large cover early in each batch.
+
+### Changed
+
+- Model details are in Overview and mesh measurements and checks are in Source info, freeing the full preview pane for the viewer.
+- Model Overview uses larger text and a readable Collection path. File and Revision navigation stays in the inspector tabs.
+- Model Details tabs wrap in narrow inspectors. Overview shows the Model description and a shortcut to the recommended Revision. The description editor offers Write and Preview tabs for Markdown.
+- Source 3MF project settings appear in Print settings, separately from recorded Revision settings.
+- G-code layer controls fit above the camera toolbar in short Model previews.
+- Right-click a Collection card to rename it in place or edit its cover. Preview a collage of up to four Models, upload an image, or restore the automatic collage.
+- The Model tag editor opens with the tag field focused. Edit details starts at the Name field, aligns the Collection picker, and keeps tag suggestions inside the scrollable editor.
+
+- The Revisions tab shows print results and time in the list. Notes and actions follow the selected Revision, with print setup and G-code file details available on demand.
+
+- Klipper Status now includes an administrator console with printer replies and loaded macros. Select a macro to supply its parameters before sending.
+
+- Fleet admins can see waiting jobs that have no assigned printer in the queue and fleet totals. Replacing filament in an existing manual feed now saves and lets compatible work dispatch. Bambu printers preparing a print count as busy.
+
+- Add to queue shows the selected Revision, plate, routing rule, destination and priority before saving. The queue list groups the Revision, destination, status and actions into columns, with routing holds written in plain language.
+- Send to printer shows the Revision and named plates with their estimates before the printer choices. The same plate selection carries between Send now and Add to queue.
+- Fleet Queue opens a routing map. Select jobs, routing rules or printers to inspect them, or drag a queued job to a printer and confirm its new destination. The dispatcher shows available capacity, and printing nodes show reported progress and time remaining.
+- Bambu file transfers can resume the authenticated FTPS session on the data connection. Bambu LAN sends sliced Library projects intact and starts the chosen plate. A tracked project can also be started from the printer’s cache. Fleet Queue shows current work, progress, available time estimates, next jobs and dispatch holds per printer. The scheduler holds the next job while the previous dispatch awaits firmware updates.
+
+- Bambu LAN uploads now use the configured FTPS connection timeout. Files can sync the printer’s cache and browse nested G-code and 3MF files. Status shows available chamber temperature, SD card presence and remaining print time.
+
+- Open a printer from anywhere on its Fleet card. The roster shows work, routing holds, reported material colors, and available nozzle, bed and part-cooling fan readings alongside recent and queued prints. Fleet totals open the matching queue view or filter printers by readiness. Printer Status distinguishes idle machines from active jobs, shows a rolling history of actual heater readings and the reported part-cooling fan level, and can queue a saved Revision for that printer. Bambu Status groups the printer portrait and reported AMS trays beside the current job, live telemetry and recent runs. The job summary includes available layer counts during a print.
+- Bambu LAN recognizes individually addressed external spools in firmware material reports and keeps their readings separate across incremental MQTT updates.
+- Fleet Queue and Maintenance selects align their text and chevrons in Chromium's native picker. Bambu LAN forwards available nozzle and bed readings, targets and part-cooling fan levels. Moonraker reads the part-cooling fan when configured.
+- Fleet cards keep status and temperatures inside the card with long job names. Fleet activity moves below the cards when horizontal space runs out.
+- Printer details put machine controls, job actions and live feedback beside the heater graph. Hotend and bed history use aligned plots on a shared scale. Moonraker includes available controller history and shows material presets before you send a preheat command. The bed surface shows measured heights and variation, and operators with an automatic probe can measure the bed from the dashboard.
+- Completed Vault prints have a **Queue again** action in Jobs. It opens the ordinary queue form with the original Revision, plate and printer selected.
+- Printer Files has a folder explorer and searchable inventory. Operators can upload a saved Revision directly to the selected printer and inspect the transferred file before starting it. Jobs shows outcomes and durations, with the selected run’s evidence and actions alongside it. Both show the Model name for matched files. Materials & maintenance brings loaded feeds, service history and routing together. Diagnostics shows individual check results, and Settings tracks unsaved changes.
+- The Moonraker Config editor keeps line numbers aligned on long files, including when a wide line adds a horizontal scrollbar. Selecting a different file opens its source at the top. Switch to Reported configuration to search the printer’s configuration sections without losing your file draft.
+
+- Web captures can import directly from the browser extension. Pending Imports retains the result and opens the resulting Model. Captures that need a decision stay available for review. The extension remembers collection and tag choices and can be set to always review.
+- Pending Imports shows saved destinations, simpler review controls, and single or bulk import actions for ready captures. Direct files appear as one selected file. The on-page panel fits its content and uses the marketplace title when available.
+- The extension keeps the server URL, browser name and connection method while its popup closes to copy a pairing code. Pairing codes and API keys are never kept.
+- Connecting the extension can grant the server and every supported marketplace in one Chrome prompt, so imports and the on-page button never ask again. With that switch off, each marketplace asks once, at its first import click, for all of its hosts together. Reopening the popup after choosing Allow finishes the connection that Chrome interrupted to show the prompt.
+- The extension reaches more servers: `.lan`, `.home`, `.home.arpa`, `.internal`, `.intranet` and `.localdomain` names and Tailscale `100.64.0.0/10` addresses count as LAN and try HTTP, then HTTPS. A redirect to HTTPS on the same host is followed. Servers behind sign-in proxies such as Cloudflare Access or Authelia work after signing in once in a tab, and the popup offers that sign-in page or the server tab for accepting a self-signed certificate. Plain HTTP to a server outside the LAN needs explicit confirmation.
+- Browser uploads go to PrintStash in parts, so a reverse proxy's request-size limit (nginx's 1 MiB default, Cloudflare's 100 MB) no longer caps model size. The extension halves the part size when a proxy refuses one.
+- The extension imports the default files with one Import click. Change the selection inline, choose a cover from the gallery thumbnails, or exclude the whole gallery. The Import button and status stay visible while the options scroll.
+- Opening Search keeps the collection and grid you were browsing. The Search sidebar searches the current collection and offers a switch to search the whole library and back. Recent searches can be removed one by one or cleared, and the AI Search status sits in one compact note. Switching sidebar tools no longer stalls the page and settles in 150 ms.
+- The Filters picker leads with quick toggles for Favorites, Printed and similar candidates, then groups the remaining filters into Files and library and Printing with a distinct icon per filter and a summary of each active selection. A filter page can be cleared on its own.
+- Model views fills the dialog with the selected image, separates renders from photos in the thumbnail strip, keeps the selected thumbnail in view, shows full view names and supports the arrow keys. Image controls in dark mode let the image show through.
+- Library cards move to their new places on the details panel's own motion when it opens or closes, the same way they follow the Collections sidebar, instead of jumping ahead of it. A card that moves to another row now slides in from the edge of that row instead of crossing the others.
+- G-code previews colour each line by what the slicer says it prints (outer and inner walls, infill, top and bottom, bridges, support, skirt and brim) instead of a rainbow by height. A legend under Layers hides or shows each feature. G-code without slicer feature markers is shaded in one hue by height.
+- G-code previews draw each printed line as a shaded tube as wide as the line itself, so a print reads as a solid object with visible layers instead of faint one-pixel lines.
+- Favorites leaves the navigation rail: it is a Library filter, at the top of the Filters picker, and Collections no longer clears it.
+- The 3D viewer shades Models in the library's preview look, with the same studio lighting as the card thumbnails, so a Model looks the same in its card and in 3D. Shared links use the look too.
+- Settings → Previews → Preview look lets you try a colour or the floor grid in its sample cards without saving. Existing images re-render only when you select Apply look, and Discard returns to the saved look.
+- Upload opens in place without re-rendering the Library, and its code loads in the background once the Library is ready, so the first Upload opens without a wait.
+
+- The Library shows child collection previews in grouped rows, and selecting a collection checks its loaded Model cards. Clicking a Model in the tree reveals its card and opens the inspector.
+- Model previews name each camera angle and mark the cover. The inspector preview can be resized and files can be downloaded or opened in the viewer from their rows.
+
+- Library cards keep more of the Model visible: preview arrows and selection are smaller, and status sits in the image corner. An expand icon on card hover and in the details panel opens the full page. Model views adds previous and next arrows and centers its view indicator.
+- 3MF files use their embedded picture as the automatic Model cover by default. Settings → Previews can render these covers instead. Existing automatic 3MF covers update in the background.
+
+- Multi-angle previews render in the same pass as the cover, from the mesh it already loaded, on every native slot. A 60-file import with orbit views finishes in about a third of the time (239 s → 89 s on a 3-CPU host); a cover pass that stops early hands its views back so they are rendered again at once. Views follow the Model image quality setting (Compact, Standard or High) instead of a fixed 480 × 360, and Recreate all images rebuilds them with the covers; existing view sets update once in the background. A top or bottom view that would show only the edge of a plate is left out instead of failing the whole set.
+
+- Model details now show the selected G-code revision’s print setup and named plate estimates alongside preview and delivery actions in Revisions. Inspector tabs lead directly into their content, and source-to-revision comparisons prioritize recorded values. Send and Queue carry the inspected plate into confirmation. Queue shows its per-copy estimates and revision test status, validates whole-copy quantities, and keeps the draft open during printer setup. Compare returns to its originating tab and summarizes empty print histories. Libraries without printers offer queueing and printer setup.
+
+- Model-detail reviews have a repeatable desktop Playwright flow using existing Models and their actual files, covering tabs, preview modes, plates, revisions and dialogs with private screenshot, layout and metadata evidence for follow-up design audits.
+- G-code previews use a slicer-style side panel with Layers and View tabs for plate cards, direct layer entry, camera and display controls. Expanding the preview hides the inspector to give the viewer more room. Plate choices stay available while loading or retrying a preview.
+
+- New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.
+
+- The browser extension popup puts pairing and capture first, with connection status in the header, a choice of pairing code or API key, and a direct review action after sending files.
+- The Chrome toolbar popup has a consistent width, a searchable collection field, and a compact unsupported-page state. The new History and Settings tabs show previous captures and let users choose the on-page launcher style, position, and visibility. Pairing name conflicts appear beside the browser name, and the extension can attach explicitly selected files when a private URL cannot be downloaded.
+
+- Model descriptions render Markdown in detail, inspection and shared views, with an edit preview. Browser capture can retain up to 64 publication photos, show them in the card gallery, and choose any captured image as the cover. Gallery transfers recover verified images, preserve source provenance, and remain included in Vault backups and portable exports.
+
+- Browser captures can suggest an editable collection and tags, include a selected cover for every resulting Model, and show download and upload byte progress. Recovering an interrupted capture retains its original suggestions and verified files; a pending local cover must be selected again.
+
+- Archive review identifies omitted images, documents and unsupported entries before importing Models, and explains how selected files and subfolders become Models and collections.
+
+- New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.
+- Flat-model previews now support arrow navigation through all five views and back to the cover. Single-cover and multi-angle cards share a larger image area, and the expanded gallery uses more room on large screens while fitting narrow displays.
+
+- Preview settings now include the vault-wide multi-angle generation switch. Preview activity reports total, completed, remaining, skipped and failed image tasks across the library, including work waiting to enter the queue. Multi-angle orbits use the shared cover camera elevation; enabled generators refresh older view sets in the background.
+
+- Library filters open beside the toolbar in a searchable picker. Search by category or value, combine selections, and see results immediately; resetting the picker preserves the current folder and search. Card context menus show the Model name once with concise actions for opening its page, showing details, Favorites and tags.
+
+- Collection rows expand and collapse continuously as folders change, keeping the Model grid attached to their movement. Settings sections, Model detail tabs, Upload modes and main destinations use a stationary reveal instead of a zoom; interrupted selections continue from their current appearance.
+
+- Nested folders read their Model page alongside child-folder listings. The measured first row starts downloading its authorized previews as soon as the page arrives, sharing those bytes with the cards. These thumbnails take priority over folder mosaics and revision details, while the first batch still fills the viewport. Shared application-shell code loads together with fewer startup requests, and the matched route's scripts load alongside its language catalog.
+- Decoded Library previews and their card details appear immediately, without a second loading interval for placeholder and image fades. Shared framework code loads together to reduce startup requests while optional features stay deferred.
+- Library cards reveal as soon as their own previews are ready. Release notes, Documents, bulk-selection tools and inspector editing controls load when opened, keeping the initial gallery smaller; the inspector header and close action remain available while its content loads.
+- Library grids and tables size the first batch to fill the visible page and load subsequent pages as the reader scrolls, including scrollbar and assistive scrolling. Pagination shows a retry action only when a page fails.
+- Search-index worker leases and progress no longer invalidate Library pagination. Catalog edits and search-generation activation still retire stale cursors.
+- Collection mosaics read four authorized thumbnail references without loading full Model cards or counting the subtree. Secondary Library reads wait for visible collection previews to resolve.
+- Library loading reuses eligible folder preview data, starts previews without waiting for card fades, and loads descriptions and dialogs on demand. Automatic folder scope resolves empty direct listings in one response while preserving bounded pagination.
+- The Collections sidebar opens with a gentler ease and changes tools without zooming its contents.
+- Search opens the sidebar and updates the global Library results; on phones the field appears above those same results. Favorites is a reversible filter that preserves the query, sidebar, toolbar and card layout. Explicit AI and image-search tools remain available.
+- Workbench sections share one sidebar width and preserve its position when navigating to Settings. Settings navigation uses the same sidebar, and section, tab and card transitions follow a shared motion pattern with reduced-motion support.
+- The frontend adopts the OpenDesign workbench: a compact navigation rail, neutral surfaces, square controls, technical library cards, and a wider model inspector. Model facts remain beside the preview while tabs change; inspecting another G-code revision changes the displayed settings and send selection without changing the stored recommendation. Source hashes are available in Files.
+- Settings follows one compact layout in every section: each setting shows its label and help on the left with the control on the right, statuses are plain text, and buttons carry no decorative icons. Single sign-on, About, Imports, Backups, Maintenance and Background work use the same grouped sections. Automatic backups and SSO options are switches, model card metrics are three dropdowns, and paired browsers are renamed through an explicit Rename action.
+- Trash shows its retention as one line above the deleted items, so it stays in reach with a long list; Save becomes available only after a change. Rows show their files, size and dates as plain text, and Delete uses the same outline button as other destructive actions.
+- Settings controls come from one shared set: every button has the same size and weight, destructive actions use one outline style with a red label, toggles are one square switch, statuses are plain text, and notices are neutral panels instead of tinted boxes. Library sources list each source like other Settings lists with Scan now, Edit source and Remove….
+- Dropdowns open one consistent menu across the app, matching the Sort and Display menus: a square popover with compact rows and a check on the chosen value. Browsers without customizable select keep their native list.
+- Client navigation uses TanStack Router with the existing URLs, authentication, and Query cache. Larger loaded library grids use TanStack Virtual to limit mounted cards while retaining cursor pagination, selection, and return-position restoration.
+- Sign-in and first-run setup share one frame and one field style. On the Storage step, Continue runs the storage check itself and moves on when it passes; Check storage remains for checking without leaving the step. The Account step reports every invalid field at once, Review labels Email plainly, lists the previews folder and offers Edit account and Edit storage, and the final button reads Create account. A refused sign-in no longer marks both fields invalid, and the sign-in page explains that another administrator resets a forgotten password in Settings → Users.
+- Storage folders use one name everywhere: "Your files" and "Previews" in setup, its review and Settings, with a note that Docker installs enter the path inside the container. A failed storage check shows "Needs attention" like a passed one shows "Storage ready" and marks the folder it names. Remote providers explain their deletion behaviour in one plain sentence instead of tier names, and beta connections say so. Setup marks completed steps clearly, and the sign-in recovery hint sits below single sign-on.
+- Library motion flows instead of cutting: the details panel eases in from its edge and leaves the same way, pointing it at another Model swaps its contents in place, opening the collections pane eases it in, and a filter, sort, layout or pane change settles the results in place. Cards no longer slide in again when the grid reflows or scrolls them back into view. Opening a folder from the tree, a breadcrumb or a folder card resolves it in one lookup instead of two.
+- The background engine uses DBOS 3.5.0 (was 3.3.0). Its first start adds indexes, a column and a table to the disposable engine database; queued Jobs resume. Stop every API and worker process and restart them together on the same image. DBOS 3.3.0 is not guaranteed to read the migrated engine database: to roll back, stop every process and discard the engine state (the `-dbos` SQLite sibling with its `-wal` and `-shm` files, or the PostgreSQL `dbos` schema) before starting the previous image; Jobs are recorded in the application database and are submitted again.
+
 ### Added
 
 - **Native OrcaSlicer 2.5 plugin.** Install a wheel and configure PrintStash inside Orca to upload exported G-code without an external post-processing command. The settings screen follows Orca's theme, distinguishes global settings from preset overrides, and groups optional revision defaults. The plugin preserves source-model matching and retry deduplication, leaves G-code unchanged, and lets export continue when PrintStash is unavailable. Available printer, filament and process settings are captured from exported G-code in Profiles.
+
+- Attach guides, photos and videos to individual Models under Files → Attachments. Preview PDFs and images, and download videos and other files. Documents follow the Model when it moves Collections or goes to Trash. Multipart Guides also accept MP4 and MOV.
+
+- **Moonraker configuration editor.** Printer administrators can browse, edit, and verify saves to existing configuration files. The editor keeps local drafts when a conflict needs review.
+
+- **Klipper printer controls.** Operators can home or jog individual axes, feed or retract filament once the primary hotend is ready, and adjust the part-cooling fan, print speed, and extrusion flow when available.
+
+- Review folders and archives as separate Models or a Multipart with named pieces. Preserve selected guides and images as Documents, retain completed results when retrying, and open saved results from Tasks. Folder review is bounded to 256 MiB and 2,000 files; original files remain unchanged.
+
+
+- 3MF projects show bounded saved printer, material, nozzle, layer, wall and infill settings, with per-plate estimates when present. File estimates remain separate from provider estimates and measured print results; original project bytes are unchanged.
+- Opt-in corner import panels for MakerWorld, Printables, Thingiverse, MyMiniFactory, Cults, Thangs, Creality Cloud and MakerOnline publications, with per-file transfer recovery, owner-scoped capture history and direct links to Pending Imports review. MakerWorld profiles retain allowlisted provider estimates and link related, accessible Models without merging them.
+- Advisory geometry checks, an import-readiness summary, and source/license summaries expose existing evidence without certifying printability or interpreting license terms.
+- Sliced `.gcode.3mf` archives are G-code Revisions: import or attach them, retain the original download, recommend a revision, preview its plates, and choose a plate to send, queue or batch. Printer history retains the selected plate. Existing explicit sliced archives are recognized during upgrade.
+
+- Custom recovery pages distinguish missing content, restricted access and connection failures, with retry and return actions that match the workbench.
+- Model cards offer lightweight multi-angle previews with deliberate arrows and an expanded gallery, including Top/Bottom and shape-aware planar views. Visible-image admission, intent-based prefetching and bounded background generation preserve primary covers and avoid hover-triggered geometry downloads. Generation has its own Background work control (`VAULT_DERIVATIVES_PREVIEWS_ENABLED`). See [preview behavior and limits](docs/model-previews.md).
+
+- Model covers can use an uploaded PNG/JPEG/WebP, the current 3D view, or an available source image. Chosen covers survive thumbnail regeneration and source-image changes; Reset to automatic restores the latest generated thumbnail. Cover edits support conflict review and are included in backup, storage migration, and purge.
 - **Multi-plate G-code previews.** Browse the sliced plates inside Bambu Studio and OrcaSlicer `.3mf` and `.gcode.3mf` files, including exports without source meshes. Choose a file and a plate in the G-code viewer; ordinary G-code revisions keep their existing preview.
 
 - CTB (v2–5) and GOO (V3.0) resin slices can be uploaded as source files with embedded previews and available layer height/count, exposure, estimated print time, resin volume, printer and slicer metadata. Original printer bytes remain downloadable. Resin printing and layer/toolpath simulation are not included.
 - Collection Documents accepts spreadsheets, Word files and arbitrary binary attachments, including other resin formats, with original-byte downloads.
+- Background work on SQLite starts as soon as it is queued instead of at the next poll: the image patches DBOS with hash-checked queue notifications, on by default. A 60-file archive's thumbnails finish 2.5 s sooner on a 3-CPU host, and an idle server uses 2% of a core instead of 11%. Set `VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS=false` to return to polling. PostgreSQL is unchanged.
+
+### Security
+
+- A TAR upload or URL import can no longer exhaust the server's memory or CPU with a few hundred bytes. TAR headers are read with fixed caps: oversized long-name or pax headers and unknown member types are refused, folders and links count toward the entry limit, the whole unpacked stream is held to the archive size limit, and cancelling an import stops its archive check.
+
+### Performance
+
+- Thumbnails for an imported archive finish sooner: search indexing of the new Models now waits until their thumbnails and measurements are done instead of competing with them for the database. New Models become searchable shortly after their thumbnails appear.
+- Mesh processing no longer stalls behind a job that has already started: admission could read a just-admitted job as still waiting, and every later job then waited for it to finish.
+- Background discovery creates each batch of Jobs in one database write instead of one per Job, so it waits less behind thumbnail publication during an import.
+- Search indexing of an import's new Models no longer starts early in the gap between two batches of thumbnail work, where it slowed the remaining thumbnails by about 5 s.
+- The default number of simultaneous mesh jobs is now one per usable CPU (it was one more). With admission no longer stalling, the extra job only competed for the CPU: on a 3-CPU, 8 GB install a 60-file archive's thumbnails finish in 38.7 s instead of 44.9 s, at the same CPU cost. `VAULT_MAX_RENDER_JOBS` and *Models processed at once* still override it.
 
 ### Fixed
 
+- The desktop Pending Imports sidebar links to the full inbox, including when the queue is empty.
+
+- Long Model names, Revision labels, and G-code filenames fit in the model details, queue dialog, and upload form. Revision numbers and measurements stay together in the revision table.
+
+- OctoPrint shows Resume when a running job is paused externally. PrusaLink records an observed print as completed when the firmware retires its job details at the end of the run.
+
+- The browser extension popup improves contrast, puts credentials before the browser name, and provides keyboard-accessible file selectors that show the selected filename.
+- Partial imports show every file result and its failure reason. Expired browser staging prompts a fresh capture, and collection selection is distinguished from physical storage.
+- Slicer handoff remembers the current user's browser preference, retains a download fallback for the selected Artifact and distinguishes a requested launch from a confirmed opening.
+- G-code previews draw the printer bed where the print really sits on it, and frame the printed object rather than the start-up purge line, which used to push a print to one side of the view.
+
+- Opening or closing Upload or New collection no longer makes Library cards and thumbnails flash.
+- Generated Model covers and gallery views share a slate material and rim lighting on CPU, WebGPU, and STL fallback paths.
+- Embedded slicer renders fit inside Model cards and image previews. In dark mode, a light backing keeps transparent plates visible. The preview API identifies these images as `slicer_render`.
+- Uploaded, source and embedded 3MF photos fill Model cards and the inspector image preview. Generated views keep their margins, and the expanded gallery shows the full image.
+- Expanded galleries use 1280 px generated views and load a separate strip of small thumbnails. Meshless models omit the geometry measurements panel.
+- Meshless sliced 3MFs open directly in the G-code viewer and show available plate estimates and embedded gallery images. Large cover previews use the original cover resolution when available.
+- GPU-generated Model covers use the same framing as CPU covers, including for rounded and diagonal shapes.
+- Large sliced plates no longer hit the former one-million-segment preview limit. Arc rendering uses bounded curve error, and typed geometry storage supports up to four million segments without dropping layers.
+- Model detail retains matching plate selection between source and sliced previews, keeps common view controls in reach, and labels measurement scope and illustrative bed placement. Sliced archives now recover shared print settings and per-plate estimates, including when existing metadata is reprocessed.
+- Model detail keeps plate cards in the same place across 3D and G-code, aligns camera viewpoints and preview edges, and groups toolpath view options and bounds for easier comparison.
+
+- Saved multipart descriptions stay visible in the overview. Multipart member names wrap without clipping, and the mobile composition editor keeps Add variant and Save changes at the shared touch-target size.
+
+- Captured-source conflict recovery stays inside the edit dialog, keeping review and retry controls reachable. Keyboard focus remains on its card when a growing Library switches to virtual rows.
+
+- Profile conflict reviews remain accessible inside the edit dialog, and cancelling a new profile returns keyboard focus to its creation button. Native dropdowns follow the app’s shared cursor preference.
+
+- Collection previews remain visible during background Library refreshes, routine count updates no longer flash an Updating label, and Add tag is visible without hovering.
+
+- The Library now refreshes automatically after catalog changes or expired browse cursors, including paged galleries. Updates preserve the reading position, wait until selection ends, and no longer require a Refresh library banner.
+
+- Completing a ZIP import no longer leaves the Library empty with a request error when it interrupts an in-progress refresh. Interrupted reads recover automatically while preserving the displayed Models and reading position.
+- Library refreshes recover automatically when an ongoing ZIP import changes the catalog during a read, keeping the displayed Models and reading position instead of showing a stuck request error.
+
+- Model card arrows return to the cover in both directions and skip the repeated default camera angle. The expanded gallery keeps every generated view available.
+- The login card is centered in the viewport, with scrolling preserved on short screens.
+
+- Multi-angle preview controls stay readable in light and dark themes. The view count remains visible beside a separate angle label, arrow hover respects reduced motion, and the gallery uses the app's normal closing transition.
+
+- G-code print settings use the selected build plate's bed temperature, including Supertack and textured plates, instead of always reading the hot-plate preset. Existing G-code metadata refreshes automatically in the background (#606).
+
+- Model previews use a raised three-quarter camera and more directional studio lighting to reveal cavities and surface depth. Tall and narrow parts retain their upright view instead of being mistaken for flat plates.
+
+- Real Library cards now reveal after they mount on both first load and cached returns, including development effect replays. Loading placeholders can no longer consume the entrance before the real cards appear. Search and Pending sidebar changes keep their stationary handoff; Favorites filters the cards without fading the whole page.
+
+- Collection navigation no longer inserts a temporary subcollection gap above existing Model cards. Settings stays reachable from the rail and restores its section sidebar; Collections correctly exits Favorites.
+
+- Library navigation uses one calm, interruptible reveal for cached folder visits, Back/Forward, and filters. New previews and loading covers fade into place instead of popping; cached images remain visible.
+
+- Library cards and results appear at their final size with a brief fade instead of shrinking and growing when a folder opens.
+
+- The API prepares route and validation metadata and collects initialization objects before accepting traffic, avoiding synchronous initialization and early full-collection pauses across concurrent first requests.
+- Derivative Jobs that fail before claiming an output now record the failure with the normal backoff and attempt limit, preventing immediate rediscovery loops while retaining completed outputs.
+- Library preview updates no longer flash a refresh banner or hide the details-panel toggle. The displayed list and open inspector stay in place during background refreshes; explicit refreshes and failures keep their feedback.
+- ZIP and model selection searches keep the search icon inside the field. Selected entries use neutral highlighting, and the ZIP destination picker and import actions stay visible in the dialog footer on narrow screens.
+- G-code preview views stay where you put them: choosing Front or Top, fitting, or changing layers no longer snaps the camera back, and orbiting still works after the top view. Layers are browsed like a slicer: a vertical layer rail with step buttons, the layer number and its height, plus a This layer toggle that shows only the current layer. A compact bar holds the view menu, fit, travel and bed; scrolling zooms.
+- Mesh processing logs which 3MF reader read each file and, when the XML reader stood in for lib3mf, why (`mesh_phases`, `printstash_mesh_3mf_reads_total`).
+- 7z archives with more than one folder (non-solid, appended or split into blocks) import instead of failing as invalid.
+- Uploads interrupted by a crash or restart before they were recorded no longer stay in staging forever: on startup the API removes unrecorded uploads older than a day.
 - API key and OrcaSlicer command copy buttons work on HTTP installations without the secure Clipboard API, with a visible error if the browser refuses copying.
 - Confirmed Trash purges reclaim owned files, thumbnails and multipart covers on guarded local/FUSE storage using hash-checked quarantine. Previously blocked guarded cleanup intents are retried; changed objects and external originals remain protected.
 

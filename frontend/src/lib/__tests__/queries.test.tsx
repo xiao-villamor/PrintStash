@@ -25,6 +25,7 @@
  * requested only on demand. A client that re-sorted locally would paginate a
  * different order than the one it displays.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 import { anEditingBase } from "@/test-support/factories";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -166,8 +167,11 @@ function makeListItem(id: number, name: string): ModelListItem {
     effective_role: null,
     tags: [],
     thumbnail_url: null,
+    previews: NO_PREVIEWS,
     file_count: 1,
+    gcode_file_count: 0,
     mesh_file_id: null,
+    bounding_box: null,
     printer_presence: [],
     updated_at: TIMESTAMP,
     print_summary: null,

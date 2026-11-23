@@ -1,11 +1,20 @@
 import { getAuthenticatedBlob } from "@/lib/api";
 import { onAuthChange } from "@/lib/auth-store";
 
-const MAX_DOWNLOADS = 2;
+// Match HTTP/1.1's per-origin connection pool. Viewport admission bounds the
+// work; primary cards still take every queued slot before background mosaics.
+const MAX_DOWNLOADS = 6;
 const MAX_INACTIVE_ENTRIES = 400;
 const MAX_INACTIVE_BYTES = 32 * 1024 * 1024;
+// The backend can admit as few as one archive preview at a time. Strip images
+// share that reader with the selected slide and need their own transfer slot.
+const ARCHIVE_IMAGE_PATH = /^\/api\/v1\/files\/\d+\/archive-images\//;
 
 type AssetStatus = "queued" | "loading" | "ready" | "retired";
+// Explicit preview intent takes the next slot. Visible covers and mosaics can
+// fill the rest before hover-initiated work takes its single speculative slot.
+const priorityOrder = { intent: 0, primary: 1, background: 2, speculative: 3 } as const;
+export type AssetPriority = keyof typeof priorityOrder;
 interface AssetData {
   url: string;
   bytes: number;
@@ -17,11 +26,15 @@ class AssetEntry {
   readonly resolve: (url: string) => void;
   readonly reject: (reason: Error) => void;
   status: AssetStatus = "queued";
+  priority: AssetPriority = "background";
   data: AssetData | null = null;
   references = 0;
   counted = false;
 
+  readonly archiveImage: boolean;
+
   constructor(readonly path: string) {
+    this.archiveImage = ARCHIVE_IMAGE_PATH.test(path);
     let resolve!: (url: string) => void;
     let reject!: (reason: Error) => void;
     this.promise = new Promise<string>((accept, refuse) => {
@@ -36,6 +49,7 @@ class AssetEntry {
 const entries = new Map<string, AssetEntry>();
 const queue: AssetEntry[] = [];
 let downloads = 0;
+let archiveDownload: AssetEntry | null = null;
 let disposing = false;
 const invalidationListeners = new Map<string, Set<() => void>>();
 
@@ -45,6 +59,14 @@ function touch(entry: AssetEntry): void {
   entries.set(entry.path, entry);
 }
 
+function releaseDownload(entry: AssetEntry): boolean {
+  if (!entry.counted) return false;
+  entry.counted = false;
+  downloads -= 1;
+  if (archiveDownload === entry) archiveDownload = null;
+  return true;
+}
+
 function retire(entry: AssetEntry, reason: Error): void {
   if (entry.status === "retired") return;
   entry.status = "retired";
@@ -52,10 +74,7 @@ function retire(entry: AssetEntry, reason: Error): void {
   const queued = queue.indexOf(entry);
   if (queued !== -1) queue.splice(queued, 1);
   entry.controller.abort(reason);
-  if (entry.counted) {
-    entry.counted = false;
-    downloads -= 1;
-  }
+  releaseDownload(entry);
   entry.reject(reason);
   if (entry.data) URL.revokeObjectURL(entry.data.url);
   pump();
@@ -82,11 +101,21 @@ function evictInactive(): void {
 function pump(): void {
   if (disposing) return;
   while (downloads < MAX_DOWNLOADS && queue.length > 0) {
-    const entry = queue.shift()!;
+    const next = queue.findIndex((entry) => !entry.archiveImage || archiveDownload === null);
+    if (next === -1) break;
+    if (
+      queue[next].priority === "speculative" &&
+      Array.from(entries.values()).some(
+        (entry) => entry.status === "loading" && entry.priority === "speculative",
+      )
+    )
+      break;
+    const [entry] = queue.splice(next, 1);
     if (entry.status !== "queued") continue;
     entry.status = "loading";
     downloads += 1;
     entry.counted = true;
+    if (entry.archiveImage) archiveDownload = entry;
     getAuthenticatedBlob(entry.path, entry.controller.signal)
       .then((blob) => {
         if (entries.get(entry.path) !== entry || entry.controller.signal.aborted) return;
@@ -98,24 +127,43 @@ function pump(): void {
       })
       .catch((reason: Error) => retire(entry, reason))
       .finally(() => {
-        if (entry.counted) {
-          entry.counted = false;
-          downloads -= 1;
-          pump();
-        }
+        if (releaseDownload(entry)) pump();
       });
   }
 }
 
-function getEntry(path: string): AssetEntry {
+function enqueue(entry: AssetEntry): void {
+  if (entry.priority === "intent") {
+    queue.unshift(entry);
+    return;
+  }
+  const next = queue.findIndex(
+    (queued) => priorityOrder[queued.priority] > priorityOrder[entry.priority],
+  );
+  if (next === -1) queue.push(entry);
+  else queue.splice(next, 0, entry);
+}
+
+function promote(entry: AssetEntry, priority: AssetPriority): void {
+  if (priorityOrder[priority] >= priorityOrder[entry.priority]) return;
+  entry.priority = priority;
+  const index = queue.indexOf(entry);
+  if (index === -1) return;
+  queue.splice(index, 1);
+  enqueue(entry);
+}
+
+function getEntry(path: string, priority: AssetPriority): AssetEntry {
   const cached = entries.get(path);
   if (cached) {
     touch(cached);
+    promote(cached, priority);
     return cached;
   }
   const entry = new AssetEntry(path);
+  entry.priority = priority;
   entries.set(path, entry);
-  queue.push(entry);
+  enqueue(entry);
   return entry;
 }
 
@@ -138,9 +186,13 @@ export interface AssetLease {
 }
 
 /** Own a share of protected bytes; other consumers survive this caller's cancellation. */
-export function acquireAssetUrl(path: string, signal?: AbortSignal): AssetLease {
+export function acquireAssetUrl(
+  path: string,
+  signal?: AbortSignal,
+  priority: AssetPriority = "primary",
+): AssetLease {
   if (signal?.aborted) return { url: Promise.reject(signal.reason), release() {} };
-  const entry = getEntry(path);
+  const entry = getEntry(path, priority);
   entry.references += 1;
   let active = true;
   let reject!: (reason: Error) => void;
@@ -159,6 +211,14 @@ export function acquireAssetUrl(path: string, signal?: AbortSignal): AssetLease 
   signal?.addEventListener("abort", cancel, { once: true });
   pump();
   return { url, release };
+}
+
+/** Promote already-owned work without adding another consumer or transfer. */
+export function prioritizeCachedAsset(path: string): void {
+  const entry = entries.get(path);
+  if (!entry) return;
+  promote(entry, "intent");
+  pump();
 }
 
 /** Synchronous reuse; display consumers must still acquire a lease in their effect. */

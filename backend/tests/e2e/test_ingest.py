@@ -8,6 +8,7 @@ than create a second model.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import math
@@ -29,6 +30,7 @@ from app.db.models import ArtifactDerivative, GeometryFingerprint
 from app.modules.derivatives import kinds
 from app.schemas.orca import OrcaNativeContext
 from tests.e2e._jobs import settle
+from tests.factories import content
 from tests.factories.geometry import tetrahedron, three_mf
 from tests.factories.three_mf_pilot import load_case, opc_package
 from tests.fixtures.three_mf_projects import (
@@ -817,6 +819,13 @@ class TestStepTessellation:
         """STEP outputs carry the 0.05 mm tessellation's recipes."""
         headers = await _setup_and_login(api, tmp_path)
 
+        enabled = await api.put(
+            "/api/v1/config",
+            headers=headers,
+            json={"derivatives_previews_enabled": True},
+        )
+        assert enabled.status_code == 200, enabled.text
+
         uploaded = await api.post(
             "/api/v1/ingest/model",
             files={
@@ -840,6 +849,7 @@ class TestStepTessellation:
             for row in derivatives.json()
         } == {
             "metadata": ("ready", kinds.STEP_GEOMETRY_RECIPE),
+            "previews": ("ready", kinds.PREVIEWS_RECIPE),
             "thumbnail": ("ready", kinds.STEP_THUMBNAIL_RECIPE),
         }
 
@@ -847,12 +857,25 @@ class TestStepTessellation:
 class TestThreeMFReader:
     @pytest.mark.asyncio
     async def test_a_3mf_is_derived_at_its_own_recipes(self, api, tmp_path, e2e_db):
-        """3MF outputs carry their reader's recipes; other meshes keep theirs."""
+        """An embedded cover still publishes the geometry and enabled multi-angle views."""
         headers = await _setup_and_login(api, tmp_path)
+
+        enabled = await api.put(
+            "/api/v1/config",
+            headers=headers,
+            json={"derivatives_previews_enabled": True},
+        )
+        assert enabled.status_code == 200, enabled.text
 
         uploaded = await api.post(
             "/api/v1/ingest/model",
-            files={"file": ("part.3mf", three_mf(), "model/3mf")},
+            files={
+                "file": (
+                    "part.3mf",
+                    three_mf(extras={"Metadata/thumbnail.png": content.png()}),
+                    "model/3mf",
+                )
+            },
             data={"model_name": "lib3mf recipes"},
             headers=headers,
         )
@@ -868,8 +891,11 @@ class TestThreeMFReader:
         } == {
             "metadata": ("ready", kinds.THREE_MF_GEOMETRY_RECIPE),
             "plates": ("skipped", kinds.PLATES_RECIPE),
+            "project_profile": ("skipped", kinds.PROJECT_PROFILE_RECIPE),
+            "previews": ("ready", kinds.PREVIEWS_RECIPE),
             "thumbnail": ("ready", kinds.THREE_MF_THUMBNAIL_RECIPE),
         }
+        assert _thumbnail_output(e2e_db, job["file_id"])["strategy"] == "embedded"
 
     @pytest.mark.asyncio
     async def test_a_3mf_is_measured_in_single_precision(self, api, tmp_path, e2e_db):
@@ -949,6 +975,157 @@ class TestThreeMFPlates:
 
 class TestSlicedPlates:
     @pytest.mark.asyncio
+    async def test_attaches_sliced_archive_to_uploaded_source(
+        self, api, superuser_headers
+    ):
+        source = await api.post(
+            "/api/v1/ingest/model",
+            headers=superuser_headers,
+            files={
+                "file": (
+                    "part.stl",
+                    _microfaceted_stl(columns=2, rows=2),
+                    "application/sla",
+                )
+            },
+        )
+        assert source.status_code == 202, source.text
+        source_job = await _await_job(api, superuser_headers, source.json()["job_id"])
+        model = (
+            await api.get(
+                f"/api/v1/models/{source_job['model_id']}", headers=superuser_headers
+            )
+        ).json()
+        sliced = await api.post(
+            "/api/v1/ingest/orca",
+            headers=superuser_headers,
+            files={"file": ("part.gcode.3mf", build_sliced_project(), "model/3mf")},
+            data={"source_hash": model["hash"]},
+        )
+        assert sliced.status_code == 202, sliced.text
+        sliced_job = await _await_job(api, superuser_headers, sliced.json()["job_id"])
+        assert sliced_job["state"] == "completed", sliced_job
+        assert sliced_job["model_id"] == model["id"]
+        updated = (
+            await api.get(f"/api/v1/models/{model['id']}", headers=superuser_headers)
+        ).json()
+        assert sorted(row["file_type"] for row in updated["files"]) == ["gcode", "stl"]
+        revision = next(row for row in updated["files"] if row["file_type"] == "gcode")
+        assert revision["gcode_revision_number"] == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("delivery", ["send", "queue", "batch", "later"])
+    async def test_prints_selected_sliced_revision(
+        self, api, superuser_headers, e2e_db, delivery
+    ):
+        from app.db.models import PrinterFile, PrintJob
+        from app.modules.printing.printer_jobs import dispatch_next
+        from app.modules.printing.printer_provider import (
+            build_provider_registry,
+            get_provider_client,
+        )
+        from tests.factories import build_printer
+        from tests.fakes.mock_printer import create_app
+        from tests.fakes.server import start_server
+
+        content = build_sliced_project(plate_numbers=(2, 10))
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            headers=superuser_headers,
+            files={"file": ("project.gcode.3mf", content, "model/3mf")},
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, superuser_headers, uploaded.json()["job_id"])
+        assert job["state"] == "completed", job
+        model = (
+            await api.get(
+                f"/api/v1/models/{job['model_id']}", headers=superuser_headers
+            )
+        ).json()
+        (revision,) = model["files"]
+        assert revision["file_type"] == "gcode"
+        assert revision["gcode_revision_number"] == 1
+        assert revision["is_recommended"] is True
+        emulator, state = create_app()
+        running = start_server(emulator)
+        try:
+            printer = build_printer(e2e_db, moonraker_url=running.base_url)
+            payload = {"file_id": revision["id"], "plate_index": 10}
+            if delivery in {"send", "later"}:
+                result = await api.post(
+                    f"/api/v1/printers/{printer.id}/send",
+                    headers=superuser_headers,
+                    json={**payload, "start_print": delivery == "send"},
+                )
+                assert result.status_code == 200, result.text
+                printed = result.json()
+                if delivery == "later":
+                    result = await api.post(
+                        f"/api/v1/printers/{printer.id}/start",
+                        headers=superuser_headers,
+                        json={
+                            "file_id": revision["id"],
+                            "remote_filename": printed["remote_filename"],
+                        },
+                    )
+                    assert result.status_code == 200, result.text
+                    printed = result.json()
+            else:
+                payload.update({"strategy": "manual", "printer_id": printer.id})
+                if delivery == "batch":
+                    payload["quantity"] = 2
+                result = await api.post(
+                    "/api/v1/fleet/batches"
+                    if delivery == "batch"
+                    else "/api/v1/fleet/queue",
+                    headers=superuser_headers,
+                    json=payload,
+                )
+                assert result.status_code == 201, result.text
+                registry = build_provider_registry()
+                dispatched = await dispatch_next(
+                    lambda row: get_provider_client(row, registry=registry)
+                )
+                assert dispatched is not None
+                e2e_db.expire_all()
+                row = e2e_db.get(PrintJob, dispatched)
+                assert row is not None
+                assert row.state.value == "started", row.error
+                printed = row.model_dump()
+            assert printed["plate_index"] == 10
+            history = await api.get(
+                f"/api/v1/models/{model['id']}/print-jobs", headers=superuser_headers
+            )
+            assert history.status_code == 200
+            recorded = next(row for row in history.json() if row["id"] == printed["id"])
+            assert recorded["identity"]["plate_index"] == 10
+            assert (
+                recorded["toolpath_preview_url"]
+                == f"/api/v1/files/{revision['id']}/embedded-gcode?plate_index=10"
+            )
+            remote = printed["remote_filename"]
+            with zipfile.ZipFile(io.BytesIO(content)) as package:
+                assert state.file_contents[remote] == package.read(
+                    "Metadata/plate_10.gcode"
+                )
+            assert remote.endswith(".gcode")
+            assert "plate-10" in remote
+            inventory = e2e_db.exec(
+                select(PrinterFile).where(
+                    PrinterFile.printer_id == printer.id,
+                    PrinterFile.remote_filename == remote,
+                )
+            ).one()
+            assert inventory.plate_index == 10
+            assert inventory.size_bytes == len(state.file_contents[remote])
+            assert (
+                inventory.sha256
+                == hashlib.sha256(state.file_contents[remote]).hexdigest()
+            )
+        finally:
+            running.stop()
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "filename", ["sliced.gcode.3mf", "sliced.3mf"], ids=["gcode-3mf", "3mf"]
     )
@@ -979,7 +1156,8 @@ class TestSlicedPlates:
         original = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
 
         assert listing.status_code == 200, listing.text
-        assert listing.json() == {"plates": [2, 10]}
+        assert listing.json()["plates"] == [2, 10]
+        assert listing.json()["identities"] == []
         assert first.status_code == 200, first.text
         assert second.status_code == 200, second.text
         assert "plate 2\n" in first.text
@@ -1444,3 +1622,36 @@ class TestComputePlacement:
         listed = await api.get(f"/api/v1/files/{file_id}/derivatives", headers=headers)
         metadata = next(row for row in listed.json() if row["kind"] == "metadata")
         assert metadata["state"] == "ready"
+
+
+class TestBurstMeshCovers:
+    @pytest.mark.asyncio
+    async def test_publishes_covers_for_a_cpu_only_burst(
+        self, api, tmp_path, monkeypatch
+    ):
+        monkeypatch.setitem(_overlay, "compute_mode", "cpu")
+        headers = await _setup_and_login(api, tmp_path)
+        jobs = []
+        for size in (1, 2, 3, 4):
+            mesh = tetrahedron()
+            mesh.apply_scale(size)
+            source = mesh.export(file_type="stl")
+            response = await api.post(
+                "/api/v1/ingest/model",
+                files={"file": (f"burst-{size}.stl", source, "application/sla")},
+                headers=headers,
+            )
+            assert response.status_code == 202, response.text
+            jobs.append(response.json()["job_id"])
+
+        settle()
+
+        for job_id in jobs:
+            completed = await api.get(f"/api/v1/jobs/{job_id}", headers=headers)
+            assert completed.json()["state"] == "completed", completed.text
+            thumbnail = await api.get(
+                f"/api/v1/files/{completed.json()['file_id']}/thumbnail",
+                headers=headers,
+            )
+            assert thumbnail.status_code == 200, thumbnail.text
+            assert thumbnail.headers["content-type"] == "image/webp"

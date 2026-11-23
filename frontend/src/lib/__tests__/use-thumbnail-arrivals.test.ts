@@ -7,6 +7,7 @@
  * card that already has its preview has nothing to wait for. A thumbnail that
  * merely started, or a different kind, is not an arrival.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -35,7 +36,7 @@ class FakeSocket implements EventSocket {
 let socket: FakeSocket;
 
 function card(id: number, thumbnail: string | null = null) {
-  return { id, thumbnail_url: thumbnail };
+  return { id, thumbnail_url: thumbnail, previews: NO_PREVIEWS };
 }
 
 async function opened(): Promise<void> {

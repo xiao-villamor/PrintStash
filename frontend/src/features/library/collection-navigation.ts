@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { collectionLookupOptions, collectionLookupByIdOptions, useQueryApi } from "@/lib/queries";
-import type { CollectionLookupRead } from "@/types";
+import type { CollectionLookupRead, ModelSort, OutlinerModelRead } from "@/types";
 
 const IDENTIFIED_KEY = "ps-recent-folders-identified";
 const LABELLED_KEY = "ps-recent-folders-labelled";
@@ -77,6 +77,20 @@ export function collectionIdentity(params: URLSearchParams): number | null {
   return Number.isSafeInteger(id) ? id : null;
 }
 
+declare module "@tanstack/react-router" {
+  interface HistoryState {
+    treeModelId?: number;
+  }
+}
+
+/** A tree Model always has a card in the unfiltered listing of its collection. */
+export function treeModelFolderHref(model: OutlinerModelRead, sort: ModelSort) {
+  const params = new URLSearchParams({ type: "all", sort, scope: "here" });
+  if (model.collection !== null) params.set("c", model.collection);
+  if (model.collection_id !== null) params.set("cid", String(model.collection_id));
+  return `/?${params}`;
+}
+
 /** A route entry is revalidated even if a previously visited ID is cached. */
 export function useCollectionDestination(path: string | null, id: number | null) {
   const client = useQueryClient();
@@ -84,12 +98,30 @@ export function useCollectionDestination(path: string | null, id: number | null)
   return useQuery({
     ...(id === null
       ? collectionLookupOptions(path, client, api)
-      : collectionLookupByIdOptions(id, api)),
+      : collectionLookupByIdOptions(id, client, api)),
     enabled: path !== null,
     staleTime: 0,
     refetchOnMount: "always",
     retry: false,
   });
+}
+
+/**
+ * The display name of a collection the Library already resolved. A cached
+ * lookup is enough here: labels must not trigger their own revalidation.
+ */
+export function useCollectionName(path: string | null, id: number | null) {
+  const client = useQueryClient();
+  const api = useQueryApi();
+  const lookup = useQuery({
+    ...(id === null
+      ? collectionLookupOptions(path, client, api)
+      : collectionLookupByIdOptions(id, client, api)),
+    enabled: path !== null,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  });
+  return path === null ? null : (lookup.data?.collection.name ?? null);
 }
 
 /** Six persisted identities are resolved only when the menu opens. */
@@ -101,7 +133,7 @@ export function useRecentFolders(current: CollectionLookupRead | undefined, open
     queries: folders.map((folder) => ({
       ...(folder.id === null
         ? collectionLookupOptions(folder.path, client, api)
-        : collectionLookupByIdOptions(folder.id, api)),
+        : collectionLookupByIdOptions(folder.id, client, api)),
       enabled: open,
       staleTime: 0,
       retry: false,

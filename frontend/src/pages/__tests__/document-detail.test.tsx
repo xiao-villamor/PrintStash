@@ -40,6 +40,7 @@ function aDocument(over: Partial<DocumentRead> = {}): DocumentRead {
     collection: "parts",
     collection_id: 1,
     multipart_model_id: null,
+    model_id: null,
     filename: null,
     effective_role: "edit",
     updated_at: "2026-01-01T00:00:00Z",
@@ -132,6 +133,19 @@ describe("DocumentDetailPage", () => {
       await user.click(screen.getByRole("button", { name: /Preview/ }));
 
       expect(screen.queryByPlaceholderText(/Write markdown/)).toBeNull();
+    });
+
+    it("announces the active document mode", async () => {
+      const user = userEvent.setup();
+      renderDocument();
+      const edit = await screen.findByRole("button", { name: "Edit" });
+      const preview = screen.getByRole("button", { name: "Preview" });
+
+      expect(edit).toHaveAttribute("aria-pressed", "false");
+      expect(preview).toHaveAttribute("aria-pressed", "true");
+      await user.click(edit);
+      expect(edit).toHaveAttribute("aria-pressed", "true");
+      expect(preview).toHaveAttribute("aria-pressed", "false");
     });
   });
 

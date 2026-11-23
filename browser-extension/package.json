@@ -14,7 +14,7 @@
     "test:store": "vitest run --config vitest.store.config.ts",
     "zip:edge": "wxt zip --browser edge --mv3",
     "zip:firefox": "wxt zip --browser firefox --mv3",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "wxt prepare && tsc --noEmit",
     "lint": "oxlint --deny-warnings .",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",

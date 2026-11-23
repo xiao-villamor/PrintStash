@@ -247,6 +247,41 @@ describe("useLibraryAuthority", () => {
     expect(screen.queryByText("Refresh required")).toBeNull();
   });
 
+  it("trusts a next page that names the authority the last probe observed", async () => {
+    const app = renderApp(<Probe />, {
+      seed: [[libraryBrowseKeys.pages(params), { pages: [page], pageParams: [null] }]],
+      routes: { [revisionPath]: json(same) },
+    });
+    await settled();
+    const probes = () => app.requests().filter((request) => request.url.endsWith("/revision"));
+    expect(probes()).toHaveLength(1);
+    const next = { ...page, items: [{ kind: "model" as const, model: aModelListItem({ id: 2 }) }] };
+    act(() =>
+      app.client.setQueryData(libraryBrowseKeys.pages(params), {
+        pages: [page, next],
+        pageParams: [null, "cursor-2"],
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(probes()).toHaveLength(1);
+  });
+
+  it("checks authority when a next page names a different revision", async () => {
+    const app = renderApp(<Probe />, {
+      seed: [[libraryBrowseKeys.pages(params), { pages: [page], pageParams: [null] }]],
+      routes: { [revisionPath]: json(same) },
+    });
+    await settled();
+    const probes = () => app.requests().filter((request) => request.url.endsWith("/revision"));
+    act(() =>
+      app.client.setQueryData(libraryBrowseKeys.pages(params), {
+        pages: [page, { ...page, authorization_revision: "a2" }],
+        pageParams: [null, "cursor-2"],
+      }),
+    );
+    await waitFor(() => expect(probes()).toHaveLength(2));
+  });
+
   it("keeps authority successes outside browse receipts", async () => {
     const app = renderApp(<Probe />, { routes: { [revisionPath]: json(same) } });
     await settled();

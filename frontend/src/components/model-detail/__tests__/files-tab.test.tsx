@@ -2,6 +2,7 @@
  * Source-file tags are direct Artifact metadata. Saving them must call the
  * Artifact endpoint and replace the surrounding Model with the server response.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 import "@testing-library/jest-dom/vitest";
 
 import { screen, waitFor, within } from "@testing-library/react";
@@ -35,6 +36,8 @@ const artifact: FileRead = {
 };
 
 const updatedModel: ModelRead = {
+  previews: NO_PREVIEWS,
+  has_custom_cover: false,
   edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   edit_version: 1,
   id: 1,
@@ -267,5 +270,43 @@ describe("FilesTab", () => {
     );
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Linked")).toBeVisible();
+  });
+});
+
+describe("FilesTab recorded identity", () => {
+  it("copies the source hash from the owning file menu", async () => {
+    const user = userEvent.setup();
+    renderApp(
+      <FilesTab
+        modelId={1}
+        sourceFiles={[{ ...artifact, geometric_sha256: "c".repeat(64) }]}
+        canEdit={false}
+        onModel={() => {}}
+      />,
+    );
+
+    const file = within(screen.getByRole("article", { name: "bracket.stl" }));
+    expect(file.queryByTitle(artifact.sha256)).not.toBeInTheDocument();
+    await user.click(file.getByRole("button", { name: "Actions for bracket.stl" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Copy SHA-256" }));
+    expect(await navigator.clipboard.readText()).toBe(artifact.sha256);
+  });
+  it("offers comparison through the existing owner callback", async () => {
+    let comparing = false;
+    renderApp(
+      <FilesTab
+        modelId={1}
+        sourceFiles={[artifact]}
+        canEdit={false}
+        onModel={() => {}}
+        onCompare={() => {
+          comparing = true;
+        }}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Compare" }));
+
+    expect(comparing).toBe(true);
   });
 });

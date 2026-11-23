@@ -20,6 +20,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
+from printstash_core.mesh.preview_profile import (
+    DEFAULT_APPEARANCE,
+    PreviewAppearance,
+    PreviewLook,
+)
+
 from app.modules.media.stl_reader import (
     InvalidSTL as _InvalidSTL,
 )
@@ -68,7 +74,7 @@ def _apply_worker_limits(
 
         resource.setrlimit(resource.RLIMIT_AS, (address_space, address_space))
         resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 2))
-    except (ImportError, OSError, ValueError):  # pragma: no cover - platform dependent
+    except ImportError, OSError, ValueError:  # pragma: no cover - platform dependent
         pass
     if sys.platform.startswith("linux"):
         try:
@@ -202,6 +208,8 @@ def _reuse_measurements(
 def _frame(
     bounds_min: tuple[float, float, float],
     bounds_max: tuple[float, float, float],
+    *,
+    reference: bool = False,
 ):
     from itertools import product
 
@@ -215,7 +223,7 @@ def _frame(
     corners = np.asarray(
         list(product(*zip(exact_min, exact_max, strict=True))), dtype=np.float64
     )
-    rotation = _select_view_rotation(corners - center, np)
+    rotation = _select_view_rotation(corners - center, np, reference=reference)
     view_corners = (corners - center) @ rotation.T
     extent_x = max(float(np.ptp(view_corners[:, 0])), 1e-6)
     extent_y = max(float(np.ptp(view_corners[:, 1])), 1e-6)
@@ -241,6 +249,9 @@ def _render(
     height: int,
     limits: _Limits,
     first: _PassStats,
+    appearance: PreviewAppearance = DEFAULT_APPEARANCE,
+    *,
+    reference_camera: bool = False,
 ) -> int:
     import io
 
@@ -261,10 +272,12 @@ def _render(
         projected_mid,
         extent_x,
         extent_y,
-    ) = _frame(first.bounds_min, first.bounds_max)
+    ) = _frame(first.bounds_min, first.bounds_max, reference=reference_camera)
     # Every finite source facet contributes to the camera bounds. The standard
     # margin accommodates the complete scene, including small remote components.
-    from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+    from printstash_core.mesh.floor_grid import paint_floor_grid
+    from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, STUDIO_LOOKS
+    from printstash_core.mesh.rasterizer import make_preview_shade
 
     margin = PREVIEW_PROFILE.margin_fraction
     scale = min(
@@ -346,6 +359,21 @@ def _render(
         raise _InvalidSTL("source changed between passes")
     finite = np.isfinite(zbuffer)
     if not finite.any() or rendered == 0:
+        # Very small disconnected facets can fall entirely between samples at
+        # the studio angle. Retry with the previous, shallower camera before
+        # declaring the source unrenderable.
+        if not reference_camera and rendered:
+            del image, zbuffer, finite
+            return _render(
+                path,
+                output,
+                width,
+                height,
+                limits,
+                first,
+                appearance,
+                reference_camera=True,
+            )
         raise _InvalidSTL("no visible triangles")
 
     # Reconstruct a smooth normal field from neighbouring depth samples.  The
@@ -431,18 +459,17 @@ def _render(
     normal_length = np.linalg.norm(normals, axis=2, keepdims=True)
     normals /= np.maximum(normal_length, 1e-6)
 
-    light = np.asarray([-0.45, 0.6, 1.0], dtype=np.float32)
-    light /= np.linalg.norm(light)
-    diffuse = np.clip(normals @ light, 0.0, 1.0)
-    brightness = 0.30 + diffuse * 0.70
-    # A cool blue-grey surface provides contrast against the light card while
-    # retaining enough range for the reconstructed depth shading to read.
-    albedo = np.asarray(PREVIEW_PROFILE.material_albedo, dtype=np.float32) * 255.0
-    rim = (1.0 - np.clip(normals[:, :, 2], 0.0, 1.0)) ** 2 * 18.0
-    shaded = np.clip(
-        albedo[None, None, :] * brightness[:, :, None] + rim[:, :, None], 0, 255
-    )
-    image[finite] = shaded[finite].astype(np.uint8)
+    look = STUDIO_LOOKS[appearance.look]
+    shade_surface = make_preview_shade(look.albedo, look.lighting)
+    # Reflect into the studio lighting frame. Evaluate only visible pixels in
+    # bounded row blocks so shading does not grow the worker's image workspace.
+    normals[..., :2] *= -1
+    for start in range(0, coverage_height, 32):
+        rows = slice(start, start + 32)
+        visible = finite[rows]
+        image[rows][visible] = (shade_surface(normals[rows][visible]) * 255).astype(
+            np.uint8
+        )
     alpha = np.where(finite, 255, 0).astype(np.uint8)
     rgb = np.asarray(image, dtype=np.uint8)
     alpha = np.asarray(
@@ -451,7 +478,17 @@ def _render(
         ),
         dtype=np.uint8,
     )
-    rgba = Image.fromarray(np.dstack((rgb, alpha)), mode="RGBA")
+    pixels = np.dstack((rgb, alpha))
+    if appearance.floor_grid:
+        paint_floor_grid(
+            pixels,
+            rotation,
+            np.asarray(first.bounds_min) - center,
+            np.asarray(first.bounds_max) - center,
+            projected_mid,
+            scale,
+        )
+    rgba = Image.fromarray(pixels, mode="RGBA")
     buffer = io.BytesIO()
     rgba.save(buffer, format="PNG", optimize=True)
     data = buffer.getvalue()
@@ -495,6 +532,12 @@ def main(
     parser.add_argument("--address-space-bytes", type=int, required=True)
     parser.add_argument("--cpu-seconds", type=int, required=True)
     parser.add_argument("--expected-parent-pid", type=int, required=True)
+    parser.add_argument(
+        "--preview-look", type=PreviewLook, default=DEFAULT_APPEARANCE.look
+    )
+    parser.add_argument(
+        "--floor-grid", action=argparse.BooleanOptionalAction, default=True
+    )
     args = parser.parse_args(argv)
     if not (
         1 <= args.width <= _MAX_RENDER_DIMENSION
@@ -564,6 +607,7 @@ def main(
             args.height,
             limits,
             first,
+            PreviewAppearance(args.preview_look, args.floor_grid),
         )
         if snapshot_stl(args.source) != source:
             raise STLSourceChanged("source changed before publication")
@@ -583,7 +627,7 @@ def main(
             },
         )
         return 0
-    except (_InvalidSTL, OSError, ValueError, struct.error):
+    except _InvalidSTL, OSError, ValueError, struct.error:
         return 3
     except MemoryError:
         raise

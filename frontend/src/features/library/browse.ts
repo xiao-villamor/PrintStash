@@ -7,6 +7,7 @@ import {
 import { listLibraryPage } from "@/lib/api/library-browse";
 import { ApiError } from "@/lib/errors";
 import { markStartup } from "@/lib/startup-timing";
+import { acquireAssetUrl } from "@/lib/asset-cache";
 import type { LibraryBrowsePage, LibraryBrowseParams } from "@/types/library-browse";
 
 export const libraryBrowseKeys = {
@@ -16,7 +17,7 @@ export const libraryBrowseKeys = {
 };
 
 /** The server's sequence is authoritative; focus must not reorder a displayed list. */
-export function libraryBrowseOptions(params: LibraryBrowseParams) {
+export function libraryBrowseOptions(params: LibraryBrowseParams, firstRowSize = 0) {
   return infiniteQueryOptions<
     LibraryBrowsePage,
     Error,
@@ -28,12 +29,13 @@ export function libraryBrowseOptions(params: LibraryBrowseParams) {
     initialPageParam: null,
     queryFn: async ({ pageParam, signal }) => {
       markStartup("library-requests");
+      let page: LibraryBrowsePage;
       try {
-        return await listLibraryPage({ ...params, cursor: pageParam ?? undefined }, { signal });
+        page = await listLibraryPage({ ...params, cursor: pageParam ?? undefined }, { signal });
       } catch (error) {
         // No cursor has been accepted for a first page. One fresh read can
         // recover a concurrent writer without changing any displayed sequence.
-        // A continuation conflict always belongs to the explicit refresh flow.
+        // A continuation conflict belongs to the coordinated refresh flow.
         if (
           pageParam !== null ||
           !(error instanceof ApiError) ||
@@ -42,8 +44,26 @@ export function libraryBrowseOptions(params: LibraryBrowseParams) {
         )
           throw error;
         signal.throwIfAborted();
-        return listLibraryPage(params, { signal });
+        page = await listLibraryPage(params, { signal });
       }
+      // The active grid already measured its first row. Start those authorized
+      // bytes before React renders the cards and waits for intersection delivery.
+      // Display consumers share the same leases; metadata-only prefetches and
+      // continuation pages retain viewport admission.
+      signal.throwIfAborted();
+      if (pageParam === null && firstRowSize > 0) {
+        for (const item of page.items.slice(0, firstRowSize)) {
+          const path =
+            item.kind === "model" ? item.model.thumbnail_url : item.multipart.cover_thumbnail_url;
+          if (!path || path.startsWith("http://") || path.startsWith("https://")) continue;
+          const lease = acquireAssetUrl(path, signal);
+          void lease.url.then(
+            () => lease.release(),
+            () => lease.release(),
+          );
+        }
+      }
+      return page;
     },
     getNextPageParam: (lastPage) => lastPage.next_cursor,
     staleTime: Infinity,
@@ -54,9 +74,9 @@ export function libraryBrowseOptions(params: LibraryBrowseParams) {
   });
 }
 
-export function useLibraryBrowse(params: LibraryBrowseParams, enabled = true) {
+export function useLibraryBrowse(params: LibraryBrowseParams, enabled = true, firstRowSize = 0) {
   const query = useInfiniteQuery({
-    ...libraryBrowseOptions(params),
+    ...libraryBrowseOptions(params, firstRowSize),
     enabled,
     placeholderData: keepPreviousData,
   });

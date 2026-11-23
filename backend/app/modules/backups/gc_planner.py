@@ -32,6 +32,7 @@ from app.db.models import (
     GcRun,
     GcRunState,
     Model,
+    ModelCover,
     ModelProvenanceSource,
     ModelSourceCover,
     MultipartModel,
@@ -42,6 +43,7 @@ from app.db.models import (
 )
 from app.db.scopes import trashed
 from app.db.session import get_session_factory
+from app.modules.library import collection_covers
 from app.modules.storage.storage_backend.contracts import StorageTier
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_identity import independent_evidence
@@ -135,12 +137,19 @@ def _model_candidate(session: Session, row: Model) -> _Candidate:
         file_keys, file_bytes = _file_metrics(file_row)
         key_count += file_keys
         size_bytes += file_bytes
+    chosen_cover = session.get(ModelCover, row.id)
+    if chosen_cover is not None:
+        key_count += 1
+        size_bytes += chosen_cover.size_bytes
     cover_count = session.exec(
         select(func.count(ModelSourceCover.id))
         .select_from(ModelSourceCover)
         .join(ModelProvenanceSource)
         .where(ModelProvenanceSource.model_id == row.id)
     ).one()
+    for document in session.exec(select(Document).where(Document.model_id == row.id)):
+        key_count += _document_key_count(document)
+        size_bytes += document.size_bytes or 0
     return _Candidate(
         kind="model",
         resource_id=int(row.id),
@@ -150,17 +159,21 @@ def _model_candidate(session: Session, row: Model) -> _Candidate:
     )
 
 
-def _document_candidate(row: Document) -> _Candidate:
+def _document_key_count(row: Document) -> int:
     images = {
         name
         for document_id, name in _DOCUMENT_IMAGE_RE.findall(row.body or "")
         if int(document_id) == row.id
     }
+    return int(bool(row.filename)) + len(images)
+
+
+def _document_candidate(row: Document) -> _Candidate:
     return _Candidate(
         kind="document",
         resource_id=int(row.id),
         deleted_at=row.deleted_at,  # type: ignore[arg-type]
-        key_count=int(bool(row.filename)) + len(images),
+        key_count=_document_key_count(row),
         size_bytes=0,
     )
 
@@ -171,6 +184,9 @@ def _collection_candidate(row: Collection) -> _Candidate:
         for collection_id, name in _COLLECTION_IMAGE_RE.findall(row.readme or "")
         if int(collection_id) == row.id
     }
+    cover = collection_covers.image_filename(row)
+    if cover is not None:
+        images.add(cover)
     return _Candidate(
         kind="collection",
         resource_id=int(row.id),
@@ -210,7 +226,9 @@ def _candidate_pool(session: Session, cutoff: datetime) -> list[_Candidate]:
         select(Printer).where(trashed(Printer), Printer.deleted_at <= cutoff)
     ).all()
     candidates = [_model_candidate(session, row) for row in models]
-    candidates.extend(_document_candidate(row) for row in documents)
+    candidates.extend(
+        _document_candidate(row) for row in documents if row.model_id not in model_ids
+    )
     candidates.extend(
         _Candidate(
             kind="multipart_model",

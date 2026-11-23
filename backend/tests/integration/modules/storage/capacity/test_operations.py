@@ -44,7 +44,7 @@ class TestOperationAdmission:
             ),
         )
         with pytest.raises(OperationError, match="storage_capacity_exceeded"):
-            producers._derive_mesh(artifact.id)
+            producers.derive_mesh(artifact.id)
 
     def test_denies_backup_before_archive_allocation(self, backup_env, monkeypatch):
         from app.modules.backups.backup.creation import create_backup

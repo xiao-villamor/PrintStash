@@ -13,12 +13,15 @@ over a fully derived library of any size costs the same:
 A bounded newest head and a timestamp-keyset tail find interactive intent.
 A separate frozen ID rotation discovers backfill, even while uploads arrive.
 Each priority has a finite queue allowance; a durable turn alternates when
-both priorities compete for a one-item result.
+both priorities compete for a one-item result. When the GPU broker is ready
+for covers, interactive mesh work cycles through the smallest, largest and
+oldest scan order, with at most one largest-first pick per batch.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import time
+from collections.abc import Iterator, Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -28,6 +31,7 @@ from sqlalchemy import (
     and_,
     cast,
     exists,
+    false,
     func,
     literal,
     not_,
@@ -48,9 +52,12 @@ from app.db.models import (
     ReconcileCursor,
     WorkPriority,
 )
+from app.db.models.work import MeshDiscoveryOrder
 from app.db.scopes import live
+from app.modules.media.compute_render import render_recipe
 from app.modules.work.contracts import DiscoveryBudget, WorkItem
 from app.modules.work.jobs import active_job_predicate
+from app.runtime.compute import client
 
 from . import policy
 from .kinds import DerivativeGroup
@@ -58,6 +65,54 @@ from .records import STALE_IN_FLIGHT, regenerations
 
 WINDOW = 5000
 FRESH_INTERACTIVE = timedelta(minutes=10)
+_COVER_PROBE_SECONDS = 0.05
+
+
+def _cover_gpu_ready() -> bool:
+    # Probe the existing owner once per pass. A cold, busy or unavailable GPU
+    # leaves discovery in its normal order and never starts a broker here.
+    width = settings.model_thumbnail_width
+    try:
+        return client.render_ready(
+            recipe=render_recipe(width, round(width * 3 / 4)),
+            deadline=time.monotonic() + _COVER_PROBE_SECONDS,
+        )
+    except TimeoutError:
+        return False
+
+
+_NEXT_MESH_ORDER = {
+    MeshDiscoveryOrder.SMALLEST: MeshDiscoveryOrder.LARGEST,
+    MeshDiscoveryOrder.LARGEST: MeshDiscoveryOrder.OLDEST,
+    MeshDiscoveryOrder.OLDEST: MeshDiscoveryOrder.SMALLEST,
+}
+
+
+def _mesh_order(
+    candidates: dict[int, int],
+    cursor: ReconcileCursor,
+    chosen: set[int],
+) -> Iterator[int]:
+    by_order = {
+        MeshDiscoveryOrder.SMALLEST: iter(
+            sorted(candidates, key=lambda file_id: (candidates[file_id], file_id))
+        ),
+        MeshDiscoveryOrder.LARGEST: iter(
+            sorted(candidates, key=lambda file_id: (-candidates[file_id], file_id))
+        ),
+        MeshDiscoveryOrder.OLDEST: iter(candidates),
+    }
+    picked_largest = False
+    for _ in candidates:
+        turn = cursor.mesh_discovery_order
+        order = turn
+        if turn is MeshDiscoveryOrder.LARGEST:
+            if picked_largest:
+                order = MeshDiscoveryOrder.SMALLEST
+            picked_largest = True
+        file_id = next(value for value in by_order[order] if value not in chosen)
+        cursor.mesh_discovery_order = _NEXT_MESH_ORDER[turn]
+        yield file_id
 
 
 def _satisfied(
@@ -151,6 +206,42 @@ class DerivativeSource:
             session.flush()
         return cursor
 
+    def _recency(self, now: datetime) -> tuple[Any, Any]:
+        """The timestamp that orders this group's work, and the interactive test."""
+        if self.group.definition is JobKind.DERIVATIVES_VIEWER_STL:
+            timestamp = col(File.viewer_requested_at)
+            return timestamp, (timestamp.is_not(None) if self.interactive else false())
+        timestamp = col(File.uploaded_at)
+        if not self.interactive:
+            return timestamp, false()
+        return timestamp, timestamp >= now - FRESH_INTERACTIVE
+
+    def _active(self) -> Any:
+        return exists().where(
+            col(Job.kind) == self.group.definition,
+            col(Job.subject_key) == literal("file/") + cast(col(File.id), String),
+            active_job_predicate(),
+        )
+
+    def owes_interactive(self, session: Session, *, now: datetime) -> bool:
+        """Whether a recent Artifact still owes outputs and has no active Job.
+
+        A read only: the scan cursor is left to discovery.
+        """
+        if not policy.resolve(session)[self.group.definition].enabled:
+            return False
+        _timestamp, recent = self._recency(now)
+        owed = session.exec(
+            select(File.id)
+            .where(
+                pending_predicate(self.group, session, now=now),
+                not_(self._active()),
+                recent,
+            )
+            .limit(1)
+        ).first()
+        return owed is not None
+
     def pending(
         self, session: Session, *, now: datetime, limit: int
     ) -> Sequence[WorkItem]:
@@ -162,6 +253,13 @@ class DerivativeSource:
             budget=DiscoveryBudget(total=limit, interactive=limit, backfill=limit),
         )
 
+    # Whether a fresh upload's gap is discovered at INTERACTIVE priority.
+    interactive = True
+
+    def prerequisite(self, session: Session) -> ColumnElement[bool]:
+        """A File predicate that must hold before this group's gap is owed."""
+        return true()
+
     def pending_prioritized(
         self, session: Session, *, now: datetime, budget: DiscoveryBudget
     ) -> Sequence[WorkItem]:
@@ -170,29 +268,23 @@ class DerivativeSource:
             or not policy.resolve(session)[self.group.definition].enabled
         ):
             return []
+        size_ordered = (
+            budget.interactive > 0
+            and self.group.definition is JobKind.DERIVATIVES_MESH
+            and _cover_gpu_ready()
+        )
         cursor = self._cursor(session)
         # The cursor is advanced as the scan goes. Flushing it before a later
         # read would take the writer for every query that follows; held back,
         # it is one short write as this pass's choice commits.
         with session.no_autoflush:
-            timestamp = (
-                col(File.viewer_requested_at)
-                if self.group.definition is JobKind.DERIVATIVES_VIEWER_STL
-                else col(File.uploaded_at)
-            )
-            recent = (
-                timestamp.is_not(None)
-                if self.group.definition is JobKind.DERIVATIVES_VIEWER_STL
-                else timestamp >= now - FRESH_INTERACTIVE
-            )
-            active = exists().where(
-                col(Job.kind) == self.group.definition,
-                col(Job.subject_key) == literal("file/") + cast(col(File.id), String),
-                active_job_predicate(),
-            )
+            timestamp, recent = self._recency(now)
+            active = self._active()
             predicate = and_(
                 pending_predicate(self.group, session, now=now), not_(active)
             )
+
+            predicate = and_(predicate, self.prerequisite(session))
 
             def eligible(
                 ids: list[int],
@@ -201,10 +293,13 @@ class DerivativeSource:
                 *,
                 newest: bool = False,
                 by_time: bool = False,
-            ) -> list[int]:
+            ) -> dict[int, int]:
                 if not ids or cap == 0:
-                    return []
-                statement = select(File.id).where(
+                    return {}
+                by_size = size_ordered and priority is WorkPriority.INTERACTIVE
+                statement = select(
+                    File.id, File.size_bytes if by_size else literal(0)
+                ).where(
                     col(File.id).in_(ids),
                     predicate,
                     recent if priority is WorkPriority.INTERACTIVE else not_(recent),
@@ -216,11 +311,15 @@ class DerivativeSource:
                     )
                 else:
                     statement = statement.order_by(col(File.id))
-                return [
-                    value
-                    for value in session.exec(statement.limit(cap + 1)).all()
+                # The size rotation must see both extremes of the scanned
+                # windows before applying the discovery cap.
+                if not by_size:
+                    statement = statement.limit(cap + 1)
+                return {
+                    value: size
+                    for value, size in session.exec(statement)
                     if value is not None
-                ]
+                }
 
             # Freeze a whole old-library round; arrivals cannot extend its upper bound.
             old_round_enabled = (
@@ -249,8 +348,8 @@ class DerivativeSource:
             old_i = eligible(old_ids, WorkPriority.INTERACTIVE, budget.interactive)
             old_b = eligible(old_ids, WorkPriority.BACKFILL, budget.backfill)
             tail: list[tuple[int, datetime]] = []
-            head_i: list[int] = []
-            tail_i: list[int] = []
+            head_i: dict[int, int] = {}
+            tail_i: dict[int, int] = {}
             if budget.interactive:
                 tail_query = select(File.id, timestamp).where(recent)
                 if cursor.scan_recent_at is not None:
@@ -293,15 +392,20 @@ class DerivativeSource:
                     newest=True,
                     by_time=True,
                 )
+            interactive = old_i | tail_i | head_i
+            chosen: set[int] = set()
             candidates = {
-                WorkPriority.INTERACTIVE: list(dict.fromkeys(old_i + tail_i + head_i)),
-                WorkPriority.BACKFILL: old_b.copy(),
+                WorkPriority.INTERACTIVE: (
+                    _mesh_order(interactive, cursor, chosen)
+                    if size_ordered
+                    else iter(interactive)
+                ),
+                WorkPriority.BACKFILL: iter(old_b),
             }
             caps = {
-                WorkPriority.INTERACTIVE: budget.interactive,
-                WorkPriority.BACKFILL: budget.backfill,
+                WorkPriority.INTERACTIVE: min(budget.interactive, len(interactive)),
+                WorkPriority.BACKFILL: min(budget.backfill, len(old_b)),
             }
-            chosen: set[int] = set()
             items: list[WorkItem] = []
             turn = cursor.discovery_next_priority
             while len(items) < budget.total:
@@ -311,18 +415,12 @@ class DerivativeSource:
                     else WorkPriority.INTERACTIVE
                 )
                 priority = next(
-                    (
-                        value
-                        for value in (turn, opposite)
-                        if caps[value] and candidates[value]
-                    ),
+                    (value for value in (turn, opposite) if caps[value]),
                     None,
                 )
                 if priority is None:
                     break
-                file_id = candidates[priority].pop(0)
-                if file_id in chosen:
-                    continue
+                file_id = next(candidates[priority])
                 chosen.add(file_id)
                 caps[priority] -= 1
                 items.append(WorkItem(subject_key(file_id), priority=priority))
@@ -332,7 +430,9 @@ class DerivativeSource:
                     else WorkPriority.INTERACTIVE
                 )
             cursor.discovery_next_priority = turn
-            unreturned_old = [value for value in old_i + old_b if value not in chosen]
+            unreturned_old = [
+                value for value in old_i.keys() | old_b.keys() if value not in chosen
+            ]
             if old_round_enabled:
                 # Position equal to the frozen upper bound marks a completed round.
                 # Position zero can also mean its first pending subject was not taken.

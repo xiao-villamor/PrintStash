@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.schemas.models import ModelFilters, ModelListItem, ModelSort
 from app.schemas.multipart_models import MultipartModelListItem
+from app.schemas.previews import ModelPreviewRead
 
 
 class LibraryView(str, Enum):
@@ -20,6 +21,10 @@ class BrowseKind(str, Enum):
 
 
 class BrowseQuery(ModelFilters):
+    auto_scope: bool = Field(
+        default=False,
+        description="Expand an empty direct listing to its subtree in the same read.",
+    )
     view: LibraryView = LibraryView.ALL
     sort: ModelSort = ModelSort.DATE_DESC
     limit: int = Field(default=60, ge=1, le=100)
@@ -52,6 +57,7 @@ class BrowsePage(BaseModel):
     )
     browse_revision: str
     authorization_revision: str
+    effective_direct: bool
 
 
 class BrowseRevisionRead(BaseModel):
@@ -64,6 +70,7 @@ class BrowseThumbnailQuery(BaseModel):
 
 
 class BrowseThumbnail(BaseModel):
+    previews: ModelPreviewRead
     model_id: int
     thumbnail_url: str | None
 
@@ -71,3 +78,19 @@ class BrowseThumbnail(BaseModel):
 class BrowseThumbnailsRead(BaseModel):
     items: list[BrowseThumbnail]
     authorization_revision: str
+
+
+class CollectionPreviewQuery(BaseModel):
+    collection: str = Field(min_length=1, max_length=2048)
+
+
+class LibraryPreviewItem(BaseModel):
+    kind: BrowseKind
+    id: int
+    thumbnail_url: str | None
+
+
+class CollectionPreviewRead(BaseModel):
+    items: list[LibraryPreviewItem] = Field(max_length=4)
+    authorization_revision: str
+    image_url: str | None = None

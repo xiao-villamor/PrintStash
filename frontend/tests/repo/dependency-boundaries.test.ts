@@ -66,10 +66,12 @@ describe("inspectDependencies", () => {
   });
 
   it.each([
+    "src/features/printers/config-workspace.tsx",
     "src/features/printers/settings-edit.ts",
     "src/features/printers/settings-review.tsx",
     "src/features/library/builds.ts",
     "src/features/library/collection-navigation.ts",
+    "src/features/library/collection-overview.ts",
   ])("accepts published feature interfaces: %s", (target) => {
     const result = edge(
       "src/components/consumer.tsx",

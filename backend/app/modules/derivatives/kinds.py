@@ -15,8 +15,9 @@ version with an anti-join and re-derives it at backfill priority, and each old
 output stays visible until its replacement is ready. Do not bump for a refactor
 that cannot change any output.
 
-An Artifact belongs to exactly one group (it is a mesh or it is G-code), so a
-kind's recipe version is read relative to the Artifact's group. A group may
+An Artifact has one primary group (mesh or G-code) and may also have independent
+secondary groups (previews, plates, toolpath, viewer STL). A kind's recipe
+version is read relative to its producer group. A group may
 version a kind separately for one source format, when only that format's
 reader changed: bumping it re-derives those Artifacts and no others. A version
 is therefore always read for a file (``recipes_for``), never for a group alone.
@@ -35,20 +36,27 @@ from app.db.models import SENTINEL_FILE_HASH, DerivativeKind, File, FileType, Jo
 
 # Recipe versions. Bump rule: see the module docstring.
 MESH_GEOMETRY_RECIPE = 12
-MESH_THUMBNAIL_RECIPE = 16
+MESH_THUMBNAIL_RECIPE = 24
 # 3MF scenes are read through lib3mf in single precision.
-THREE_MF_GEOMETRY_RECIPE = 13
-THREE_MF_THUMBNAIL_RECIPE = 17
-THREE_MF_VIEWER_STL_RECIPE = 4
+THREE_MF_GEOMETRY_RECIPE = 15
+# 21 selects embedded covers by default and records picture availability.
+THREE_MF_THUMBNAIL_RECIPE = 29
+THREE_MF_VIEWER_STL_RECIPE = 5
 # STEP is tessellated at 0.05 mm linear deflection.
 STEP_GEOMETRY_RECIPE = 13
-STEP_THUMBNAIL_RECIPE = 17
+# Keep this above the shared thumbnail recipe so a shared row cannot satisfy
+# the STEP-specific producer, even after a shared recipe bump.
+STEP_THUMBNAIL_RECIPE = 25
 STEP_VIEWER_STL_RECIPE = 4
-GCODE_METADATA_RECIPE = 6
-GCODE_THUMBNAIL_RECIPE = 3
+GCODE_METADATA_RECIPE = 11
+GCODE_THUMBNAIL_RECIPE = 8
 TOOLPATH_RECIPE = 1
 VIEWER_STL_RECIPE = 3
 PLATES_RECIPE = 1
+PROJECT_PROFILE_RECIPE = 1
+PREVIEWS_RECIPE = 3
+# Includes orbit and full-size cover views.
+PREVIEWS_RECIPE = 10
 VIEWER_TYPES = (
     FileType.THREE_MF,
     FileType.OBJ,
@@ -137,6 +145,24 @@ def _is_binary_gcode(file: File) -> bool:
 
 
 GROUPS: tuple[DerivativeGroup, ...] = (
+    DerivativeGroup(
+        definition=JobKind.DERIVATIVES_PROJECT_PROFILE,
+        recipes={DerivativeKind.PROJECT_PROFILE: PROJECT_PROFILE_RECIPE},
+        label="3MF project settings",
+        applies=lambda: and_(_real(), col(File.file_type) == FileType.THREE_MF),
+        applies_to=lambda file: (
+            file.sha256 != SENTINEL_FILE_HASH and file.file_type == FileType.THREE_MF
+        ),
+    ),
+    DerivativeGroup(
+        definition=JobKind.DERIVATIVES_PREVIEWS,
+        recipes={DerivativeKind.PREVIEWS: PREVIEWS_RECIPE},
+        label="Multi-angle previews",
+        applies=lambda: and_(_real(), col(File.file_type).in_(MESH_TYPES)),
+        applies_to=lambda file: (
+            file.sha256 != SENTINEL_FILE_HASH and file.file_type in MESH_TYPES
+        ),
+    ),
     DerivativeGroup(
         definition=JobKind.DERIVATIVES_MESH,
         recipes={

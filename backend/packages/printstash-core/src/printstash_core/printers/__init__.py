@@ -11,6 +11,7 @@ from .catalog import (
 )
 from .contracts import (
     ArtifactCaptureClient,
+    MachineControlClient,
     PrinterClient,
     ProviderFactory,
     SnapshotCallback,
@@ -19,8 +20,11 @@ from .models import (
     BambuConfig,
     Capability,
     ElegooCentauriConfig,
+    GcodeMoveSnapshot,
+    MachineControlError,
     MaterialSlotSnapshot,
     MoonrakerConfig,
+    MotionAxis,
     OctoPrintConfig,
     PrintArtifactFormat,
     PrinterConfig,
@@ -32,6 +36,7 @@ from .models import (
     PrusaLinkConfig,
     TemperatureSnapshot,
     ToolSnapshot,
+    TuningControl,
 )
 from .registry import ProviderRegistry
 
@@ -42,7 +47,11 @@ __all__ = [
     "ConfigField",
     "ConfigValueKind",
     "ElegooCentauriConfig",
+    "GcodeMoveSnapshot",
+    "MachineControlClient",
+    "MachineControlError",
     "MoonrakerConfig",
+    "MotionAxis",
     "MaterialSlotSnapshot",
     "OctoPrintConfig",
     "PrintArtifactFormat",
@@ -63,5 +72,6 @@ __all__ = [
     "SnapshotCallback",
     "TemperatureSnapshot",
     "ToolSnapshot",
+    "TuningControl",
     "catalog_document",
 ]

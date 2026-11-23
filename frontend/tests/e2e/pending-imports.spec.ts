@@ -9,30 +9,25 @@ import { collectPageProblems, useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("pending imports", () => {
-  test("desktop navigation reaches Pending Imports on nested routes", async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto("/");
-    await page.getByRole("button", { name: "My workspace" }).click();
+  test("desktop Pending sidebar links to the full inbox", async ({ page }) => {
+    for (const route of ["/", "/inbox/41"]) {
+      await page.goto(route);
+      const pending = page
+        .getByRole("navigation", { name: "Navigation" })
+        .getByRole("link", { name: "Pending", exact: true });
+      await pending.click();
+      await expect(pending).toHaveAttribute("aria-expanded", "true");
+      const sidebar = page.getByRole("complementary", { name: "Pending Imports" });
+      await expect(sidebar.getByText("No imports in the queue")).toBeVisible();
+      await expect(page).toHaveURL((url) => url.pathname === route);
 
-    const pending = page.getByRole("menuitem", { name: "Pending" });
-    await expect(pending).toHaveAttribute("href", "/inbox");
-    await pending.click();
-    await expect(page).toHaveURL(/\/inbox$/);
-    await expect(page.getByRole("heading", { name: "Pending Imports" })).toBeVisible();
-
-    await page.getByRole("button", { name: "My workspace" }).click();
-    await expect(page.getByRole("menuitem", { name: "Pending" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
-
-    await page.goto("/inbox/41");
-    await expect(page).toHaveURL(/\/inbox\/41$/);
-    await page.getByRole("button", { name: "My workspace" }).click();
-    await expect(page.getByRole("menuitem", { name: "Pending" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+      await sidebar.getByRole("link", { name: "Open inbox" }).click();
+      await expect(page).toHaveURL((url) => url.pathname === "/inbox");
+      const main = page.getByRole("main");
+      await expect(main.getByRole("heading", { name: "Pending Imports" })).toBeVisible();
+      await expect(main.getByRole("button", { name: "Add URL" })).toBeVisible();
+      await expect(main.getByRole("tab", { name: /Completed/ })).toBeVisible();
+    }
   });
 
   test("mobile navigation stays active on Pending Import detail routes", async ({ page }) => {
@@ -61,15 +56,21 @@ test.describe("pending imports", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
-    await page.getByRole("button", { name: "From URL" }).click();
+    await page.getByRole("tab", { name: "From URL" }).click();
     await page
       .getByPlaceholder("Model page, collection, or direct .stl/.zip link")
       .fill("https://www.printables.com/model/41-capture-bracket");
-    await page.getByRole("button", { name: "Review URL" }).click();
+    await page.getByRole("button", { name: "Capture for review" }).click();
+    await expect(page).toHaveURL(/\/inbox\/\d+$/);
+    // Move off the notification so its hover pause cannot cover the next action.
+    await page.mouse.move(0, 0);
+    await expect(
+      page.getByText("Captured URL. Review it before importing.", { exact: true }),
+    ).toBeHidden();
     await expect(page).toHaveURL(/\/inbox\/41$/);
     await page.getByRole("link", { name: "Pending", exact: true }).click();
 
-    const queue = page.getByRole("list", { name: "Import queue" });
+    const queue = page.getByRole("list", { name: "Captures" });
     await expect(queue.getByRole("heading", { name: "Capture bracket" })).toBeVisible();
     await expect(queue.getByText("Printables")).toBeVisible();
     await expect(queue.getByText("Files: 2")).toBeVisible();
@@ -83,11 +84,17 @@ test.describe("pending imports", () => {
   test("clears both pending-import queue states", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
-    await page.getByRole("button", { name: "From URL" }).click();
+    await page.getByRole("tab", { name: "From URL" }).click();
     await page
       .getByPlaceholder("Model page, collection, or direct .stl/.zip link")
       .fill("https://www.printables.com/model/41-capture-bracket");
-    await page.getByRole("button", { name: "Review URL" }).click();
+    await page.getByRole("button", { name: "Capture for review" }).click();
+    await expect(page).toHaveURL(/\/inbox\/\d+$/);
+    // Move off the notification so its hover pause cannot cover the next action.
+    await page.mouse.move(0, 0);
+    await expect(
+      page.getByText("Captured URL. Review it before importing.", { exact: true }),
+    ).toBeHidden();
     await page.goto("/inbox");
 
     await page.getByRole("button", { name: "Delete import" }).click();
@@ -99,11 +106,17 @@ test.describe("pending imports", () => {
 
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
-    await page.getByRole("button", { name: "From URL" }).click();
+    await page.getByRole("tab", { name: "From URL" }).click();
     await page
       .getByPlaceholder("Model page, collection, or direct .stl/.zip link")
       .fill("https://www.printables.com/model/41-capture-bracket");
-    await page.getByRole("button", { name: "Review URL" }).click();
+    await page.getByRole("button", { name: "Capture for review" }).click();
+    await expect(page).toHaveURL(/\/inbox\/\d+$/);
+    // Move off the notification so its hover pause cannot cover the next action.
+    await page.mouse.move(0, 0);
+    await expect(
+      page.getByText("Captured URL. Review it before importing.", { exact: true }),
+    ).toBeHidden();
     await page.getByRole("button", { name: "Import selected" }).click();
     await expect(page.getByRole("heading", { name: "Results" })).toBeVisible();
     await page.goto("/inbox");
@@ -121,11 +134,17 @@ test.describe("pending imports", () => {
     const problems = await collectPageProblems(page);
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
-    await page.getByRole("button", { name: "From URL" }).click();
+    await page.getByRole("tab", { name: "From URL" }).click();
     await page
       .getByPlaceholder("Model page, collection, or direct .stl/.zip link")
       .fill("https://www.printables.com/model/41-capture-bracket");
-    await page.getByRole("button", { name: "Review URL" }).click();
+    await page.getByRole("button", { name: "Capture for review" }).click();
+    await expect(page).toHaveURL(/\/inbox\/\d+$/);
+    // Move off the notification so its hover pause cannot cover the next action.
+    await page.mouse.move(0, 0);
+    await expect(
+      page.getByText("Captured URL. Review it before importing.", { exact: true }),
+    ).toBeHidden();
 
     await expect(page).toHaveURL(/\/inbox\/41$/);
     await expect(page.getByRole("heading", { name: "Capture bracket" })).toBeVisible();
@@ -141,27 +160,45 @@ test.describe("pending imports", () => {
 
     await page.getByRole("link", { name: "Open model" }).click();
     expect(problems, "before opening the Source tab").toEqual([]);
-    await page.getByRole("tab", { name: "Source" }).click();
-    await expect(page.getByText("Fixture maker")).toBeVisible();
-    await expect(page.getByText("CC BY 4.0")).toBeVisible();
+    await page.getByRole("tab", { name: "Source info", exact: true }).click();
+    await expect(page.getByTestId("model-detail-sidebar").getByText("Fixture maker")).toBeVisible();
+    await expect(
+      page.getByTestId("model-detail-sidebar").getByText("CC BY 4.0", { exact: true }),
+    ).toBeVisible();
     await expect(page.getByText("Print with supports.")).toBeVisible();
     expect(problems, "after opening the Source tab").toEqual([]);
     const creatorField = page
       .getByRole("heading", { name: "Creator", exact: true, level: 3 })
       .locator("../..");
     await creatorField.getByRole("button", { name: "Edit" }).click();
-    await creatorField.getByLabel("Creator override").fill("Corrected maker");
-    await creatorField.getByRole("button", { name: "Save" }).click();
-    await expect(page.getByText("Corrected maker")).toBeVisible();
-    await expect(page.getByText("Edited")).toBeVisible();
+    await page
+      .getByRole("dialog", { name: "Edit Creator" })
+      .getByLabel("Creator override")
+      .fill("Corrected maker");
+    await page
+      .getByRole("dialog", { name: "Edit Creator" })
+      .getByRole("button", { name: "Save override" })
+      .click();
+    await expect(page.getByRole("dialog", { name: "Edit Creator" })).toBeHidden();
+    await expect(
+      page.getByTestId("model-detail-sidebar").getByText("Corrected maker", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("model-detail-sidebar").getByText("Edited", { exact: true }),
+    ).toBeVisible();
     expect(problems, "after saving the override").toEqual([]);
     await creatorField.getByRole("button", { name: "Edit" }).click();
-    await creatorField.getByRole("button", { name: "Restore captured value" }).click();
+    await page
+      .getByRole("dialog", { name: "Edit Creator" })
+      .getByRole("button", { name: "Restore captured value" })
+      .click();
     const dialog = page.getByRole("dialog", { name: "Restore captured value?" });
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Restore" }).click();
-    await expect(page.getByText("Fixture maker")).toBeVisible();
-    await expect(page.getByText("Source").last()).toBeVisible();
+    await expect(page.getByTestId("model-detail-sidebar").getByText("Fixture maker")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Source information", exact: true }),
+    ).toBeVisible();
 
     expect(problems).toEqual([]);
   });
@@ -171,13 +208,21 @@ test.describe("pending imports", () => {
 
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
-    await page.getByRole("button", { name: "From URL" }).click();
+    await page.getByRole("tab", { name: "From URL" }).click();
     await page
       .getByPlaceholder("Model page, collection, or direct .stl/.zip link")
       .fill("https://www.printables.com/model/41-capture-bracket");
-    await page.getByRole("button", { name: "Review URL" }).click();
+    await page.getByRole("button", { name: "Capture for review" }).click();
+    await expect(page).toHaveURL(/\/inbox\/\d+$/);
+    // Move off the notification so its hover pause cannot cover the next action.
+    await page.mouse.move(0, 0);
+    await expect(
+      page.getByText("Captured URL. Review it before importing.", { exact: true }),
+    ).toBeHidden();
 
-    await expect(page.getByRole("combobox", { name: "Destination" })).toHaveValue("new");
+    await expect(page.getByRole("combobox", { name: "Collection", exact: true })).toHaveValue(
+      "new",
+    );
     await expect(page.getByRole("textbox", { name: "Collection name" })).toHaveValue(
       "Capture bracket",
     );
@@ -189,11 +234,17 @@ test.describe("pending imports", () => {
   test("pending import can be deleted with its staged capture", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
-    await page.getByRole("button", { name: "From URL" }).click();
+    await page.getByRole("tab", { name: "From URL" }).click();
     await page
       .getByPlaceholder("Model page, collection, or direct .stl/.zip link")
       .fill("https://www.printables.com/model/41-capture-bracket");
-    await page.getByRole("button", { name: "Review URL" }).click();
+    await page.getByRole("button", { name: "Capture for review" }).click();
+    await expect(page).toHaveURL(/\/inbox\/\d+$/);
+    // Move off the notification so its hover pause cannot cover the next action.
+    await page.mouse.move(0, 0);
+    await expect(
+      page.getByText("Captured URL. Review it before importing.", { exact: true }),
+    ).toBeHidden();
     await expect(page).toHaveURL(/\/inbox\/41$/);
 
     await page.getByRole("button", { name: "Delete import" }).click();

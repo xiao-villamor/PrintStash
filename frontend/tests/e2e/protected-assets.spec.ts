@@ -49,13 +49,13 @@ test.describe("protected asset admission", () => {
     });
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Thumbnail 1", exact: true })).toBeVisible();
-    await expect.poll(() => requested.length).toBe(2);
+    await expect.poll(() => requested.length).toBe(6);
     expect(requested).not.toContain(24);
     held = false;
     for (const release of releases) release();
     await page.waitForFunction(() => {
       const visible = [
-        ...document.querySelectorAll("main article [data-library-thumbnail]"),
+        ...document.querySelectorAll("main .library-model-card [data-library-thumbnail]"),
       ].filter((frame) => {
         const bounds = frame.getBoundingClientRect();
         return bounds.width > 0 && bounds.bottom > 0 && bounds.top < innerHeight;
@@ -72,11 +72,11 @@ test.describe("protected asset admission", () => {
         })
       );
     });
-    expect(maximum).toBeLessThanOrEqual(2);
+    expect(maximum).toBeLessThanOrEqual(6);
     expect(requested).not.toContain(24);
     await page.getByRole("heading", { name: "Thumbnail 24", exact: true }).scrollIntoViewIfNeeded();
     await expect.poll(() => requested.includes(24)).toBe(true);
     await expect(page.getByAltText("Thumbnail 24", { exact: true })).toBeVisible();
-    expect(maximum).toBeLessThanOrEqual(2);
+    expect(maximum).toBeLessThanOrEqual(6);
   });
 });

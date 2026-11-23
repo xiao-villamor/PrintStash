@@ -55,7 +55,7 @@ describe("CollectionPicker", () => {
 
     const option = await screen.findByRole("option", { name: /Parts\/Brackets/ });
     expect(within(option).getByText("Brackets", { exact: true })).toBeVisible();
-    expect(within(option).getByText("Parts/Brackets", { exact: true })).toBeVisible();
+    expect(option).toHaveAttribute("title", "Parts/Brackets");
   });
 
   it("leaves out folders the reader cannot write to", async () => {

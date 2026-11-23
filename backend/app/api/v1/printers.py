@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from typing import Awaitable, Callable, List, Optional
 
 from fastapi import (
@@ -15,14 +16,22 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from printstash_core.printers import ProviderError, ProviderRegistry
+from printstash_core.printers import (
+    Capability,
+    MachineControlClient,
+    MachineControlError,
+    MotionAxis,
+    ProviderError,
+    ProviderRegistry,
+)
+from printstash_core.printers.contracts import ProjectPrintClient
 from sqlmodel import Session, select
 
 from app.api.edit_preconditions import edit_precondition
 from app.bootstrap.dependencies import get_hub, get_hub_from_ws
 from app.core.http import get_or_404
 from app.core.logging import get_logger
-from app.core.security import require_superuser, require_user
+from app.core.security import require_auth, require_superuser, require_user
 from app.core.time import utcnow
 from app.db.models import (
     CollectionRole,
@@ -42,6 +51,7 @@ from app.db.scopes import live
 from app.db.session import get_session
 from app.modules.identity import printer_rbac, rbac, ws_tickets
 from app.modules.identity.auth import get_user_by_id, verify_access_token
+from app.modules.media.sliced_gcode import is_sliced_filename
 from app.modules.printing import dispatch, materials, printer_edits
 from app.modules.printing.printer_files import (
     list_printer_files,
@@ -49,6 +59,7 @@ from app.modules.printing.printer_files import (
 )
 from app.modules.printing.printer_hub import PrinterHub
 from app.modules.printing.printer_jobs import (
+    project_subtask_id,
     reproducibility_payload,
 )
 from app.modules.printing.printer_provider import (
@@ -62,7 +73,9 @@ from app.modules.storage.storage_backend.runtime import get_backend
 from app.schemas.editing import EditPrecondition
 from app.schemas.materials import ManualMaterialStateUpdate, PrinterMaterialStateRead
 from app.schemas.printers import (
+    ExtrudeFilament,
     HomeAxes,
+    JogPrinter,
     MoonrakerConfigRead,
     PrinterCapabilities,
     PrinterCreate,
@@ -75,6 +88,7 @@ from app.schemas.printers import (
     SendToPrinter,
     SetTemperature,
     StartPrinterFile,
+    TunePrinter,
 )
 
 logger = get_logger(__name__)
@@ -247,6 +261,7 @@ def _to_printer_file_read(
         model_id=file_row.model_id if file_row else None,
         model_name=model_row.name if model_row else None,
         original_filename=file_row.original_filename if file_row else None,
+        plate_index=row.plate_index if file_row else None,
         remote_filename=row.remote_filename,
         size_bytes=row.size_bytes,
         sha256=row.sha256,
@@ -908,6 +923,13 @@ async def start_printer_file(
             detail="operation_not_supported_for_provider",
         )
 
+    stored_remote = session.exec(
+        select(PrinterFile).where(
+            PrinterFile.printer_id == printer_id,
+            PrinterFile.remote_filename == payload.remote_filename,
+            PrinterFile.missing_since.is_(None),
+        )
+    ).first()
     file_row: File | None = None
     source = "external"
     if payload.file_id is not None:
@@ -934,6 +956,37 @@ async def start_printer_file(
                 file_row = candidate
                 source = "vault"
 
+    native_project = (
+        p.provider == PrinterProvider.BAMBU_LAN
+        and payload.remote_filename.lower().endswith(".3mf")
+    )
+    if native_project:
+        if (
+            not isinstance(provider, ProjectPrintClient)
+            or stored_remote is None
+            or stored_remote.plate_index is None
+            or file_row is None
+            or stored_remote.file_id != file_row.id
+            or not is_sliced_filename(file_row.original_filename)
+            or stored_remote.matched_by not in {"upload_history", "vault_marker"}
+        ):
+            raise HTTPException(status_code=409, detail="artifact_format_not_supported")
+        if (
+            materials.compatibility_for_printer(
+                session, int(file_row.id), printer_id
+            ).verdict
+            == "mismatch"
+        ):
+            raise HTTPException(
+                status_code=409, detail="material_mismatch_confirmation_required"
+            )
+    elif (
+        p.provider == PrinterProvider.BAMBU_LAN
+        and not payload.remote_filename.lower().endswith((".gcode", ".g", ".gco"))
+    ):
+        raise HTTPException(status_code=409, detail="artifact_format_not_supported")
+    await dispatch.require_ready_before_send(provider)
+
     if file_row is not None:
         file_id = int(file_row.id)
         model_id = file_row.model_id
@@ -945,6 +998,12 @@ async def start_printer_file(
         file_id=file_id,
         model_id=model_id,
         remote_filename=payload.remote_filename,
+        provider_job_id=project_subtask_id() if native_project else None,
+        plate_index=(
+            stored_remote.plate_index
+            if stored_remote is not None and stored_remote.file_id == file_id
+            else None
+        ),
         state=PrintJobState.STARTED,
         source=source,
         started_at=utcnow(),
@@ -954,7 +1013,17 @@ async def start_printer_file(
     session.refresh(job)
 
     try:
-        await provider.start(payload.remote_filename)
+        if (
+            native_project
+            and isinstance(provider, ProjectPrintClient)
+            and job.plate_index is not None
+            and job.provider_job_id is not None
+        ):
+            await provider.start_project(
+                payload.remote_filename, job.plate_index, job.provider_job_id
+            )
+        else:
+            await provider.start(payload.remote_filename)
     except ProviderError as exc:
         job.state = PrintJobState.FAILED
         job.error = _provider_action_code(exc)
@@ -1132,6 +1201,7 @@ async def set_printer_temperature(
 @router.post(
     "/{printer_id}/home",
     summary="Home the toolhead (all axes, or a subset)",
+    dependencies=[Depends(require_auth)],
 )
 async def home_printer(
     printer_id: int,
@@ -1140,12 +1210,95 @@ async def home_printer(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict:
+    axes = tuple(MotionAxis(axis) for axis in payload.axes) if payload.axes else ()
+    return await _machine_control(
+        request, printer_id, current_user, session, lambda provider: provider.home(axes)
+    )
+
+
+async def _machine_control(
+    request: Request,
+    printer_id: int,
+    current_user: User,
+    session: Session,
+    command: Callable[[MachineControlClient], Awaitable[Mapping[str, object]]],
+) -> dict:
     printer_rbac.require_printer_role(
         session, current_user, printer_id, PrinterRole.CONTROL
     )
-    provider = _require_gcode_provider(request, session, printer_id)
-    script = "G28" if not payload.axes else "G28 " + " ".join(payload.axes.upper())
-    return await _run_gcode(provider, script)
+    try:
+        provider = _require_gcode_provider(request, session, printer_id)
+        if not isinstance(provider, MachineControlClient):
+            raise HTTPException(409, detail="operation_not_supported_for_provider")
+        await command(provider)
+    except MachineControlError as exc:
+        raise HTTPException(409, detail=exc.reason.value) from exc
+    except ProviderError as exc:
+        raise HTTPException(502, detail=exc.code) from exc
+    return {"ok": True}
+
+
+@router.post(
+    "/{printer_id}/jog",
+    summary="Jog a homed axis by a signed distance",
+    dependencies=[Depends(require_auth)],
+)
+async def jog_printer(
+    printer_id: int,
+    payload: JogPrinter,
+    request: Request,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> dict:
+    return await _machine_control(
+        request,
+        printer_id,
+        current_user,
+        session,
+        lambda provider: provider.jog(payload.axis, payload.distance),
+    )
+
+
+@router.post(
+    "/{printer_id}/extrude",
+    summary="Feed or retract filament",
+    dependencies=[Depends(require_auth)],
+)
+async def extrude_filament(
+    printer_id: int,
+    payload: ExtrudeFilament,
+    request: Request,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> dict:
+    return await _machine_control(
+        request,
+        printer_id,
+        current_user,
+        session,
+        lambda provider: provider.extrude(payload.distance),
+    )
+
+
+@router.post(
+    "/{printer_id}/tune",
+    summary="Set a fan, speed, or flow percentage",
+    dependencies=[Depends(require_auth)],
+)
+async def tune_printer(
+    printer_id: int,
+    payload: TunePrinter,
+    request: Request,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> dict:
+    return await _machine_control(
+        request,
+        printer_id,
+        current_user,
+        session,
+        lambda provider: provider.tune(payload.control, payload.percent),
+    )
 
 
 @router.post(
@@ -1268,7 +1421,7 @@ async def delete_file_on_printer(
     )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     provider = _provider_client(request, p)
-    if not provider.capabilities.can_list_files:
+    if not provider.capabilities.supports(Capability.DELETE_FILE):
         raise HTTPException(
             status_code=409,
             detail="operation_not_supported_for_provider",
@@ -1387,6 +1540,7 @@ async def printer_ws(
 
         {"type": "snapshot", "printer_id": <id>, "data": {...full snapshot...}}
         {"type": "update",   "printer_id": <id>, "data": {...changed objects...}}
+        {"type": "offline",  "printer_id": <id>}
     """
     ticket = websocket.query_params.get("ticket")
     token = None

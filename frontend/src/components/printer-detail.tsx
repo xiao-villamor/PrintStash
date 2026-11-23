@@ -1,32 +1,38 @@
 "use client";
 
+import { createPortal } from "react-dom";
+
 import { usePrinterSettingsCommand } from "@/features/printers/settings-edit";
 import { PrinterSettingsReview } from "@/features/printers/settings-review";
 
-import {
-  currentLocale,
-  knownUiText,
-  uiMessage,
-  uiText,
-  type MessageDescriptor,
-} from "@/lib/locale";
+import { knownUiText, uiMessage, uiText, type MessageDescriptor } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Link } from "@/lib/link";
+import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
 import type { ProviderJsonObject, ProviderJsonValue } from "@/types/printers";
 import {
   PrinterFileRead,
   PrinterRead,
   PrinterSnapshot,
-  PrinterStatus,
   PrinterUpdate,
+  PrinterDiagnostics,
 } from "@/types";
 import {
   cancelPrinter,
   emergencyStopPrinter,
-  homePrinter,
   openPrinterWS,
   pausePrinter,
   resumePrinter,
@@ -38,73 +44,93 @@ import {
   usePrinterFileMutation,
 } from "@/features/printers/queries";
 import { getSessionVersion } from "@/lib/session-transport";
-import { userMessage } from "@/lib/errors";
+import { ApiError, userMessage } from "@/lib/errors";
 import { isLoggedIn, onAuthChange } from "@/lib/auth-store";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { formatBytes, formatDuration } from "@/lib/format";
+import { formatDuration } from "@/lib/format";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { PageFailure } from "@/components/page-failure";
+import { PrinterConfigWorkspace } from "@/features/printers/config-workspace";
+import { FormField } from "@/components/ui/form-field";
+import { Input, inputClasses } from "@/components/ui/input";
 import { TabBar } from "@/components/ui/tabs";
+import { PageHeader } from "@/components/ui/page-header";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
-import { FleetMaintenancePanel } from "@/components/fleet-panels";
-import { PrinterMaterials } from "@/components/printer-materials";
-import { PrintJobReproducibility } from "@/components/print-job-reproducibility";
-import { cn } from "@/lib/utils";
-import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
-import { Localized } from "@/components/ui/localized";
-import { PRINTER_MODEL_OPTIONS, providerAddress, providerLabel } from "@/lib/printer-providers";
+import { PrinterServiceWorkspace } from "@/components/printer-service-workspace";
+import { PrinterDiagnosticsPanel } from "@/components/printer-diagnostics";
 import {
-  ArrowLeft,
-  AlertTriangle,
-  CheckCircle2,
-  FileText,
-  Info,
-  Loader2,
-  Home,
-  Pause,
-  Play,
-  Power,
-  Square,
-  RefreshCcw,
-  Settings,
-  Thermometer,
-  Trash2,
-  Wifi,
-  WifiOff,
-  XCircle,
-} from "lucide-react";
+  PrinterFiles,
+  PrinterJobHistory,
+  PrinterRecentRuns,
+} from "@/components/printer-file-history";
+import {
+  identifyPrintJob,
+  identifyRunningPrint,
+  printerArtifactInventory,
+} from "@/features/printers/artifact-identity";
+import { cn } from "@/lib/utils";
+import { Localized } from "@/components/ui/localized";
+import { HeaterChart, PartCoolingFan, PrinterProgress } from "@/components/printer-telemetry";
+import {
+  CommandReceipt,
+  HeaterTarget,
+  PrinterControls,
+  ThermalPresets,
+  type CommandReceipts,
+} from "@/components/printer-controls";
+import { PrinterConsole } from "./printer-console";
+import { MachineIdentity, MachineMaterials } from "@/components/printer-machine";
+import {
+  PREHEAT_PRESETS,
+  printerControlAvailability,
+  type PrinterCommandPanel,
+} from "@/features/printers/controls";
+import { useMachineSetup } from "@/features/printers/materials";
+import { usePrinterHeaterHistory } from "@/features/printers/inspection";
+import { PrinterBedSurface } from "@/components/printer-bed-surface";
+import {
+  activePrintState,
+  emptyHeaterHistory,
+  finiteReading,
+  observeHeaters,
+} from "@/features/printers/telemetry";
+import "./printer-detail-content.css";
+import "./printer-detail.css";
+import "./printer-sections.css";
+import { PRINTER_MODEL_OPTIONS, providerAddress, providerLabel } from "@/lib/printer-providers";
+import { Pause, Play, Square, RefreshCcw } from "lucide-react";
 
-const PREHEAT_PRESETS: { name: string; hotend: number; bed: number }[] = [
-  { name: "PLA", hotend: 200, bed: 60 },
-  { name: "PETG", hotend: 240, bed: 80 },
-  { name: "ABS", hotend: 245, bed: 100 },
-];
-
-const STATUS_COLORS = {
-  ready: "bg-success",
-  printing: "bg-primary",
-  paused: "bg-warning",
-  offline: "bg-muted-foreground",
-  unknown: "bg-muted-foreground",
-  error: "bg-destructive",
-} satisfies Record<PrinterStatus, string>;
-
-const BTN_SECONDARY = cn(buttonVariants({ variant: "outline", size: "xs" }), "hover:bg-muted");
-const BTN_DANGER = cn(
-  buttonVariants({ variant: "outline", size: "xs" }),
-  "border-red-300/50 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40",
+const FleetAddJobDialog = lazy(() =>
+  import("./fleet-add-job").then((module) => ({ default: module.FleetAddJobDialog })),
 );
-const SECTION_CLASS = "overflow-hidden rounded-lg border border-border bg-background";
-const SECTION_HEADER_CLASS =
-  "flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-5 py-4";
 
-function checkLabel(name: string): string {
-  return knownUiText(name);
-}
+const PRINTER_TABS = [
+  "status",
+  "files",
+  "jobs",
+  "materials",
+  "maintenance",
+  "config",
+  "diagnostics",
+  "settings",
+] as const;
+type PrinterTab = (typeof PRINTER_TABS)[number];
 
-function actionLabel(name: string): string {
-  return knownUiText(name);
+function allowedPrinterTab(tab: string | null, printer: PrinterRead | null): PrinterTab {
+  const requested = PRINTER_TABS.find((candidate) => candidate === tab);
+  switch (requested) {
+    case "materials":
+      return printer?.access.can_print || printer?.access.can_admin ? requested : "status";
+    case "config":
+      return printer?.provider === "moonraker" && printer.access.can_admin ? requested : "status";
+    case "diagnostics":
+    case "maintenance":
+    case "settings":
+      return printer?.access.can_admin ? requested : "status";
+    default:
+      return requested ?? "status";
+  }
 }
 
 /**
@@ -132,9 +158,18 @@ function mergeSnapshotField(
 }
 
 /** Apply a Moonraker `update` patch to the held snapshot without dropping untouched fields. */
-function mergeSnapshot(a: PrinterSnapshot, b: PrinterSnapshot): PrinterSnapshot {
-  const out: PrinterSnapshot = { ...a };
-  for (const k of Object.keys(b)) out[k] = mergeSnapshotField(a[k], b[k]);
+function mergeSnapshot(previous: PrinterSnapshot, patch: PrinterSnapshot): PrinterSnapshot {
+  const previousState = previous.print_stats?.state;
+  const startsNewPrint =
+    previousState !== undefined &&
+    !activePrintState(previousState) &&
+    activePrintState(patch.print_stats?.state) !== null;
+  // An idle frame may still name the preceding job and report its final layer.
+  const base: PrinterSnapshot = startsNewPrint
+    ? { ...previous, print_stats: undefined, virtual_sdcard: undefined }
+    : previous;
+  const out: PrinterSnapshot = { ...base };
+  for (const key of Object.keys(patch)) out[key] = mergeSnapshotField(base[key], patch[key]);
   return out;
 }
 
@@ -179,22 +214,48 @@ function PrinterDetailView({
     loadingConfig,
   } = resources;
   const [snapshot, setSnapshot] = useState<PrinterSnapshot>({});
-  const [wsConnected, setWsConnected] = useState(false);
+  const [telemetry, setTelemetry] = useState<"waiting" | "live" | "offline">("waiting");
+  const [heaterHistory, setHeaterHistory] = useState(emptyHeaterHistory);
+  const displayHeaterHistory = usePrinterHeaterHistory(printer, heaterHistory);
+  const telemetryConnection = useRef(0);
+  const [addJobOpen, setAddJobOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"pause" | "resume" | "cancel" | null>(null);
-  const [machineBusy, setMachineBusy] = useState<string | null>(null);
-  const [hotendTarget, setHotendTarget] = useState("");
-  const [bedTarget, setBedTarget] = useState("");
-  const [activeTab, setActiveTab] = useState<
-    | "status"
-    | "files"
-    | "jobs"
-    | "materials"
-    | "maintenance"
-    | "config"
-    | "diagnostics"
-    | "settings"
-  >("status");
+  const [machineBusy, setMachineBusy] = useState<PrinterCommandPanel | null>(null);
+  const [receipts, setReceipts] = useState<CommandReceipts>({});
+  const commandPending = useRef<symbol | null>(null);
+  const emergencyStopPending = useRef<symbol | null>(null);
+  const [emergencyStopBusy, setEmergencyStopBusy] = useState(false);
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+  const activeTab = allowedPrinterTab(searchParams.get("tab"), printer);
+  const [settingsVisited, setSettingsVisited] = useState(
+    () => searchParams.get("tab") === "settings",
+  );
+
+  const reportsMaterials =
+    printer?.provider === "bambu_lan" || Boolean(printer?.capabilities.can_report_material_state);
+  const machineSetup = useMachineSetup(
+    printerId,
+    activeTab === "status" &&
+      printer?.access.can_view === true &&
+      (printer.provider === "moonraker" || reportsMaterials),
+  );
+
+  function tabUrl(tab: PrinterTab) {
+    const next = new URLSearchParams(searchParams);
+    if (tab === "status") next.delete("tab");
+    else next.set("tab", tab);
+    const query = next.toString();
+    return query ? `${pathname}?${query}` : pathname;
+  }
+
+  function setActiveTab(tab: PrinterTab) {
+    if (tab === activeTab) return;
+    if (tab === "settings") setSettingsVisited(true);
+    router.push(tabUrl(tab), { resetScroll: false });
+  }
+
   const [startingFileId, setStartingFileId] = useState<number | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [syncingFiles, setSyncingFiles] = useState(false);
@@ -235,6 +296,12 @@ function PrinterDetailView({
       }
     }
 
+    function disconnect(state: "waiting" | "offline") {
+      telemetryConnection.current += 1;
+      setSnapshot({});
+      setTelemetry(state);
+    }
+
     async function connect() {
       if (disposed || accessDenied || !isLoggedIn()) return;
       const version = generation;
@@ -251,7 +318,6 @@ function PrinterDetailView({
         const current = () => !disposed && version === generation && socket === ws;
         ws.onopen = () => {
           if (!current()) return;
-          setWsConnected(true);
           if (opened) void refreshAll();
           opened = true;
         };
@@ -262,7 +328,7 @@ function PrinterDetailView({
           ws.onclose = null;
           ws.onmessage = null;
           ws.onerror = null;
-          setWsConnected(false);
+          disconnect("waiting");
           reconnect = setTimeout(() => {
             reconnect = null;
             void connect();
@@ -273,12 +339,23 @@ function PrinterDetailView({
           if (!current()) return;
           try {
             const msg = JSON.parse(ev.data);
-            if (msg.type === "snapshot") {
-              setSnapshot(msg.data || {});
-            } else if (msg.type === "update") {
-              setSnapshot((prev) => mergeSnapshot(prev, msg.data || {}));
+            if (msg.type === "offline") {
+              disconnect("offline");
+              return;
             }
-            if (msg?.data?.print_stats?.state) void loadJobs();
+            if (msg.type !== "snapshot" && msg.type !== "update") return;
+            if (!isSnapshotSection(msg.data)) return;
+            const data: PrinterSnapshot = msg.data;
+            const connection = telemetryConnection.current;
+            const at = Date.now();
+            setTelemetry("live");
+            setSnapshot((previous) =>
+              msg.type === "snapshot" ? data : mergeSnapshot(previous, data),
+            );
+            setHeaterHistory((history) =>
+              observeHeaters(history, data, at, connection, msg.type === "snapshot"),
+            );
+            if (data.print_stats?.state) void loadJobs();
           } catch {
             /* Ignore malformed frames. */
           }
@@ -296,8 +373,8 @@ function PrinterDetailView({
     void connect();
     const stopAuth = onAuthChange(() => {
       retire();
-      setSnapshot({});
-      setWsConnected(false);
+      disconnect("waiting");
+      setHeaterHistory(emptyHeaterHistory);
       setError(null);
       if (isLoggedIn()) void connect();
     });
@@ -308,74 +385,71 @@ function PrinterDetailView({
     };
   }, [accessDenied, printerId, loadJobs, refreshAll]);
 
-  async function control(action: "pause" | "resume" | "cancel", fn: () => Promise<void>) {
-    if (!auth.isAuthenticated) {
-      auth.showAuthRequiredToast();
-      return;
-    }
-    const version = lifetime.current;
-    setBusy(action);
-    try {
-      await fn();
-    } catch (e) {
-      if (version === lifetime.current) toast.error(e);
-    } finally {
-      if (version === lifetime.current) setBusy(null);
-    }
-  }
+  const printControl = {
+    pause: () =>
+      machineAction("job", () => pausePrinter(printerId), uiMessage("Pause command sent")),
+    resume: () =>
+      machineAction("job", () => resumePrinter(printerId), uiMessage("Resume command sent")),
+    cancel: () =>
+      machineAction("job", () => cancelPrinter(printerId), uiMessage("Cancel command sent")),
+  };
 
-  async function machineAction<T>(key: string, fn: () => Promise<T>, success: MessageDescriptor) {
+  async function machineAction<T>(
+    key: PrinterCommandPanel,
+    fn: () => Promise<T>,
+    success: MessageDescriptor,
+    report?: (kind: "success" | "error", message: string) => void,
+  ) {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
       return;
     }
+    if (commandPending.current || emergencyStopPending.current) return;
+    const operation = Symbol(key);
+    commandPending.current = operation;
     const version = lifetime.current;
     setMachineBusy(key);
+    setReceipts((previous) => ({ ...previous, [key]: undefined }));
     try {
       await fn();
-      if (version === lifetime.current) toast.success(uiText(success.key, success.values));
+      if (version !== lifetime.current) return;
+      const message = uiText(success.key, success.values);
+      if (report) report("success", message);
+      else setReceipts((previous) => ({ ...previous, [key]: { kind: "success", message } }));
     } catch (e) {
-      if (version === lifetime.current) toast.error(e);
+      if (version !== lifetime.current) return;
+      const message = userMessage(e);
+      if (report) report("error", message);
+      else setReceipts((previous) => ({ ...previous, [key]: { kind: "error", message } }));
     } finally {
-      if (version === lifetime.current) setMachineBusy(null);
+      if (commandPending.current === operation) {
+        commandPending.current = null;
+        setMachineBusy(null);
+      }
     }
-  }
-
-  function applyTemp(heater: "extruder" | "bed", raw: string, clear: () => void) {
-    const t = Number(raw);
-    if (!Number.isFinite(t) || t < 0 || t > 500) {
-      toast.error(uiText("Enter a temperature between 0 and 500."));
-      return;
-    }
-    void machineAction(
-      `set-${heater}`,
-      () => setPrinterTemperature(printerId, heater, t).then(clear),
-      uiMessage("{value1} set to {value2}°C", {
-        value1: String(heater === "extruder" ? "Hotend" : "Bed"),
-        value2: String(t),
-      }),
-    );
   }
 
   function preheat(p: (typeof PREHEAT_PRESETS)[number]) {
     void machineAction(
-      `preheat-${p.name}`,
+      "thermal-presets",
       async () => {
+        const version = lifetime.current;
         await setPrinterTemperature(printerId, "extruder", p.hotend);
-        await setPrinterTemperature(printerId, "bed", p.bed);
+        if (version === lifetime.current) await setPrinterTemperature(printerId, "bed", p.bed);
       },
-      uiMessage("Preheating for {value1}", { value1: String(p.name) }),
+      uiMessage("{value1} preheat command sent", { value1: p.name }),
     );
   }
 
   function cooldown() {
     void machineAction(
-      "cooldown",
+      "thermal-presets",
       async () => {
+        const version = lifetime.current;
         await setPrinterTemperature(printerId, "extruder", 0);
-        await setPrinterTemperature(printerId, "bed", 0);
+        if (version === lifetime.current) await setPrinterTemperature(printerId, "bed", 0);
       },
-      uiMessage("printer.cooldownSuccess"),
+      uiMessage("Cooldown command sent"),
     );
   }
 
@@ -388,13 +462,40 @@ function PrinterDetailView({
   }
 
   async function confirmEmergencyStopAction() {
+    if (emergencyStopPending.current) return;
+    if (
+      !auth.isAuthenticated ||
+      telemetry !== "live" ||
+      !printer?.access.can_control ||
+      !printer.capabilities.can_send_gcode
+    ) {
+      setConfirmEmergencyStop(false);
+      return;
+    }
+    // Emergency stop deliberately bypasses the lock for normal printer commands.
+    const operation = Symbol("emergency stop");
+    emergencyStopPending.current = operation;
     const version = lifetime.current;
-    await machineAction(
-      "estop",
-      () => emergencyStopPrinter(printerId),
-      uiMessage("printer.emergencyStopSuccess"),
-    );
-    if (version === lifetime.current) setConfirmEmergencyStop(false);
+    setEmergencyStopBusy(true);
+    setReceipts((previous) => ({ ...previous, emergency: undefined }));
+    try {
+      await emergencyStopPrinter(printerId);
+      if (version === lifetime.current) {
+        const message = uiText("Emergency stop command sent");
+        setReceipts((previous) => ({ ...previous, emergency: { kind: "success", message } }));
+      }
+    } catch (error) {
+      if (version === lifetime.current) {
+        const message = userMessage(error);
+        setReceipts((previous) => ({ ...previous, emergency: { kind: "error", message } }));
+      }
+    } finally {
+      if (emergencyStopPending.current === operation) {
+        emergencyStopPending.current = null;
+        setEmergencyStopBusy(false);
+        setConfirmEmergencyStop(false);
+      }
+    }
   }
 
   async function syncFiles() {
@@ -481,22 +582,41 @@ function PrinterDetailView({
     }
   }
 
-  const ps = snapshot.print_stats || {};
-  const vs = snapshot.virtual_sdcard || {};
-  const ext = snapshot.extruder || {};
-  const bed = snapshot.heater_bed || {};
-  const toolhead = snapshot.toolhead || {};
-  const webhook = snapshot.webhooks || {};
-  const progress = vs.progress == null ? null : vs.progress * 100;
-  const hasCurrentPrint = Boolean(ps.filename || ps.state === "printing" || ps.state === "paused");
+  const ps = snapshot.print_stats;
+  const elapsed = finiteReading(ps?.total_duration);
+  const printTime = finiteReading(ps?.print_duration);
+  const activeState = activePrintState(ps?.state);
+  const artifactInventory = useMemo(() => printerArtifactInventory(printerFiles), [printerFiles]);
+  const runningPrint = activeState
+    ? identifyRunningPrint(printerId, ps?.filename, jobs, artifactInventory)
+    : null;
+  const progressFraction = finiteReading(snapshot.virtual_sdcard?.progress);
+  const progress = progressFraction === null ? null : progressFraction * 100;
+  const progressLabel =
+    progress === null ? "—" : `${formatNumber(progress, { maximumFractionDigits: 1 })}%`;
+  const currentLayer = finiteReading(ps?.external_current_layer);
+  const totalLayers = finiteReading(ps?.external_total_layers);
+  const lastJob = jobs.find((job) => job.printer_id === printerId && job.finished_at !== null);
 
   if (!printer) {
     if (resources.error)
       return (
-        <div role="alert">
-          {userMessage(resources.error)}
-          <Button onClick={() => void resources.refreshAll()}>{uiText("Retry")}</Button>
-        </div>
+        <PageFailure
+          kind={
+            resources.error instanceof ApiError && resources.error.status === 401
+              ? "authentication"
+              : resources.error instanceof ApiError && resources.error.status === 403
+                ? "forbidden"
+                : resources.error instanceof ApiError && resources.error.status === 404
+                  ? "not-found"
+                  : resources.error instanceof ApiError &&
+                      resources.error.code === "network_unreachable"
+                    ? "offline"
+                    : "unavailable"
+          }
+          description={userMessage(resources.error)}
+          onRetry={() => void resources.refreshAll()}
+        />
       );
     return (
       <div className="w-full space-y-4">
@@ -506,16 +626,228 @@ function PrinterDetailView({
     );
   }
 
+  const bambu = printer.provider === "bambu_lan";
+  const availability = printerControlAvailability(printer, snapshot, telemetry === "live");
+  const commandsBusy = machineBusy !== null || emergencyStopBusy;
+  const connectionLabel =
+    telemetry === "live"
+      ? uiText("Live")
+      : telemetry === "offline" || printer.status === "offline"
+        ? uiText("Offline")
+        : uiText("Reconnecting…");
+  const nextJob = jobs
+    .filter((job) => job.printer_id === printerId && job.state === "queued")
+    .sort((left, right) => left.queue_position - right.queue_position)[0];
+
+  const currentWork = (
+    <section aria-label={uiText("Current job")} className="printer-desk-section">
+      <div className="printer-desk-heading">
+        <h2>{uiText("Current job")}</h2>
+        <span>
+          {activeState
+            ? knownUiText(activeState)
+            : availability.readyIdle
+              ? uiText("Ready")
+              : connectionLabel}
+        </span>
+      </div>
+      <div className="printer-current-work-row flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <p className="break-words text-base font-semibold">
+            {activeState
+              ? (runningPrint?.title ?? uiText("Print name not reported"))
+              : ps?.state
+                ? uiText("No active print")
+                : uiText("Waiting for printer status")}
+          </p>
+          {runningPrint && runningPrint.title !== runningPrint.filename && (
+            <p className="break-all text-xs text-muted-foreground">{runningPrint.filename}</p>
+          )}
+          {!bambu && !activeState && lastJob && (
+            <p className="break-words text-xs text-muted-foreground">
+              {uiText("Last job")} · {identifyPrintJob(lastJob, artifactInventory).title} ·{" "}
+              {knownUiText(lastJob.state)}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {activeState ? (
+            <>
+              {activeState === "printing" && printer.capabilities.can_pause && (
+                <ControlButton
+                  onClick={printControl.pause}
+                  disabled={!availability.connected || commandsBusy}
+                  icon={Pause}
+                  label={uiText("Pause")}
+                />
+              )}
+              {activeState === "paused" && printer.capabilities.can_resume && (
+                <ControlButton
+                  onClick={printControl.resume}
+                  disabled={!availability.connected || commandsBusy}
+                  icon={Play}
+                  label={uiText("Resume")}
+                />
+              )}
+              {printer.capabilities.can_cancel && (
+                <ControlButton
+                  onClick={printControl.cancel}
+                  disabled={!availability.connected || commandsBusy}
+                  icon={Square}
+                  label={uiText("Cancel")}
+                  destructive
+                />
+              )}
+            </>
+          ) : (
+            <>
+              {printer.access.can_print &&
+                printer.capabilities.can_upload &&
+                printer.capabilities.can_start && (
+                  <Button size="xs" onClick={() => setAddJobOpen(true)}>
+                    {uiText("Add to queue")}
+                  </Button>
+                )}
+              {printer.capabilities.can_list_files && (
+                <Button variant="outline" size="xs" onClick={() => setActiveTab("files")}>
+                  {uiText("Browse files")}
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+      <CommandReceipt receipt={receipts.job} pending={machineBusy === "job"} />
+      {activeState && (
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
+          <div className="min-w-32 space-y-1">
+            <StatusMetric label={uiText("Progress")} value={progressLabel} />
+            {progress !== null && <PrinterProgress value={progress} />}
+          </div>
+          {currentLayer !== null && (
+            <StatusMetric
+              label={uiText("Layer")}
+              value={
+                totalLayers !== null && totalLayers > 0
+                  ? `${formatNumber(currentLayer)} / ${formatNumber(totalLayers)}`
+                  : formatNumber(currentLayer)
+              }
+            />
+          )}
+          {ps?.remaining_minutes != null && (
+            <StatusMetric
+              label={uiText("Time remaining")}
+              value={uiText("{value1} min", { value1: formatNumber(ps.remaining_minutes) })}
+            />
+          )}
+          {elapsed !== null && (
+            <StatusMetric label={uiText("Elapsed")} value={formatDuration(elapsed)} />
+          )}
+          {printTime !== null && (
+            <StatusMetric
+              label={uiText(
+                printer.provider === "moonraker" || elapsed !== null ? "Print time" : "Elapsed",
+              )}
+              value={formatDuration(printTime)}
+            />
+          )}
+        </div>
+      )}
+      <div className="printer-current-work-row flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2">
+        <p className="min-w-0 break-words text-xs text-muted-foreground">
+          {nextJob
+            ? uiText("Up next: {value1}", {
+                value1: identifyPrintJob(nextJob, artifactInventory).title,
+              })
+            : uiText("No queued job for this printer")}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {activeState && printer.capabilities.can_list_files && (
+            <Button variant="outline" size="xs" onClick={() => setActiveTab("files")}>
+              {uiText("Browse files")}
+            </Button>
+          )}
+          {printer.access.can_print && (
+            <Link
+              href="/printers?tab=queue"
+              className={buttonVariants({ variant: "outline", size: "xs" })}
+            >
+              {uiText("View queue")}
+            </Link>
+          )}
+          {!bambu && (
+            <Button size="xs" variant="outline" onClick={() => setActiveTab("jobs")}>
+              {uiText("Print history")}
+            </Button>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+
+  const statusRail = (
+    <PrinterStatusRail
+      printer={printer}
+      setup={machineSetup}
+      chamber={snapshot["temperature_sensor chamber"]?.temperature}
+      cardPresent={snapshot.bambu_storage?.card_present}
+      reportsMaterials={reportsMaterials}
+      connectionLabel={connectionLabel}
+      live={telemetry === "live"}
+      openMaterials={() => setActiveTab("materials")}
+      openSettings={() => setActiveTab("settings")}
+      inspection={
+        printer.provider === "moonraker" ? (
+          <>
+            <PrinterBedSurface
+              printerId={printer.id}
+              control={{
+                printer,
+                snapshot,
+                live: telemetry === "live",
+                busy: commandsBusy,
+                run: machineAction,
+              }}
+            />
+            {availability.moonraker && printer.access.can_admin && (
+              <PrinterConsole
+                key={printer.id}
+                printerId={printer.id}
+                live={telemetry === "live"}
+                busy={commandsBusy}
+              />
+            )}
+          </>
+        ) : undefined
+      }
+      fan={
+        !availability.moonraker && !bambu ? (
+          <PartCoolingFan speed={snapshot.fan?.speed} />
+        ) : undefined
+      }
+    />
+  );
+
   return (
     <Localized>
       <>
+        {addJobOpen && printer.access.can_print && (
+          <Suspense fallback={null}>
+            <FleetAddJobDialog
+              open
+              onClose={() => setAddJobOpen(false)}
+              printers={[printer]}
+              fixedPrinterId={printerId}
+            />
+          </Suspense>
+        )}
         <ConfirmModal
           open={confirmEmergencyStop}
           onClose={() => {
-            if (machineBusy !== "estop") setConfirmEmergencyStop(false);
+            if (!emergencyStopBusy) setConfirmEmergencyStop(false);
           }}
           onConfirm={confirmEmergencyStopAction}
-          busy={machineBusy === "estop"}
+          busy={emergencyStopBusy}
           title={uiText("Emergency stop printer?")}
           description={uiText(
             "This halts the printer immediately and requires a firmware restart.",
@@ -540,67 +872,55 @@ function PrinterDetailView({
           }
         />
         <div className="w-full space-y-6">
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <Link
-              href="/printers"
-              className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {uiText(" Printers")}
-            </Link>
-            <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5">
-              {wsConnected ? (
-                <>
-                  <Wifi className="h-3 w-3 text-emerald-500" />
-                  <span className="font-mono text-3xs font-semibold uppercase tracking-wider text-emerald-600">
-                    {uiText("Live")}
+          <PageHeader
+            title={printer.name}
+            description={
+              <>
+                {providerLabel(printer)} · {connectionLabel}
+                {printer.capabilities.support_level === "beta" && (
+                  <span className="ml-2 inline-flex border border-border bg-muted px-1.5 py-0.5 text-2xs font-medium text-foreground">
+                    {uiText("Beta")}
                   </span>
-                </>
-              ) : (
+                )}
+              </>
+            }
+            actions={
+              activeTab === "materials" ||
+              activeTab === "maintenance" ||
+              activeTab === "diagnostics" ||
+              (activeTab === "files" && printer.capabilities.can_list_files) ? null : (
                 <>
-                  <WifiOff className="h-3 w-3 text-amber-500" />
-                  <span className="font-mono text-3xs uppercase tracking-wider text-amber-500">
-                    {uiText("Reconnecting…")}
-                  </span>
+                  {activeTab === "status" &&
+                    availability.moonraker &&
+                    printer.access.can_control && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <CommandReceipt receipt={receipts.emergency} pending={emergencyStopBusy} />
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          disabled={!availability.connected || emergencyStopBusy}
+                          onClick={emergencyStop}
+                        >
+                          {uiText("Emergency stop")}
+                        </Button>
+                      </div>
+                    )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (activeTab === "config") void loadMoonrakerConfig();
+                      else void refreshAll();
+                    }}
+                    disabled={activeTab === "config" && loadingConfig}
+                  >
+                    <RefreshCcw className="h-3.5 w-3.5" />
+                    {uiText("Refresh")}
+                  </Button>
                 </>
-              )}
-            </div>
-          </div>
-
-          {/* Title */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-2xl font-bold tracking-tight text-foreground">{printer.name}</h1>
-              <span className="rounded border border-border px-2 py-1 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                {providerLabel(printer)}
-              </span>
-              {printer.capabilities.support_level === "beta" && (
-                <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-mono text-3xs uppercase tracking-wider text-amber-600">
-                  {uiText("Beta")}
-                </span>
-              )}
-              <span className="flex items-center gap-1.5 rounded border border-border bg-background px-2 py-1">
-                <span
-                  className={`w-2 h-2 rounded-full ${STATUS_COLORS[printer.status] || "bg-slate-400"}`}
-                />
-                <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                  {knownUiText(printer.status)}
-                </span>
-              </span>
-            </div>
-            <p className="font-mono text-xs text-muted-foreground break-all">
-              {printer.access.can_admin
-                ? providerAddress(printer)
-                : uiText("{value1} access", { value1: String(printer.access.role) })}
-            </p>
-          </div>
-
-          {printer.capabilities.support_notes.length > 0 && (
-            <div className="rounded border border-border bg-muted/40 p-3 text-xs leading-5 text-muted-foreground">
-              {printer.capabilities.support_notes.join(" ")}
-            </div>
-          )}
+              )
+            }
+          />
 
           {(error || resources.error) && (
             <div className="rounded border border-red-300/50 bg-red-50/30 p-3 font-mono text-sm text-red-600 dark:bg-red-950/20">
@@ -612,20 +932,6 @@ function PrinterDetailView({
               )}
             </div>
           )}
-
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatusMetric label="Klipper" value={webhook.state || printer.status} />
-            <StatusMetric label={uiText("File")} value={ps.filename || "Idle"} truncate />
-            <StatusMetric
-              label={uiText("Progress")}
-              value={
-                progress != null
-                  ? `${formatNumber(progress, { maximumFractionDigits: 1, minimumFractionDigits: 1 })}%`
-                  : "—"
-              }
-            />
-            <StatusMetric label={uiText("Homed")} value={toolhead.homed_axes || "—"} />
-          </div>
 
           <div className="border-b border-border">
             <TabBar
@@ -648,22 +954,12 @@ function PrinterDetailView({
                     return uiText("Jobs");
                   },
                 },
-                ...(printer.access.can_print
+                ...(printer.access.can_print || printer.access.can_admin
                   ? [
                       {
                         key: "materials" as const,
                         get label() {
-                          return uiText("Materials & tools");
-                        },
-                      },
-                    ]
-                  : []),
-                ...(printer.access.can_admin
-                  ? [
-                      {
-                        key: "maintenance" as const,
-                        get label() {
-                          return uiText("Maintenance");
+                          return uiText("Materials & maintenance");
                         },
                       },
                     ]
@@ -695,724 +991,196 @@ function PrinterDetailView({
                     ]
                   : []),
               ]}
-              active={activeTab}
-              onChange={(k) => {
-                setActiveTab(k);
-              }}
+              active={activeTab === "maintenance" ? "materials" : activeTab}
+              onChange={setActiveTab}
               className="gap-1 overflow-x-auto -mb-px"
-              tabClassName="px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors text-muted-foreground hover:text-foreground"
-              activeTabClassName="text-primary"
+              tabClassName="px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              activeTabClassName="bg-transparent font-semibold text-foreground hover:bg-transparent"
             />
           </div>
 
           {activeTab === "status" && (
-            <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3 animate-panel-in">
-              {/* Current print */}
-              <section className={`${SECTION_CLASS} lg:col-span-2`}>
-                <div className={SECTION_HEADER_CLASS}>
-                  <h2 className="text-sm font-semibold text-foreground">
-                    {uiText("Current print")}
-                  </h2>
-                </div>
-                {hasCurrentPrint ? (
-                  <div className="space-y-5 p-6">
-                    <Row label={uiText("FILE")} value={ps.filename || "—"} truncate />
-                    <Row label={uiText("STATE")} value={ps.state || "—"} capitalize />
-
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                          {uiText("Progress")}
-                        </span>
-                        <span className="font-mono text-xs text-foreground font-semibold">
-                          {progress != null
-                            ? `${formatNumber(progress, { maximumFractionDigits: 1, minimumFractionDigits: 1 })}%`
-                            : "—"}
-                        </span>
-                      </div>
-                      <div className="h-2 w-full overflow-hidden rounded bg-muted">
-                        <div
-                          className="h-full w-full origin-left bg-primary transition-transform duration-slow ease-linear"
-                          style={{ transform: `scaleX(${Math.min(100, progress ?? 0) / 100})` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <Row
-                        label={uiText("ELAPSED")}
-                        value={formatDuration(ps.print_duration)}
-                        stack
-                      />
-                      <Row
-                        label={uiText("TOTAL")}
-                        value={formatDuration(ps.total_duration)}
-                        stack
-                      />
-                    </div>
-
-                    <div className="border-t border-border pt-4 space-y-3">
-                      <div className="flex flex-wrap gap-2">
-                        <ControlButton
-                          onClick={() => control("pause", () => pausePrinter(printerId))}
-                          disabled={
-                            !printer.access.can_control ||
-                            !printer.capabilities.can_pause ||
-                            ps.state !== "printing" ||
-                            busy !== null
-                          }
-                          busy={busy === "pause"}
-                          icon={Pause}
-                          label={printer.access.can_control ? uiText("Pause") : uiText("No access")}
-                        />
-                        <ControlButton
-                          onClick={() => control("resume", () => resumePrinter(printerId))}
-                          disabled={
-                            !printer.access.can_control ||
-                            !printer.capabilities.can_resume ||
-                            ps.state !== "paused" ||
-                            busy !== null
-                          }
-                          busy={busy === "resume"}
-                          icon={Play}
-                          label={
-                            printer.access.can_control ? uiText("Resume") : uiText("No access")
-                          }
-                        />
-                        <ControlButton
-                          onClick={() => control("cancel", () => cancelPrinter(printerId))}
-                          disabled={
-                            !printer.access.can_control ||
-                            !printer.capabilities.can_cancel ||
-                            (ps.state !== "printing" && ps.state !== "paused") ||
-                            busy !== null
-                          }
-                          busy={busy === "cancel"}
-                          icon={Square}
-                          label={
-                            printer.access.can_control ? uiText("Cancel") : uiText("No access")
-                          }
-                          destructive
-                        />
-                      </div>
-                      <p className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                        {printer.access.can_control
-                          ? uiText("Controls permitted by your printer role.")
-                          : uiText("Control role required.")}
-                      </p>
-                    </div>
+            <div
+              className="printer-workbench"
+              data-layout={bambu ? "bambu" : availability.moonraker ? "klipper" : "overview"}
+            >
+              {bambu && statusRail}
+              <div className="printer-workbench-column">
+                {currentWork}
+                <section className="printer-desk-section" aria-label={uiText("Temperatures")}>
+                  <div className="printer-desk-heading">
+                    <h2>{uiText("Temperatures")}</h2>
+                    {bambu && <PartCoolingFan speed={snapshot.fan?.speed} variant="reading" />}
                   </div>
-                ) : (
-                  <div className="flex min-h-64 flex-col items-center justify-center px-6 py-10 text-center">
-                    <span className="mb-4 inline-flex rounded-full bg-muted p-3 text-muted-foreground">
-                      <FileText className="h-5 w-5" />
-                    </span>
-                    <h3 className="text-sm font-semibold text-foreground">
-                      {uiText("No active print")}
-                    </h3>
-                    <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
-                      {printer.status === "offline"
-                        ? uiText(
-                            "Printer is offline. Print details will appear after it reconnects.",
-                          )
-                        : uiText(
-                            "Start a file from the Files tab to see live progress and controls here.",
-                          )}
-                    </p>
-                    {printer.status !== "offline" && printer.capabilities.can_list_files && (
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab("files")}
-                        className={cn(BTN_SECONDARY, "mt-5")}
-                      >
-                        <FileText className="h-3.5 w-3.5" />
-                        {uiText("Browse files")}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </section>
-
-              {/* Temperatures */}
-              <section className={SECTION_CLASS}>
-                <div className={SECTION_HEADER_CLASS}>
-                  <div className="flex items-center gap-2">
-                    <Thermometer className="h-4 w-4 text-muted-foreground" />
-                    <h2 className="text-sm font-semibold text-foreground">
-                      {uiText("Temperatures")}
-                    </h2>
-                  </div>
-                </div>
-                <div className="space-y-5 p-5">
-                  <div className="grid grid-cols-2 gap-3">
-                    <TempRow label={uiText("Hotend")} cur={ext.temperature} tgt={ext.target} />
-                    <TempRow label={uiText("Bed")} cur={bed.temperature} tgt={bed.target} />
-                  </div>
-
-                  {printer.capabilities.can_send_gcode && (
-                    <div className="border-t border-border pt-4 space-y-4">
-                      {printer.status === "offline" && (
-                        <p className="text-sm text-muted-foreground">
-                          {uiText(
-                            "Printer is offline. Check its address and connection before sending commands.",
-                          )}
-                        </p>
+                  {telemetry !== "live" && printer.status === "offline" && (
+                    <p className="text-xs text-muted-foreground">
+                      {uiText(
+                        "Printer is offline. Check its address and connection before sending commands.",
                       )}
-                      <div className="space-y-2">
-                        <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                          {uiText("Preheat")}
-                        </span>
-                        <div className="flex flex-wrap gap-2">
-                          {PREHEAT_PRESETS.map((p) => (
-                            <button
-                              key={p.name}
-                              onClick={() => preheat(p)}
-                              disabled={!printer.access.can_control || machineBusy !== null}
-                              title={uiText("Hotend {value1}°C · Bed {value2}°C", {
-                                value1: String(p.hotend),
-                                value2: String(p.bed),
-                              })}
-                              className={BTN_SECONDARY}
-                            >
-                              {machineBusy === `preheat-${p.name}` && (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              )}
-                              {p.name}
-                            </button>
-                          ))}
-                          <button
-                            onClick={cooldown}
-                            disabled={!printer.access.can_control || machineBusy !== null}
-                            className={BTN_SECONDARY}
-                          >
-                            {machineBusy === "cooldown" && (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            )}
-                            {uiText("Cooldown")}
-                          </button>
-                        </div>
-                      </div>
-
-                      <SetTempInput
-                        label={uiText("Hotend target")}
-                        value={hotendTarget}
-                        onChange={setHotendTarget}
-                        onApply={() =>
-                          applyTemp("extruder", hotendTarget, () => setHotendTarget(""))
-                        }
-                        busy={machineBusy === "set-extruder"}
-                        disabled={!printer.access.can_control || machineBusy !== null}
-                      />
-                      <SetTempInput
-                        label={uiText("Bed target")}
-                        value={bedTarget}
-                        onChange={setBedTarget}
-                        onApply={() => applyTemp("bed", bedTarget, () => setBedTarget(""))}
-                        busy={machineBusy === "set-bed"}
-                        disabled={!printer.access.can_control || machineBusy !== null}
-                      />
-
-                      <div className="border-t border-border pt-4 flex flex-wrap gap-2">
-                        <button
-                          onClick={() =>
-                            void machineAction(
-                              "home",
-                              () => homePrinter(printerId),
-                              uiMessage("printer.homeSuccess"),
-                            )
-                          }
-                          disabled={!printer.access.can_control || machineBusy !== null}
-                          className={BTN_SECONDARY}
-                        >
-                          {machineBusy === "home" ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Home className="h-3.5 w-3.5" />
-                          )}
-                          {uiText("Home all")}
-                        </button>
-                        <button
-                          onClick={emergencyStop}
-                          disabled={!printer.access.can_control || machineBusy !== null}
-                          className={BTN_DANGER}
-                        >
-                          {machineBusy === "estop" ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Power className="h-3.5 w-3.5" />
-                          )}
-                          {uiText("E-stop")}
-                        </button>
-                      </div>
-                    </div>
+                    </p>
                   )}
-                </div>
-              </section>
+                  <HeaterChart
+                    snapshot={snapshot}
+                    history={displayHeaterHistory.history}
+                    recorded={displayHeaterHistory.recorded}
+                    live={telemetry === "live"}
+                    renderTarget={
+                      availability.moonraker && printer.access.can_control
+                        ? (series) => {
+                            const heater = series === "extruder" ? "extruder" : "bed";
+                            const panel = heater === "extruder" ? "hotend" : "bed";
+                            return (
+                              <HeaterTarget
+                                label={uiText(
+                                  heater === "extruder" ? "Hotend target" : "Bed target",
+                                )}
+                                disabled={!availability.tuning}
+                                busy={commandsBusy}
+                                pending={machineBusy === panel}
+                                receipt={receipts[panel]}
+                                onApply={(target, clear) =>
+                                  machineAction(
+                                    panel,
+                                    () => setPrinterTemperature(printerId, heater, target),
+                                    uiMessage("Target command sent for {value1} °C", {
+                                      value1: formatNumber(target),
+                                    }),
+                                    (kind, message) => {
+                                      if (kind === "success") clear();
+                                      setReceipts((previous) => ({
+                                        ...previous,
+                                        [panel]: { kind, message },
+                                      }));
+                                    },
+                                  )
+                                }
+                              />
+                            );
+                          }
+                        : undefined
+                    }
+                  />
+                  {availability.moonraker && printer.access.can_control && (
+                    <ThermalPresets
+                      disabled={!availability.idle || commandsBusy}
+                      activePrint={activeState !== null}
+                      preheat={preheat}
+                      cooldown={cooldown}
+                      pending={machineBusy === "thermal-presets"}
+                      receipt={receipts["thermal-presets"]}
+                    />
+                  )}
+                </section>
+                {bambu && (
+                  <PrinterRecentRuns
+                    printerId={printer.id}
+                    jobs={jobs}
+                    inventory={artifactInventory}
+                    jobsHref={tabUrl("jobs")}
+                  />
+                )}
+              </div>
+              {availability.moonraker && (
+                <PrinterControls
+                  printer={printer}
+                  snapshot={snapshot}
+                  live={telemetry === "live"}
+                  busy={commandsBusy}
+                  pending={machineBusy}
+                  receipts={receipts}
+                  setup={machineSetup}
+                  materialsHref={
+                    printer.access.can_print || printer.access.can_admin
+                      ? tabUrl("materials")
+                      : undefined
+                  }
+                  run={machineAction}
+                />
+              )}
+              {!bambu && statusRail}
             </div>
           )}
 
           {activeTab === "files" && (
-            <section className={`${SECTION_CLASS} animate-panel-in`}>
-              <div className={SECTION_HEADER_CLASS}>
-                <div className="flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-muted-foreground" />
-                  <h2 className="text-sm font-semibold text-foreground">
-                    {uiText("Printer files")}
-                  </h2>
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-3xs font-semibold text-muted-foreground">
-                    {printerFiles.length}
-                  </span>
-                </div>
-                <button
-                  onClick={syncFiles}
-                  disabled={
-                    syncingFiles ||
-                    !printer.access.can_admin ||
-                    !printer.capabilities.can_list_files
-                  }
-                  title={auth.blockReason ?? uiText("Sync printer files")}
-                  className={BTN_SECONDARY}
-                >
-                  {syncingFiles ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCcw className="h-3.5 w-3.5" />
-                  )}
-                  {syncingFiles ? uiText("Syncing") : uiText("Sync")}
-                </button>
-              </div>
-              {printer.last_error && printer.status === "offline" && (
-                <div className="border-b border-border bg-red-50/30 px-6 py-3 font-mono text-2xs text-red-600 break-words dark:bg-red-950/20">
-                  {uiText(
-                    "Could not connect to the printer. Check its address and network connection, then retry.",
-                  )}
-                </div>
-              )}
-              {printerFiles.length === 0 ? (
-                <div className="p-10 text-center font-mono text-xs text-muted-foreground">
-                  {printer.capabilities.can_list_files
-                    ? uiText("No printer files synced yet.")
-                    : uiText("Printer file inventory is not supported by this provider.")}
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border text-left font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                        <th className="py-3 px-4 font-medium">{uiText("Remote file")}</th>
-                        <th className="py-3 px-4 font-medium">{uiText("Vault match")}</th>
-                        <th className="py-3 px-4 font-medium text-right">{uiText("Size")}</th>
-                        <th className="py-3 px-4 font-medium">{uiText("Status")}</th>
-                        <th className="py-3 px-4 font-medium">{uiText("Last seen")}</th>
-                        <th className="py-3 px-4 font-medium text-right">{uiText("Action")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {printerFiles.map((f) => (
-                        <tr
-                          key={f.id}
-                          className="border-b border-border transition-colors last:border-0 hover:bg-muted/30"
-                        >
-                          <td
-                            className="py-3 px-4 font-mono text-xs text-foreground max-w-[320px] truncate"
-                            title={f.remote_filename}
-                          >
-                            {f.remote_filename}
-                          </td>
-                          <td className="py-3 px-4">
-                            {f.model_id ? (
-                              <Link
-                                href={`/models/${f.model_id}`}
-                                className="font-mono text-xs text-foreground hover:text-primary hover:underline"
-                              >
-                                {f.model_name ?? f.original_filename}
-                              </Link>
-                            ) : (
-                              <span className="font-mono text-xs text-muted-foreground">
-                                {uiText("External")}
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-3 px-4 text-right font-mono text-xs text-foreground whitespace-nowrap">
-                            {f.size_bytes != null ? formatBytes(f.size_bytes) : "—"}
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600">
-                              {f.matched_by}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                            {new Date(f.last_seen_at).toLocaleString(currentLocale())}
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            <div className="flex justify-end gap-2">
-                              <button
-                                onClick={() => startRemoteFile(f)}
-                                disabled={
-                                  !printer.access.can_print ||
-                                  !printer.capabilities.can_start ||
-                                  startingFileId !== null ||
-                                  deletingFileId !== null
-                                }
-                                title={auth.blockReason ?? uiText("Start this printer file")}
-                                className={BTN_SECONDARY}
-                              >
-                                {startingFileId === f.id ? (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                ) : (
-                                  <Play className="h-3 w-3" />
-                                )}
-                                {uiText("Start")}
-                              </button>
-                              <button
-                                onClick={() => deleteRemoteFile(f)}
-                                disabled={
-                                  !printer.access.can_admin ||
-                                  printer.provider !== "moonraker" ||
-                                  deletingFileId !== null ||
-                                  startingFileId !== null ||
-                                  ps.filename === f.remote_filename
-                                }
-                                title={
-                                  ps.filename === f.remote_filename
-                                    ? uiText("Cannot delete active print file")
-                                    : (auth.blockReason ?? uiText("Delete this printer file"))
-                                }
-                                className={BTN_DANGER}
-                              >
-                                {deletingFileId === f.id ? (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                ) : (
-                                  <Trash2 className="h-3 w-3" />
-                                )}
-                                {uiText("Delete")}
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          )}
-
-          {activeTab === "settings" && (
-            <PrinterSettings
+            <PrinterFiles
               printer={printer}
-              canEdit={printer.access.can_admin}
-              key={printer.id}
+              files={printerFiles}
+              activeFilename={runningPrint?.filename}
+              authBlockReason={auth.blockReason}
+              startingId={startingFileId}
+              deletingId={deletingFileId}
+              syncing={syncingFiles}
+              onSync={syncFiles}
+              onStart={startRemoteFile}
+              onDelete={deleteRemoteFile}
+              onOpenJobs={() => setActiveTab("jobs")}
+              notes={
+                ((!bambu && printer.capabilities.support_notes.length > 0) ||
+                  (printer.last_error && printer.status === "offline")) && (
+                  <div className="printer-explorer-provider-notes">
+                    {!bambu && <PrinterProviderNotes printer={printer} />}
+                    {printer.last_error && printer.status === "offline" && (
+                      <p className="text-sm text-destructive">
+                        {uiText(
+                          "Could not connect to the printer. Check its address and network connection, then retry.",
+                        )}
+                      </p>
+                    )}
+                  </div>
+                )
+              }
             />
           )}
 
-          {activeTab === "materials" && <PrinterMaterials printer={printer} />}
-
-          {activeTab === "maintenance" && (
-            <div className="animate-panel-in">
-              <FleetMaintenancePanel
-                printers={[printer]}
-                onPrintersChanged={() => {
-                  void resources.refresh(printerKeys.detail(printerId));
-                }}
+          {(settingsVisited || activeTab === "settings") && printer.access.can_admin && (
+            <div hidden={activeTab !== "settings"}>
+              <PrinterSettings
+                printer={printer}
+                canEdit={printer.access.can_admin}
+                key={printer.id}
+                connectionLabel={connectionLabel}
+                onDiagnostics={() => setActiveTab("diagnostics")}
+                onMaintenance={() => setActiveTab("maintenance")}
               />
             </div>
           )}
 
-          {/* History */}
-          {activeTab === "jobs" && (
-            <section className={`${SECTION_CLASS} animate-panel-in`}>
-              <div className={SECTION_HEADER_CLASS}>
-                <h2 className="text-sm font-semibold text-foreground">{uiText("Print history")}</h2>
-                {jobs.length > 0 && (
-                  <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-3xs font-semibold text-muted-foreground">
-                    {uiText("counts.jobs", { count: jobs.length })}
-                  </span>
-                )}
-              </div>
-              {jobs.length === 0 ? (
-                <div className="p-10 text-center font-mono text-xs text-muted-foreground">
-                  {uiText("No print jobs yet.")}
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border text-left font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                        <th className="py-3 px-4 font-medium">{uiText("When")}</th>
-                        <th className="py-3 px-4 font-medium">{uiText("File")}</th>
-                        <th className="py-3 px-4 font-medium">{uiText("State")}</th>
-                        <th className="py-3 px-4 font-medium text-right">{uiText("Progress")}</th>
-                        <th className="py-3 px-4 font-medium">{uiText("Started")}</th>
-                        <th className="py-3 px-4 font-medium">{uiText("Finished")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {jobs.map((j) => (
-                        <tr
-                          key={j.id}
-                          className="border-b border-border transition-colors last:border-0 hover:bg-muted/30"
-                        >
-                          <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                            {new Date(j.created_at).toLocaleString(currentLocale())}
-                          </td>
-                          <td className="py-3 px-4 max-w-[260px]">
-                            {j.artifact_evidence === "vault" ||
-                            j.artifact_evidence.endsWith("_archived") ? (
-                              <Link
-                                href={`/models/${j.model_id}`}
-                                className="font-mono text-xs text-foreground hover:text-primary hover:underline"
-                                title={printJobArtifactLabel(j)}
-                              >
-                                {printJobArtifactLabel(j)}
-                              </Link>
-                            ) : (
-                              <span
-                                className="font-mono text-xs text-foreground"
-                                title={printJobArtifactLabel(j)}
-                              >
-                                {printJobArtifactLabel(j)}
-                              </span>
-                            )}
-                            {j.source === "external" && (
-                              <span className="mt-1 block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                                {knownUiText(j.artifact_evidence)}
-                              </span>
-                            )}
-                            <PrintJobReproducibility
-                              job={j}
-                              previewHref={
-                                j.artifact_evidence === "vault" ||
-                                j.artifact_evidence.endsWith("_archived")
-                                  ? `/models/${j.model_id}`
-                                  : null
-                              }
-                            />
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className="rounded bg-muted px-2 py-0.5 font-mono text-3xs uppercase tracking-wider text-foreground">
-                              {knownUiText(j.state)}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-right font-mono text-xs text-foreground">
-                            {formatNumber(j.progress * 100, { maximumFractionDigits: 0 })}%
-                          </td>
-                          <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                            {j.started_at
-                              ? new Date(j.started_at).toLocaleTimeString(currentLocale())
-                              : "—"}
-                          </td>
-                          <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                            {j.finished_at
-                              ? new Date(j.finished_at).toLocaleTimeString(currentLocale())
-                              : "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
+          {(activeTab === "materials" || activeTab === "maintenance") && (
+            <PrinterServiceWorkspace
+              printer={printer}
+              section={activeTab}
+              onRoutingChanged={() => void resources.refresh(printerKeys.detail(printerId))}
+            />
           )}
 
-          {activeTab === "config" && printer.provider === "moonraker" && (
-            <section className={`${SECTION_CLASS} animate-panel-in`}>
-              <div className={SECTION_HEADER_CLASS}>
-                <div className="flex items-center gap-2">
-                  <Settings className="h-4 w-4 text-muted-foreground" />
-                  <h2 className="text-sm font-semibold text-foreground">
-                    {uiText("Moonraker and Klipper config")}
-                  </h2>
-                </div>
-                <button
-                  onClick={loadMoonrakerConfig}
-                  disabled={loadingConfig}
-                  className={BTN_SECONDARY}
-                >
-                  {loadingConfig ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCcw className="h-3.5 w-3.5" />
-                  )}
-                  {loadingConfig ? uiText("Loading") : uiText("Refresh")}
-                </button>
-              </div>
-              {!moonrakerConfig ? (
-                <div className="p-10 text-center font-mono text-xs text-muted-foreground">
-                  {loadingConfig ? uiText("Loading config…") : uiText("Config not loaded.")}
-                </div>
-              ) : (
-                <div className="p-4 sm:p-6 space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <ConfigSummary title="Moonraker" data={moonrakerConfig.server_info} />
-                    <ConfigSummary title="Klipper" data={moonrakerConfig.printer_info} />
-                  </div>
-                  <ConfigBlock
-                    title={uiText("Moonraker config")}
-                    data={moonrakerConfig.moonraker_config}
-                  />
-                  <ConfigBlock
-                    title={uiText("Klipper config")}
-                    data={moonrakerConfig.klipper_config}
-                  />
-                </div>
-              )}
-            </section>
+          {activeTab === "jobs" && (
+            <PrinterJobHistory printer={printer} jobs={jobs} files={printerFiles} />
           )}
+
+          {activeTab === "config" &&
+            printer.provider === "moonraker" &&
+            printer.access.can_admin && (
+              <PrinterConfigWorkspace
+                key={printerId}
+                printerId={printerId}
+                data={moonrakerConfig}
+                error={resources.configError ? userMessage(resources.configError) : null}
+                loading={loadingConfig}
+                onRefresh={() => void loadMoonrakerConfig()}
+                onCopy={(data) => void copyProviderJson(data)}
+              />
+            )}
 
           {activeTab === "diagnostics" && (
-            <section className={`${SECTION_CLASS} animate-panel-in`}>
-              <div className={SECTION_HEADER_CLASS}>
-                <div className="flex items-center gap-2">
-                  <Info className="h-4 w-4 text-muted-foreground" />
-                  <h2 className="text-sm font-semibold text-foreground">
-                    {uiText("Provider diagnostics")}
-                  </h2>
-                </div>
-                <button
-                  onClick={loadDiagnostics}
-                  disabled={checkingDiagnostics}
-                  className={BTN_SECONDARY}
-                >
-                  {checkingDiagnostics ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCcw className="h-3.5 w-3.5" />
-                  )}
-                  {checkingDiagnostics ? uiText("Checking") : uiText("Refresh")}
-                </button>
-              </div>
-
-              {printer.last_error && printer.status === "offline" && (
-                <p className="border-b border-border px-6 py-3 font-mono text-xs text-muted-foreground break-words">
-                  {printer.last_error}
-                </p>
-              )}
-              {!diagnostics ? (
-                <div className="p-10 text-center font-mono text-xs text-muted-foreground">
-                  {uiText("Diagnostics have not loaded yet.")}
-                </div>
-              ) : (
-                <div className="p-4 sm:p-6 space-y-5">
-                  <div
-                    className={`rounded border p-4 ${
-                      diagnostics.ok
-                        ? "border-emerald-500/30 bg-emerald-500/10"
-                        : "border-amber-500/40 bg-amber-500/10"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      {diagnostics.ok ? (
-                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                      ) : (
-                        <AlertTriangle className="h-4 w-4 text-amber-600" />
-                      )}
-                      <span
-                        className={`font-mono text-xs uppercase tracking-wider font-semibold ${
-                          diagnostics.ok ? "text-emerald-600" : "text-amber-600"
-                        }`}
-                      >
-                        {diagnostics.ok ? uiText("Provider reachable") : uiText("Needs attention")}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {uiText("{value1} is marked {value2}.", {
-                        value1: String(providerLabel({ provider: diagnostics.provider }) ?? ""),
-                        value2: String(diagnostics.support_level ?? ""),
-                      })}
-                    </p>
-                  </div>
-
-                  {diagnostics.notes.length > 0 && (
-                    <div className="rounded border border-border bg-muted/40 p-4 space-y-2">
-                      {diagnostics.notes.map((note) => (
-                        <p
-                          key={knownUiText(note)}
-                          className="text-sm text-muted-foreground leading-relaxed"
-                        >
-                          {knownUiText(note)}
-                        </p>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="rounded border border-border overflow-hidden">
-                      <div className="border-b border-border px-4 py-3">
-                        <h3 className="text-sm font-semibold text-foreground">
-                          {uiText("Checks")}
-                        </h3>
-                      </div>
-                      <div className="divide-y divide-border">
-                        {diagnostics.checks.map((check) => (
-                          <div key={check.name} className="px-4 py-3 flex items-start gap-3">
-                            {check.ok ? (
-                              <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600" />
-                            ) : (
-                              <XCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-600" />
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <div className="font-mono text-xs uppercase tracking-wider text-foreground">
-                                {checkLabel(check.name)}
-                              </div>
-                              {!check.ok && (
-                                <div className="mt-1 font-mono text-2xs text-red-600 break-words">
-                                  {check.code ?? uiText("provider_error")}
-                                  {check.detail ? `: ${check.detail}` : ""}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="rounded border border-border overflow-hidden">
-                      <div className="border-b border-border px-4 py-3">
-                        <h3 className="text-sm font-semibold text-foreground">
-                          {uiText("Capabilities")}
-                        </h3>
-                      </div>
-                      <div className="grid grid-cols-2 gap-px bg-border">
-                        {Object.entries(diagnostics.capabilities).map(([name, enabled]) => (
-                          <div key={name} className="bg-background px-4 py-3">
-                            <div className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                              {checkLabel(name.replace(/^can_/, ""))}
-                            </div>
-                            <div
-                              className={`mt-1 font-mono text-xs font-semibold ${
-                                enabled ? "text-emerald-600" : "text-muted-foreground"
-                              }`}
-                            >
-                              {enabled ? uiText("Supported") : uiText("Unavailable")}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {diagnostics.unsupported_actions.length > 0 && (
-                    <div className="rounded border border-amber-500/40 bg-amber-500/10 p-4">
-                      <div className="font-mono text-3xs uppercase tracking-wider text-amber-600 font-semibold">
-                        {uiText("Unsupported in this provider")}
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {diagnostics.unsupported_actions.map((action) => (
-                          <span
-                            key={action}
-                            className="rounded border border-amber-500/40 px-2 py-1 font-mono text-3xs uppercase tracking-wider text-amber-600"
-                          >
-                            {actionLabel(action)}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </section>
+            <PrinterDiagnosticsPanel
+              printer={printer}
+              result={diagnostics}
+              checkedAt={resources.diagnosticsCheckedAt}
+              error={resources.diagnosticsError ? userMessage(resources.diagnosticsError) : null}
+              running={checkingDiagnostics}
+              onRun={() => void loadDiagnostics()}
+              onCopy={diagnostics ? () => void copyProviderJson(diagnostics) : undefined}
+            />
           )}
         </div>
       </>
@@ -1420,52 +1188,47 @@ function PrinterDetailView({
   );
 }
 
-function ConfigSummary({ title, data }: { title: string; data: ProviderJsonObject }) {
-  useUiLocale();
-  // Scalars only: nested objects and arrays are unreadable in a two-column summary and
-  // are already shown in full by the raw ConfigBlock below. `instanceof Object` is false
-  // for every JSON scalar and for null, which is exactly the set worth summarising.
-  const rows = Object.entries(data)
-    .filter(([, value]) => !(value instanceof Object))
-    .slice(0, 8);
-
-  return (
-    <div className="rounded border border-border overflow-hidden">
-      <div className="border-b border-border px-4 py-3">
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-      </div>
-      <div className="divide-y divide-border">
-        {rows.length === 0 ? (
-          <div className="px-4 py-3 font-mono text-xs text-muted-foreground">—</div>
-        ) : (
-          rows.map(([key, value]) => (
-            <div key={key} className="grid grid-cols-[minmax(120px,0.45fr)_1fr] gap-3 px-4 py-3">
-              <div className="font-mono text-3xs uppercase tracking-wider text-muted-foreground truncate">
-                {checkLabel(key)}
-              </div>
-              <div className="font-mono text-xs text-foreground break-words">
-                {String(value ?? "—")}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
+async function copyProviderJson(data: ProviderJsonObject | PrinterDiagnostics) {
+  try {
+    const text = JSON.stringify(data, null, 2);
+    if (text === undefined) throw new Error("provider_json_missing");
+    await navigator.clipboard.writeText(text);
+    toast.success(uiText("migration.copied"));
+  } catch {
+    toast.error(uiText("Could not copy JSON."));
+  }
 }
 
-function PrinterSettings({
+export function PrinterSettings({
   printer: initialPrinter,
   canEdit,
+  modalActions,
+  onCancel,
+  onSaved,
+  onRemove,
+  connectionLabel,
+  onDiagnostics,
+  onMaintenance,
 }: {
   printer: PrinterRead;
   canEdit: boolean;
+  modalActions?: { formId: string; target: HTMLElement | null };
+  onCancel?: () => void;
+  onSaved?: () => void;
+  onRemove?: () => void;
+  connectionLabel?: string;
+  onDiagnostics?: () => void;
+  onMaintenance?: () => void;
 }) {
   useUiLocale();
   const [printer, setPrinter] = useState(initialPrinter);
   const command = usePrinterSettingsCommand(printer.id);
   const active = useRef(true);
   const form = useRef<HTMLFormElement>(null);
+  const hintId = useId();
+  const compact = modalActions !== undefined;
+  const Field = compact ? FormField : SettingsField;
+  const setup = useMachineSetup(initialPrinter.id, !compact);
   useEffect(() => {
     active.current = true;
 
@@ -1488,8 +1251,31 @@ function PrinterSettings({
   const [operatorReleaseRequired, setOperatorReleaseRequired] = useState(
     printer.operator_release_required,
   );
+  const dirty =
+    name.trim() !== printer.name ||
+    modelName !== (printer.model_name ?? "") ||
+    group !== (printer.group ?? "") ||
+    notes !== (printer.notes ?? "") ||
+    address !== providerAddress(printer) ||
+    serial !== (printer.bambu_serial ?? "") ||
+    username !== (printer.prusalink_username ?? "") ||
+    mainboardId !== (printer.elegoo_centauri_mainboard_id ?? "") ||
+    secret !== "" ||
+    providerMaterialSync !== printer.provider_material_sync_enabled ||
+    operatorReleaseRequired !== printer.operator_release_required;
   const saving = command.busy;
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [discarded, setDiscarded] = useState(false);
+  const saveLabel = saving
+    ? "Saving…"
+    : dirty
+      ? "Unsaved changes"
+      : discarded
+        ? "Changes discarded"
+        : saved
+          ? "Saved"
+          : "No unsaved changes";
 
   const secretLabel =
     printer.provider === "bambu_lan"
@@ -1522,7 +1308,7 @@ function PrinterSettings({
 
   async function save(e?: React.FormEvent, revised = false) {
     e?.preventDefault();
-    if (!canEdit || saving || (!revised && command.blocked)) return;
+    if (!canEdit || saving || (!revised && (command.blocked || (!compact && !dirty)))) return;
     if (form.current && !form.current.reportValidity()) return;
     const session = getSessionVersion();
     const current = () => active.current && session === getSessionVersion();
@@ -1563,7 +1349,10 @@ function PrinterSettings({
       const updated = await command.save(printer, payload, revised);
       if (!current()) return;
       adopt(updated);
+      setSaved(true);
+      setDiscarded(false);
       toast.success(uiText("Printer settings saved"));
+      onSaved?.();
     } catch (err) {
       if (!current()) return;
       const message = err instanceof Error ? err.message : "Could not save printer settings";
@@ -1572,47 +1361,149 @@ function PrinterSettings({
     }
   }
 
+  const materialSyncField = (
+    <label className="flex items-start gap-3">
+      <input
+        type="checkbox"
+        checked={providerMaterialSync}
+        onChange={(event) => setProviderMaterialSync(event.target.checked)}
+        disabled={!canEdit || saving}
+        className="mt-0.5 h-4 w-4"
+      />
+      <span>
+        <span
+          className={cn("block font-medium text-foreground", compact ? "text-field" : "text-sm")}
+        >
+          {uiText("Provider material sync")}
+        </span>
+        <span className={cn("block text-xs text-muted-foreground", compact ? "mt-1" : "mt-0.5")}>
+          {uiText(
+            "Import supported AMS or active-Spoolman state. Turn off to use manual state exclusively.",
+          )}
+        </span>
+      </span>
+    </label>
+  );
+
+  const notesField = (
+    <Field label={uiText("Notes")}>
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        rows={compact ? undefined : 2}
+        disabled={!canEdit || saving}
+        className={
+          compact
+            ? inputClasses
+            : "w-full resize-y rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-disabled disabled:opacity-50"
+        }
+      />
+    </Field>
+  );
+
+  const actions = (
+    <>
+      {onRemove && (
+        <Button
+          type="button"
+          variant="ghost"
+          className="mr-auto text-destructive"
+          disabled={saving}
+          onClick={onRemove}
+        >
+          {uiText("Remove printer")}
+        </Button>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        disabled={saving || (!compact && (!dirty || command.blocked))}
+        onClick={
+          onCancel ??
+          (() => {
+            adopt(printer);
+            setDiscarded(true);
+          })
+        }
+      >
+        {uiText(compact ? "Cancel" : "Discard changes")}
+      </Button>
+      <Button
+        type="submit"
+        form={modalActions?.formId}
+        loading={saving}
+        disabled={!canEdit || command.blocked || !name.trim() || (!compact && !dirty)}
+      >
+        {uiText("Save changes")}
+      </Button>
+    </>
+  );
+
   return (
     <Localized>
-      <form ref={form} onSubmit={save} className={`${SECTION_CLASS} animate-panel-in`}>
-        <div className={SECTION_HEADER_CLASS}>
-          <div className="flex items-center gap-2">
-            <Settings className="h-4 w-4 text-muted-foreground" />
-            <div>
-              <h2 className="text-sm font-semibold text-foreground">
-                {uiText("Printer settings")}
-              </h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {uiText("Connection and display details")}
-              </p>
-            </div>
-          </div>
-          <Button
-            type="submit"
-            size="sm"
-            loading={saving}
-            disabled={!canEdit || command.blocked || !name.trim()}
-          >
-            {uiText("Save changes")}
-          </Button>
-        </div>
-        <div className="grid gap-6 p-5 lg:grid-cols-2 lg:p-6">
-          <div className="space-y-4">
-            <SettingsField label={uiText("Name")}>
+      <div className={compact ? undefined : "printer-desk printer-settings-desk"}>
+        {!compact && (
+          <aside className="min-w-0">
+            <MachineIdentity
+              printer={initialPrinter}
+              status={connectionLabel ?? knownUiText(initialPrinter.status)}
+              nozzle={setup.nozzle}
+            />
+            <dl className="printer-machine-facts printer-settings-context">
+              <div>
+                <dt>{uiText("Scheduling")}</dt>
+                <dd>
+                  {uiText(
+                    initialPrinter.drain_mode ? "Soft drain active" : "Accepting scheduled work",
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>{uiText("Operator release")}</dt>
+                <dd>
+                  {uiText(initialPrinter.operator_release_required ? "Required" : "Optional")}
+                </dd>
+              </div>
+            </dl>
+          </aside>
+        )}
+        <form
+          id={modalActions?.formId}
+          ref={form}
+          onSubmit={save}
+          className={compact ? "space-y-5" : "min-w-0 divide-y divide-border"}
+        >
+          {!compact && (
+            <header className="printer-settings-actions">
+              <h2 className="mr-auto text-sm font-semibold">{uiText("Printer settings")}</h2>
+              <span role="status" className="text-xs text-muted-foreground">
+                {uiText(saveLabel)}
+              </span>
+            </header>
+          )}
+          <PrinterSettingsSection compact={compact} title={uiText("Identity & routing")}>
+            <Field label={uiText("Name")}>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
                 disabled={!canEdit || saving}
               />
-            </SettingsField>
-            <SettingsField
+            </Field>
+            {compact && (
+              <Field label={uiText("Integration")}>
+                <Input value={providerLabel(printer)} readOnly />
+              </Field>
+            )}
+            <Field
               label={uiText("Model")}
               hint={uiText("Pick a known model or type your own")}
+              hintId={`${hintId}-model`}
             >
               {/* ponytail: native datalist — suggestions from the catalog, free text still allowed */}
               <Input
                 list="printer-model-options"
+                aria-describedby={compact ? `${hintId}-model` : undefined}
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
                 placeholder={printer.detected_model ?? uiText("Auto-detected")}
@@ -1623,33 +1514,35 @@ function PrinterSettings({
                   <option key={model} value={model} />
                 ))}
               </datalist>
-            </SettingsField>
-            <SettingsField label={uiText("Group")} hint={uiText("Optional farm grouping")}>
+            </Field>
+            <Field
+              label={uiText("Group")}
+              hint={uiText("Optional farm grouping")}
+              hintId={`${hintId}-group`}
+            >
               <Input
                 value={group}
+                aria-describedby={compact ? `${hintId}-group` : undefined}
                 onChange={(e) => setGroup(e.target.value)}
                 placeholder={uiText("Workshop")}
                 disabled={!canEdit || saving}
               />
-            </SettingsField>
-            <SettingsField label={uiText("Notes")}>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={4}
-                disabled={!canEdit || saving}
-                className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-disabled disabled:opacity-50"
-              />
-            </SettingsField>
-          </div>
-          <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
-            <div>
-              <p className="text-sm font-semibold text-foreground">{uiText("Connection")}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {uiText("{value1} configuration", { value1: String(providerLabel(printer) ?? "") })}
-              </p>
-            </div>
-            <SettingsField
+            </Field>
+          </PrinterSettingsSection>
+          <PrinterSettingsSection
+            compact={compact}
+            title={uiText("Connection")}
+            description={providerLabel(printer)}
+            action={
+              !compact &&
+              onDiagnostics && (
+                <Button size="xs" variant="outline" type="button" onClick={onDiagnostics}>
+                  {uiText("Connection checks")}
+                </Button>
+              )
+            }
+          >
+            <Field
               label={
                 printer.provider === "moonraker" ||
                 printer.provider === "prusalink" ||
@@ -1664,71 +1557,80 @@ function PrinterSettings({
                 required
                 disabled={!canEdit || saving}
               />
-            </SettingsField>
+            </Field>
             {printer.provider === "bambu_lan" && (
-              <SettingsField label={uiText("Printer serial")}>
+              <Field label={uiText("Printer serial")}>
                 <Input
                   value={serial}
                   onChange={(e) => setSerial(e.target.value)}
                   required
                   disabled={!canEdit || saving}
                 />
-              </SettingsField>
+              </Field>
             )}
             {printer.provider === "prusalink" && printer.prusalink_auth_mode !== "api_key" && (
-              <SettingsField label={uiText("Username")}>
+              <Field label={uiText("Username")}>
                 <Input
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   required
                   disabled={!canEdit || saving}
                 />
-              </SettingsField>
+              </Field>
             )}
             {printer.provider === "elegoo_centauri" &&
               printer.provider_variant === "elegoo_centauri_carbon" && (
-                <SettingsField
+                <Field
                   label={uiText("Mainboard ID")}
+                  hintId={`${hintId}-mainboard`}
                   hint={uiText(
                     "Needed for reliable printer commands while idle, paused, or errored.",
                   )}
                 >
                   <Input
                     value={mainboardId}
+                    aria-describedby={compact ? `${hintId}-mainboard` : undefined}
                     onChange={(e) => setMainboardId(e.target.value)}
                     disabled={!canEdit || saving}
                   />
-                </SettingsField>
+                </Field>
               )}
-            <SettingsField label={secretLabel} hint={uiText("Leave blank to keep current value")}>
+            <Field
+              label={secretLabel}
+              hint={uiText("Leave blank to keep current value")}
+              hintId={`${hintId}-secret`}
+            >
               <Input
                 type="password"
+                autoComplete="new-password"
                 value={secret}
+                aria-describedby={compact ? `${hintId}-secret` : undefined}
                 onChange={(e) => setSecret(e.target.value)}
                 placeholder={uiText("Unchanged")}
                 disabled={!canEdit || saving}
               />
-            </SettingsField>
-            <label className="flex items-start gap-3 rounded-md border border-border bg-background p-3">
-              <input
-                type="checkbox"
-                checked={providerMaterialSync}
-                onChange={(event) => setProviderMaterialSync(event.target.checked)}
-                disabled={!canEdit || saving}
-                className="mt-0.5 h-4 w-4"
-              />
-              <span>
-                <span className="block text-sm font-medium text-foreground">
-                  {uiText("Provider material sync")}
-                </span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
-                  {uiText(
-                    "Import supported AMS or active-Spoolman state. Turn off to use manual state exclusively.",
-                  )}
-                </span>
-              </span>
-            </label>
-            <label className="flex items-start gap-3 rounded-md border border-border bg-background p-3">
+            </Field>
+            {!compact &&
+              (printer.provider === "moonraker" ||
+                printer.provider === "bambu_lan" ||
+                printer.capabilities.can_report_material_state) &&
+              materialSyncField}
+          </PrinterSettingsSection>
+          {compact && notesField}
+          <PrinterSettingsSection
+            compact={compact}
+            title={uiText("Scheduling & release")}
+            action={
+              !compact &&
+              onMaintenance && (
+                <Button size="xs" variant="outline" type="button" onClick={onMaintenance}>
+                  {uiText("Manage maintenance")}
+                </Button>
+              )
+            }
+          >
+            {compact && materialSyncField}
+            <label className="flex items-start gap-3">
               <input
                 type="checkbox"
                 checked={operatorReleaseRequired}
@@ -1737,10 +1639,17 @@ function PrinterSettings({
                 className="mt-0.5 h-4 w-4"
               />
               <span>
-                <span className="block text-sm font-medium text-foreground">
+                <span
+                  className={cn(
+                    "block font-medium text-foreground",
+                    compact ? "text-field" : "text-sm",
+                  )}
+                >
                   {uiText("Require operator release")}
                 </span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">
+                <span
+                  className={cn("block text-xs text-muted-foreground", compact ? "mt-1" : "mt-0.5")}
+                >
                   {uiText(
                     "After a managed print completes, block scheduling until an operator releases or holds the printer.",
                   )}
@@ -1755,24 +1664,63 @@ function PrinterSettings({
                 {error}
               </p>
             )}
-          </div>
-        </div>
-        <PrinterSettingsReview
-          canSave={Boolean(name.trim())}
-          state={command.state}
-          original={printer}
-          onReview={() => {
-            void command.review().catch((err) => {
-              if (active.current) setError(userMessage(err));
-            });
-          }}
-          onAdopt={() => adopt(command.adopt())}
-          onSave={() => {
-            void save(undefined, true);
-          }}
-        />
-      </form>
+          </PrinterSettingsSection>
+          {!compact && (
+            <PrinterSettingsSection compact={false} title={uiText("Operator notes")}>
+              {notesField}
+            </PrinterSettingsSection>
+          )}
+          {modalActions ? (
+            modalActions.target && createPortal(actions, modalActions.target)
+          ) : (
+            <div className="printer-settings-actions">
+              <div className="ml-auto flex flex-wrap gap-2">{actions}</div>
+            </div>
+          )}
+          <PrinterSettingsReview
+            canSave={Boolean(name.trim())}
+            state={command.state}
+            original={printer}
+            onReview={() => {
+              void command.review().catch((err) => {
+                if (active.current) setError(userMessage(err));
+              });
+            }}
+            onAdopt={() => adopt(command.adopt())}
+            onSave={() => {
+              void save(undefined, true);
+            }}
+          />
+        </form>
+      </div>
     </Localized>
+  );
+}
+
+function PrinterSettingsSection({
+  compact,
+  title,
+  description,
+  action,
+  children,
+}: {
+  compact: boolean;
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={compact ? "space-y-4" : "printer-desk-section"}>
+      {(!compact || description) && (
+        <div className={compact ? "space-y-1" : "printer-desk-heading"}>
+          <h2 className="text-sm font-semibold">{title}</h2>
+          {action ||
+            (description && <span className="text-xs text-muted-foreground">{description}</span>)}
+        </div>
+      )}
+      <div className={compact ? "space-y-4" : "printer-settings-fields"}>{children}</div>
+    </section>
   );
 }
 
@@ -1787,7 +1735,7 @@ function SettingsField({
 }) {
   useUiLocale();
   return (
-    <label className="block space-y-1.5">
+    <label className="printer-settings-field block space-y-1.5">
       <span className="flex items-center justify-between gap-3 text-xs font-medium text-foreground">
         {label}
         {hint && <span className="font-normal text-muted-foreground">{hint}</span>}
@@ -1797,79 +1745,78 @@ function SettingsField({
   );
 }
 
-function ConfigBlock({ title, data }: { title: string; data: ProviderJsonObject }) {
-  useUiLocale();
+function PrinterProviderNotes({ printer }: { printer: PrinterRead }) {
+  if (!printer.capabilities.support_notes.length) return null;
   return (
-    <div className="rounded border border-border overflow-hidden">
-      <div className="border-b border-border px-4 py-3">
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-      </div>
-      <pre className="max-h-[420px] overflow-auto bg-muted/40 p-4 font-mono text-2xs leading-5 text-foreground">
-        {JSON.stringify(data, null, 2)}
-      </pre>
-    </div>
+    <section
+      aria-label={uiText("Provider support")}
+      className="space-y-1 border-l-2 border-border pl-3 text-xs text-muted-foreground"
+    >
+      {printer.capabilities.support_notes.map((note) => (
+        <p key={note}>{knownUiText(note)}</p>
+      ))}
+    </section>
   );
 }
 
-function StatusMetric({
-  label,
-  value,
-  truncate,
+function PrinterStatusRail({
+  printer,
+  chamber,
+  cardPresent,
+  setup,
+  reportsMaterials,
+  connectionLabel,
+  live,
+  openMaterials,
+  openSettings,
+  inspection,
+  fan,
 }: {
-  label: string;
-  value: string;
-  truncate?: boolean;
+  printer: PrinterRead;
+  chamber?: number;
+  cardPresent?: boolean;
+  setup: ReturnType<typeof useMachineSetup>;
+  reportsMaterials: boolean;
+  connectionLabel: string;
+  live: boolean;
+  openMaterials: () => void;
+  openSettings: () => void;
+  inspection: React.ReactNode;
+  fan: React.ReactNode;
 }) {
-  useUiLocale();
   return (
-    <div className="rounded border border-border bg-background p-3">
-      <div className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-        {label}
-      </div>
-      <div
-        className={`mt-1 font-mono text-sm font-semibold text-foreground ${truncate ? "truncate" : ""}`}
-        title={value}
-      >
-        {value}
-      </div>
-    </div>
+    <aside className="printer-workbench-column">
+      <MachineIdentity
+        printer={printer}
+        status={connectionLabel}
+        nozzle={setup.nozzle}
+        summary={{
+          chamber,
+          cardPresent,
+          live,
+          openSettings: printer.access.can_admin ? openSettings : undefined,
+        }}
+      />
+      {inspection}
+      {printer.provider !== "moonraker" && (reportsMaterials || printer.access.can_print) && (
+        <MachineMaterials
+          setup={setup}
+          reportsMaterials={reportsMaterials}
+          openMaterials={
+            printer.access.can_print || printer.access.can_admin ? openMaterials : undefined
+          }
+        />
+      )}
+      {fan && <div className="printer-desk-section">{fan}</div>}
+    </aside>
   );
 }
 
-function Row({
-  label,
-  value,
-  truncate,
-  capitalize,
-  stack,
-}: {
-  label: string;
-  value: string;
-  truncate?: boolean;
-  capitalize?: boolean;
-  stack?: boolean;
-}) {
-  useUiLocale();
-  if (stack) {
-    return (
-      <div className="space-y-1">
-        <div className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-          {label}
-        </div>
-        <div className="font-mono text-sm text-foreground font-semibold">{value}</div>
-      </div>
-    );
-  }
+function StatusMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground flex-shrink-0">
-        {label}
-      </span>
-      <span
-        className={`font-mono text-xs text-foreground font-medium ${truncate ? "truncate" : ""} ${capitalize ? "capitalize" : ""}`}
-      >
-        {value}
-      </span>
+    <div className="min-w-0">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="break-words font-mono text-sm font-semibold tabular-nums">{value}</div>
     </div>
   );
 }
@@ -1877,111 +1824,26 @@ function Row({
 function ControlButton({
   onClick,
   disabled,
-  busy,
   icon: Icon,
   label,
   destructive,
 }: {
   onClick: () => void;
   disabled?: boolean;
-  busy?: boolean;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   destructive?: boolean;
 }) {
   useUiLocale();
   return (
-    <button
+    <Button
+      size="sm"
+      variant={destructive ? "danger" : "default"}
       onClick={onClick}
       disabled={disabled}
-      className={`flex items-center gap-1.5 px-3 py-2 rounded font-mono text-xs uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-disabled ${
-        destructive
-          ? "bg-red-600 text-white hover:opacity-90"
-          : "border border-border text-foreground hover:bg-muted"
-      }`}
     >
-      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}
+      <Icon className="size-3.5" aria-hidden="true" />
       {label}
-    </button>
-  );
-}
-
-function SetTempInput({
-  label,
-  value,
-  onChange,
-  onApply,
-  busy,
-  disabled,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  onApply: () => void;
-  busy?: boolean;
-  disabled?: boolean;
-}) {
-  useUiLocale();
-  return (
-    <div className="flex items-end gap-2">
-      <label className="flex-1 space-y-1">
-        <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-          {label}
-        </span>
-        <input
-          type="number"
-          min={0}
-          max={500}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !disabled) onApply();
-          }}
-          placeholder="°C"
-          className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-        />
-      </label>
-      <button onClick={onApply} disabled={disabled || value === ""} className={BTN_SECONDARY}>
-        {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-        {uiText("Set")}
-      </button>
-    </div>
-  );
-}
-
-function TempRow({ label, cur, tgt }: { label: string; cur?: number; tgt?: number }) {
-  useUiLocale();
-  const pct =
-    tgt != null && tgt > 0 && cur != null ? Math.min(100, Math.max(0, (cur / tgt) * 100)) : null;
-  return (
-    <div className="rounded-md border border-border bg-muted/30 p-3">
-      <div className="flex items-center gap-1.5">
-        <Thermometer className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-          {label}
-        </span>
-      </div>
-      <div className="mt-2 font-mono text-xl font-semibold leading-none text-foreground">
-        {cur != null
-          ? formatNumber(cur, { maximumFractionDigits: 1, minimumFractionDigits: 1 })
-          : "—"}
-        <span className="ml-0.5 text-xs font-normal text-muted-foreground">°C</span>
-      </div>
-      <div className="mt-1 min-h-4 font-mono text-3xs text-muted-foreground">
-        {tgt != null && tgt > 0
-          ? uiText("Target {value1}°C", {
-              value1: String(formatNumber(tgt, { maximumFractionDigits: 0 })),
-            })
-          : uiText("No target")}
-      </div>
-      {pct != null && (
-        <div className="mt-2 h-1 w-full overflow-hidden rounded bg-muted">
-          <div
-            className="h-full w-full origin-left bg-primary transition-transform duration-slow ease-linear"
-            style={{ transform: `scaleX(${pct / 100})` }}
-          />
-        </div>
-      )}
-    </div>
+    </Button>
   );
 }

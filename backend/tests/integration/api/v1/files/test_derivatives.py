@@ -64,6 +64,13 @@ def _states_of(client: TestClient, user: User, file: File) -> list[dict]:
     return response.json()
 
 
+@pytest.fixture(autouse=True)
+def enabled_preview_default(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings.frozen, "derivatives_previews_enabled", True)
+
+
 @pytest.fixture
 def shelf(db_session: Session):
     return build_collection(db_session, "Derivative shelf")
@@ -109,6 +116,7 @@ class TestListFileDerivatives:
 
         assert _states(response) == {
             DerivativeKind.METADATA: "pending",
+            DerivativeKind.PREVIEWS: "pending",
             DerivativeKind.THUMBNAIL: "pending",
         }
 
@@ -217,6 +225,7 @@ class TestRetryFileDerivative:
         )
         assert _states(settled) == {
             DerivativeKind.METADATA: "ready",
+            DerivativeKind.PREVIEWS: "ready",
             DerivativeKind.THUMBNAIL: "ready",
         }
         db_session.expire_all()

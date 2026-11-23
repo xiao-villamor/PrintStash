@@ -24,7 +24,7 @@ from typing import Any, Iterable, Sequence
 from sqlalchemy import and_, bindparam, func, or_
 from sqlalchemy import select as sa_select
 from sqlalchemy.orm import aliased
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 from sqlmodel.sql.expression import SelectOfScalar
 
 from app.core.errors import ErrorKind, OperationError
@@ -56,6 +56,7 @@ class _Row:
     path: str
     parent_id: int | None
     has_readme: bool
+    has_custom_cover: bool
     sort_name: str
 
 
@@ -68,6 +69,7 @@ def _columns() -> tuple[Any, ...]:
         Collection.parent_id,
         # Only whether a readme exists; the text can be large.
         func.coalesce(func.length(Collection.readme), 0) > 0,
+        col(Collection.cover_selection).is_not(None),
         func.lower(Collection.name),
     )
 
@@ -300,6 +302,7 @@ def _nodes(
             effective_role=roles[row.id],
             tags=tags.get(row.id, []),
             has_readme=row.has_readme,
+            has_custom_cover=row.has_custom_cover,
             child_count=children.get(row.id, 0),
             descendant_count=subtrees[row.path].collections,
             display_path=display[row.path],

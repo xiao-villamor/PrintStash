@@ -6,6 +6,7 @@
 export interface BrowserProviderAdapter {
   runtime: {
     getManifest(): { version: string };
+    sendMessage(message: object): Promise<unknown>;
   };
   storage: {
     get(keys: string | string[]): Promise<Record<string, unknown>>;

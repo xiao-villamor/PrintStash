@@ -7,6 +7,7 @@ serialized: every attempt rebuilds what it needs from the subject row.
 """
 
 from datetime import datetime
+from enum import StrEnum
 from typing import ClassVar, Optional
 from uuid import uuid4
 
@@ -105,6 +106,12 @@ class Job(SQLModel, table=True):
     finished_at: Optional[datetime] = Field(default=None, index=True)
 
 
+class MeshDiscoveryOrder(StrEnum):
+    SMALLEST = "smallest"
+    LARGEST = "largest"
+    OLDEST = "oldest"
+
+
 class ReconcileCursor(SQLModel, table=True):
     """Per-definition reconciler bookkeeping: the pass claim and the dirty mark.
 
@@ -126,6 +133,7 @@ class ReconcileCursor(SQLModel, table=True):
         enum_check("source", JobKind),
         enum_check("pass_priority", WorkPriority),
         enum_check("discovery_next_priority", WorkPriority),
+        enum_check("mesh_discovery_order", MeshDiscoveryOrder),
         CheckConstraint(
             "(scan_recent_at IS NULL) = (scan_recent_file_id IS NULL)",
             name="recent_keyset_complete",
@@ -183,10 +191,20 @@ class ReconcileCursor(SQLModel, table=True):
             EnumText(WorkPriority), nullable=False, server_default="backfill"
         ),
     )
+    # Keep the interactive size rotation even when only one Job fits a pass.
+    mesh_discovery_order: MeshDiscoveryOrder = Field(
+        default=MeshDiscoveryOrder.SMALLEST,
+        sa_column=Column(
+            EnumText(MeshDiscoveryOrder), nullable=False, server_default="smallest"
+        ),
+    )
     # Indexed keyset for recent uploads or viewer demand. These are scan
     # positions, not foreign keys: deletion must not invalidate pagination.
     scan_recent_at: datetime | None = None
     scan_recent_file_id: int | None = None
+    # The start of a secondary admission grace period. Unlike the active
+    # primary queue's oldest Job, this cannot move forward under steady input.
+    secondary_deferred_at: datetime | None = None
 
 
 class WorkFence(SQLModel, table=True):

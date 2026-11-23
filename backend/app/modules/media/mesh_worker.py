@@ -11,8 +11,12 @@ import os
 import sys
 from pathlib import Path
 
-from app.modules.media.mesh_contracts import PreparedThumbnailResult, ThumbnailRequest
-from app.modules.media.mesh_isolation import read_spec
+from app.modules.media.mesh_contracts import (
+    PreparedThumbnailResult,
+    ThumbnailRequest,
+    ViewsRequest,
+)
+from app.modules.media.mesh_isolation import read_spec, worker_appearance
 from app.modules.media.mesh_protocol import BasicOutput, FingerprintFinal, encode_frame
 from app.modules.media.render_context import background_render_scope
 from app.modules.media.thumbnail_engine import ThumbnailEngine
@@ -30,10 +34,12 @@ def main(argv: list[str]) -> int:
         height=spec["height"],
         include_geometry=spec["include_geometry"],
         include_thumbnail=spec["include_thumbnail"],
+        check_embedded_3mf_preview=spec["check_embedded_3mf_preview"],
         include_fingerprint=spec["include_fingerprint"],
         triangle_cap=spec["triangle_cap"],
         output_format=spec["output_format"],
         reason=spec["reason"],
+        views=None if spec["views"] is None else ViewsRequest(**spec["views"]),
     )
     sequence = 0
 
@@ -45,7 +51,7 @@ def main(argv: list[str]) -> int:
     try:
         # This worker produces asynchronous Artifact outputs. Its Job priority
         # is retained for admission, but renders can share one GPU submission.
-        with background_render_scope():
+        with background_render_scope(), worker_appearance(spec):
             directory = spec.get("prepare_directory")
             generated = (
                 ThumbnailEngine().prepare(

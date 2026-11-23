@@ -53,16 +53,18 @@ test.describe("storage presets", () => {
       );
       await page.goto("/settings?section=remote-storage");
       const remote = page.getByRole("region", { name: "Remote storage" });
-      await remote
+      await remote.getByRole("button", { name: "Add remote connection" }).click();
+      const form = page.getByRole("dialog", { name: "Add remote connection" });
+      await form
         .getByRole("group", { name: "Storage category" })
         .getByRole("button", { name: preset.category })
         .click();
-      await remote
+      await form
         .getByRole("group", { name: "Provider" })
         .getByRole("button", { name: preset.label })
         .click();
       await page.getByLabel("Connection name").fill("Preset backup");
-      await remote
+      await form
         .getByRole("group", { name: "Use for" })
         .getByRole("button", { name: "Backup replicas" })
         .click();

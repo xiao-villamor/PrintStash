@@ -128,10 +128,12 @@ describe("Drawer", () => {
       </Drawer>,
     );
     act(() => {
-      vi.advanceTimersByTime(DURATION.fast);
+      vi.advanceTimersByTime(DURATION.slow - 1);
     });
+    expect(screen.queryByRole("dialog", { hidden: true })).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(1));
 
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
   });
 
   it("lets a caller class the panel and its container", () => {

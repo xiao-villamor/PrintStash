@@ -39,17 +39,11 @@ caption conflict handling remains covered by the caption API and component suite
 `library-filters.spec.ts` filters a real uploaded Model through file-type, printed-status and calendar dropdowns, restores the range after reload, and clears a print-history date to recover the result.
 
 Library navigation covers desktop grid and phone list reading positions through
-detail, Back and Forward with 101 Models spanning several pages. A controlled
-real revision change starts from an already paged view and holds its next cursor
-across an unused tag deletion. That transaction advances the browse revision
-without generating searchable content or depending on unrelated indexing work.
-The real backend must reject the stale cursor with HTTP 409; one explicit refresh
-must then restore accepted HTTP 200 continuation. Returns assert the visible
-anchor because a late revision notice can change the document height. Upload
-setup and fresh Library reads follow at most one visible refresh action if initial
-read contention requires it, then await its HTTP 200 acknowledgement. They do not
-loop page reloads. The shared outliner seed keeps its 501-Model default for the
-separate large outliner flows.
+detail, Back and Forward with 101 Models spanning several pages. Automatic
+refresh traverses the virtual gallery to its last Model, changes the real browse
+revision through an unused tag deletion, and verifies that the background update
+preserves the visible Model and its screen offset without a Refresh library banner.
+The shared outliner seed keeps its 501-Model default for separate large outliner flows.
 
 Storage-provider setup is deliberately isolated because it must begin with an
 unconfigured instance and restart after changing transports:
@@ -97,7 +91,63 @@ tests use unique (timestamped) names and clean up after themselves.
 
 Requires the backend dev venv (`backend/.venv`); falls back to `uv run`.
 
+## Model-detail review
+
+```bash
+# Supply an existing Model URL and account through the environment.
+# Keep credentials out of shell history, screenshots and committed files.
+pnpm review:model-detail
+```
+
+Requires `PRINTSTASH_REVIEW_URL` (an existing `/models/<id>` URL),
+`PRINTSTASH_REVIEW_USERNAME` and `PRINTSTASH_REVIEW_PASSWORD`, plus Python 3
+for reading the downloaded sliced archive. The opt-in `playwright.review.config.ts`
+connects to that deployment directly. It starts no servers, resets no database,
+and generates no Models or metadata. Ordinary real-backend CI excludes `review/`.
+
+Four journeys inspect **details and previews in light and dark**, always at
+**1920×1080, device scale 1**, with navigation collapsed. The target must have a
+source 3MF and a sliced-3MF Revision with multiple plates. All seven detail tabs,
+scrollable content, revision comparison, model/revision/cover/share/history/send
+and queue dialogs, plate selection, camera/layer/display controls and expanded
+views use the Model's actual data. Empty states remain empty; the flow never
+creates extra revisions or history just to fill a screenshot. It downloads the
+actual sliced archive, verifies its SHA-256 against the API, and records embedded
+settings verbatim beside the persisted metadata.
+
+The review opens forms without submitting them. Login and single-use events-stream
+authentication tickets are the only allowed POSTs. Browser API writes are blocked
+and fail the journey; the Model version and Artifacts must
+remain unchanged. A labelled browser-only 503 checks Source error/retry presentation
+before returning to the real response. No print, queue entry, share link, import,
+edit or history record is submitted. This is a read-only inspection, not a
+persistence or hardware test.
+
+Open each journey's `index.html` under `reports/model-detail-review/` at the
+repository root. The gallery links to viewport screenshots, ARIA snapshots,
+control coordinates and computed typography. `metadata.json` records real input
+evidence; `manifest.json` includes completion state and console/network diagnostics.
+Partial evidence survives failed journeys. Tracing is off to avoid recording login
+credentials; all artifacts contain private library data and must stay private.
+A later run replaces the output directory, so copy any baseline you want to retain.
+
+A passing journey is **not a clean design or accessibility audit**. Inspect every
+captured state, including the before/after-Fit pairs. Compare shared controls and
+plate context across modes; mesh-only shading does not imply an equivalent toolpath
+action. `clippedBy`, `outsideScrollport` and `coveredAtCenter` are candidates that
+need interpretation: scrolling, backdrops, disabled controls and custom input
+wrappers can be intentional. For a later Impeccable pass, supply the galleries,
+metadata and diagnostics with `DESIGN.md`; separate measured faults from hierarchy
+and consistency judgments. This command does not install or execute Impeccable.
+
 ## Coverage
+
+`library-inspector.spec.ts` uploads a real G-code Model, selects a loopback printer
+emulator, records a failed outcome through the inline inspector's revision shortcut
+and Mod+Enter note action, verifies the exact persisted record, then reloads the
+Library and checks its history. The flow removes its Model and printer afterward.
+Its toolpath flow also opens a real G-code preview in the narrow Library inspector,
+switches to View, and exercises camera, travel and fit controls.
 
 Dropdown placement covers Statistics customization at phone width, an open-menu
 resize, a short viewport, and member Model actions. Checkbox choices survive a
@@ -121,7 +171,8 @@ with `VAULT_SETUP_MODE=environment` and `VAULT_SETUP_ADMIN_*` set, as an app-sto
 install form leaves it: sign in with the provisioned credentials, get redirected to
 the storage step from any page, choose storage, then upload a first Model.
 
-auth (UI login, wrong-password, username + API-key login then revoke) ·
+auth (centered login in both themes at desktop/mobile sizes, short-screen scrolling,
+UI login, wrong-password, username + API-key login then revoke) ·
 vault (search, tag filter, list/grid toggle, empty state, narrow responsive toolbar) · collections
 (create / nest / anchored heading rename at 1080p preserving the visible tree, populated nested collection, Model identity and downloaded Artifact bytes across reload, plus keyboard pen/Escape cancellation / subtree count / delete / recursive-delete non-empty from the sidebar / lazy child expansion and Model move) ·
 documents (markdown editor, collection README, GFM tables) · tags (quick create/assign from a card,
@@ -142,6 +193,26 @@ remote storage loading layout and provider choice at desktop and mobile widths �
 About (running version + changelog) · design customization (metadata visibility,
 card-metric slots + reset) · printer add/remove and short-screen provider setup (320px, 390px and landscape; accessible dialog name, reachable actions and keyboard cancellation) · cross-cutting (theme
 persistence, health version, routes free of uncaught errors).
+
+Fleet Status queues an uploaded Revision for a fixed destination through the
+real backend and Moonraker emulator. The browser observes the print heat up and
+cool, reloads to verify job history, and opens Queue and Maintenance selects
+with the keyboard.
+
+The Fleet overview shows measured nozzle and bed temperatures and a stopped
+part-cooling fan on an idle Moonraker emulator. Enter opens the printer.
+
+Completed printer Jobs can open the queue dialog with the original sliced
+Revision, saved plate and destination. The browser confirms the repeat job
+and verifies both print runs persist through reload.
+
+`printer-file-history.spec.ts` browses synced Moonraker paths, starts and
+deletes selected remote files, then compares recorded and unrecorded durations,
+filters outcomes, and opens evidence from the resulting Jobs history.
+
+`printer-library-upload.spec.ts` prepares a saved Revision from Files on a
+disposable Moonraker emulator. It verifies the upload-only request, confirmed
+remote filename, inspectable inventory entry, and absence of a printer start.
 
 The mock-API browser suite also exercises operator recovery for an active fleet
 job whose physical print has disappeared; the real printer contract covers the
@@ -232,4 +303,21 @@ sends no further setup probe.
 - `resin.spec.ts`: CTB/GOO source upload, persisted print metadata, rendered embedded preview, original-byte download.
 - `documents.spec.ts`: collection spreadsheets and binary resin attachments remain downloadable with their original filenames and bytes.
 
+- `model-covers.spec.ts`: source selection, upload, real 3D-view capture, preservation through thumbnail regeneration, and reset to automatic.
 - `gcode-plates.spec.ts`: upload sliced 3MF exports with or without meshes, then switch between distinct plate toolpaths in the real viewer.
+
+`inbox-capture.spec.ts`: pairs a browser, interrupts a two-file transfer, resumes only the pending file, imports both Models through review, and verifies revocation denies importer recovery. Provider bytes are controlled; the API, staging and ingestion are real.
+
+- `gcode-plates.spec.ts`: upload sliced 3MF exports with or without meshes, switch plate toolpaths, preview a dense 750-layer revision, and send the selected revision to a printer emulator. Desktop layout cases check that Layers and View controls fit without clipping or overlap in normal and expanded previews and across model tabs. The default render is 1920×1080 with the main navigation collapsed; explicit 1280×720 and 1440×1000 cases reproduce the reported sidebar clipping.
+
+The default Klipper dashboard scenario in `fleet.spec.ts` homes and jogs an axis,
+applies an override, then preheats, feeds filament, and cools down. It verifies
+the reported position, speed, and extrusion availability from real emulator telemetry.
+
+`printer-sections.spec.ts` exercises the combined per-printer materials and maintenance
+workspace on the Moonraker emulator, persists routing and notes, and verifies
+Diagnostics and browser history at the desktop viewport.
+
+- `printer-config.spec.ts` uses the throwaway Moonraker config root to check nested navigation, dirty-draft guards, keyboard save, exact CRLF readback after reload, external-edit review, and read-only files. It switches to reported provider values with an unsaved draft and verifies the same draft can still be saved. It also verifies gutter alignment while paging and scrolling to the end of a long source file with horizontal overflow.
+
+- `farm-lab/printers.spec.ts` exercises Fleet → printer → Files → Jobs against the bundled app and independently provisioned native printers. Each browser upload is checked on the device. The [Farm Lab manual-testing guide](../../../deploy/manual-testing/README.md#opt-in-farm-lab-integration-tests) has the prerequisites, full command and single-printer selector.

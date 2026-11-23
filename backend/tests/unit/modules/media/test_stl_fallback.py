@@ -41,6 +41,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 from PIL import Image
+from printstash_core.mesh.preview_profile import (
+    PreviewAppearance,
+    PreviewLook,
+    appearance_scope,
+)
 
 from app.modules.media import stl_fallback
 from app.modules.media.stl_reader import STLReadLimits
@@ -99,22 +104,19 @@ def _write_hostile_ascii(path: Path) -> Path:
 
 
 class TestRenderStlThumbnail:
-    def test_uses_the_canonical_material_colour(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_uses_the_selected_material_colour(self, tmp_path: Path) -> None:
         path = tmp_path / "canonical-material.stl"
         _write_renderable_binary_stl(path, 12)
-        profile = type("PreviewProfile", (), {"material_albedo": (1.0, 0.0, 0.0)})()
-        monkeypatch.setattr(stl_fallback, "PREVIEW_PROFILE", profile)
 
-        result = stl_fallback.render_stl_thumbnail(path, width=64, height=48)
+        with appearance_scope(PreviewAppearance(PreviewLook.SAND, floor_grid=False)):
+            result = stl_fallback.render_stl_thumbnail(path, width=64, height=48)
 
         assert result is not None
         pixels = np.asarray(Image.open(io.BytesIO(result.png)).convert("RGBA"))
         shaded = pixels[:, :, :3][pixels[:, :, 3] > 20]
         assert shaded.size > 0
-        assert float(shaded[:, 0].mean()) > float(shaded[:, 1].mean()) + 40.0
-        assert float(shaded[:, 0].mean()) > float(shaded[:, 2].mean()) + 40.0
+        assert float(shaded[:, 0].mean()) > float(shaded[:, 1].mean()) + 5.0
+        assert float(shaded[:, 1].mean()) > float(shaded[:, 2].mean()) + 5.0
 
     def test_stl_fallback_uniformly_caps_sample_to_100k(
         self, tmp_path: Path, monkeypatch
@@ -180,7 +182,8 @@ class TestRenderStlThumbnail:
         monkeypatch.setattr(stl_fallback, "_MAX_SAMPLED_TRIANGLES", 10_000)
         path = tmp_path / "issue-67-connected-microfacets.stl"
         triangle_count = _write_microfaceted_surface_stl(path)
-        result = stl_fallback.render_stl_thumbnail(path, width=96, height=72)
+        with appearance_scope(PreviewAppearance(floor_grid=False)):
+            result = stl_fallback.render_stl_thumbnail(path, width=96, height=72)
 
         assert result is not None
         assert result.triangle_count == triangle_count
@@ -262,7 +265,8 @@ class TestRenderStlThumbnail:
 
         path = tmp_path / "annular-hole.stl"
         _write_annular_binary_stl(path)
-        result = stl_fallback.render_stl_thumbnail(path, width=160, height=120)
+        with appearance_scope(PreviewAppearance(floor_grid=False)):
+            result = stl_fallback.render_stl_thumbnail(path, width=160, height=120)
 
         assert result is not None
         pixels = np.asarray(Image.open(io.BytesIO(result.png)).convert("RGBA"))
@@ -480,7 +484,7 @@ class TestRenderStlThumbnail:
 
         monkeypatch.setattr(stl_fallback, "_read_samples", lambda *_args: sampled)
         monkeypatch.setattr(
-            mesh_render, "_select_view_rotation", lambda *_args: np.eye(3)
+            mesh_render, "_select_view_rotation", lambda *_args, **_kwargs: np.eye(3)
         )
 
         assert stl_fallback.render_stl_thumbnail(path) is None
@@ -488,8 +492,8 @@ class TestRenderStlThumbnail:
     @pytest.mark.parametrize(
         "rotation",
         [
-            lambda *_args: (_ for _ in ()).throw(ValueError("rotation")),
-            lambda *_args: np.full((3, 3), np.nan),
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("rotation")),
+            lambda *_args, **_kwargs: np.full((3, 3), np.nan),
         ],
         ids=["raises", "returns-nan"],
     )
@@ -533,7 +537,8 @@ class TestRenderStlThumbnail:
         monkeypatch.setattr(stl_fallback, "_MAX_SAMPLED_TRIANGLES", 32)
         path = tmp_path / "incomplete-annular-hole.stl"
         _write_annular_binary_stl(path)
-        result = stl_fallback.render_stl_thumbnail(path, width=160, height=120)
+        with appearance_scope(PreviewAppearance(floor_grid=False)):
+            result = stl_fallback.render_stl_thumbnail(path, width=160, height=120)
 
         assert result is not None
         assert result.complete is False
@@ -549,7 +554,8 @@ class TestRenderStlThumbnail:
         monkeypatch.setattr(stl_fallback, "_MAX_SAMPLED_TRIANGLES", 768)
         path = tmp_path / "dense-microfaceted-annulus.stl"
         triangle_count = _write_microfaceted_annular_stl(path)
-        result = stl_fallback.render_stl_thumbnail(path, width=160, height=120)
+        with appearance_scope(PreviewAppearance(floor_grid=False)):
+            result = stl_fallback.render_stl_thumbnail(path, width=160, height=120)
 
         assert result is not None
         assert result.triangle_count == triangle_count
@@ -692,9 +698,7 @@ class TestPartialSampling:
 
 
 class TestSampleWorkingSet:
-    def test_bounds_sampling_working_set(
-        self, tmp_path, monkeypatch
-    ):
+    def test_bounds_sampling_working_set(self, tmp_path, monkeypatch):
         path = tmp_path / "working-set.stl"
         _write_renderable_binary_stl(path, 120)
         original = np.concatenate

@@ -1,25 +1,39 @@
 "use client";
 
+import { LibraryStatusFilters } from "@/components/library-status-filters";
+import { CollectionHeaderTags } from "@/components/collection-header-tags";
+import "./library-header.css";
+import { LibraryCollectionGroup } from "@/components/library-collection-group";
+import { LibraryCollectionsRegion } from "@/components/library-collections-region";
+
 import { arrivingKeys, entryKeys } from "@/lib/library-arrivals";
-import {
-  FOLDER_CARDS_CLASS,
-  FOLDER_MOVE_CLASS,
-  folderMove,
-  type FolderMove,
-} from "@/lib/folder-transition";
+import { FOLDER_ENTRANCE_MS } from "@/lib/folder-transition";
+import { useEntranceWindow } from "@/lib/entrance-window";
+import { useContentReveal } from "@/lib/use-content-reveal";
+import { DURATION } from "@/lib/overlay";
 import { deleteLibraryMultipart } from "@/features/library/multipart";
 import { useLibraryNavigationReads } from "@/features/library/navigation-reads";
 import {
   collectionIdentity,
+  treeModelFolderHref,
   useCollectionDestination,
   useRecentFolders,
 } from "@/features/library/collection-navigation";
 import { useTaxonomyCommands } from "@/features/library/taxonomy";
 
-import { LibraryCardSelection } from "@/components/library-card-selection";
 import { LibraryBatchRecovery } from "@/components/library-batch-recovery";
 
-import { useLibraryReadingPosition } from "@/features/library/reading-position";
+import {
+  libraryReadingSelector,
+  useLibraryReadingPosition,
+  type LibraryReadingRenderer,
+} from "@/features/library/reading-position";
+import { LibraryItems, type LibraryInspectorDock } from "@/components/library-items";
+import {
+  LIBRARY_INSPECTOR_MAX_WIDTH,
+  LIBRARY_INSPECTOR_MIN_WIDTH,
+} from "@/components/use-inspector-motion";
+import { PANE_MOVING_EVENT, PANE_SETTLED_EVENT } from "@/components/use-collections-pane-motion";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { useModelOpenIntent } from "@/features/library/model-detail";
 import { useLibraryEntry, type LibraryEntry } from "@/features/library/navigation-state";
@@ -38,8 +52,10 @@ import {
   useLibraryBrowse,
 } from "@/features/library/browse";
 import { useLibraryThumbnails } from "@/features/library/thumbnails";
+import { modelSelection } from "@/components/library-collection-selection";
 import { useLibraryAuthority } from "@/features/library/authority";
 import { listLibraryPage } from "@/lib/api/library-browse";
+import type { LibraryBrowseParams } from "@/types/library-browse";
 
 import { historyFilters, historyKeys } from "@/lib/search-filters";
 import {
@@ -50,11 +66,17 @@ import {
   sameLibraryFilters,
   structuredLibraryFilterKeys as STRUCTURED_FILTER_KEYS,
   structuredLibraryFilterLabel,
-  type StructuredLibraryFilterKey as StructuredFilterKey,
 } from "@/features/library/filters";
 
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
 
+import {
+  consumeCollectionRename,
+  pendingCollectionRename,
+  isTypingTarget,
+  keyboardOverlayOpen,
+  modalOverlayOpen,
+} from "@/lib/keyboard-commands";
 import { uiText, type MessageKey } from "@/lib/locale";
 import { getErrorMessage, parseApiError, userMessage } from "@/lib/errors";
 import { filterValueText } from "@/lib/filter-labels";
@@ -62,16 +84,31 @@ import { filterValueText } from "@/lib/filter-labels";
 import { useUiLocale } from "@/lib/i18n";
 import { useIntentPrefetch } from "@/lib/use-intent-prefetch";
 import { useLibraryStartup } from "@/lib/library-startup-context";
+import { useNavigationShell } from "@/lib/navigation-shell";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useId,
+  useMemo,
+  useState,
+  useRef,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
+import { isCancelledError, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/navigation";
+import { useLocation } from "@tanstack/react-router";
 import {
   CollectionNodeRead,
   CollectionRead,
   CollectionPage,
   ModelBatchResult,
   ModelListItem,
+  OutlinerModelRead,
   ModelSort,
   MultipartModelListItem,
   PrinterRead,
@@ -79,28 +116,43 @@ import {
   TagRead,
 } from "@/types";
 import { ModelCard } from "@/components/model-card";
-import { TitleEditor } from "@/components/title-editor";
+import { LibraryModelInspector } from "@/components/library-model-inspector";
+import { InlineTitleEditor } from "@/components/inline-title-editor";
+import { CollectionOverviewCard } from "@/components/collection-overview";
+import {
+  CollectionCoverEditor,
+  type CollectionCardAction,
+} from "@/components/collection-card-editor";
+import { CollectionBreadcrumbs } from "@/components/collection-breadcrumbs";
+import { useModelDropTarget } from "@/lib/use-model-drop-target";
 import { DeferredDialog } from "@/components/deferred-dialog";
 import { lazyImport } from "@/lib/lazy-component";
 import { useModelMoves } from "@/features/library/moves";
 import { ModelMoveReview } from "@/components/model-move-review";
-import { MODEL_DND_MIME, captureModelDrag, readModelDrag, type ModelDrag } from "@/lib/model-dnd";
-import { BatchToolbar } from "@/components/batch-toolbar";
+import { MODEL_DND_MIME, captureModelDrag, type ModelDrag } from "@/lib/model-dnd";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CollectionReadme } from "@/components/collection-readme";
+import { useCollectionReadmeRenderer } from "@/components/use-collection-readme-renderer";
+import { MultipartModelTagsDialog } from "@/components/multipart-model-tags-dialog";
 import { MultipartModelCard } from "@/components/multipart-model-card";
-import { EntityTagsDialog } from "@/components/entity-tags-dialog";
-import { DocumentBrowser } from "@/components/document-browser";
+import { useCollectionsPaneOpen } from "@/lib/collections-pane-context";
+import { subscribeUploadRequests } from "@/lib/upload-requests";
+import { LibraryCollectionsPane, LibraryBreadcrumbs } from "@/components/collections-pane";
 import { FilterSidebar } from "@/components/filter-sidebar";
-import { readLibraryLocation, type LibraryViewMode } from "@/features/library/url";
+import {
+  libraryDestinationHref,
+  readLibraryLocation,
+  type LibraryViewMode,
+} from "@/features/library/url";
 import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
 import { StructuredFilters } from "@/components/structured-filters";
-import { LibraryBaseFilters } from "@/components/library-base-filters";
+import { LibraryFilterPicker, type LibraryFilterField } from "@/components/library-filter-picker";
 import type { UploadMode } from "@/components/upload-modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { FormField } from "@/components/ui/form-field";
 import { Modal } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { SavedViewSelector } from "@/components/saved-view-selector";
@@ -109,8 +161,8 @@ import { translateUiText } from "@/lib/locale";
 import { useI18n } from "@/lib/i18n";
 import { useMobileFilterDrawer } from "@/lib/mobile-filter-context";
 import {
-  SlidersHorizontal,
   Grid,
+  LayoutGrid,
   List,
   FileText,
   X,
@@ -125,9 +177,12 @@ import {
   Check,
   ChevronDown,
   MoreHorizontal,
-  Boxes,
+  ListChecks,
+  SlidersHorizontal,
   ScanSearch,
-  Pencil,
+  Search,
+  FolderTree,
+  Boxes,
 } from "lucide-react";
 import {
   listCollectionChildren,
@@ -157,14 +212,18 @@ import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
 import { Link } from "@/lib/link";
+import { displayModelName } from "@/lib/display-name";
 import { timeAgo } from "@/lib/format";
 import { rememberLastCollection, readLastView, rememberLastView } from "@/lib/last-collection";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
+import {
+  LibraryCardFill,
+  LibraryCardDetailsPlaceholder,
+  LibraryPreviewPlaceholder,
+} from "@/components/library-card-placeholder";
 import { useStartupThumbnails } from "@/lib/use-startup-thumbnails";
 import { useThumbnailArrivals } from "@/lib/use-thumbnail-arrivals";
 import { cn } from "@/lib/utils";
-import { Spinner } from "@/components/ui/spinner";
-import { TabBar } from "@/components/ui/tabs";
 
 const loadUploadModal = () =>
   import("@/components/upload-modal").then((module) => ({ default: module.UploadModal }));
@@ -177,22 +236,12 @@ const loadNewMultipartModelModal = () =>
 const UploadModal = lazyImport(loadUploadModal);
 const ModelTagsDialog = lazyImport(loadModelTagsDialog);
 const NewMultipartModelModal = lazyImport(loadNewMultipartModelModal);
-
-/** Fetch the dialog chunks once the library is usable, so the first click opens
- *  a dialog instead of an empty frame while its code downloads. */
-function useDialogPreload(ready: boolean) {
-  useEffect(() => {
-    if (!ready) return;
-    const load = () => {
-      // A failed warm-up changes nothing: opening the dialog retries the import.
-      for (const loader of [loadModelTagsDialog, loadUploadModal, loadNewMultipartModelModal])
-        void loader().catch(() => undefined);
-    };
-    // Late enough not to compete with the first thumbnails, early enough to be warm.
-    const handle = setTimeout(load, 1500);
-    return () => clearTimeout(handle);
-  }, [ready]);
-}
+const DocumentBrowser = lazyImport(() =>
+  import("@/components/document-browser").then((module) => ({ default: module.DocumentBrowser })),
+);
+const BatchToolbar = lazyImport(() =>
+  import("@/components/batch-toolbar").then((module) => ({ default: module.BatchToolbar })),
+);
 
 type SortKey = ModelSort;
 type ViewMode = "grid" | "list";
@@ -200,9 +249,10 @@ type LibraryItem =
   | { kind: "model"; value: ModelListItem }
   | { kind: "multipart"; value: MultipartModelListItem };
 
-// Fill the initial viewport without projecting/mounting sixty cards at once.
-// Later pages keep the same bound and use the server cursor.
-const PAGE_SIZE = 24;
+// Layout-free hosts use a bounded fallback; browsers measure their first batch.
+// Later pages keep the measured size and use the server cursor.
+const UNMEASURED_PAGE_SIZE = 24;
+const NO_ARRIVALS: ReadonlySet<string> = new Set();
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   {
     value: "relevance",
@@ -269,6 +319,137 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 type MenuTriggerSize = "xs" | "sm";
 type MenuTriggerVariant = "outline" | "ghost";
 
+/** Narrows the current folder (and everything below it) by name, without leaving it. */
+function FolderSearch({
+  value,
+  onCommit,
+  placeholder,
+}: {
+  value: string;
+  onCommit: (value: string) => void;
+  placeholder: string;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [committed, setCommitted] = useState(value);
+  // Navigation (back, a cleared filter chip) replaces the URL value; follow it.
+  if (value !== committed) {
+    setCommitted(value);
+    setDraft(value);
+  }
+  useEffect(() => {
+    if (draft.trim() === value.trim()) return;
+    const timer = window.setTimeout(() => onCommit(draft), 150);
+    return () => window.clearTimeout(timer);
+  }, [draft, value, onCommit]);
+  return (
+    <label className="library-folder-search relative flex min-w-0 items-center">
+      <Search
+        aria-hidden
+        className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-muted-foreground"
+      />
+      <input
+        type="search"
+        data-library-search
+        value={draft}
+        aria-label={placeholder}
+        placeholder={placeholder}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") onCommit(draft);
+          if (event.key === "Escape" && draft) {
+            event.preventDefault();
+            setDraft("");
+            onCommit("");
+          }
+        }}
+        className="h-8 w-full min-w-0 border border-input bg-card pl-8 pr-7 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+      <kbd className="pointer-events-none absolute right-2 font-mono text-xs text-muted-foreground">
+        /
+      </kbd>
+    </label>
+  );
+}
+
+const COMPACT_COLLECTION_HEIGHT = 60;
+
+/**
+ * One row of collections above the models, expandable per folder. It owns its
+ * column count, so a pane animation that changes the row size re-renders this
+ * strip only, never the whole library mid-motion.
+ */
+function CollectionStrip({
+  total,
+  overview,
+  resetKey,
+  children,
+}: {
+  total: number;
+  overview: boolean;
+  resetKey: string;
+  children: (
+    limit: number | null,
+    onColumns: (columns: number) => void,
+    extraColumns: number,
+  ) => ReactNode;
+}) {
+  useUiLocale();
+  const [expandedFor, setExpandedFor] = useState<string | null>(null);
+  const [rowSize, setRowSize] = useState(4);
+  const expanded = expandedFor === resetKey;
+  // While the pane moves, the row already holds its resting column count (the
+  // grid switches at the start of the motion). One more collection stays
+  // rendered beyond the row's clipped edge: closing, the moving edge uncovers
+  // it; opening, the narrowing row slides the leaving one out under the edge.
+  const [extra, setExtra] = useState(0);
+  useEffect(() => {
+    const moving = () => setExtra(1);
+    const settled = () => setExtra(0);
+    window.addEventListener(PANE_MOVING_EVENT, moving);
+    window.addEventListener(PANE_SETTLED_EVENT, settled);
+    return () => {
+      window.removeEventListener(PANE_MOVING_EVENT, moving);
+      window.removeEventListener(PANE_SETTLED_EVENT, settled);
+    };
+  }, []);
+  // How many collections the resting row leaves out, so "N more" fades in or
+  // out together with the pane motion rather than after it.
+  const hidden = Math.max(0, total - rowSize);
+  return (
+    <>
+      {!overview && (
+        <div className="mb-1 flex min-h-5 items-center justify-between gap-3">
+          <h2 className="text-xs font-medium text-foreground">
+            {uiText("Collections")} <span className="font-mono font-normal">{total}</span>
+          </h2>
+          {/* Always mounted: when every collection fits (e.g. the pane closed)
+              it fades out in place instead of popping in and out at rest. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            aria-expanded={expanded}
+            aria-hidden={!expanded && hidden === 0 ? true : undefined}
+            tabIndex={!expanded && hidden === 0 ? -1 : undefined}
+            onClick={() => setExpandedFor(expanded ? null : resetKey)}
+            className={`h-5 transition-opacity duration-press ease-out ${!expanded && hidden === 0 ? "pointer-events-none opacity-0" : "opacity-100"}`}
+          >
+            {expanded
+              ? uiText("Show fewer")
+              : uiText("library.collectionsHidden", { count: Math.max(hidden, 1) })}
+            <ChevronDown aria-hidden className={`h-3.5 w-3.5 ${expanded ? "rotate-180" : ""}`} />
+          </Button>
+        </div>
+      )}
+      {children(
+        overview || expanded ? null : rowSize + extra,
+        setRowSize,
+        overview || expanded ? 0 : extra,
+      )}
+    </>
+  );
+}
+
 interface SortMenuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -327,7 +508,8 @@ function SortMenu({
         <button
           key={option.value}
           type="button"
-          role="menuitem"
+          role="menuitemradio"
+          aria-checked={sortKey === option.value}
           onClick={() => {
             onSelect(option.value);
             onOpenChange(false);
@@ -336,6 +518,65 @@ function SortMenu({
         >
           <span className="flex-1">{labelFor(option.label)}</span>
           {sortKey === option.value && <Check className="h-3.5 w-3.5" />}
+        </button>
+      ))}
+    </DropdownMenu>
+  );
+}
+
+interface PrinterMenuProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  value: string;
+  options: { value: string; label: string }[];
+  onSelect: (value: string) => void;
+  onIntent: () => void;
+}
+
+/** Same menu as Sort, so both toolbar choices open the same way (below, end-aligned). */
+function PrinterMenu({ open, onOpenChange, value, options, onSelect, onIntent }: PrinterMenuProps) {
+  useUiLocale();
+  const current = options.find((option) => option.value === value) ?? options[0];
+  return (
+    <DropdownMenu
+      open={open}
+      onOpenChange={onOpenChange}
+      align="end"
+      trigger={
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          data-menu-trigger
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label={uiText("Printer")}
+          onFocus={onIntent}
+          onPointerDown={onIntent}
+          onClick={() => onOpenChange(!open)}
+          className="library-toolbar-printer h-8 w-36 max-w-full"
+        >
+          <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-left">{current?.label}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </Button>
+      }
+      contentClassName="w-52 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+    >
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="menuitemradio"
+          aria-checked={value === option.value}
+          onClick={() => {
+            onSelect(option.value);
+            onOpenChange(false);
+          }}
+          className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${value === option.value ? "bg-accent text-accent-foreground" : ""}`}
+        >
+          <span className="min-w-0 flex-1 truncate">{option.label}</span>
+          {value === option.value && <Check className="h-3.5 w-3.5" />}
         </button>
       ))}
     </DropdownMenu>
@@ -462,7 +703,7 @@ function canWriteCollection(collection: CollectionRead | null | undefined): bool
 }
 
 type LibraryRefreshState = { entry: LibraryEntry } & (
-  | { status: "pending" }
+  | { status: "pending" | "stale" }
   | { status: "failed" | "denied"; error: string }
 );
 
@@ -472,14 +713,39 @@ export interface BrowserInitialData {
   printers: PrinterRead[];
 }
 
+const INSPECTOR_WIDTH_KEY = "ps-library-inspector-width";
+
+function storedInspectorWidth() {
+  try {
+    const width = Number(localStorage.getItem(INSPECTOR_WIDTH_KEY));
+    return Number.isSafeInteger(width) &&
+      width >= LIBRARY_INSPECTOR_MIN_WIDTH &&
+      width <= LIBRARY_INSPECTOR_MAX_WIDTH
+      ? width
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+type InspectorIntent = { id: number; open: boolean };
+const libraryInspectorIntents = new Map<string, InspectorIntent>();
+
 export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   useUiLocale();
   const { locale, t } = useI18n();
   const ui = useCallback((value: string) => translateUiText(locale, value), [locale]);
   const router = useRouter();
+  const paneOpen = useCollectionsPaneOpen();
+  const { savedViewsHost, setSavedViewsAvailable } = useNavigationShell();
   const searchParams = useSearchParams();
   const auth = useRequireAuth();
   const { user, refresh: refreshAuth } = useAuth();
+  useLayoutEffect(() => {
+    if (!savedViewsHost || !auth.isAuthenticated) return;
+    setSavedViewsAvailable(true);
+    return () => setSavedViewsAvailable(false);
+  }, [savedViewsHost, auth.isAuthenticated, setSavedViewsAvailable]);
   const {
     createCollection,
     moveCollection,
@@ -489,6 +755,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   } = useTaxonomyCommands();
   const startup = useLibraryStartup();
   const settleStartup = startup.settle;
+  const requestStartup = startup.request;
   const filtersEnabled = startup.canLoad("filters");
   const savedViewsEnabled = startup.canLoad("saved-views");
   // Shared taxonomy facets from the TanStack Query cache: one cache entry shared
@@ -534,9 +801,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   } | null>(null);
   const activeSavedViewId =
     savedViewSelection?.session === savedViewsOwner.session ? savedViewSelection.id : null;
-  function setActiveSavedViewId(id: number | null) {
-    setSavedViewSelection(id === null ? null : { session: savedViewsOwner.session, id });
-  }
+  const setActiveSavedViewId = useCallback(
+    (id: number | null) => {
+      setSavedViewSelection(id === null ? null : { session: savedViewsOwner.session, id });
+    },
+    [savedViewsOwner.session],
+  );
   const [saveViewOpen, setSaveViewOpen] = useState(false);
   const [saveViewName, setSaveViewName] = useState("");
   const [saveViewBusy, setSaveViewBusy] = useState(false);
@@ -565,6 +835,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
     readVaultPreference("ps-vault-view") === "list" ? "list" : "grid",
   );
+  // Measure the loading cards before the first browse request. Keep this size
+  // with the mounted view so resizing cannot replace its accepted cursors.
+  const [pageSize, setPageSize] = useState<number | null>(null);
+  const [firstRowSize, setFirstRowSize] = useState(0);
   const [initialLibraryPreferences] = useState(() => ({
     view: readVaultPreference(LIBRARY_VIEW_KEY),
     sort: readVaultPreference("ps-vault-sort"),
@@ -572,15 +846,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [initialLibrarySection] = useState<"models" | "docs">(() =>
     readLastView() === "docs" ? "docs" : "models",
   );
-  const libraryLocation = useMemo(
-    () =>
-      readLibraryLocation(
-        new URLSearchParams(filterQuery),
-        initialLibraryPreferences,
-        initialLibrarySection,
-      ),
-    [filterQuery, initialLibraryPreferences, initialLibrarySection],
-  );
+  const libraryLocation = useMemo(() => {
+    const params = new URLSearchParams(filterQuery);
+    if (params.get("favorites") === "true") params.set("v", "models");
+    return readLibraryLocation(params, initialLibraryPreferences, initialLibrarySection);
+  }, [filterQuery, initialLibraryPreferences, initialLibrarySection]);
   const { view: libraryView, sort: sortKey, section: docView } = libraryLocation;
   const canViewPrinters = !!user?.is_superuser;
   const libraryFilters = useMemo(
@@ -611,6 +881,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     canonicalParams.set("cid", String(destinationCollection.id));
   }
   const canonicalLibraryHref = `/?${canonicalParams}`;
+  // Dialog parameters stay in the URL but never change what the Library shows.
+  const destinationHref = libraryDestinationHref(canonicalLibraryHref);
   const currentLocationHref = searchParams.size ? `/?${searchParams}` : "/";
   useEffect(() => {
     if (currentLocationHref !== canonicalLibraryHref) router.replace(canonicalLibraryHref);
@@ -624,10 +896,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }, [initialLibraryPreferences.view]);
   const [sortOpen, setSortOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
-  const [desktopSortOpen, setDesktopSortOpen] = useState(false);
-  const [desktopDisplayOpen, setDesktopDisplayOpen] = useState(false);
+  const [printerMenuOpen, setPrinterMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const toolbarMenuOpener = useRef<HTMLElement | null>(null);
+  const filtersOpener = useRef<HTMLButtonElement>(null);
   const [filtersExpanded, setFiltersExpanded] = useState<boolean | null>(null);
+  // Documents still need the collection snapshot, but have no
+  // Model placeholder to measure. Keep their existing bounded browse read.
+  if (pageSize === null && docView === "docs") setPageSize(UNMEASURED_PAGE_SIZE);
   const [compact, setCompact] = useState(
     () => readVaultPreference("ps-vault-density") === "compact",
   );
@@ -637,35 +913,21 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [tagTarget, setTagTarget] = useState<ModelListItem | null>(null);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [tagDialogSession, setTagDialogSession] = useState(0);
-  // `?upload=1` is a deep link into the upload dialog. Open it on the render that
-  // first sees the param; the effect below strips the param again so a reload (or
-  // a later deep link) behaves the same way.
+  // The URL owns a deep-linked upload until the dialog is dismissed. Permission
+  // still has to resolve before it can become visible to a member.
   const uploadRequested = searchParams.get("upload") === "1";
-  const [uploadDeepLinkSeen, setUploadDeepLinkSeen] = useState(false);
-  if (uploadDeepLinkSeen !== uploadRequested) {
-    setUploadDeepLinkSeen(uploadRequested);
-    if (uploadRequested) setUploadOpen(true);
-  }
   const [dropPreload, setDropPreload] = useState<{
     files: File[];
     items?: BulkItem[];
     mode: UploadMode;
   } | null>(null);
 
-  useEffect(() => {
-    const reviewImport = () => {
-      setDropPreload({ files: [], mode: "url" });
-      setUploadOpen(true);
-    };
-    window.addEventListener("printstash:review-import", reviewImport);
-    return () => window.removeEventListener("printstash:review-import", reviewImport);
-  }, []);
   const [dropCollection, setDropCollection] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragEnterCount = useRef(0);
 
   function classifyDrop(files: File[]): { files: File[]; mode: UploadMode } | null {
-    const meshes = files.filter((f) => isSourceFile(f.name));
+    const meshes = files.filter((f) => isSourceFile(f.name) && !isGcodeFile(f.name));
     const gcodes = files.filter((f) => isGcodeFile(f.name));
     const zips = files.filter((f) => isArchiveFile(f.name));
     if (meshes.length >= 2) return { mode: "bulk", files: meshes };
@@ -720,14 +982,31 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     }
     const result = classifyDrop(files);
     if (!result) return;
-    setDropPreload({ ...result, items: bulkItems });
+    setDropPreload({
+      ...result,
+      mode: bulkItems?.some((item) => item.relPath !== "") ? "bulk" : result.mode,
+      items: bulkItems,
+    });
     setDropCollection(collPath);
     setUploadOpen(true);
   }
 
+  const collectionFormId = useId();
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
-  const { open: filterDrawerOpen, openDrawer, closeDrawer } = useMobileFilterDrawer();
+  const createCollectionRequested = searchParams.get("newCollection") === "1";
+  const [createCollectionSeen, setCreateCollectionSeen] = useState(false);
+  if (createCollectionSeen !== createCollectionRequested) {
+    setCreateCollectionSeen(createCollectionRequested);
+    if (createCollectionRequested) setIsCreatingCollection(true);
+  }
+  useEffect(() => {
+    if (!createCollectionRequested) return;
+    const params = new URLSearchParams(searchParams);
+    params.delete("newCollection");
+    router.replace(`/?${params}`);
+  }, [createCollectionRequested, searchParams, router]);
+  const { open: filterDrawerOpen, closeDrawer } = useMobileFilterDrawer();
 
   // Collection selection lives in the URL (`?c=<path>`) so it resets when the
   // user navigates away (e.g. to Settings) and clicks "Vault" again — that link
@@ -747,6 +1026,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     rememberLastView(docView);
   }, [docView]);
 
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectedMultipartRows, setSelectedMultipartRows] = useState<
+    Map<number, MultipartModelListItem>
+  >(new Map());
   const startNavigationReads = useLibraryNavigationReads();
   function handleCollectionChange(path: string | null, id: number | null = null) {
     if (
@@ -755,23 +1038,31 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       (id === null || id === selectedCollectionId)
     )
       return;
-    startNavigationReads(path, {
-      ...folderModelFilters(path),
-      view: libraryView,
-      limit: PAGE_SIZE,
-      sort: sortKey,
-    });
+    startNavigationReads(
+      path,
+      {
+        ...folderModelFilters(path),
+        view: libraryView,
+        limit: pageSize ?? UNMEASURED_PAGE_SIZE,
+        sort: sortKey,
+      },
+      id,
+    );
     // An already empty selection must not render the departing grid urgently
     // before Router can commit the destination and start its critical reads.
     setSelectedIds((current) => (current.size === 0 ? current : new Set()));
     setSelectedMultipartRows((current) => (current.size === 0 ? current : new Map()));
+    router.push(collectionHref(path, id));
+  }
+
+  function collectionHref(path: string | null, id: number | null) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("cid");
     if (id !== null) params.set("cid", String(id));
     if (path) params.set("c", path);
     else params.delete("c");
     const qs = params.toString();
-    router.push(qs ? `/?${qs}` : "/");
+    return qs ? `/?${qs}` : "/";
   }
 
   function handleLibraryViewChange(view: LibraryViewMode) {
@@ -784,21 +1075,38 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     router.replace(params.size ? `/?${params}` : "/");
   }
 
-  useEffect(() => {
-    if (!uploadRequested) return;
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("upload");
-    const qs = params.toString();
-    router.replace(qs ? `/?${qs}` : "/");
-  }, [uploadRequested, searchParams, router]);
-
   const query = searchParams.get("q") ?? "";
   const searchQuery = currentFilters.q ?? undefined;
+  // Model scope: "here" lists only this folder's own models, "all" its whole
+  // subtree. Unset follows the folder: one with no models of its own shows its
+  // subtree, so models are never hidden behind folder cards.
+  const scopeParam = searchParams.get("scope");
+  const folderScopeKey = selectedCollection ?? "";
+  const [autoSubtreeFor, setAutoSubtreeFor] = useState<string | null>(null);
+  const requestedIncludeSubfolders =
+    scopeParam === "all" || (scopeParam !== "here" && autoSubtreeFor === folderScopeKey);
   const queryClient = useQueryClient();
 
-  function setStructuredFilter(key: StructuredFilterKey, values: string[]) {
+  function setModelScope(next: "here" | "all") {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("scope", next);
+    router.replace(`/?${params}`);
+  }
+
+  function setFolderQuery(next: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    const value = next.trim();
+    if (value) params.set("q", value);
+    else params.delete("q");
+    const qs = params.toString();
+    router.replace(qs ? `/?${qs}` : "/");
+  }
+
+  function setStructuredFilter(key: LibraryFilterField, values: string[]) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete(key);
+    if (key === "printer_id") params.delete("printer_presence");
+    if (key === "printer_presence") params.delete("printer_id");
     values.forEach((value) => params.append(key, value));
     const qs = params.toString();
     router.replace(qs ? `/?${qs}` : "/");
@@ -811,13 +1119,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // the memoization of everything derived from it below.
   const folderModelFilters = (
     collection: string | null = selectedCollection,
-  ): ModelListFilters => ({
+  ): ModelListFilters & Pick<LibraryBrowseParams, "auto_scope"> => ({
     ...baseFilters,
     collection: collection ?? undefined,
     // A search or a filter spans the whole subtree; an unfiltered folder view
     // lists only its direct children so subfolders' models don't leak into
     // the parent (#30).
-    direct: !searchQuery && !narrowsLibrary(baseFilters),
+    direct: !requestedIncludeSubfolders && !searchQuery && !narrowsLibrary(baseFilters),
+    auto_scope: scopeParam === null && !searchQuery && !narrowsLibrary(baseFilters),
     q: searchQuery,
   });
   // Options and counts describe the whole subtree, so a folder that holds only
@@ -827,18 +1136,34 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     { enabled: filtersEnabled },
   );
 
-  function writeFilterUrl(filters: SavedViewRead["filters"]) {
-    const params = writeLibraryFilters(filters, canViewPrinters);
-    router.replace(`/?${params}`);
-  }
+  const writeFilterUrl = useCallback(
+    (filters: SavedViewRead["filters"]) => {
+      const params = writeLibraryFilters(filters, canViewPrinters);
+      router.replace(`/?${params}`);
+    },
+    [canViewPrinters, router],
+  );
 
-  function applySavedView(view: SavedViewRead) {
-    setFiltersExpanded(null);
-    setActiveSavedViewId(view.id);
-    setSelectedIds(new Set());
-    setSelectedMultipartRows(new Map());
-    writeFilterUrl(view.filters);
-  }
+  const applySavedView = useCallback(
+    (view: SavedViewRead) => {
+      setFiltersExpanded(null);
+      setActiveSavedViewId(view.id);
+      setSelectedIds(new Set());
+      setSelectedMultipartRows(new Map());
+      writeFilterUrl(view.filters);
+    },
+    [setActiveSavedViewId, setSelectedIds, setSelectedMultipartRows, writeFilterUrl],
+  );
+
+  useEffect(() => {
+    function selectFromPane(event: Event) {
+      if (!(event instanceof CustomEvent) || !Number.isSafeInteger(event.detail)) return;
+      const view = savedViews.find((item) => item.id === event.detail);
+      if (view) applySavedView(view);
+    }
+    window.addEventListener("printstash:select-saved-view", selectFromPane);
+    return () => window.removeEventListener("printstash:select-saved-view", selectFromPane);
+  }, [savedViews, applySavedView]);
 
   async function saveCurrentView() {
     const name = saveViewName.trim();
@@ -902,12 +1227,25 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const browseParams = {
     ...folderModelFilters(),
     view: libraryView,
-    limit: PAGE_SIZE,
+    limit: pageSize ?? UNMEASURED_PAGE_SIZE,
     sort: sortKey,
   };
   const modelQuery = useLibraryBrowse(
     browseParams,
-    selectedCollectionId === null || destinationCollection?.path === selectedCollection,
+    pageSize !== null &&
+      (selectedCollectionId === null || destinationCollection?.path === selectedCollection),
+    firstRowSize,
+  );
+  const browsePage = modelQuery.isPlaceholderData ? undefined : modelQuery.data?.pages[0];
+  const effectiveDirect = browsePage?.effective_direct ?? browseParams.direct;
+  const includeSubfolders = requestedIncludeSubfolders || effectiveDirect === false;
+  const statusFilterActive = structured.revision_status.length > 0;
+  const canReusePickerFacets = effectiveDirect === false && !statusFilterActive;
+  const statusFacetQuery = useModelFacets(
+    { ...folderModelFilters(), direct: effectiveDirect, revision_status: undefined },
+    {
+      enabled: filtersEnabled && docView === "models" && !!browsePage && !canReusePickerFacets,
+    },
   );
   const recent = useRecentFolders(
     destinationSettled ? selectedLookup.data : undefined,
@@ -923,6 +1261,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const collectionReadme = useCollectionReadme(selectedCollectionRow?.id ?? null, {
     enabled: selectedCollectionRow?.has_readme ?? false,
   });
+  const readmeRenderer = useCollectionReadmeRenderer(selectedCollectionRow?.has_readme ?? false);
   const folderSearch = useCollectionSearch(searchQuery ?? "", "view", {
     enabled: searchQuery !== undefined,
   });
@@ -931,6 +1270,28 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       searchQuery === undefined && (selectedCollection === null || selectedCollectionRow !== null),
   });
   const folderPages = searchQuery !== undefined ? folderSearch : folderLevel;
+  const foldersReady =
+    (searchQuery !== undefined || selectedCollection === null || selectedCollectionRow !== null) &&
+    folderPages.data !== undefined &&
+    !folderPages.isPlaceholderData;
+  // The authorized lookup already reserves the child-folder strip. Its items
+  // can load alongside the Model page instead of delaying viewport sizing.
+  // Search and readme layouts still need their actual content before measuring.
+  const capacityReady =
+    foldersReady ||
+    (searchQuery === undefined &&
+      destinationCollection !== undefined &&
+      !destinationCollection.has_readme);
+  const receivePageSize = useCallback(
+    (capacity: number, columns: number) => {
+      // Include the reserved collection strip before measuring the Model area.
+      if (capacityReady) {
+        setPageSize((current) => current ?? capacity);
+        setFirstRowSize(columns);
+      }
+    },
+    [capacityReady],
+  );
   // Canonical replacement creates a Router key. Publish the visit only once
   // that identity is settled, before the reader can establish its position.
   const projectionReady =
@@ -938,13 +1299,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     (selectedCollection === null ||
       (selectedCollectionRow !== null && selectedCollectionId === selectedCollectionRow.id)) &&
     (!selectedCollectionRow?.has_readme || !collectionReadme.isPending) &&
+    (!selectedCollectionRow?.has_readme || !readmeRenderer.isPending) &&
     folderPages.data !== undefined &&
     !folderPages.isPlaceholderData &&
     modelQuery.data !== undefined &&
     !modelQuery.isPlaceholderData;
 
-  const entry = useLibraryEntry(canonicalLibraryHref, projectionReady);
-  const modelMoves = useModelMoves(entry, refresh);
+  const entry = useLibraryEntry(destinationHref, projectionReady);
   const [refreshState, setRefreshState] = useState<LibraryRefreshState | null>(null);
   const refreshScope = useRef({ entry, sequence: 0 });
   useLayoutEffect(() => {
@@ -978,7 +1339,26 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (!browseReady) return null;
     return {
       entry,
+      favorites: favoritesOnly,
       items: orderedItems,
+      previewSource:
+        modelQuery.data?.pages[0] &&
+        !foldersHidden &&
+        !searchQuery &&
+        libraryView === "all" &&
+        sortKey === "date-desc"
+          ? {
+              page: modelQuery.data.pages[0],
+              params: {
+                view: "all" as const,
+                sort: "date-desc" as const,
+                limit: pageSize ?? UNMEASURED_PAGE_SIZE,
+                collection: selectedCollection ?? undefined,
+                direct: !includeSubfolders,
+              },
+            }
+          : undefined,
+      authorizationRevision: modelQuery.data?.pages[0]?.authorization_revision,
       modelPages: modelQuery.data?.pages.length ?? 0,
       folderPages: foldersHidden ? 0 : (folderPages.data?.pages.length ?? 0),
       collections: foldersHidden
@@ -994,7 +1374,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     };
   }, [
     browseReady,
+    searchQuery,
+    libraryView,
+    sortKey,
+    pageSize,
+    selectedCollection,
+    includeSubfolders,
     entry,
+    favoritesOnly,
     orderedItems,
     foldersHidden,
     folderPages.data,
@@ -1002,7 +1389,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     selectedCollectionRow,
     selectedLookup.data,
     modelQuery.hasNextPage,
-    modelQuery.data?.pages.length,
+    modelQuery.data,
   ]);
   const [settledSnapshot, setSettledSnapshot] = useState(nextSnapshot);
   const lookupStatus = selectedLookup.error ? parseApiError(selectedLookup.error).status : null;
@@ -1012,7 +1399,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     (lookupStatus === 403 ||
       lookupStatus === 404 ||
       settledSnapshot === null ||
-      settledSnapshot.entry.href !== canonicalLibraryHref);
+      settledSnapshot.entry.href !== destinationHref);
   if (unavailableCollection && settledSnapshot !== null) setSettledSnapshot(null);
   if (nextSnapshot !== null && nextSnapshot !== settledSnapshot) setSettledSnapshot(nextSnapshot);
   const snapshot =
@@ -1020,243 +1407,22 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       ? null
       : (nextSnapshot ?? settledSnapshot);
   const displayedCollection = snapshot?.collection ?? null;
-  // `null` until the first snapshot lands: opening a folder by URL is arriving,
-  // not moving, so the first settled folder must not animate.
+  // Each displayed destination owns the real cards' entrance, including cached visits.
   const displayedPath = snapshot === null ? null : (displayedCollection?.path ?? "");
-  const [folderEntrance, setFolderEntrance] = useState<{
-    path: string | null;
-    move: FolderMove | null;
-  }>({ path: displayedPath, move: null });
-  if (displayedPath !== null && folderEntrance.path !== displayedPath) {
-    setFolderEntrance({
-      path: displayedPath,
-      move: folderEntrance.path === null ? null : folderMove(folderEntrance.path, displayedPath),
-    });
-  }
+  const cardIdentity = `${snapshot?.entry.href ?? ""}:${viewMode}:${snapshot?.items.length ? "populated" : "empty"}`;
+  const cardEntrance = useEntranceWindow(cardIdentity, snapshot ? true : null, FOLDER_ENTRANCE_MS);
   const onAuthorityRetired = useCallback(() => {
     const session = getSessionVersion();
     void refreshAuth().catch((error) => {
       if (session === getSessionVersion()) toast.error(error);
     });
   }, [refreshAuth]);
+  const refreshForAuthority = useRef<(() => Promise<void>) | null>(null);
   const authority = useLibraryAuthority(browseReady ? (modelQuery.data?.pages[0] ?? null) : null, {
     eventsReady: startup.canLoad("activity"),
-    onRefresh: () => reading.refresh(refresh),
+    onRefresh: () => refreshForAuthority.current?.(),
     onAuthorityRetired,
   });
-  const refreshRequired =
-    authority.refreshRequired || modelQuery.refreshRequired || currentRefresh !== null;
-  const libraryItems = snapshot?.items ?? [];
-  const visibleModels = libraryItems.flatMap((item) => (item.kind === "model" ? [item.value] : []));
-  const visibleMultipartModels = libraryItems.flatMap((item) =>
-    item.kind === "multipart" ? [item.value] : [],
-  );
-  const visibleCollections = snapshot?.collections ?? [];
-  const breadcrumbs = snapshot?.breadcrumbs ?? [];
-  const selectedName = snapshot?.collection?.name ?? null;
-  const canRenameCollection =
-    auth.isAuthenticated &&
-    displayedCollection !== null &&
-    displayedCollection.path === selectedCollection &&
-    (!!user?.is_superuser || displayedCollection.effective_role === "admin");
-  const [collectionRename, setCollectionRename] = useState<{
-    entry: LibraryEntry;
-    collection: CollectionNodeRead;
-  } | null>(null);
-  const [collectionRenameName, setCollectionRenameName] = useState("");
-  const [collectionRenameBusy, setCollectionRenameBusy] = useState(false);
-  const renameLifetime = useRef(0);
-  useLayoutEffect(
-    () => () => {
-      renameLifetime.current += 1;
-    },
-    [entry, canRenameCollection],
-  );
-  if (
-    collectionRename !== null &&
-    (collectionRename.entry !== entry ||
-      !canRenameCollection ||
-      entry.session !== getSessionVersion())
-  ) {
-    setCollectionRename(null);
-    setCollectionRenameName("");
-    setCollectionRenameBusy(false);
-  }
-
-  function openCollectionRename() {
-    if (!canRenameCollection || !displayedCollection || collectionRenameBusy || collectionRename) {
-      return;
-    }
-    setCollectionRename({ entry, collection: displayedCollection });
-    setCollectionRenameName(displayedCollection.name);
-    setCollectionRenameBusy(false);
-  }
-
-  async function saveCollectionRename() {
-    const target = collectionRename;
-    const name = collectionRenameName.trim();
-    if (!target || !name || collectionRenameBusy || !canRenameCollection) return;
-    const session = getSessionVersion();
-    const lifetime = renameLifetime.current;
-    const isCurrent = () => session === getSessionVersion() && renameLifetime.current === lifetime;
-    setCollectionRenameBusy(true);
-    try {
-      const updated = await renameCollection(target.collection.id, name);
-      requireSessionVersion(session);
-      if (!isCurrent()) return;
-      setCollectionRename(null);
-      toast.success(uiText("collection.renameSuccess", { count: 1 }));
-      if (updated.path === selectedCollection) void refresh();
-      else {
-        const params = new URLSearchParams(searchParams.toString());
-        params.set("c", updated.path);
-        params.set("cid", String(updated.id));
-        router.replace(`/?${params}`);
-      }
-    } catch (error) {
-      if (isCurrent()) toast.error(error);
-    } finally {
-      if (isCurrent()) setCollectionRenameBusy(false);
-    }
-  }
-  const error =
-    (currentRefresh && currentRefresh.status !== "pending" ? currentRefresh.error : null) ??
-    (modelQuery.refreshRequired ? null : modelQuery.error?.message) ??
-    (selectedCollection !== null ? selectedLookup.error?.message : null) ??
-    folderPages.error?.message ??
-    null;
-  const loading = snapshot === null && !browseReady && error === null;
-  const refreshing =
-    currentRefresh?.status === "pending" ||
-    (!loading &&
-      !error &&
-      !modelQuery.refreshRequired &&
-      (!browseReady || (modelQuery.isFetching && !modelQuery.isFetchingNextPage)));
-  const loadingMore = modelQuery.isFetchingNextPage || !browseReady;
-  const hasMore = snapshot?.hasMore ?? false;
-
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [selectedMultipartRows, setSelectedMultipartRows] = useState<
-    Map<number, MultipartModelListItem>
-  >(new Map());
-  const selectionEntry = useRef<LibraryEntry | null>(entry);
-  useLayoutEffect(() => {
-    selectionEntry.current = entry;
-    return () => {
-      selectionEntry.current = null;
-    };
-  }, [entry]);
-  useLayoutEffect(() => {
-    setSelectedMultipartRows((current) => (current.size === 0 ? current : new Map()));
-  }, [libraryView, selectedCollection, selectedCollectionId, docView]);
-  // Selected folders are kept as the rows they were picked from: they may leave
-  // the view (another folder opened) and still need their names and paths.
-  const [selectedCollectionRows, setSelectedCollectionRows] = useState<
-    Map<number, CollectionNodeRead>
-  >(new Map());
-  const [keyboardSelection, setKeyboardSelection] = useState(false);
-  const selectMode =
-    keyboardSelection ||
-    selectedIds.size > 0 ||
-    selectedCollectionRows.size > 0 ||
-    selectedMultipartRows.size > 0;
-
-  // What turned up since this view was last read eases in once; everything
-  // already on screen keeps its place. A different folder starts a new reading.
-  const shownKeys = entryKeys(visibleCollections, libraryItems);
-  const [arrival, setArrival] = useState<{
-    path: string | null;
-    keys: ReadonlySet<string>;
-    arriving: ReadonlySet<string>;
-  }>({ path: displayedPath, keys: new Set(shownKeys), arriving: new Set() });
-  if (displayedPath !== null) {
-    if (arrival.path !== displayedPath) {
-      setArrival({ path: displayedPath, keys: new Set(shownKeys), arriving: new Set() });
-    } else if (
-      shownKeys.length !== arrival.keys.size ||
-      shownKeys.some((key) => !arrival.keys.has(key))
-    ) {
-      setArrival({
-        path: displayedPath,
-        keys: new Set(shownKeys),
-        arriving: arrivingKeys(arrival.keys, shownKeys),
-      });
-    }
-  }
-
-  // A change to the library applies by itself while the view is a single page:
-  // new Models ease in where they belong and a change elsewhere only moves the
-  // counts. Deeper in the list the notice stays, since reloading every page
-  // read so far on each change would move the place being read.
-  const settlesByItself =
-    authority.refreshRequired &&
-    !modelQuery.refreshRequired &&
-    currentRefresh === null &&
-    !selectMode &&
-    (snapshot?.modelPages ?? 0) <= 1 &&
-    (snapshot?.folderPages ?? 0) <= 1;
-  const lastSettled = useRef(0);
-  // The timer must survive re-renders, so it reads the latest refresh through a
-  // ref instead of depending on an object that is new on every render.
-  const settleNow = useRef<() => void>(() => undefined);
-  useLayoutEffect(() => {
-    settleNow.current = () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.outliner });
-      void authority.refresh();
-    };
-  });
-  useEffect(() => {
-    if (!settlesByItself) return;
-    const wait = Math.max(800, lastSettled.current + 4000 - Date.now());
-    const timer = setTimeout(() => {
-      lastSettled.current = Date.now();
-      settleNow.current();
-    }, wait);
-    return () => clearTimeout(timer);
-  }, [settlesByItself]);
-
-  useEffect(() => {
-    if (browseReady) settleStartup("cards", "ready");
-    else if (error !== null) settleStartup("cards", "failed");
-  }, [browseReady, error, settleStartup]);
-  const startupContent = useRef<HTMLElement>(null);
-  const listContent = useRef<HTMLDivElement>(null);
-  const reading = useLibraryReadingPosition(
-    snapshot?.entry,
-    viewMode,
-    startupContent,
-    listContent,
-    snapshot !== null && docView === "models" && !authority.authorizationChanged,
-    {
-      ready: browseReady,
-      models: {
-        count: snapshot?.modelPages ?? 0,
-        more: modelQuery.hasNextPage ?? false,
-        pending: modelQuery.isFetching,
-        failed: modelQuery.isError,
-        next: () => void modelQuery.loadMore(),
-      },
-      folders: {
-        count: snapshot?.folderPages ?? 0,
-        more: foldersHidden ? false : (folderPages.hasNextPage ?? false),
-        pending: folderPages.isFetching,
-        failed: folderPages.isError,
-        next: () => void folderPages.fetchNextPage({ cancelRefetch: false }),
-      },
-    },
-  );
-  useStartupThumbnails(startupContent, browseReady, libraryItems.length > 0);
-  const thumbnails = useLibraryThumbnails(
-    visibleModels,
-    browseReady ? (modelQuery.data?.pages[0] ?? null) : null,
-    onAuthorityRetired,
-  );
-  useThumbnailArrivals(visibleModels, thumbnails.refresh);
-
-  function loadMore() {
-    if (hasMore && !loadingMore && !refreshRequired && !authority.authorizationChanged)
-      void modelQuery.loadMore();
-  }
   async function refresh() {
     const session = getSessionVersion();
     if (
@@ -1346,22 +1512,338 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       if (isCurrent()) setRefreshState(null);
     } catch (error) {
       if (!isCurrent()) return;
-      const denied = lookupPending && parseApiError(error).status === 404;
+      const interrupted = isCancelledError(error);
+      const failure = parseApiError(error);
+      if (interrupted || (failure.status === 409 && failure.code === "browse_refresh_required")) {
+        // Ingest completion replaces ongoing reads; further catalog writes can
+        // also reject both first-page attempts. Preserve the displayed snapshot
+        // and reading anchor, then settle replaced reads through the same timer.
+        setRefreshState({ entry, status: "stale" });
+        return;
+      }
+      const denied = lookupPending && failure.status === 404;
       if (denied) setSettledSnapshot(null);
       setRefreshState({ entry, status: denied ? "denied" : "failed", error: userMessage(error) });
     }
   }
+
+  const refreshRequired =
+    authority.refreshRequired || modelQuery.refreshRequired || currentRefresh !== null;
+  const libraryItems = snapshot?.items ?? [];
+  const visibleModels = libraryItems.flatMap((item) => (item.kind === "model" ? [item.value] : []));
+  const visibleMultipartModels = libraryItems.flatMap((item) =>
+    item.kind === "multipart" ? [item.value] : [],
+  );
+  const visibleCollections = snapshot?.collections ?? [];
+  const [collectionCardTarget, setCollectionCardTarget] = useState<{
+    entry: LibraryEntry;
+    id: number;
+    action: CollectionCardAction;
+  } | null>(null);
+  const canManageCollectionCards = auth.isAuthenticated && !authority.authorizationChanged;
+  function canManageCard(collection: CollectionRead, action: CollectionCardAction) {
+    return (
+      canManageCollectionCards &&
+      (!!user?.is_superuser ||
+        collection.effective_role === "admin" ||
+        (action === "cover" && collection.effective_role === "edit"))
+    );
+  }
+  const managedCollection =
+    collectionCardTarget?.entry === entry
+      ? visibleCollections.find(
+          (collection) =>
+            collection.id === collectionCardTarget.id &&
+            canManageCard(collection, collectionCardTarget.action),
+        )
+      : undefined;
+  const breadcrumbs = snapshot?.breadcrumbs ?? [];
+  const selectedName = snapshot?.collection?.name ?? null;
+  const canRenameCollection =
+    auth.isAuthenticated &&
+    displayedCollection !== null &&
+    displayedCollection.path === selectedCollection &&
+    (!!user?.is_superuser || displayedCollection.effective_role === "admin");
+  const [collectionRename, setCollectionRename] = useState<{
+    entry: LibraryEntry;
+    collection: CollectionNodeRead;
+  } | null>(null);
+  const [collectionRenameName, setCollectionRenameName] = useState("");
+  const [collectionRenameBusy, setCollectionRenameBusy] = useState(false);
+  const renameLifetime = useRef(0);
+  useLayoutEffect(
+    () => () => {
+      renameLifetime.current += 1;
+    },
+    [entry, canRenameCollection],
+  );
+  if (
+    collectionRename !== null &&
+    (collectionRename.entry !== entry ||
+      !canRenameCollection ||
+      entry.session !== getSessionVersion())
+  ) {
+    setCollectionRename(null);
+    setCollectionRenameName("");
+    setCollectionRenameBusy(false);
+  }
+
+  const openCollectionRename = useCallback(() => {
+    if (!canRenameCollection || !displayedCollection || collectionRenameBusy || collectionRename) {
+      return;
+    }
+    setCollectionRename({ entry, collection: displayedCollection });
+    setCollectionRenameName(displayedCollection.name);
+    setCollectionRenameBusy(false);
+  }, [
+    canRenameCollection,
+    displayedCollection,
+    collectionRenameBusy,
+    collectionRename,
+    entry,
+    setCollectionRename,
+    setCollectionRenameName,
+  ]);
+  useEffect(() => {
+    function consumePendingRename() {
+      if (!canRenameCollection || !displayedCollection || collectionRenameBusy || collectionRename)
+        return;
+      if (
+        pendingCollectionRename()?.path === displayedCollection.path &&
+        consumeCollectionRename(displayedCollection.path)
+      )
+        openCollectionRename();
+    }
+    function renameRequested(event: Event) {
+      if (!(event instanceof CustomEvent) || event.detail !== displayedCollection?.path) return;
+      if (pendingCollectionRename()) consumePendingRename();
+      else openCollectionRename();
+    }
+    consumePendingRename();
+    window.addEventListener("printstash:rename-collection", renameRequested);
+    return () => window.removeEventListener("printstash:rename-collection", renameRequested);
+  }, [
+    canRenameCollection,
+    displayedCollection,
+    collectionRenameBusy,
+    collectionRename,
+    openCollectionRename,
+  ]);
+
+  async function saveCollectionRename() {
+    const target = collectionRename;
+    const name = collectionRenameName.trim();
+    if (!target || !name || collectionRenameBusy || !canRenameCollection) return;
+    const session = getSessionVersion();
+    const lifetime = renameLifetime.current;
+    const isCurrent = () => session === getSessionVersion() && renameLifetime.current === lifetime;
+    setCollectionRenameBusy(true);
+    try {
+      const updated = await renameCollection(target.collection.id, name);
+      requireSessionVersion(session);
+      if (!isCurrent()) return;
+      setCollectionRename(null);
+      toast.success(uiText("collection.renameSuccess", { count: 1 }));
+      if (updated.path === selectedCollection) void refresh();
+      else {
+        const params = new URLSearchParams(searchParams.toString());
+        params.set("c", updated.path);
+        params.set("cid", String(updated.id));
+        router.replace(`/?${params}`);
+      }
+    } catch (error) {
+      if (isCurrent()) toast.error(error);
+    } finally {
+      if (isCurrent()) setCollectionRenameBusy(false);
+    }
+  }
+  const modelReadError = modelQuery.refreshRequired ? null : modelQuery.error?.message;
+  const error =
+    (currentRefresh?.status === "failed" || currentRefresh?.status === "denied"
+      ? currentRefresh.error
+      : null) ??
+    modelReadError ??
+    (selectedCollection !== null ? selectedLookup.error?.message : null) ??
+    folderPages.error?.message ??
+    null;
+  const loading = snapshot === null && !browseReady && error === null;
+  const refreshing =
+    currentRefresh?.status === "pending" ||
+    (!loading &&
+      !error &&
+      !modelQuery.refreshRequired &&
+      (!browseReady || (modelQuery.isFetching && !modelQuery.isFetchingNextPage)));
+  const loadingMore = modelQuery.isFetchingNextPage || !browseReady;
+  const hasMore = snapshot?.hasMore ?? false;
+  const modelsPending =
+    !loading &&
+    error === null &&
+    !browseReady &&
+    !favoritesOnly &&
+    (snapshot?.items.length ?? 0) === 0;
+
+  const selectionEntry = useRef<LibraryEntry | null>(entry);
+  useLayoutEffect(() => {
+    selectionEntry.current = entry;
+    return () => {
+      selectionEntry.current = null;
+    };
+  }, [entry]);
+  const multipartSelectionIdentity = JSON.stringify([
+    libraryView,
+    selectedCollection,
+    selectedCollectionId,
+    docView,
+  ]);
+  const [multipartSelectionScope, setMultipartSelectionScope] = useState(
+    multipartSelectionIdentity,
+  );
+  if (multipartSelectionScope !== multipartSelectionIdentity) {
+    setMultipartSelectionScope(multipartSelectionIdentity);
+    if (selectedMultipartRows.size > 0) setSelectedMultipartRows(new Map());
+  }
+  // Selected folders are kept as the rows they were picked from: they may leave
+  // the view (another folder opened) and still need their names and paths.
+  const [selectedCollectionRows, setSelectedCollectionRows] = useState<
+    Map<number, CollectionNodeRead>
+  >(new Map());
+  const [keyboardSelection, setKeyboardSelection] = useState(false);
+  const selectMode =
+    keyboardSelection ||
+    selectedIds.size > 0 ||
+    selectedCollectionRows.size > 0 ||
+    selectedMultipartRows.size > 0;
+
+  // What turned up since this view was last read eases in once; everything
+  // already on screen keeps its place. A different folder, filter or sort
+  // starts a new reading: its results settle in together instead.
+  const shownKeys = entryKeys(visibleCollections, libraryItems);
+  const displayedHref = snapshot?.entry.href ?? null;
+  const [arrival, setArrival] = useState<{
+    href: string | null;
+    keys: ReadonlySet<string>;
+    arriving: ReadonlySet<string> | null;
+  }>({ href: displayedHref, keys: new Set(shownKeys), arriving: null });
+  if (displayedHref !== null) {
+    if (arrival.href !== displayedHref) {
+      setArrival({ href: displayedHref, keys: new Set(shownKeys), arriving: null });
+    } else if (
+      shownKeys.length !== arrival.keys.size ||
+      shownKeys.some((key) => !arrival.keys.has(key))
+    ) {
+      const arriving = arrivingKeys(arrival.keys, shownKeys);
+      setArrival({
+        href: displayedHref,
+        keys: new Set(shownKeys),
+        arriving: arriving.size > 0 ? arriving : null,
+      });
+    }
+  }
+  // Only for the arrival itself: a card that later remounts (scrolled back
+  // into view, or a reflowed row) keeps its place.
+  const arriving = useEntranceWindow(arrival, arrival.arriving, DURATION.fast) ?? NO_ARRIVALS;
+
+  // Lists reveal together; grid cards reveal on their actual mount or destination
+  // change, so virtual rows cannot consume the entrance before showing content.
+  const modelsContent = useRef<HTMLDivElement>(null);
+  const libraryReveal = useContentReveal(`${snapshot?.entry.href ?? ""}:${viewMode}`, {
+    enabled: snapshot !== null && docView === "models" && viewMode === "list",
+    animateOnEnable: true,
+  });
+
+  useEffect(() => {
+    if (browseReady) settleStartup("cards", "ready");
+    else if (error !== null) settleStartup("cards", "failed");
+  }, [browseReady, error, settleStartup]);
+  const startupContent = useRef<HTMLElement>(null);
+  const listContent = useRef<HTMLDivElement>(null);
+  const readingRenderers = useRef(new Map<string, LibraryReadingRenderer>());
+  const reading = useLibraryReadingPosition(
+    snapshot?.entry,
+    viewMode,
+    startupContent,
+    listContent,
+    snapshot !== null && docView === "models" && !authority.authorizationChanged,
+    {
+      ready: browseReady,
+      models: {
+        count: snapshot?.modelPages ?? 0,
+        more: modelQuery.hasNextPage ?? false,
+        pending: modelQuery.isFetching,
+        failed:
+          modelQuery.isError &&
+          !modelQuery.refreshRequired &&
+          currentRefresh?.status !== "pending" &&
+          currentRefresh?.status !== "stale",
+        next: () => void modelQuery.loadMore(),
+      },
+      folders: {
+        count: snapshot?.folderPages ?? 0,
+        more: foldersHidden ? false : (folderPages.hasNextPage ?? false),
+        pending: folderPages.isFetching,
+        failed: folderPages.isError,
+        next: () => void folderPages.fetchNextPage({ cancelRefetch: false }),
+      },
+    },
+    readingRenderers,
+  );
+  useStartupThumbnails(startupContent, browseReady, libraryItems.length > 0);
+  const thumbnails = useLibraryThumbnails(
+    visibleModels,
+    browseReady ? (modelQuery.data?.pages[0] ?? null) : null,
+    onAuthorityRetired,
+  );
+  useThumbnailArrivals(visibleModels, thumbnails.refresh);
+
+  function loadMore() {
+    if (hasMore && !loadingMore && !refreshRequired && !authority.authorizationChanged)
+      void modelQuery.loadMore();
+  }
+  // Reconcile changed pages in the background, including stale continuations.
+  // Reading-position recovery reloads only the previously visited pages and
+  // restores the visible anchor. Selection postpones reordering until it ends.
+  const settlesByItself =
+    !selectMode &&
+    !authority.authorizationChanged &&
+    ((currentRefresh === null && (authority.refreshRequired || modelQuery.refreshRequired)) ||
+      currentRefresh?.status === "stale");
+  const lastSettled = useRef(0);
+  // The timer must survive re-renders, so it reads the latest refresh through a
+  // ref instead of depending on an object that is new on every render.
+  const settleNow = useRef<() => void>(() => undefined);
+  useLayoutEffect(() => {
+    settleNow.current = () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.outliner });
+      void (snapshot?.entry === entry ? reading.refresh(refresh) : refresh());
+    };
+  });
+  useEffect(() => {
+    if (!settlesByItself) return;
+    const wait = Math.max(800, lastSettled.current + 4000 - Date.now());
+    const timer = setTimeout(() => {
+      lastSettled.current = Date.now();
+      settleNow.current();
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [settlesByItself]);
+
+  useLayoutEffect(() => {
+    refreshForAuthority.current = () => reading.refresh(refresh);
+    return () => {
+      refreshForAuthority.current = null;
+    };
+  });
+  const modelMoves = useModelMoves(entry, refresh);
 
   // Multi-select for batch actions. The selected set is view-independent so it
   // survives load-more and search; backend per-model RBAC makes cross-collection
   // selections safe. We clear it when navigating folders (see below) so a hidden
   // off-screen selection doesn't linger.
 
-  function toggleStructuredFilters() {
+  function toggleStructuredFilters(event: React.MouseEvent<HTMLButtonElement>) {
+    filtersOpener.current = event.currentTarget;
     startup.request("filters");
-    setFiltersExpanded(
-      (current) => !(current ?? activeFilterItems.length > Number(!!query.trim())),
-    );
+    setFiltersExpanded((current) => !current);
   }
 
   const [batchBusy, setBatchBusy] = useState(false);
@@ -1384,6 +1866,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const lastSelectedModelId = useRef<number | null>(null);
   const selectedModelSnapshot = useRef<Map<number, ModelListItem>>(new Map());
   const sortedModels = visibleModels;
+  const [multipartTagTarget, setMultipartTagTarget] = useState<{
+    item: MultipartModelListItem;
+    intent: number;
+  } | null>(null);
+  const openMultipartTagEditor = useCallback(
+    (item: MultipartModelListItem) => {
+      requestStartup("filters");
+      setMultipartTagTarget((previous) => ({ item, intent: (previous?.intent ?? 0) + 1 }));
+    },
+    [requestStartup],
+  );
   const openTagEditor = useCallback(
     (model: ModelListItem) => {
       setTagTarget(model);
@@ -1397,9 +1890,44 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   useLayoutEffect(() => {
     selectionOrder.current = sortedModels;
   }, [sortedModels]);
-  const toggleSelect = useCallback((id: number, range = false) => {
+  const groupedModels = useRef(new Map<number, ModelListItem[]>());
+  const recordGroupedModels = useCallback((id: number, models: ModelListItem[] | null) => {
+    if (models) groupedModels.current.set(id, models);
+    else groupedModels.current.delete(id);
+  }, []);
+  function toggleSelect(id: number, range = false) {
     // Capture this gesture once; React may replay the state updater.
-    const sortedModels = selectionOrder.current;
+    const sortedModels = Array.from(
+      new Map(
+        [...selectionOrder.current, ...Array.from(groupedModels.current.values()).flat()].map(
+          (model) => [model.id, model],
+        ),
+      ).values(),
+    );
+    const clicked = sortedModels.find((model) => model.id === id);
+    const selection = clicked
+      ? modelSelection(clicked, selectedIds, selectedCollectionRows.values())
+      : ({ kind: "none" } as const);
+    if (selection.kind === "implied") {
+      lastSelectedModelId.current = id;
+      const remaining = new Map(selectedCollectionRows);
+      for (const collection of selection.collections) remaining.delete(collection.id);
+      setSelectedCollectionRows(remaining);
+      const explicit = new Set(selectedIds);
+      explicit.delete(id);
+      for (const model of sortedModels) {
+        if (
+          model.id !== id &&
+          modelSelection(model, selectedIds, selection.collections).kind === "implied" &&
+          modelSelection(model, selectedIds, remaining.values()).kind !== "implied"
+        ) {
+          explicit.add(model.id);
+          selectedModelSnapshot.current.set(model.id, model);
+        }
+      }
+      setSelectedIds(explicit);
+      return;
+    }
     const anchor = lastSelectedModelId.current;
     const selectingRange = range && anchor !== null;
     const from = selectingRange ? sortedModels.findIndex((model) => model.id === anchor) : -1;
@@ -1407,17 +1935,21 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const rangeModels =
       from >= 0 && to >= 0 ? sortedModels.slice(Math.min(from, to), Math.max(from, to) + 1) : [];
     lastSelectedModelId.current = id;
-    for (const model of rangeModels) selectedModelSnapshot.current.set(model.id, model);
-    const model = sortedModels.find((item) => item.id === id);
-    if (model) selectedModelSnapshot.current.set(id, model);
+    const explicitRange = rangeModels.filter(
+      (model) =>
+        modelSelection(model, selectedIds, selectedCollectionRows.values()).kind !== "implied",
+    );
+    for (const model of explicitRange) selectedModelSnapshot.current.set(model.id, model);
+    if (clicked) selectedModelSnapshot.current.set(id, clicked);
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (selectingRange) rangeModels.forEach((model) => next.add(model.id));
+      if (selectingRange && rangeModels.length > 0)
+        explicitRange.forEach((model) => next.add(model.id));
       else if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }, []);
+  }
 
   const lastSelectedMultipartId = useRef<number | null>(null);
   function toggleMultipartSelect(id: number, range = false) {
@@ -1440,6 +1972,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function toggleCollectionSelect(id: number) {
     const row = visibleCollections.find((collection) => collection.id === id);
+    if (row && !selectedCollectionRows.has(id)) {
+      const explicit = new Set(selectedIds);
+      for (const modelId of selectedIds) {
+        const model = selectedModelSnapshot.current.get(modelId);
+        if (model && modelSelection(model, selectedIds, [row]).kind === "implied") {
+          explicit.delete(modelId);
+        }
+      }
+      if (explicit.size !== selectedIds.size) setSelectedIds(explicit);
+    }
     setSelectedCollectionRows((prev) => {
       const next = new Map(prev);
       if (next.has(id)) next.delete(id);
@@ -1455,11 +1997,19 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setKeyboardSelection(false);
     lastSelectedMultipartId.current = null;
     lastSelectedModelId.current = null;
-  }, []);
+  }, [setSelectedIds, setSelectedMultipartRows, setSelectedCollectionRows, setKeyboardSelection]);
 
   function selectAllVisible() {
     setSelectedMultipartRows(new Map(visibleMultipartModels.map((item) => [item.id, item])));
-    setSelectedIds(new Set(sortedModels.map((m) => m.id)));
+    setSelectedIds(
+      new Set(
+        sortedModels
+          .filter(
+            (model) => modelSelection(model, selectedIds, visibleCollections).kind !== "implied",
+          )
+          .map((model) => model.id),
+      ),
+    );
     selectedModelSnapshot.current = new Map(sortedModels.map((model) => [model.id, model]));
     setSelectedCollectionRows(
       new Map(visibleCollections.map((collection) => [collection.id, collection])),
@@ -1484,7 +2034,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         all.push(...page.items.flatMap((item) => (item.kind === "model" ? [item.model] : [])));
         cursor = page.next_cursor ?? undefined;
       } while (cursor !== undefined);
-      setSelectedIds(new Set(all.map((model) => model.id)));
+      setSelectedIds(
+        new Set(
+          all
+            .filter(
+              (model) =>
+                modelSelection(model, selectedIds, selectedCollectionRows.values()).kind !==
+                "implied",
+            )
+            .map((model) => model.id),
+        ),
+      );
       setSelectedMultipartRows(new Map(multipart.map((item) => [item.id, item])));
       selectedModelSnapshot.current = new Map(all.map((model) => [model.id, model]));
       toast.info(uiText("library.matchingSelected", { count: all.length + multipart.length }));
@@ -1520,24 +2080,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     [selectedCollectionRows],
   );
   const selectionCount =
-    selectedIds.size + selectedCollectionRows.size + selectedMultipartRows.size;
-
-  useEffect(() => {
-    function onShortcut(event: KeyboardEvent) {
-      const typing =
-        event.target instanceof HTMLElement &&
-        event.target.matches("input, textarea, select, [contenteditable=true]");
-      if (event.key === "/" && !typing) {
-        event.preventDefault();
-        document.querySelector<HTMLInputElement>("[data-model-search]")?.focus();
-      } else if (event.key.toLowerCase() === "s" && !typing && auth.isAuthenticated) {
-        event.preventDefault();
-        setKeyboardSelection(true);
-      } else if (event.key === "Escape" && selectMode && !typing) clearSelection();
-    }
-    window.addEventListener("keydown", onShortcut);
-    return () => window.removeEventListener("keydown", onShortcut);
-  }, [auth.isAuthenticated, clearSelection, selectMode]);
+    selectedIdList.length + selectedCollectionRows.size + selectedMultipartRows.size;
+  // First selection loads the tools; retain their owner afterward so clearing
+  // selection can finish the existing exit and dialog lifecycle.
+  const [batchToolsActivated, setBatchToolsActivated] = useState(false);
+  if (selectionCount > 0 && !batchToolsActivated) setBatchToolsActivated(true);
 
   async function runCollectionBatch(
     success: MessageKey,
@@ -1836,9 +2383,345 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     searchParams.has("uploaded_after") ||
     searchParams.has("uploaded_before") ||
     historyKeys.some((key) => searchParams.has(key));
-  const displayCount = libraryItems.length;
+  const browseTotal =
+    unavailableCollection || currentRefresh?.status === "denied" ? undefined : browsePage?.total;
+  const statusFacets = canReusePickerFacets ? facetQuery : statusFacetQuery;
+  const statusCounts =
+    browseTotal !== undefined && !statusFacets.isPlaceholderData ? statusFacets.data : undefined;
+  const allStatusCount = statusFilterActive
+    ? statusCounts?.printed.reduce((total, item) => total + item.count, 0)
+    : browseTotal;
+  const hasMultipartResults =
+    browseTotal !== undefined && orderedItems.some((item) => item.kind === "multipart");
+  const folderHoldsOnlyFolders =
+    !favoritesOnly &&
+    docView === "models" &&
+    browseReady &&
+    !loading &&
+    !includeSubfolders &&
+    visibleCollections.length > 0 &&
+    browseTotal === 0 &&
+    !hasMore &&
+    !hasActiveFilters;
+  const subtreeHasModels = (displayedCollection?.model_count ?? 1) > 0;
+  if (
+    folderHoldsOnlyFolders &&
+    scopeParam !== "here" &&
+    subtreeHasModels &&
+    autoSubtreeFor !== folderScopeKey
+  ) {
+    setAutoSubtreeFor(folderScopeKey);
+  }
+  // The large folder overview remains only for folders whose subtree holds no models yet.
+  const collectionOverview = folderHoldsOnlyFolders && !subtreeHasModels;
+  // Reserve only the initial destination's known children. During navigation
+  // the displayed snapshot owns its geometry until the next one commits. A
+  // disabled root query can still return cached data while a leaf lookup runs.
+  const reservedCollections =
+    !foldersHidden && !collectionOverview && loading
+      ? ((foldersReady ? folderPages.data?.pages[0]?.items.length : undefined) ??
+        destinationCollection?.child_count ??
+        0)
+      : 0;
+  const showScopeToggle =
+    !favoritesOnly &&
+    docView === "models" &&
+    !searchQuery &&
+    (visibleCollections.length > 0 || reservedCollections > 0);
   // Links belong to the displayed result even while another destination loads.
-  const currentLibraryHref = snapshot?.entry.href ?? canonicalLibraryHref;
+  const currentLibraryHref = snapshot?.entry.href ?? destinationHref;
+  const inspectorScope = `${entry.session}:${entry.key}:${currentLibraryHref}`;
+  const [inspectorState, setInspectorState] = useState<{
+    scope: string;
+    intent: InspectorIntent;
+  } | null>(null);
+  const inspectorIntent =
+    inspectorState?.scope === inspectorScope
+      ? inspectorState.intent
+      : libraryInspectorIntents.get(inspectorScope);
+  // A background read retains this entry's displayed snapshot and controls.
+  // Navigation and authorization changes still retire the previous inspector.
+  const inspectorAvailable =
+    snapshot?.entry === entry &&
+    docView === "models" &&
+    !authority.authorizationChanged &&
+    (visibleModels.length > 0 || inspectorIntent?.open === true);
+  const inspectorOpen = inspectorAvailable && !!inspectorIntent?.open;
+  const [preferredInspectorWidth, setPreferredInspectorWidth] = useState(storedInspectorWidth);
+  const chooseInspectorWidth = useCallback((width: number | null) => {
+    setPreferredInspectorWidth(width);
+    try {
+      if (width === null) localStorage.removeItem(INSPECTOR_WIDTH_KEY);
+      else localStorage.setItem(INSPECTOR_WIDTH_KEY, String(width));
+    } catch {
+      // The width remains usable for this session.
+    }
+  }, []);
+  const [inspectorDock, setInspectorDock] = useState<LibraryInspectorDock | null>(null);
+  const receiveInspectorDock = useCallback((dock: LibraryInspectorDock | null) => {
+    setInspectorDock((previous) =>
+      previous?.width === dock?.width &&
+      previous?.paddingOffset === dock?.paddingOffset &&
+      previous?.custom === dock?.custom &&
+      previous?.maxWidth === dock?.maxWidth
+        ? previous
+        : dock,
+    );
+  }, []);
+  const [inspectorMotion, setInspectorMotion] = useState<{
+    open: boolean;
+    locked: { dock: LibraryInspectorDock | null } | null;
+  }>({ open: inspectorOpen, locked: inspectorOpen ? { dock: null } : null });
+  const appliedDock = inspectorMotion.locked ? inspectorMotion.locked.dock : inspectorDock;
+  if (inspectorMotion.open !== inspectorOpen) {
+    // The spring's travel is relative to its width. Hold the current width
+    // through the entrance, exit, or a reversal, then apply the latest fit.
+    setInspectorMotion({ open: inspectorOpen, locked: { dock: appliedDock } });
+  }
+  const settleInspectorDock = useCallback(() => {
+    setInspectorMotion((motion) => (motion.locked ? { ...motion, locked: null } : motion));
+  }, []);
+  const inspectorDockStyle: CSSProperties & {
+    "--library-inspector-width"?: string;
+    "--library-inspector-padding-offset"?: string;
+  } = appliedDock
+    ? {
+        "--library-inspector-width": `${appliedDock.width}px`,
+        "--library-inspector-padding-offset": `${appliedDock.paddingOffset}px`,
+      }
+    : {};
+  const inspectorKeyboardOpener = useRef<HTMLElement | null>(null);
+  const setInspector = useCallback(
+    (intent: InspectorIntent) => {
+      libraryInspectorIntents.set(inspectorScope, intent);
+      while (libraryInspectorIntents.size > 20)
+        libraryInspectorIntents.delete(libraryInspectorIntents.keys().next().value!);
+      setInspectorState({ scope: inspectorScope, intent });
+    },
+    [inspectorScope],
+  );
+  const inspectModel = useCallback(
+    (id: number, opener: HTMLElement | null) => {
+      // Capture focus modality before the drawer moves focus to its title.
+      inspectorKeyboardOpener.current = opener?.matches(":focus-visible") ? opener : null;
+      setInspector({ id, open: true });
+    },
+    [setInspector],
+  );
+  const historyTreeModelId = useLocation({ select: (location) => location.state.treeModelId });
+  const [handledTreeEntry, setHandledTreeEntry] = useState<string | null>(null);
+  const [treeReveal, setTreeReveal] = useState<{
+    id: number;
+    entryKey: string;
+    opener: HTMLElement;
+  } | null>(null);
+  const [treeFocus, setTreeFocus] = useState<{ id: number; entryKey: string } | null>(null);
+  function openTreeModel(model: OutlinerModelRead, opener: HTMLElement) {
+    if (
+      docView === "models" &&
+      libraryView === "all" &&
+      !searchQuery &&
+      !narrowsLibrary(baseFilters) &&
+      model.collection_id === selectedCollectionId &&
+      model.collection === selectedCollection
+    ) {
+      setTreeReveal({ id: model.id, entryKey: entry.key, opener });
+      return;
+    }
+    router.push(treeModelFolderHref(model, sortKey), { state: { treeModelId: model.id } });
+  }
+  const localTreeReveal = treeReveal?.entryKey === entry.key ? treeReveal : null;
+  const revealModelId =
+    localTreeReveal?.id ??
+    (handledTreeEntry !== entry.key && Number.isSafeInteger(historyTreeModelId)
+      ? historyTreeModelId
+      : undefined);
+  useEffect(() => {
+    if (revealModelId === undefined || !browseReady || snapshot?.entry !== entry) return;
+
+    function finish() {
+      setTreeReveal(null);
+      setHandledTreeEntry(entry.key);
+    }
+    if (!visibleModels.some(({ id }) => id === revealModelId)) {
+      if (hasMore && !modelQuery.isFetching && !modelQuery.isFetchNextPageError) {
+        void modelQuery.loadMore();
+      } else if (!hasMore || modelQuery.isFetchNextPageError) {
+        const frame = requestAnimationFrame(finish);
+        return () => cancelAnimationFrame(frame);
+      }
+      return;
+    }
+    const id = revealModelId;
+    const key = `/models/${id}`;
+    const element = startupContent.current;
+    if (!element) return;
+    let frame = 0;
+    function reveal() {
+      const anchor = element?.querySelector<HTMLElement>(libraryReadingSelector(key));
+      const card = anchor?.closest<HTMLElement>("[data-library-key]") ?? anchor;
+      // A mounted card can open while the virtual list is still measuring.
+      if (!card && readingRenderers.current.get("models")?.reveal(key) === "pending") {
+        frame = requestAnimationFrame(reveal);
+        return;
+      }
+      if (card) {
+        card.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+        inspectModel(id, localTreeReveal?.opener ?? anchor ?? null);
+        setTreeFocus({ id, entryKey: entry.key });
+      }
+      finish();
+    }
+    frame = requestAnimationFrame(reveal);
+    return () => cancelAnimationFrame(frame);
+  }, [
+    browseReady,
+    entry,
+    hasMore,
+    inspectModel,
+    modelQuery,
+    revealModelId,
+    snapshot,
+    localTreeReveal,
+    visibleModels,
+  ]);
+
+  // The dock can change the grid's column count and remount the targeted row.
+  // Re-center and highlight the same card once its final geometry is available.
+  useEffect(() => {
+    if (
+      treeFocus?.entryKey !== entry.key ||
+      treeFocus?.id !== inspectorIntent?.id ||
+      !inspectorOpen ||
+      inspectorMotion.locked !== null
+    )
+      return;
+    const key = `/models/${treeFocus.id}`;
+    let frame = 0;
+    let highlightTimer: number | undefined;
+    let highlighted: HTMLElement | undefined;
+    function center() {
+      const anchor = startupContent.current?.querySelector<HTMLElement>(
+        libraryReadingSelector(key),
+      );
+      const card = anchor?.closest<HTMLElement>("[data-library-key]") ?? anchor;
+      if (!card) {
+        if (readingRenderers.current.get("models")?.reveal(key) === "pending") {
+          frame = requestAnimationFrame(center);
+        }
+        return;
+      }
+      card.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+      card.classList.add("library-tree-spotlight");
+      highlighted = card;
+      highlightTimer = window.setTimeout(() => setTreeFocus(null), DURATION.slow);
+    }
+    frame = requestAnimationFrame(center);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(highlightTimer);
+      highlighted?.classList.remove("library-tree-spotlight");
+    };
+  }, [entry.key, inspectorIntent?.id, inspectorMotion.locked, inspectorOpen, treeFocus]);
+
+  const closeInspector = useCallback(() => {
+    if (inspectorIntent) setInspector({ ...inspectorIntent, open: false });
+    requestAnimationFrame(() => {
+      const opener = inspectorKeyboardOpener.current;
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+      else startupContent.current?.focus({ preventScroll: true });
+    });
+  }, [inspectorIntent, setInspector]);
+  const toggleInspector = useCallback(() => {
+    if (!inspectorAvailable) return;
+    if (inspectorOpen) closeInspector();
+    else {
+      const id = inspectorIntent?.id ?? visibleModels[0]?.id;
+      if (id !== undefined) {
+        const opener = document.activeElement;
+        inspectModel(id, opener instanceof HTMLElement ? opener : null);
+      }
+    }
+  }, [
+    inspectorAvailable,
+    inspectorOpen,
+    inspectorIntent,
+    visibleModels,
+    closeInspector,
+    inspectModel,
+  ]);
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("printstash:library-inspector-state", {
+        detail: { available: inspectorAvailable, open: inspectorOpen },
+      }),
+    );
+  }, [inspectorAvailable, inspectorOpen]);
+  useEffect(() => {
+    window.addEventListener("printstash:toggle-library-inspector", toggleInspector);
+    return () => window.removeEventListener("printstash:toggle-library-inspector", toggleInspector);
+  }, [toggleInspector]);
+  useEffect(
+    () => () => {
+      window.dispatchEvent(
+        new CustomEvent("printstash:library-inspector-state", {
+          detail: { available: false, open: false },
+        }),
+      );
+    },
+    [],
+  );
+  useEffect(() => {
+    function onShortcut(event: KeyboardEvent) {
+      if (
+        event.repeat ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.getModifierState("AltGraph") ||
+        modalOverlayOpen()
+      )
+        return;
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.altKey &&
+        !event.shiftKey &&
+        event.code === "KeyB"
+      ) {
+        if (inspectorAvailable) {
+          event.preventDefault();
+          toggleInspector();
+        }
+        return;
+      }
+      if (keyboardOverlayOpen() || isTypingTarget(event.target)) return;
+      if (
+        event.key.toLowerCase() === "s" &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        auth.isAuthenticated
+      ) {
+        event.preventDefault();
+        setKeyboardSelection(true);
+      } else if (event.key === "Escape" && inspectorOpen) {
+        event.preventDefault();
+        closeInspector();
+      } else if (event.key === "Escape" && selectMode) {
+        event.preventDefault();
+        clearSelection();
+      }
+    }
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  }, [
+    auth.isAuthenticated,
+    clearSelection,
+    selectMode,
+    inspectorAvailable,
+    inspectorOpen,
+    toggleInspector,
+    closeInspector,
+  ]);
   // While searching, the grid is a global result list, not a folder view: show
   // only collections whose name matches the query (anywhere in the tree), to
   // mirror the matching models. Without a query we fall back to the normal
@@ -1857,7 +2740,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       const options = libraryBrowseOptions({
         ...folderModelFilters(path),
         view: libraryView,
-        limit: PAGE_SIZE,
+        limit: pageSize ?? UNMEASURED_PAGE_SIZE,
         sort: sortKey,
       });
       const cancel = () => {
@@ -1873,7 +2756,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     startup.complete && browseReady && !refreshing,
   );
   const warmModel = useModelOpenIntent(startup.complete && browseReady && !refreshing);
-  useDialogPreload(startup.complete && browseReady);
   const canAdminSelectedCollection =
     user?.is_superuser || selectedCollectionRow?.effective_role === "admin";
   // Even administrators must wait for the selected parent's identity before creating.
@@ -1884,7 +2766,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     enabled: auth.isAuthenticated && !user?.is_superuser,
   });
   const hasWritableCollection =
-    !!user?.is_superuser || (writableProbe.data?.pages[0]?.items.length ?? 0) > 0;
+    !!user?.is_superuser ||
+    (!writableProbe.isError && (writableProbe.data?.pages[0]?.items.length ?? 0) > 0);
   const canUploadToVault =
     auth.isAuthenticated &&
     (user?.is_superuser || canWriteCollection(selectedCollectionRow) || hasWritableCollection);
@@ -1894,6 +2777,55 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       : !!(user?.is_superuser || canWriteCollection(selectedCollectionRow));
   const uploadDefaultCollection =
     user?.is_superuser || canWriteCollection(selectedCollectionRow) ? selectedCollection : null;
+  const showUpload = uploadOpen || (uploadRequested && canUploadToVault);
+  useEffect(
+    () =>
+      subscribeUploadRequests(() => {
+        setDropPreload(null);
+        setDropCollection(null);
+        setUploadOpen(true);
+      }),
+    [],
+  );
+  // Warm the dialog's code once the Library is usable, so the first Upload
+  // does not wait for its download.
+  useEffect(() => {
+    if (!browseReady || !canUploadToVault) return;
+    const id = window.setTimeout(() => void loadUploadModal(), 1500);
+    return () => window.clearTimeout(id);
+  }, [browseReady, canUploadToVault]);
+  function closeUpload() {
+    setUploadOpen(false);
+    if (uploadRequested) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("upload");
+      router.replace(params.size ? `/?${params}` : "/");
+    }
+  }
+  useEffect(() => {
+    if (
+      !uploadRequested ||
+      !auth.isAuthenticated ||
+      canUploadToVault ||
+      (!user?.is_superuser && writableProbe.isPending && !canWriteCollection(selectedCollectionRow))
+    )
+      return;
+    if (writableProbe.isError) toast.error(writableProbe.error);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("upload");
+    router.replace(params.size ? `/?${params}` : "/");
+  }, [
+    uploadRequested,
+    auth.isAuthenticated,
+    user?.is_superuser,
+    writableProbe.isPending,
+    writableProbe.isError,
+    writableProbe.error,
+    selectedCollectionRow,
+    canUploadToVault,
+    searchParams,
+    router,
+  ]);
 
   async function handleCreateCollection() {
     const name = newCollectionName.trim();
@@ -1955,12 +2887,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
 
   async function saveCollectionTags(collection: CollectionRead, nextTags: string[]) {
+    const session = getSessionVersion();
     try {
       // The write invalidates every loaded collection query (request.ts).
-      await replaceCollectionTags(collection.id, nextTags);
+      const confirmed = await replaceCollectionTags(collection.id, nextTags);
       toast.success(uiText("Tags updated for {value1}", { value1: String(collection.name) }));
+      return confirmed.tags;
     } catch (error) {
-      toast.error(error);
+      if (session === getSessionVersion()) toast.error(error);
       throw error;
     }
   }
@@ -2006,13 +2940,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     router.replace(qs ? `/?${qs}` : "/");
   }
 
-  function clearAllFilters() {
+  function clearAllFilters(preserveLocation = false) {
     setSelectedIds(new Set());
     setSelectedMultipartRows(new Map());
     const params = new URLSearchParams(searchParams.toString());
-    params.delete("q");
-    params.delete("c");
-    params.delete("cid");
+    if (!preserveLocation) {
+      params.delete("q");
+      params.delete("c");
+      params.delete("cid");
+    }
     params.delete("tag");
     params.delete("printer_id");
     params.delete("printer_presence");
@@ -2089,6 +3025,57 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     }
     return items;
   })();
+  const emptyFavorites =
+    favoritesOnly && selectedCollection === null && activeFilterItems.length === 1;
+
+  const savedViewControl = (rail = savedViewsHost !== null) => (
+    <SavedViewSelector
+      key={savedViewsOwner.session}
+      railTrigger={rail}
+      readState={savedViewReadState}
+      views={savedViews}
+      activeId={activeSavedViewId}
+      modified={savedViewModified}
+      onSelect={applySavedView}
+      onCreate={openSaveView}
+      onUpdate={(view) =>
+        manageSavedView(
+          {
+            kind: "update",
+            id: view.id,
+            payload: { filters: currentFilters },
+          },
+          "savedView.updateSuccess",
+        )
+      }
+      onRename={(view, name) =>
+        manageSavedView(
+          { kind: "update", id: view.id, payload: { name } },
+          "savedView.renameSuccess",
+        )
+      }
+      onDuplicate={(view) =>
+        manageSavedView(
+          {
+            kind: "create",
+            name: duplicateViewName(view.name),
+            filters: effectiveLibraryView(view.filters, canViewPrinters),
+          },
+          "savedView.duplicateSuccess",
+        )
+      }
+      onDelete={(view) =>
+        manageSavedView({ kind: "delete", id: view.id }, "savedView.deleteSuccess")
+      }
+      align="start"
+      triggerClassName={
+        rail
+          ? "h-10 w-10 max-w-none justify-center p-0 text-muted-foreground hover:text-foreground"
+          : "h-8 w-full max-w-none justify-start px-3 text-sm"
+      }
+      triggerVariant="ghost"
+    />
+  );
 
   if (authority.authorizationChanged || thumbnails.authorizationChanged)
     return (
@@ -2097,35 +3084,439 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       </div>
     );
 
-  const libraryActions = (
-    <div
-      role="group"
-      aria-label={t("vault.libraryTools")}
-      className="order-3 flex basis-full flex-wrap items-center gap-2 @3xl/library:order-2 @3xl/library:basis-auto"
+  const libraryActions = auth.isAuthenticated ? (
+    <div role="group" aria-label={t("vault.libraryTools")} className="flex shrink-0 items-center">
+      <Button
+        variant="ghost"
+        size="xs"
+        className="h-8 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
+        aria-pressed={selectMode}
+        aria-label={uiText("Select")}
+        onClick={() => (selectMode ? clearSelection() : setKeyboardSelection(true))}
+      >
+        <ListChecks className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        <span className="library-toolbar-label">{uiText("Select")}</span>
+      </Button>
+    </div>
+  ) : null;
+
+  // Creating a collection acts on the folder, not on the models being filtered.
+  const newCollectionButton = (
+    <Button
+      variant="outline"
+      size="xs"
+      className="shrink-0 @3xl/library:h-8"
+      disabled={!canCreateCollection}
+      title={
+        canAdminSelectedCollection
+          ? uiText("Create a collection")
+          : uiText("Admin access required for this collection")
+      }
+      onClick={handleOpenCreateCollection}
     >
-      <Button variant="outline" size="xs" className="h-10 @3xl/library:h-8" asChild>
-        <Link href="/library/similar">
-          <ScanSearch className="h-4 w-4 shrink-0" aria-hidden />
+      <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      {uiText("New collection")}
+    </Button>
+  );
+
+  const libraryMoreActions = (
+    <>
+      <Button variant="ghost" role="menuitem" className="w-full justify-start" asChild>
+        <Link href="/library/similar" onClick={() => setMoreOpen(false)}>
+          <ScanSearch className="h-4 w-4" aria-hidden />
           {t("similarity.title")}
         </Link>
       </Button>
       <Button
-        variant="outline"
-        size="xs"
-        className="h-10 @3xl/library:h-8"
-        disabled={!canCreateCollection}
-        title={
-          canAdminSelectedCollection
-            ? uiText("Create a collection")
-            : uiText("Admin access required for this collection")
-        }
-        onClick={handleOpenCreateCollection}
+        variant="ghost"
+        role="menuitem"
+        className="w-full justify-start"
+        onClick={() => {
+          setMoreOpen(false);
+          const params = new URLSearchParams(searchParams.toString());
+          params.set("v", "docs");
+          router.replace(`/?${params}`);
+        }}
       >
-        <Plus className="h-4 w-4 shrink-0" aria-hidden />
-        {uiText("New collection")}
+        {t("vault.documents")}
       </Button>
-    </div>
+      {docView === "models" && (
+        <Button
+          variant="ghost"
+          role="menuitem"
+          className="w-full justify-start"
+          disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
+          onClick={() => {
+            setMoreOpen(false);
+            setMultipartCreateOpen(true);
+          }}
+        >
+          <Plus className="h-4 w-4" aria-hidden />
+          {t("multipart.new")}
+        </Button>
+      )}
+      {auth.isAuthenticated && (
+        <>
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={favoritesOnly}
+            onClick={() => {
+              toggleFavorites();
+              setMoreOpen(false);
+            }}
+            className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${favoritesOnly ? "bg-accent text-accent-foreground" : ""}`}
+          >
+            <Star className={`h-4 w-4 ${favoritesOnly ? "fill-current" : ""}`} />
+            <span className="flex-1">{uiText("Favorites")}</span>
+            {favoritesOnly && <Check className="h-3.5 w-3.5" />}
+          </button>
+          <SavedViewSelector
+            key={savedViewsOwner.session}
+            readState={savedViewReadState}
+            views={savedViews}
+            activeId={activeSavedViewId}
+            modified={savedViewModified}
+            onSelect={(view) => {
+              applySavedView(view);
+              setMoreOpen(false);
+            }}
+            onCreate={() => {
+              setMoreOpen(false);
+              openSaveView();
+            }}
+            onUpdate={(view) =>
+              manageSavedView(
+                {
+                  kind: "update",
+                  id: view.id,
+                  payload: { filters: currentFilters },
+                },
+                "savedView.updateSuccess",
+              )
+            }
+            onRename={(view, name) =>
+              manageSavedView(
+                { kind: "update", id: view.id, payload: { name } },
+                "savedView.renameSuccess",
+              )
+            }
+            onDuplicate={(view) =>
+              manageSavedView(
+                {
+                  kind: "create",
+                  name: duplicateViewName(view.name),
+                  filters: effectiveLibraryView(view.filters, canViewPrinters),
+                },
+                "savedView.duplicateSuccess",
+              )
+            }
+            onDelete={(view) =>
+              manageSavedView({ kind: "delete", id: view.id }, "savedView.deleteSuccess")
+            }
+            triggerClassName="max-w-none w-full justify-start px-2.5 py-2 text-sm"
+            triggerRole="menuitem"
+            triggerSize="sm"
+            triggerVariant="ghost"
+          />
+        </>
+      )}
+      <DisplayMenu
+        open={displayOpen}
+        onOpenChange={setDisplayOpen}
+        viewMode={viewMode}
+        compact={compact}
+        onSelectMode={selectViewMode}
+        onSelectDensity={selectDensity}
+        labelFor={ui}
+        triggerSize="sm"
+        triggerVariant="ghost"
+        triggerRole="menuitem"
+        triggerClassName="w-full justify-start"
+        onSelectComplete={() => setMoreOpen(false)}
+      />
+    </>
   );
+
+  function filterControl(className: string) {
+    return (
+      <DropdownMenu
+        open={!!filtersExpanded}
+        onOpenChange={(open) => setFiltersExpanded(open)}
+        portal
+        align="start"
+        role="dialog"
+        aria-label={uiText("Filter Models")}
+        className={className}
+        contentClassName="w-[352px] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg"
+        trigger={
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            data-menu-trigger
+            onClick={toggleStructuredFilters}
+            aria-label={uiText("Filters")}
+            aria-haspopup="dialog"
+            aria-expanded={!!filtersExpanded}
+            aria-controls="library-filter-panel"
+            className="h-8 w-full gap-2 aria-expanded:bg-accent aria-expanded:text-accent-foreground"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span className="library-toolbar-filter-label">{uiText("Filters")}</span>
+            {activeFilterItems.length > Number(!!query.trim()) && (
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {activeFilterItems.length - Number(!!query.trim())}
+              </span>
+            )}
+          </Button>
+        }
+      >
+        <LibraryFilterPicker
+          filters={currentFilters}
+          facets={facetQuery.data}
+          tags={tags}
+          printers={printers}
+          canViewPrinters={canViewPrinters}
+          loading={facetQuery.isLoading || tagsQuery.isLoading}
+          error={facetQuery.isError || tagsQuery.isError}
+          onRetry={() => {
+            void facetQuery.refetch();
+            void tagsQuery.refetch();
+          }}
+          onChange={setStructuredFilter}
+          onReset={() => clearAllFilters(true)}
+          onClose={() => {
+            setFiltersExpanded(false);
+            filtersOpener.current?.focus();
+          }}
+        />
+      </DropdownMenu>
+    );
+  }
+
+  const libraryToolbar = collectionOverview ? (
+    <div className="collection-overview-toolbar flex flex-wrap items-center justify-between gap-4">
+      <div className="min-w-0">
+        <h2 className="text-base font-semibold">{uiText("library.collectionOverview.title")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {uiText("library.collectionOverview.help")}
+        </p>
+      </div>
+      <div className="collection-overview-actions flex flex-wrap items-center gap-2">
+        {filterControl("shrink-0")}
+        {libraryActions}
+        <DropdownMenu
+          open={moreOpen}
+          onOpenChange={setMoreOpen}
+          align="end"
+          portal
+          trigger={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="h-9 w-9"
+              aria-label={t("nav.more")}
+              aria-haspopup="menu"
+              aria-expanded={moreOpen}
+              onClick={(event) => {
+                toolbarMenuOpener.current = event.currentTarget;
+                setMoreOpen(!moreOpen);
+              }}
+            >
+              <MoreHorizontal className="h-4 w-4" aria-hidden />
+            </Button>
+          }
+          contentClassName="w-64 border border-border bg-popover p-1 shadow-lg"
+        >
+          {libraryMoreActions}
+        </DropdownMenu>
+      </div>
+    </div>
+  ) : (
+    <DropdownMenu
+      open={moreOpen}
+      returnFocusRef={toolbarMenuOpener}
+      onOpenChange={setMoreOpen}
+      align="end"
+      contentClassName="w-64 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+      trigger={
+        <div
+          onContextMenu={(event) => {
+            event.preventDefault();
+            toolbarMenuOpener.current =
+              document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            setMoreOpen(true);
+          }}
+          onKeyDown={(event) => {
+            if (event.shiftKey && event.key === "F10") {
+              event.preventDefault();
+              toolbarMenuOpener.current = event.target instanceof HTMLElement ? event.target : null;
+              setMoreOpen(true);
+            }
+          }}
+          className="library-model-toolbar flex min-w-0 flex-wrap items-center gap-2"
+        >
+          <h2 className="sr-only">{t("vault.models")}</h2>
+          <div className="library-toolbar-filters flex min-w-0 flex-wrap items-center gap-2">
+            {docView === "models" && (
+              <LibraryStatusFilters
+                value={structured.revision_status}
+                counts={statusCounts?.revision_status}
+                total={allStatusCount}
+                onChange={(value) => setStructuredFilter("revision_status", value)}
+                onIntent={() => startup.request("filters")}
+              />
+            )}
+            {showScopeToggle && (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                aria-pressed={includeSubfolders}
+                aria-label={uiText("Include subfolders")}
+                disabled={loading}
+                onClick={() => setModelScope(includeSubfolders ? "here" : "all")}
+                className="h-8 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
+              >
+                <FolderTree className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="library-toolbar-label">{uiText("Include subfolders")}</span>
+              </Button>
+            )}
+            {filterControl("shrink-0")}
+            {canViewPrinters && (
+              <div className="min-w-0 max-w-full">
+                <PrinterMenu
+                  open={printerMenuOpen}
+                  onOpenChange={setPrinterMenuOpen}
+                  value={
+                    selectedPrinterId !== null
+                      ? String(selectedPrinterId)
+                      : (selectedPrinterPresence ?? "")
+                  }
+                  options={[
+                    { value: "", label: uiText("Any printer") },
+                    { value: "any", label: uiText("On a printer") },
+                    { value: "none", label: uiText("Vault only") },
+                    ...printers.map((printer) => ({
+                      value: String(printer.id),
+                      label: printer.name,
+                    })),
+                  ]}
+                  onIntent={() => startup.request("filters")}
+                  onSelect={(value) => {
+                    if (value === "any" || value === "none") setSelectedPrinterPresence(value);
+                    else setSelectedPrinterId(value ? Number(value) : null);
+                  }}
+                />
+              </div>
+            )}
+          </div>
+          <div className="library-display-controls ml-auto flex min-w-0 flex-wrap items-center gap-2">
+            {docView === "models" && (
+              <FolderSearch
+                value={query}
+                onCommit={setFolderQuery}
+                placeholder={
+                  selectedName
+                    ? uiText("Search in {value1}", { value1: selectedName })
+                    : uiText("Search models")
+                }
+              />
+            )}
+            {libraryActions}
+            <SortMenu
+              open={sortOpen}
+              onOpenChange={setSortOpen}
+              sortKey={sortKey}
+              onSelect={selectSort}
+              labelFor={ui}
+              triggerSize="xs"
+              triggerClassName="library-toolbar-sort h-8 w-32 max-w-full"
+              wrapperClassName="min-w-0 max-w-full"
+            />
+            <div className="flex items-center bg-muted/50">
+              {(["grid", "list"] as const).map((mode) => (
+                <Button
+                  key={mode}
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={uiText("{value1} View", {
+                    value1: ui(mode === "grid" ? "Grid" : "List"),
+                  })}
+                  aria-pressed={viewMode === mode}
+                  onClick={() => selectViewMode(mode)}
+                  className={
+                    viewMode === mode ? "bg-accent text-accent-foreground" : "text-muted-foreground"
+                  }
+                >
+                  {mode === "grid" ? (
+                    <LayoutGrid className="h-3.5 w-3.5" />
+                  ) : (
+                    <List className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              ))}
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              data-menu-trigger
+              aria-haspopup="menu"
+              aria-expanded={moreOpen}
+              aria-label={t("nav.more")}
+              onClick={(event) => {
+                toolbarMenuOpener.current = event.currentTarget;
+                setMoreOpen(!moreOpen);
+              }}
+            >
+              <MoreHorizontal className="h-4 w-4" aria-hidden />
+            </Button>
+          </div>
+        </div>
+      }
+    >
+      {libraryMoreActions}
+    </DropdownMenu>
+  );
+
+  const childGroups =
+    displayedCollection && !includeSubfolders && libraryView === "all" && user
+      ? visibleCollections
+          .filter((collection) => collection.model_count > 0)
+          .map((collection) => (
+            <LibraryCollectionGroup
+              key={collection.id}
+              collection={collection}
+              userId={user.id}
+              href={collectionHref(collection.path, collection.id)}
+              sort={sortKey}
+              compact={compact}
+              scrollRef={startupContent}
+              onOpen={(child) => handleCollectionChange(child.path, child.id)}
+              onLoaded={recordGroupedModels}
+              renderModel={(model) => (
+                <ModelCard
+                  model={model}
+                  origin={snapshot?.entry}
+                  selectable={selectMode}
+                  selected={
+                    modelSelection(model, selectedIds, selectedCollectionRows.values()).kind !==
+                    "none"
+                  }
+                  onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
+                  draggable={canUploadToVault && !selectMode}
+                  onEditTags={openTagEditor}
+                  onIntent={warmModel}
+                  onInspect={inspectModel}
+                  inspected={inspectorOpen && inspectorIntent?.id === model.id}
+                />
+              )}
+            />
+          ))
+      : null;
 
   return (
     <Localized>
@@ -2180,15 +3571,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           </form>
         </Modal>
-        <DeferredDialog
-          open={uploadOpen}
-          title={uiText("Upload")}
-          onClose={() => setUploadOpen(false)}
-        >
+        <DeferredDialog open={showUpload} title={uiText("Upload")} onClose={closeUpload}>
           <UploadModal
-            open={uploadOpen}
+            open={showUpload}
             onClose={() => {
-              setUploadOpen(false);
+              closeUpload();
               setDropPreload(null);
               setDropCollection(null);
             }}
@@ -2239,6 +3626,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           selectedPrinterId={selectedPrinterId}
           selectedPrinterPresence={selectedPrinterPresence}
           onCollectionChange={handleCollectionChange}
+          onModelOpen={openTreeModel}
           onTagsChange={setSelectedTags}
           onPrinterChange={setSelectedPrinterId}
           onPrinterPresenceChange={setSelectedPrinterPresence}
@@ -2268,100 +3656,119 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         />
 
         {/* Stitch layout: filter sidebar + main content */}
-        <FilterSidebar
-          filtersOpen={false}
-          outlinerFilters={baseFilters}
-          tags={tags}
-          printers={printers}
-          selectedCollection={selectedCollection}
-          selectedCollectionId={selectedCollectionId}
-          selectedTags={selectedTags}
-          selectedPrinterId={selectedPrinterId}
-          selectedPrinterPresence={selectedPrinterPresence}
-          onCollectionChange={handleCollectionChange}
-          onCollectionIntent={prefetchFolder}
-          onTagsChange={setSelectedTags}
-          onPrinterChange={setSelectedPrinterId}
-          onPrinterPresenceChange={setSelectedPrinterPresence}
-          onCreateCollection={handleOpenCreateCollection}
-          onMoveModel={handleMoveModel}
-          onMoveCollection={handleMoveCollection}
-          onDeleteCollection={handleDeleteCollection}
-          canViewPrinters={canViewPrinters}
-          canManageLibrary={!!user?.is_superuser}
-          quickAccess={
-            auth.isAuthenticated ? (
-              <>
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  aria-pressed={favoritesOnly}
-                  onClick={toggleFavorites}
-                  className={cn(
-                    "h-8 w-full justify-start px-3 text-sm",
-                    favoritesOnly && "bg-accent text-accent-foreground",
-                  )}
-                >
-                  <Star className={cn("h-4 w-4", favoritesOnly && "fill-current")} aria-hidden />
-                  {uiText("Favorites")}
-                </Button>
-                <SavedViewSelector
-                  key={savedViewsOwner.session}
-                  readState={savedViewReadState}
-                  views={savedViews}
-                  activeId={activeSavedViewId}
-                  modified={savedViewModified}
-                  onSelect={applySavedView}
-                  onCreate={openSaveView}
-                  onUpdate={(view) =>
-                    manageSavedView(
-                      {
-                        kind: "update",
-                        id: view.id,
-                        payload: { filters: currentFilters },
-                      },
-                      "savedView.updateSuccess",
-                    )
-                  }
-                  onRename={(view, name) =>
-                    manageSavedView(
-                      { kind: "update", id: view.id, payload: { name } },
-                      "savedView.renameSuccess",
-                    )
-                  }
-                  onDuplicate={(view) =>
-                    manageSavedView(
-                      {
-                        kind: "create",
-                        name: duplicateViewName(view.name),
-                        filters: effectiveLibraryView(view.filters, canViewPrinters),
-                      },
-                      "savedView.duplicateSuccess",
-                    )
-                  }
-                  onDelete={(view) =>
-                    manageSavedView({ kind: "delete", id: view.id }, "savedView.deleteSuccess")
-                  }
-                  align="start"
-                  triggerClassName="h-8 w-full max-w-none justify-start px-3 text-sm"
-                  triggerVariant="ghost"
-                />
-              </>
-            ) : null
-          }
-          libraryView={libraryView}
-          onLibraryViewChange={handleLibraryViewChange}
-        />
+        <LibraryCollectionsPane>
+          <FilterSidebar
+            collectionsOnly={paneOpen !== null}
+            filtersOpen={false}
+            outlinerFilters={baseFilters}
+            tags={tags}
+            printers={printers}
+            selectedCollection={selectedCollection}
+            selectedCollectionId={selectedCollectionId}
+            selectedTags={selectedTags}
+            selectedPrinterId={selectedPrinterId}
+            selectedPrinterPresence={selectedPrinterPresence}
+            onCollectionChange={handleCollectionChange}
+            onModelOpen={openTreeModel}
+            onCollectionIntent={prefetchFolder}
+            onTagsChange={setSelectedTags}
+            onPrinterChange={setSelectedPrinterId}
+            onPrinterPresenceChange={setSelectedPrinterPresence}
+            onCreateCollection={handleOpenCreateCollection}
+            onMoveModel={handleMoveModel}
+            onMoveCollection={handleMoveCollection}
+            onDeleteCollection={handleDeleteCollection}
+            canViewPrinters={canViewPrinters}
+            canManageLibrary={!!user?.is_superuser}
+            quickAccess={
+              auth.isAuthenticated ? (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    aria-pressed={favoritesOnly}
+                    onClick={toggleFavorites}
+                    className={cn(
+                      "h-8 w-full justify-start px-3 text-sm",
+                      favoritesOnly && "bg-accent text-accent-foreground",
+                    )}
+                  >
+                    <Star className={cn("h-4 w-4", favoritesOnly && "fill-current")} aria-hidden />
+                    {uiText("Favorites")}
+                  </Button>
+                  {!savedViewsHost && savedViewControl()}
+                </>
+              ) : null
+            }
+            libraryView={libraryView}
+            onLibraryViewChange={handleLibraryViewChange}
+          />
+        </LibraryCollectionsPane>
+        {savedViewsHost && auth.isAuthenticated && createPortal(savedViewControl(), savedViewsHost)}
 
         <main
           ref={startupContent}
+          tabIndex={-1}
           aria-busy={reading.status === "restoring"}
+          data-inspector-open={inspectorOpen || undefined}
+          data-inspector-grid={(docView === "models" && viewMode === "grid") || undefined}
+          data-inspector-layout={docView === "models" ? viewMode : undefined}
+          data-inspector-compact-dock={
+            (viewMode === "grid" && compact && !!appliedDock) || undefined
+          }
+          style={inspectorDockStyle}
           className="@container/library relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-background pb-24 md:pb-0"
           onDragEnter={onMainDragEnter}
           onDragOver={onMainDragOver}
           onDragLeave={onMainDragLeave}
           onDrop={onMainDrop}
         >
+          {/* Selection controls float over the top of the content: entering
+              selection mode never moves the item that was just pressed. */}
+          {selectMode && (
+            <div className="sticky top-0 z-20 h-0">
+              <div className="absolute inset-x-0 top-0 flex min-h-14 flex-wrap items-center gap-3 border-b border-border bg-muted px-4 py-2 text-xs sm:px-6">
+                <span className="font-mono text-muted-foreground">
+                  {uiText("{value1} selected", { value1: String(selectionCount ?? "") })}
+                </span>
+                {docView === "models" && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={selectAllVisible}
+                      className="font-medium text-primary hover:underline"
+                    >
+                      {uiText("Select all on screen (")}
+                      {sortedModels.length +
+                        visibleMultipartModels.length +
+                        visibleCollections.length}
+                      )
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void selectAllMatching()}
+                      disabled={selectingAll}
+                      className="font-medium text-primary hover:underline disabled:opacity-50"
+                    >
+                      {selectingAll ? uiText("Selecting…") : uiText("library.selectAllMatching")}
+                    </button>
+                  </>
+                )}
+                <Button size="xs" variant="outline" onClick={clearSelection}>
+                  {uiText("Done")}
+                </Button>
+                {selectionCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearSelection}
+                    className="font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    {uiText("Clear")}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           {isDragging && canUploadToVault && (
             <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center border-2 border-dashed border-primary bg-primary/5">
               <span className="bg-background border border-border rounded px-4 py-2 font-mono text-xs uppercase tracking-widest shadow">
@@ -2370,425 +3777,164 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           )}
           {/* Breadcrumb */}
-          <nav className="flex min-w-0 items-center gap-2 border-b border-border bg-background px-4 py-2.5 text-sm tracking-tight sm:px-6">
-            {breadcrumbs.length > 0 ? (
-              <>
-                <button
-                  onClick={() => handleCollectionChange(null)}
-                  className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  {uiText("All Models")}
-                </button>
-                {breadcrumbs.map((crumb) => (
-                  <span key={crumb.id} className="flex min-w-0 items-center gap-2">
-                    <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/40" />
-                    <button
-                      onClick={() => handleCollectionChange(crumb.path)}
-                      className="min-w-0 truncate font-medium text-foreground"
-                      title={crumb.name}
-                    >
-                      {crumb.name}
-                    </button>
-                  </span>
-                ))}
-              </>
-            ) : (
-              <button
-                onClick={() => handleCollectionChange(null)}
-                className="text-foreground font-medium"
-              >
-                {uiText("All Models")}
-              </button>
-            )}
-            {availableRecentFolders.length > 0 && (
-              <DropdownMenu
-                className="ml-auto shrink-0"
-                open={recentFoldersOpen}
-                onOpenChange={setRecentFoldersOpen}
-                align="end"
-                trigger={
-                  <button
-                    type="button"
-                    data-menu-trigger
-                    aria-haspopup="menu"
-                    aria-expanded={recentFoldersOpen}
-                    aria-label={uiText("Recent")}
-                    onClick={() => setRecentFoldersOpen(!recentFoldersOpen)}
-                    className="ml-auto flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    <History className="h-3.5 w-3.5" aria-hidden />
-                    <span className="hidden sm:inline">{ui("Recent")}</span>
-                  </button>
-                }
-                contentClassName="w-64 max-w-[calc(100vw-2rem)] rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-              >
-                <p className="px-2.5 py-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                  {uiText("Recent folders")}
-                </p>
-                {availableRecentFolders.map((folder) => (
-                  <button
-                    key={folder.id ?? folder.path}
-                    title={folder.label}
-                    disabled={folder.unavailable}
-                    role="menuitem"
-                    type="button"
-                    onClick={() => {
-                      handleCollectionChange(folder.path, folder.id);
-                      setRecentFoldersOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 truncate">
-                      {folder.label}
-                      {folder.unavailable ? ` — ${uiText("Unavailable")}` : ""}
-                    </span>
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    recent.clear();
-                    setRecentFoldersOpen(false);
-                  }}
-                  className="mt-1 w-full border-t border-border px-2.5 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-popover-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {uiText("Clear recent folders")}
-                </button>
-              </DropdownMenu>
-            )}
-          </nav>
-
-          {/* The pane owns breakpoints: an open outliner also consumes horizontal room. */}
-          <div className="sticky top-0 z-40 flex flex-col gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
-            <div className="flex min-w-0 items-start justify-between gap-4">
-              <div className="min-w-0 flex-1 space-y-1">
-                <TitleEditor
-                  open={collectionRename !== null}
-                  onOpenChange={(open) => {
-                    if (open) openCollectionRename();
-                    else if (!collectionRenameBusy) setCollectionRename(null);
-                  }}
-                  label={uiText("Rename {value1}", { value1: selectedName ?? "" })}
-                  fieldLabel={uiText("inbox.collectionName")}
-                  value={collectionRenameName}
-                  onValueChange={setCollectionRenameName}
-                  onSave={() => void saveCollectionRename()}
-                  busy={collectionRenameBusy}
-                  maxLength={100}
-                  requiredMessage={uiText("{field} is required.", {
-                    field: uiText("inbox.collectionName"),
-                  })}
-                  trigger={
-                    <div className="flex min-w-0 items-center gap-1">
-                      <h1
-                        onDoubleClick={openCollectionRename}
-                        className="min-w-0 break-words text-lg font-bold tracking-tight text-foreground sm:text-2xl"
-                      >
-                        {unavailableCollection
-                          ? uiText("library.collectionUnavailable")
-                          : (selectedName ?? uiText("All Models"))}
-                      </h1>
-                      {canRenameCollection && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="shrink-0 text-muted-foreground"
-                          data-menu-trigger
-                          aria-haspopup="dialog"
-                          aria-expanded={collectionRename !== null}
-                          aria-label={uiText("Rename {value1}", { value1: selectedName ?? "" })}
-                          title={uiText("Rename")}
-                          onClick={openCollectionRename}
-                        >
-                          <Pencil className="h-3.5 w-3.5" aria-hidden />
-                        </Button>
-                      )}
-                    </div>
-                  }
-                />
-                <p className="text-sm text-muted-foreground">
-                  {unavailableCollection
-                    ? uiText("library.collectionUnavailableHelp")
-                    : loading
-                      ? uiText("Loading...")
-                      : uiText(selectedName ? "counts.collectionItems" : "counts.items", {
-                          count: displayCount,
-                        })}
-                  {refreshing && (
-                    <span className="ml-2 font-mono text-xs text-muted-foreground">
-                      {uiText("Updating...")}
-                    </span>
-                  )}
-                </p>
-              </div>
-              <Button
-                onClick={() => {
-                  setDropPreload(null);
-                  setDropCollection(null);
-                  setUploadOpen(true);
-                }}
-                disabled={!canUploadToVault}
-                title={
-                  canUploadToVault
-                    ? uiText("Upload artifacts")
-                    : uiText("Sign in and get edit access to upload")
-                }
-                className="shrink-0 @3xl/library:h-8 @3xl/library:text-xs"
-              >
-                {uiText("Upload")}
-              </Button>
-            </div>
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={openDrawer}
-                className="order-1 h-10 min-w-0 flex-1 px-2 md:hidden"
-              >
-                <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-                <span className="min-w-0 truncate">{uiText("Filters")}</span>
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                onClick={toggleStructuredFilters}
-                aria-expanded={filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())}
-                aria-controls="library-filter-panel"
-                className="order-1 hidden h-10 min-w-0 flex-1 px-2 md:inline-flex @3xl/library:h-8 @3xl/library:flex-none @3xl/library:px-3"
-              >
-                <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-                <span className="min-w-0 truncate">{uiText("Filters")}</span>
-                {activeFilterItems.length > Number(!!query.trim()) && (
-                  <span className="font-mono tabular-nums">
-                    {activeFilterItems.length - Number(!!query.trim())}
-                  </span>
-                )}
-              </Button>
-              <div className="order-2 grid min-w-0 flex-2 grid-cols-2 gap-2 @3xl/library:hidden">
-                <SortMenu
-                  open={sortOpen}
-                  onOpenChange={setSortOpen}
-                  sortKey={sortKey}
-                  onSelect={selectSort}
-                  labelFor={ui}
-                  triggerSize="sm"
-                  triggerClassName="h-10 w-full min-w-0 px-2 text-xs"
-                  wrapperClassName="min-w-0"
-                />
+          <LibraryBreadcrumbs>
+            <CollectionBreadcrumbs items={breadcrumbs} onNavigate={handleCollectionChange}>
+              {availableRecentFolders.length > 0 && (
                 <DropdownMenu
-                  open={moreOpen}
-                  onOpenChange={setMoreOpen}
-                  align="end"
-                  className="min-w-0"
+                  className="ml-2 shrink-0 border-l border-border pl-2"
+                  open={recentFoldersOpen}
+                  onOpenChange={setRecentFoldersOpen}
+                  align="start"
                   trigger={
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="ghost"
+                      size="sm"
                       data-menu-trigger
                       aria-haspopup="menu"
-                      aria-expanded={moreOpen}
-                      aria-label={t("nav.more")}
-                      onClick={() => setMoreOpen(!moreOpen)}
-                      className="w-full min-w-0 px-2"
+                      aria-expanded={recentFoldersOpen}
+                      aria-label={uiText("Recent")}
+                      onClick={() => setRecentFoldersOpen(!recentFoldersOpen)}
+                      className="h-7 gap-1.5 px-2 text-xs font-normal text-muted-foreground"
                     >
-                      <MoreHorizontal className="h-4 w-4 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate">{t("nav.more")}</span>
-                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <History className="h-3.5 w-3.5" aria-hidden />
+                      <span className="hidden @xl/trail:inline">{ui("Recent")}</span>
                     </Button>
                   }
-                  contentClassName="w-64 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+                  contentClassName="w-64 max-w-[calc(100vw-2rem)] rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
                 >
-                  {docView === "models" && (
-                    <Button
-                      variant="ghost"
+                  <p className="px-2.5 py-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                    {uiText("Recent folders")}
+                  </p>
+                  {availableRecentFolders.map((folder) => (
+                    <button
+                      key={folder.id ?? folder.path}
+                      title={folder.label}
+                      disabled={folder.unavailable}
                       role="menuitem"
-                      className="w-full justify-start"
-                      disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
+                      type="button"
                       onClick={() => {
-                        setMoreOpen(false);
-                        setMultipartCreateOpen(true);
+                        handleCollectionChange(folder.path, folder.id);
+                        setRecentFoldersOpen(false);
                       }}
+                      className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      <Plus className="h-4 w-4" aria-hidden />
-                      {t("multipart.new")}
-                    </Button>
+                      <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 truncate">
+                        {folder.label}
+                        {folder.unavailable ? ` — ${uiText("Unavailable")}` : ""}
+                      </span>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      recent.clear();
+                      setRecentFoldersOpen(false);
+                    }}
+                    className="mt-1 w-full border-t border-border px-2.5 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-popover-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {uiText("Clear recent folders")}
+                  </button>
+                </DropdownMenu>
+              )}
+            </CollectionBreadcrumbs>
+          </LibraryBreadcrumbs>
+
+          {/* The pane owns breakpoints: an open outliner also consumes horizontal room. */}
+          <div className="library-collection-header px-4 sm:px-6">
+            <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-1">
+              <div className="library-collection-identity min-w-0 flex-1">
+                <InlineTitleEditor
+                  fieldLabel={uiText("inbox.collectionName")}
+                  maxLength={100}
+                  title={
+                    unavailableCollection
+                      ? uiText("library.collectionUnavailable")
+                      : (selectedName ?? uiText("All Models"))
+                  }
+                  canEdit={canRenameCollection}
+                  open={collectionRename !== null}
+                  onOpen={openCollectionRename}
+                  onCancel={() => {
+                    if (!collectionRenameBusy) setCollectionRename(null);
+                  }}
+                  value={collectionRenameName}
+                  onValueChange={setCollectionRenameName}
+                  onSave={saveCollectionRename}
+                  busy={collectionRenameBusy}
+                />
+                <div className="library-collection-meta flex flex-wrap items-center">
+                  {collectionOverview && !displayedCollection && (
+                    <span className="library-meta-part">
+                      {uiText("library.header.collections", { count: visibleCollections.length })}
+                    </span>
                   )}
-                  {auth.isAuthenticated && (
+                  {displayedCollection && displayedCollection.child_count > 0 && (
+                    <span className="library-meta-part">
+                      {uiText("library.header.collections", {
+                        count: displayedCollection.child_count,
+                      })}
+                    </span>
+                  )}
+                  {browseTotal !== undefined &&
+                    (displayedCollection?.path ?? null) === selectedCollection && (
+                      <span className="library-meta-part">
+                        {displayedCollection && (searchQuery || foldersHidden)
+                          ? uiText("library.header.filteredCount", {
+                              count: browseTotal,
+                              total: displayedCollection.model_count,
+                            })
+                          : uiText(hasMultipartResults ? "library.header.items" : "counts.models", {
+                              count: browseTotal,
+                            })}
+                      </span>
+                    )}
+                  {displayedCollection && (
                     <>
-                      <button
-                        type="button"
-                        role="menuitemcheckbox"
-                        aria-checked={favoritesOnly}
-                        onClick={() => {
-                          toggleFavorites();
-                          setMoreOpen(false);
-                        }}
-                        className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${favoritesOnly ? "bg-accent text-accent-foreground" : ""}`}
-                      >
-                        <Star className={`h-4 w-4 ${favoritesOnly ? "fill-current" : ""}`} />
-                        <span className="flex-1">{uiText("Favorites")}</span>
-                        {favoritesOnly && <Check className="h-3.5 w-3.5" />}
-                      </button>
-                      <SavedViewSelector
-                        key={savedViewsOwner.session}
-                        readState={savedViewReadState}
-                        views={savedViews}
-                        activeId={activeSavedViewId}
-                        modified={savedViewModified}
-                        onSelect={(view) => {
-                          applySavedView(view);
-                          setMoreOpen(false);
-                        }}
-                        onCreate={() => {
-                          setMoreOpen(false);
-                          openSaveView();
-                        }}
-                        onUpdate={(view) =>
-                          manageSavedView(
-                            {
-                              kind: "update",
-                              id: view.id,
-                              payload: { filters: currentFilters },
-                            },
-                            "savedView.updateSuccess",
-                          )
-                        }
-                        onRename={(view, name) =>
-                          manageSavedView(
-                            { kind: "update", id: view.id, payload: { name } },
-                            "savedView.renameSuccess",
-                          )
-                        }
-                        onDuplicate={(view) =>
-                          manageSavedView(
-                            {
-                              kind: "create",
-                              name: duplicateViewName(view.name),
-                              filters: effectiveLibraryView(view.filters, canViewPrinters),
-                            },
-                            "savedView.duplicateSuccess",
-                          )
-                        }
-                        onDelete={(view) =>
-                          manageSavedView(
-                            { kind: "delete", id: view.id },
-                            "savedView.deleteSuccess",
-                          )
-                        }
-                        triggerClassName="max-w-none w-full justify-start px-2.5 py-2 text-sm"
-                        triggerRole="menuitem"
-                        triggerSize="sm"
-                        triggerVariant="ghost"
+                      <CollectionHeaderTags
+                        key={`tags:${displayedCollection.id}`}
+                        tags={displayedCollection.tags}
+                        canEdit={!!user?.is_superuser || canWriteCollection(displayedCollection)}
+                        onSave={(nextTags) => saveCollectionTags(displayedCollection, nextTags)}
+                      />
+                      <CollectionReadme
+                        key={displayedCollection.id}
+                        collectionId={displayedCollection.id}
+                        compact
+                        hasReadme={displayedCollection.has_readme}
+                        canEdit={!!user?.is_superuser || canWriteCollection(displayedCollection)}
+                        disabled={!browseReady}
                       />
                     </>
                   )}
-                  <DisplayMenu
-                    open={displayOpen}
-                    onOpenChange={setDisplayOpen}
-                    viewMode={viewMode}
-                    compact={compact}
-                    onSelectMode={selectViewMode}
-                    onSelectDensity={selectDensity}
-                    labelFor={ui}
-                    triggerSize="sm"
-                    triggerVariant="ghost"
-                    triggerRole="menuitem"
-                    triggerClassName="w-full justify-start"
-                    onSelectComplete={() => setMoreOpen(false)}
-                  />
-                </DropdownMenu>
+                  {selectedCollection !== null && loading && (
+                    <CollectionHeaderSkeleton hasDescription={destinationCollection?.has_readme} />
+                  )}
+                </div>
               </div>
-              {libraryActions}
-              {docView === "models" && (
+              {newCollectionButton}
+              {paneOpen === null && (
                 <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  onClick={() => setMultipartCreateOpen(true)}
-                  disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
+                  onClick={() => {
+                    setDropPreload(null);
+                    setDropCollection(null);
+                    setUploadOpen(true);
+                  }}
+                  disabled={!canUploadToVault}
                   title={
-                    user?.is_superuser || canWriteCollection(selectedCollectionRow)
-                      ? undefined
-                      : t("multipart.editAccess")
+                    canUploadToVault
+                      ? uiText("Upload artifacts")
+                      : uiText("Sign in and get edit access to upload")
                   }
-                  className="order-3 hidden h-8 @3xl/library:inline-flex"
+                  className="shrink-0 @3xl/library:h-8 @3xl/library:text-xs"
                 >
-                  <Plus className="h-4 w-4" aria-hidden />
-                  {t("multipart.new")}
+                  {uiText("Upload")}
                 </Button>
               )}
-
-              <div className="order-4 ml-auto hidden shrink-0 items-center gap-2 @3xl/library:flex">
-                <SortMenu
-                  open={desktopSortOpen}
-                  onOpenChange={setDesktopSortOpen}
-                  sortKey={sortKey}
-                  onSelect={selectSort}
-                  labelFor={ui}
-                  triggerSize="xs"
-                  triggerClassName="h-8"
-                />
-                <DisplayMenu
-                  open={desktopDisplayOpen}
-                  onOpenChange={setDesktopDisplayOpen}
-                  viewMode={viewMode}
-                  compact={compact}
-                  onSelectMode={selectViewMode}
-                  onSelectDensity={selectDensity}
-                  labelFor={ui}
-                  triggerSize="xs"
-                  triggerClassName="h-8"
-                />
-              </div>
             </div>
           </div>
-
-          {(filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())) && (
-            <div
-              id="library-filter-panel"
-              role="region"
-              aria-label={uiText("Filters")}
-              className="hidden border-b border-border bg-muted/30 px-4 py-3 md:block sm:px-6"
-              onFocusCapture={() => startup.request("filters")}
-              onPointerDownCapture={() => startup.request("filters")}
-            >
-              <StructuredFilters
-                layout="inline"
-                extraControls={
-                  <LibraryBaseFilters
-                    tags={tags}
-                    printers={printers}
-                    selectedTags={selectedTags}
-                    selectedPrinterId={selectedPrinterId}
-                    selectedPrinterPresence={selectedPrinterPresence}
-                    onTagsChange={setSelectedTags}
-                    onPrinterChange={setSelectedPrinterId}
-                    onPrinterPresenceChange={setSelectedPrinterPresence}
-                    canViewPrinters={canViewPrinters}
-                  />
-                }
-                facets={facetQuery.data}
-                loading={facetQuery.isLoading}
-                error={facetQuery.isError}
-                active={structured}
-                onChange={setStructuredFilter}
-                uploadedAfter={searchParams.get("uploaded_after") ?? undefined}
-                uploadedBefore={searchParams.get("uploaded_before") ?? undefined}
-                history={historyFilters(searchParams)}
-                onDateChange={(key, value) => {
-                  const params = new URLSearchParams(searchParams.toString());
-                  if (value) params.set(key, value);
-                  else params.delete(key);
-                  router.replace(params.size ? `/?${params}` : "/");
-                }}
-                onClearAll={clearAllFilters}
-              />
-            </div>
-          )}
 
           {activeFilterItems.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3 sm:px-6">
@@ -2809,155 +3955,103 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   <X className="h-3 w-3" aria-hidden />
                 </Button>
               ))}
-              <Button type="button" variant="ghost" size="xs" onClick={clearAllFilters}>
+              <Button type="button" variant="ghost" size="xs" onClick={() => clearAllFilters()}>
                 {uiText("Clear all")}
               </Button>
             </div>
           )}
 
-          {selectedCollection !== null && !displayedCollection ? (
-            <CollectionHeaderSkeleton />
-          ) : (
-            displayedCollection && (
-              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-2 sm:px-6">
-                <EntityTagsDialog
-                  entityLabel={displayedCollection.name}
-                  tags={displayedCollection.tags}
-                  availableTags={tags}
-                  canEdit={!!user?.is_superuser || canWriteCollection(displayedCollection)}
-                  help={uiText(
-                    "Collection tags are inherited by Models in this collection and every descendant for search and filtering.",
-                  )}
-                  onSave={(nextTags) => saveCollectionTags(displayedCollection, nextTags)}
-                />
-                <CollectionReadme
-                  key={displayedCollection.id}
-                  collectionId={displayedCollection.id}
-                  hasReadme={displayedCollection.has_readme}
-                  canEdit={!!user?.is_superuser || canWriteCollection(displayedCollection)}
-                  disabled={!browseReady}
-                />
-              </div>
-            )
-          )}
-
-          {/* Models / Documents tabs */}
-          <TabBar
-            tabs={[
-              { key: "models", label: t("vault.models") },
-              { key: "docs", label: t("vault.documents") },
-            ]}
-            active={docView}
-            onChange={(view) => {
-              const params = new URLSearchParams(searchParams.toString());
-              params.set("v", view);
-              router.replace(params.size ? `/?${params}` : "/");
+          <Modal
+            open={isCreatingCollection}
+            onClose={() => {
+              setIsCreatingCollection(false);
+              setNewCollectionName("");
             }}
-            className="border-b border-border px-4 pt-3 sm:px-6"
-            tabClassName="px-3 py-2 text-sm font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            activeTabClassName="text-foreground"
-          />
-
-          {isCreatingCollection && (
-            <div className="px-6 py-3 bg-muted border-b border-border">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleCreateCollection();
-                }}
-                className="flex items-center gap-2"
-              >
-                <input
-                  autoFocus
-                  value={newCollectionName}
-                  onChange={(e) => setNewCollectionName(e.target.value)}
-                  placeholder={
-                    auth.isAuthenticated
-                      ? selectedCollection
-                        ? uiText('New subcollection in "{value1}"...', {
-                            value1: String(selectedName ?? selectedCollection),
-                          })
-                        : uiText("Collection name...")
-                      : uiText("Sign in to add")
-                  }
-                  disabled={!auth.isAuthenticated}
-                  className="flex-1 max-w-xs bg-background text-foreground text-sm border border-border rounded px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-50"
-                />
-                <button
-                  type="submit"
-                  disabled={
-                    !newCollectionName.trim() || !auth.isAuthenticated || !canCreateCollection
-                  }
-                  className="px-3 py-1.5 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover transition-colors disabled:opacity-50"
-                >
-                  {uiText("Create")}
-                </button>
-                <button
+            title={uiText("New collection")}
+            description={uiText("Create a collection inside the current collection.")}
+            className="max-w-[480px]"
+            footer={
+              <>
+                <Button
                   type="button"
+                  variant="outline"
                   onClick={() => {
                     setIsCreatingCollection(false);
                     setNewCollectionName("");
                   }}
-                  className="px-3 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted transition-colors"
                 >
                   {uiText("Cancel")}
-                </button>
-              </form>
-            </div>
-          )}
-
-          {selectMode && (
-            <div className="px-4 sm:px-6 py-2 bg-muted border-b border-border flex flex-wrap items-center gap-3 text-xs">
-              <span className="font-mono text-muted-foreground">
-                {uiText("{value1} selected", { value1: String(selectionCount ?? "") })}
-              </span>
-              {docView === "models" && (
-                <>
-                  <button
-                    type="button"
-                    onClick={selectAllVisible}
-                    className="font-medium text-primary hover:underline"
-                  >
-                    {uiText("Select all on screen (")}
-                    {sortedModels.length +
-                      visibleMultipartModels.length +
-                      visibleCollections.length}
-                    )
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void selectAllMatching()}
-                    disabled={selectingAll}
-                    className="font-medium text-primary hover:underline disabled:opacity-50"
-                  >
-                    {selectingAll ? uiText("Selecting…") : uiText("library.selectAllMatching")}
-                  </button>
-                </>
-              )}
-              <Button size="xs" variant="outline" onClick={clearSelection}>
-                {uiText("Done")}
-              </Button>
-              {selectionCount > 0 && (
-                <button
-                  type="button"
-                  onClick={clearSelection}
-                  className="font-medium text-muted-foreground hover:text-foreground"
+                </Button>
+                <Button
+                  type="submit"
+                  form={collectionFormId}
+                  disabled={
+                    !newCollectionName.trim() || !auth.isAuthenticated || !canCreateCollection
+                  }
                 >
-                  {uiText("Clear")}
-                </button>
-              )}
+                  {uiText("Create collection")}
+                </Button>
+              </>
+            }
+          >
+            <form
+              id={collectionFormId}
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleCreateCollection();
+              }}
+            >
+              <FormField label={uiText("Name")}>
+                <Input
+                  autoFocus
+                  value={newCollectionName}
+                  onChange={(event) => setNewCollectionName(event.target.value)}
+                  disabled={!auth.isAuthenticated}
+                  maxLength={100}
+                />
+              </FormField>
+            </form>
+          </Modal>
+
+          {docView === "docs" && !favoritesOnly && (
+            <div className="flex items-center gap-4 px-4 pt-4 text-sm sm:px-6">
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  const params = new URLSearchParams(searchParams.toString());
+                  params.set("v", "models");
+                  router.replace(`/?${params}`);
+                }}
+              >
+                {t("vault.models")}
+              </button>
+              <span className="font-semibold">{t("vault.documents")}</span>
             </div>
           )}
 
           {/* Content */}
-          {docView === "docs" && (selectedCollection === null || selectedCollectionRow !== null) ? (
-            <DocumentBrowser
-              collectionId={selectedCollectionRow?.id ?? null}
-              collectionPath={selectedCollection}
-              canCreate={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
-            />
+          {docView === "docs" &&
+          !favoritesOnly &&
+          (selectedCollection === null || selectedCollectionRow !== null) ? (
+            <Suspense
+              fallback={
+                <p role="status" className="p-6 text-sm">
+                  {uiText("Loading...")}
+                </p>
+              }
+            >
+              <DocumentBrowser
+                collectionId={selectedCollectionRow?.id ?? null}
+                collectionPath={selectedCollection}
+                canCreate={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
+              />
+            </Suspense>
           ) : (
-            <div className="flex-1 flex flex-col bg-background">
+            <div
+              ref={libraryReveal}
+              className="library-content-reveal flex-1 flex flex-col bg-background"
+            >
               {reading.status === "reset" && (
                 <p
                   role="status"
@@ -2965,28 +4059,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 >
                   {uiText("library.readingPositionReset")}
                 </p>
-              )}
-              {refreshRequired && !settlesByItself && (
-                <div
-                  role="status"
-                  className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-md border border-border bg-muted p-3 text-sm"
-                >
-                  <p>{uiText("library.updatesAvailable")}</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    loading={refreshing}
-                    onClick={() =>
-                      void (currentRefresh || modelQuery.refreshRequired
-                        ? snapshot?.entry === entry
-                          ? reading.refresh(refresh)
-                          : refresh()
-                        : authority.refresh())
-                    }
-                  >
-                    {uiText("library.refresh")}
-                  </Button>
-                </div>
               )}
               {authority.error && (
                 <div
@@ -3005,22 +4077,43 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </div>
               )}
               {error && (
-                <div className="mx-6 mt-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-                  {unavailableCollection ? uiText("library.collectionUnavailableHelp") : error}
+                <div
+                  role="alert"
+                  className="mx-4 mt-4 flex items-center justify-between gap-3 border border-destructive/40 bg-destructive/10 p-3 text-sm sm:mx-6"
+                >
+                  <p className="min-w-0 break-words text-foreground">
+                    {unavailableCollection ? (
+                      uiText("library.collectionUnavailableHelp")
+                    ) : (
+                      <>
+                        {uiText("Could not load Models.")}{" "}
+                        <span className="text-muted-foreground">{error}</span>
+                      </>
+                    )}
+                  </p>
                   {unavailableCollection && (
                     <Button
                       variant="outline"
                       size="sm"
+                      className="shrink-0"
                       onClick={() => handleCollectionChange(null)}
                     >
                       {uiText("aiSearch.backToLibrary")}
                     </Button>
                   )}
-                  {currentRefresh && currentRefresh.status !== "pending" && (
+                  {(currentRefresh ||
+                    (!unavailableCollection &&
+                      modelReadError &&
+                      !modelQuery.isFetchNextPageError)) && (
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => void (snapshot ? reading.refresh(refresh) : refresh())}
+                      className="shrink-0"
+                      disabled={currentRefresh?.status === "pending" || modelQuery.isFetching}
+                      onClick={() => {
+                        if (currentRefresh) void (snapshot ? reading.refresh(refresh) : refresh());
+                        else void modelQuery.refetch();
+                      }}
                     >
                       {uiText("Retry")}
                     </Button>
@@ -3028,189 +4121,327 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </div>
               )}
 
-              {loading ? (
-                viewMode === "grid" ? (
-                  <ModelGridSkeleton compact={compact} />
-                ) : (
-                  <ModelListSkeleton />
-                )
-              ) : error && snapshot === null ? null : sortedModels.length === 0 &&
-                visibleMultipartModels.length === 0 &&
-                visibleCollections.length === 0 &&
-                !hasMore ? (
-                <EmptyState
-                  title={uiText(
-                    selectedCollection && !hasActiveFilters
-                      ? "library.collectionEmpty"
-                      : "No models found",
-                  )}
-                  description={
-                    hasActiveFilters
-                      ? uiText("Try clearing some filters.")
-                      : selectedCollection
-                        ? uiText(
-                            canUploadHere
-                              ? "library.collectionEmptyHelp"
-                              : "library.collectionReadOnlyEmptyHelp",
-                          )
-                        : uiText(
-                            "Upload a model when you're ready, or skim the wiki first if this is a new install.",
-                          )
-                  }
-                  action={
-                    hasActiveFilters ? (
-                      <Button type="button" variant="outline" size="xs" onClick={clearAllFilters}>
-                        {uiText("Clear all filters")}
-                      </Button>
-                    ) : selectedCollection && !canUploadHere ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleCollectionChange(null)}
-                      >
-                        {uiText("aiSearch.backToLibrary")}
-                      </Button>
-                    ) : (
-                      <div className="flex flex-wrap items-center justify-center gap-2">
-                        <GettingStartedReminder />
+              {collectionOverview && (
+                <div className="collection-overview-toolbar-wrap px-4 sm:px-6">
+                  {libraryToolbar}
+                </div>
+              )}
+
+              <LibraryCollectionsRegion
+                followingContent={modelsContent}
+                present={
+                  viewMode === "grid" &&
+                  (reservedCollections > 0 || (!loading && visibleCollections.length > 0))
+                }
+                enabled={snapshot !== null && viewMode === "grid" && !collectionOverview}
+              >
+                {viewMode === "grid" && reservedCollections > 0 && (
+                  <section
+                    className="library-subcollections library-loading-placeholder mx-4 sm:mx-6"
+                    aria-hidden
+                  >
+                    <CollectionStrip
+                      total={reservedCollections}
+                      overview={false}
+                      resetKey={selectedCollection ?? ""}
+                    >
+                      {(limit, onColumns, extraColumns) => (
+                        <LibraryItems
+                          items={Array.from(
+                            { length: Math.min(reservedCollections, limit ?? reservedCollections) },
+                            (_, index) => index,
+                          )}
+                          itemKey={(index) => `collection-placeholder:${index}`}
+                          renderItem={() => <div className="library-collection-placeholder" />}
+                          scrollRef={startupContent}
+                          readingRenderers={readingRenderers}
+                          readingId="collections-placeholder"
+                          layout="grid"
+                          freezeInspectorTracks={inspectorOpen}
+                          compact={compact}
+                          estimateSize={COMPACT_COLLECTION_HEIGHT}
+                          minCardWidth={300}
+                          virtualize={false}
+                          onColumnsChange={onColumns}
+                          extraColumns={extraColumns}
+                        />
+                      )}
+                    </CollectionStrip>
+                  </section>
+                )}
+
+                {viewMode === "grid" && !loading && visibleCollections.length > 0 && (
+                  <section
+                    className={`library-subcollections mx-4 sm:mx-6 ${collectionOverview ? "library-subcollections-overview" : ""}`}
+                    aria-label={uiText("Collections")}
+                  >
+                    <CollectionStrip
+                      total={visibleCollections.length}
+                      overview={collectionOverview}
+                      resetKey={displayedPath ?? ""}
+                    >
+                      {(limit, onColumns, extraColumns) => (
+                        <LibraryItems
+                          key={`collections:${displayedPath ?? ""}`}
+                          items={
+                            limit === null ? visibleCollections : visibleCollections.slice(0, limit)
+                          }
+                          itemKey={(collection) => `collection:${collection.id}`}
+                          renderItem={(collection) => (
+                            <LibraryCardFill
+                              identity={cardIdentity}
+                              animateOnMount={cardEntrance !== null}
+                              className="library-collection-reveal"
+                            >
+                              <CollectionOverviewCard
+                                collection={collection}
+                                compact={!collectionOverview}
+                                arriving={arriving.has(`c:${collection.id}`)}
+                                authorizationRevision={snapshot?.authorizationRevision}
+                                onAuthorityRetired={onAuthorityRetired}
+                                previewsReady={browseReady}
+                                previewSource={snapshot?.previewSource}
+                                onSelect={handleCollectionChange}
+                                onIntent={prefetchFolder}
+                                onDropModel={canUploadToVault ? handleMoveModel : undefined}
+                                selectable={selectMode}
+                                selected={selectedCollectionRows.has(collection.id)}
+                                onToggleSelect={
+                                  auth.isAuthenticated ? toggleCollectionSelect : undefined
+                                }
+                                onRename={
+                                  canManageCard(collection, "rename")
+                                    ? () =>
+                                        setCollectionCardTarget({
+                                          entry,
+                                          id: collection.id,
+                                          action: "rename",
+                                        })
+                                    : undefined
+                                }
+                                onEditCover={
+                                  canManageCard(collection, "cover")
+                                    ? () =>
+                                        setCollectionCardTarget({
+                                          entry,
+                                          id: collection.id,
+                                          action: "cover",
+                                        })
+                                    : undefined
+                                }
+                                renaming={
+                                  managedCollection?.id === collection.id &&
+                                  collectionCardTarget?.action === "rename"
+                                }
+                                onRenameEnd={(saved) => {
+                                  setCollectionCardTarget((target) =>
+                                    target?.entry === entry &&
+                                    target.id === collection.id &&
+                                    target.action === "rename"
+                                      ? null
+                                      : target,
+                                  );
+                                  if (saved) void refresh();
+                                }}
+                              />
+                            </LibraryCardFill>
+                          )}
+                          scrollRef={startupContent}
+                          readingRenderers={readingRenderers}
+                          readingId="collections"
+                          layout="grid"
+                          freezeInspectorTracks={inspectorOpen}
+                          compact={!collectionOverview && compact}
+                          estimateSize={collectionOverview ? 266 : COMPACT_COLLECTION_HEIGHT}
+                          minCardWidth={collectionOverview ? undefined : 300}
+                          onColumnsChange={onColumns}
+                          extraColumns={extraColumns}
+                        />
+                      )}
+                    </CollectionStrip>
+                  </section>
+                )}
+              </LibraryCollectionsRegion>
+
+              <div ref={modelsContent} className="library-model-content flex flex-1 flex-col">
+                {!collectionOverview && (
+                  <div className="library-model-toolbar-wrap px-4 sm:px-6">{libraryToolbar}</div>
+                )}
+
+                {loading ? (
+                  viewMode === "grid" ? (
+                    <ModelGridSkeleton compact={compact} onCapacityChange={receivePageSize} />
+                  ) : (
+                    <ModelListSkeleton onCapacityChange={receivePageSize} />
+                  )
+                ) : modelsPending ? (
+                  // The folder's collections can arrive before its Models: the
+                  // placeholder holds the Models' place until they replace it.
+                  viewMode === "grid" ? (
+                    <ModelGridSkeleton compact={compact} onCapacityChange={receivePageSize} />
+                  ) : (
+                    <ModelListSkeleton onCapacityChange={receivePageSize} />
+                  )
+                ) : error && snapshot === null ? null : collectionOverview &&
+                  viewMode === "grid" ? null : sortedModels.length === 0 &&
+                  visibleMultipartModels.length === 0 &&
+                  visibleCollections.length === 0 &&
+                  !hasMore ? (
+                  <EmptyState
+                    title={uiText(
+                      emptyFavorites
+                        ? "No favorites yet"
+                        : selectedCollection && !hasActiveFilters
+                          ? "library.collectionEmpty"
+                          : "No models found",
+                    )}
+                    description={
+                      emptyFavorites
+                        ? uiText("Star a model or multipart set to see it here.")
+                        : hasActiveFilters
+                          ? uiText("Try clearing some filters.")
+                          : selectedCollection
+                            ? uiText(
+                                canUploadHere
+                                  ? "library.collectionEmptyHelp"
+                                  : "library.collectionReadOnlyEmptyHelp",
+                              )
+                            : uiText(
+                                "Upload a model when you're ready, or skim the wiki first if this is a new install.",
+                              )
+                    }
+                    action={
+                      emptyFavorites ? (
+                        <Button type="button" variant="outline" size="xs" onClick={toggleFavorites}>
+                          {uiText("aiSearch.backToLibrary")}
+                        </Button>
+                      ) : hasActiveFilters ? (
                         <Button
                           type="button"
-                          size="sm"
-                          disabled={!canUploadToVault}
-                          onClick={() => {
-                            setDropPreload({ files: [], mode: "files" });
-                            setUploadOpen(true);
-                          }}
+                          variant="outline"
+                          size="xs"
+                          onClick={() => clearAllFilters()}
                         >
-                          {uiText("Upload files")}
+                          {uiText("Clear all filters")}
                         </Button>
+                      ) : selectedCollection && !canUploadHere ? (
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          disabled={!canUploadToVault}
-                          onClick={() => {
-                            setDropPreload({ files: [], mode: "url" });
-                            setUploadOpen(true);
-                          }}
+                          onClick={() => handleCollectionChange(null)}
                         >
-                          {uiText("Import from URL")}
+                          {uiText("aiSearch.backToLibrary")}
                         </Button>
-                        {user?.is_superuser && (
-                          <Button asChild variant="outline" size="sm">
-                            <Link href="/settings">{uiText("Connect folder or NAS")}</Link>
-                          </Button>
-                        )}
-                      </div>
-                    )
-                  }
-                  className="flex-1 py-20"
-                />
-              ) : viewMode === "grid" ? (
-                <div
-                  key={`grid:${folderEntrance.path ?? ""}`}
-                  className={compact ? "p-3" : "p-4 sm:p-6"}
-                >
-                  <div
-                    className={cn(
-                      folderEntrance.move && FOLDER_CARDS_CLASS[folderEntrance.move],
-                      "grid",
-                      compact ? MODEL_GRID_LAYOUT.compact : MODEL_GRID_LAYOUT.comfortable,
-                    )}
-                  >
-                    {visibleCollections.map((collection) => (
-                      <CollectionFolderCard
-                        key={collection.id}
-                        collection={collection}
-                        arriving={arrival.arriving.has(`c:${collection.id}`)}
-                        onSelect={handleCollectionChange}
-                        onIntent={prefetchFolder}
-                        onDropModel={canUploadToVault ? handleMoveModel : undefined}
-                        selectable={selectMode}
-                        selected={selectedCollectionRows.has(collection.id)}
-                        onToggleSelect={auth.isAuthenticated ? toggleCollectionSelect : undefined}
-                      />
-                    ))}
-                    {libraryItems.map((item) =>
-                      item.kind === "multipart" ? (
-                        <MultipartModelCard
-                          key={`multipart-${item.value.id}`}
-                          item={item.value}
-                          arriving={arrival.arriving.has(`p:${item.value.id}`)}
-                          collectionLabel={item.value.collection_label}
-                          returnTo={currentLibraryHref}
-                          origin={snapshot?.entry}
-                          availableTags={tags}
-                          onDataChange={refresh}
-                          selectable={selectMode}
-                          selected={selectedMultipartRows.has(item.value.id)}
-                          onToggleSelect={auth.isAuthenticated ? toggleMultipartSelect : undefined}
-                        />
                       ) : (
-                        <ModelCard
-                          key={item.value.id}
-                          model={item.value}
-                          origin={snapshot?.entry}
-                          arriving={arrival.arriving.has(`m:${item.value.id}`)}
-                          collectionLabel={item.value.collection_label}
-                          selectable={selectMode}
-                          selected={selectedIds.has(item.value.id)}
-                          onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
-                          draggable={canUploadToVault && !selectMode}
-                          onEditTags={openTagEditor}
-                          onIntent={warmModel}
-                        />
-                      ),
-                    )}
-                  </div>
-                  <LoadMore
-                    hasMore={snapshot?.moreFolders ?? false}
-                    loading={fetchingFolders || currentRefresh !== null}
-                    failed={folderPages.isFetchNextPageError}
-                    onClick={() => {
-                      if (currentRefresh === null) void fetchMoreFolders();
-                    }}
-                    folders
+                        <div className="flex flex-wrap items-center justify-center gap-2">
+                          <GettingStartedReminder />
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={!canUploadToVault}
+                            onClick={() => {
+                              setDropPreload({ files: [], mode: "files" });
+                              setUploadOpen(true);
+                            }}
+                          >
+                            {uiText("Upload files")}
+                          </Button>
+                          {canUploadToVault && (
+                            <Button asChild variant="outline" size="sm">
+                              <Link href="/inbox">{uiText("Import from URL")}</Link>
+                            </Button>
+                          )}
+                          {user?.is_superuser && (
+                            <Button asChild variant="outline" size="sm">
+                              <Link href="/settings">{uiText("Connect folder or NAS")}</Link>
+                            </Button>
+                          )}
+                        </div>
+                      )
+                    }
+                    className="flex-1 py-20"
                   />
-                  <LoadMore
-                    hasMore={hasMore && !refreshRequired}
-                    loading={loadingMore}
-                    failed={modelQuery.isFetchNextPageError}
-                    onClick={loadMore}
-                  />
-                </div>
-              ) : (
-                <div
-                  key={`list:${folderEntrance.path ?? ""}`}
-                  ref={listContent}
-                  className={`${folderEntrance.move ? FOLDER_MOVE_CLASS[folderEntrance.move] : ""} flex-1 overflow-y-auto`}
-                >
-                  <div className="flex flex-col">
-                    <div className="flex items-center gap-3 px-4 py-2 border-b border-border text-xs font-mono text-muted-foreground uppercase tracking-wider bg-muted/50">
-                      {auth.isAuthenticated && <span className="w-5 shrink-0" aria-hidden />}
-                      <span className="w-10 flex-shrink-0">{uiText("Thumb")}</span>
-                      <span className="flex-1">{uiText("Name")}</span>
-                      <span className="w-24 text-right hidden sm:block">
-                        {uiText("Collection")}
-                      </span>
-                      <span className="w-20 text-right">{uiText("Contents")}</span>
-                      <span className="w-24 text-right hidden md:block">{uiText("Updated")}</span>
-                    </div>
-                    {visibleCollections.map((collection) => (
-                      <CollectionListRow
-                        key={collection.id}
-                        collection={collection}
-                        displayPath={collection.display_path}
-                        onSelect={handleCollectionChange}
-                        onIntent={prefetchFolder}
-                        onDropModel={canUploadToVault ? handleMoveModel : undefined}
-                        selectable={selectMode}
-                        selected={selectedCollectionRows.has(collection.id)}
-                        onToggleSelect={auth.isAuthenticated ? toggleCollectionSelect : undefined}
-                      />
-                    ))}
+                ) : viewMode === "grid" ? (
+                  <div
+                    // One grid across folders: a Model shown in both (subfolders
+                    // included) keeps its card, thumbnail and state instead of
+                    // every card being rebuilt on each navigation. The surrounding
+                    // content reveal settles the committed visit as one surface.
+                    key="grid"
+                    className={compact ? "p-3" : "px-4 pb-4 pt-3 sm:px-6 sm:pb-6"}
+                  >
+                    <LibraryItems
+                      items={libraryItems}
+                      itemKey={(item) =>
+                        item.kind === "model"
+                          ? `/models/${item.value.id}`
+                          : `/multipart-models/${item.value.id}`
+                      }
+                      renderItem={(item) => (
+                        <LibraryCardFill
+                          identity={cardIdentity}
+                          animateOnMount={cardEntrance !== null}
+                        >
+                          {item.kind === "multipart" ? (
+                            <MultipartModelCard
+                              key={`multipart-${item.value.id}`}
+                              item={item.value}
+                              arriving={arriving.has(`p:${item.value.id}`)}
+                              collectionLabel={item.value.collection_label}
+                              returnTo={currentLibraryHref}
+                              origin={snapshot?.entry}
+                              availableTags={tags}
+                              onDataChange={refresh}
+                              onEditTags={openMultipartTagEditor}
+                              selectable={selectMode}
+                              selected={selectedMultipartRows.has(item.value.id)}
+                              onToggleSelect={
+                                auth.isAuthenticated ? toggleMultipartSelect : undefined
+                              }
+                            />
+                          ) : (
+                            <ModelCard
+                              key={item.value.id}
+                              model={item.value}
+                              origin={snapshot?.entry}
+                              arriving={arriving.has(`m:${item.value.id}`)}
+                              collectionLabel={
+                                includeSubfolders ? item.value.collection_label : null
+                              }
+                              selectable={selectMode}
+                              selected={
+                                modelSelection(
+                                  item.value,
+                                  selectedIds,
+                                  selectedCollectionRows.values(),
+                                ).kind !== "none"
+                              }
+                              onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
+                              draggable={canUploadToVault && !selectMode}
+                              onEditTags={openTagEditor}
+                              onIntent={warmModel}
+                              onInspect={inspectModel}
+                              inspected={inspectorOpen && inspectorIntent?.id === item.value.id}
+                            />
+                          )}
+                        </LibraryCardFill>
+                      )}
+                      scrollRef={startupContent}
+                      readingRenderers={readingRenderers}
+                      readingId="models"
+                      layout="grid"
+                      freezeInspectorTracks={inspectorOpen}
+                      onInspectorDockChange={receiveInspectorDock}
+                      inspectorDockLocked={inspectorMotion.locked !== null}
+                      preferredInspectorWidth={preferredInspectorWidth}
+                      appliedInspectorCustomWidth={appliedDock?.custom}
+                      estimateSize={compact ? 290 : 250}
+                      compact={compact}
+                    />
                     <LoadMore
+                      paused={reading.status === "restoring" || !browseReady}
+                      layoutKey={`${viewMode}:${paneOpen ?? true}`}
                       hasMore={snapshot?.moreFolders ?? false}
                       loading={fetchingFolders || currentRefresh !== null}
                       failed={folderPages.isFetchNextPageError}
@@ -3219,44 +4450,175 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       }}
                       folders
                     />
-                    {libraryItems.map((item) =>
-                      item.kind === "multipart" ? (
-                        <MultipartModelListRow
-                          key={`multipart-${item.value.id}`}
-                          selectable={selectMode}
-                          selected={selectedMultipartRows.has(item.value.id)}
-                          onToggleSelect={auth.isAuthenticated ? toggleMultipartSelect : undefined}
-                          item={item.value}
-                          collectionLabel={item.value.collection_label}
-                          returnTo={currentLibraryHref}
-                          origin={snapshot?.entry}
-                        />
-                      ) : (
-                        <ModelListRow
-                          key={item.value.id}
-                          model={item.value}
-                          origin={snapshot?.entry}
-                          collectionLabel={item.value.collection_label}
-                          selectable={selectMode}
-                          selected={selectedIds.has(item.value.id)}
-                          onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
-                          draggable={canUploadToVault && !selectMode}
-                        />
-                      ),
+                    <LoadMore
+                      paused={reading.status === "restoring" || !browseReady}
+                      layoutKey={`${viewMode}:${paneOpen ?? true}`}
+                      hasMore={hasMore && !refreshRequired}
+                      loading={loadingMore}
+                      failed={modelQuery.isFetchNextPageError}
+                      onClick={loadMore}
+                    />
+                    {childGroups && childGroups.length > 0 && (
+                      <div className="mt-4 space-y-4">{childGroups}</div>
                     )}
                   </div>
-                  <LoadMore
-                    hasMore={hasMore && !refreshRequired}
-                    loading={loadingMore}
-                    failed={modelQuery.isFetchNextPageError}
-                    onClick={loadMore}
-                  />
-                </div>
-              )}
+                ) : (
+                  <div
+                    key={`list:${displayedPath ?? ""}`}
+                    ref={listContent}
+                    data-library-list
+                    className="flex-1 overflow-y-auto"
+                  >
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-3 px-4 py-2 border-b border-border text-xs font-mono text-muted-foreground uppercase tracking-wider bg-muted/50">
+                        {auth.isAuthenticated && <span className="w-5 shrink-0" aria-hidden />}
+                        <span className="w-10 flex-shrink-0">{uiText("Thumb")}</span>
+                        <span className="flex-1">{uiText("Name")}</span>
+                        <span className="w-24 text-right hidden sm:block">
+                          {uiText("Collection")}
+                        </span>
+                        <span className="w-20 text-right">{uiText("Contents")}</span>
+                        <span className="w-24 text-right hidden md:block">{uiText("Updated")}</span>
+                      </div>
+                      <LibraryItems
+                        items={visibleCollections}
+                        itemKey={(collection) => `collection:${collection.id}`}
+                        renderItem={(collection) => (
+                          <CollectionListRow
+                            key={collection.id}
+                            collection={collection}
+                            displayPath={collection.display_path}
+                            onSelect={handleCollectionChange}
+                            onIntent={prefetchFolder}
+                            onDropModel={canUploadToVault ? handleMoveModel : undefined}
+                            selectable={selectMode}
+                            selected={selectedCollectionRows.has(collection.id)}
+                            onToggleSelect={
+                              auth.isAuthenticated ? toggleCollectionSelect : undefined
+                            }
+                          />
+                        )}
+                        scrollRef={startupContent}
+                        readingRenderers={readingRenderers}
+                        readingId="collections"
+                        layout="list"
+                        estimateSize={65}
+                      />
+                      <LoadMore
+                        paused={reading.status === "restoring" || !browseReady}
+                        layoutKey={`${viewMode}:${paneOpen ?? true}`}
+                        hasMore={snapshot?.moreFolders ?? false}
+                        loading={fetchingFolders || currentRefresh !== null}
+                        failed={folderPages.isFetchNextPageError}
+                        onClick={() => {
+                          if (currentRefresh === null) void fetchMoreFolders();
+                        }}
+                        folders
+                      />
+                      <LibraryItems
+                        items={libraryItems}
+                        itemKey={(item) =>
+                          item.kind === "model"
+                            ? `/models/${item.value.id}`
+                            : `/multipart-models/${item.value.id}`
+                        }
+                        renderItem={(item) =>
+                          item.kind === "multipart" ? (
+                            <MultipartModelListRow
+                              key={`multipart-${item.value.id}`}
+                              selectable={selectMode}
+                              selected={selectedMultipartRows.has(item.value.id)}
+                              onToggleSelect={
+                                auth.isAuthenticated ? toggleMultipartSelect : undefined
+                              }
+                              item={item.value}
+                              collectionLabel={item.value.collection_label}
+                              returnTo={currentLibraryHref}
+                              origin={snapshot?.entry}
+                            />
+                          ) : (
+                            <ModelListRow
+                              key={item.value.id}
+                              model={item.value}
+                              origin={snapshot?.entry}
+                              collectionLabel={item.value.collection_label}
+                              selectable={selectMode}
+                              selected={
+                                modelSelection(
+                                  item.value,
+                                  selectedIds,
+                                  selectedCollectionRows.values(),
+                                ).kind !== "none"
+                              }
+                              onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
+                              draggable={canUploadToVault && !selectMode}
+                              onInspect={inspectModel}
+                              inspected={inspectorOpen && inspectorIntent?.id === item.value.id}
+                            />
+                          )
+                        }
+                        scrollRef={startupContent}
+                        readingRenderers={readingRenderers}
+                        readingId="models"
+                        layout="list"
+                        freezeInspectorTracks={inspectorOpen}
+                        onInspectorDockChange={receiveInspectorDock}
+                        inspectorDockLocked={inspectorMotion.locked !== null}
+                        preferredInspectorWidth={preferredInspectorWidth}
+                      />
+                    </div>
+                    <LoadMore
+                      paused={reading.status === "restoring" || !browseReady}
+                      layoutKey={`${viewMode}:${paneOpen ?? true}`}
+                      hasMore={hasMore && !refreshRequired}
+                      loading={loadingMore}
+                      failed={modelQuery.isFetchNextPageError}
+                      onClick={loadMore}
+                    />
+                    {childGroups && childGroups.length > 0 && (
+                      <div className="mt-4 space-y-4">{childGroups}</div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </main>
+        {inspectorAvailable && inspectorIntent && (
+          <LibraryModelInspector
+            key={entry.session}
+            id={inspectorIntent.id}
+            open={inspectorOpen}
+            style={inspectorDockStyle}
+            onMotionSettled={settleInspectorDock}
+            resize={
+              appliedDock && appliedDock.maxWidth >= LIBRARY_INSPECTOR_MIN_WIDTH
+                ? {
+                    current: appliedDock.width,
+                    max: appliedDock.maxWidth,
+                    locked: inspectorMotion.locked !== null,
+                    onResize: chooseInspectorWidth,
+                  }
+                : null
+            }
+            origin={snapshot?.entry}
+            canWrite={auth.isAuthenticated && !authority.authorizationChanged && inspectorOpen}
+            onOpenPage={() => reading.rememberAnchor(`/models/${inspectorIntent.id}`)}
+            onClose={closeInspector}
+          />
+        )}
 
+        {managedCollection && collectionCardTarget?.action === "cover" && (
+          <CollectionCoverEditor
+            key={managedCollection.id}
+            collection={managedCollection}
+            onClose={() => setCollectionCardTarget(null)}
+            onSaved={() => {
+              setCollectionCardTarget(null);
+              void refresh();
+            }}
+          />
+        )}
         {currentBatchRecovery && (
           <LibraryBatchRecovery
             key={currentBatchRecovery.entry.key}
@@ -3270,23 +4632,43 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             }}
           />
         )}
-        {docView === "models" && (
-          <BatchToolbar
-            modelCount={selectedIds.size}
-            multipartCount={selectedMultipartRows.size}
-            selectedCollections={selectedCollections}
-            tags={tags}
-            busy={batchBusy || currentBatchRecovery !== null}
-            canMoveToRoot={!!user?.is_superuser}
-            onMoveSelection={moveSelection}
-            onRenameCollections={(names) =>
-              runCollectionBatch("collection.renameSuccess", (collection) =>
-                renameCollection(collection.id, names[collection.id]),
+        {docView === "models" && batchToolsActivated && (
+          <Suspense fallback={null}>
+            <BatchToolbar
+              modelCount={selectedIdList.length}
+              multipartCount={selectedMultipartRows.size}
+              selectedCollections={selectedCollections}
+              tags={tags}
+              busy={batchBusy || currentBatchRecovery !== null}
+              canMoveToRoot={!!user?.is_superuser}
+              onMoveSelection={moveSelection}
+              onRenameCollections={(names) =>
+                runCollectionBatch("collection.renameSuccess", (collection) =>
+                  renameCollection(collection.id, names[collection.id]),
+                )
+              }
+              onApplyTags={tagSelection}
+              onDeleteSelection={deleteSelection}
+              onClear={clearSelection}
+            />
+          </Suspense>
+        )}
+        {multipartTagTarget && (
+          <MultipartModelTagsDialog
+            key={`${multipartTagTarget.item.id}:${multipartTagTarget.intent}`}
+            item={multipartTagTarget.item}
+            availableTags={tags}
+            onDataChange={refresh}
+            canEdit={
+              !authority.authorizationChanged &&
+              visibleMultipartModels.some(
+                (item) =>
+                  item.id === multipartTagTarget.item.id &&
+                  (item.effective_role === "edit" || item.effective_role === "admin"),
               )
             }
-            onApplyTags={tagSelection}
-            onDeleteSelection={deleteSelection}
-            onClear={clearSelection}
+            initialOpen
+            triggerMode="none"
           />
         )}
         {tagTarget && (
@@ -3315,108 +4697,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   );
 }
 
-// Makes a collection card accept a dragged model: highlights on hover and calls
-// onDropModel(source, path) on drop. Ignores OS file drags (no MODEL_DND_MIME)
-// so those still bubble to the main upload handler.
-function useModelDropTarget(path: string, onDropModel?: (source: ModelDrag, path: string) => void) {
-  const [dragOver, setDragOver] = useState(false);
-  const handlers = {
-    onDragOver: (e: React.DragEvent) => {
-      if (!onDropModel || !e.dataTransfer.types.includes(MODEL_DND_MIME)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      e.dataTransfer.dropEffect = "move";
-      setDragOver(true);
-    },
-    onDragLeave: () => setDragOver(false),
-    onDrop: (e: React.DragEvent) => {
-      if (!onDropModel || !e.dataTransfer.types.includes(MODEL_DND_MIME)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      setDragOver(false);
-      const source = readModelDrag(e.dataTransfer.getData(MODEL_DND_MIME));
-      if (source) onDropModel(source, path);
-    },
-  };
-  return { dragOver, handlers };
-}
-
-function CollectionFolderCard({
-  collection,
-  arriving = false,
-  onSelect,
-  onIntent,
-  onDropModel,
-  selectable,
-  selected,
-  onToggleSelect,
-}: {
-  collection: CollectionRead;
-  arriving?: boolean;
-  onSelect: (path: string) => void;
-  /** The user is about to open this folder (hover or focus): warm its data. */
-  onIntent?: (path: string | null) => void;
-  onDropModel?: (source: ModelDrag, path: string) => void;
-  selectable?: boolean;
-  selected?: boolean;
-  onToggleSelect?: (id: number) => void;
-}) {
-  useUiLocale();
-  const { dragOver, handlers } = useModelDropTarget(collection.path, onDropModel);
-  return (
-    <Localized>
-      <div
-        role="button"
-        tabIndex={0}
-        data-collection-path={collection.path}
-        onPointerEnter={() => !selectable && onIntent?.(collection.path)}
-        onFocus={() => !selectable && onIntent?.(collection.path)}
-        onPointerLeave={() => onIntent?.(null)}
-        onBlur={() => onIntent?.(null)}
-        onClick={() => (selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path))}
-        onKeyDown={(event) => {
-          if (event.target !== event.currentTarget) return;
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            if (selectable) onToggleSelect?.(collection.id);
-            else onSelect(collection.path);
-          }
-        }}
-        {...handlers}
-        className={`${arriving ? "animate-card-arrive" : ""} group group/selection-card flex flex-col text-left bg-muted border rounded-lg hover:shadow-sm transition-[border-color,box-shadow,transform] duration-fast active:scale-[0.99] relative overflow-hidden ${
-          selected
-            ? "border-primary bg-accent"
-            : dragOver
-              ? "border-primary ring-2 ring-primary-soft"
-              : "border-border hover:border-primary"
-        }`}
-      >
-        <div className="flex-1 flex items-center justify-center bg-muted/60 dark:bg-surface-container-high min-h-[100px] sm:min-h-[140px]">
-          {onToggleSelect && (
-            <LibraryCardSelection
-              selecting={!!selectable}
-              checked={!!selected}
-              onChange={() => onToggleSelect(collection.id)}
-              label={uiText("Select folder {value1}", { value1: String(collection.name) })}
-            />
-          )}
-          <Folder className="w-12 h-12 sm:w-16 sm:h-16 text-primary/30" />
-        </div>
-        <div className="p-3 border-t border-border">
-          <div className="flex items-center justify-end gap-2 mb-0.5">
-            <span className="text-3xs text-muted-foreground font-mono">
-              {uiText("{value1} models", { value1: String(collection.model_count ?? "") })}
-            </span>
-          </div>
-          <p className="text-sm font-bold text-foreground truncate tracking-tight">
-            {collection.name}
-          </p>
-        </div>
-      </div>
-    </Localized>
-  );
-}
-
 function CollectionListRow({
   collection,
   displayPath,
@@ -3429,7 +4709,7 @@ function CollectionListRow({
 }: {
   collection: CollectionRead;
   displayPath: string | null;
-  onSelect: (path: string) => void;
+  onSelect: (path: string, id: number) => void;
   /** The user is about to open this folder (hover or focus): warm its data. */
   onIntent?: (path: string | null) => void;
   onDropModel?: (source: ModelDrag, path: string) => void;
@@ -3445,17 +4725,20 @@ function CollectionListRow({
         role="button"
         tabIndex={0}
         data-collection-path={collection.path}
+        data-library-anchor={`collection:${collection.id}`}
         onPointerEnter={() => !selectable && onIntent?.(collection.path)}
         onFocus={() => !selectable && onIntent?.(collection.path)}
         onPointerLeave={() => onIntent?.(null)}
         onBlur={() => onIntent?.(null)}
-        onClick={() => (selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path))}
+        onClick={() =>
+          selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path, collection.id)
+        }
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
             if (selectable) onToggleSelect?.(collection.id);
-            else onSelect(collection.path);
+            else onSelect(collection.path, collection.id);
           }
         }}
         {...handlers}
@@ -3578,6 +4861,8 @@ function ModelListRow({
   selected = false,
   onToggleSelect,
   draggable = false,
+  onInspect,
+  inspected = false,
 }: {
   model: ModelListItem;
   origin?: LibraryEntry;
@@ -3586,12 +4871,15 @@ function ModelListRow({
   selected?: boolean;
   onToggleSelect?: (id: number, range?: boolean) => void;
   draggable?: boolean;
+  onInspect?: (id: number, opener: HTMLElement) => void;
+  inspected?: boolean;
 }) {
   useUiLocale();
   const printerPresence = model.printer_presence ?? [];
   return (
     <Localized>
       <LibraryItemLink
+        data-inspected={inspected || undefined}
         origin={origin}
         href={`/models/${model.id}`}
         draggable={draggable}
@@ -3607,9 +4895,19 @@ function ModelListRow({
           if (selectable) {
             e.preventDefault();
             onToggleSelect?.(model.id, e.shiftKey);
+          } else if (
+            onInspect &&
+            e.button === 0 &&
+            !e.metaKey &&
+            !e.ctrlKey &&
+            !e.shiftKey &&
+            !e.altKey
+          ) {
+            e.preventDefault();
+            onInspect(model.id, e.currentTarget);
           }
         }}
-        className={`flex items-center gap-2 md:gap-3 px-4 py-3 border-b border-border transition-colors group active:bg-muted ${
+        className={`library-model-row flex items-center gap-2 md:gap-3 px-4 py-3 border-b border-border transition-colors duration-press group active:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
           draggable ? "cursor-grab active:cursor-grabbing" : ""
         } ${selected ? "bg-accent" : "hover:bg-muted"}`}
       >
@@ -3633,7 +4931,9 @@ function ModelListRow({
           }
         />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-foreground truncate">{model.name}</p>
+          <p className="text-sm font-medium text-foreground truncate" title={model.name}>
+            {displayModelName(model.name)}
+          </p>
           {model.tags.length > 0 && (
             <div className="flex gap-1 mt-0.5">
               {model.tags.slice(0, 2).map((tag) => (
@@ -3676,19 +4976,22 @@ function ModelListRow({
 
 /**
  * The next page of a view loads as the list is scrolled toward its end, so
- * there is no button to press. A sentinel reaching up 600px above the end of the
- * list starts the read before the reader gets there. The button remains only
- * where it must: a browser that cannot observe scrolling, or after a read
- * failed, since a sentinel still in view would otherwise retry without end.
+ * a sentinel reaching up 600px above the end starts the read before the reader
+ * gets there. A failed read retires the observer and offers an explicit retry,
+ * so a sentinel still in view cannot retry without end.
  */
 function LoadMore({
   hasMore,
   loading,
   failed = false,
+  paused = false,
+  layoutKey,
   onClick,
   folders = false,
 }: {
   hasMore: boolean;
+  paused?: boolean;
+  layoutKey: string;
   loading: boolean;
   failed?: boolean;
   onClick: () => void;
@@ -3700,101 +5003,273 @@ function LoadMore({
   useLayoutEffect(() => {
     load.current = onClick;
   });
-  const automatic = "IntersectionObserver" in globalThis && !failed;
+  // The measured first batch fills the viewport. Anticipate later pages only
+  // after the reader scrolls, even when this view has no initial media pause.
+  const [awaitScroll, setAwaitScroll] = useState(true);
+  const [readingLayout, setReadingLayout] = useState(layoutKey);
+  if (readingLayout !== layoutKey) {
+    setReadingLayout(layoutKey);
+    setAwaitScroll(true);
+  }
+  if (paused && !awaitScroll) setAwaitScroll(true);
+  // Reconstruct only the saved pages. Resume anticipation after the reader moves,
+  // so a restored near-end sentinel cannot fetch an unvisited cursor on its own.
+  useEffect(() => {
+    if (!awaitScroll || paused) return;
+    const main = sentinel.current?.closest("main");
+    if (!main) return;
+    const resume = (event: Event) => {
+      if (event instanceof KeyboardEvent && !["PageDown", "End", "ArrowDown"].includes(event.key))
+        return;
+      setAwaitScroll(false);
+    };
+    main.addEventListener("wheel", resume, { passive: true });
+    main.addEventListener("touchmove", resume, { passive: true });
+    // Scroll does not bubble: capture also covers the table's inner scroller.
+    // Scrollbar dragging and assistive scrolling need no wheel or key event.
+    main.addEventListener("scroll", resume, { capture: true, passive: true });
+    main.addEventListener("keydown", resume);
+    return () => {
+      main.removeEventListener("wheel", resume);
+      main.removeEventListener("touchmove", resume);
+      main.removeEventListener("scroll", resume, true);
+      main.removeEventListener("keydown", resume);
+    };
+  }, [awaitScroll, paused]);
+  const automatic = "IntersectionObserver" in globalThis && !failed && !paused && !awaitScroll;
+  const mayLoad = useRef(false);
+  useLayoutEffect(() => {
+    mayLoad.current = automatic && hasMore && !loading;
+  });
+  useEffect(() => {
+    const main = sentinel.current?.closest("main");
+    if (!main || !hasMore || loading || failed || paused || !awaitScroll) return;
+    // A short first page has no scrollbar to move. Fill only that viewport;
+    // the larger anticipation area belongs to subsequent reader scrolling.
+    let filling = false;
+    const fill = () => {
+      const table = main.querySelector<HTMLElement>("[data-library-list]");
+      const tableScrollable = table !== null && table.scrollHeight > table.clientHeight + 1;
+      if (
+        !filling &&
+        !tableScrollable &&
+        main.clientHeight > 0 &&
+        main.scrollHeight <= main.clientHeight + 1
+      ) {
+        filling = true;
+        load.current();
+      }
+    };
+    fill();
+    if (!("ResizeObserver" in globalThis)) return;
+    const observer = new ResizeObserver(fill);
+    observer.observe(main);
+    return () => observer.disconnect();
+  }, [awaitScroll, failed, hasMore, loading, paused, layoutKey]);
   useEffect(() => {
     const element = sentinel.current;
     if (!automatic || !hasMore || loading || element === null) return;
     // Observing reports the current state at once, so a list shorter than the
     // reach keeps loading until it fills it.
     const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) load.current();
+      if (mayLoad.current && entries.some((entry) => entry.isIntersecting)) {
+        mayLoad.current = false;
+        load.current();
+      }
     });
     observer.observe(element);
     return () => observer.disconnect();
   }, [automatic, hasMore, loading]);
   if (!hasMore) return null;
-  if (automatic) {
-    return (
-      <Localized>
-        <div className="relative pb-6">
+  return (
+    <Localized>
+      <div
+        data-library-pagination={folders ? "folders" : "models"}
+        className="relative flex justify-center mt-6 pb-6"
+      >
+        {"IntersectionObserver" in globalThis && (
           <div
             ref={sentinel}
             data-load-more-sentinel
             aria-hidden
             className="pointer-events-none absolute bottom-0 h-[600px] w-full"
           />
-          {loading && (
-            <div className="flex justify-center py-6">
-              <Spinner />
-            </div>
-          )}
-        </div>
-      </Localized>
-    );
-  }
-  return (
-    <Localized>
-      <div className="flex justify-center mt-6 pb-6">
-        <button
-          onClick={onClick}
-          disabled={loading}
-          className="px-4 py-2 rounded border border-border bg-background text-foreground hover:bg-muted disabled:opacity-50 font-mono text-[13px] uppercase tracking-wider transition-colors"
-        >
-          {loading
-            ? uiText("Loading...")
-            : folders
-              ? uiText("Show more folders")
-              : uiText("Load more")}
-        </button>
+        )}
+        {loading ? (
+          <span role="status" className="text-xs text-muted-foreground">
+            {uiText("Loading...")}
+          </span>
+        ) : failed ? (
+          <Button variant="outline" onClick={onClick}>
+            {uiText("Retry")}
+          </Button>
+        ) : null}
       </div>
     </Localized>
   );
 }
 
-/** The tags row and description of a Collection, before its row and readme arrive. */
-export function CollectionHeaderSkeleton() {
+/** Reserve the compact metadata line while the collection snapshot loads. */
+export function CollectionHeaderSkeleton({ hasDescription = false }: { hasDescription?: boolean }) {
   useUiLocale();
   return (
     <div
       role="status"
       aria-label={uiText("Loading…")}
-      className="flex flex-wrap items-center gap-4 border-b border-border px-4 py-2 sm:px-6"
+      className="library-loading-placeholder w-full min-w-0"
     >
-      <Skeleton className="h-8 w-28" />
-      <Skeleton className="h-8 w-60 max-w-full" />
-    </div>
-  );
-}
-
-const MODEL_GRID_LAYOUT = {
-  comfortable: "grid-cols-[repeat(auto-fill,minmax(min(100%,260px),1fr))] gap-4",
-  compact: "grid-cols-[repeat(auto-fill,minmax(min(100%,200px),1fr))] gap-2",
-};
-
-export function ModelGridSkeleton({ compact = false }: { compact?: boolean }) {
-  useUiLocale();
-  return (
-    <div role="status" aria-label={uiText("Loading...")} className={compact ? "p-3" : "p-4 sm:p-6"}>
-      <div
-        className={cn("grid", compact ? MODEL_GRID_LAYOUT.compact : MODEL_GRID_LAYOUT.comfortable)}
-      >
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="space-y-3 rounded-lg border border-border p-3 bg-card">
-            <Skeleton className="h-40 w-full rounded" />
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-3 w-1/2" />
-            <Skeleton className="h-12 w-full rounded" />
-          </div>
-        ))}
+      {hasDescription && (
+        <div className="mb-1 flex h-[18px] items-center">
+          <Skeleton className="h-3 w-60 max-w-full" />
+        </div>
+      )}
+      <div className="collection-header-meta-placeholder">
+        <Skeleton className="h-3 w-60 max-w-full" />
       </div>
     </div>
   );
 }
 
-function ModelListSkeleton() {
+/** Two full rows: a partial last row reads as content, not as loading. */
+const SKELETON_ROWS = 2;
+
+function viewportPageSize(node: HTMLElement, columns: number, selector: string): number {
+  const main = node.closest("main");
+  const first = node.querySelector<HTMLElement>(selector);
+  if (!main || !first || main.clientHeight === 0 || first.clientHeight === 0)
+    return UNMEASURED_PAGE_SIZE;
+  const firstRect = first.getBoundingClientRect();
+  const rowGap = Number.parseFloat(getComputedStyle(first.parentElement!).rowGap);
+  const gap = Number.isFinite(rowGap) ? rowGap : 0;
+  const available = Math.max(0, main.getBoundingClientRect().bottom - firstRect.top);
+  const rows = Math.max(1, Math.ceil((available + gap) / (firstRect.height + gap)));
+  // Browse's maximum page size is 100; a taller surface continues automatically.
+  return Math.min(100, columns * rows);
+}
+
+export function ModelGridSkeleton({
+  compact = false,
+  onRetire,
+  onCapacityChange,
+}: {
+  compact?: boolean;
+  onRetire?: (rects: readonly DOMRect[]) => void;
+  onCapacityChange?: (capacity: number, columns: number) => void;
+}) {
   useUiLocale();
+  const [scrollNode, setScrollNode] = useState<HTMLDivElement | null>(null);
+  const scroll = useMemo(() => ({ current: scrollNode }), [scrollNode]);
+  const renderers = useRef(new Map<string, LibraryReadingRenderer>());
+  const [columns, setColumns] = useState(4);
+  const capacityFrame = useRef<number | null>(null);
+  const receiveColumns = useCallback(
+    (count: number) => {
+      setColumns(count);
+      if (capacityFrame.current !== null) cancelAnimationFrame(capacityFrame.current);
+      // The reserved collection strip measures its columns in the same commit.
+      // Read after that reflow so an early nested-folder request still fills
+      // the viewport, rather than sizing against temporary stacked folders.
+      capacityFrame.current = requestAnimationFrame(() => {
+        if (scrollNode?.isConnected)
+          onCapacityChange?.(viewportPageSize(scrollNode, count, "[data-library-key]"), count);
+      });
+    },
+    [onCapacityChange, scrollNode],
+  );
+  useLayoutEffect(
+    () => () => {
+      if (capacityFrame.current !== null) cancelAnimationFrame(capacityFrame.current);
+    },
+    [],
+  );
+  useLayoutEffect(() => {
+    // Non-layout hosts and hidden surfaces cannot provide a viewport yet.
+    if (scrollNode?.clientWidth === 0) onCapacityChange?.(UNMEASURED_PAGE_SIZE, 0);
+  }, [onCapacityChange, scrollNode]);
+  const cards = useMemo(
+    () => Array.from({ length: columns * SKELETON_ROWS }, (_, index) => index),
+    [columns],
+  );
+  useLayoutEffect(() => {
+    if (!scrollNode || !onRetire) return;
+    let rects: readonly DOMRect[] = [];
+    const measure = () => {
+      rects = Array.from(scrollNode.querySelectorAll("[data-library-key]")).map((node) =>
+        node.getBoundingClientRect(),
+      );
+    };
+    let tick = requestAnimationFrame(measure);
+    const schedule = () => {
+      cancelAnimationFrame(tick);
+      tick = requestAnimationFrame(measure);
+    };
+    const observer = "ResizeObserver" in globalThis ? new ResizeObserver(schedule) : null;
+    observer?.observe(scrollNode);
+    window.addEventListener("scroll", schedule, true);
+    return () => {
+      cancelAnimationFrame(tick);
+      observer?.disconnect();
+      window.removeEventListener("scroll", schedule, true);
+      const grid = scrollNode.querySelector(".library-loading-placeholder");
+      // A suppressed fast-load placeholder never established a visual position;
+      // forget older ones too, so cards never travel from a stale placeholder.
+      if (!grid || Number(getComputedStyle(grid).opacity) === 0) {
+        onRetire([]);
+        return;
+      }
+      // Keep the last painted positions: earlier siblings may already have
+      // changed layout during the commit that retires this placeholder.
+      onRetire(rects);
+    };
+  }, [scrollNode, onRetire]);
   return (
-    <div className="flex flex-col">
+    <div
+      ref={setScrollNode}
+      role="status"
+      aria-label={uiText("Loading...")}
+      className={compact ? "p-3" : "px-4 pb-4 pt-3 sm:px-6 sm:pb-6"}
+    >
+      {scrollNode && (
+        <LibraryItems
+          items={cards}
+          onColumnsChange={receiveColumns}
+          itemKey={(index) => `skeleton:${index}`}
+          scrollRef={scroll}
+          readingRenderers={renderers}
+          readingId="skeleton"
+          layout="grid"
+          className="library-loading-placeholder"
+          compact={compact}
+          virtualize={false}
+          renderItem={() => (
+            <div
+              className="library-model-card overflow-hidden border border-border bg-card"
+              aria-hidden
+            >
+              <div className="library-preview">
+                <LibraryPreviewPlaceholder />
+              </div>
+              <LibraryCardDetailsPlaceholder />
+            </div>
+          )}
+        />
+      )}
+    </div>
+  );
+}
+
+function ModelListSkeleton({
+  onCapacityChange,
+}: {
+  onCapacityChange?: (capacity: number, columns: number) => void;
+}) {
+  useUiLocale();
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (root.current) onCapacityChange?.(viewportPageSize(root.current, 1, ":scope > div"), 1);
+  }, [onCapacityChange]);
+  return (
+    <div ref={root} className="flex flex-col">
       {Array.from({ length: 6 }).map((_, i) => (
         <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-border">
           <Skeleton className="w-10 h-10 rounded flex-shrink-0" />

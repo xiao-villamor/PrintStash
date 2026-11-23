@@ -231,7 +231,7 @@ describe("OidcSettingsCard", () => {
     it("reads as off when SSO is not configured", async () => {
       renderCard();
 
-      expect(await screen.findByRole("checkbox", { name: "Enable SSO login" })).toHaveAttribute(
+      expect(await screen.findByRole("switch", { name: "Enable SSO login" })).toHaveAttribute(
         "aria-checked",
         "false",
       );
@@ -243,7 +243,7 @@ describe("OidcSettingsCard", () => {
       renderCard();
 
       expect(
-        await screen.findByRole("checkbox", { name: "Allow insecure HTTP issuer" }),
+        await screen.findByRole("switch", { name: "Allow insecure HTTP issuer" }),
       ).toHaveAttribute("aria-checked", "false");
     });
   });
@@ -254,7 +254,7 @@ describe("OidcSettingsCard", () => {
       // button leads nowhere.
       const user = userEvent.setup();
       const { saveConfig } = renderCard();
-      await user.click(await screen.findByRole("checkbox", { name: "Enable SSO login" }));
+      await user.click(await screen.findByRole("switch", { name: "Enable SSO login" }));
 
       await user.click(screen.getByRole("button", { name: /Save SSO settings/ }));
 
@@ -264,7 +264,7 @@ describe("OidcSettingsCard", () => {
     it("says which fields are missing", async () => {
       const user = userEvent.setup();
       renderCard();
-      await user.click(await screen.findByRole("checkbox", { name: "Enable SSO login" }));
+      await user.click(await screen.findByRole("switch", { name: "Enable SSO login" }));
 
       await user.click(screen.getByRole("button", { name: /Save SSO settings/ }));
 
@@ -279,7 +279,7 @@ describe("OidcSettingsCard", () => {
         oidc_issuer_url: "https://auth.test/o/printstash",
         oidc_client_id: "printstash",
       });
-      await user.click(await screen.findByRole("checkbox", { name: "Enable SSO login" }));
+      await user.click(await screen.findByRole("switch", { name: "Enable SSO login" }));
 
       await user.click(screen.getByRole("button", { name: /Save SSO settings/ }));
 
@@ -293,7 +293,7 @@ describe("OidcSettingsCard", () => {
       // about turning it on, not about typing.
       const user = userEvent.setup();
       const { saveConfig } = renderCard();
-      await screen.findByRole("checkbox", { name: "Enable SSO login" });
+      await screen.findByRole("switch", { name: "Enable SSO login" });
 
       await user.click(screen.getByRole("button", { name: /Save SSO settings/ }));
 
@@ -306,7 +306,7 @@ describe("OidcSettingsCard", () => {
       // It is never returned, so an empty field means "keep what is stored".
       const user = userEvent.setup();
       const { saveConfig } = renderCard({ has_oidc_client_secret: true });
-      await screen.findByRole("checkbox", { name: "Enable SSO login" });
+      await screen.findByRole("switch", { name: "Enable SSO login" });
 
       await user.click(screen.getByRole("button", { name: /Save SSO settings/ }));
 
@@ -350,7 +350,7 @@ describe("OidcSettingsCard", () => {
     it("confirms the settings landed", async () => {
       const user = userEvent.setup();
       renderCard();
-      await screen.findByRole("checkbox", { name: "Enable SSO login" });
+      await screen.findByRole("switch", { name: "Enable SSO login" });
 
       await user.click(screen.getByRole("button", { name: /Save SSO settings/ }));
 
@@ -366,7 +366,7 @@ describe("OidcSettingsCard", () => {
           "PUT /api/v1/config": json({ detail: "issuer_unreachable" }, 503),
         },
       });
-      await screen.findByRole("checkbox", { name: "Enable SSO login" });
+      await screen.findByRole("switch", { name: "Enable SSO login" });
 
       await user.click(screen.getByRole("button", { name: /Save SSO settings/ }));
 

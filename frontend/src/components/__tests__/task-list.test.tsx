@@ -5,7 +5,7 @@
  */
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test-support/router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TaskList } from "@/components/task-list";
@@ -27,7 +27,7 @@ function task(overrides: Partial<TaskItem> = {}): TaskItem {
 
 function renderTaskList(tasks: TaskItem[], user: AuthState["user"] = null) {
   render(
-    <MemoryRouter>
+    <TestRouter>
       <AuthContext.Provider
         value={{
           user,
@@ -39,13 +39,29 @@ function renderTaskList(tasks: TaskItem[], user: AuthState["user"] = null) {
       >
         <TaskList tasks={tasks} onClear={vi.fn<() => void>()} />
       </AuthContext.Provider>
-    </MemoryRouter>,
+    </TestRouter>,
   );
 }
 
 afterEach(() => act(() => setLocale("en")));
 
 describe("TaskList", () => {
+  it("opens the committed Multipart from an archive import", () => {
+    renderTaskList([task({ status: "completed", multipartModelId: 12 })]);
+    expect(screen.getByRole("link", { name: "Open Multipart Model" })).toHaveAttribute(
+      "href",
+      "/multipart-models/12",
+    );
+  });
+  it("keeps a saved guide accessible after a partial import", () => {
+    renderTaskList([
+      task({ status: "failed", importedDocuments: [{ document_id: 9, name: "Assembly.pdf" }] }),
+    ]);
+    expect(screen.getByRole("link", { name: "Assembly.pdf" })).toHaveAttribute(
+      "href",
+      "/documents/9",
+    );
+  });
   it.each(["pending", "running"] as const)(
     "warns that a %s browser upload needs its tab",
     (status) => {
@@ -279,7 +295,10 @@ describe("TaskList", () => {
     expect(
       screen.getByText(/Falta un archivo necesario para la copia de seguridad\./),
     ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Revisar y reintentar" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Revisar y reintentar" })).toHaveAttribute(
+      "href",
+      "/inbox",
+    );
   });
 
   it("retains failed item names literally", async () => {

@@ -11,12 +11,27 @@ available builds. Anything marked beta here remains beta.
 ## Printer Providers
 
 - Moonraker/Klipper is the primary supported provider.
+- Printer Status shows up to five minutes of heater readings. Moonraker
+  history depends on its controller cache, which uses nominal sample timing.
+  The Bambu graph starts fresh on reload. Bambu heater and fan fields vary
+  by firmware, and Klipper's part-cooling fan is optional.
 - Moonraker support includes live status, upload/send, optional start, remote
   file inventory sync, remote file start, pause/resume/cancel, and job history.
+- Moonraker manual extrusion is available for the active primary extruder
+  once Klipper reports it can extrude. Hardware limits can reduce available
+  travel or extrusion below PrintStash's per-command limits. Klipper's
+  part-cooling control requires a configured `fan`. Operate the printer from
+  a single application during manual motion.
+- Moonraker's file manager defines visibility for its `config` root, including
+  entries exposed through device-side links. PrintStash filters to permitted
+  relative paths and existing text files, then applies Moonraker's access
+  permissions. Moonraker offers no atomic compare-and-swap or existing-file-only
+  upload, so a concurrent edit or removal from another client can race a save
+  after the revision check. Review the readback when an upload is unconfirmed.
 - Bambu LAN support is beta. It supports local status, upload of plain-text
-  Vault G-code, explicit send-to-print, and pause/resume/cancel controls.
-- Bambu LAN remote-file inventory, deletion, raw G-code controls, and measured
-  filament consumption are not implemented.
+  Vault G-code and sliced projects, explicit plate starts, and pause/resume/cancel controls.
+- Bambu LAN browsing outside `/cache`, remote deletion, manual motion and tuning
+  controls, and measured filament consumption are not implemented.
 - Multipart Models reference existing Models as named pieces and alternatives.
   Quantities and [manufacturing builds](multipart-builds.md) track selected
   Revisions and confirmed physical output. Compatibility rules
@@ -171,8 +186,12 @@ available builds. Anything marked beta here remains beta.
   at a time in Model detail. Discovery is limited to 64 canonical
   `Metadata/plate_<N>.gcode` members and the configured 3MF preview limits.
   It does not require source meshes or a saved plate layout. Unsliced projects
-  have no toolpath to preview. This plate choice controls the preview only;
-  it does not select a plate for printer dispatch.
+  have no toolpath to preview. Explicit `.gcode.3mf` files are Revisions, and
+  the Send dialog separately selects the plate to send, queue or batch.
+  A single sliced plate is selected automatically; multiple plates require a choice.
+  Bambu LAN sends the archive and selected plate. Other providers receive the extracted toolpath. PrintStash does not set per-print AMS mappings.
+  Multi-plate revision-wide estimates and material requirements are left unknown
+  because the plates can use different settings; single-plate metadata is parsed.
 
 - Libraries of up to 25,000 collections and 100,000 Models are supported and
   tested nightly at that size. Larger libraries work, but the collection
@@ -219,12 +238,19 @@ available builds. Anything marked beta here remains beta.
   models and preview images for review, and again when the selection is
   imported, so staging briefly needs room for those files uncompressed.
   Encrypted archives, links inside archives and multi-volume archives are not
-  read. Compressed RAR members need `bsdtar`, which the container image
+  read. A TAR archive must not unpack to more than the archive size limit
+  (`VAULT_MAX_ARCHIVE_UNCOMPRESSED_MB`) in total, counting files that are not
+  models; sparse members, member types other than files, folders, links and
+  devices, and names that are not UTF-8 are refused. Compressed RAR members need `bsdtar`, which the container image
   includes; uncompressed members are read without it. Browser captures and
   Pending Imports accept ZIP only.
 - The G-code toolpath viewer is a browser-side visualization aid. It is not a
   slicer-grade simulator and does not validate firmware-specific macros,
-  acceleration, pressure advance, or printer safety.
+  acceleration, pressure advance, or printer safety. Previews retain all printable
+  layers within a combined budget of four million extrusion and travel segments.
+  Circular arcs use chords with a maximum 0.02 mm approximation error and 5°
+  angular step. Files exceeding the budget remain downloadable in their original
+  form. Rendering speed and memory use depend on the browser and GPU.
 
 ## Notifications
 
@@ -419,3 +445,7 @@ remains downloadable. CTB files without an embedded preview have no thumbnail.
 
 Other resin formats, spreadsheets and Word documents can be stored in collection
 Documents and downloaded unchanged. Their contents do not have an in-app preview.
+
+## Multi-angle Model previews
+
+Generated card views are discrete recognition aids, not complete geometry inspection. Recipe 1 follows the shared mesh limits (`VAULT_MESH_MAX_LOAD_MB`, default 200; `VAULT_MESH_MAX_RENDER_TRIANGLES`, default 2,000,000) and produces five or six 480 × 360 images; native memory admission also applies. Unsupported or refused optional views leave the original Artifact and primary cover usable. Primary work gets scheduling priority, with a finite grace period to keep continuous ingestion from starving secondary views. See [behavior and limits](model-previews.md).

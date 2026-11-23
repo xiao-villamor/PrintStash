@@ -44,6 +44,7 @@ import app.modules.library.model_views.exports as models_exports
 import app.modules.library.model_views.facets as models_facets
 import app.modules.library.model_views.listing as models_listing
 import app.modules.library.model_views.pagination as models_pagination
+import app.modules.library.model_views.profiles as models_profiles
 import app.modules.library.model_views.statistics as models_statistics
 import app.modules.library.model_views.trash as models_trash
 import app.modules.printing.costing as models_costing
@@ -81,6 +82,7 @@ from app.modules.ingestion import library_transfer, staging_leases
 from app.modules.ingestion.ingestion import add_gcode_revision_to_model
 from app.modules.library import commands as model_commands
 from app.modules.library import (
+    model_covers,
     provenance,
     revisions,
     source_covers,
@@ -105,6 +107,8 @@ from app.modules.library.trash import (
 from app.modules.library.trash import (
     restore_model as trash_restore_model,
 )
+from app.modules.media.preview_contracts import PreviewSize, ViewId
+from app.modules.media.source_cover_processing import MAX_SOURCE_COVER_BYTES
 from app.modules.printing import job_import, print_results
 from app.modules.printing.moonraker import MoonrakerError
 from app.modules.printing.printer_jobs import reproducibility_payload
@@ -128,6 +132,8 @@ from app.schemas.library_browse import (
     BrowseRevisionRead,
     BrowseThumbnailQuery,
     BrowseThumbnailsRead,
+    CollectionPreviewQuery,
+    CollectionPreviewRead,
 )
 from app.schemas.models import (
     ArtifactOutcomeRead,
@@ -138,6 +144,7 @@ from app.schemas.models import (
     ModelBatchMove,
     ModelBatchResult,
     ModelBatchTags,
+    ModelCoverSource,
     ModelEditBatchResult,
     ModelFacetsRead,
     ModelFilters,
@@ -161,6 +168,7 @@ from app.schemas.provenance import (
     ModelProvenancePatch,
     ModelProvenanceRead,
     ModelSourceCoverRead,
+    RelatedProfilesRead,
 )
 from app.schemas.saved_views import ModelStarRead
 from app.schemas.search import SearchResponse
@@ -373,6 +381,19 @@ def browse_thumbnails(
     session: Session = Depends(get_session),
 ) -> BrowseThumbnailsRead:
     return models_browse.thumbnail_items(session, current_user, query.model_id)
+
+
+@router.get(
+    "/browse/collection-preview",
+    response_model=CollectionPreviewRead,
+    summary="Read four authorized collection cover references without card metadata",
+)
+def collection_preview(
+    query: Annotated[CollectionPreviewQuery, Query()],
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> CollectionPreviewRead:
+    return models_browse.collection_preview(session, current_user, query.collection)
 
 
 @router.get(
@@ -968,6 +989,132 @@ def patch_model_provenance(
     return result
 
 
+@router.get("/{model_id}/cover/content", summary="Read the Model's chosen cover")
+def get_model_cover(
+    model_id: int,
+    size: Literal["thumbnail", "original"] = "original",
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> Response:
+    model = _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    from app.modules.media.thumbnail import PhotoSize, to_photo_webp
+
+    photo = to_photo_webp(model_covers.content(model), size=PhotoSize(size))
+    return Response(
+        content=photo.data,
+        media_type="image/webp",
+        headers={
+            "Cache-Control": "private, no-cache",
+            "ETag": f'"model-cover-{model_id}-{model.cover_filename}-{size}-photo"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.put(
+    "/{model_id}/cover",
+    response_model=ModelRead,
+    summary="Choose an uploaded Model cover",
+)
+@bounded_command
+def put_model_cover(
+    model_id: int,
+    response: Response,
+    file: UploadFile = UploadFileParam(...),
+    actor: CommandActor = Depends(require_command_writer),
+    precondition: EditPrecondition = Depends(edit_precondition),
+) -> ModelRead:
+    with command_session(actor) as (session, current_user):
+        model = _require_model_role(
+            session, current_user, model_id, CollectionRole.EDIT
+        )
+        model_covers.put(
+            session,
+            current_user,
+            model,
+            file.file.read(MAX_SOURCE_COVER_BYTES + 1),
+            file.content_type,
+            precondition,
+        )
+        response.headers["ETag"] = etag(
+            EditKind.MODEL, model_id, model.edit_version, model.edit_epoch
+        )
+        result = models_detail.detail(session, model_id, current_user)
+        if result is None:
+            raise HTTPException(status_code=404, detail="model_not_found")
+        return result
+
+
+@router.post(
+    "/{model_id}/cover/source",
+    response_model=ModelRead,
+    summary="Choose a source image as the Model cover",
+)
+@bounded_command
+def select_model_cover_source(
+    model_id: int,
+    payload: ModelCoverSource,
+    response: Response,
+    actor: CommandActor = Depends(require_command_writer),
+    precondition: EditPrecondition = Depends(edit_precondition),
+) -> ModelRead:
+    with command_session(actor) as (session, current_user):
+        model = _require_model_role(
+            session, current_user, model_id, CollectionRole.EDIT
+        )
+        model_covers.select_source(
+            session,
+            current_user,
+            model,
+            payload.source_id,
+            precondition,
+            position=payload.position,
+        )
+        response.headers["ETag"] = etag(
+            EditKind.MODEL, model_id, model.edit_version, model.edit_epoch
+        )
+        result = models_detail.detail(session, model_id, current_user)
+        if result is None:
+            raise HTTPException(status_code=404, detail="model_not_found")
+        return result
+
+
+@router.delete(
+    "/{model_id}/cover",
+    response_model=ModelRead,
+    summary="Reset the Model cover to automatic",
+)
+@bounded_command
+def reset_model_cover(
+    model_id: int,
+    response: Response,
+    actor: CommandActor = Depends(require_command_writer),
+    precondition: EditPrecondition = Depends(edit_precondition),
+) -> ModelRead:
+    with command_session(actor) as (session, current_user):
+        model = _require_model_role(
+            session, current_user, model_id, CollectionRole.EDIT
+        )
+        model_covers.reset(session, current_user, model, precondition)
+        response.headers["ETag"] = etag(
+            EditKind.MODEL, model_id, model.edit_version, model.edit_epoch
+        )
+        result = models_detail.detail(session, model_id, current_user)
+        if result is None:
+            raise HTTPException(status_code=404, detail="model_not_found")
+        return result
+
+
+@router.get("/{model_id}/related-profiles", response_model=RelatedProfilesRead)
+def get_related_profiles(
+    model_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> RelatedProfilesRead:
+    _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    return models_profiles.related_profiles(session, current_user, model_id)
+
+
 def _provenance_source_or_404(
     session: Session, model_id: int, source_id: int
 ) -> ModelProvenanceSource:
@@ -1003,16 +1150,22 @@ def get_model_source_cover(
 def stream_model_source_cover(
     model_id: int,
     source_id: int,
+    position: int = Query(default=0, ge=0),
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> Response:
     _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
     _provenance_source_or_404(session, model_id, source_id)
-    cover = source_covers.get(session, source_id)
+    cover = source_covers.get(session, source_id, position=position)
     if cover is None:
         raise HTTPException(status_code=404, detail="source_cover_not_found")
+    from app.modules.media.thumbnail import PhotoSize, to_photo_webp
+
+    photo = to_photo_webp(
+        get_backend().read_bytes(cover.storage_key), size=PhotoSize.ORIGINAL
+    )
     return Response(
-        content=get_backend().read_bytes(cover.storage_key),
+        content=photo.data,
         media_type="image/webp",
         headers={
             "Cache-Control": "private, max-age=3600",
@@ -1133,7 +1286,9 @@ def add_gcode_revision(
 
         original_filename = Path(file.filename).name
         suffix = Path(original_filename).suffix.lower() or ".gcode"
-        if suffix not in _GCODE_SUFFIXES:
+        if suffix not in _GCODE_SUFFIXES and not original_filename.lower().endswith(
+            ".gcode.3mf"
+        ):
             raise HTTPException(status_code=400, detail="unsupported_file_type")
 
         staged = _stage_gcode_upload(file, suffix)
@@ -1783,3 +1938,33 @@ def delete_model(
     m = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
     soft_delete_model(session, m)
     return Response(status_code=204)
+
+
+@router.get("/{model_id}/previews/{generation}")
+def get_model_preview_manifest(
+    model_id: int,
+    generation: str,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+):
+    from app.modules.library.model_views import previews
+
+    _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    return previews.resolve(session, model_id, generation)[1]
+
+
+@router.get("/{model_id}/previews/{generation}/{view_id}")
+def get_model_preview_image(
+    model_id: int,
+    generation: str,
+    view_id: ViewId,
+    size: PreviewSize = PreviewSize.FULL,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+):
+    from app.api.preview_response import preview_response
+    from app.modules.library.model_views import previews
+
+    _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    row, manifest = previews.resolve(session, model_id, generation)
+    return preview_response(row, manifest, view_id, size=size)

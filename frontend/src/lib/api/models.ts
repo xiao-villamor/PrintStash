@@ -12,6 +12,7 @@ import {
   sendJson,
 } from "@/lib/api/request";
 import {
+  ArchiveIntake,
   ArtifactOutcomeRead,
   FileRevisionUpdate,
   ImportedPrintJobRead,
@@ -107,10 +108,11 @@ export async function listOutlinerModels(
 
 export async function getModelFacets(
   params?: Omit<ListModelsParams, "limit" | "offset">,
+  options?: GetJsonOptions,
 ): Promise<ModelFacetsRead> {
   const search = modelListSearch(params);
   const query = search.toString();
-  return getJson<ModelFacetsRead>(`/api/v1/models/facets${query ? `?${query}` : ""}`, {});
+  return getJson<ModelFacetsRead>(`/api/v1/models/facets${query ? `?${query}` : ""}`, options);
 }
 
 export function starModel(id: number): Promise<ModelStarRead> {
@@ -421,7 +423,7 @@ export function inspectArchive(
 
 export function selectArchiveEntries(
   archiveId: string,
-  payload: { names: string[]; collection?: string; tags?: string },
+  payload: { names: string[]; collection?: string; tags?: string; intake?: ArchiveIntake },
 ): Promise<JobAccepted> {
   return sendJson<JobAccepted>(`/api/v1/ingest/archive/${archiveId}/select`, "POST", payload);
 }

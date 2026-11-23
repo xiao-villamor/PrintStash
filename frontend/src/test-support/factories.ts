@@ -1,3 +1,4 @@
+import { NO_PREVIEWS } from "@/types/previews";
 import type { SlicerProfileRead } from "@/types/slicer-profiles";
 import type { ComputeStatus } from "@/types/system";
 import type { GcPlan } from "@/lib/api/gc";
@@ -51,6 +52,7 @@ import type {
   FilePlate,
   JobStatus,
   ModelListItem,
+  ModelFacetsRead,
   OutlinerModelRead,
   PrinterAccess,
   PrinterCapabilities,
@@ -62,6 +64,7 @@ import type {
   TagRead,
   VaultStatsRead,
   WorkOverview,
+  PreviewActivity,
 } from "@/types";
 
 /** A fixed instant. Every builder's timestamps derive from this one. */
@@ -179,6 +182,7 @@ export function aPrintJob(override?: Partial<PrintJobRead>): PrintJobRead {
     external_profile_id: null,
     external_gcode_file: null,
     external_plate_index: null,
+    plate_index: null,
     external_current_layer: null,
     external_total_layers: null,
     external_nozzle_diameter: null,
@@ -309,8 +313,11 @@ export function aModelListItem(override?: Partial<ModelListItem>): ModelListItem
     effective_role: null,
     tags: [],
     thumbnail_url: null,
+    previews: NO_PREVIEWS,
     file_count: 1,
+    gcode_file_count: 0,
     mesh_file_id: null,
+    bounding_box: null,
     printer_presence: [],
     updated_at: FROZEN_NOW,
     print_summary: null,
@@ -325,6 +332,8 @@ export function aModel(
   override?: Partial<import("@/types").ModelRead>,
 ): import("@/types").ModelRead {
   return {
+    previews: NO_PREVIEWS,
+    has_custom_cover: false,
     edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 1,
@@ -367,6 +376,23 @@ export function aRevision(
     uploaded_at: FROZEN_NOW,
     metadata: null,
     tags: [],
+    ...override,
+  };
+}
+
+/** The Model history projection adds printer and revision display fields. */
+export function aModelPrintJob(
+  override: Partial<import("@/types").ModelPrintJobRead> = {},
+): import("@/types").ModelPrintJobRead {
+  return {
+    ...aPrintJob(),
+    printer_name: "Workshop",
+    gcode_revision_number: 1,
+    revision_label: null,
+    material_type: null,
+    filament_used_g: null,
+    actual_duration_s: null,
+    filament_cost: null,
     ...override,
   };
 }
@@ -819,6 +845,11 @@ export function aVaultConfig(
     derivatives_mesh_enabled: true,
     derivatives_gcode_enabled: true,
     derivatives_toolpath_enabled: true,
+    derivatives_previews_enabled: false,
+    derivatives_previews_include_poles: false,
+    prefer_rendered_3mf_preview: false,
+    preview_look: "sky",
+    preview_floor_grid: true,
     storage_backend: "local",
     storage_provider: "local",
     storage_provider_config: {
@@ -1122,4 +1153,41 @@ export function aTrashedMultipartModel(
     expires_at: "2026-01-31T00:00:00Z",
     ...override,
   };
+}
+
+/** Available filter values for one Library scope. */
+export function aModelFacets(override: Partial<ModelFacetsRead> = {}): ModelFacetsRead {
+  return {
+    file_type: [],
+    material_type: [],
+    slicer_name: [],
+    printer_model: [],
+    revision_status: [],
+    print_outcome: [],
+    storage: [],
+    printed: [],
+    ...override,
+  };
+}
+
+/** Saved project facts with no inferred print measurements. */
+export function aProjectProfile(
+  override?: Partial<import("@/lib/queries/project-profile").ProjectProfile>,
+): import("@/lib/queries/project-profile").ProjectProfile {
+  return {
+    name: null,
+    printer: null,
+    materials: [],
+    nozzle_diameters_mm: [],
+    layer_height_mm: null,
+    wall_loops: null,
+    infill_percent: null,
+    plates: [],
+    ...override,
+  };
+}
+
+/** A settled image preparation census, including enabled producers only. */
+export function aPreviewActivity(override?: Partial<PreviewActivity>): PreviewActivity {
+  return { total: 0, completed: 0, remaining: 0, skipped: 0, failed: 0, ...override };
 }

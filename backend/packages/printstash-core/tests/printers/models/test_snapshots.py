@@ -489,3 +489,93 @@ class TestToolSnapshot:
 class TestTemperatureSnapshot:
     def test_defaults_both_readings_to_absent(self) -> None:
         assert TemperatureSnapshot() == TemperatureSnapshot(None, None)
+
+
+class TestMachineTelemetry:
+    def test_normalizes_reported_control_telemetry_without_losing_false_or_zero(self):
+        status = {
+            "toolhead": {
+                "axis_minimum": [-5, 0, 0, 0],
+                "axis_maximum": [240, 240, 300, 0],
+                "extruder": "extruder",
+            },
+            "extruder": {"can_extrude": False},
+            "fan": {"speed": 0},
+            "gcode_move": {
+                "gcode_position": [10, 20, 30, 40],
+                "speed_factor": 1.2,
+                "extrude_factor": 0.75,
+                "absolute_coordinates": False,
+                "absolute_extrude": True,
+                "future_field": 3,
+            },
+        }
+
+        snapshot = PrinterSnapshot.from_legacy_payload(status)
+
+        assert snapshot.axis_minimum == (-5, 0, 0, 0)
+        assert snapshot.axis_maximum == (240, 240, 300, 0)
+        assert snapshot.active_extruder == "extruder"
+        assert snapshot.extruder is not None
+        assert snapshot.extruder.can_extrude is False
+        assert snapshot.fan_speed == 0
+        assert snapshot.gcode_move.position == (10, 20, 30, 40)
+        assert snapshot.gcode_move.speed_factor == 1.2
+        assert snapshot.gcode_move.extrude_factor == 0.75
+        assert snapshot.gcode_move.absolute_coordinates is False
+        assert snapshot.gcode_move.absolute_extrude is True
+        assert snapshot.extra["gcode_move"] == {"future_field": 3}
+        assert snapshot.to_legacy_payload() == status
+
+    def test_invalid_control_telemetry_stays_unknown(self):
+        snapshot = PrinterSnapshot.from_legacy_payload(
+            {
+                "toolhead": {"axis_maximum": [100, True, 100]},
+                "extruder": {"can_extrude": "false"},
+                "fan": {"speed": float("nan")},
+                "gcode_move": {
+                    "gcode_position": [10, 20, float("inf")],
+                    "absolute_coordinates": 1,
+                    "extrude_factor": False,
+                },
+            }
+        )
+
+        assert snapshot.axis_maximum is None
+        assert snapshot.extruder is not None
+        assert snapshot.extruder.can_extrude is None
+        assert snapshot.fan_speed is None
+        assert snapshot.gcode_move.position is None
+        assert snapshot.gcode_move.absolute_coordinates is None
+        assert snapshot.gcode_move.extrude_factor is None
+
+    def test_builds_legacy_payload_with_typed_control_telemetry(self):
+        from printstash_core.printers import GcodeMoveSnapshot
+
+        snapshot = PrinterSnapshot(
+            temperatures={"extruder": TemperatureSnapshot(can_extrude=True)},
+            gcode_move=GcodeMoveSnapshot(
+                absolute_coordinates=True,
+                absolute_extrude=False,
+                position=(10, 0, 0, 3),
+            ),
+            fan_speed=0,
+            axis_minimum=(-3, 0, 0),
+            axis_maximum=(200, 200, 200),
+            active_extruder="extruder",
+        )
+
+        assert snapshot.to_legacy_payload() == {
+            "extruder": {"can_extrude": True},
+            "gcode_move": {
+                "absolute_coordinates": True,
+                "absolute_extrude": False,
+                "gcode_position": [10, 0, 0, 3],
+            },
+            "fan": {"speed": 0},
+            "toolhead": {
+                "axis_minimum": [-3, 0, 0],
+                "axis_maximum": [200, 200, 200],
+                "extruder": "extruder",
+            },
+        }

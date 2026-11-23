@@ -4,6 +4,7 @@ import struct
 
 import numpy as np
 import pytest
+from printstash_core.mesh.rasterizer import render_prepared_pixels
 from printstash_core.mesh.render_geometry import prepare_mesh_render
 
 from app.modules.media.compute_geometry import encode
@@ -82,14 +83,95 @@ class TestWebGpuRender:
         actual = np.frombuffer(first[12 : 12 + size], dtype=np.uint8).reshape(-1, 4)
         assert np.count_nonzero(actual[:, 3] >= 128) > 100
         assert np.count_nonzero(actual[:, 3] == 0) > 100
-        # GPU bounds retain every canonical coordinate extremum exactly; the
-        # new framing/raster recipe intentionally need not match CPU pixels.
+        # The cached model-space bounds still drive automatic view selection.
         geometry = next(iter(renderer.geometry.values()))
         bounds = np.frombuffer(
             renderer.device.queue.read_buffer(geometry.bounds), dtype="<f4"
         ).reshape(2, 4)
         np.testing.assert_array_equal(bounds[0, :3], prepared.vertices.min(axis=0))
         np.testing.assert_array_equal(bounds[1, :3], prepared.vertices.max(axis=0))
+
+    def test_matches_cpu_framing_in_a_mixed_model_batch(self, renderer):
+        import trimesh
+
+        # The asymmetric curved surface makes the rotated box both larger and
+        # differently centered. The mesh also spans multiple reduction levels.
+        curved = trimesh.creation.icosphere(subdivisions=5)
+        curved.vertices[:, 0] += 0.5 * curved.vertices[:, 2] ** 2
+        curved.vertices[:, 1] *= 0.8
+        angle = np.pi / 4
+        diagonal = np.array(
+            [
+                [np.cos(angle), -np.sin(angle), 0],
+                [np.sin(angle), np.cos(angle), 0],
+                [0, 0, -1],
+            ]
+        )
+
+        cases = [(prepare_mesh_render(curved), [None, diagonal])]
+        for axis in range(3):
+            flat = trimesh.creation.icosphere(subdivisions=3 if axis == 0 else 1)
+            flat.vertices[:, axis] = 0.0
+            views = [None, np.eye(3)] if axis == 2 else [None]
+            cases.append((prepare_mesh_render(flat), views))
+
+        width, height = 128, 96
+        payloads = [
+            encode(prepared, width, height, views, True) for prepared, views in cases
+        ]
+        outputs = renderer.execute_many(payloads)
+
+        for (prepared, views), output in zip(cases, outputs, strict=True):
+            assert struct.unpack("!III", output[:12]) == (width, height, len(views))
+            images = np.frombuffer(output[12:], dtype=np.uint8).reshape(
+                len(views), height, width, 4
+            )
+            for view, image in zip(views, images, strict=True):
+                cpu = render_prepared_pixels(
+                    prepared, "framing", width, height, view_rotation=view, matte=True
+                )
+                assert cpu is not None
+                expected = (
+                    np.frombuffer(cpu.rgba, dtype=np.uint8).reshape(height, width, 4)[
+                        :, :, 3
+                    ]
+                    >= 128
+                )
+                actual = image[:, :, 3] >= 128
+                expected_y, expected_x = np.nonzero(expected)
+                actual_y, actual_x = np.nonzero(actual)
+                np.testing.assert_allclose(
+                    [actual_x.min(), actual_y.min(), actual_x.max(), actual_y.max()],
+                    [
+                        expected_x.min(),
+                        expected_y.min(),
+                        expected_x.max(),
+                        expected_y.max(),
+                    ],
+                    atol=1,
+                    rtol=0,
+                )
+                # Also catch clipped interiors or a mismatched flat-axis view.
+                assert (actual & expected).sum() / (actual | expected).sum() > 0.98
+
+    def test_keeps_nearest_surface_visible_across_view_depth_range(self, renderer):
+        import trimesh
+
+        # Both triangles project onto the same pixels, but the farther one
+        # has a different normal. The near surface wins even when drawn first.
+        near = [[0, 0, -1], [1, 0, -2], [0, 1, -3]]
+        far = [[0, 0, 1], [1, 0, 1], [0, 1, 1]]
+        both = trimesh.Trimesh(near + far, [[0, 1, 2], [3, 4, 5]], process=False)
+        front = trimesh.Trimesh(near, [[0, 1, 2]], process=False)
+        views = [np.eye(3)]
+        reference, layered = renderer.execute_many(
+            [
+                encode(prepare_mesh_render(mesh), 64, 64, views, True)
+                for mesh in (front, both)
+            ]
+        )
+
+        assert layered == reference
 
     def test_preserves_shared_edges_in_orthographic_views(self, renderer):
         import trimesh
@@ -597,3 +679,32 @@ class TestGpuPostprocess:
         assert renderer.postprocessor is None
         assert struct.unpack("!III", raw[:12]) == (128, 96, 1)
         assert postprocess_rgba(raw[12:], 64, 48).rgba == expected[12:]
+
+
+class TestStudioPreview:
+    @pytest.mark.parametrize(
+        "extents",
+        [(2, 2, 2), (2, 2, 20), (20, 2, 2), (20, 30, 1)],
+        ids=["solid", "upright-rod", "horizontal-rod", "plate"],
+    )
+    @pytest.mark.parametrize("matte", [False, True], ids=["studio", "analytical"])
+    def test_matches_cpu_studio_framing(self, renderer, extents, matte):
+        import trimesh
+        from printstash_core.mesh.rasterizer import render_prepared_pixels
+
+        prepared = prepare_mesh_render(trimesh.creation.box(extents=extents))
+        expected = render_prepared_pixels(
+            prepared, "studio", width=160, height=120, matte=matte
+        )
+        assert expected is not None
+        result = renderer.execute(encode(prepared, 160, 120, [None], matte))
+        width, height, count = struct.unpack("!III", result[:12])
+        assert (width, height, count) == (160, 120, 1)
+        actual = np.frombuffer(result[12:], dtype=np.uint8).reshape(120, 160, 4)
+        cpu = np.frombuffer(expected.rgba, dtype=np.uint8).reshape(120, 160, 4)
+        visible = (actual[..., 3] == 255) & (cpu[..., 3] == 255)
+        union = (actual[..., 3] >= 128) | (cpu[..., 3] >= 128)
+        overlap = (actual[..., 3] >= 128) & (cpu[..., 3] >= 128)
+
+        assert overlap.sum() / union.sum() > 0.97
+        assert np.abs(actual[visible, :3].astype(float) - cpu[visible, :3]).mean() < 4

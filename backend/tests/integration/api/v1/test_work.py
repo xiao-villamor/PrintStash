@@ -58,6 +58,36 @@ def _nudged(engine) -> set[JobKind]:
     }
 
 
+class TestGetPreviewActivity:
+    def test_reports_the_unqueued_backlog(self, client, admin, make_model, make_file):
+        make_file(make_model(), filename="part.stl")
+
+        response = client.get(
+            "/api/v1/admin/work/preview-activity", headers=_headers(admin)
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+            "total": 1,
+            "completed": 0,
+            "remaining": 1,
+            "skipped": 0,
+            "failed": 0,
+        }
+
+    def test_rejects_non_administrators(self, client, member):
+        response = client.get(
+            "/api/v1/admin/work/preview-activity", headers=_headers(member)
+        )
+
+        assert response.status_code == 403, response.text
+
+    def test_rejects_unauthenticated_reads(self, client):
+        response = client.get("/api/v1/admin/work/preview-activity")
+
+        assert response.status_code == 401, response.text
+
+
 class TestOverview:
     def test_lists_every_lane_with_its_depth(
         self, client: TestClient, admin: User, make_job, work_engine

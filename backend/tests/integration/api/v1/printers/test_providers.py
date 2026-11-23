@@ -24,6 +24,7 @@ from app.db.models import (
     Printer,
     PrinterProvider,
 )
+from app.modules.printing.printer_jobs import TransferReceipt
 from tests.factories import build_file, build_model, build_printer
 
 
@@ -47,7 +48,7 @@ class TestBambuPrinter:
         assert body["capabilities"]["can_start"] is True
         assert body["capabilities"]["can_pause"] is True
         assert body["capabilities"]["support_level"] == "beta"
-        assert "list_files" in body["capabilities"]["unsupported_actions"]
+        assert body["capabilities"]["can_list_files"] is True
 
     def test_create_bambu_missing_fields_422(self, client: TestClient, auth_headers):
         resp = client.post(
@@ -246,7 +247,11 @@ class TestBambuPrinter:
             patch("app.api.v1.printers.get_backend", return_value=backend),
             patch(
                 "app.modules.printing.dispatch.transfer_artifact",
-                new_callable=AsyncMock,
+                new=AsyncMock(
+                    return_value=TransferReceipt(
+                        size_bytes=artifact.size_bytes, sha256=artifact.sha256
+                    )
+                ),
             ) as transfer,
         ):
             response = client.post(
@@ -307,7 +312,7 @@ class TestBambuPrinter:
         assert body["support_level"] == "beta"
         assert body["capabilities"]["can_upload"] is True
         assert body["capabilities"]["can_start"] is True
-        assert "list_files" in body["unsupported_actions"]
+        assert body["capabilities"]["can_list_files"] is True
         assert body["ok"] is True
         assert [check["name"] for check in body["checks"]] == [
             "configuration",

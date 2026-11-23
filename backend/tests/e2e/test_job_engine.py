@@ -51,7 +51,10 @@ def vault_env(request, tmp_path: Path) -> dict[str, str]:
         if request.param == "postgresql"
         else f"sqlite:///{tmp_path / 'vault.sqlite'}"
     )
-    return vault_environment(tmp_path, db_url)
+    return {
+        **vault_environment(tmp_path, db_url),
+        "VAULT_DERIVATIVES_PREVIEWS_ENABLED": "true",
+    }
 
 
 def _stall(environment: dict[str, str], marker: Path) -> tuple[subprocess.Popen, int]:
@@ -148,7 +151,11 @@ class TestCrashRecovery:
 
         states = _converge(vault_env, file_id)
 
-        assert states == {"metadata": "ready", "thumbnail": "ready"}
+        assert states == {
+            "metadata": "ready",
+            "thumbnail": "ready",
+            "previews": "ready",
+        }
 
     def test_a_restarted_api_reruns_its_predecessors_work_at_once(
         self, vault_env: dict[str, str], tmp_path: Path
@@ -166,7 +173,11 @@ class TestCrashRecovery:
 
         states = _converge(restarted, file_id)
 
-        assert states == {"metadata": "ready", "thumbnail": "ready"}
+        assert states == {
+            "metadata": "ready",
+            "thumbnail": "ready",
+            "previews": "ready",
+        }
 
     def test_a_new_version_reruns_what_the_old_one_left_running(
         self, vault_env: dict[str, str], tmp_path: Path
@@ -187,7 +198,11 @@ class TestCrashRecovery:
 
         states = _converge(new, file_id)
 
-        assert states == {"metadata": "ready", "thumbnail": "ready"}
+        assert states == {
+            "metadata": "ready",
+            "thumbnail": "ready",
+            "previews": "ready",
+        }
 
 
 class TestEngineStateLoss:
@@ -203,7 +218,11 @@ class TestEngineStateLoss:
 
         states = _converge(vault_env, file_id)
 
-        assert states == {"metadata": "ready", "thumbnail": "ready"}
+        assert states == {
+            "metadata": "ready",
+            "thumbnail": "ready",
+            "previews": "ready",
+        }
 
 
 def _lose_artifact_bytes(environment: dict[str, str], file_id: int) -> None:
@@ -242,6 +261,7 @@ class TestRestore:
         vault_env = vault_environment(
             tmp_path, f"sqlite:///{tmp_path / 'vault.sqlite'}"
         )
+        vault_env["VAULT_DERIVATIVES_PREVIEWS_ENABLED"] = "true"
         process, held = _start(vault_env, "stall_backup", str(tmp_path / "running"))
         _kill(process)
         _discard_engine_state(vault_env)
@@ -255,7 +275,11 @@ class TestRestore:
             str(held["file_id"]),
         )
 
-        assert outcome["states"] == {"metadata": "ready", "thumbnail": "ready"}
+        assert outcome["states"] == {
+            "metadata": "ready",
+            "thumbnail": "ready",
+            "previews": "ready",
+        }
 
 
 @pytest.fixture

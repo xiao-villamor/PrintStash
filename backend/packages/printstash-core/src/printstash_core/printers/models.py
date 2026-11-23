@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from math import isfinite
 from types import MappingProxyType
 from typing import Any, ClassVar, TypeAlias, cast
 
@@ -44,6 +45,40 @@ class PrintArtifactFormat(StrEnum):
 
     GCODE_TEXT = "gcode_text"
     BGCODE_BINARY = "bgcode_binary"
+
+
+class MotionAxis(StrEnum):
+    X = "x"
+    Y = "y"
+    Z = "z"
+
+    @property
+    def coordinate_index(self) -> int:
+        return "xyz".index(self.value)
+
+
+class TuningControl(StrEnum):
+    FAN = "fan"
+    SPEED = "speed"
+    FLOW = "flow"
+
+
+class MachineControlConflict(StrEnum):
+    NOT_READY = "printer_not_ready"
+    BUSY = "printer_not_idle"
+    AXIS_NOT_HOMED = "axis_not_homed"
+    OUT_OF_BOUNDS = "move_out_of_bounds"
+    COLD_EXTRUDER = "extruder_too_cold"
+    UNAVAILABLE = "machine_control_unavailable"
+    FAN_UNAVAILABLE = "part_cooling_fan_unavailable"
+    BED_AXES_NOT_HOMED = "bed_measurement_axes_not_homed"
+    BED_MEASUREMENT_UNSUPPORTED = "bed_measurement_unsupported"
+
+
+class MachineControlError(RuntimeError):
+    def __init__(self, reason: MachineControlConflict) -> None:
+        super().__init__(reason.value)
+        self.reason = reason
 
 
 class ProviderError(RuntimeError):
@@ -355,9 +390,20 @@ _PRINT_FIELDS = frozenset(
     }
 )
 _STORAGE_FIELDS = frozenset({"progress", "file_position", "file_size"})
-_TEMPERATURE_FIELDS = frozenset({"temperature", "target"})
-_TOOLHEAD_FIELDS = frozenset({"position", "homed_axes"})
+_TEMPERATURE_FIELDS = frozenset({"temperature", "target", "can_extrude"})
+_TOOLHEAD_FIELDS = frozenset(
+    {"position", "homed_axes", "axis_minimum", "axis_maximum", "extruder"}
+)
 _WEBHOOK_FIELDS = frozenset({"state", "state_message"})
+_GCODE_MOVE_FIELDS = frozenset(
+    {
+        "gcode_position",
+        "speed_factor",
+        "extrude_factor",
+        "absolute_coordinates",
+        "absolute_extrude",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -367,9 +413,25 @@ class TemperatureSnapshot:
     temperature: int | float | None = None
     target: int | float | None = None
     extra: Mapping[str, FrozenValue] = field(default_factory=dict)
+    can_extrude: bool | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "extra", _freeze_mapping(self.extra))
+
+
+@dataclass(frozen=True)
+class GcodeMoveSnapshot:
+    """Klipper parsing state and override factors."""
+
+    position: tuple[int | float, ...] | None = None
+    speed_factor: int | float | None = None
+    extrude_factor: int | float | None = None
+    absolute_coordinates: bool | None = None
+    absolute_extrude: bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.position is not None:
+            object.__setattr__(self, "position", tuple(self.position))
 
 
 @dataclass(frozen=True)
@@ -442,6 +504,11 @@ class PrinterSnapshot:
     extra: Mapping[str, FrozenValue] = field(default_factory=dict)
     toolhead_extra: Mapping[str, FrozenValue] = field(default_factory=dict)
     webhook_extra: Mapping[str, FrozenValue] = field(default_factory=dict)
+    gcode_move: GcodeMoveSnapshot = field(default_factory=GcodeMoveSnapshot)
+    fan_speed: int | float | None = None
+    axis_minimum: tuple[int | float, ...] | None = None
+    axis_maximum: tuple[int | float, ...] | None = None
+    active_extruder: str | None = None
     _legacy_payload: Mapping[str, FrozenValue] | None = field(
         default=None, repr=False, compare=False
     )
@@ -453,6 +520,10 @@ class PrinterSnapshot:
         object.__setattr__(self, "material_tools", tuple(self.material_tools))
         if self.position is not None:
             object.__setattr__(self, "position", tuple(self.position))
+        if self.axis_minimum is not None:
+            object.__setattr__(self, "axis_minimum", tuple(self.axis_minimum))
+        if self.axis_maximum is not None:
+            object.__setattr__(self, "axis_maximum", tuple(self.axis_maximum))
         object.__setattr__(self, "extra", _freeze_mapping(self.extra))
         object.__setattr__(self, "toolhead_extra", _freeze_mapping(self.toolhead_extra))
         object.__setattr__(self, "webhook_extra", _freeze_mapping(self.webhook_extra))
@@ -503,6 +574,8 @@ class PrinterSnapshot:
         storage = _mapping(status.get("virtual_sdcard"))
         toolhead = _mapping(status.get("toolhead"))
         webhooks = _mapping(status.get("webhooks"))
+        gcode_move = _mapping(status.get("gcode_move"))
+        fan = _mapping(status.get("fan"))
         raw_material_slots = status.get("material_slots")
         material_slots: list[MaterialSlotSnapshot] = []
         if isinstance(raw_material_slots, (list, tuple)):
@@ -592,6 +665,7 @@ class PrinterSnapshot:
                 temperature=_optional_number(source.get("temperature")),
                 target=_optional_number(source.get("target")),
                 extra=_extra(source, _TEMPERATURE_FIELDS),
+                can_extrude=_optional_bool(source.get("can_extrude")),
             )
 
         known_top_level = frozenset(
@@ -605,6 +679,18 @@ class PrinterSnapshot:
                 *temperature_keys,
             }
         )
+        extra = {
+            key: value for key, value in status.items() if key not in known_top_level
+        }
+        for name, source, fields in (
+            ("gcode_move", gcode_move, _GCODE_MOVE_FIELDS),
+            ("fan", fan, frozenset({"speed"})),
+        ):
+            remaining = _extra(source, fields)
+            if remaining:
+                extra[name] = remaining
+            else:
+                extra.pop(name, None)
         return cls(
             print=print_snapshot,
             temperatures=temperatures,
@@ -614,10 +700,23 @@ class PrinterSnapshot:
             webhook_message=_optional_str(webhooks.get("state_message")),
             material_slots=tuple(material_slots),
             material_tools=tuple(material_tools),
-            extra=_extra(status, known_top_level),
+            extra=extra,
             toolhead_extra=_extra(toolhead, _TOOLHEAD_FIELDS),
             webhook_extra=_extra(webhooks, _WEBHOOK_FIELDS),
             _legacy_payload=_freeze_mapping(payload),
+            gcode_move=GcodeMoveSnapshot(
+                position=_optional_position(gcode_move.get("gcode_position")),
+                speed_factor=_optional_number(gcode_move.get("speed_factor")),
+                extrude_factor=_optional_number(gcode_move.get("extrude_factor")),
+                absolute_coordinates=_optional_bool(
+                    gcode_move.get("absolute_coordinates")
+                ),
+                absolute_extrude=_optional_bool(gcode_move.get("absolute_extrude")),
+            ),
+            fan_speed=_optional_number(fan.get("speed")),
+            axis_minimum=_optional_position(toolhead.get("axis_minimum")),
+            axis_maximum=_optional_position(toolhead.get("axis_maximum")),
+            active_extruder=_optional_str(toolhead.get("extruder")),
         )
 
     def to_legacy_payload(self) -> dict[str, Any]:
@@ -669,16 +768,37 @@ class PrinterSnapshot:
                 temperature,
                 temperature=snapshot.temperature,
                 target=snapshot.target,
+                can_extrude=snapshot.can_extrude,
             )
             status[key] = temperature
 
         toolhead = cast(dict[str, Any], _thaw(self.toolhead_extra))
         if self.position is not None:
             toolhead["position"] = list(self.position)
-        if self.homed_axes is not None:
-            toolhead["homed_axes"] = self.homed_axes
+        _put_not_none(
+            toolhead, homed_axes=self.homed_axes, extruder=self.active_extruder
+        )
+        if self.axis_minimum is not None:
+            toolhead["axis_minimum"] = list(self.axis_minimum)
+        if self.axis_maximum is not None:
+            toolhead["axis_maximum"] = list(self.axis_maximum)
         if toolhead:
             status["toolhead"] = toolhead
+
+        move = status.pop("gcode_move", {})
+        _put_not_none(
+            move,
+            speed_factor=self.gcode_move.speed_factor,
+            extrude_factor=self.gcode_move.extrude_factor,
+            absolute_coordinates=self.gcode_move.absolute_coordinates,
+            absolute_extrude=self.gcode_move.absolute_extrude,
+        )
+        if self.gcode_move.position is not None:
+            move["gcode_position"] = list(self.gcode_move.position)
+        if move:
+            status["gcode_move"] = move
+        if self.fan_speed is not None:
+            status.setdefault("fan", {})["speed"] = self.fan_speed
 
         webhooks = cast(dict[str, Any], _thaw(self.webhook_extra))
         _put_not_none(
@@ -729,7 +849,13 @@ def _optional_str(value: object) -> str | None:
 def _optional_number(value: object) -> int | float | None:
     if isinstance(value, bool):
         return None
-    return value if isinstance(value, (int, float)) else None
+    if isinstance(value, int) or (isinstance(value, float) and isfinite(value)):
+        return value
+    return None
+
+
+def _optional_bool(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None
 
 
 def _optional_int(value: object) -> int | None:
@@ -741,9 +867,7 @@ def _optional_int(value: object) -> int | None:
 def _optional_position(value: object) -> tuple[int | float, ...] | None:
     if not isinstance(value, (list, tuple)):
         return None
-    if any(
-        isinstance(item, bool) or not isinstance(item, (int, float)) for item in value
-    ):
+    if any(_optional_number(item) is None for item in value):
         return None
     return tuple(value)
 

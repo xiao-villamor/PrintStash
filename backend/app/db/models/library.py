@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from sys import float_info
-from typing import ClassVar, List, Optional
+from typing import Any, ClassVar, List, Optional
 
 from printstash_core.mesh.measurements import (
     VolumeMethod,
@@ -11,6 +11,7 @@ from printstash_core.mesh.measurements import (
     VolumeUnavailableCause,
 )
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     Column,
@@ -321,6 +322,9 @@ class Collection(SQLModel, table=True):
     # Short markdown description shown on top of the collection view. Image refs
     # point at /collections/{id}/images/{name} (self-hosted).
     readme: Optional[str] = Field(default=None, sa_column=Column(Text))
+    cover_selection: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
+    )
 
     deleted_at: Optional[datetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
@@ -527,6 +531,7 @@ class Model(SQLModel, table=True):
     """Logical asset, deduplicated by `hash` (source mesh sha256, gcode fallback)."""
 
     __tablename__ = "models"
+    cover_filename: ClassVar[Mapped[str | None]]
     __table_args__ = (
         Index("ix_models_deleted_updated_id", "deleted_at", "updated_at", "id"),
     )
@@ -580,6 +585,20 @@ class Model(SQLModel, table=True):
             "lazy": "selectin",
         },
     )
+
+
+class ModelCover(SQLModel, table=True):
+    """User-chosen presentation, independent of every Artifact derivative."""
+
+    __tablename__ = "model_covers"
+    __table_args__ = (
+        CheckConstraint("size_bytes > 0", name="model_cover_size_positive"),
+    )
+
+    model_id: int = Field(primary_key=True, foreign_key="models.id", ondelete="CASCADE")
+    filename: str = Field(max_length=255)
+    size_bytes: int = Field(gt=0)
+    sha256: str = Field(max_length=64)
 
 
 class MultipartModel(SQLModel, table=True):
@@ -743,11 +762,15 @@ class MultipartModelChoice(SQLModel, table=True):
 
 
 class Document(SQLModel, table=True):
-    """A standalone document item (manual / notes) living in a collection,
-    shown in the library alongside models. Markdown docs keep their content in
-    ``body`` (editable); binary docs (PDF/other) store ``filename`` + a blob."""
+    """A library Document or one owned by a Model. Binary files live in storage."""
 
     __tablename__ = "documents"
+    __table_args__ = (
+        CheckConstraint(
+            "model_id IS NULL OR (collection_id IS NULL AND multipart_model_id IS NULL)",
+            name="document_model_owns_scope",
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     edit_epoch: ClassVar[Mapped[str]]
@@ -768,6 +791,8 @@ class Document(SQLModel, table=True):
             index=True,
         ),
     )
+
+    model_id: Optional[int] = Field(default=None, foreign_key="models.id", index=True)
 
     body: Optional[str] = Field(default=None, sa_column=Column(Text))  # markdown
     filename: Optional[str] = Field(default=None, max_length=255)  # binary
@@ -806,3 +831,12 @@ for _editable_aggregate in (Model, MultipartModel, Document):
     _editable_aggregate.edit_epoch = column_property(
         select(LibraryRevision.epoch).where(LibraryRevision.id == 1).scalar_subquery()
     )
+
+# A bounded primary-key lookup in the Model SELECT, never a per-card query.
+# Keeping user presentation in its own table leaves derivative pointers intact.
+Model.cover_filename = column_property(
+    select(ModelCover.filename)
+    .where(ModelCover.model_id == Model.id)
+    .correlate_except(ModelCover)
+    .scalar_subquery()
+)

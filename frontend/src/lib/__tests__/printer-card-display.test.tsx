@@ -9,6 +9,7 @@ import {
   PRINTER_CARD_IMAGE_STORAGE_KEY,
   readPrinterCardImagePreference,
   usePrinterCardImagePreference,
+  usePrinterArtworkPreference,
   writePrinterCardImagePreference,
 } from "@/lib/printer-card-display";
 
@@ -48,8 +49,8 @@ afterEach(() => {
 });
 
 describe("readPrinterCardImagePreference", () => {
-  it("hides printer images by default", () => {
-    expect(readPrinterCardImagePreference()).toBe(false);
+  it("uses local artwork when the preference is unset", () => {
+    expect(renderHook(usePrinterArtworkPreference).result.current).toBe("local");
   });
   it.each(["false", "TRUE", "invalid"])(
     "rejects unsupported printer image preference %s",
@@ -136,12 +137,12 @@ describe("usePrinterCardImagePreference", () => {
     expect(view.result.current).toBe(true);
   });
   it("ignores unrelated preference storage events", () => {
-    const view = renderHook(usePrinterCardImagePreference);
+    const view = renderHook(usePrinterArtworkPreference);
     localStorage.setItem(PRINTER_CARD_IMAGE_STORAGE_KEY, "true");
 
     act(() => window.dispatchEvent(new StorageEvent("storage", { key: "other-preference" })));
 
-    expect(view.result.current).toBe(false);
+    expect(view.result.current).toBe("local");
   });
   it("delivers unpersisted printer image preference to mounted consumers", () => {
     const first = renderHook(usePrinterCardImagePreference);

@@ -2531,6 +2531,20 @@ class TestPortableProvenanceContextsV2:
     def test_builds_a_context_for_each_artifact_link(self) -> None:
         assert list(self._contexts(self._sidecar())) == [(7, 11)]
 
+    def test_profile_estimates_survive_portable_provenance(self) -> None:
+        profile = {
+            "id": "shelf",
+            "name": "Shelf",
+            "origin": "provider",
+            "estimated_seconds": 30277,
+        }
+        snapshot = self._snapshot(profiles={"42:cube": profile})
+        (context, _overrides) = self._contexts(self._sidecar(snapshot=snapshot))[
+            (7, 11)
+        ][0]
+        assert context.manifest.to_dict()["profiles"]["42:cube"] == profile
+        assert context.manifest.schema_version == 3
+
     def test_carries_the_whole_capture_snapshot(self) -> None:
         (context, _overrides) = self._contexts(self._sidecar())[(7, 11)][0]
 
@@ -3153,3 +3167,109 @@ class TestCreateArchive:
             assert "actor" not in json.dumps(sidecar).lower()
         finally:
             archive_path.unlink(missing_ok=True)
+
+
+class TestPortableGalleryValidation:
+    def test_refuses_duplicate_portable_gallery_positions(
+        self,
+    ):
+        import pytest
+
+        from app.modules.ingestion.library_transfer import _portable_source_images
+
+        with pytest.raises(ValueError, match="portable_provenance_invalid"):
+            _portable_source_images({"images": [{"position": 1}, {"position": 1}]})
+
+
+class TestPortableGalleryRoundTrip:
+    def test_portable_archive_preserves_all_source_images(
+        self, db_session, auth_headers, tmp_path
+    ):
+        import io
+
+        from PIL import Image
+
+        from app.modules.library import source_covers
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from tests.factories.capture import capture_source
+
+        user, model, file_row = _seed(db_session, tmp_path)
+        manifest = CaptureManifestV2.from_dict(
+            {
+                "schema_version": 2,
+                "kind": "model_files",
+                "source": capture_source(),
+                "files": [
+                    {
+                        "id": "part",
+                        "name": "cube.stl",
+                        "file_type": "stl",
+                        "size": file_row.size_bytes,
+                    }
+                ],
+                "selected_ids": ["part"],
+            }
+        )
+        provenance.attach_existing_artifact(
+            db_session,
+            file_row,
+            provenance.ProvenanceContext(
+                manifest=manifest,
+                source_file_id="part",
+                source_filename="cube.stl",
+                blob_sha256=file_row.sha256,
+            ),
+        )
+        db_session.commit()
+        source = db_session.exec(
+            select(ModelProvenanceSource).where(
+                ModelProvenanceSource.model_id == model.id
+            )
+        ).one()
+        expected = []
+        for position, color in enumerate(("red", "green", "blue")):
+            buffer = io.BytesIO()
+            Image.new("RGB", (16, 16), color).save(buffer, "PNG")
+            write = source_covers.put(
+                db_session,
+                get_backend(),
+                provenance_source_id=source.id,
+                actor_id=user.id,
+                data=buffer.getvalue(),
+                content_type="image/png",
+                position=position,
+            )
+            db_session.commit()
+            expected.append(get_backend().read_bytes(write.cover.storage_key))
+        archive = library_transfer.create_archive(db_session, user)
+        try:
+            library_transfer.import_archive(db_session, archive, user)
+            actual = [
+                get_backend().read_bytes(
+                    source_covers.get(db_session, source.id, position=i).storage_key
+                )
+                for i in range(3)
+            ]
+            from app.modules.media.source_cover_processing import (
+                process_source_cover_upload,
+            )
+
+            assert actual == [
+                process_source_cover_upload(data, "image/webp").data
+                for data in expected
+            ]
+            with zipfile.ZipFile(archive) as zipped:
+                sidecar = json.loads(zipped.read("provenance.json"))
+                exported = next(
+                    s
+                    for m in sidecar["models"]
+                    for s in m["sources"]
+                    if s["source_id"] == source.id
+                )
+                assert [image["position"] for image in exported["images"]] == [1, 2]
+                assert zipped.read(exported["cover"]["entry"]) == expected[0]
+                assert [
+                    zipped.read(image["entry"]) for image in exported["images"]
+                ] == expected[1:]
+        finally:
+            archive.unlink(missing_ok=True)

@@ -7,7 +7,7 @@ import { localeDefinitions, SUPPORTED_LOCALES } from "@/lib/locale";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
-export function LocaleToggle() {
+export function LocaleToggle({ menuItem = false }: { menuItem?: boolean }) {
   const { locale, setLocale, t } = useI18n();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -24,6 +24,8 @@ export function LocaleToggle() {
           type="button"
           variant="ghost"
           size="icon"
+          role={menuItem ? "menuitem" : undefined}
+          className={menuItem ? "w-full justify-start gap-3 px-3 text-sm" : undefined}
           onClick={() => setOpen(!open)}
           aria-label={`${t("locale.label")}: ${localeDefinitions[locale].name}`}
           title={`${t("locale.label")}: ${localeDefinitions[locale].name}`}
@@ -32,6 +34,7 @@ export function LocaleToggle() {
           data-menu-trigger
         >
           <Languages className="h-4 w-4" aria-hidden />
+          {menuItem && <span>{`${t("locale.label")}: ${localeDefinitions[locale].name}`}</span>}
         </Button>
       }
     >

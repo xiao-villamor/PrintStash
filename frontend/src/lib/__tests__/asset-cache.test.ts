@@ -28,6 +28,7 @@ import {
   getAssetCacheStats,
   invalidateCachedAsset,
   peekCachedAssetUrl,
+  prioritizeCachedAsset,
 } from "@/lib/asset-cache";
 
 /** Complete a non-mounted test consumer through the production lease interface. */
@@ -249,22 +250,65 @@ describe("assetCache", () => {
 });
 
 describe("asset leases and admission", () => {
-  it("limits simultaneous protected image downloads to two", async () => {
-    const responses = Array.from({ length: 6 }, () => Promise.withResolvers<Response>());
+  // Six concurrent protected downloads (see MAX_DOWNLOADS).
+  const SLOTS = 6;
+
+  it("limits simultaneous protected image downloads to six", async () => {
+    const responses = Array.from({ length: SLOTS + 2 }, () => Promise.withResolvers<Response>());
     let index = 0;
     vi.mocked(fetch).mockImplementation(() => responses[index++].promise);
     const leases = responses.map((_, i) => acquireAssetUrl(`/lease/limit-${i}`));
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(SLOTS);
     responses[0].resolve(new Response("png"));
     await leases[0].url;
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(SLOTS + 1));
     responses.slice(1).forEach((response) => response.resolve(new Response("png")));
     await Promise.all(leases.map((lease) => lease.url));
     leases.forEach((lease) => lease.release());
   });
 
+  it("downloads a card's image before queued collection mosaic images", async () => {
+    const responses = Array.from({ length: SLOTS + 2 }, () => Promise.withResolvers<Response>());
+    let index = 0;
+    vi.mocked(fetch).mockImplementation(() => responses[index++].promise);
+    const requested = () => vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+    const mosaics = Array.from({ length: SLOTS + 1 }, (_, i) =>
+      acquireAssetUrl(`/lease/mosaic-${i}`, undefined, "background"),
+    );
+    const card = acquireAssetUrl("/lease/card");
+    // Every slot went to a mosaic already; the card overtakes the queued one.
+    expect(requested()).toHaveLength(SLOTS);
+    responses[0].resolve(new Response("png"));
+    await mosaics[0].url;
+    await vi.waitFor(() => expect(requested()).toHaveLength(SLOTS + 1));
+    expect(requested()[SLOTS]).toContain("/lease/card");
+    responses.slice(1).forEach((response) => response.resolve(new Response("png")));
+    await Promise.all([...mosaics, card].map((lease) => lease.url));
+    [...mosaics, card].forEach((lease) => lease.release());
+  });
+
+  it("promotes a queued mosaic image that a card also shows", async () => {
+    const responses = Array.from({ length: SLOTS + 2 }, () => Promise.withResolvers<Response>());
+    let index = 0;
+    vi.mocked(fetch).mockImplementation(() => responses[index++].promise);
+    const requested = () => vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+    const mosaics = Array.from({ length: SLOTS + 1 }, (_, i) =>
+      acquireAssetUrl(`/lease/shared-${i}`, undefined, "background"),
+    );
+    const extra = acquireAssetUrl("/lease/shared-extra", undefined, "background");
+    // The last mosaic is still queued; a card showing the same picture promotes it.
+    const card = acquireAssetUrl(`/lease/shared-${SLOTS}`);
+    responses[0].resolve(new Response("png"));
+    await mosaics[0].url;
+    await vi.waitFor(() => expect(requested()).toHaveLength(SLOTS + 1));
+    expect(requested()[SLOTS]).toContain(`/lease/shared-${SLOTS}`);
+    responses.slice(1).forEach((response) => response.resolve(new Response("png")));
+    await Promise.all([...mosaics, extra, card].map((lease) => lease.url));
+    [...mosaics, extra, card].forEach((lease) => lease.release());
+  });
+
   it("removes abandoned queued image work", async () => {
-    const responses = Array.from({ length: 4 }, () => Promise.withResolvers<Response>());
+    const responses = Array.from({ length: SLOTS }, () => Promise.withResolvers<Response>());
     let index = 0;
     vi.mocked(fetch).mockImplementation(() => responses[index++].promise);
     const active = responses.map((_, i) => acquireAssetUrl(`/lease/queue-${i}`));
@@ -274,7 +318,7 @@ describe("asset leases and admission", () => {
     responses.forEach((response) => response.resolve(new Response("png")));
     await Promise.all(active.map((lease) => lease.url));
     expect(await abandoned).toMatchObject({ name: "AbortError" });
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(SLOTS);
     active.forEach((lease) => lease.release());
   });
 
@@ -346,7 +390,8 @@ describe("asset leases and admission", () => {
     response.resolve(new Response("obsolete"));
     for (const outcome of await Promise.all(outcomes))
       expect(outcome).toMatchObject({ name: "AbortError" });
-    expect(fetch).toHaveBeenCalledTimes(2);
+    // Only the downloads already started reached the network; queued ones never do.
+    expect(fetch).toHaveBeenCalledTimes(SLOTS);
     expect(created).toHaveLength(0);
     leases.forEach((lease) => lease.release());
   });
@@ -399,5 +444,79 @@ describe("private asset scope", () => {
       inactiveEntries: 4,
     });
     mounted.release();
+  });
+});
+
+describe("preview transfer scheduling", () => {
+  it("reserves a download slot for visible images", async () => {
+    const pending = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockImplementation(async () => {
+      await pending.promise;
+      return new Response("webp");
+    });
+    const first = acquireAssetUrl("/preview/a", undefined, "speculative");
+    const second = acquireAssetUrl("/preview/b", undefined, "speculative");
+    const visible = acquireAssetUrl("/preview/cover");
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringContaining("/preview/a"),
+      expect.stringContaining("/preview/cover"),
+    ]);
+    pending.resolve(new Response("webp"));
+    await Promise.all([first.url, second.url, visible.url]);
+    first.release();
+    second.release();
+    visible.release();
+  });
+
+  it("orders queued downloads by priority under contention", async () => {
+    const release = Promise.withResolvers<void>();
+    vi.mocked(fetch).mockImplementation(async () => {
+      await release.promise;
+      return new Response("webp");
+    });
+    const active = Array.from({ length: 6 }, (_, i) => acquireAssetUrl(`/preview/active-${i}`));
+    const neighbor = acquireAssetUrl("/preview/neighbor", undefined, "speculative");
+    const mosaic = acquireAssetUrl("/preview/mosaic", undefined, "background");
+    const cover = acquireAssetUrl("/preview/cover");
+    const arrow = acquireAssetUrl("/preview/arrow", undefined, "speculative");
+    prioritizeCachedAsset("/preview/arrow");
+
+    release.resolve();
+    const leases = [...active, neighbor, mosaic, cover, arrow];
+    await Promise.all(leases.map((lease) => lease.url));
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.slice(active.length)
+        .map(([url]) => String(url)),
+    ).toEqual([
+      expect.stringContaining("/preview/arrow"),
+      expect.stringContaining("/preview/cover"),
+      expect.stringContaining("/preview/mosaic"),
+      expect.stringContaining("/preview/neighbor"),
+    ]);
+    leases.forEach((lease) => lease.release());
+  });
+
+  it("promotes the queued arrow destination ahead of another neighbor", async () => {
+    const pending = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockImplementation(async () => {
+      await pending.promise;
+      return new Response("webp");
+    });
+    const first = acquireAssetUrl("/preview/active", undefined, "speculative");
+    const other = acquireAssetUrl("/preview/other", undefined, "speculative");
+    const destination = acquireAssetUrl("/preview/destination", undefined, "speculative");
+    prioritizeCachedAsset("/preview/destination");
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringContaining("/preview/active"),
+      expect.stringContaining("/preview/destination"),
+    ]);
+    pending.resolve(new Response("webp"));
+    await Promise.all([first.url, other.url, destination.url]);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    first.release();
+    other.release();
+    destination.release();
   });
 });

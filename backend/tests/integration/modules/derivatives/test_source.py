@@ -27,6 +27,7 @@ from app.db.models import (
     DerivativeState,
     FileType,
     JobKind,
+    ReconcileCursor,
     WorkPriority,
 )
 from app.modules.derivatives import kinds
@@ -53,7 +54,79 @@ def mesh(make_model, make_file):
     return build
 
 
+class TestOwesInteractive:
+    """A read-only answer for definitions that yield to mesh work."""
+
+    def test_a_recent_artifact_missing_outputs_is_owed(
+        self, db_session: Session, mesh
+    ) -> None:
+        mesh()
+
+        assert MESH.owes_interactive(db_session, now=utcnow()) is True
+
+    def test_an_old_artifact_is_backfill_work(self, db_session: Session, mesh) -> None:
+        mesh(uploaded_at=utcnow() - timedelta(days=30))
+
+        assert MESH.owes_interactive(db_session, now=utcnow()) is False
+
+    def test_a_fully_derived_artifact_is_not_owed(
+        self, db_session: Session, mesh, make_derivative
+    ) -> None:
+        artifact = mesh()
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL)
+
+        assert MESH.owes_interactive(db_session, now=utcnow()) is False
+
+    def test_an_artifact_with_an_active_job_is_left_to_that_job(
+        self, db_session: Session, mesh, make_job
+    ) -> None:
+        artifact = mesh()
+        make_job(kind=JobKind.DERIVATIVES_MESH, subject=subject_key(artifact.id))
+
+        assert MESH.owes_interactive(db_session, now=utcnow()) is False
+
+    def test_leaves_the_scan_cursor_to_discovery(
+        self, db_session: Session, mesh
+    ) -> None:
+        mesh()
+
+        MESH.owes_interactive(db_session, now=utcnow())
+
+        assert db_session.get(ReconcileCursor, JobKind.DERIVATIVES_MESH) is None
+
+
 class TestPending:
+    def test_rederives_gcode_metadata_without_plate_selection(
+        self, db_session, make_model, make_file, make_derivative
+    ) -> None:
+        artifact = make_file(
+            make_model(), filename="supertack.gcode", file_type=FileType.GCODE
+        )
+        make_derivative(artifact, DerivativeKind.METADATA, recipe_version=6)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL)
+        source = DerivativeSource(group(JobKind.DERIVATIVES_GCODE))
+
+        assert _subjects(db_session, source=source) == [subject_key(artifact.id)]
+
+    def test_requeues_previously_skipped_multi_plate_metadata(
+        self, db_session, make_model, make_file, make_derivative
+    ) -> None:
+        artifact = make_file(
+            make_model(), filename="multi.gcode.3mf", file_type=FileType.GCODE
+        )
+        make_derivative(
+            artifact,
+            DerivativeKind.METADATA,
+            recipe_version=kinds.GCODE_METADATA_RECIPE - 1,
+            state=DerivativeState.SKIPPED,
+            failure_reason="per_plate_metadata",
+        )
+        make_derivative(artifact, DerivativeKind.THUMBNAIL)
+        source = DerivativeSource(group(JobKind.DERIVATIVES_GCODE))
+
+        assert _subjects(db_session, source=source) == [subject_key(artifact.id)]
+
     @pytest.mark.parametrize(
         ("kind", "old_recipe", "other_kind"),
         [
@@ -87,15 +160,32 @@ class TestPending:
         [DerivativeState.READY, DerivativeState.FAILED],
         ids=["ready", "failed"],
     )
+    @pytest.mark.parametrize(
+        ("file_type", "previous_recipe"),
+        [
+            pytest.param(FileType.STL, 17, id="stl"),
+            pytest.param(FileType.THREE_MF, 19, id="3mf"),
+            pytest.param(FileType.STEP, 18, id="step"),
+        ],
+    )
     def test_rederives_thumbnails_from_the_previous_gpu_recipe(
-        self, db_session, mesh, make_derivative, state
+        self,
+        db_session,
+        make_file,
+        make_model,
+        make_derivative,
+        state,
+        file_type,
+        previous_recipe,
     ):
-        artifact = mesh()
+        artifact = make_file(
+            make_model(), filename=f"part.{file_type.value}", file_type=file_type
+        )
         make_derivative(artifact, DerivativeKind.METADATA)
         make_derivative(
             artifact,
             DerivativeKind.THUMBNAIL,
-            recipe_version=14,
+            recipe_version=previous_recipe,
             state=state,
             exhausted=state is DerivativeState.FAILED,
             failure_reason="render_failed" if state is DerivativeState.FAILED else None,
@@ -868,3 +958,79 @@ class TestPriorityDiscovery:
         cursor = db_session.get(ReconcileCursor, JobKind.DERIVATIVES_MESH)
         assert cursor is not None
         assert cursor.scan_high_water == frozen_upper
+
+
+class TestMeshDiscoveryOrder:
+    def test_cpu_keeps_discovery_order_without_accelerating_large_covers(
+        self, db_session, mesh, monkeypatch
+    ):
+        monkeypatch.setitem(_overlay, "compute_render_policy", "qualified")
+        medium, small, _large = (
+            mesh(size_bytes=size) for size in (200, 100, 50_000_000)
+        )
+
+        assert _subjects(db_session, limit=2) == [
+            subject_key(medium.id),
+            subject_key(small.id),
+        ]
+
+    def test_keeps_scan_order_when_the_broker_probe_times_out(
+        self, db_session, mesh, monkeypatch
+    ):
+        def timed_out(**kwargs):
+            raise TimeoutError("compute_deadline")
+
+        monkeypatch.setattr(source_module.client, "render_ready", timed_out)
+        old, new = (mesh(size_bytes=size) for size in (800, 100))
+
+        assert _subjects(db_session) == [subject_key(old.id), subject_key(new.id)]
+
+    def test_accelerates_at_most_one_large_cover_per_batch(
+        self, db_session, mesh, monkeypatch
+    ):
+        monkeypatch.setattr(source_module.client, "render_ready", lambda **kwargs: True)
+        artifacts = [mesh(size_bytes=size) for size in (500, 900, 50, 100, 300, 800)]
+
+        assert _subjects(db_session, limit=5) == [
+            subject_key(artifacts[index].id) for index in (2, 1, 0, 3, 4)
+        ]
+
+    def test_resolves_equal_sizes_by_artifact_id(self, db_session, mesh, monkeypatch):
+        monkeypatch.setattr(source_module.client, "render_ready", lambda **kwargs: True)
+        large, later_large, small, later_small = (
+            mesh(size_bytes=size) for size in (800, 800, 50, 50)
+        )
+
+        assert _subjects(db_session, limit=2) == [
+            subject_key(small.id),
+            subject_key(large.id),
+        ]
+        assert later_large.id != large.id
+        assert later_small.id != small.id
+
+    def test_resumes_gpu_rotation_after_a_new_session(
+        self, db_session, mesh, make_job, monkeypatch
+    ):
+        monkeypatch.setattr(source_module.client, "render_ready", lambda **kwargs: True)
+        _medium, small, large = (mesh(size_bytes=size) for size in (200, 100, 800))
+        assert _subjects(db_session, limit=1) == [subject_key(small.id)]
+        make_job(kind=JobKind.DERIVATIVES_MESH, subject=subject_key(small.id))
+        expected = subject_key(large.id)
+
+        with Session(db_session.get_bind()) as restarted:
+            assert _subjects(restarted, limit=1) == [expected]
+
+    def test_services_backfill_during_accelerated_arrivals(
+        self, db_session, mesh, make_job, monkeypatch
+    ):
+        monkeypatch.setattr(source_module.client, "render_ready", lambda **kwargs: True)
+        old = [mesh(uploaded_at=utcnow() - timedelta(days=30)) for _ in range(3)]
+        discovered = []
+        for _ in range(2 * len(old)):
+            mesh(size_bytes=1_000_000)
+            mesh(size_bytes=100)
+            (item,) = _pending(db_session, limit=1)
+            make_job(kind=JobKind.DERIVATIVES_MESH, subject=item.subject_key)
+            if item.priority is WorkPriority.BACKFILL:
+                discovered.append(item.subject_key)
+        assert discovered == [subject_key(row.id) for row in old]

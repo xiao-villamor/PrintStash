@@ -130,3 +130,6 @@ export function useModelPrintJobs(id: number, enabled: boolean) {
   );
   return { ...query, publish };
 }
+
+// Cover edits share the Model detail publication and editing authority.
+export { useModelCoverEditing } from "./model-covers";

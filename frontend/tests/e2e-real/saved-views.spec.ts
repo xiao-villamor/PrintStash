@@ -14,14 +14,15 @@ import { modelCard, uploadModel } from "./util";
 // and manage it (rename/duplicate/delete). Favorites: star a model, then filter
 // the grid down to starred models only.
 
-// The trigger's accessible name is "Saved views" only while no view is active
-// (it switches to the active view's name once one is applied) — target the
-// stable `data-menu-trigger` + `aria-haspopup="dialog"` pair inside Quick access;
-// the toolbar's filter pickers and header's search launcher use dialog triggers too.
-function savedViewsTrigger(page: import("@playwright/test").Page) {
-  return page
-    .getByRole("navigation", { name: "Quick access" })
-    .locator('button[data-menu-trigger][aria-haspopup="dialog"]');
+async function manageSavedViews(page: import("@playwright/test").Page) {
+  const pane = page.getByRole("complementary", { name: "Saved views", exact: true });
+  if (!(await pane.isVisible()))
+    await page
+      .getByRole("navigation", { name: "Navigation", exact: true })
+      .getByRole("button", { name: "Saved views", exact: true })
+      .click();
+  await pane.getByRole("button", { name: "Manage saved views" }).click();
+  return page.getByRole("dialog", { name: "Saved views", exact: true });
 }
 
 test.describe("saved views", () => {
@@ -40,8 +41,8 @@ test.describe("saved views", () => {
     // Filter to the tag, then save that as a view.
     await page.goto("/");
     await openFilters(page);
-    await page.getByRole("button", { name: "Tags", exact: true }).click();
-    const tags = page.getByRole("dialog", { name: "Tags", exact: true });
+    const tags = page.getByRole("dialog", { name: "Filter Models", exact: true });
+    await tags.getByRole("button", { name: "Tags", exact: true }).click();
     await tags.getByRole("checkbox", { name: tag, exact: true }).click();
     await expect(tags.getByRole("checkbox", { name: tag, exact: true })).toBeChecked();
     await page.keyboard.press("Escape");
@@ -49,7 +50,7 @@ test.describe("saved views", () => {
     await expect(modelCard(page, plain)).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`tag=${encodeURIComponent(tag)}`));
 
-    await savedViewsTrigger(page).click();
+    await manageSavedViews(page);
     await page.getByText("Save current view").click();
     const createName = page.getByRole("textbox", { name: "View name", exact: true });
     await expect(createName).toBeFocused();
@@ -65,16 +66,23 @@ test.describe("saved views", () => {
     // same result set + query string.
     await page.goto("/");
     await expect(modelCard(page, plain)).toBeVisible();
-    await savedViewsTrigger(page).click();
-    await page.getByRole("button", { name: viewName, exact: true }).click();
+    await manageSavedViews(page);
+    await page
+      .getByRole("dialog", { name: "Saved views", exact: true })
+      .getByRole("button", { name: viewName, exact: true })
+      .click();
 
     await expect(page).toHaveURL(new RegExp(`tag=${encodeURIComponent(tag)}`));
     await expect(modelCard(page, tagged)).toBeVisible();
     await expect(modelCard(page, plain)).toHaveCount(0);
 
     // Rename — the trigger now shows the active view's name.
-    await expect(savedViewsTrigger(page)).toContainText(viewName);
-    await savedViewsTrigger(page).click();
+    await expect(
+      page
+        .getByRole("complementary", { name: "Saved views" })
+        .getByRole("button", { name: viewName, exact: true }),
+    ).toBeVisible();
+    await manageSavedViews(page);
     await page.getByLabel(`Rename ${viewName}`).click();
     const renameName = page.getByRole("textbox", { name: "View name", exact: true });
     await expect(renameName).toBeFocused();
@@ -82,16 +90,27 @@ test.describe("saved views", () => {
     // Typing replaces the selected name immediately, without a pointer click.
     await page.keyboard.type(renamed);
     await renameName.press("Enter");
-    await expect(savedViewsTrigger(page)).toContainText(renamed);
+    await expect(
+      page
+        .getByRole("complementary", { name: "Saved views" })
+        .getByRole("button", { name: renamed, exact: true }),
+    ).toBeVisible();
     await page.reload();
-    await savedViewsTrigger(page).click();
-    await page.getByRole("button", { name: `${renamed} Recent`, exact: true }).click();
+    await manageSavedViews(page);
+    await page
+      .getByRole("dialog", { name: "Saved views", exact: true })
+      .getByRole("button", { name: `${renamed} Recent`, exact: true })
+      .click();
 
     // Duplicate — the duplicate button doesn't close the menu, so the new entry
     // and its own delete control are usable right away.
-    await savedViewsTrigger(page).click();
+    await manageSavedViews(page);
     await page.getByLabel(`Duplicate ${renamed}`).click();
-    await expect(page.getByText(`${renamed} copy`)).toBeVisible();
+    await expect(
+      page
+        .getByRole("dialog", { name: "Saved views", exact: true })
+        .getByText(`${renamed} copy`, { exact: true }),
+    ).toBeVisible();
     await page.getByLabel(`Delete ${renamed} copy`).click();
     await page
       .getByRole("dialog", { name: "Delete saved view?", exact: true })
@@ -100,7 +119,7 @@ test.describe("saved views", () => {
     await expect(page.getByText(`${renamed} copy`)).toHaveCount(0);
 
     // Delete the original.
-    await savedViewsTrigger(page).click();
+    await manageSavedViews(page);
     await page.getByLabel(`Delete ${renamed}`).click();
     await page
       .getByRole("dialog", { name: "Delete saved view?", exact: true })
@@ -118,15 +137,15 @@ test.describe("saved views", () => {
     await uploadModel(page, plain);
 
     await page.goto("/");
-    // The star button is a sibling of the card's `<a>`, not a descendant of it
-    // (both live under the same `<article>`) — scope through the article so
-    // `getByLabel` can actually find it.
-    const starredArticle = modelCard(page, starred).locator("xpath=ancestor::article");
-    await starredArticle.getByLabel(`Add ${starred} to favorites`).click();
-    await expect(starredArticle.getByLabel(`Remove ${starred} from favorites`)).toBeVisible();
+    await modelCard(page, starred).click({ button: "right" });
+    await page.getByRole("menuitem", { name: `Add ${starred} to favorites` }).click();
+    await expect(
+      page.getByRole("menuitem", { name: `Remove ${starred} from favorites` }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
 
     const favorites = page
-      .getByRole("navigation", { name: "Quick access", exact: true })
+      .getByRole("navigation", { name: "Navigation", exact: true })
       .getByRole("button", { name: "Favorites", exact: true });
     await favorites.click();
     await expect(page).toHaveURL(/favorites=true/);
@@ -138,6 +157,7 @@ test.describe("saved views", () => {
     await expect(modelCard(page, plain)).toBeVisible();
 
     // Cleanup: unstar so the shared DB doesn't drift the favorites facet.
-    await starredArticle.getByLabel(`Remove ${starred} from favorites`).click();
+    await modelCard(page, starred).click({ button: "right" });
+    await page.getByRole("menuitem", { name: `Remove ${starred} from favorites` }).click();
   });
 });

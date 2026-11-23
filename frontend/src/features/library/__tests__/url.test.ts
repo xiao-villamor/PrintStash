@@ -3,7 +3,7 @@
  * preserve unrelated filters while resolving legacy or untrusted input once.
  */
 import { describe, expect, it } from "vitest";
-import { readLibraryLocation } from "../url";
+import { LIBRARY_DIALOG_PARAMS, libraryDestinationHref, readLibraryLocation } from "../url";
 
 describe("readLibraryLocation", () => {
   it.each(["organized", "components"])("normalizes retired URL mode %s", (view) => {
@@ -84,5 +84,21 @@ describe("readLibraryLocation", () => {
       sort: "cost-asc",
     });
     expect(readLibraryLocation(new URLSearchParams(first.href.slice(2)))).toEqual(first);
+  });
+});
+
+describe("libraryDestinationHref", () => {
+  it.each(LIBRARY_DIALOG_PARAMS.map((key) => ({ key })))(
+    "drops the $key dialog parameter from the displayed destination",
+    ({ key }) => {
+      expect(libraryDestinationHref(`/?type=all&c=parts&${key}=1&sort=name-asc`)).toBe(
+        "/?type=all&c=parts&sort=name-asc",
+      );
+    },
+  );
+
+  it("keeps every filter that changes what the Library shows", () => {
+    const href = "/?type=all&c=parts&cid=4&q=bracket&tag=a&tag=b&sort=name-asc";
+    expect(libraryDestinationHref(href)).toBe(href);
   });
 });

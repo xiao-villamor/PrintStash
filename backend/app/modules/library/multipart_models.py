@@ -82,6 +82,7 @@ def _guides(
             collection=_collection_path(session, row.collection_id),
             collection_id=row.collection_id,
             multipart_model_id=row.multipart_model_id,
+            model_id=row.model_id,
             filename=row.filename,
             effective_role=rbac.effective_collection_role(
                 session, user, row.collection_id

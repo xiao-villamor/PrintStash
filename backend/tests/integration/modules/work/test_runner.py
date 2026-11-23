@@ -49,6 +49,7 @@ from app.modules.work.contracts import (
 )
 from app.modules.work.jobs import jobs
 from app.modules.work.runner import ExecutionContext, _begin, _settle, execute_job
+from app.modules.work.submission import submit
 from app.runtime.engine.inline import InlineJobEngine, _Execution, _Runner
 
 # Probes borrow real kinds and a lane; this catalog holds only them.
@@ -252,14 +253,15 @@ def hold() -> float:
     return 30.0
 
 
-class TestBegin:
-    @pytest.fixture
-    def prioritized_source(self, engine: InlineJobEngine) -> None:
-        definition = engine.catalog.definition(DISCOVERED)
-        engine.catalog.definitions[DISCOVERED] = replace(
-            definition, source=_PrioritizedNothingPending()
-        )
+@pytest.fixture
+def prioritized_source(engine: InlineJobEngine) -> None:
+    definition = engine.catalog.definition(DISCOVERED)
+    engine.catalog.definitions[DISCOVERED] = replace(
+        definition, source=_PrioritizedNothingPending()
+    )
 
+
+class TestBegin:
     def test_claim_queues_interactive_successor_discovery(
         self, engine, prioritized_source, make_job, db_session, transactions
     ) -> None:
@@ -433,7 +435,7 @@ class TestExecutionContext:
         assert _status(job.id).current_item == "second.stl"
 
     def test_held_progress_is_written_when_the_hold_ends_without_another_report(
-        self, engine: InlineJobEngine, make_job
+        self, engine: InlineJobEngine, threaded_hub_db, make_job
     ) -> None:
         # A step that reports once and then blocks (a slow download) never
         # calls back: what it reported must still appear.
@@ -568,6 +570,77 @@ class TestExecutionContext:
         _context(job).finish(JobOutcome.COMPLETED)
 
         assert DISCOVERED in _stamped(db_session) & _nudged(engine)
+
+    def test_prioritized_settlement_defers_refill_to_an_accepted_successor(
+        self, engine, prioritized_source, make_job, db_session, sql_statements
+    ) -> None:
+        successor = make_job(kind=DISCOVERED)
+        submit(successor.id)
+        job = make_job(kind=DISCOVERED, state=JobState.RUNNING, attempts=1)
+
+        with sql_statements.recording():
+            _context(job).finish(JobOutcome.COMPLETED)
+
+        assert (_stamped(db_session), _nudged(engine)) == (set(), set())
+        assert not [
+            statement.sql
+            for statement in sql_statements.statements
+            if statement.sql.startswith(
+                ("UPDATE reconcile_cursors", "INSERT INTO reconcile_cursors")
+            )
+        ]
+        assert _begin(successor.id, 1, successor.execution_epoch) is not None
+        assert _nudged(engine) == {DISCOVERED}
+
+    @pytest.mark.parametrize(
+        ("submitted_epoch", "priority", "state"),
+        [
+            pytest.param(
+                "retired", WorkPriority.INTERACTIVE, JobState.QUEUED, id="retired-epoch"
+            ),
+            pytest.param(
+                None, WorkPriority.INTERACTIVE, JobState.QUEUED, id="never-submitted"
+            ),
+            pytest.param(
+                "current", WorkPriority.BACKFILL, JobState.QUEUED, id="backfill"
+            ),
+            pytest.param(
+                "current",
+                WorkPriority.INTERACTIVE,
+                JobState.RUNNING,
+                id="already-running",
+            ),
+            pytest.param(
+                "current",
+                WorkPriority.INTERACTIVE,
+                JobState.INTERRUPTED,
+                id="interrupted",
+            ),
+        ],
+    )
+    def test_prioritized_settlement_refills_without_an_accepted_queued_successor(
+        self,
+        engine,
+        prioritized_source,
+        make_job,
+        db_session,
+        submitted_epoch,
+        priority,
+        state,
+    ) -> None:
+        make_job(
+            kind=DISCOVERED,
+            attempts=1,
+            execution_epoch="current",
+            submitted_epoch=submitted_epoch,
+            priority=priority,
+            state=state,
+        )
+        job = make_job(kind=DISCOVERED, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert (_stamped(db_session), _nudged(engine)) == ({DISCOVERED}, {DISCOVERED})
 
     def test_finish_leaves_the_settled_cleanup_to_the_end_of_the_attempt(
         self, engine: InlineJobEngine, make_job
@@ -1543,6 +1616,70 @@ class TestStepPriority:
         assert _status(job.id).state is JobState.FAILED
 
 
+class TestStepTelemetry:
+    """A step runs inside its Job's identity and its first start is timed (F5)."""
+
+    def test_binds_the_execution_identity_for_the_step(self, engine, make_job):
+        from app.core.execution_scope import current_execution
+
+        observed = []
+        TRACE.behaviour["one"] = lambda _context: observed.append(current_execution())
+        job = make_job(kind=MUTATING)
+
+        _run(engine, job)
+
+        assert observed[0] is not None
+        assert (observed[0].job_id, observed[0].definition) == (
+            job.id,
+            MUTATING.value,
+        )
+        assert current_execution() is None
+
+    def test_records_the_queue_wait_of_a_first_start(self, engine, make_job):
+        from app.core.metrics import registry
+
+        def count() -> float:
+            return (
+                registry.get_sample_value(
+                    "printstash_job_queue_wait_seconds_count",
+                    {"kind": MUTATING.value},
+                )
+                or 0.0
+            )
+
+        before = count()
+        job = make_job(kind=MUTATING)
+
+        _run(engine, job)
+
+        assert count() == before + 1
+
+    def test_a_later_attempt_records_no_queue_wait(self, engine, make_job):
+        from app.core.metrics import registry
+        from app.core.time import utcnow
+
+        def count() -> float:
+            return (
+                registry.get_sample_value(
+                    "printstash_job_queue_wait_seconds_count",
+                    {"kind": MUTATING.value},
+                )
+                or 0.0
+            )
+
+        job = make_job(
+            kind=MUTATING,
+            state=JobState.INTERRUPTED,
+            attempts=1,
+            started_at=utcnow(),
+        )
+        before = count()
+
+        _run(engine, job, attempt=2)
+
+        assert count() == before
+
+
 class TestAdditionsRelease:
     """The last addition to settle releases the work that waited for it."""
 
@@ -1592,6 +1729,128 @@ class TestAdditionsRelease:
         _context(job).finish(JobOutcome.COMPLETED)
 
         assert PACED in _nudged(additions_engine)
+
+
+class TestInteractiveRelease:
+    """Starting the last waiting interactive Job releases work that yielded."""
+
+    def test_claim_nudges_only_after_the_last_waiting_job_starts(
+        self, yielding_engine, make_job, monkeypatch
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        first = make_job(kind=INTERACTIVE_WORK, subject="artifact/first")
+        last = make_job(kind=INTERACTIVE_WORK, subject="artifact/last")
+
+        assert _begin(first.id, 1, first.execution_epoch) is not None
+        assert YIELDING not in _nudged(yielding_engine)
+        last_id = last.id
+        submit = yielding_engine.submit
+
+        def submit_after_claim(submission):
+            if isinstance(submission, PassSubmission) and submission.source is YIELDING:
+                job = jobs.get(last_id)
+                assert job is not None and job.state is JobState.RUNNING
+            return submit(submission)
+
+        monkeypatch.setattr(yielding_engine, "submit", submit_after_claim)
+        assert _begin(last_id, 1, last.execution_epoch) is not None
+        assert YIELDING in _nudged(yielding_engine)
+
+    def test_rolled_back_claim_leaves_no_projection_wakeup(
+        self, yielding_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        job = make_job(kind=INTERACTIVE_WORK)
+        job_id, epoch = job.id, job.execution_epoch
+
+        def reject_commit(session):
+            assert YIELDING in _stamped(session)
+            raise _LOCKED
+
+        event.listen(Session, "before_commit", reject_commit)
+        try:
+            with pytest.raises(OperationalError, match="database is locked"):
+                _begin(job_id, 1, epoch)
+        finally:
+            event.remove(Session, "before_commit", reject_commit)
+
+        assert YIELDING not in _nudged(yielding_engine)
+        assert YIELDING not in _stamped(db_session)
+        assert (
+            db_session.get_one(Job, job_id, populate_existing=True).state
+            is JobState.QUEUED
+        )
+
+    def test_tick_wakes_projection_without_a_claim_nudge(
+        self, yielding_engine, make_job
+    ) -> None:
+        from app.modules.work.reconciler import tick
+
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        make_job(kind=INTERACTIVE_WORK, state=JobState.RUNNING, attempts=1)
+
+        tick()
+
+        assert YIELDING in _nudged(yielding_engine)
+
+    def test_the_last_interactive_job_to_end_nudges_the_yielding_work(
+        self, yielding_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        job = make_job(kind=INTERACTIVE_WORK, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        cursor = db_session.get(ReconcileCursor, YIELDING)
+        assert cursor is not None and cursor.nudged_at is not None
+        assert YIELDING in _nudged(yielding_engine)
+
+    def test_one_that_ends_before_others_leaves_it_waiting(
+        self, yielding_engine, make_job
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        make_job(
+            kind=INTERACTIVE_WORK,
+            state=JobState.QUEUED,
+            subject="artifact/2",
+        )
+        job = make_job(kind=INTERACTIVE_WORK, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert YIELDING not in _nudged(yielding_engine)
+
+    def test_a_failed_interactive_job_releases_it_too(
+        self, yielding_engine, make_job
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        job = make_job(kind=INTERACTIVE_WORK, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.FAILED, error="broken_mesh")
+
+        assert YIELDING in _nudged(yielding_engine)
+
+    def test_a_backfill_job_ending_releases_nothing(
+        self, yielding_engine, make_job
+    ) -> None:
+        from .conftest import INTERACTIVE_WORK, YIELDING
+
+        job = make_job(
+            kind=INTERACTIVE_WORK,
+            state=JobState.RUNNING,
+            attempts=1,
+            priority=WorkPriority.BACKFILL,
+        )
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert YIELDING not in _nudged(yielding_engine)
 
 
 def _paced_delays(engine: InlineJobEngine, source: JobKind) -> list[float | None]:

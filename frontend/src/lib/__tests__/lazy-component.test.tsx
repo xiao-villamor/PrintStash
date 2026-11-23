@@ -2,7 +2,7 @@
 import { Suspense } from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { lazyImport } from "@/lib/lazy-component";
+import { lazyImport, recoverRouteChunk } from "@/lib/lazy-component";
 
 const flags = new Map<string, string>();
 const reload = vi.fn<() => void>();
@@ -111,4 +111,32 @@ describe("lazy chunk recovery", () => {
       expect(flags.has("chunk-reload")).toBe(false);
     },
   );
+});
+
+describe("recoverRouteChunk", () => {
+  it.each([
+    { label: "Chromium", message: "Failed to fetch dynamically imported module: /assets/route.js" },
+    { label: "Safari", message: "Importing a module script failed." },
+    { label: "Firefox", message: "error loading dynamically imported module" },
+  ])("reloads a missing automatic route chunk in $label", ({ message }) => {
+    recoverRouteChunk(new TypeError(message));
+
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(flags.get("chunk-reload")).toBe("1");
+  });
+  it("shares the recovery budget with deferred page chunks", () => {
+    flags.set("chunk-reload", "1");
+
+    recoverRouteChunk(
+      new TypeError("Failed to fetch dynamically imported module: /assets/route.js"),
+    );
+
+    expect(reload).not.toHaveBeenCalled();
+  });
+  it("leaves a screen render error to the route error boundary", () => {
+    recoverRouteChunk(new Error("invalid model response"));
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(flags.has("chunk-reload")).toBe(false);
+  });
 });

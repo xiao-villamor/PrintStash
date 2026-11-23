@@ -6,17 +6,49 @@
  * amount of control-endpoint coverage matters.
  */
 import { test, expect, authBundleFor, ADMIN } from "./helpers";
+import { collapseNavigationSidebar } from "./util";
 
 // Adds a real Moonraker printer record (it will sit offline — no hardware — but
 // the create/list/remove path is fully exercised against the backend).
 test.describe("printers", () => {
+  test("shows idle printer telemetry in Fleet", async ({ page }) => {
+    const name = `e2e-fleet-readings-${Date.now()}`;
+    const port = Number(process.env.PLAYWRIGHT_MOCK_PRINTER_PORT ?? 7530);
+    await page.goto("/printers");
+    await collapseNavigationSidebar(page);
+    await page.getByRole("button", { name: "Add printer" }).click();
+    const setup = page.getByRole("dialog", { name: "Add printer", exact: true });
+    await setup.getByLabel("Name", { exact: true }).fill(name);
+    await setup.getByPlaceholder("http://printer.local:7125").fill(`http://127.0.0.1:${port}`);
+    await setup.getByRole("button", { name: "Add printer" }).click();
+
+    const link = page.getByRole("link", { name, exact: true });
+    const path = await link.getAttribute("href");
+    const card = page.getByRole("article").filter({ has: link });
+    try {
+      await expect(card.getByText("No active print")).toBeVisible();
+      await expect(card.getByText("Nozzle", { exact: true })).toBeVisible();
+      await expect(card.getByText("Bed", { exact: true })).toBeVisible();
+      await expect(card.getByText("25 °C", { exact: true })).toHaveCount(2);
+      await expect(card.getByText("Part cooling fan", { exact: true })).toBeVisible();
+      await expect(card.getByText("0%", { exact: true })).toBeVisible();
+      await link.press("Enter");
+      await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+    } finally {
+      expect((await page.request.delete(`/api/v1${path}`)).ok()).toBe(true);
+    }
+  });
+
   test("add and remove a printer", async ({ page }) => {
     const name = `e2e-printer-${Date.now()}`;
     await page.goto("/printers");
     await expect(page.getByRole("heading", { name: "Printers" })).toBeVisible();
 
     await page.getByRole("button", { name: "Add printer" }).click();
-    await page.getByPlaceholder("Voron 2.4").fill(name);
+    await page
+      .getByRole("dialog", { name: "Add printer", exact: true })
+      .getByLabel("Name", { exact: true })
+      .fill(name);
     await page.getByPlaceholder("http://printer.local:7125").fill("http://127.0.0.1:7125");
     await page.getByRole("button", { name: "Add printer" }).last().click();
 
@@ -27,8 +59,12 @@ test.describe("printers", () => {
     await page.reload();
     await expect(page.getByRole("link", { name: new RegExp(name) })).toBeVisible();
 
-    // Remove through the card action and shared confirmation dialog.
-    await card.locator("xpath=ancestor::article").getByRole("button", { name: "Remove" }).click();
+    // Remove through connection settings and the shared confirmation dialog.
+    await card.locator("xpath=ancestor::article").getByRole("button", { name: "Settings" }).click();
+    await page
+      .getByRole("dialog", { name: "Edit printer connection" })
+      .getByRole("button", { name: "Remove printer", exact: true })
+      .click();
     await page.getByRole("dialog").getByRole("button", { name: "Remove" }).click();
     await expect(page.getByRole("link", { name: new RegExp(name) })).toHaveCount(0);
   });
@@ -66,13 +102,21 @@ test.describe("printer settings conflict recovery", () => {
         (r) =>
           r.url().endsWith(`/api/v1/printers/${printer.id}`) && r.request().method() === "PATCH",
       );
-      await page.getByRole("button", { name: "Save changes", exact: true }).click();
+      await page
+        .locator("form")
+        .filter({ has: page.getByLabel("Name", { exact: true }) })
+        .getByRole("button", { name: "Save changes", exact: true })
+        .click();
       expect((await firstSave).status()).toBe(200);
       const staleSave = second.waitForResponse(
         (r) =>
           r.url().endsWith(`/api/v1/printers/${printer.id}`) && r.request().method() === "PATCH",
       );
-      await second.getByRole("button", { name: "Save changes", exact: true }).click();
+      await second
+        .locator("form")
+        .filter({ has: second.getByLabel("Name", { exact: true }) })
+        .getByRole("button", { name: "Save changes", exact: true })
+        .click();
       expect((await staleSave).status()).toBe(412);
       await expect(second.getByLabel("Name", { exact: true })).toHaveValue(`${name}-revised`);
       await second.getByRole("button", { name: "Review current settings" }).click();

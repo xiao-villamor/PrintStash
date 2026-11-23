@@ -37,7 +37,7 @@ The default is one container, SQLite, and a persistent volume at `/data`.
 
 ```bash
 mkdir -p printstash && cd printstash
-curl -fsSL https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/xiao-villamor/PrintStash/v0.15.1/docker-compose.yml -o docker-compose.yml
 printf 'PRINTSTASH_VERSION=0.15.1\n' > .env
 docker compose up -d
 ```
@@ -47,10 +47,10 @@ create the administrator account, and upload a model. There are no default
 credentials. To index a folder or NAS, [mount it inside the container](https://www.printstash.org/en/docs/guides/shared-volumes/#mount-a-folder-into-docker)
 and add it under **Settings → Library sources**.
 
-This guide prepares the **0.15.1** image pin. Use it after that version appears in
-[GitHub Releases](https://github.com/xiao-villamor/PrintStash/releases); until then,
-use the version shown in the latest published release. Without a pin, `latest` can include
-unreleased changes. See [installation options](https://www.printstash.org/en/docs/getting-started/installation/)
+The example pins the Compose file and container image to the same release.
+Check [GitHub Releases](https://github.com/xiao-villamor/PrintStash/releases/latest)
+for the latest published version. The `latest` image can include unreleased
+changes. See [installation options](https://www.printstash.org/en/docs/getting-started/installation/)
 for ports, PostgreSQL, remote storage, and SSO. Existing installations should
 read the [upgrade notes](#project-status--roadmap) first.
 
@@ -117,6 +117,8 @@ for setup, firmware limits, and unsupported actions.
 
 ## Documentation
 
+See the [repository guides](docs/README.md) for deployment and operator references.
+
 | Topic | Guides on printstash.org |
 | --- | --- |
 | Installation | [Setup](https://www.printstash.org/en/docs/getting-started/installation/) · [First run](https://www.printstash.org/en/docs/getting-started/first-run/) · [Upgrading](https://www.printstash.org/en/docs/guides/upgrading/) |
@@ -140,7 +142,7 @@ in [Printer Compatibility](#printer-compatibility), meaning Bambu LAN, PrusaLink
 the Elegoo Centauri Carbon models.
 
 **Upgrading to 0.15.1:** take a verified backup, stop all API and worker
-processes, and upgrade them together after the image is published. Allow
+processes, and upgrade them together on the same image. Allow
 background processing to refresh changed previews and metadata. Keep the
 previous image and pre-upgrade backup for rollback.
 Read the [0.15.1 upgrade instructions](UPGRADE.md#0151-notes), including the

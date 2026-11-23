@@ -1,5 +1,5 @@
 import { usePathname } from "@/lib/navigation";
-import { Outlet } from "react-router-dom";
+import { RouteOutlet } from "@/lib/route-outlet";
 
 import { AppShell } from "@/components/app-shell";
 import { SetupGate } from "@/components/setup-gate";
@@ -16,7 +16,7 @@ export default function RootLayout() {
     <AuthProvider boundary={pathname === "/login" || pathname === "/setup" ? "entry" : "private"}>
       <SetupGate>
         <AppShell>
-          <Outlet />
+          <RouteOutlet />
         </AppShell>
       </SetupGate>
     </AuthProvider>

@@ -50,6 +50,122 @@ def slots_by_key(status: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 class TestNormalizeStatus:
+    def test_normalizes_optional_machine_telemetry_independently(self):
+        client = make_client()
+        report = client._normalize_status(
+            {
+                "print": {
+                    "chamber_temper": 32.5,
+                    "sdcard": False,
+                    "mc_remaining_time": "0",
+                }
+            }
+        )
+        assert report["temperature_sensor chamber"] == {"temperature": 32.5}
+        assert report["bambu_storage"] == {"card_present": False}
+        assert report["print_stats"]["remaining_minutes"] == 0
+        invalid = client._normalize_status({"print": {"mc_remaining_time": -1}})
+        assert invalid["print_stats"]["remaining_minutes"] is None
+        assert "bambu_storage" not in invalid
+
+    def test_external_inputs_keep_identity_across_sparse_reports(self) -> None:
+        client = make_client()
+        client._normalize_status(
+            {"print": {"vt_tray": {"id": "254", "tray_type": "PLA"}}}
+        )
+        inputs = [
+            {"id": 255, "tray_type": "PLA", "tray_color": "123456FF"},
+            {"id": "254", "tray_type": "PETG", "tray_color": "654321FF"},
+        ]
+        slots = slots_by_key(client._normalize_status({"print": {"vir_slot": inputs}}))
+        assert set(slots) == {"external", "external:254"}
+        assert slots["external"]["color_hex"] == "#123456"
+        assert slots["external:254"]["material_type"] == "PETG"
+        assert slots["external:254"]["tool_key"] is None
+
+        update = {
+            "vir_slot": [None, {"id": "999"}, {"id": 254, "tray_color": "ABCDEF00"}]
+        }
+        updated = slots_by_key(client._normalize_status({"print": update}))
+        assert updated["external:254"]["material_type"] == "PETG"
+        assert updated["external:254"]["color_hex"] == "#ABCDEF"
+        empty = slots_by_key(
+            client._normalize_status(
+                {"print": {"vir_slot": [{"id": 254, "tray_type": ""}]}}
+            )
+        )
+        assert empty["external:254"]["state"] == "empty"
+        assert empty["external:254"]["color_hex"] is None
+        assert empty["external"]["material_type"] == "PLA"
+        assert slots["external:254"]["color_hex"] == "#654321"
+        legacy = slots_by_key(
+            client._normalize_status({"print": {"vt_tray": {"tray_type": "ABS"}}})
+        )
+        assert legacy["external"]["tool_key"] is None
+        assert legacy["external:254"]["state"] == "empty"
+
+    def test_normalizes_reported_layer_counts(self) -> None:
+        status = make_client()._normalize_status(
+            {"print": {"layer_num": "0", "total_layer_num": "120"}}
+        )
+
+        assert status == {
+            "print_stats": {"external_current_layer": 0, "external_total_layers": 120}
+        }
+
+    @pytest.mark.parametrize("value", [-1, 3.5, "invalid", True])
+    def test_ignores_invalid_layer_totals(self, value: Any) -> None:
+        status = make_client()._normalize_status(
+            {"print": {"layer_num": 8, "total_layer_num": value}}
+        )
+
+        assert status == {"print_stats": {"external_current_layer": 8}}
+
+    def test_normalizes_finite_heater_measurements(self) -> None:
+        status = make_client()._normalize_status(
+            {
+                "print": {
+                    "nozzle_temper": 22.5,
+                    "nozzle_target_temper": 0,
+                    "bed_temper": 23,
+                    "bed_target_temper": "60",
+                }
+            }
+        )
+
+        assert status == {
+            "extruder": {"temperature": 22.5, "target": 0},
+            "heater_bed": {"temperature": 23, "target": 60},
+        }
+
+    @pytest.mark.parametrize(
+        "invalid", [None, True, "nan", float("inf"), [], "invalid"]
+    )
+    def test_invalid_heater_fields_do_not_replace_valid_fields(
+        self, invalid: Any
+    ) -> None:
+        status = make_client()._normalize_status(
+            {"print": {"nozzle_temper": invalid, "nozzle_target_temper": 0}}
+        )
+
+        assert status == {"extruder": {"target": 0}}
+
+    @pytest.mark.parametrize(("reported", "fraction"), [("0", 0), ("6", 0.4), (15, 1)])
+    def test_normalizes_part_cooling_fan(self, reported: Any, fraction: float) -> None:
+        status = make_client()._normalize_status(
+            {"print": {"cooling_fan_speed": reported}}
+        )
+
+        assert status == {"fan": {"speed": fraction}}
+
+    @pytest.mark.parametrize("reported", [-1, 16, "nan", None])
+    def test_drops_unavailable_fan_measurements(self, reported: Any) -> None:
+        status = make_client()._normalize_status(
+            {"print": {"cooling_fan_speed": reported}}
+        )
+
+        assert status == {}
+
     def test_maps_the_reported_job_fields_into_the_envelope(self) -> None:
         status = make_client()._normalize_status(
             {
@@ -107,7 +223,7 @@ class TestNormalizeStatus:
         ("raw", "normalized"),
         [
             ("IDLE", "standby"),
-            ("PREPARE", "standby"),
+            ("PREPARE", "printing"),
             ("SLICING", "standby"),
             ("RUNNING", "printing"),
             ("PAUSE", "paused"),

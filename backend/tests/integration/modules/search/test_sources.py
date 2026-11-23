@@ -238,6 +238,19 @@ class TestProjectSubject:
             SearchSubject(SubjectType.MODEL, model.id),
         )
 
+    def test_excludes_model_documents_from_standalone_search(
+        self, db_session, make_model, make_document
+    ):
+        model = make_model("Bracket")
+        document = make_document("Guide", model_id=model.id, body="Model instructions")
+
+        assert (
+            project_subject(
+                db_session, SearchSubject(SubjectType.DOCUMENT, document.id)
+            )
+            is None
+        )
+
     def test_projects_markdown_body(self, db_session, make_document):
         document = make_document("Guide", body="# Assembly\nFit the lid.")
 

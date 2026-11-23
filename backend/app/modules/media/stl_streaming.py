@@ -287,6 +287,8 @@ def render_stl_preview_isolated(
         max_rss_bytes=min(limits.max_rss_bytes, _worker_memory_budget()),
         address_space_bytes=limits.address_space_bytes,
     )
+    from printstash_core.mesh.preview_profile import preview_appearance
+
     from app.modules.media.mesh_isolation import MeshWorkerError, supervise_result
     from app.modules.media.native_budget import (
         MeshSource,
@@ -299,6 +301,7 @@ def render_stl_preview_isolated(
     from app.modules.media.worker_bootstrap import command as worker_command
     from app.runtime.native_runtime import current_permit
 
+    appearance = preview_appearance()
     capacity = native_process.native_capacity()
     active = current_permit()
     amount = (
@@ -324,6 +327,9 @@ def render_stl_preview_isolated(
             str(int(width)),
             str(int(height)),
             *worker_limits.as_worker_args(expected_parent_pid=os.getpid()),
+            "--preview-look",
+            appearance.look.value,
+            "--floor-grid" if appearance.floor_grid else "--no-floor-grid",
         ]
         if in_worker:
             # The outer worker already owns a hard ceiling and deadline.
@@ -345,9 +351,9 @@ def render_stl_preview_isolated(
                 worker_command(
                     "app.modules.media.stl_preview_worker",
                     arguments,
-                    permit.resources.bytes,
+                    permit.hard_bytes,
                 ),
-                memory_budget=min(worker_limits.max_rss_bytes, permit.resources.bytes),
+                memory_budget=min(worker_limits.max_rss_bytes, permit.hard_bytes),
                 timeout_seconds=worker_limits.hard_timeout_seconds,
                 permit=permit,
                 lifecycle=WorkerLifecycle.GUARDED,

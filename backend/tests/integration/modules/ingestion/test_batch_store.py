@@ -387,3 +387,149 @@ class TestStoreBoundaries:
             if deduplicated
             else IngestionEntryState.IMPORTED
         )
+
+
+class _WriterProbe:
+    """Count the write transactions a call opens on the shared engine."""
+
+    def __init__(self, engine):
+        self._engine = engine
+        self.statements = _StatementProbe()
+
+    def __enter__(self):
+        event.listen(
+            self._engine, "before_cursor_execute", self.statements.before_execute
+        )
+        return self
+
+    def __exit__(self, *_exc):
+        event.remove(
+            self._engine, "before_cursor_execute", self.statements.before_execute
+        )
+
+    @property
+    def writer_turns(self) -> int:
+        return sum(
+            statement.strip().upper() == "BEGIN IMMEDIATE"
+            for statement in self.statements.statements
+        )
+
+
+class TestLedgerReadsTakeNoWriter:
+    """Ledger calls that change no row answer from a read (audit F6)."""
+
+    def test_fresh_entry_confirmation_takes_no_writer(
+        self, execution, spec, db_session
+    ):
+        ctx, _ = execution
+        owner = JobBatch(ctx.job_id)
+        row = batch_store.freeze_entries(ctx, owner, (spec,))[0]
+
+        with _WriterProbe(db_session.get_bind()) as probe:
+            confirmed = batch_store.reconcile(ctx, owner, row.key)
+
+        assert confirmed is None
+        assert probe.writer_turns == 0
+
+    def test_recorded_entry_confirmation_takes_no_writer(
+        self, execution, spec, make_model, make_file, db_session
+    ):
+        ctx, _ = execution
+        owner = JobBatch(ctx.job_id)
+        row = batch_store.freeze_entries(ctx, owner, (spec,))[0]
+        file = make_file(make_model(), ingestion_key=row.ingestion_key)
+        first = batch_store.reconcile(ctx, owner, row.key)
+
+        with _WriterProbe(db_session.get_bind()) as probe:
+            again = batch_store.reconcile(ctx, owner, row.key)
+
+        assert again == first and again.file_id == file.id
+        assert probe.writer_turns == 0
+
+    def test_adopting_a_committed_file_takes_the_writer(
+        self, execution, spec, make_model, make_file, db_session
+    ):
+        ctx, _ = execution
+        owner = JobBatch(ctx.job_id)
+        row = batch_store.freeze_entries(ctx, owner, (spec,))[0]
+        make_file(make_model(), ingestion_key=row.ingestion_key)
+
+        with _WriterProbe(db_session.get_bind()) as probe:
+            batch_store.reconcile(ctx, owner, row.key)
+
+        assert probe.writer_turns == 1
+
+    @pytest.mark.parametrize(
+        "deduplicated", [False, True], ids=["imported", "deduplicated"]
+    )
+    def test_outcome_the_commit_recorded_takes_no_writer(
+        self, execution, spec, make_model, make_file, db_session, deduplicated
+    ):
+        from app.modules.ingestion.batch_contracts import Deduplicated
+
+        ctx, _ = execution
+        owner = JobBatch(ctx.job_id)
+        row = batch_store.freeze_entries(ctx, owner, (spec,))[0]
+        file = make_file(make_model())
+        ref = BatchCommitReference(
+            owner, row.id, JobExecution(ctx.job_id, ctx.attempt, ctx.execution_epoch)
+        )
+        with get_session_factory().scoped_session() as session:
+            batch_store.record_committed(session, ref, file, deduplicated=deduplicated)
+            session.commit()
+        outcome = (Deduplicated if deduplicated else Imported)(file.model_id, file.id)
+
+        with _WriterProbe(db_session.get_bind()) as probe:
+            record = batch_store.record_outcome(ctx, owner, row.key, outcome)
+
+        assert (record.model_id, record.file_id) == (file.model_id, file.id)
+        assert probe.writer_turns == 0
+
+    def test_an_outcome_no_commit_recorded_is_written(
+        self, execution, spec, make_model, make_file
+    ):
+        ctx, _ = execution
+        owner = JobBatch(ctx.job_id)
+        row = batch_store.freeze_entries(ctx, owner, (spec,))[0]
+        file = make_file(make_model())
+
+        record = batch_store.record_outcome(
+            ctx, owner, row.key, Imported(file.model_id, file.id)
+        )
+
+        assert record.state is IngestionEntryState.IMPORTED
+        assert batch_store.results(owner, limit=1)[0].file_id == file.id
+
+    def test_unlocked_confirmation_refuses_a_cancelled_attempt(self, execution, spec):
+        ctx, actor = execution
+        owner = JobBatch(ctx.job_id)
+        row = batch_store.freeze_entries(ctx, owner, (spec,))[0]
+        service.cancel(ctx.job_id, actor=actor)
+
+        with pytest.raises(OperationCancelled):
+            batch_store.reconcile(ctx, owner, row.key)
+
+    def test_unlocked_confirmation_refuses_another_jobs_batch(
+        self, execution, spec, make_job
+    ):
+        ctx, actor = execution
+        other = make_job(owner=actor, subject="other-batch")
+
+        with pytest.raises(OperationCancelled):
+            batch_store.reconcile(ctx, JobBatch(other.id), spec.key)
+
+    def test_unlocked_confirmation_refuses_an_inbox_item_that_moved_on(
+        self, make_user, make_job, make_inbox_item, spec, db_session
+    ):
+        actor = make_user()
+        job = make_job(kind=JobKind.INGESTION_INBOX_IMPORT, owner=actor)
+        item = make_inbox_item(actor, state=InboxItemState.IMPORTING, job_id=job.id)
+        owner = InboxBatch(item.id)
+        ctx = build_job_context(job.id)
+        row = batch_store.freeze_entries(ctx, owner, (spec,))[0]
+        item.state = InboxItemState.COMPLETED
+        db_session.add(item)
+        db_session.commit()
+
+        with pytest.raises(OperationCancelled):
+            batch_store.reconcile(ctx, owner, row.key)

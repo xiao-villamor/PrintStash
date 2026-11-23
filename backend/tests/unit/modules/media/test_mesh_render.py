@@ -40,7 +40,7 @@ def _tilt_matrix() -> np.ndarray:
 
 
 class TestSelectViewRotation:
-    def test_flat_z_mesh_uses_front_view_like_stl_viewer(self) -> None:
+    def test_flat_z_mesh_keeps_the_full_broad_face_on_a_diagonal(self) -> None:
         verts = np.array(
             [
                 [-5.0, -5.0, -0.2],
@@ -54,10 +54,12 @@ class TestSelectViewRotation:
         rotation = mesh_render._select_view_rotation(verts, np)
         view = verts @ rotation.T
 
-        expected = _tilt_matrix() @ np.diag([1.0, 1.0, -1.0])
+        azimuth = np.radians(-35.0)
+        c, s = np.cos(azimuth), np.sin(azimuth)
+        diagonal = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+        expected = _tilt_matrix() @ diagonal @ np.diag([1.0, 1.0, -1.0])
         np.testing.assert_allclose(rotation, expected, atol=1e-12)
-        # Screen-X is untouched by the tilt: the broad face still spans the view.
-        np.testing.assert_allclose(view[:, 0], verts[:, 0])
+        assert np.ptp(view[:, 0]) > np.ptp(verts[:, 0])
 
     def test_solid_mesh_uses_z_up_hero_view(self) -> None:
         # A chunky/solid mesh gets the 3/4 "hero" view, not the flat front view.
@@ -103,7 +105,7 @@ class TestSelectViewRotation:
 
         rotation = mesh_render._select_view_rotation(verts, np)
 
-        expected = _tilt_matrix() @ np.array(
+        expected = _tilt_matrix().T @ np.array(
             [
                 [0.0, 1.0, 0.0],
                 [0.0, 0.0, 1.0],
@@ -356,7 +358,7 @@ class TestDeferredPreparation:
         )
         prepared = mesh_render.prepare_preview_render(self.mesh(faces))
         assert isinstance(prepared, VisualRender)
-        assert not hasattr(prepared, "smooth_normals")
+        assert not hasattr(prepared, "corner_normals")
         assert not hasattr(prepared, "position_ids")
         assert prepared._canonical is None
 
@@ -401,7 +403,7 @@ class TestDeferredPreparation:
         mesh_render.render_prepared_pixels(prepared, "model", compute=False)
         mesh_render.render_prepared_pixels(prepared, "model", compute=False)
         assert seen[0] is seen[1]
-        np.testing.assert_array_equal(seen[0].smooth_normals, [[0, 0, 1]] * 3)
+        np.testing.assert_array_equal(seen[0].corner_normals, [[[0, 0, 1]] * 3] * 2)
 
 
 class TestAcceleratedEncoding:

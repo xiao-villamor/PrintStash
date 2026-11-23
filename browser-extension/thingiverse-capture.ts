@@ -1,3 +1,4 @@
+import { downloadProgress, type ByteProgress } from "./transfer-progress.ts";
 import { buildBrowserCaptureMessage, type BrowserCaptureMessage } from "./capture-adapter.ts";
 import type { BrowserCaptureFile } from "./capture-transport.ts";
 
@@ -10,7 +11,7 @@ const THINGIVERSE_DOWNLOAD_HOSTS = new Set([
   "api.thingiverse.com",
   "cdn.thingiverse.com",
 ]);
-const THINGIVERSE_PERMISSION_ORIGINS = [
+export const THINGIVERSE_PERMISSION_ORIGINS = [
   "https://thingiverse.com/*",
   "https://www.thingiverse.com/*",
   "https://cdn.thingiverse.com/*",
@@ -202,52 +203,146 @@ export async function requestThingiverseFilesInMainWorld(args: {
   } catch {
     return { ok: false, code: "contract_changed" };
   }
+  function visibleFiles(doc: Document, page: URL): ThingiverseFilesPageResult | undefined {
+    const files: ThingiversePageFile[] = [];
+    const seen = new Set<string>();
+    const anchors = Array.from(doc.querySelectorAll<HTMLAnchorElement>("a[href]"));
+    if (anchors.length > 2_000) return { ok: false, code: "contract_changed" };
+    for (const anchor of anchors) {
+      let parsed: URL;
+      try {
+        parsed = new URL(anchor.href, doc.baseURI);
+      } catch {
+        continue;
+      }
+      const host = parsed.hostname.toLowerCase();
+      if (
+        parsed.protocol !== "https:" ||
+        parsed.username ||
+        parsed.password ||
+        parsed.hash ||
+        ![
+          "thingiverse.com",
+          "www.thingiverse.com",
+          "api.thingiverse.com",
+          "cdn.thingiverse.com",
+        ].includes(host)
+      ) {
+        continue;
+      }
+      const fileId =
+        parsed.pathname.match(/^\/download:(\d{1,20})\/?$/)?.[1] ||
+        parsed.pathname.match(/^\/files\/(\d{1,20})\/download\/?$/)?.[1];
+      if (!fileId || seen.has(fileId)) continue;
+      let filename =
+        safeFilename(anchor.download) ||
+        safeFilename(anchor.title) ||
+        safeFilename(anchor.getAttribute("aria-label")) ||
+        safeFilename(anchor.textContent);
+      let ancestor: Element | null = anchor.parentElement;
+      for (let depth = 0; !filename && ancestor && depth < 4; depth += 1) {
+        filename = safeFilename(ancestor.textContent);
+        ancestor = ancestor.parentElement;
+      }
+      if (!filename) continue;
+      seen.add(fileId);
+      files.push({ id: fileId, filename, fileType: typeFor(filename), url: parsed.toString() });
+      if (files.length > 256) return { ok: false, code: "contract_changed" };
+    }
+    if (files.length > 0) return { ok: true, files };
+
+    // The current React Files view already owns an authenticated/public file list.
+    // Inspect only publication-bound props; never return the component or its account state.
+    if (
+      ["thingiverse.com", "www.thingiverse.com"].includes(page.hostname) &&
+      new RegExp(`^/(?:thing:|things/)${args.sourceItemId}(?:/files)?/?$`).test(page.pathname)
+    ) {
+      const buttons = [
+        ...doc.querySelectorAll<HTMLButtonElement>('button[aria-label^="Download "]'),
+      ];
+      if (buttons.length > 256) return { ok: false, code: "contract_changed" };
+      for (const button of buttons) {
+        const key = Object.keys(button).find((key) => key.startsWith("__reactFiber$"));
+        if (!key) continue;
+        type FileFiber = {
+          memoizedProps?: { thing?: { id?: unknown; files?: unknown } };
+          return?: FileFiber | null;
+        };
+        let fiber = (button as unknown as Record<string, FileFiber>)[key];
+        for (let depth = 0; fiber && depth < 20; depth++) {
+          const thing = fiber.memoizedProps?.thing;
+          if (thing && String(thing.id) === args.sourceItemId && Array.isArray(thing.files)) {
+            if (thing.files.length > 256) return { ok: false, code: "contract_changed" };
+            const native: ThingiversePageFile[] = [];
+            for (const file of thing.files) {
+              if (
+                !file ||
+                typeof file !== "object" ||
+                !Number.isSafeInteger(file.id) ||
+                file.id <= 0 ||
+                typeof file.name !== "string" ||
+                safeFilename(file.name) !== file.name ||
+                file.name.startsWith(".")
+              )
+                return { ok: false, code: "contract_changed" };
+              native.push({
+                id: String(file.id),
+                filename: file.name,
+                fileType: typeFor(file.name),
+                url: `https://www.thingiverse.com/download:${file.id}`,
+              });
+            }
+            if (new Set(native.map((file) => file.id)).size !== native.length)
+              return { ok: false, code: "contract_changed" };
+            if (native.length) return { ok: true, files: native };
+          }
+          if (!fiber.return) break;
+          fiber = fiber.return;
+        }
+      }
+    }
+  }
+
+  const current = new URL(window.location.href);
+  const visible = visibleFiles(document, current);
+  if (visible) return visible;
+
+  async function readFilesView(): Promise<ThingiverseFilesPageResult | undefined> {
+    const listing = new RegExp(`^/(?:thing:|things/)${args.sourceItemId}/?$`);
+    if (current.origin !== new URL(args.endpoint).origin || !listing.test(current.pathname)) {
+      return undefined;
+    }
+    const url = new URL(`/thing:${args.sourceItemId}/files`, current.origin);
+    const frame = document.createElement("iframe");
+    frame.hidden = true;
+    frame.title = "Thingiverse files";
+    frame.src = url.href;
+    document.body.append(frame);
+    try {
+      // The Files view renders its file list after its page bundle loads.
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        try {
+          const doc = frame.contentDocument;
+          const page = doc ? new URL(doc.URL) : null;
+          if (doc && page && page.origin === url.origin && page.pathname === url.pathname) {
+            const result = visibleFiles(doc, page);
+            if (result) return result;
+          }
+        } catch {
+          // A redirect away from the publication cannot supply its files.
+          return undefined;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      return undefined;
+    } finally {
+      frame.remove();
+    }
+  }
+
   const files: ThingiversePageFile[] = [];
   const seen = new Set<string>();
-  const anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"));
-  if (anchors.length > 2_000) return { ok: false, code: "contract_changed" };
-  for (const anchor of anchors) {
-    let parsed: URL;
-    try {
-      parsed = new URL(anchor.href, document.baseURI);
-    } catch {
-      continue;
-    }
-    const host = parsed.hostname.toLowerCase();
-    if (
-      parsed.protocol !== "https:" ||
-      parsed.username ||
-      parsed.password ||
-      parsed.hash ||
-      ![
-        "thingiverse.com",
-        "www.thingiverse.com",
-        "api.thingiverse.com",
-        "cdn.thingiverse.com",
-      ].includes(host)
-    ) {
-      continue;
-    }
-    const fileId =
-      parsed.pathname.match(/^\/download:(\d{1,20})\/?$/)?.[1] ||
-      parsed.pathname.match(/^\/files\/(\d{1,20})\/download\/?$/)?.[1];
-    if (!fileId || seen.has(fileId)) continue;
-    let filename =
-      safeFilename(anchor.download) ||
-      safeFilename(anchor.title) ||
-      safeFilename(anchor.getAttribute("aria-label")) ||
-      safeFilename(anchor.textContent);
-    let ancestor: Element | null = anchor.parentElement;
-    for (let depth = 0; !filename && ancestor && depth < 4; depth += 1) {
-      filename = safeFilename(ancestor.textContent);
-      ancestor = ancestor.parentElement;
-    }
-    if (!filename) continue;
-    seen.add(fileId);
-    files.push({ id: fileId, filename, fileType: typeFor(filename), url: parsed.toString() });
-    if (files.length > 256) return { ok: false, code: "contract_changed" };
-  }
-  if (files.length > 0) return { ok: true, files };
 
   try {
     const readBoundedJson = async (
@@ -363,7 +458,7 @@ export async function requestThingiverseFilesInMainWorld(args: {
     };
 
     const responseResult = await requestJson(args.endpoint);
-    if (!responseResult.ok) return responseResult;
+    if (!responseResult.ok && responseResult.code !== "challenge") return responseResult;
     const findFiles = (
       parsed: unknown,
     ): { ok: true; files?: unknown[] } | { ok: false; code: "contract_changed" } => {
@@ -391,7 +486,7 @@ export async function requestThingiverseFilesInMainWorld(args: {
       }
       return { ok: true, files: rawFiles };
     };
-    const completeFiles = findFiles(responseResult.value);
+    const completeFiles = responseResult.ok ? findFiles(responseResult.value) : undefined;
     const collectSafeFiles = (rawFiles: unknown[] | undefined): boolean => {
       if (!rawFiles || rawFiles.length === 0 || rawFiles.length > 256) return false;
       for (const value of rawFiles) {
@@ -447,12 +542,17 @@ export async function requestThingiverseFilesInMainWorld(args: {
       }
       return files.length > 0;
     };
-    const completeRawFiles = completeFiles.ok ? completeFiles.files : undefined;
+    const completeRawFiles = completeFiles?.ok ? completeFiles.files : undefined;
     if (collectSafeFiles(completeRawFiles)) return { ok: true, files };
 
-    const filesEndpoint = `https://api.thingiverse.com/things/${args.sourceItemId}/files`;
+    const filesEndpoint = `${new URL(args.endpoint).origin}/api/things/${args.sourceItemId}/files`;
     const filesResult = await requestJson(filesEndpoint);
-    if (!filesResult.ok) return filesResult;
+    if (!filesResult.ok) {
+      if (filesResult.code === "challenge" || !responseResult.ok) {
+        return (await readFilesView()) ?? filesResult;
+      }
+      return filesResult;
+    }
     const dedicatedFiles = findFiles(filesResult.value);
     const dedicatedRawFiles = dedicatedFiles.ok ? dedicatedFiles.files : undefined;
     if (collectSafeFiles(dedicatedRawFiles)) return { ok: true, files };
@@ -544,7 +644,11 @@ export function thingiverseCaptureFromPage({
   };
 }
 
-async function readBoundedFile(response: Response, signal?: AbortSignal): Promise<Blob> {
+async function readBoundedFile(
+  response: Response,
+  signal?: AbortSignal,
+  progress?: ByteProgress,
+): Promise<Blob> {
   const contentLengthValue = response.headers.get("Content-Length");
   if (contentLengthValue !== null) {
     const contentLength = Number(contentLengthValue);
@@ -563,6 +667,7 @@ async function readBoundedFile(response: Response, signal?: AbortSignal): Promis
       "user_file_required: Thingiverse did not provide a file stream. Download it normally, then attach it in Pending Imports.",
     );
   }
+  const report = downloadProgress(response, progress);
   const reader = response.body.getReader();
   const chunks: ArrayBuffer[] = [];
   let total = 0;
@@ -586,6 +691,7 @@ async function readBoundedFile(response: Response, signal?: AbortSignal): Promis
       const copy = new ArrayBuffer(next.value.byteLength);
       new Uint8Array(copy).set(next.value);
       chunks.push(copy);
+      report(total);
     }
   } finally {
     signal?.removeEventListener("abort", abortReader);
@@ -602,12 +708,14 @@ export async function downloadThingiverseCandidate({
   link,
   ensureOriginPermissions = async () => {},
   signal,
+  progress,
 }: {
   fetchImpl?: typeof fetch;
   candidate: BrowserCaptureMessage["candidates"][number];
   link: string;
   ensureOriginPermissions?: (origins: string[]) => Promise<void>;
   signal?: AbortSignal;
+  progress?: ByteProgress;
 }): Promise<BrowserCaptureFile> {
   const fileId = candidate.id.match(/:file:(\d{1,20})$/)?.[1];
   if (!fileId || !validFilename(candidate.filename) || !validDownloadUrl(link, fileId)) {
@@ -644,7 +752,7 @@ export async function downloadThingiverseCandidate({
   }
   return {
     id: candidate.id,
-    file: await readBoundedFile(response, signal),
+    file: await readBoundedFile(response, signal, progress),
     filename: candidate.filename,
     mediaType:
       candidate.fileType === "stl"

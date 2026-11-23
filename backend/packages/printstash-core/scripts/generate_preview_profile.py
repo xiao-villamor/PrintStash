@@ -24,6 +24,29 @@ def render_typescript(profile: dict[str, object]) -> str:
     assert isinstance(flat, dict)
     assert isinstance(supersampling, dict)
     assert isinstance(encoding, dict)
+    looks = profile["looks"]
+    assert isinstance(looks, dict)
+    colour_properties = []
+    for look, style in looks.items():
+        albedo = style["albedo"]
+        colour = "#" + "".join(f"{round(channel * 255):02X}" for channel in albedo)
+        colour_properties.append(f"  {look}: {json.dumps(colour)},\n")
+    lighting = profile["lighting"]
+    assert isinstance(lighting, dict)
+
+    def numbers(values: list[float]) -> str:
+        return "[" + ", ".join(json.dumps(value) for value in values) + "]"
+
+    studio_looks = "".join(
+        f"    {look}: {{\n"
+        f"      albedo: {numbers(style['albedo'])},\n"
+        + "".join(
+            f"      {name}: {style[name]},\n"
+            for name in ("key", "fill", "ambient", "rim", "specular")
+        )
+        + "    },\n"
+        for look, style in looks.items()
+    )
     return (
         "// Generated from printstash-core/mesh/preview_profile.json. "
         "Do not edit by hand.\n"
@@ -51,6 +74,20 @@ def render_typescript(profile: dict[str, object]) -> str:
         f"    exact: {str(encoding['exact']).lower()},\n"
         f"    method: {encoding['method']},\n"
         "  },\n"
+        "} as const;\n"
+        "export const PREVIEW_LOOK_COLOURS = {\n"
+        + "".join(colour_properties)
+        + "} as const;\n"
+        "/** Studio shading of generated images, in the camera frame (x right, y up, z to viewer). */\n"
+        "export const PREVIEW_STUDIO = {\n"
+        f"  key: {{ direction: {numbers(lighting['key']['direction'])}, "
+        f"colour: {numbers(lighting['key']['colour'])} }},\n"
+        f"  fill: {{ direction: {numbers(lighting['fill']['direction'])}, "
+        f"colour: {numbers(lighting['fill']['colour'])} }},\n"
+        f"  rim: {{ colour: {numbers(lighting['rim']['colour'])}, "
+        f"power: {lighting['rim']['power']} }},\n"
+        f"  specularPower: {lighting['specular']['power']},\n"
+        "  looks: {\n" + studio_looks + "  },\n"
         "} as const;\n"
     )
 

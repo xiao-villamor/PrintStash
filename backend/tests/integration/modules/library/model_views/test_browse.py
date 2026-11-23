@@ -7,7 +7,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from app.core.errors import OperationError
 from app.db.models import User
 from app.db.session import _set_sqlite_pragmas
-from app.modules.library.model_views.browse import page_items
+from app.modules.library.model_views.browse import collection_preview, page_items
 from app.schemas.library_browse import BrowseQuery
 from tests.factories import build_model, build_user
 
@@ -27,8 +27,9 @@ def browse_database(tmp_path):
     engine.dispose()
 
 
-class TestPageItems:
-    def test_rejects_read_revision_race(self, browse_database):
+class TestBrowseSnapshots:
+    @pytest.mark.parametrize("surface", ["page", "preview"], ids=["page", "preview"])
+    def test_rejects_read_revision_race(self, browse_database, surface):
         engine, user_id, model_id = browse_database
         race = {"committed": False}
 
@@ -51,9 +52,31 @@ class TestPageItems:
             event.listen(reader.connection(), "after_cursor_execute", committed_writer)
 
             with pytest.raises(OperationError, match="browse_refresh_required"):
-                page_items(reader, user, BrowseQuery())
+                if surface == "page":
+                    page_items(reader, user, BrowseQuery())
+                else:
+                    collection_preview(reader, user, "parts")
 
         assert race["committed"] is True
+
+    @pytest.mark.parametrize("surface", ["page", "preview"], ids=["page", "preview"])
+    def test_rejects_actor_disabled_after_authentication(
+        self, browse_database, surface
+    ):
+        engine, user_id, _ = browse_database
+        with Session(engine) as reader:
+            user = reader.get(User, user_id)
+            with Session(engine) as writer:
+                writer.execute(
+                    text("UPDATE users SET is_active=0 WHERE id=:id"), {"id": user_id}
+                )
+                writer.commit()
+
+            with pytest.raises(OperationError, match="collection_permission_denied"):
+                if surface == "page":
+                    page_items(reader, user, BrowseQuery())
+                else:
+                    collection_preview(reader, user, "parts")
 
 
 class TestThumbnailItems:
@@ -73,9 +96,12 @@ class TestThumbnailItems:
             event.listen(reader.connection(), "after_cursor_execute", record)
             result = thumbnail_items(reader, user, ids)
         assert len(result.items) == count
-        assert len(statements) == 4
+        # The source gallery adds one batch read; the selected mesh Artifact read is fixed
+        # per page (their derivative rows add one more only when meshes exist).
+        assert len(statements) == 6
         assert all(
-            statement.lstrip().upper().startswith("SELECT") for statement in statements
+            statement.lstrip().upper().startswith(("SELECT", "WITH"))
+            for statement in statements
         )
         assert not any(
             "model_tags" in statement or "metadata" in statement

@@ -7,12 +7,13 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { SettingsTab } from "@/components/model-detail/settings-tab";
 import { DEFAULT_METADATA_PREFERENCES } from "@/lib/metadata-preferences";
 import { buildPrintSettingRows } from "@/components/model-detail/presentation";
+import { aMetadata } from "@/test-support/factories";
 import type { MetadataRead } from "@/types";
 
 const geometryOnlyMetadata: MetadataRead = {
@@ -70,5 +71,177 @@ describe("SettingsTab", () => {
     expect(screen.getByText("Mesh Geometry")).toBeInTheDocument();
     expect(screen.getByText("176.14 cm³")).toBeInTheDocument();
     expect(screen.getByText("49,672")).toBeInTheDocument();
+  });
+});
+
+function setting(label: string) {
+  const row = screen.getByText(label).parentElement;
+  if (!row) throw new Error("A setting must belong to its definition row");
+  return within(row);
+}
+
+function renderSettings(meta: MetadataRead, preferences = DEFAULT_METADATA_PREFERENCES) {
+  return render(
+    <SettingsTab
+      meta={meta}
+      printSettingRows={buildPrintSettingRows(meta, preferences)}
+      preferences={preferences}
+    />,
+  );
+}
+
+describe("SettingsTab sliced revision", () => {
+  it("shows per-plate estimates instead of an archive-wide estimate", () => {
+    render(
+      <SettingsTab
+        meta={aMetadata({ printer_model: "Workshop printer" })}
+        printSettingRows={[]}
+        preferences={DEFAULT_METADATA_PREFERENCES}
+        hasSlicedRevision
+        selectedSlicedPlate={2}
+        plateEstimates={{
+          plates: [1, 2],
+          identities: [],
+          plate_metadata: [
+            {
+              number: 1,
+              metadata: { estimated_time_s: 27862, filament_weight_g: 419.18, filament_cost: null },
+            },
+            {
+              number: 2,
+              metadata: { estimated_time_s: 2465, filament_weight_g: 13.03, filament_cost: null },
+            },
+          ],
+        }}
+      />,
+    );
+    expect(
+      within(screen.getByRole("region", { name: "Plate 02" })).getByText("13.03 g"),
+    ).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Estimates" })).not.toBeInTheDocument();
+  });
+
+  it("honors hidden per-plate estimate preferences", () => {
+    render(
+      <SettingsTab
+        meta={aMetadata()}
+        printSettingRows={[]}
+        preferences={{
+          ...DEFAULT_METADATA_PREFERENCES,
+          estimated_time: false,
+          filament_weight: false,
+          filament_cost: false,
+        }}
+        plateEstimates={{ plates: [1, 2], identities: [], plate_metadata: [] }}
+      />,
+    );
+    expect(screen.queryByText("Estimated time")).not.toBeInTheDocument();
+    expect(screen.queryByText("Filament weight")).not.toBeInTheDocument();
+    expect(screen.queryByText("Filament cost")).not.toBeInTheDocument();
+  });
+
+  it("suggests a sliced revision when no settings or revision exist", () => {
+    render(
+      <SettingsTab meta={null} printSettingRows={[]} preferences={DEFAULT_METADATA_PREFERENCES} />,
+    );
+
+    expect(
+      screen.getByText(
+        "No print settings recorded yet. Add a sliced G-code revision to capture them.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("does not show an empty state when settings are recorded", () => {
+    render(
+      <SettingsTab
+        meta={aMetadata({ printer_model: "Workshop printer" })}
+        printSettingRows={[]}
+        preferences={DEFAULT_METADATA_PREFERENCES}
+        hasSlicedRevision
+      />,
+    );
+
+    expect(screen.getByText("Workshop printer")).toBeVisible();
+    expect(
+      screen.queryByText("No print settings are available for this sliced revision."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("explains missing settings without asking for another revision", () => {
+    render(
+      <SettingsTab
+        meta={geometryOnlyMetadata}
+        printSettingRows={buildPrintSettingRows(geometryOnlyMetadata, DEFAULT_METADATA_PREFERENCES)}
+        preferences={DEFAULT_METADATA_PREFERENCES}
+        hasSlicedRevision
+      />,
+    );
+
+    expect(
+      screen.getByText("No print settings are available for this sliced revision."),
+    ).toBeVisible();
+    expect(screen.queryByText(/Add a sliced G-code/)).not.toBeInTheDocument();
+  });
+});
+
+describe("SettingsTab recorded values", () => {
+  it("groups settings into the reference sections", () => {
+    renderSettings(aMetadata({ printer_model: "Workshop printer" }));
+
+    expect(screen.getByRole("heading", { name: "Printer & material" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Temperatures" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Estimates" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Layers & structure" })).toBeVisible();
+  });
+  it("preserves recorded zero settings", () => {
+    renderSettings(
+      aMetadata({
+        layer_height_mm: 0,
+        estimated_time_s: 0,
+        filament_weight_g: 0,
+        filament_cost: 0,
+      }),
+    );
+
+    expect(setting("Layer height").getByText("0mm")).toBeVisible();
+    expect(setting("Estimated time").getByText("0s")).toBeVisible();
+    expect(setting("Filament weight").getByText("0g")).toBeVisible();
+    expect(setting("Filament cost").getByText("0.00")).toBeVisible();
+  });
+  it("retains recorded zero walls", () => {
+    renderSettings(aMetadata({ wall_loops: 0 }));
+
+    expect(setting("Walls").getByText("0")).toBeVisible();
+  });
+  it("distinguishes absent walls from recorded zero", () => {
+    renderSettings(aMetadata());
+
+    expect(setting("Walls").getByText("Not recorded")).toBeVisible();
+  });
+  it("retains a recorded false support setting", () => {
+    renderSettings(aMetadata({ support_material: false }));
+
+    expect(setting("Supports").getByText("No")).toBeVisible();
+  });
+  it("retains zero resin exposure", () => {
+    renderSettings(aMetadata({ layer_count: 0, exposure_time_s: 0, resin_volume_ml: 0 }));
+
+    expect(setting("EXPOSURE").getByText("0 s")).toBeVisible();
+    expect(setting("RESIN VOLUME").getByText("0 ml")).toBeVisible();
+  });
+  it("honors a hidden printer profile preference", () => {
+    renderSettings(aMetadata({ printer_model: "Workshop printer" }), {
+      ...DEFAULT_METADATA_PREFERENCES,
+      printer_profile: false,
+    });
+
+    expect(screen.queryByText("Workshop printer")).not.toBeInTheDocument();
+  });
+  it("retains zero mesh counts", () => {
+    renderSettings(aMetadata({ volume_mm3: 0, triangle_count: 0 }));
+
+    expect(setting("TRIANGLES").getByText("0")).toBeVisible();
+    expect(setting("VOLUME").getByText("0.0 mm³")).toBeVisible();
   });
 });

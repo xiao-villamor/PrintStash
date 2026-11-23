@@ -1,0 +1,232 @@
+.fleet-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.fleet-filter-row > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.fleet-filter-row select {
+  width: auto;
+  min-width: 144px;
+  height: 36px;
+  padding-inline: 10px;
+  font-size: 13px;
+  color: var(--foreground);
+}
+.fleet-list-panel {
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+.fleet-list-panel > h2 {
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 16px 20px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.fleet-plain-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  border-bottom: 1px solid var(--border);
+  padding: 18px 20px;
+}
+.fleet-plain-row:last-child {
+  border-bottom: 0;
+}
+.fleet-plain-row > div:first-child {
+  min-width: 0;
+  flex: 1;
+}
+.fleet-plain-row p {
+  overflow-wrap: anywhere;
+}
+.fleet-plain-row > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.fleet-panels .fleet-plain-row button {
+  height: 34px;
+  min-width: 34px;
+  font-size: 13px;
+}
+@media (max-width: 767px) {
+  .fleet-filter-row {
+    gap: 10px;
+  }
+  .fleet-filter-row > label {
+    flex: 1;
+    min-width: 130px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .fleet-filter-row select {
+    width: 100%;
+    min-width: 0;
+    font-size: 16px;
+  }
+  .fleet-plain-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+  }
+  .fleet-plain-row > div:last-child {
+    justify-content: flex-start;
+  }
+}
+
+.farm-dispatch-board {
+  overflow-x: auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+.farm-dispatch-board table {
+  width: 100%;
+  min-width: 640px;
+  table-layout: fixed;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+.farm-dispatch-board caption {
+  text-align: left;
+  padding: 14px 18px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.farm-dispatch-board td,
+.farm-dispatch-board th {
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+.farm-dispatch-board thead th {
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-weight: 500;
+  font-size: 12px;
+  padding-block: 7px;
+}
+.farm-dispatch-board th:first-child {
+  width: 22%;
+}
+.farm-dispatch-board th:last-child {
+  width: 20%;
+}
+.farm-dispatch-board tr[data-selected="true"] {
+  background: var(--accent);
+}
+.farm-dispatch-board th button {
+  margin-inline-start: -8px;
+  color: var(--primary);
+}
+.farm-dispatch-board small {
+  display: block;
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+.farm-job-name {
+  font-weight: 500;
+}
+.farm-job-progress,
+.farm-queue-scopes {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.farm-job-progress {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.farm-job-progress progress {
+  width: min(75%, 14rem);
+  height: 6px;
+  accent-color: var(--primary);
+}
+.farm-queue-scopes {
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+.farm-queue-scopes span {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+
+.farm-routing-state {
+  display: inline-block;
+  border-inline-start: 3px solid var(--muted-foreground);
+  padding-inline-start: 8px;
+  text-transform: capitalize;
+}
+.farm-routing-state[data-state="ready"] {
+  border-color: var(--success);
+}
+.farm-routing-state[data-state="printing"] {
+  border-color: var(--primary);
+}
+.farm-routing-state[data-state="held"],
+.farm-routing-state[data-state="paused"] {
+  border-color: var(--warning);
+}
+.farm-dispatch-board td > button {
+  display: block;
+  margin-inline-start: -8px;
+}
+.farm-queue-scopes button[aria-pressed="true"] span {
+  color: inherit;
+}
+
+.farm-board-title,
+.farm-capacity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.farm-board-title {
+  justify-content: space-between;
+}
+.farm-capacity {
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.farm-capacity-track {
+  display: flex;
+  gap: 2px;
+  width: 100px;
+  height: 6px;
+  overflow: hidden;
+}
+.farm-capacity-track span {
+  flex: 1;
+  background: var(--border);
+}
+.farm-capacity-track [data-state="printing"] {
+  background: var(--primary);
+}
+.farm-job-progress progress {
+  appearance: none;
+  background: var(--muted);
+  border: 0;
+}
+.farm-job-progress progress::-webkit-progress-bar {
+  background: var(--muted);
+}
+.farm-job-progress progress::-webkit-progress-value {
+  background: var(--primary);
+}
+.farm-job-progress progress::-moz-progress-bar {
+  background: var(--primary);
+}

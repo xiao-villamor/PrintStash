@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import math
 import time
 import uuid
 from datetime import datetime
@@ -113,7 +114,10 @@ async def validation_exception_handler(
     return JSONResponse(
         status_code=422,
         content=jsonable_encoder(
-            {"detail": "request_validation_failed", "errors": errors}
+            {"detail": "request_validation_failed", "errors": errors},
+            custom_encoder={
+                float: lambda value: value if math.isfinite(value) else None
+            },
         ),
     )
 
@@ -178,7 +182,7 @@ async def bind_audit_context(request: Request, call_next):
         if payload and payload.get("sub"):
             try:
                 actor_id = int(payload["sub"])
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 actor_id = None
     set_audit_context(
         actor_id=actor_id, ip=request.client.host if request.client else None
@@ -203,7 +207,7 @@ async def log_requests(request: Request, call_next):
             duration_ms = (time.perf_counter() - started) * 1000
             response.headers["X-Request-ID"] = request_id
             response.headers["Server-Timing"] = (
-                f'app;dur={duration_ms:.1f}, '
+                f"app;dur={duration_ms:.1f}, "
                 f'sql;dur={sql_stats.duration_ms:.1f};desc="{sql_stats.statement_count} statements"'
             )
             return response

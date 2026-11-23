@@ -16,6 +16,7 @@ class DocumentListItem(EditingBase):
     collection: Optional[str] = None
     collection_id: Optional[int] = None
     multipart_model_id: Optional[int] = None
+    model_id: Optional[int]
     filename: Optional[str] = None
     effective_role: Optional[CollectionRole] = None
     updated_at: datetime

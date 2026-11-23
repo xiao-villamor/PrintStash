@@ -6,7 +6,9 @@ import { useUiLocale } from "@/lib/i18n";
 import { useState } from "react";
 import { ChevronDown, ExternalLink } from "lucide-react";
 
-import { getJson } from "@/lib/api/request";
+import { useAuth } from "@/lib/auth-context";
+import { getSessionVersion } from "@/lib/session-transport";
+import { downloadAuthenticatedFile, getJson } from "@/lib/api/request";
 import { toast } from "@/lib/toast";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 
@@ -50,32 +52,64 @@ export function SlicerOpenButton({
   fileId,
   fileType,
   size = "md",
+  showLabel = false,
 }: {
   fileId: number;
   fileType: string;
   size?: "sm" | "md";
+  showLabel?: boolean;
 }) {
   useUiLocale();
   const [open, setOpen] = useState(false);
+  const { user } = useAuth();
+  const preferenceKey = user ? `printstash.slicer.${window.location.origin}.${user.id}` : null;
+  const [preference, setPreference] = useState<{ key: string | null; scheme: string } | null>(null);
+  const storedPreference = preferenceKey ? localStorage.getItem(preferenceKey) : null;
+  const preferred = preference?.key === preferenceKey ? preference.scheme : storedPreference;
 
   const iconSize = size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4";
   const chevronSize = size === "sm" ? "h-2.5 w-2.5" : "h-3 w-3";
 
   const slicers = SLICERS.filter((s) => s.types.has(fileType));
-  if (slicers.length === 0) return null;
+  slicers.sort((a, b) => Number(b.scheme === preferred) - Number(a.scheme === preferred));
+
+  async function download() {
+    setOpen(false);
+    try {
+      await downloadAuthenticatedFile(`/api/v1/files/${fileId}/download`);
+    } catch {
+      toast.error(uiText("The file could not be downloaded. Try again from this Artifact."));
+    }
+  }
 
   async function openInSlicer(scheme: string) {
     setOpen(false);
+    const session = getSessionVersion();
+    let fileUrl: string;
     try {
       // The slicer is a separate process with no login session, so it can't
       // send our bearer token. The backend returns a short-lived, filename-
       // bearing download URL (the path carries the extension so the slicer can
       // detect the format) with a file-scoped token embedded.
       const { url } = await getJson<{ url: string }>(`/api/v1/files/${fileId}/slicer-url`, {});
-      const fileUrl = `${window.location.origin}${url}`;
-      window.location.assign(slicerHref(scheme, fileUrl));
+      fileUrl = `${window.location.origin}${url}`;
     } catch {
-      toast.error(uiText("Couldn't open in slicer"));
+      if (getSessionVersion() === session)
+        toast.error(
+          uiText("Could not prepare the slicer download. You can still download this Artifact."),
+        );
+      return;
+    }
+    if (getSessionVersion() !== session) return;
+    if (preferenceKey) localStorage.setItem(preferenceKey, scheme);
+    setPreference({ key: preferenceKey, scheme });
+    try {
+      window.location.assign(slicerHref(scheme, fileUrl));
+      toast.info(
+        uiText("Slicer launch requested. If it does not open, download the file instead."),
+      );
+    } catch {
+      toast.error(uiText("The slicer protocol could not be launched. Download the file instead."));
     }
   }
 
@@ -83,25 +117,35 @@ export function SlicerOpenButton({
     <DropdownMenu
       open={open}
       onOpenChange={setOpen}
+      portal
       align="end"
       role="menu"
+      aria-label={uiText("Open in slicer")}
       trigger={
         <button
+          type="button"
           data-menu-trigger
           onClick={() => setOpen((o) => !o)}
           title={uiText("Open in slicer")}
+          aria-label={uiText("Open in slicer")}
           aria-haspopup="menu"
           aria-expanded={open}
           className="inline-flex items-center gap-0.5 text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors"
         >
           <ExternalLink className={iconSize} />
+          {showLabel && <span className="px-1 text-xs">{uiText("Open in slicer")}</span>}
           <ChevronDown className={chevronSize} />
         </button>
       }
-      contentClassName="min-w-[10rem] rounded border border-outline-variant bg-surface shadow-lg"
+      contentClassName="w-48 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
     >
-      <p className="px-3 py-1.5 font-mono text-3xs uppercase tracking-wider text-on-surface-variant border-b border-outline-variant">
-        {uiText("Open in slicer")}
+      <p className="px-3 py-2 text-xs text-muted-foreground">
+        {slicers.length === 0
+          ? uiText("No supported slicer handoff for this format. Download the original file.")
+          : uiText(
+              "Opening requires a registered slicer protocol and an address and certificate the slicer accepts.",
+            )}
+        {fileType === "3mf" && ` ${uiText("Opens the whole project, including all plates.")}`}
       </p>
       {slicers.map(({ name, scheme }) => (
         <button
@@ -109,11 +153,20 @@ export function SlicerOpenButton({
           type="button"
           role="menuitem"
           onClick={() => openInSlicer(scheme)}
-          className="block w-full px-3 py-2 text-left font-mono text-xs text-on-surface hover:bg-surface-container-low focus-visible:bg-surface-container-low outline-none transition-colors last:rounded-b"
+          className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover outline-none transition-colors"
         >
           {name}
+          {scheme === preferred && <span className="sr-only">{uiText(" (preferred)")}</span>}
         </button>
       ))}
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => void download()}
+        className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover outline-none transition-colors"
+      >
+        {uiText("Download original file")}
+      </button>
     </DropdownMenu>
   );
 }

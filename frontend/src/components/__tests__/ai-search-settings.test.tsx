@@ -14,6 +14,18 @@ import {
   searchStatus,
 } from "@/test-support/search";
 
+async function closeSettingsDialog() {
+  const dialog = screen.queryByRole("dialog");
+  if (!dialog) return;
+  await userEvent.click(within(dialog).getByRole("button", { name: /^(Close|Cerrar)$/ }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+}
+
+async function openSettingsDialog(name: string | RegExp) {
+  await closeSettingsDialog();
+  await userEvent.click(await screen.findByRole("button", { name }));
+}
+
 async function settingsPanel(options: RenderAppOptions = {}) {
   const app = renderApp(<AiSearchSettings />, {
     ...options,
@@ -41,9 +53,7 @@ async function settingsPanel(options: RenderAppOptions = {}) {
     (options.routes["GET /api/v1/config/ai-search"] instanceof Response &&
       options.routes["GET /api/v1/config/ai-search"].ok)
   ) {
-    await userEvent.click(
-      await screen.findByRole("tab", { name: /Search types|Tipos de búsqueda/ }),
-    );
+    await openSettingsDialog(/Manage indexes|Gestionar índices/);
   }
   return app;
 }
@@ -73,7 +83,7 @@ describe("AI Search settings", () => {
       await screen.findByText("Open Technical, enable AI Search and save your settings first."),
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Build new index" })).toBeDisabled();
-    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     expect(
       screen.getByText("You choose each download below. Enabling this does not start a download."),
     ).toBeVisible();
@@ -155,7 +165,11 @@ describe("AI Search settings", () => {
         ]),
       },
     });
-    expect(screen.getByText("Checking library content")).toBeVisible();
+    expect(
+      within(screen.getByRole("dialog", { name: "Search types" })).getByText(
+        "Checking library content",
+      ),
+    ).toBeVisible();
     expect(screen.queryByText("0 / 124 passages indexed")).toBeNull();
   });
 
@@ -308,7 +322,7 @@ describe("AI Search settings", () => {
         "PUT /api/v1/config/ai-search": json({ detail: "edit_conflict" }, 412),
       },
     });
-    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     const weight = screen.getByRole("spinbutton", { name: "Keyword ranking weight" });
     fireEvent.change(weight, { target: { value: "2" } });
     await userEvent.click(screen.getByRole("button", { name: "Save search settings" }));
@@ -324,7 +338,7 @@ describe("AI Search settings", () => {
         "PUT /api/v1/config/ai-search": json({ detail: "edit_conflict" }, 412),
       },
     });
-    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     fireEvent.change(screen.getByRole("spinbutton", { name: "Keyword ranking weight" }), {
       target: { value: "2" },
     });
@@ -372,7 +386,7 @@ describe("AI Search settings", () => {
         },
       },
     });
-    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     fireEvent.change(screen.getByRole("spinbutton", { name: "Keyword ranking weight" }), {
       target: { value: "2" },
     });
@@ -386,7 +400,7 @@ describe("AI Search settings", () => {
     const app = await settingsPanel({
       routes: { "PUT /api/v1/config/ai-search": json({ detail: "edit_conflict" }, 412) },
     });
-    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     await userEvent.click(screen.getByRole("button", { name: "Save search settings" }));
     await screen.findByRole("button", { name: "Review latest version" });
     app.route({ "GET /api/v1/config/ai-search": json({ detail: "forbidden" }, status) });
@@ -404,7 +418,7 @@ describe("AI Search settings", () => {
     const app = await settingsPanel({
       routes: { "PUT /api/v1/config/ai-search": json({ detail: "edit_conflict" }, 412) },
     });
-    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     await userEvent.click(screen.getByRole("button", { name: "Save search settings" }));
     await screen.findByRole("button", { name: "Review latest version" });
     app.route({ "GET /api/v1/config/ai-search": json(searchConfiguration({ edit_version: 5 })) });
@@ -427,7 +441,7 @@ describe("AI Search settings", () => {
         },
       },
     });
-    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     const weight = screen.getByRole("spinbutton", { name: "Keyword ranking weight" });
     fireEvent.change(weight, { target: { value: "2" } });
     app.route({ "GET /api/v1/config/ai-search": json(searchConfiguration({ edit_version: 5 })) });
@@ -444,7 +458,7 @@ describe("AI Search settings", () => {
     const app = await settingsPanel({
       routes: { "PUT /api/v1/config/ai-search": json({ detail: "edit_conflict" }, 412) },
     });
-    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     await userEvent.click(screen.getByRole("button", { name: "Save search settings" }));
     await screen.findByRole("button", { name: "Review latest version" });
     app.route({
@@ -473,7 +487,7 @@ describe("AI Search settings", () => {
   it("saves advanced ranking choices explicitly", async () => {
     const user = userEvent.setup();
     const app = await settingsPanel();
-    await user.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Keyword search backend" }),
       "ranked_like",
@@ -503,7 +517,7 @@ describe("AI Search settings", () => {
         ),
       },
     });
-    await user.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     const captions = screen.getByRole("checkbox", { name: "Enable generated descriptions" });
     expect(captions).toBeDisabled();
     await user.selectOptions(screen.getByRole("combobox", { name: "Chat and descriptions" }), "2");
@@ -526,7 +540,7 @@ describe("AI Search settings", () => {
   it("saves independent opt-ins without submitting endpoint secrets", async () => {
     const user = userEvent.setup();
     const app = await settingsPanel();
-    await user.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     await user.click(await screen.findByRole("checkbox", { name: "Enable AI Search" }));
     await user.click(screen.getByRole("button", { name: "Save search settings" }));
     await waitFor(() => expect(app.requestsWithMethod("PUT")).toHaveLength(1));
@@ -692,7 +706,11 @@ describe("AI Search settings", () => {
     await act(async () => {
       await app.client.refetchQueries({ queryKey: ["ai-search", "generations"] });
     });
-    expect(await screen.findByText(/Refreshed encoder/)).toBeVisible();
+    expect(
+      await within(screen.getByRole("dialog", { name: "Search types" })).findByText(
+        /Refreshed encoder/,
+      ),
+    ).toBeVisible();
     await act(async () => {
       resume();
       await pending;
@@ -714,7 +732,7 @@ describe("AI Search settings", () => {
         ),
       },
     });
-    await user.click(screen.getByRole("tab", { name: "AI servers" }));
+    await openSettingsDialog("Manage servers");
     await user.click(screen.getByRole("button", { name: "Edit server-encoder" }));
     const form = screen.getByRole("form", { name: "Inference server" });
     expect(within(form).getByLabelText("API key (optional)")).toHaveValue("");
@@ -733,7 +751,7 @@ describe("AI Search settings", () => {
     const app = await settingsPanel({
       routes: { "POST /api/v1/config/ai-search/endpoints": json(anInferenceEndpoint({ id: 3 })) },
     });
-    await user.click(screen.getByRole("tab", { name: "AI servers" }));
+    await openSettingsDialog("Manage servers");
     await user.click(screen.getByRole("button", { name: "Edit server-encoder" }));
     await user.click(screen.getByRole("checkbox", { name: "Replace saved headers" }));
     await user.click(screen.getByRole("button", { name: "Add header" }));
@@ -748,7 +766,7 @@ describe("AI Search settings", () => {
   it("supports Spanish maintenance controls", async () => {
     await settingsPanel({ locale: "es" });
     expect(screen.getByText("Crear o cambiar la búsqueda")).toBeVisible();
-    await userEvent.click(screen.getByRole("tab", { name: "Opciones técnicas" }));
+    await openSettingsDialog("Ajustes técnicos");
     expect(
       await screen.findByRole("button", { name: "Guardar ajustes de búsqueda" }),
     ).toBeVisible();
@@ -760,7 +778,7 @@ describe("AI Search settings", () => {
       await app.client.refetchQueries({ queryKey: ["ai-search", "settings"] });
     });
     expect(await screen.findByText("AI Search settings could not load")).toBeVisible();
-    await userEvent.click(screen.getByRole("tab", { name: "Guided setup" }));
+    await closeSettingsDialog();
     app.route({
       "GET /api/v1/config/ai-search": json(
         searchConfiguration({ settings: searchSettings({ enabled: false }) }),
@@ -773,7 +791,7 @@ describe("AI Search settings", () => {
   it("keeps a technical draft through background settings replacement", async () => {
     const user = userEvent.setup();
     const app = await settingsPanel();
-    await user.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     const weight = screen.getByRole("spinbutton", { name: "Keyword ranking weight" });
     await user.clear(weight);
     await user.type(weight, "2");
@@ -803,7 +821,7 @@ describe("AI Search settings", () => {
   it("keeps a failed-refresh technical draft read-only until retry", async () => {
     const user = userEvent.setup();
     const app = await settingsPanel();
-    await user.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     const weight = screen.getByRole("spinbutton", { name: "Keyword ranking weight" });
     await user.clear(weight);
     await user.type(weight, "2");
@@ -841,7 +859,7 @@ describe("Sparse expansion settings", () => {
     const app = await settingsPanel({
       routes: { "GET /api/v1/inference/models": json([anInferenceModel(), sparse]) },
     });
-    await user.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     await user.selectOptions(screen.getByRole("combobox", { name: "Expansion model" }), sparse.id);
     await user.click(screen.getByRole("checkbox", { name: "Enable lexical expansion" }));
     await user.click(screen.getByRole("button", { name: "Save search settings" }));
@@ -869,7 +887,7 @@ describe("Sparse expansion settings", () => {
         }),
       },
     });
-    await user.click(screen.getByRole("tab", { name: "Technical" }));
+    await openSettingsDialog("Technical settings");
     await user.selectOptions(screen.getByRole("combobox", { name: "Expansion model" }), sparse.id);
     expect(screen.getByRole("checkbox", { name: "Enable lexical expansion" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Download model" }));

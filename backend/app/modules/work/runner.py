@@ -21,12 +21,13 @@ from typing import Any
 from sqlalchemy import bindparam
 from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
-from sqlmodel import col, select
+from sqlmodel import Session, col, select
 
 from app.core.cancellation import OperationCancelled, cancellation_scope
 from app.core.config import settings
+from app.core.execution_scope import ExecutionIdentity, execution_scope
 from app.core.logging import get_logger
-from app.core.time import utcnow
+from app.core.time import ensure_utc, utcnow
 from app.core.work_priority import priority_scope
 from app.db.models import ACTIVE_JOB_STATES, Job, JobKind, JobState, WorkPriority
 from app.db.session import get_session_factory
@@ -171,28 +172,59 @@ class ExecutionContext:
         """
         from .submission import queue_stamped, stamp
 
-        definition = catalog_module.get_catalog().definition(self.definition)
+        catalog = catalog_module.get_catalog()
+        definition = catalog.definition(self.definition)
         passes: list[JobKind] = []
 
-        def stamp_completion(session: Any) -> None:
+        def stamp_completion(session: Session) -> None:
             now = utcnow()
-            sources = set(definition.completion_nudges)
-            # A pass over this definition finds the next subject, or submits a
-            # Job the engine has not taken yet. Request-originated work has no
-            # subjects to find, so with nothing waiting to be submitted the
-            # pass would only read; the tick still repairs what a crash left.
-            if definition.source is not None or jobs.awaits_submission(
-                session, definition.name, besides=self.job_id
-            ):
+            sources = {
+                source
+                for source in definition.completion_nudges
+                if catalog.definition(source).admission(session) is None
+            }
+            if definition.source is None:
+                # A requested Job only has siblings for the pass to submit.
+                refill = jobs.awaits_submission(
+                    session, definition.name, besides=self.job_id
+                )
+            else:
+                # Claim refills prioritized interactive queues. When a
+                # successful settlement still has a submitted successor, let
+                # that claim discover the next batch. Keep failure, the tail,
+                # and backfill settlement as their own wakeups.
+                refill = not (
+                    outcome is JobOutcome.COMPLETED
+                    and self.priority is WorkPriority.INTERACTIVE
+                    and isinstance(definition.source, PrioritizedWorkSource)
+                    and jobs.has_submitted_interactive_queue(session, definition.name)
+                )
+            if refill:
                 sources.add(definition.name)
-            catalog = catalog_module.get_catalog()
-            adding = jobs.any_active(session, catalog.additions, besides=self.job_id)
+            paced = catalog.paced_during_additions
+            adding = (
+                definition.adds_to_library or not sources.isdisjoint(paced)
+            ) and jobs.any_active(session, catalog.additions, besides=self.job_id)
             if definition.adds_to_library and not adding:
                 # The last addition to end releases the work that held back.
                 sources.update(catalog.held_by_additions)
             if adding:
                 # Paced work looks again on its own while additions go on.
-                sources.difference_update(catalog.paced_during_additions)
+                sources.difference_update(paced)
+            yielding = catalog.yielding_to(definition.name)
+            if (
+                yielding
+                and self.priority is WorkPriority.INTERACTIVE
+                and not jobs.any_active(
+                    session,
+                    (definition.name,),
+                    besides=self.job_id,
+                    priority=WorkPriority.INTERACTIVE,
+                )
+            ):
+                # The last interactive Job to end releases the work that
+                # yielded to it.
+                sources.update(yielding)
             for source in sorted(sources):
                 if stamp(session, source, now=now):
                     passes.append(source)
@@ -426,6 +458,14 @@ def _begin(job_id: str, attempt: int, execution_epoch: str) -> dict[str, str] | 
         if row.attempts > attempt:
             return None
         now = utcnow()
+        if row.started_at is None:
+            from app.core.metrics import record_queue_wait
+
+            # Enqueue to first start: polling, lane slots and admission.
+            record_queue_wait(
+                row.kind.value, (now - ensure_utc(row.created_at)).total_seconds()
+            )
+        starting = row.state is not JobState.RUNNING
         row.attempts = max(row.attempts, attempt)
         row.submitted_epoch = execution_epoch
         row.state = JobState.RUNNING
@@ -439,17 +479,53 @@ def _begin(job_id: str, attempt: int, execution_epoch: str) -> dict[str, str] | 
             "priority": row.priority.value,
         }
         session.add(row)
+        check_after_commit: JobKind | None = None
         if row.priority is WorkPriority.INTERACTIVE:
-            definition = catalog_module.get_catalog().definition(row.kind)
-            if isinstance(definition.source, PrioritizedWorkSource):
-                from .submission import nudge_after_commit
+            from .submission import nudge_after_commit
 
-                # Running interactive work frees a pending slot. Let the source
-                # fill that existing allowance while this attempt runs; its
-                # priority quotas and admission checks still bound discovery.
+            catalog = catalog_module.get_catalog()
+            definition = catalog.definition(row.kind)
+            sqlite = session.get_bind().dialect.name == "sqlite"
+            if isinstance(definition.source, PrioritizedWorkSource):
+                # The transactional nudge checks a batched source's reserve
+                # after this claim is visible (after commit on PostgreSQL).
+                if sqlite and definition.batch_interactive_discovery:
+                    session.flush()
                 nudge_after_commit(session, definition.name)
+            yielding = catalog.yielding_to(definition.name)
+            if starting and yielding:
+                if sqlite:
+                    if not catalog.interactive_waiting(
+                        session, definition.name, now=now, queue_locked=True
+                    ):
+                        for source in yielding:
+                            nudge_after_commit(session, source)
+                else:
+                    # Concurrent PostgreSQL claims can each see the other
+                    # Job as queued until both writes commit.
+                    check_after_commit = definition.name
         session.commit()
-        return claim
+
+    if check_after_commit is not None:
+        _wake_yielding_after_claim(check_after_commit)
+    return claim
+
+
+def _wake_yielding_after_claim(name: JobKind) -> None:
+    """Check the committed queue before sending a best-effort wakeup."""
+    from .submission import nudge
+
+    catalog = catalog_module.get_catalog()
+    try:
+        with get_session_factory().scoped_session() as session:
+            if catalog.interactive_waiting(session, name, now=utcnow()):
+                return
+        for source in catalog.yielding_to(name):
+            nudge(source)
+    except Exception:  # noqa: BLE001 - settlement and the tick recover this hint
+        logger.exception(
+            "interactive claim wakeup failed", extra={"source": name.value}
+        )
 
 
 def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
@@ -505,6 +581,13 @@ def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
             with (
                 cancellation_scope(withdrawn, idle=waiting),
                 priority_scope(context.priority),
+                execution_scope(
+                    ExecutionIdentity(
+                        job_id=context.job_id,
+                        execution_id=context.execution_id,
+                        definition=context.definition.value,
+                    )
+                ),
             ):
                 step.fn(context)
         finally:

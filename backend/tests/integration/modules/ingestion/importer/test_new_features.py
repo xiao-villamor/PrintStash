@@ -284,6 +284,41 @@ class TestValidatePublicUrl:
 
 
 class TestInspectArchive:
+    def test_reviews_auxiliary_files_without_importing_them_as_models(self, tmp_path):
+        from app.modules.ingestion import importer
+        from app.modules.ingestion.background import archive_manifest
+
+        archive = tmp_path / "parts.zip"
+        archive.write_bytes(
+            _zip_bytes(
+                {
+                    "part.stl": b"mesh",
+                    "photo.jpg": b"image",
+                    "manual.pdf": b"pdf",
+                    "README.md": b"instructions",
+                    "ignored.exe": b"unknown",
+                }
+            )
+        )
+        entries = importer.inspect_archive(archive)
+        manifest = archive_manifest("review", "parts.zip", entries)
+        assert [
+            (entry.name, entry.is_image, entry.is_document)
+            for entry in manifest.entries
+        ] == [
+            ("part.stl", False, False),
+            ("photo.jpg", True, False),
+            ("manual.pdf", False, True),
+            ("README.md", False, True),
+            ("ignored.exe", False, False),
+        ]
+        assert [
+            entry.name
+            for entry in importer.selected_archive_entries(
+                archive, [entry.name for entry in entries]
+            )
+        ] == ["part.stl"]
+
     def test_inspect_archive_rejects_traversal_instead_of_partially_accepting(
         self, tmp_path
     ):

@@ -75,7 +75,7 @@ app is built so the seams are injectable — use them:
 | Query hooks | `<QueryApiProvider api={{ ...defaultQueryApi, ...stubs }}>` with `vi.fn<QueryApi["listPrinters"]>()` per read the test performs |
 | Server state a page renders | seeded `QueryClient` — `client.setQueryData(queryKeys.printers, [...])` with `{ retry: false, staleTime: Infinity, refetchOnWindowFocus: false }` so nothing falls back to the network |
 | Auth | `<AuthContext.Provider value={ADMIN_AUTH}>` with typed `vi.fn<AuthState["login"]>()` members |
-| Routing | `<MemoryRouter initialEntries={[...]}>` |
+| Routing | `<TestRouter initialEntries={[...]}>` from `@/test-support/router` (real TanStack memory history); `renderApp` includes it. Use `routes` or `routePath` when route params matter. |
 | Browser globals (`matchMedia`, `IntersectionObserver`, clipboard) | `vi.stubGlobal(name, fake)` in `beforeEach`; unstub in `afterEach` |
 | Persistence | real `localStorage`/`sessionStorage` (cleared for you) |
 
@@ -148,7 +148,7 @@ describe("sendJson", () => { ... });
 - Hooks live inside the `describe` they serve; a single-unit file may keep
   them at module scope.
 - Component tests: one `render<Component>(seed)` helper per file that wires
-  the real providers (`QueryClientProvider`, `AuthContext`, `MemoryRouter`);
+  the real providers (`QueryClientProvider`, `AuthContext`, `TestRouter`);
   tests differ only in seed and interaction.
 
 ### `it.each` / `describe.each`

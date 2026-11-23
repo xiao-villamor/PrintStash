@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { aVaultConfig, aPrinter, aRevision } from "../../src/test-support/factories";
+import { NO_PREVIEWS } from "../../src/types/previews";
 import type { VaultConfigUpdate, PrinterUpdate } from "../../src/types";
 import { aCaption } from "../../src/test-support/captions";
 import { searchPreferences, searchStatus } from "../../src/test-support/search";
@@ -8,9 +10,10 @@ import type { Duplex } from "node:stream";
 import type { SubjectCaption } from "../../src/types/captions";
 import type { SearchStatus } from "../../src/types/search";
 import type { ModelProvenanceRead, ModelSourceCoverRead } from "../../src/types/provenance";
-import type { MetadataRead } from "../../src/types/models";
+import type { ManualPrintJobCreate, MetadataRead, ModelPrintJobRead } from "../../src/types/models";
 
 const now = "2026-06-04T00:24:22.000000";
+const collectionEdits = new Map<number, { tags: string[]; readme: string | null }>();
 
 function mockCollection(id: number, name: string, path: string, modelCount: number) {
   return {
@@ -21,8 +24,8 @@ function mockCollection(id: number, name: string, path: string, modelCount: numb
     parent_id: null,
     model_count: modelCount,
     effective_role: "admin",
-    tags: [],
-    has_readme: false,
+    tags: collectionEdits.get(id)?.tags ?? [],
+    has_readme: Boolean(collectionEdits.get(id)?.readme),
   };
 }
 
@@ -80,6 +83,7 @@ const model = {
   edit_version: 1,
   id: 1,
   name: "skadis_kitchen-roll_screw",
+  starred: false,
   slug: "skadis-kitchen-roll-screw",
   hash: "59b3ca0dd226918a7e65c4417a6c2ea2314f821b77bed988fa9eb7fec86d3f30",
   collection: "maraio",
@@ -90,6 +94,8 @@ const model = {
   effective_role: "admin",
   tags: ["tete"],
   thumbnail_url: "/api/v1/files/1/thumbnail",
+  // Cover only: specs that browse generated views supply their own set.
+  previews: NO_PREVIEWS,
   created_at: "2026-05-31T10:46:55.658492",
   updated_at: now,
   files: [
@@ -187,6 +193,12 @@ const filamentProfiles = [
     material_brand: "Generic",
     cost_per_kg: 21,
     notes: null,
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    edit_version: 1,
+    usage_count: 0,
+    spoolman_filament_id: null,
+    density_g_cm3: null,
+    diameter_mm: null,
     created_at: now,
     updated_at: now,
   },
@@ -200,6 +212,9 @@ const printerProfiles = [
     slicer_name: "OrcaSlicer",
     nozzle_diameter_mm: 0.4,
     notes: null,
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    edit_version: 1,
+    usage_count: 0,
     created_at: now,
     updated_at: now,
   },
@@ -236,6 +251,7 @@ const modelList = [
     edit_epoch: model.edit_epoch,
     edit_version: model.edit_version,
     name: model.name,
+    starred: model.starred,
     slug: model.slug,
     collection: model.collection,
     collection_id: model.collection_id,
@@ -243,11 +259,20 @@ const modelList = [
     effective_role: model.effective_role,
     tags: model.tags,
     thumbnail_url: model.thumbnail_url,
+    previews: model.previews,
     file_count: model.files.length,
+    gcode_file_count: model.files.filter((file) => file.file_type === "gcode").length,
+    bounding_box: null,
     printer_presence: [{ printer_id: printer.id, printer_name: printer.name, file_count: 1 }],
     updated_at: model.updated_at,
     mesh_file_id: 1,
-    print_summary: null,
+    print_summary: {
+      layer_height_mm: metadata.layer_height_mm,
+      estimated_time_s: metadata.estimated_time_s,
+      filament_weight_g: metadata.filament_weight_g,
+      material_type: metadata.material_type,
+      slicer_name: metadata.slicer_name,
+    },
     recommended_revision_status: "known_good",
     recommended_revision_label: null,
   },
@@ -256,6 +281,8 @@ const modelList = [
 // Mutable server state a test can flip before navigating (workers: 1, serial).
 let inboxCollectionId: number | null = null;
 let fleetJobState: "paused" | "failed" = "paused";
+let manualPrintRecords: ModelPrintJobRead[] = [];
+let nextManualPrintId = 4;
 const state = {
   externalLibrariesEnabled: false,
   ingestJobQueued: false,
@@ -452,6 +479,7 @@ function artifactUploadStatus(uploadState: "created" | "uploading" | "ingesting"
 }
 
 export function resetMockApiState(): void {
+  collectionEdits.clear();
   printer = { ...initialPrinter };
   configuration = aVaultConfig({ storage_tier: "unguarded" });
   state.externalLibrariesEnabled = false;
@@ -469,6 +497,8 @@ export function resetMockApiState(): void {
   state.s3LegacyCandidate = true;
   state.s3LegacyAdopted = false;
   fleetJobState = "paused";
+  manualPrintRecords = [];
+  nextManualPrintId = 4;
   state.gcPlanState = null;
 }
 
@@ -723,16 +753,16 @@ function storageProviders() {
       fields: [
         {
           name: "data_dir",
-          label: "Models directory",
-          help: "Directory for model files",
+          label: "Your files",
+          help: "Where uploaded models are saved. With Docker, enter the path inside the container.",
           input_type: "path",
           required: true,
           secret: false,
         },
         {
           name: "thumb_dir",
-          label: "Thumbnail directory",
-          help: "Directory for generated images",
+          label: "Previews",
+          help: "Where generated thumbnails and previews are saved.",
           input_type: "path",
           required: true,
           secret: false,
@@ -1132,6 +1162,40 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     }
     return;
   }
+  const collectionEdit = url.pathname.match(/^\/api\/v1\/collections\/(\d+)\/(tags|readme)$/);
+  if (collectionEdit) {
+    const id = Number(collectionEdit[1]);
+    const row = mockCollections().find((collection) => collection.id === id);
+    if (!row) {
+      sendJson(res, { detail: "collection_not_found" }, 404);
+      return;
+    }
+    const current = collectionEdits.get(id) ?? { tags: [], readme: null };
+    if (req.method === "GET" && collectionEdit[2] === "readme") {
+      sendJson(res, { readme: current.readme });
+      return;
+    }
+    if (req.method !== "PUT") {
+      sendJson(res, { detail: "method_not_allowed" }, 405);
+      return;
+    }
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", () => {
+      if (collectionEdit[2] === "tags") {
+        const update: { tags: string[] } = JSON.parse(body);
+        collectionEdits.set(id, { ...current, tags: update.tags });
+        sendJson(res, { ...row, tags: update.tags });
+      } else {
+        const update: { readme: string | null } = JSON.parse(body);
+        collectionEdits.set(id, { ...current, readme: update.readme });
+        sendJson(res, { readme: update.readme });
+      }
+    });
+    return;
+  }
   if (url.pathname === "/api/v1/collections/children") {
     const top = url.searchParams.get("parent_id") === null;
     sendJson(res, { items: top ? mockCollections().map(mockNode) : [], next_cursor: null });
@@ -1185,10 +1249,18 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
   if (url.pathname === "/api/v1/inbox/batch" && req.method === "POST") {
-    drainRequest(req, () => {
-      state.inboxCaptured = false;
-      state.inboxImported = false;
-      sendJson(res, []);
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      const payload = JSON.parse(body);
+      if (payload.action === "import" && payload.use_default_destination === true) {
+        state.inboxImported = true;
+        sendJson(res, [importedInboxItem()]);
+      } else {
+        state.inboxCaptured = false;
+        state.inboxImported = false;
+        sendJson(res, []);
+      }
     });
     return;
   }
@@ -1229,6 +1301,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
   if (url.pathname === "/api/v1/inbox/41/retry" && req.method === "POST") {
     drainRequest(req, () => sendJson(res, importedInboxItem()));
+    return;
+  }
+  if (/^\/api\/v1\/models\/\d+\/related-profiles$/.test(url.pathname)) {
+    sendJson(res, { items: [], has_more: false });
     return;
   }
   if (url.pathname === "/api/v1/models/1/provenance") {
@@ -1347,13 +1423,32 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     sendJson(res, {
       items: modelList
         .filter((model) => ids.has(model.id))
-        .map((model) => ({ model_id: model.id, thumbnail_url: model.thumbnail_url })),
+        .map((model) => ({
+          model_id: model.id,
+          thumbnail_url: model.thumbnail_url,
+          previews: model.previews,
+        })),
       authorization_revision: "a1",
     });
     return;
   }
   if (url.pathname === "/api/v1/models/browse/revision") {
     sendJson(res, { browse_revision: "r1", authorization_revision: "a1" });
+    return;
+  }
+  if (url.pathname === "/api/v1/models/browse/collection-preview") {
+    const collection = url.searchParams.get("collection");
+    sendJson(res, {
+      items: modelList
+        .filter(
+          (model) =>
+            model.collection === collection || model.collection?.startsWith(`${collection}/`),
+        )
+        .toSorted((a, b) => b.updated_at.localeCompare(a.updated_at) || a.id - b.id)
+        .slice(0, 4)
+        .map((model) => ({ kind: "model", id: model.id, thumbnail_url: model.thumbnail_url })),
+      authorization_revision: "a1",
+    });
     return;
   }
   if (url.pathname === "/api/v1/models/browse") {
@@ -1453,8 +1548,128 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     ]);
     return;
   }
+  if (url.pathname === "/api/v1/models/1/artifact-outcomes" && req.method === "GET") {
+    sendJson(res, []);
+    return;
+  }
   if (url.pathname === "/api/v1/models/1/print-jobs") {
+    if (req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk: string) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        let payload: ManualPrintJobCreate;
+        try {
+          payload = JSON.parse(body);
+        } catch {
+          sendJson(res, { detail: "invalid_json" }, 422);
+          return;
+        }
+        const file = model.files.find((item) => item.id === payload.file_id);
+        if (!file) {
+          sendJson(res, { detail: { code: "file_not_found" } }, 404);
+          return;
+        }
+        if (payload.printer_id != null && payload.printer_id !== printer.id) {
+          sendJson(res, { detail: { code: "printer_not_found" } }, 404);
+          return;
+        }
+        const printerName =
+          payload.printer_id != null ? printer.name : payload.printer_name?.trim();
+        if (!printerName) {
+          sendJson(res, { detail: { code: "printer_required" } }, 422);
+          return;
+        }
+        const jobState = payload.state ?? "completed";
+        if (
+          ![
+            "queued",
+            "uploading",
+            "started",
+            "printing",
+            "paused",
+            "completed",
+            "cancelled",
+            "failed",
+          ].includes(jobState)
+        ) {
+          sendJson(res, { detail: "invalid_print_state" }, 422);
+          return;
+        }
+        const createdAt = new Date().toISOString();
+        const identity = {
+          display_name: null,
+          task_id: null,
+          subtask_id: null,
+          project_id: null,
+          profile_id: null,
+          gcode_file: null,
+          plate_index: null,
+        };
+        const reported = { current_layer: null, total_layers: null, nozzle_diameter: null };
+        const downloadUrl = `/api/v1/files/${file.id}/download`;
+        const record: ModelPrintJobRead = {
+          id: nextManualPrintId++,
+          printer_id: payload.printer_id ?? null,
+          printer_name: printerName,
+          file_id: file.id,
+          remote_filename: file.original_filename,
+          source: "manual",
+          external_display_name: null,
+          artifact_evidence: "vault",
+          reproducibility_level: "exact",
+          identity,
+          metadata: reported,
+          reproducibility: {
+            level: "exact",
+            identity,
+            metadata: reported,
+            error: null,
+            download_url: downloadUrl,
+          },
+          download_url: downloadUrl,
+          toolpath_preview_url: null,
+          gcode_revision_number: file.gcode_revision_number ?? null,
+          revision_label: file.revision_label ?? null,
+          state:
+            jobState === "queued"
+              ? "queued"
+              : jobState === "uploading"
+                ? "uploading"
+                : jobState === "started"
+                  ? "started"
+                  : jobState === "printing"
+                    ? "printing"
+                    : jobState === "paused"
+                      ? "paused"
+                      : jobState === "failed"
+                        ? "failed"
+                        : jobState === "cancelled"
+                          ? "cancelled"
+                          : "completed",
+          material_type: null,
+          error: payload.error ?? null,
+          filament_used_g: null,
+          actual_duration_s: null,
+          filament_cost: null,
+          spool_id: payload.spool_id ?? null,
+          spool_name: payload.spool_name ?? null,
+          started_at: payload.started_at ?? null,
+          finished_at: payload.finished_at ?? null,
+          created_at: createdAt,
+        };
+        manualPrintRecords.unshift(record);
+        sendJson(res, record);
+      });
+      return;
+    }
+    if (req.method !== "GET") {
+      sendJson(res, { detail: "method_not_allowed" }, 405);
+      return;
+    }
     sendJson(res, [
+      ...manualPrintRecords,
       {
         id: 1,
         printer_id: printer.id,
@@ -1677,6 +1892,28 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     sendJson(res, printer);
     return;
   }
+  if (url.pathname === "/api/v1/printers/3/heater-history") {
+    sendJson(res, { sample_interval_ms: 1000, extruder: [], heater_bed: [] });
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/bed-mesh/measurement" && req.method === "GET") {
+    sendJson(res, { supported: false });
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/bed-mesh") {
+    sendJson(res, { state: "unconfigured" });
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/material-state") {
+    sendJson(res, {
+      printer_id: printer.id,
+      updated_at: printer.updated_at,
+      provider_sync_enabled: printer.provider_material_sync_enabled,
+      tools: [],
+      slots: [],
+    });
+    return;
+  }
   if (url.pathname === "/api/v1/printers/3/config") {
     sendJson(res, {
       printer_id: printer.id,
@@ -1684,6 +1921,21 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       printer_info: {},
       moonraker_config: {},
       klipper_config: {},
+    });
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/config/files" && req.method === "GET") {
+    sendJson(res, {
+      files: [{ path: "printer.cfg", size_bytes: 32, modified: 1700000000, writable: false }],
+    });
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/config/file" && req.method === "GET") {
+    sendJson(res, {
+      path: "printer.cfg",
+      content: "[printer]\nkinematics: cartesian\n",
+      revision: "70c8eea2a5f90a6d5abd8b8329deb76f45fc898cec5c3a11f628f21aee0dedcb",
+      writable: false,
     });
     return;
   }
@@ -1854,6 +2106,15 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     res.end("G90\nM82\nG1 Z0.2\nG1 X10 Y0 E0.1\nG1 X20 Y0 E0.2\n");
     return;
   }
+  if (url.pathname === "/api/v1/files/2/toolpath") {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end(
+      readFileSync(
+        new URL("../../../backend/tests/fixtures/real_orca_ender3_benchy.gcode", import.meta.url),
+      ),
+    );
+    return;
+  }
   if (url.pathname.startsWith("/api/v1/files/") && url.pathname.endsWith("/download")) {
     res.writeHead(200, {
       "Content-Type": "application/octet-stream",
@@ -1919,6 +2180,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
   if (req.method === "POST" && url.pathname === "/api/v1/admin/work/cancel-queued") {
     drainRequest(req, () => sendJson(res, { cancelled: 4 }));
+    return;
+  }
+  if (url.pathname === "/api/v1/admin/work/preview-activity") {
+    sendJson(res, { total: 0, completed: 0, remaining: 0, skipped: 0, failed: 0 });
     return;
   }
   if (url.pathname === "/api/v1/admin/work") {
@@ -2010,6 +2275,9 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
           derivatives_mesh_enabled,
           derivatives_gcode_enabled,
           derivatives_toolpath_enabled,
+          derivatives_previews_enabled,
+          derivatives_previews_include_poles,
+          prefer_rendered_3mf_preview,
           ...publicFields
         } = update;
         configuration = {
@@ -2028,6 +2296,18 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
             derivatives_toolpath_enabled === undefined
               ? configuration.derivatives_toolpath_enabled
               : (derivatives_toolpath_enabled ?? true),
+          derivatives_previews_enabled:
+            derivatives_previews_enabled === undefined
+              ? configuration.derivatives_previews_enabled
+              : (derivatives_previews_enabled ?? false),
+          derivatives_previews_include_poles:
+            derivatives_previews_include_poles === undefined
+              ? configuration.derivatives_previews_include_poles
+              : (derivatives_previews_include_poles ?? false),
+          prefer_rendered_3mf_preview:
+            prefer_rendered_3mf_preview === undefined
+              ? configuration.prefer_rendered_3mf_preview
+              : (prefer_rendered_3mf_preview ?? false),
           has_oidc_client_secret:
             oidc_client_secret === undefined
               ? configuration.has_oidc_client_secret

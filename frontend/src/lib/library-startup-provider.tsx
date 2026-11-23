@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -26,7 +26,7 @@ function navigation(key: string): NavigationState {
     key,
     id: ++sequence,
     started: performance.now(),
-    parts: { cards: "pending", tree: "idle", media: "pending" },
+    parts: { cards: "pending", tree: "idle", "primary-media": "pending", media: "pending" },
     usable: false,
     complete: false,
     requested: new Set<SecondaryRead>(),
@@ -44,14 +44,18 @@ export function LibraryStartupProvider({
   const location = useLocation();
   const auth = useAuth();
   const desktop = useMediaQuery("(min-width: 768px)");
-  const key = `${location.key}:${active}`;
+  const key = `${location.state.__TSR_key}:${active}`;
   const [state, setState] = useState(() => navigation(key));
   if (state.key !== key) setState(navigation(key));
   const id = state.id;
   const failed = Object.values(state.parts).includes("failed");
   const contentReady = state.parts.cards === "ready" && (!desktop || state.parts.tree === "ready");
+  // Full media readiness includes the primary row; that earlier phase only
+  // releases reads which must not compete with the row's thumbnails.
   const allReady =
-    Object.values(state.parts).every((part) => part === "ready") &&
+    state.parts.cards === "ready" &&
+    state.parts.tree === "ready" &&
+    state.parts.media === "ready" &&
     !auth.loading &&
     auth.user !== null;
   const settle = useCallback(
@@ -80,9 +84,9 @@ export function LibraryStartupProvider({
   // or the most recently prepared start timestamp.
   useLayoutEffect(() => {
     performance.mark("printstash:navigation:current", {
-      detail: { navigation: id, historyKey: location.key, active },
+      detail: { navigation: id, historyKey: location.state.__TSR_key, active },
     });
-  }, [id, location.key, active]);
+  }, [id, location.state.__TSR_key, active]);
 
   useEffect(() => {
     if (!active) return;
@@ -143,11 +147,17 @@ export function LibraryStartupProvider({
     () => ({
       complete: !active || state.complete,
       canLoad: (read: SecondaryRead) =>
-        !active || state.complete || mobileIdle || failed || state.requested.has(read),
+        !active ||
+        state.complete ||
+        mobileIdle ||
+        failed ||
+        state.requested.has(read) ||
+        ((read === "collection-previews" || read === "card-details") &&
+          state.parts["primary-media"] === "ready"),
       request,
       settle,
     }),
-    [active, state.complete, state.requested, mobileIdle, failed, request, settle],
+    [active, state.complete, state.requested, state.parts, mobileIdle, failed, request, settle],
   );
   return <LibraryStartupContext.Provider value={value}>{children}</LibraryStartupContext.Provider>;
 }

@@ -22,6 +22,7 @@ from printstash_core.mesh.measurements import (
     validate_geometry_extents,
     volume_value,
 )
+from printstash_core.mesh.render_geometry import prepare_scene
 from printstash_core.mesh.similarity import GeometryError
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 
@@ -71,6 +72,9 @@ from app.modules.media.mesh_protocol import (
     OutputSink,
     PreparedThumbnailOutput,
     ThumbnailOutput,
+    ViewsOutput,
+    ViewsReady,
+    ViewsRefused,
 )
 from app.modules.media.mesh_resources import (
     DetachedSceneMesh,
@@ -83,6 +87,17 @@ from app.modules.media.mesh_telemetry import (
     MeshPhase,
     PhaseOutcome,
     PhaseRecorder,
+    ReaderChoice,
+)
+from app.modules.media.preview_contracts import PreviewLimitError
+from app.modules.media.preview_views import (
+    RENDER_FAILURES,
+    render_prepared_views,
+    render_views,
+    scene_center,
+)
+from app.modules.media.preview_views import (
+    failure_reason as preview_failure_reason,
 )
 from app.modules.media.stl_reader import (
     InvalidSTL,
@@ -232,11 +247,16 @@ class _Generation:
         self.source_scene: PreparedScene | None = None
         # Set once the scene is read; lib3mf scenes use their lighter face weight.
         self.lib3mf_scene = False
+        self.reader_choice: ReaderChoice | None = None
         self.scene_cleanup_pending = False
         self.fingerprint_result: FingerprintResult | None = None
         self.sample_buffers_pending = False
         self.geometry_emitted = False
         self.thumbnail_emitted = False
+        self.views_emitted = False
+        # Why the source could not be read, kept after an embedded cover
+        # replaces the thumbnail failure: views still owe that reason.
+        self.load_refusal: ThumbnailFailureReason | None = None
         self.reload_mesh_for_fingerprint = False
         self.stl_measurements: STLMeasurements | None = None
         self.embedded = None
@@ -321,8 +341,10 @@ class _Generation:
                 # meshes once because it also needs exact geometry metadata.
                 if (
                     self.embedded is not None
+                    and self._embedded_is_final()
                     and not self.request.include_geometry
                     and not self.request.include_fingerprint
+                    and self.request.views is None
                 ):
                     self.image = self.embedded
                     self.strategy = ThumbnailStrategy.EMBEDDED
@@ -332,6 +354,7 @@ class _Generation:
                         self._parse()
                     self._measure()
                     self._render()
+                    self._views()
                     self._fingerprint()
         except _OutputDeliveryError as exc:
             raise exc.error from None
@@ -425,6 +448,7 @@ class _Generation:
         """Take a 3MF's own picture, and publish it before the mesh is read."""
         if (
             self.request.include_thumbnail
+            and self.request.check_embedded_3mf_preview
             and self.suffix == ".3mf"
             and (not self.over_cap or settings.use_embedded_3mf_preview_for_large_files)
         ):
@@ -438,14 +462,22 @@ class _Generation:
             self.phases.finish(
                 output_bytes=len(self.embedded) if self.embedded is not None else None
             )
-            if self.embedded is not None:
-                # The slicer's own picture is ready now. Publish it
-                # before the mesh is read, so the Model has a thumbnail
-                # while its geometry is still being measured.
+            if self.embedded is not None and self._embedded_is_final():
+                # The slicer's own picture is the cover. Publish it before
+                # the mesh is read, so the Model has a thumbnail while its
+                # geometry is still being measured.
                 self.image = self.embedded
                 self.strategy = ThumbnailStrategy.EMBEDDED
                 self.preview_coverage = PreviewCoverage.DOCUMENT_SUPPLIED
                 self.emit_thumbnail()
+
+    def _embedded_is_final(self) -> bool:
+        """Whether the 3MF's own picture is the cover rather than a fallback.
+
+        A render is preferred unless the source is over the cap, where the
+        mesh is never read and the slicer picture is all there is.
+        """
+        return not settings.prefer_rendered_3mf_preview or self.over_cap
 
     def _parse(self) -> None:
         """Read the source into the representation its format calls for."""
@@ -456,11 +488,11 @@ class _Generation:
             # Render, topology and FP apply their own budgets
             # before a consumer materializes placed geometry.
             try:
-                scene, reader = read_scene_with_reader(
+                scene, self.reader_choice = read_scene_with_reader(
                     self.request.path, max_faces=MAX_ANALYSIS_FACES
                 )
                 self.source_scene = PreparedScene(scene)
-                self.lib3mf_scene = reader is ThreeMFReader.LIB3MF
+                self.lib3mf_scene = self.reader_choice.reader is ThreeMFReader.LIB3MF
             except GeometryError as exc:
                 if exc.code in {
                     "archive_resource_limit",
@@ -476,6 +508,7 @@ class _Generation:
                     else ThumbnailFailureReason.INVALID_SOURCE
                 )
                 self.failure = refusal
+                self.load_refusal = refusal
                 if self.request.include_geometry:
                     self.geometry_outcome = GeometryRefused(refusal)
                 if self.request.include_fingerprint:
@@ -548,6 +581,7 @@ class _Generation:
                     else ThumbnailFailureReason.INVALID_SOURCE
                 )
                 self.failure = refusal
+                self.load_refusal = refusal
                 if self.request.include_geometry:
                     self.geometry_outcome = GeometryRefused(refusal)
                 if self.request.include_fingerprint:
@@ -557,6 +591,7 @@ class _Generation:
                     )
 
         self.phases.finish(
+            reader=self.reader_choice,
             outcome=PhaseOutcome.COMPLETED
             if self.mesh is not None
             or self.source_scene is not None
@@ -706,15 +741,18 @@ class _Generation:
         if self.request.include_thumbnail:
             self.phases.start(MeshPhase.RENDER)
             self.report("rendering_thumbnail")
-            if self.embedded is not None:
-                self.image = self.embedded
-                self.strategy = ThumbnailStrategy.EMBEDDED
-                self.preview_coverage = PreviewCoverage.DOCUMENT_SUPPLIED
-            elif (
+            renderable = (
                 self.mesh is not None
                 or self.visual_mesh is not None
                 or self.source_scene is not None
+            )
+            if self.embedded is not None and (
+                self._embedded_is_final() or not renderable
             ):
+                self.image = self.embedded
+                self.strategy = ThumbnailStrategy.EMBEDDED
+                self.preview_coverage = PreviewCoverage.DOCUMENT_SUPPLIED
+            elif renderable:
                 if self.source_scene is not None:
                     # Keep only already-admitted placed arrays for later
                     # analysis; native mesh objects and topology caches
@@ -788,9 +826,10 @@ class _Generation:
                                         self.width,
                                         self.height,
                                     )
-                                except ValueError:
-                                    # A source may fit native CPU rendering while its
-                                    # immutable packet exceeds the shared wire budget.
+                                except ValueError as exc:
+                                    # The CPU renderer can still consume geometry
+                                    # the bounded transport cannot represent.
+                                    logger.debug("thumbnail packet refused: %s", exc)
                                     self.packet = None
                         self.image = (
                             None
@@ -825,6 +864,17 @@ class _Generation:
                     if self.image is not None:
                         self.strategy = ThumbnailStrategy.FULL
                         self.preview_coverage = PreviewCoverage.COMPLETE
+                if (
+                    self.image is None
+                    and self.packet is None
+                    and self.embedded is not None
+                ):
+                    # The render was refused or failed: the slicer's picture
+                    # is still a faithful cover.
+                    self.image = self.embedded
+                    self.strategy = ThumbnailStrategy.EMBEDDED
+                    self.preview_coverage = PreviewCoverage.DOCUMENT_SUPPLIED
+                    self.failure = None
 
             self.phases.finish(
                 output_bytes=len(self.image)
@@ -966,6 +1016,73 @@ class _Generation:
                 )
         self.emit_thumbnail()
 
+    def emit_views(self, output: ViewsOutput) -> None:
+        if self.request.views is None or self.views_emitted:
+            return
+        self.views_emitted = True
+        self.deliver(output)
+
+    def _views(self) -> None:
+        """Render the requested views from what the cover pass already loaded.
+
+        Runs after the cover is published, so a Model's first picture never
+        waits on its views; it shares the load, admission and source copy.
+        """
+        views = self.request.views
+        if views is None or self.views_emitted:
+            return
+        started = time.monotonic()
+
+        def elapsed() -> int:
+            return max(round((time.monotonic() - started) * 1000), 0)
+
+        limit = min(int(settings.mesh_max_render_triangles), MAX_ANALYSIS_FACES)
+        self.report("rendering_views")
+        try:
+            if self.source_scene is not None:
+                scene = self.source_scene.scene
+                if self.source_scene.triangle_count > limit:
+                    raise PreviewLimitError
+                manifest, images = render_prepared_views(
+                    prepare_scene(scene),
+                    center=scene_center(scene),
+                    source_sha256=views.source_sha256,
+                    max_faces=limit,
+                    width=views.width,
+                    recipe=views.recipe,
+                    include_poles=views.include_poles,
+                    planar_cover=views.planar_cover,
+                )
+            else:
+                mesh = self.visual_mesh if self.visual_mesh is not None else self.mesh
+                if mesh is None:
+                    # Nothing loaded survives: an over-cap source streamed its
+                    # cover, or loading failed. The batch decides on its own.
+                    self.emit_views(
+                        ViewsRefused(
+                            ThumbnailFailureReason.RESOURCE_LIMIT
+                            if self.over_cap
+                            else self.load_refusal
+                            or self.failure
+                            or ThumbnailFailureReason.WORKER_FAILED,
+                            elapsed(),
+                        )
+                    )
+                    return
+                manifest, images = render_views(
+                    mesh,
+                    source_sha256=views.source_sha256,
+                    max_faces=limit,
+                    width=views.width,
+                    recipe=views.recipe,
+                    include_poles=views.include_poles,
+                    planar_cover=views.planar_cover,
+                )
+        except RENDER_FAILURES as exc:
+            self.emit_views(ViewsRefused(preview_failure_reason(exc), elapsed()))
+            return
+        self.emit_views(ViewsReady(manifest, b"".join(images), elapsed()))
+
     def _fingerprint(self) -> None:
         """Extract the similarity fingerprint from the geometry already in hand."""
         if self.request.include_fingerprint and self.fingerprint_result is None:
@@ -1070,6 +1187,15 @@ class _Generation:
         try:
             self.emit_geometry()
             self.emit_thumbnail()
+            if not self.views_emitted:
+                self.emit_views(
+                    ViewsRefused(
+                        self.load_refusal
+                        or self.failure
+                        or ThumbnailFailureReason.WORKER_FAILED,
+                        0,
+                    )
+                )
         except _OutputDeliveryError as exc:
             raise exc.error from None
         if (

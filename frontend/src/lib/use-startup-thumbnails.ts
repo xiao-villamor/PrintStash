@@ -17,8 +17,7 @@ export function useStartupThumbnails(
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const thumbnails = [...element.querySelectorAll("[data-library-thumbnail]")];
-        if (hasMedia && thumbnails.length === 0) return;
-        const visible = thumbnails.filter((thumbnail) => {
+        const inViewport = (thumbnail: Element) => {
           const bounds = thumbnail.getBoundingClientRect();
           return (
             bounds.width > 0 &&
@@ -28,7 +27,39 @@ export function useStartupThumbnails(
             bounds.left < innerWidth &&
             bounds.right > 0
           );
-        });
+        };
+        // Mosaic metadata and revision details share the browser's connection
+        // pool with thumbnails. Release them after the first visible Model row
+        // settles, independently of lower rows and the mosaics themselves.
+        const cards = [
+          ...element.querySelectorAll(
+            '[data-library-key^="/models/"], [data-library-key^="/multipart-models/"]',
+          ),
+        ].filter(inViewport);
+        const top = Math.min(...cards.map((card) => card.getBoundingClientRect().top));
+        const row = cards.filter((card) => Math.abs(card.getBoundingClientRect().top - top) < 1);
+        if (
+          row.every((card) => {
+            const thumbnail = card.querySelector("[data-library-thumbnail]");
+            const status = thumbnail?.getAttribute("data-library-thumbnail");
+            // A missing/failed derivative must not strand the remaining reads.
+            if (status === "missing" || status === "failed") return true;
+            const image = thumbnail?.querySelector("img");
+            return status === "ready" && image?.complete && image.naturalWidth > 0;
+          })
+        )
+          settle("primary-media", "ready");
+        if (hasMedia && thumbnails.length === 0) return;
+        // Collection images do not exist until their bounded preview read resolves.
+        // Keep secondary requests behind that read as well as the image bytes.
+        const previews = [...element.querySelectorAll("[data-library-preview]")].filter(inViewport);
+        if (previews.some((preview) => preview.getAttribute("data-library-preview") === "failed")) {
+          settle("media", "failed");
+          return;
+        }
+        if (previews.some((preview) => preview.getAttribute("data-library-preview") === "pending"))
+          return;
+        const visible = thumbnails.filter(inViewport);
         if (
           visible.some((thumbnail) => thumbnail.getAttribute("data-library-thumbnail") === "failed")
         ) {
@@ -62,7 +93,7 @@ export function useStartupThumbnails(
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ["data-library-thumbnail", "src"],
+      attributeFilter: ["data-library-thumbnail", "data-library-preview", "src"],
     });
     element.addEventListener("load", check, true);
     element.addEventListener("error", check, true);

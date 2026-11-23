@@ -15,12 +15,14 @@ from app.db.models import SENTINEL_FILE_HASH, DerivativeKind, File, FileType, Jo
 from app.modules.derivatives import kinds
 from tests.factories.library import detached_file
 
-METADATA, PLATES, THUMBNAIL, TOOLPATH, VIEWER_STL = (
+METADATA, PLATES, THUMBNAIL, TOOLPATH, VIEWER_STL, PREVIEWS, PROJECT_PROFILE = (
     DerivativeKind.METADATA,
     DerivativeKind.PLATES,
     DerivativeKind.THUMBNAIL,
     DerivativeKind.TOOLPATH,
     DerivativeKind.VIEWER_STL,
+    DerivativeKind.PREVIEWS,
+    DerivativeKind.PROJECT_PROFILE,
 )
 
 
@@ -29,6 +31,19 @@ def _file(file_type: FileType, name: str = "part", sha: str = "a" * 64) -> File:
 
 
 class TestRecipesFor:
+    @pytest.mark.parametrize(
+        "file_type,previous,metadata",
+        [(FileType.STL, 22, 12), (FileType.THREE_MF, 28, 15), (FileType.STEP, 23, 13)],
+        ids=["stl", "3mf", "step"],
+    )
+    def test_refreshes_previews_without_reprocessing_geometry(
+        self, file_type, previous, metadata
+    ) -> None:
+        recipes = kinds.recipes_for(_file(file_type))
+
+        assert recipes[THUMBNAIL] > previous
+        assert recipes[METADATA] == metadata
+
     @pytest.mark.parametrize(
         "file_type",
         [
@@ -43,13 +58,19 @@ class TestRecipesFor:
         ],
     )
     def test_a_mesh_gets_every_mesh_kind(self, file_type: FileType) -> None:
-        assert set(kinds.recipes_for(_file(file_type))) == {METADATA, THUMBNAIL}
+        assert set(kinds.recipes_for(_file(file_type))) == {
+            METADATA,
+            THUMBNAIL,
+            PREVIEWS,
+        }
 
-    def test_a_3mf_also_gets_its_plates(self) -> None:
+    def test_a_3mf_gets_project_derivatives(self) -> None:
         assert set(kinds.recipes_for(_file(FileType.THREE_MF))) == {
             METADATA,
             PLATES,
+            PROJECT_PROFILE,
             THUMBNAIL,
+            PREVIEWS,
         }
 
     def test_plain_gcode_gets_what_its_header_holds(self) -> None:
@@ -71,7 +92,9 @@ class TestRecipesFor:
         assert kinds.recipes_for(_file(FileType.THREE_MF)) == {
             METADATA: kinds.THREE_MF_GEOMETRY_RECIPE,
             PLATES: kinds.PLATES_RECIPE,
+            PROJECT_PROFILE: kinds.PROJECT_PROFILE_RECIPE,
             THUMBNAIL: kinds.THREE_MF_THUMBNAIL_RECIPE,
+            PREVIEWS: kinds.PREVIEWS_RECIPE,
         }
 
     def test_a_step_gets_its_own_mesh_recipes(self) -> None:
@@ -79,6 +102,7 @@ class TestRecipesFor:
         assert kinds.recipes_for(_file(FileType.STEP)) == {
             METADATA: kinds.STEP_GEOMETRY_RECIPE,
             THUMBNAIL: kinds.STEP_THUMBNAIL_RECIPE,
+            PREVIEWS: kinds.PREVIEWS_RECIPE,
         }
 
     @pytest.mark.parametrize(
@@ -92,6 +116,7 @@ class TestRecipesFor:
         assert kinds.recipes_for(_file(file_type)) == {
             METADATA: kinds.MESH_GEOMETRY_RECIPE,
             THUMBNAIL: kinds.MESH_THUMBNAIL_RECIPE,
+            PREVIEWS: kinds.PREVIEWS_RECIPE,
         }
 
     def test_a_sentinel_row_gets_nothing(self) -> None:
@@ -173,7 +198,9 @@ class TestGroups:
         assert set(kinds.all_definitions()) == {
             JobKind.DERIVATIVES_MESH,
             JobKind.DERIVATIVES_PLATES,
+            JobKind.DERIVATIVES_PROJECT_PROFILE,
             JobKind.DERIVATIVES_GCODE,
             JobKind.DERIVATIVES_TOOLPATH,
             JobKind.DERIVATIVES_VIEWER_STL,
+            JobKind.DERIVATIVES_PREVIEWS,
         }

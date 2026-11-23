@@ -2,6 +2,7 @@ import { useId } from "react";
 import { StorageProviderGuidance } from "@/components/storage-provider-guidance";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { useUiLocale } from "@/lib/i18n";
 import { knownUiText, uiText } from "@/lib/locale";
 import { providerFields } from "@/lib/storage-provider-form";
@@ -17,6 +18,8 @@ export function StorageProviderFields({
   editing = false,
   onClear,
   omitFields = [],
+  onboarding = false,
+  invalidFields = [],
 }: {
   provider: StorageProvider;
   values: StorageProviderConfigValues;
@@ -27,11 +30,14 @@ export function StorageProviderFields({
   editing?: boolean;
   onClear?: (name: string) => void;
   omitFields?: string[];
+  onboarding?: boolean;
+  /** Fields a failed check named; they are marked invalid and described by their help. */
+  invalidFields?: readonly string[];
 }) {
   useUiLocale();
   const prefix = useId();
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
+    <div className={cn("grid gap-4", onboarding ? "md:grid-cols-2" : "sm:grid-cols-2")}>
       <StorageProviderGuidance provider={provider} />
       {providerFields(provider, use)
         .filter((field) => !omitFields.includes(field.name))
@@ -42,7 +48,10 @@ export function StorageProviderFields({
             <div key={field.name} className="space-y-1.5">
               <label
                 htmlFor={id}
-                className="flex items-center justify-between gap-2 text-xs font-medium text-on-surface-variant"
+                className={cn(
+                  "flex items-center justify-between gap-2 text-[13px] font-medium",
+                  onboarding ? "text-foreground" : "text-on-surface-variant",
+                )}
               >
                 <span>{knownUiText(field.label)}</span>
                 {!field.required && <span>{uiText("Optional")}</span>}
@@ -72,6 +81,7 @@ export function StorageProviderFields({
                   required={field.required && !stored}
                   placeholder={stored ? uiText("Stored — leave blank to keep") : undefined}
                   autoComplete={field.secret ? "new-password" : "off"}
+                  aria-invalid={invalidFields.includes(field.name)}
                   aria-describedby={`${id}-help`}
                   onChange={(event) =>
                     onChange(

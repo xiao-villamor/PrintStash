@@ -1,4 +1,12 @@
 import { arcPoints, type Plane, type Point } from "./gcode-arcs";
+import {
+  TOOLPATH_FEATURE_COLOURS,
+  TOOLPATH_FEATURES,
+  featureIndex,
+  featureMarker,
+  linearRgb,
+  type ToolpathFeature,
+} from "./gcode-features";
 
 // G-code toolpath parsing. Lives outside the viewer component so the module
 // stays component-only and Fast Refresh keeps working for the viewer.
@@ -13,7 +21,12 @@ interface LayerRange {
 
 export interface ToolpathData {
   extrudePositions: Float32Array;
-  extrudeColors: Float32Array;
+  /** Linear RGBA per vertex (opaque); the viewer reads its RGB. */
+  extrudeColors: Uint8Array;
+  /** `TOOLPATH_FEATURES` index per vertex. */
+  extrudeFeatures: Uint8Array;
+  /** Features the slicer marked, in legend order; empty for unmarked G-code. */
+  features: ToolpathFeature[];
   travelPositions: Float32Array;
   layerRanges: LayerRange[];
   cumulativeVertices: Uint32Array; // cumulative vertex count per layer (length = layerRanges.length + 1)
@@ -23,21 +36,106 @@ export interface ToolpathData {
     sizeY: number;
     sizeZ: number;
     maxDim: number;
+    /** Machine coordinates (mm) of the toolpath's lowest X and Y and its centre. */
+    minX: number;
+    minY: number;
+    centerX: number;
+    centerY: number;
   };
+}
+
+// Four million extrusion segments occupy at most 192 MB of final positions
+// and colors. Typed chunks avoid the much larger temporary JS-number arrays.
+const DEFAULT_SEGMENT_LIMIT = 4_000_000;
+const POSITION_CHUNK_SEGMENTS = 16_384;
+
+class PositionBuffer {
+  length = 0;
+  private chunks: Float32Array[] = [];
+  private current: Float32Array | null = null;
+  private used = 0;
+
+  push(x: number, y: number, z: number, nx: number, ny: number, nz: number) {
+    if (this.current === null || this.used === this.current.length) {
+      if (this.current !== null) this.chunks.push(this.current);
+      this.current = new Float32Array(POSITION_CHUNK_SEGMENTS * 6);
+      this.used = 0;
+    }
+    this.current[this.used++] = x;
+    this.current[this.used++] = y;
+    this.current[this.used++] = z;
+    this.current[this.used++] = nx;
+    this.current[this.used++] = ny;
+    this.current[this.used++] = nz;
+    this.length += 6;
+  }
+
+  take(): Float32Array {
+    const result = new Float32Array(this.length);
+    let offset = 0;
+    for (const chunk of this.chunks) {
+      result.set(chunk, offset);
+      offset += chunk.length;
+    }
+    if (this.current !== null) result.set(this.current.subarray(0, this.used), offset);
+    this.chunks = [];
+    this.current = null;
+    this.used = 0;
+    return result;
+  }
+}
+
+/** One byte per extruded vertex, chunked like the positions. */
+class FeatureBuffer {
+  length = 0;
+  private chunks: Uint8Array[] = [];
+  private current = new Uint8Array(POSITION_CHUNK_SEGMENTS * 2);
+
+  push(feature: number) {
+    const used = this.length % this.current.length;
+    if (this.length > 0 && used === 0) {
+      this.chunks.push(this.current);
+      this.current = new Uint8Array(POSITION_CHUNK_SEGMENTS * 2);
+    }
+    this.current[used] = feature;
+    this.length += 1;
+  }
+
+  take(): Uint8Array {
+    const result = new Uint8Array(this.length);
+    let offset = 0;
+    for (const chunk of this.chunks) {
+      result.set(chunk, offset);
+      offset += chunk.length;
+    }
+    result.set(this.current.subarray(0, this.length - offset), offset);
+    return result;
+  }
+}
+
+// Unmarked G-code shades by height in one hue, lighter towards the top.
+const heightLow = linearRgb("#35507A");
+const heightHigh = linearRgb("#B5CBEA");
+// camelCase: the dev React refresh transform reads an upper-case `X = y.map(fn)`
+// as a component and injects registration code that breaks this worker module.
+const featureRgb = TOOLPATH_FEATURES.map((feature) => linearRgb(TOOLPATH_FEATURE_COLOURS[feature]));
+
+function* lines(text: string): Generator<string> {
+  let start = 0;
+  while (start < text.length) {
+    const end = text.indexOf("\n", start);
+    if (end === -1) {
+      yield text.slice(start);
+      return;
+    }
+    yield text.slice(start, end);
+    start = end + 1;
+  }
 }
 
 // ---- G-code Parser ----
 
-function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-  const a = s * Math.min(l, 1 - l);
-  const f = (n: number) => {
-    const k = (n + h / 30) % 12;
-    return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
-  };
-  return [f(0), f(8), f(4)];
-}
-
-export function parseGcode(text: string, segmentLimit = 1_000_000): ToolpathData {
+export function parseGcode(text: string, segmentLimit = DEFAULT_SEGMENT_LIMIT): ToolpathData {
   let position: Point = [0, 0, 0];
   const offset: Point = [0, 0, 0];
   let ce = 0,
@@ -47,8 +145,15 @@ export function parseGcode(text: string, segmentLimit = 1_000_000): ToolpathData
     absoluteCenter = false;
   let plane: Plane = "xy";
   let segments = 0;
-  const extrudeSegs: number[] = [];
-  const travelSegs: number[] = [];
+  const extrudeSegs = new PositionBuffer();
+  const travelSegs = new PositionBuffer();
+  const featureSegs = new FeatureBuffer();
+  const OTHER = featureIndex("other");
+  let feature = OTHER;
+  let marked = false;
+  // The printed object's extent, without start-up lines such as a purge line
+  // (slicers mark those "Custom"), which would push the object off-centre.
+  const object = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
   const layerRanges: LayerRange[] = [];
   let currentZ = -1,
     layerVertStart = 0;
@@ -66,18 +171,34 @@ export function parseGcode(text: string, segmentLimit = 1_000_000): ToolpathData
       if (++segments > segmentLimit) throw new Error("toolpath_segment_limit");
       (extruding ? extrudeSegs : travelSegs).push(x, z, -y, nx, nz, -ny);
       if (extruding) {
+        featureSegs.push(feature);
+        featureSegs.push(feature);
         minX = Math.min(minX, x, nx);
         maxX = Math.max(maxX, x, nx);
         minY = Math.min(minY, y, ny);
         maxY = Math.max(maxY, y, ny);
         minZ = Math.min(minZ, z, nz);
         maxZ = Math.max(maxZ, z, nz);
+        if (feature !== OTHER) {
+          object.minX = Math.min(object.minX, x, nx);
+          object.maxX = Math.max(object.maxX, x, nx);
+          object.minY = Math.min(object.minY, y, ny);
+          object.maxY = Math.max(object.maxY, y, ny);
+        }
       }
     }
     position = next;
   };
 
-  for (const rawLine of text.split("\n")) {
+  for (const rawLine of lines(text)) {
+    if (rawLine.includes(";")) {
+      const named = featureMarker(rawLine);
+      if (named !== null) {
+        feature = featureIndex(named);
+        marked = true;
+        continue;
+      }
+    }
     const line = rawLine
       .split(/[;*]/, 1)[0]
       .replace(/\([^)]*\)/g, "")
@@ -206,13 +327,17 @@ export function parseGcode(text: string, segmentLimit = 1_000_000): ToolpathData
     maxZ = 20;
   }
 
+  if (marked && object.minX !== Infinity) {
+    ({ minX, maxX, minY, maxY } = object);
+  }
+
   // Center coordinates
   const centerX = (minX + maxX) / 2;
   const centerY = (minY + maxY) / 2; // gcode Y
   const centerZ = (minZ + maxZ) / 2; // gcode Z (height)
 
-  const extArr = new Float32Array(extrudeSegs);
-  const travArr = new Float32Array(travelSegs);
+  const extArr = extrudeSegs.take();
+  const travArr = travelSegs.take();
 
   for (let i = 0; i < extArr.length; i += 3) {
     extArr[i] -= centerX;
@@ -225,22 +350,31 @@ export function parseGcode(text: string, segmentLimit = 1_000_000): ToolpathData
     travArr[i + 2] += centerY;
   }
 
-  // Per-vertex colors based on Y (height) in three.js space
+  // Slicer features when marked; otherwise one hue by height.
   const totalVerts = extArr.length / 3;
-  const colArr = new Float32Array(totalVerts * 3);
+  const extrudeFeatures = featureSegs.take();
+  const colArr = new Uint8Array(totalVerts * 4);
   const heightRange = maxZ - minZ || 1;
-
+  const seen = new Set<number>();
   for (let vi = 0; vi < totalVerts; vi++) {
-    const threeY = extArr[vi * 3 + 1]; // centered, three.y = gcodeZ - centerZ
-    const gcodeZ = threeY + centerZ;
-    const t = Math.max(0, Math.min(1, (gcodeZ - minZ) / heightRange));
-    // Blue (240°) at bottom → red (0°) at top
-    const hue = (1 - t) * 240;
-    const [r, g, b] = hslToRgb(hue, 0.9, 0.55);
-    colArr[vi * 3] = r;
-    colArr[vi * 3 + 1] = g;
-    colArr[vi * 3 + 2] = b;
+    const out = vi * 4;
+    if (marked) {
+      const index = extrudeFeatures[vi]!;
+      const rgb = featureRgb[index]!;
+      seen.add(index);
+      colArr[out] = rgb[0];
+      colArr[out + 1] = rgb[1];
+      colArr[out + 2] = rgb[2];
+    } else {
+      const t = Math.max(0, Math.min(1, (extArr[vi * 3 + 1]! + centerZ - minZ) / heightRange));
+      for (let channel = 0; channel < 3; channel++)
+        colArr[out + channel] = Math.round(
+          heightLow[channel]! + (heightHigh[channel]! - heightLow[channel]!) * t,
+        );
+    }
+    colArr[out + 3] = 255;
   }
+  const features = TOOLPATH_FEATURES.filter((_, index) => seen.has(index));
 
   // Cumulative vertex counts for layer slider
   const cumulative = new Uint32Array(layerRanges.length + 1);
@@ -256,10 +390,38 @@ export function parseGcode(text: string, segmentLimit = 1_000_000): ToolpathData
   return {
     extrudePositions: extArr,
     extrudeColors: colArr,
+    extrudeFeatures,
+    features,
     travelPositions: travArr,
     layerRanges,
     cumulativeVertices: cumulative,
     totalLayers: layerRanges.length,
-    bounds: { sizeX, sizeY, sizeZ, maxDim: Math.max(sizeX, sizeY, sizeZ) || 1 },
+    bounds: {
+      sizeX,
+      sizeY,
+      sizeZ,
+      maxDim: Math.max(sizeX, sizeY, sizeZ) || 1,
+      minX,
+      minY,
+      centerX,
+      centerY,
+    },
   };
+}
+
+/**
+ * Where the bed's centre sits in the scene, which is centred on the toolpath.
+ * Most beds put the origin at a front corner, so their centre is half the bed
+ * away; centre-origin machines (deltas, for one) centre the bed on the origin.
+ * The print sits nearer whichever centre its machine uses. A purge line just
+ * off the bed edge (negative X on many printers) must not decide it.
+ */
+export function bedCentre(bounds: ToolpathData["bounds"], bed: { x: number; y: number }) {
+  const centreOrigin =
+    Math.hypot(bounds.centerX, bounds.centerY) <
+    Math.hypot(bounds.centerX - bed.x / 2, bounds.centerY - bed.y / 2);
+  const bedX = centreOrigin ? 0 : bed.x / 2;
+  const bedY = centreOrigin ? 0 : bed.y / 2;
+  // Scene x is machine X; scene z is machine -Y; both relative to the toolpath centre.
+  return { x: bedX - bounds.centerX, z: bounds.centerY - bedY };
 }

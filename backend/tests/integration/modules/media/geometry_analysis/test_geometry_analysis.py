@@ -175,7 +175,7 @@ class TestEmbeddingViews:
         loads = []
         preparations = []
         original = geometry_analysis._load
-        prepare = mesh_render.prepare_mesh_render
+        prepare = mesh_render.prepare_encoder_render
         source = mesh_path.read_bytes()
 
         def observed(*args, **kwargs):
@@ -194,7 +194,7 @@ class TestEmbeddingViews:
             return prepare(mesh)
 
         monkeypatch.setattr(geometry_analysis, "_load", observed)
-        monkeypatch.setattr(mesh_render, "prepare_mesh_render", observed_preparation)
+        monkeypatch.setattr(mesh_render, "prepare_encoder_render", observed_preparation)
         recipe = VisualRecipe.for_space(
             VisualRecipe.space(
                 EmbeddingSpace("clip", "v1", 3, "text_image", "test"),
@@ -260,7 +260,7 @@ class TestEmbeddingViews:
         self, mesh_path, monkeypatch
     ):
         original = geometry_analysis._load
-        prepare = mesh_render.prepare_mesh_render
+        prepare = mesh_render.prepare_encoder_render
         loaded = []
         preparations = []
         source = mesh_path.read_bytes()
@@ -278,7 +278,7 @@ class TestEmbeddingViews:
             return prepare(mesh)
 
         monkeypatch.setattr(geometry_analysis, "_load", observed)
-        monkeypatch.setattr(mesh_render, "prepare_mesh_render", observed_preparation)
+        monkeypatch.setattr(mesh_render, "prepare_encoder_render", observed_preparation)
         views = geometry_analysis.embedding_views(
             mesh_path,
             file_type="stl",

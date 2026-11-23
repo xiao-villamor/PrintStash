@@ -1,0 +1,431 @@
+.library-virtual-row {
+  display: grid;
+  align-items: stretch;
+  /* For the one frame before the column count catches up with a narrowing
+     pane, the last card is clipped instead of scrolling the page sideways. */
+  overflow-x: clip;
+  overflow-clip-margin: 2px;
+}
+.library-items-grid > [data-library-key],
+.library-virtual-row > [data-library-key] {
+  height: 100%;
+}
+.library-preview {
+  background-color: var(--plate);
+}
+
+/* Reveal the card preview controls on pointer or keyboard intent. */
+.library-preview-reveal {
+  opacity: 1;
+  transition: opacity var(--duration-press) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .library-preview-reveal {
+    opacity: 0;
+  }
+  .library-preview-controls[data-hovered] .library-preview-reveal,
+  .library-model-card:focus-within .library-preview-reveal {
+    opacity: 1;
+  }
+  .library-model-card:not(:focus-within)
+    .library-preview-controls:not([data-hovered])
+    :is(.library-preview-arrow, .library-preview-views, .library-card-open-page) {
+    pointer-events: none;
+  }
+}
+.library-model-card:focus-within .library-preview-reveal {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .library-preview-reveal {
+    transition: none;
+  }
+}
+
+/* Compact over the image; touch keeps a full-size target around the same mark. */
+@media (pointer: coarse) {
+  .library-preview-arrow::before,
+  .library-card-open-page::before {
+    content: "";
+    position: absolute;
+  }
+  .library-preview-arrow[data-side="previous"]::before {
+    inset: -6px -12px -6px -4px;
+  }
+  .library-preview-arrow[data-side="next"]::before {
+    inset: -6px -4px -6px -12px;
+  }
+  .library-card-open-page::before {
+    inset: -14px -6px -6px -14px;
+  }
+}
+
+/* Opens the full page from the card corner; a plain click opens the inspector. */
+.library-card-open-page {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 24px;
+  height: 24px;
+  /* Appears and responds in place: no fade or press movement. */
+  transition: none;
+}
+.library-model-card .library-card-open-page:active,
+.library-model-card:has(.library-preview-controls :active) {
+  /* Pressing a control over the image does not press the card under it. */
+  scale: none;
+  transform: none;
+}
+
+/* Data and image readiness fill a stationary frame, independently of navigation. */
+.library-preview-placeholder {
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
+}
+/* Reveal real card content, never a cover that can outlive its animation. */
+.library-card-fill-frame,
+.library-collection-reveal {
+  --opacity-content-enter: 0.2;
+}
+.library-thumbnail-fill {
+  transition: opacity var(--duration-library-enter) var(--ease-library-enter);
+}
+@media (prefers-reduced-motion: reduce) {
+  .library-thumbnail-fill {
+    transition-duration: var(--duration-press);
+  }
+}
+
+.library-card-facts > span + span::before,
+.library-card-revision-separator::before {
+  content: "·";
+}
+.library-card-facts > span + span::before {
+  margin-right: 0.375rem;
+}
+.library-card-content {
+  min-height: 0;
+}
+.library-model-card[data-favorites] .library-card-content {
+  min-height: 128px;
+}
+.library-model-card[data-favorites] :is(.library-preview, .library-preview-controls) {
+  height: 200px;
+}
+
+.library-model-card[data-favorites] [data-library-card-tags] {
+  opacity: 0;
+}
+.library-model-card[data-favorites]:hover [data-library-card-tags],
+.library-model-card[data-favorites]:focus-within [data-library-card-tags] {
+  opacity: 1;
+}
+
+.library-model-card[data-inspected],
+.library-model-row[data-inspected] {
+  border-color: var(--ring);
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
+}
+
+.library-model-card:not([data-favorites]) :is(.library-preview, .library-preview-controls) {
+  height: auto;
+  aspect-ratio: 4 / 3;
+}
+.library-card-standard {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px 0;
+}
+.library-card-standard h3 {
+  display: flex;
+  align-items: flex-start;
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.3;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.library-card-standard h3 > span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.library-card-revision-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  background: inherit;
+}
+.library-card-revision-line {
+  position: relative;
+  background: inherit;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+}
+.library-card-revision-line strong {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font: 600 13px/1.4 var(--font-mono);
+}
+.library-card-recommended,
+.library-card-revision-separator {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.library-card-context,
+.library-card-result {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+}
+.library-card-summary-container .library-card-facts {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font: 400 12px/1.4 var(--font-mono);
+}
+
+.library-card-summary-container {
+  /* Pinned to the card's foot: rows of cards share one footer line. */
+  margin-top: auto;
+  padding: 6px 12px 10px;
+  background: inherit;
+  min-width: 0;
+}
+.library-card-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 17px;
+  margin: 2px 0 0;
+  color: var(--muted-foreground);
+  font: 400 12px/1.4 var(--font-mono);
+}
+.library-card-meta > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.library-card-meta > time {
+  flex-shrink: 0;
+}
+/* Pointer devices reveal per-card actions on intent; touch keeps them visible. */
+@media (hover: hover) {
+  .library-card-revision-actions {
+    position: absolute;
+    top: 0;
+    right: 0;
+    padding-left: 6px;
+    background: inherit;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-press) var(--ease-out);
+  }
+  .library-model-card:hover .library-card-revision-actions,
+  .library-model-card:focus-within .library-card-revision-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  /* The result ends in an ellipsis instead of being cut by the actions. */
+  .library-model-card:hover .library-card-result,
+  .library-model-card:focus-within .library-card-result {
+    padding-right: 68px;
+  }
+}
+.library-card-status {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  max-width: calc(100% - 56px);
+}
+.library-card-status > span {
+  height: 20px;
+  padding: 0 2px;
+  gap: 5px;
+  font-weight: 500;
+  background: transparent;
+}
+.library-model-card:has(.library-preview[data-image-kind="photo"])
+  > div
+  > [role="checkbox"]:not([aria-checked="true"]),
+.dark
+  .library-model-card:has(.library-preview[data-image-kind="slicer_render"])
+  > div
+  > [role="checkbox"]:not([aria-checked="true"]) {
+  border-color: var(--muted-foreground);
+}
+.library-preview[data-image-kind="photo"] .library-card-status > span,
+.dark .library-preview[data-image-kind="slicer_render"] .library-card-status > span {
+  padding-inline: 6px;
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+}
+@media (prefers-reduced-motion: reduce) {
+  .library-card-revision-actions {
+    transition: none;
+  }
+}
+.library-card-revision-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
+  margin-right: -4px;
+}
+.library-card-revision-actions > button {
+  width: 28px;
+  height: 28px;
+}
+.library-card-revision-actions svg {
+  width: 14px;
+  height: 14px;
+}
+.library-card-outcome {
+  color: var(--foreground);
+  font: 500 12px/1.4 var(--font-mono);
+}
+.library-card-result > span + span::before {
+  content: " · ";
+  color: var(--muted-foreground);
+}
+.library-card-outcome-failed {
+  color: var(--destructive);
+}
+.library-card-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  border-radius: var(--radius);
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 13px;
+}
+.library-card-menu-item:hover,
+.library-card-menu-item:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+.library-card-menu-item:disabled {
+  opacity: 0.5;
+}
+
+.library-card-summary-container .library-card-facts > span + span::before {
+  margin-left: 6px;
+}
+.library-card-status > span {
+  color: var(--secondary);
+}
+.library-card-status [data-revision-status="needs_test"] > span:first-child {
+  background: var(--status-test-dot);
+}
+
+.library-model-card {
+  container-type: inline-size;
+}
+/* Keep the selected surface opaque beneath the overlapping revision actions. */
+.library-model-card[data-selected]:not([data-favorites]) {
+  background: linear-gradient(var(--accent), var(--accent)), var(--card);
+}
+@container (width < 200px) {
+  .library-preview-views .library-preview-view-label {
+    display: none;
+  }
+}
+
+.library-model-card:not([data-inspected]):hover {
+  border-color: var(--border-strong);
+}
+
+.library-model-card:not([data-favorites]) .library-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Clears the corner row so the status never sits against the part. */
+.library-card-thumbnail {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 18px 10px 10px;
+  object-fit: contain;
+}
+
+/* The stage fills the dialog's width; its height follows the viewport so the
+   strip below always stays on screen. */
+.model-preview-gallery-stage {
+  width: 100%;
+  height: clamp(12rem, calc(100dvh - 20rem), 44rem);
+}
+
+.model-preview-gallery-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* Preview shape and type stay consistent as the shared track grows. */
+.collection-card-collage {
+  aspect-ratio: 2 / 1;
+}
+[data-compact] .collection-card-collage {
+  width: 72px;
+  height: 44px;
+  aspect-ratio: auto;
+}
+.collection-card-name {
+  font-size: 1rem;
+}
+[data-compact] .collection-card-name {
+  font-size: 0.875rem;
+}
+
+/* A compact collection card's frame (44px collage + 14px padding + 2px border),
+   so the reserved row has the height of the row that replaces it. */
+.library-collection-placeholder {
+  height: 60px;
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.library-tree-spotlight {
+  position: relative;
+}
+
+.library-tree-spotlight::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+  border: 2px solid var(--primary);
+  content: "";
+  animation: library-tree-spotlight var(--duration-slow) var(--ease-out) both;
+}
+
+@keyframes library-tree-spotlight {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-tree-spotlight::after {
+    animation: none;
+  }
+}

@@ -157,6 +157,7 @@ def build_printer_file(
     interesting case of a file somebody put on the printer by SD card, which the
     library knows about but does not own.
     """
+    overrides.setdefault("plate_index", None)
     index = nth("printer_file")
     if file is not None:
         overrides.setdefault("file_id", file.id)
@@ -193,6 +194,7 @@ def print_job_config(
         overrides.setdefault("file_id", file.id)
         overrides.setdefault("model_id", file.model_id)
         overrides.setdefault("remote_filename", file.original_filename)
+    overrides.setdefault("plate_index", None)
     return PrintJob(state=state, **overrides)
 
 
@@ -214,6 +216,7 @@ def build_print_job(
     if printer is not None:
         overrides.setdefault("printer_id", printer.id)
         overrides.setdefault("printer_name", printer.name)
+    overrides.setdefault("plate_index", None)
     overrides.setdefault("remote_filename", file.original_filename)
     return save(
         session,

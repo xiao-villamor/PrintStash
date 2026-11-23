@@ -7,7 +7,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
-import { clickModelAction, gcodeFor, modelCard, uploadGcodeModel } from "../util";
+import { openModelPage, clickModelAction, gcodeFor, uploadGcodeModel } from "../util";
 
 const apiPort = Number(process.env.PLAYWRIGHT_STORAGE_API_PORT ?? 8420);
 const webdavPort = Number(process.env.PLAYWRIGHT_STORAGE_WEBDAV_PORT ?? 8775);
@@ -91,16 +91,17 @@ test.describe("storage provider setup", () => {
     await page.getByLabel("Confirm password", { exact: true }).fill("playwright-password");
     await page.getByRole("button", { name: "Continue" }).click();
 
-    await page.getByRole("button", { name: /Nextcloud and WebDAV/ }).click();
+    await page.getByRole("button", { name: "WebDAV / Nextcloud" }).click();
     await page.getByLabel("Provider").selectOption("webdav");
-    await expect(page.getByText("Support: Beta")).toBeVisible();
-    await expect(page.getByText("Expected: Guarded")).toBeVisible();
+    await expect(page.getByText(/Support for this connection is in beta\./)).toBeVisible();
+    await expect(page.getByText("Expected: Guarded")).toHaveCount(0);
     await page.getByLabel("Server URL").fill(`http://127.0.0.1:${webdavPort}`);
     await page.getByLabel("Username").fill("webdav-user");
     await page.getByLabel("Password").fill("webdav-password");
     await page.getByLabel("Root").fill("vault-data");
     await page.getByRole("button", { name: "Check storage" }).click();
-    await page.getByRole("button", { name: "Create my account and continue" }).click();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByRole("button", { name: "Create account" }).click();
     await expect(page).toHaveURL(/\/getting-started$/);
     await page.getByRole("button", { name: "I'll do this later" }).click();
 
@@ -127,7 +128,13 @@ test.describe("storage provider setup", () => {
 
     await page.goto("/settings?section=storage");
     await expect(page.getByRole("heading", { name: "Current storage", exact: true })).toBeVisible();
-    await expect(page.getByText("Storage safety: Guarded")).toBeVisible();
+    await expect(
+      page
+        .getByRole("term")
+        .filter({ hasText: /^Storage safety$/ })
+        .locator("..")
+        .getByRole("definition"),
+    ).toHaveText("Guarded");
     await expect(page.getByPlaceholder("Stored — leave blank to keep")).toBeVisible();
 
     // A concurrent configuration command cannot silently authorize this draft.
@@ -177,7 +184,7 @@ test.describe("storage provider setup", () => {
     expect(remoteObject).toBeTruthy();
     const remoteObjectUrl = new URL(remoteObject!, webdavBase).toString();
     const expectedBytes = Buffer.from(gcodeFor(modelName));
-    await modelCard(page, modelName).click();
+    await openModelPage(page, modelName);
     await clickModelAction(page, "Delete model");
     await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
 
@@ -251,7 +258,7 @@ test.describe("storage provider setup", () => {
     const expectedBytes = Buffer.from(gcodeFor(modelName));
     expect(Number(uploadedBytes.headers()["content-length"] ?? 0)).toBe(expectedBytes.length);
     expect(await uploadedBytes.body()).toEqual(expectedBytes);
-    await modelCard(page, modelName).click();
+    await openModelPage(page, modelName);
     await clickModelAction(page, "Delete model");
     await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
 
@@ -301,7 +308,7 @@ test.describe("storage provider setup", () => {
 
     const modelName = `sftp-storage-${Date.now()}`;
     await uploadGcodeModel(page, modelName);
-    await modelCard(page, modelName).click();
+    await openModelPage(page, modelName);
     await clickModelAction(page, "Delete model");
     await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
     await previewExpiredTrashWithoutApproval(page, modelName);

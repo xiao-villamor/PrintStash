@@ -132,6 +132,8 @@ def viewer() -> None:
             "metadata": "ready",
             "thumbnail": "ready",
             "plates": "skipped",
+            "project_profile": "skipped",
+            "previews": "ready",
         }, settled
         settled_jobs(JobKind.DERIVATIVES_MESH, 1)
         stopped = threading.Event()

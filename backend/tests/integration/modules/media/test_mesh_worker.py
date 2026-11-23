@@ -30,10 +30,13 @@ def run_worker(tmp_path, monkeypatch):
             "height": None,
             "include_geometry": True,
             "include_thumbnail": True,
+            "check_embedded_3mf_preview": True,
             "include_fingerprint": False,
             "triangle_cap": 2_000_000,
             "output_format": "WEBP",
             "reason": "derivative",
+            # The supervisor always says whether this pass renders views.
+            "views": None,
         }
         spec.update(overrides)
         # An owned descriptor stands in for stdout; main still duplicates and
@@ -63,7 +66,11 @@ class TestMain:
 
         def exchange(request, body, **kw):
             observed.append((request.priority, bool(body)))
-            return b"\x01" + struct.pack("!III", 16, 12, 1) + bytes([20, 40, 60, 255]) * 192
+            return (
+                b"\x01"
+                + struct.pack("!III", 16, 12, 1)
+                + bytes([20, 40, 60, 255]) * 192
+            )
 
         monkeypatch.setattr(compute_render.client, "exchange_render", exchange)
         with priority_scope(WorkPriority(job_priority)):
@@ -77,7 +84,9 @@ class TestMain:
         decoder = FrameDecoder(ThumbnailRequest(Path("cube.stl"), width=16, height=12))
         frames = list(decoder.feed(reply))
         decoder.finish()
-        thumbnail = next(frame for frame in frames if isinstance(frame, ThumbnailOutput))
+        thumbnail = next(
+            frame for frame in frames if isinstance(frame, ThumbnailOutput)
+        )
         assert status == 0
         assert thumbnail.image is not None
         assert observed == [(Priority.BACKGROUND, True)]

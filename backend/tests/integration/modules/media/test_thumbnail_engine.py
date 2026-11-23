@@ -86,7 +86,10 @@ class TestPhaseStats:
         assert phases["fingerprint"].outcome.value == "completed"
         assert "render" not in phases
 
-    def test_embedded_preview_retains_extraction_cost(self, tmp_path: Path) -> None:
+    def test_embedded_preview_retains_extraction_cost(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "prefer_rendered_3mf_preview", False)
         source = tmp_path / "embedded.3mf"
         source.write_bytes(three_mf(extras={"Metadata/thumbnail.png": content.png()}))
 
@@ -945,7 +948,10 @@ class TestBoundedVolumeAuthority:
 
 
 class TestCoverage:
-    def test_embedded_preview_does_not_certify_unread_source(self, tmp_path):
+    def test_embedded_preview_does_not_certify_unread_source(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setitem(_overlay, "prefer_rendered_3mf_preview", False)
         source = tmp_path / "embedded.3mf"
         source.write_bytes(three_mf(extras={"Metadata/thumbnail.png": content.png()}))
 
@@ -1692,3 +1698,108 @@ class TestThumbnailFailureBoundaries:
         assert isinstance(outputs[0].outcome, GeometryRefused)
         assert outputs[0].outcome.reason is ThumbnailFailureReason.RESOURCE_LIMIT
         assert source.read_bytes() == source_bytes
+
+
+class TestViews:
+    """One load serves the cover and every multi-angle view."""
+
+    @staticmethod
+    def _outputs(path: Path, *, include_poles: bool = False) -> list:
+        import hashlib
+
+        from app.modules.media.mesh_contracts import ViewsRequest
+
+        outputs: list = []
+        ThumbnailEngine().generate(
+            ThumbnailRequest(
+                path,
+                output_format="WEBP",
+                views=ViewsRequest(
+                    recipe=3,
+                    include_poles=include_poles,
+                    source_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                    width=640,
+                ),
+            ),
+            on_output=outputs.append,
+        )
+        return outputs
+
+    def test_renders_views_after_publishing_the_cover(self, cube: Path) -> None:
+        from app.modules.media.mesh_protocol import (
+            GeometryOutput,
+            ThumbnailOutput,
+            ViewsReady,
+        )
+
+        outputs = self._outputs(cube)
+
+        assert [type(output) for output in outputs] == [
+            GeometryOutput,
+            ThumbnailOutput,
+            ViewsReady,
+        ]
+        assert len(outputs[2].manifest.views) == 4
+
+    def test_frames_3mf_scenes_like_the_batch(self, tmp_path: Path) -> None:
+        from app.modules.media import preview_worker
+
+        path = tmp_path / "placed.3mf"
+        path.write_bytes(
+            three_mf(
+                meshes={1: trimesh.creation.box(extents=[10, 20, 5])},
+                build=(
+                    (1, "1 0 0 0 1 0 0 0 1 0 0 0"),
+                    (1, "0 1 0 -1 0 0 0 0 1 40 0 0"),
+                ),
+            )
+        )
+        (views,) = [
+            o for o in self._outputs(path, include_poles=True) if hasattr(o, "bundle")
+        ]
+        batch = tmp_path / "batch"
+        batch.mkdir()
+
+        manifest = preview_worker.produce(
+            path,
+            "3mf",
+            views.manifest.source_sha256,
+            batch,
+            width=640,
+            recipe=3,
+            include_poles=True,
+        )
+
+        assert (batch / "views.bin").read_bytes() == views.bundle
+        assert json.loads(manifest) == views.manifest.model_dump(mode="json")
+
+    def test_refuses_views_of_a_streamed_source(
+        self, cube: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.modules.media.mesh_protocol import ViewsRefused
+
+        monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1)
+
+        outputs = self._outputs(cube)
+
+        assert outputs[-1] == ViewsRefused(
+            ThumbnailFailureReason.RESOURCE_LIMIT, outputs[-1].duration_ms
+        )
+
+    def test_reports_why_an_unreadable_source_has_no_views(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "broken.stl"
+        source.write_bytes(b"not geometry")
+
+        outputs = self._outputs(source)
+
+        assert outputs[-1].reason is ThumbnailFailureReason.INVALID_SOURCE
+
+    def test_renders_no_views_unless_asked(self, cube: Path) -> None:
+        from app.modules.media.mesh_protocol import ViewsReady, ViewsRefused
+
+        outputs: list = []
+        ThumbnailEngine().generate(ThumbnailRequest(cube), on_output=outputs.append)
+
+        assert not [o for o in outputs if isinstance(o, ViewsReady | ViewsRefused)]

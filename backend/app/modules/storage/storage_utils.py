@@ -20,9 +20,11 @@ from app.db.models import (
     Collection,
     Document,
     File,
+    ModelCover,
     ModelSourceCover,
     MultipartModel,
 )
+from app.modules.library import collection_covers
 from app.modules.storage.storage_backend.contracts import StorageBackend
 from app.modules.storage.storage_backend.runtime import get_backend
 
@@ -166,16 +168,23 @@ def ownership_snapshot(
     for row in session.exec(select(Collection)).all():
         if row.id is None:
             continue
-        for collection_id, name in _COLLECTION_IMAGE_RE.findall(row.readme or ""):
-            if int(collection_id) == row.id:
-                result.embedded.append(
-                    OwnedBlob(
-                        key=backend.collection_image_key(row.id, name),
-                        resource_type="collection_image",
-                        resource_id=row.id,
-                        display_name=name,
-                    )
+        names = {
+            name
+            for collection_id, name in _COLLECTION_IMAGE_RE.findall(row.readme or "")
+            if int(collection_id) == row.id
+        }
+        cover = collection_covers.image_filename(row)
+        if cover is not None:
+            names.add(cover)
+        for name in sorted(names):
+            result.embedded.append(
+                OwnedBlob(
+                    key=backend.collection_image_key(row.id, name),
+                    resource_type="collection_image",
+                    resource_id=row.id,
+                    display_name=name,
                 )
+            )
 
     # Provenance covers are vault-owned blobs even though they are not attached
     # to a File.  Keep them in the census so backup/restore cannot silently lose
@@ -188,6 +197,17 @@ def ownership_snapshot(
                 resource_id=row.id or 0,
                 expected_size=row.size_bytes,
                 display_name="source-cover.webp",
+            )
+        )
+    for row in session.exec(select(ModelCover)).all():
+        result.primary.append(
+            OwnedBlob(
+                key=backend.model_cover_key(row.model_id, row.filename),
+                resource_type="model_cover",
+                resource_id=row.model_id,
+                expected_size=row.size_bytes,
+                expected_sha256=row.sha256,
+                display_name="model-cover.webp",
             )
         )
     for row in session.exec(select(MultipartModel)).all():

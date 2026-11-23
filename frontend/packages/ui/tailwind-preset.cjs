@@ -5,6 +5,9 @@ module.exports = {
     extend: {
       colors: {
         border: "var(--border)",
+        "border-strong": "var(--border-strong)",
+        "overlay-scrim": "var(--overlay-scrim)",
+        plate: "var(--plate)",
         input: "var(--input)",
         ring: "var(--ring)",
         background: "var(--background)",
@@ -53,13 +56,17 @@ module.exports = {
         sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
+      boxShadow: {
+        dialog: "0 20px 60px var(--dialog-shadow)",
+      },
       borderRadius: {
         DEFAULT: "var(--radius)",
         lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 0.125rem)",
+        md: "var(--radius)",
+        sm: "var(--radius)",
       },
       fontSize: {
+        field: "0.8125rem",
         "2xs": "0.6875rem",
         "3xs": "0.625rem",
       },
@@ -70,7 +77,9 @@ module.exports = {
       transitionTimingFunction: {
         out: "var(--ease-out)",
         "in-out": "var(--ease-in-out)",
+        settle: "var(--ease-content-settle)",
       },
+      scale: { "content-enter": "var(--scale-content-enter)" },
       transitionDuration: {
         press: "var(--duration-press)",
         fast: "var(--duration-fast)",

@@ -10,6 +10,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from app.modules.ingestion.archive_plan import ArchiveIntake
+
 
 class UrlIngestRequest(BaseModel):
     """Body for POST /ingest/url.
@@ -37,6 +39,7 @@ class ArchiveEntryRead(BaseModel):
     size_bytes: int
     file_type: Optional[str] = None  # FileType value if importable, else None
     is_image: bool = False
+    is_document: bool = False
 
 
 class ArchiveManifest(BaseModel):
@@ -54,6 +57,7 @@ class ArchiveSelectRequest(BaseModel):
     names: list[str] = []
     collection: Optional[str] = None
     tags: Optional[str] = None
+    intake: ArchiveIntake | None = None
 
 
 class ModelFileRead(BaseModel):

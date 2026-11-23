@@ -17,11 +17,12 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/errors";
-import { toast, toastCatch } from "@/lib/toast";
+import { toast, toastCatch, undoLastChange } from "@/lib/toast";
+import { clearLogin } from "@/lib/auth-store";
 import { renderApp } from "@/test-support/render";
 
 /** Mount the toaster, then raise one error through it. */
@@ -35,10 +36,15 @@ function raise(cause: unknown) {
 const NETWORK_COPY = /Check that PrintStash is running/;
 
 beforeEach(() => {
+  // Own Sonner's delayed exit callbacks so they cannot outlive jsdom.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   window.localStorage.clear();
 });
 
 afterEach(() => {
+  cleanup();
+  vi.clearAllTimers();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -114,7 +120,49 @@ describe("toast.undo", () => {
     act(() => toast.undo("Model moved", undo));
     fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
 
-    expect(undo).toHaveBeenCalledOnce();
+    await waitFor(() => expect(undo).toHaveBeenCalledOnce());
+  });
+});
+describe("undoLastChange", () => {
+  it("expires keyboard undo with its visible notice", async () => {
+    vi.useFakeTimers();
+    renderApp(<p>Library</p>);
+    const undo = vi.fn<() => void>();
+    act(() => toast.undo("Moved Model", undo));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6500);
+    });
+    expect(undoLastChange()).toBe(false);
+    expect(undo).not.toHaveBeenCalled();
+  });
+  it("consumes the visible captured undo once", async () => {
+    renderApp(<p>Library</p>);
+    const undo = vi.fn<() => void>();
+    act(() => toast.undo("Moved Model", undo));
+    await screen.findByRole("button", { name: "Undo" });
+    expect(undoLastChange()).toBe(true);
+    expect(undoLastChange()).toBe(false);
+    await waitFor(() => expect(undo).toHaveBeenCalledOnce());
+  });
+  it("retires an Undo captured by an earlier session", async () => {
+    renderApp(<p>Library</p>);
+    const undo = vi.fn<() => void>();
+    act(() => toast.undo("Moved Model", undo));
+    await screen.findByRole("button", { name: "Undo" });
+    act(() => clearLogin());
+    expect(undoLastChange()).toBe(false);
+    expect(undo).not.toHaveBeenCalled();
+  });
+  it("shows recovery when the current captured Undo fails", async () => {
+    renderApp(<p>Library</p>);
+    act(() =>
+      toast.undo("Moved Model", async () => {
+        throw new ApiError(404, "model_not_found", "gone");
+      }),
+    );
+    await screen.findByRole("button", { name: "Undo" });
+    undoLastChange();
+    expect(await screen.findByText("This model no longer exists.")).toBeVisible();
   });
 });
 describe("toastCatch", () => {
