@@ -17,6 +17,49 @@ import { collectPageProblems, useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("printer routes", () => {
+  test("constrains long saved revisions to the picker and queue form", async ({ page }) => {
+    const name = "ContinuousWorkshopModel".repeat(9);
+    const label = "ContinuousRevisionLabel".repeat(5);
+    await page.route("**/api/v1/models/page?**", async (route) => {
+      const response = await route.fetch();
+      const result = await response.json();
+      result.items = result.items.map((item: { id: number }) =>
+        item.id === 1 ? { ...item, name } : item,
+      );
+      await route.fulfill({ response, json: result });
+    });
+    await page.route("**/api/v1/models/1", async (route) => {
+      const response = await route.fetch();
+      const model = await response.json();
+      model.name = name;
+      model.files[1].revision_label = label;
+      await route.fulfill({ response, json: model });
+    });
+    await page.setViewportSize({ width: 800, height: 650 });
+    await page.goto("/printers?tab=queue");
+    await page.getByRole("button", { name: "Add to queue", exact: true }).first().click();
+    await page.getByText("Browse saved Revisions", { exact: true }).click();
+    const picker = page.getByRole("dialog", { name: "Revision", exact: true });
+    await picker.getByRole("button", { name, exact: true }).click();
+    const revision = picker.getByRole("button", { name: new RegExp(label) });
+    await expect(revision).toBeVisible();
+    await expect
+      .poll(() => revision.evaluate((element) => element.scrollWidth - element.clientWidth))
+      .toBeLessThanOrEqual(1);
+    await revision.click();
+    await expect(picker).toBeHidden();
+    const dialog = page.getByRole("dialog", { name: "Add to queue" });
+    await expect(dialog.getByText(name, { exact: true })).toBeVisible();
+    await expect
+      .poll(() =>
+        dialog.locator(".queue-compose-body").evaluate((element) => {
+          return element.scrollWidth - element.clientWidth;
+        }),
+      )
+      .toBeLessThanOrEqual(1);
+    await expect(dialog.getByRole("button", { name: "Save job" })).toBeInViewport();
+  });
+
   test("printer list route loads configured printers through the frontend proxy", async ({
     page,
   }) => {

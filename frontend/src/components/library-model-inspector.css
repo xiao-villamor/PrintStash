@@ -24,8 +24,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 52px;
-  padding: 0 12px 0 16px;
+  min-height: 52px;
+  padding: 8px 12px 8px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--card);
 }
@@ -33,9 +33,11 @@
   flex: 1;
   min-width: 0;
   margin: 0;
+  display: -webkit-box;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   font-size: 16px;
   font-weight: 600;
   outline: none;

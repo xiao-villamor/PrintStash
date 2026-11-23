@@ -462,7 +462,15 @@
 }
 .detail-revisions-table tbody tr:first-child > * {
   padding: 12px 10px 2px;
-  vertical-align: baseline;
+  vertical-align: top;
+}
+.detail-revisions-table tr:first-child > :nth-child(-n + 2),
+.detail-revisions-table .detail-revision-table-note {
+  overflow-wrap: anywhere;
+}
+.detail-revisions-table tr:first-child > td:nth-child(n + 3) {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .detail-revisions-table .detail-revision-table-note {
   padding: 0 10px 12px;
@@ -746,6 +754,7 @@
   min-height: 62px;
 }
 .model-detail-heading > div:first-child {
+  flex: 1 1 min(100%, 22rem);
   min-height: 36px;
   align-items: center;
 }

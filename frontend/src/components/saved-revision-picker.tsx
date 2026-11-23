@@ -53,7 +53,7 @@ export function SavedRevisionPicker({
     ? []
     : (browsed.data?.files.filter((file) => file.file_type === "gcode") ?? []);
   return (
-    <div className="grid gap-2">
+    <div className="grid grid-cols-1 gap-2">
       <label className="text-[13px]" htmlFor={revisionId}>
         {uiText("Revision")}
       </label>
@@ -67,19 +67,24 @@ export function SavedRevisionPicker({
         align="start"
         role="dialog"
         aria-label={uiText("Revision")}
-        className="w-full"
+        className="w-full min-w-0"
         contentClassName="w-[36rem] max-w-[calc(100vw-2rem)] overflow-hidden border border-border bg-popover text-popover-foreground shadow-lg"
         trigger={
           <Button
             id={revisionId}
             type="button"
             variant="outline"
-            className="h-[38px] w-full justify-between border-input text-left text-[13px] font-normal"
+            className="h-[38px] w-full min-w-0 justify-between border-input text-left text-[13px] font-normal"
             aria-haspopup="dialog"
             aria-expanded={pickerOpen}
             onClick={() => onOpenChange(!pickerOpen)}
           >
-            <span className="min-w-0 truncate">
+            <span
+              className="min-w-0 truncate"
+              title={
+                file && chosen.data ? `${chosen.data.name} · ${revisionLabel(file)}` : undefined
+              }
+            >
               {file && chosen.data
                 ? `${chosen.data.name} · ${revisionLabel(file)}`
                 : (emptyLabel ?? uiText("Select"))}
@@ -119,7 +124,7 @@ export function SavedRevisionPicker({
                   <button
                     key={revision.id}
                     type="button"
-                    className="block w-full px-2 py-3 text-left text-sm hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="block w-full wrap-anywhere px-2 py-3 text-left text-sm hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => {
                       onChoose({ modelId: browsedModel.id, fileId: revision.id });
                       setBrowsedModel(null);

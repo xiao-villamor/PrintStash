@@ -138,6 +138,8 @@
 
 ### Fixed
 
+- Long Model names, Revision labels, and G-code filenames fit in the model details, queue dialog, and upload form. Revision numbers and measurements stay together in the revision table.
+
 - OctoPrint shows Resume when a running job is paused externally. PrusaLink records an observed print as completed when the firmware retires its job details at the end of the run.
 
 - The browser extension popup improves contrast, puts credentials before the browser name, and provides keyboard-accessible file selectors that show the selected filename.

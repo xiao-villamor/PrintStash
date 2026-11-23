@@ -453,7 +453,7 @@ export function RevisionsTab({
                   >
                     <tr>
                       <th scope="row">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                           {selecting && (
                             <Checkbox
                               checked={selectedRevisionIds.has(file.id)}
@@ -473,21 +473,21 @@ export function RevisionsTab({
                           <button
                             type="button"
                             data-revision-id={file.id}
-                            className="text-left"
+                            className="min-w-0 wrap-anywhere text-left"
                             aria-pressed={file.id === selectedId}
                             onClick={() => inspect(file.id)}
                           >
-                            <strong>
+                            <strong className="whitespace-nowrap">
                               {uiText("Rev {value1}", {
                                 value1: String(file.gcode_revision_number ?? file.version),
                               })}
                             </strong>
                             {file.revision_label && (
-                              <span className="ml-2 font-normal">{` ${file.revision_label}`}</span>
+                              <span className="ms-2 font-normal">{` ${file.revision_label}`}</span>
                             )}
                           </button>
                           {file.is_recommended && (
-                            <span className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground">
+                            <span className="inline-flex items-center gap-1 whitespace-nowrap text-xs font-normal text-muted-foreground">
                               <Star className="h-3 w-3" />
                               {uiText("Recommended")}
                             </span>
@@ -554,24 +554,28 @@ export function RevisionsTab({
                           <h3
                             data-revision-id={f.id}
                             tabIndex={gcodeFiles.length === 1 ? 0 : undefined}
-                            className="flex flex-wrap items-baseline gap-2 text-xl font-semibold"
+                            className="flex min-w-0 flex-wrap items-baseline gap-2 text-xl font-semibold"
                           >
-                            {uiText("Rev {value1}", {
-                              value1: String(f.gcode_revision_number ?? f.version),
-                            })}
+                            <span className="whitespace-nowrap">
+                              {uiText("Rev {value1}", {
+                                value1: String(f.gcode_revision_number ?? f.version),
+                              })}
+                            </span>
                             {f.revision_status && gcodeFiles.length === 1 && (
                               <span className="rounded border border-border px-2 py-0.5 text-xs font-medium">
                                 {revisionStatusLabel(f.revision_status)}
                               </span>
                             )}
                             {f.is_recommended && (
-                              <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                              <span className="inline-flex items-center gap-1 whitespace-nowrap text-xs font-medium text-muted-foreground">
                                 <Star className="h-3.5 w-3.5" />
                                 {uiText("Recommended")}
                               </span>
                             )}
                             {f.revision_label && (
-                              <span className="font-normal">{f.revision_label}</span>
+                              <span className="min-w-0 wrap-anywhere font-normal">
+                                {f.revision_label}
+                              </span>
                             )}
                           </h3>
                           {onPreview && (

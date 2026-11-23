@@ -125,6 +125,87 @@ test.describe("model detail route", () => {
     await expect(rename).toBeFocused();
   });
 
+  test("keeps long model and revision text within the available space", async ({ page }) => {
+    const name = "Workshop bracket ".repeat(12).trim();
+    const label = "ContinuousRevisionIdentifier".repeat(4);
+    const notes = "ContinuousRevisionNote".repeat(6);
+    await page.route("**/api/v1/models/1", (route) =>
+      route.fulfill({
+        json: aModel({
+          id: 1,
+          name,
+          files: [
+            aRevision({ id: 2, gcode_revision_number: 1, revision_label: "15% infill" }),
+            aRevision({
+              id: 3,
+              version: 3,
+              gcode_revision_number: 2,
+              revision_label: label,
+              revision_notes: notes,
+              is_recommended: true,
+              metadata: aMetadata({ estimated_time_s: 4320, layer_height_mm: 0.2 }),
+            }),
+          ],
+        }),
+      }),
+    );
+    await page.setViewportSize({ width: 800, height: 650 });
+    await page.goto("/");
+    await page.getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true }).click();
+    const inspector = page.locator("#model-drawer");
+    const inspectorTitle = inspector.getByRole("heading", { name, exact: true });
+    await expect(inspectorTitle).toBeVisible();
+    await expect(inspectorTitle).toHaveAttribute("title", name);
+    await expect
+      .poll(() =>
+        inspectorTitle.evaluate((element) =>
+          Math.round(
+            element.clientHeight / Number.parseFloat(getComputedStyle(element).lineHeight),
+          ),
+        ),
+      )
+      .toBe(2);
+    await expect(inspector.getByRole("link", { name: "Open page", exact: true })).toBeVisible();
+    await page.goto("/models/1?tab=revisions");
+    const heading = page.getByRole("heading", { level: 1, name, exact: true });
+    await expect(heading).toBeVisible();
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await sidebar.getAttribute("aria-expanded")) === "false") await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "true");
+    for (const viewport of [
+      { width: 800, height: 650 },
+      { width: 770, height: 630 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await expect.poll(async () => (await heading.boundingBox())?.width ?? 0).toBeGreaterThan(260);
+    }
+
+    await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    const row = page.getByRole("button", { name: new RegExp(label) });
+    await row.click();
+    const revisionHeading = page.getByRole("heading", { name: new RegExp(label) });
+    await expect(revisionHeading).toBeVisible();
+    await expect
+      .poll(() =>
+        revisionHeading.getByText(label, { exact: true }).evaluate((element) => {
+          const panel = element.closest('[role="tabpanel"]')!;
+          return element.getBoundingClientRect().right - panel.getBoundingClientRect().right;
+        }),
+      )
+      .toBeLessThanOrEqual(1);
+    await expect
+      .poll(() =>
+        page.getByRole("table").evaluate((table) => {
+          const time = table.querySelector("tbody:last-child td:nth-child(5)")!;
+          const range = document.createRange();
+          range.selectNodeContents(time);
+          return range.getClientRects().length;
+        }),
+      )
+      .toBe(1);
+  });
+
   test("downloads a rendered toolpath capture", async ({ page }) => {
     const preview = await openToolpath(page);
     const completed = page.waitForEvent("download");

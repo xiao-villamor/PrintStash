@@ -1077,7 +1077,7 @@ function ModelDetailPresentation({
               }}
               className="model-detail-heading flex flex-wrap items-center justify-between px-5 pt-4 pb-2.5 gap-2 bg-background shrink-0"
             >
-              <div className="flex w-full min-w-0 items-start gap-3 md:w-auto md:flex-1 md:gap-4">
+              <div className="flex min-w-0 items-start gap-3 md:gap-4">
                 <div className="min-w-0 flex-1">
                   <InlineTitleEditor
                     title={model.name}
@@ -1158,7 +1158,7 @@ function ModelDetailPresentation({
                 </div>
               </div>
               <div
-                className={`flex items-center gap-2 ${editing ? "w-full justify-end md:w-auto md:self-start" : ""}`}
+                className={`ms-auto flex min-w-0 flex-wrap items-center justify-end gap-2 ${editing ? "w-full md:w-auto md:self-start" : ""}`}
               >
                 <>
                   <Button
