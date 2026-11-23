@@ -35,7 +35,7 @@ async function openToolpath(page: Page) {
   );
   await page.goto("/models/1");
   const preview = page.getByRole("region", { name: "Preview", exact: true });
-  await preview.getByRole("button", { name: "Layers", exact: true }).click();
+  await preview.getByRole("button", { name: "G-code", exact: true }).click();
   await expect(preview.getByRole("button", { name: "Screenshot", exact: true })).toBeEnabled();
   return preview;
 }
@@ -277,6 +277,29 @@ test.describe("model detail route", () => {
         }),
       )
       .toBeLessThanOrEqual(1);
+  });
+
+  test("keeps G-code controls clear of the camera dock in a short window", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const preview = await openToolpath(page);
+    const controls = preview.getByRole("complementary", { name: "Toolpath controls" });
+    const fit = preview.getByRole("button", { name: "Fit to view", exact: true });
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+    await expect(controls.getByRole("spinbutton", { name: "Layer number" })).toBeVisible();
+
+    for (const expanded of [false, true]) {
+      if ((await sidebar.getAttribute("aria-expanded")) !== String(expanded)) {
+        await sidebar.click();
+      }
+      await expect
+        .poll(async () => {
+          const sidebarBox = (await controls.boundingBox())!;
+          const dockBox = (await preview.locator(".detail-viewer-dock").boundingBox())!;
+          return sidebarBox.y + sidebarBox.height - dockBox.y;
+        })
+        .toBeLessThanOrEqual(1);
+      await fit.click({ trial: true });
+    }
   });
 
   test("downloads a rendered toolpath capture", async ({ page }) => {

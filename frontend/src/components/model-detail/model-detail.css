@@ -11,6 +11,7 @@
   overflow: auto;
 }
 .model-detail-visual {
+  container: model-preview / inline-size;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -486,8 +487,19 @@
 }
 /* The grid row owns the canvas height; the shared toolpath layout must not
    extend its larger standalone minimum into the camera dock. */
-.detail-preview-canvas .toolpath-workspace {
+.detail-preview-canvas .toolpath-workspace,
+.detail-preview-canvas .toolpath-viewport {
   min-height: 0;
+}
+@container model-preview (max-width: 28rem) {
+  .model-detail-preview:has(.toolpath-layout) {
+    flex: 1 0 auto;
+    grid-template-rows: auto auto minmax(20rem, max-content) auto auto;
+  }
+  .detail-preview-canvas:has(.toolpath-layout),
+  .detail-preview-canvas .toolpath-layout {
+    height: auto;
+  }
 }
 .detail-viewer-controls {
   display: contents;

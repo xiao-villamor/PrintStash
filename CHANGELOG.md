@@ -14,6 +14,7 @@
 - Model Overview uses larger text and a readable Collection path. File and Revision navigation stays in the inspector tabs.
 - Model Details tabs wrap in narrow inspectors. The Overview places print actions beside the inspected Revision.
 - Source 3MF project settings appear in Print settings, separately from recorded Revision settings.
+- G-code layer controls fit above the camera toolbar in short Model previews.
 - The Model tag editor opens with the tag field focused. Edit details starts at the Name field, aligns the Collection picker, and keeps tag suggestions inside the scrollable editor.
 
 - The Revisions tab shows print results and time in the list. Notes and actions follow the selected Revision, with print setup and G-code file details available on demand.
@@ -31,6 +32,7 @@
 - Open a printer from anywhere on its Fleet card. The roster shows work, routing holds, reported material colors, and available nozzle, bed and part-cooling fan readings alongside recent and queued prints. Fleet totals open the matching queue view or filter printers by readiness. Printer Status distinguishes idle machines from active jobs, shows a rolling history of actual heater readings and the reported part-cooling fan level, and can queue a saved Revision for that printer. Bambu Status groups the printer portrait and reported AMS trays beside the current job, live telemetry and recent runs. The job summary includes available layer counts during a print.
 - Bambu LAN recognizes individually addressed external spools in firmware material reports and keeps their readings separate across incremental MQTT updates.
 - Fleet Queue and Maintenance selects align their text and chevrons in Chromium's native picker. Bambu LAN forwards available nozzle and bed readings, targets and part-cooling fan levels. Moonraker reads the part-cooling fan when configured.
+- Fleet cards keep status and temperatures inside the card with long job names. Fleet activity moves below the cards when horizontal space runs out.
 - Printer details put machine controls, job actions and live feedback beside the heater graph. Hotend and bed history use aligned plots on a shared scale. Moonraker includes available controller history and shows material presets before you send a preheat command. The bed surface shows measured heights and variation, and operators with an automatic probe can measure the bed from the dashboard.
 - Completed Vault prints have a **Queue again** action in Jobs. It opens the ordinary queue form with the original Revision, plate and printer selected.
 - Printer Files has a folder explorer and searchable inventory. Operators can upload a saved Revision directly to the selected printer and inspect the transferred file before starting it. Jobs shows outcomes and durations, with the selected run’s evidence and actions alongside it. Both show the Model name for matched files. Materials & maintenance brings loaded feeds, service history and routing together. Diagnostics shows individual check results, and Settings tracks unsaved changes.
