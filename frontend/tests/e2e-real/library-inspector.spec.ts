@@ -125,8 +125,9 @@ test.describe("Library inline inspector", () => {
       await page.reload();
       await modelCard(page, name).click();
       await drawer.getByRole("tab", { name: /History/ }).click();
-      await expect(historyPanel.getByText(note, { exact: true })).toBeVisible();
-      await expect(historyPanel.getByText(new RegExp(printerName))).toBeVisible();
+      const recorded = historyPanel.getByRole("list");
+      await expect(recorded.getByText(note, { exact: true })).toBeVisible();
+      await expect(recorded.getByText(new RegExp(printerName))).toBeVisible();
     } finally {
       if (modelId !== null) {
         expect((await page.request.delete(`/api/v1/models/${modelId}`)).ok()).toBe(true);
