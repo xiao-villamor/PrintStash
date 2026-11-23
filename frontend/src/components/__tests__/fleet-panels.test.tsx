@@ -289,6 +289,39 @@ describe("FleetQueuePanel", () => {
     expect(list.queryByText("next.gcode")).toBeNull();
   });
 
+  it("shows reported time remaining before progress arrives", () => {
+    const printer = makePrinter();
+    renderQueuePanel({
+      printers: [printer],
+      summary: makeSummary({
+        printers: [
+          {
+            printer_id: printer.id,
+            name: printer.name,
+            group: null,
+            status: "printing",
+            progress: null,
+            remaining_minutes: 0,
+            loaded_slots: [],
+            nozzle_diameter_mm: null,
+            current_job_id: null,
+            current_job_name: "tool.gcode",
+            current_priority: null,
+            next_job_id: null,
+            next_job_name: null,
+            next_priority: null,
+            drain_mode: false,
+            maintenance: false,
+            pending_operator_release: false,
+          },
+        ],
+      }),
+    });
+    const board = within(screen.getByRole("table", { name: "Farm dispatch" }));
+    expect(board.getByText("0 min remaining")).toBeVisible();
+    expect(board.queryByRole("progressbar")).toBeNull();
+  });
+
   it("switches the visible queue scope", async () => {
     renderQueuePanel({
       jobs: [

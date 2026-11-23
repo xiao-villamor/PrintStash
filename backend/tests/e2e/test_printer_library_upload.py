@@ -62,7 +62,7 @@ class TestUploadFromLibrary:
             running.stop()
 
     @pytest.mark.asyncio
-    async def test_bambu_upload_then_sync_preserves_revision_and_external_project(
+    async def test_bambu_sync_reconciles_a_library_upload_in_a_populated_cache(
         self, api, superuser_headers, e2e_db, bambu_cache
     ) -> None:
         printer, ftp, _, sim = bambu_cache

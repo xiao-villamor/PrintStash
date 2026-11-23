@@ -201,10 +201,14 @@ function FarmDispatchBoard({
                       {uiText("Review active job")}
                     </Button>
                   )}
-                  {percent != null && (
+                  {running && (percent != null || row.remaining_minutes != null) && (
                     <div className="farm-job-progress">
-                      <progress aria-label={uiText("Progress")} value={percent} max={100} />
-                      <span>{percent}%</span>
+                      {percent != null && (
+                        <>
+                          <progress aria-label={uiText("Progress")} value={percent} max={100} />
+                          <span>{percent}%</span>
+                        </>
+                      )}
                       {row.remaining_minutes != null && (
                         <small>
                           {uiText("{value1} min remaining", { value1: row.remaining_minutes })}

@@ -252,7 +252,7 @@ class TestDownloadArtifact:
 
 class TestStart:
     @pytest.mark.asyncio
-    async def test_project_command_encodes_the_cache_name_and_selects_the_exact_member(
+    async def test_addresses_the_selected_plate_in_the_cached_project(
         self,
     ):
         sent = []
@@ -283,7 +283,7 @@ class TestStart:
         assert not sent
 
     @pytest.mark.asyncio
-    async def test_starts_nested_text_gcode_and_declines_project_archives(self):
+    async def test_plain_start_accepts_only_text_toolpaths(self):
         sent = []
         client = make_client()
         client._send_command = _recorder(sent)  # type: ignore[method-assign]

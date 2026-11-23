@@ -50,7 +50,7 @@ def slots_by_key(status: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 class TestNormalizeStatus:
-    def test_reports_chamber_storage_and_remaining_time_independently(self):
+    def test_normalizes_optional_machine_telemetry_independently(self):
         client = make_client()
         report = client._normalize_status(
             {

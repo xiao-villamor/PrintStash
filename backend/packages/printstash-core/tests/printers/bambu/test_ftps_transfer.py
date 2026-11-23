@@ -614,55 +614,56 @@ class TestDownloadViaFtps:
         assert attempts == 1
 
 
-def test_implicit_connection_keeps_configured_timeout(monkeypatch):
-    timeouts = []
+class TestImplicitConnection:
+    def test_implicit_connection_keeps_configured_timeout(self, monkeypatch):
+        timeouts = []
 
-    def connect(address, timeout, *, source_address):
-        timeouts.append(timeout)
-        raise TimeoutError
+        def connect(address, timeout, *, source_address):
+            timeouts.append(timeout)
+            raise TimeoutError
 
-    monkeypatch.setattr(socket, "create_connection", connect)
-    with pytest.raises(TimeoutError):
-        make_client()._ftps_client().connect(HOST, 990)
-    assert timeouts == [30]
-
-
-@pytest.mark.asyncio
-async def test_cache_inventory_uses_private_channel_and_keeps_nested_names():
-    class Listing(FakeFtpsClient):
-        def retrlines(self, command, collect):
-            entries = {
-                "LIST cache": [
-                    "drwxr-xr-x 1 bblp ftp 0 Nov 10 10:00 Parts",
-                    "-rw-r--r-- 1 bblp ftp 0 Nov 10 10:00 empty.gcode",
-                    "lrwxrwxrwx 1 bblp ftp 7 Nov 10 10:00 link -> outside",
-                    "-rw-r--r-- 1 bblp ftp 1 Nov 10 10:00 notes.txt",
-                ],
-                "LIST cache/Parts": [
-                    "-rw-r--r-- 1 bblp ftp 120 Nov 10 10:00 Test plate.3mf"
-                ],
-            }
-            for entry in entries[command]:
-                collect(entry)
-
-    ftp = Listing()
-    inventory = await make_client(ftps_client_factory=lambda: ftp).list_files()
-    assert inventory == [
-        {"path": "empty.gcode", "size": 0},
-        {"path": "Parts/Test plate.3mf", "size": 120},
-    ]
-    assert ("prot_p",) in ftp.calls
+        monkeypatch.setattr(socket, "create_connection", connect)
+        with pytest.raises(TimeoutError):
+            make_client()._ftps_client().connect(HOST, 990)
+        assert timeouts == [30]
 
 
-@pytest.mark.asyncio
-async def test_unrecognized_listing_fails_instead_of_reconciling_partial_inventory():
-    class PartialList(FakeFtpsClient):
-        def retrlines(self, command, collect):
-            collect("-rw-r--r-- 1 bblp ftp 4 Nov 10 10:00 first.gcode")
-            collect("unable to enumerate remaining files")
+class TestCacheInventory:
+    @pytest.mark.asyncio
+    async def test_reads_the_printable_cache_tree(self):
+        class Listing(FakeFtpsClient):
+            def retrlines(self, command, collect):
+                entries = {
+                    "LIST cache": [
+                        "drwxr-xr-x 1 bblp ftp 0 Nov 10 10:00 Parts",
+                        "-rw-r--r-- 1 bblp ftp 0 Nov 10 10:00 empty.gcode",
+                        "lrwxrwxrwx 1 bblp ftp 7 Nov 10 10:00 link -> outside",
+                        "-rw-r--r-- 1 bblp ftp 1 Nov 10 10:00 notes.txt",
+                    ],
+                    "LIST cache/Parts": [
+                        "-rw-r--r-- 1 bblp ftp 120 Nov 10 10:00 Test plate.3mf"
+                    ],
+                }
+                for entry in entries[command]:
+                    collect(entry)
 
-    ftp = PartialList()
-    client = make_client(ftps_client_factory=lambda: ftp)
-    with pytest.raises(ProviderError, match="bambu_inventory_invalid_listing"):
-        await client.list_files()
-    assert ftp.calls[-1] == ("quit",)
+        ftp = Listing()
+        inventory = await make_client(ftps_client_factory=lambda: ftp).list_files()
+        assert inventory == [
+            {"path": "empty.gcode", "size": 0},
+            {"path": "Parts/Test plate.3mf", "size": 120},
+        ]
+        assert ("prot_p",) in ftp.calls
+
+    @pytest.mark.asyncio
+    async def test_rejects_an_incomplete_listing(self):
+        class PartialList(FakeFtpsClient):
+            def retrlines(self, command, collect):
+                collect("-rw-r--r-- 1 bblp ftp 4 Nov 10 10:00 first.gcode")
+                collect("unable to enumerate remaining files")
+
+        ftp = PartialList()
+        client = make_client(ftps_client_factory=lambda: ftp)
+        with pytest.raises(ProviderError, match="bambu_inventory_invalid_listing"):
+            await client.list_files()
+        assert ftp.calls[-1] == ("quit",)
