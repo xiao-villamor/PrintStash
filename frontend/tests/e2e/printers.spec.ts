@@ -78,6 +78,39 @@ test.describe("printer routes", () => {
     expect(problems).toEqual([]);
   });
 
+  for (const theme of ["dark", "light"] as const) {
+    test(`uses a theme-appropriate printer artwork background in ${theme} mode`, async ({
+      page,
+    }) => {
+      await page.addInitScript((mode) => {
+        localStorage.setItem("printstash.theme", mode);
+        localStorage.setItem("printstash.printer-card.show-image", "true");
+      }, theme);
+      await page.route("**/api/v1/printers", async (route) => {
+        const response = await route.fetch();
+        const [printer] = await response.json();
+        await route.fulfill({ response, json: [{ ...printer, model_name: "Bambu Lab P1S" }] });
+      });
+      await page.goto("/printers");
+      const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+      if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+      const artwork = page.getByRole("img", { name: "Bambu Lab P1S printer" });
+      await expect(artwork).toBeVisible();
+      const pane = artwork.locator("..");
+      await pane.screenshot({ path: test.info().outputPath(`printer-artwork-${theme}.png`) });
+      const color = await page.evaluate((mode) => {
+        const sample = document.createElement("div");
+        sample.style.backgroundColor =
+          mode === "dark" ? "var(--muted)" : "var(--preview-image-matte)";
+        document.body.append(sample);
+        const value = getComputedStyle(sample).backgroundColor;
+        sample.remove();
+        return value;
+      }, theme);
+      await expect(pane).toHaveCSS("background-color", color);
+    });
+  }
+
   test("fleet cards contain telemetry when a job has a long filename", async ({ page }) => {
     const currentJob = `workshop-${"continuous-filename-".repeat(10)}.gcode.3mf`;
     await page.addInitScript(() =>
