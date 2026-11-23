@@ -100,7 +100,10 @@ test.describe("tags", () => {
     const deleted = page.waitForResponse(
       (response) => /\/tags\/\d+$/.test(response.url()) && response.request().method() === "DELETE",
     );
-    await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
+    await page
+      .getByRole("dialog", { name: "Delete tag?" })
+      .getByRole("button", { name: "Delete", exact: true })
+      .click();
     expect((await deleted).ok()).toBe(true);
     await expect(del).toHaveCount(0);
     const persisted = await (await page.request.get(`/api/v1/models/${id}`)).json();
