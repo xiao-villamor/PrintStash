@@ -280,9 +280,10 @@ test.describe("model detail route", () => {
   });
 
   test("keeps G-code controls clear of the camera dock in a short window", async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.setViewportSize({ width: 1280, height: 600 });
     const preview = await openToolpath(page);
     const controls = preview.getByRole("complementary", { name: "Toolpath controls" });
+    const viewport = preview.locator(".toolpath-viewport");
     const fit = preview.getByRole("button", { name: "Fit to view", exact: true });
     const sidebar = page.getByRole("button", { name: "Toggle sidebar", exact: true });
     await expect(controls.getByRole("spinbutton", { name: "Layer number" })).toBeVisible();
@@ -294,8 +295,12 @@ test.describe("model detail route", () => {
       await expect
         .poll(async () => {
           const sidebarBox = (await controls.boundingBox())!;
+          const viewportBox = (await viewport.boundingBox())!;
           const dockBox = (await preview.locator(".detail-viewer-dock").boundingBox())!;
-          return sidebarBox.y + sidebarBox.height - dockBox.y;
+          return (
+            Math.max(sidebarBox.y + sidebarBox.height, viewportBox.y + viewportBox.height) -
+            dockBox.y
+          );
         })
         .toBeLessThanOrEqual(1);
       await fit.click({ trial: true });
@@ -351,12 +356,11 @@ test.describe("model detail route", () => {
     const preview = await openToolpath(page);
     const canvas = preview.locator("canvas");
     const before = await canvas.screenshot();
+    const top = preview.getByRole("button", { name: "Top", exact: true });
 
-    await preview.getByRole("combobox", { name: "Camera view", exact: true }).selectOption("top");
+    await top.click();
 
-    await expect(preview.getByRole("combobox", { name: "Camera view", exact: true })).toHaveValue(
-      "top",
-    );
+    await expect(top).toHaveAttribute("aria-pressed", "true");
     await expect.poll(async () => (await canvas.screenshot()).equals(before)).toBe(false);
   });
 
@@ -364,7 +368,8 @@ test.describe("model detail route", () => {
     const preview = await openToolpath(page);
     const canvas = preview.locator("canvas");
     const isometric = await canvas.screenshot();
-    await preview.getByRole("combobox", { name: "Camera view", exact: true }).selectOption("top");
+    const topView = preview.getByRole("button", { name: "Top", exact: true });
+    await topView.click();
     await expect.poll(async () => (await canvas.screenshot()).equals(isometric)).toBe(false);
     const slider = preview.getByRole("slider", { name: "Current layer" });
     const last = await slider.getAttribute("max");
@@ -375,9 +380,7 @@ test.describe("model detail route", () => {
     await slider.fill(last!);
 
     await expect.poll(async () => (await canvas.screenshot()).equals(top)).toBe(true);
-    await expect(preview.getByRole("combobox", { name: "Camera view", exact: true })).toHaveValue(
-      "top",
-    );
+    await expect(topView).toHaveAttribute("aria-pressed", "true");
   });
 
   test("restores the isometric fit after isolating a toolpath layer", async ({ page }) => {
@@ -393,10 +396,11 @@ test.describe("model detail route", () => {
     );
     await expect.poll(async () => (await canvas.screenshot()).equals(all)).toBe(false);
 
-    await preview.getByRole("combobox", { name: "Camera view", exact: true }).selectOption("top");
+    await preview.getByRole("button", { name: "Top", exact: true }).click();
     await preview.getByRole("button", { name: "Fit to view", exact: true }).click();
-    await expect(preview.getByRole("combobox", { name: "Camera view", exact: true })).toHaveValue(
-      "isometric",
+    await expect(preview.getByRole("button", { name: "Isometric", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
   });
 
