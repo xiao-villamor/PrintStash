@@ -42,6 +42,8 @@ SMALL_BY_NATURE = {
     "/api/v1/notifications/channels": "configured notification channels",
     "/api/v1/printer-profiles": "configured printer profiles",
     "/api/v1/printers": "the printers on one install",
+    "/api/v1/printers/{printer_id}/console": "latest 100 Moonraker console entries",
+    "/api/v1/printers/{printer_id}/macros": "macros configured on one Klipper printer",
     "/api/v1/printers/{printer_id}/permissions": "grants on one printer",
     "/api/v1/provider-connections": "configured provider connections",
     "/api/v1/saved-views": "one user's saved views",

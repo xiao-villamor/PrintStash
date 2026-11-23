@@ -257,7 +257,10 @@ class TestKlipperConsole:
         printer = make_printer()
         base = f"/api/v1/printers/{printer.id}/console"
         controller[1]["/printer/gcode/script?script=M105"] = {"result": "ok"}
-        entries = [{"time": 100.0, "type": "response", "message": "T:22"}]
+        entries = [
+            {"time": float(i), "type": "response", "message": f"T:{i}"}
+            for i in range(101)
+        ]
         controller[1]["/server/gcode_store?count=100"] = {
             "result": {"gcode_store": entries}
         }
@@ -267,7 +270,7 @@ class TestKlipperConsole:
             ).status_code
             == 204
         )
-        assert client.get(base, headers=auth_headers).json() == entries
+        assert client.get(base, headers=auth_headers).json() == entries[1:]
 
     @pytest.mark.parametrize(
         ("endpoint", "path"),
