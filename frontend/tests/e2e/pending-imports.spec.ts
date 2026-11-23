@@ -9,8 +9,7 @@ import { collectPageProblems, useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("pending imports", () => {
-  test("desktop Pending opens its review panel on nested routes", async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 800 });
+  test("desktop Pending sidebar links to the full inbox", async ({ page }) => {
     for (const route of ["/", "/inbox/41"]) {
       await page.goto(route);
       const pending = page
@@ -18,8 +17,16 @@ test.describe("pending imports", () => {
         .getByRole("link", { name: "Pending", exact: true });
       await pending.click();
       await expect(pending).toHaveAttribute("aria-expanded", "true");
-      await expect(page.getByRole("complementary", { name: "Pending Imports" })).toBeVisible();
+      const sidebar = page.getByRole("complementary", { name: "Pending Imports" });
+      await expect(sidebar.getByText("No imports in the queue")).toBeVisible();
       await expect(page).toHaveURL((url) => url.pathname === route);
+
+      await sidebar.getByRole("link", { name: "Open inbox" }).click();
+      await expect(page).toHaveURL((url) => url.pathname === "/inbox");
+      const main = page.getByRole("main");
+      await expect(main.getByRole("heading", { name: "Pending Imports" })).toBeVisible();
+      await expect(main.getByRole("button", { name: "Add URL" })).toBeVisible();
+      await expect(main.getByRole("tab", { name: /Completed/ })).toBeVisible();
     }
   });
 

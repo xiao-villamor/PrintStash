@@ -1,7 +1,7 @@
 /** Captures recover original bytes, expose their profiles and keep geometry evidence advisory. */
 import { randomUUID } from "node:crypto";
 import { test, expect } from "./helpers";
-import { stlFor } from "./util";
+import { collapseNavigationSidebar, stlFor } from "./util";
 import { captureSequentialFiles } from "../../../browser-extension/sequential-capture";
 import { claimBrowserPairing } from "../../../browser-extension/core";
 
@@ -55,7 +55,15 @@ test.describe("inbox-capture", () => {
     await expect.poll(async () => (await read()).state, { timeout: 30000 }).toBe("completed");
     const item = await read();
     expect(item.resulting_model_id).toBeGreaterThan(0);
-    await page.goto("/inbox");
+    await page.goto("/");
+    await collapseNavigationSidebar(page);
+    await page
+      .getByRole("navigation", { name: "Navigation" })
+      .getByRole("link", { name: "Pending", exact: true })
+      .click();
+    const sidebar = page.getByRole("complementary", { name: "Pending Imports" });
+    await sidebar.getByRole("link", { name: "Open inbox" }).click();
+    await expect(page).toHaveURL(/\/inbox$/);
     await page.getByRole("tab", { name: /Completed/ }).click();
     const row = page.locator("li").filter({ hasText: `Quick capture ${publication}` });
     await expect(row.getByRole("link", { name: "Open model" })).toHaveAttribute(

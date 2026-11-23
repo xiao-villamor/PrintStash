@@ -10,6 +10,10 @@ to AuditLog.
 
 ## Pending Imports
 
+On desktop, select **Pending** in the sidebar, then **Open inbox** to reach the
+full queue, **Add URL**, and completed imports. The link is available even when
+the queue is empty.
+
 Pending Imports (`/inbox`) stores a capture before any Model or Artifact exists.
 Paste a supported URL or use the browser extension, then review its title,
 selected files, destination Collection, and tags before adding anything to the
