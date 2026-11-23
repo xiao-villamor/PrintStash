@@ -308,7 +308,9 @@ describe("PrinterCard", () => {
   it("switches to global queue empty state", async () => {
     renderPrintersPage();
     await userEvent.click(screen.getByRole("tab", { name: "Queue" }));
-    expect(screen.getByText("No jobs match these filters.")).toBeInTheDocument();
+    const queue = within(screen.getByRole("region", { name: "Queued print jobs" }));
+    expect(queue.getByText("The queue is empty")).toBeVisible();
+    expect(queue.getByRole("button", { name: "Add to queue" })).toBeEnabled();
   });
 
   it("summarizes fleet health and filters by printer group", async () => {
