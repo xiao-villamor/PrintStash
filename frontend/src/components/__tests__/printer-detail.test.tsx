@@ -966,7 +966,7 @@ describe("PrinterDetailPage", () => {
       expect(screen.getByRole("region", { name: "Reported values" })).toHaveTextContent("voron");
     });
 
-    it("keeps provider errors in the reported view and retries there", async () => {
+    it("retries a failed provider request from the reported configuration view", async () => {
       const user = userEvent.setup();
       const gate = Promise.withResolvers<Response>();
       const read = vi
