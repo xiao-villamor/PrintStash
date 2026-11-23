@@ -593,7 +593,12 @@ describe("ModelDetail", () => {
         model: aModel({ collection: "parts/brackets", collection_label: "Parts/Brackets" }),
       });
 
-      expect(await screen.findByText("Parts/Brackets")).toBeVisible();
+      const path = await screen.findByRole("list", { name: "Collection" });
+      expect(
+        within(path)
+          .getAllByRole("listitem")
+          .map((item) => item.textContent),
+      ).toEqual(["Parts", "Brackets"]);
       expect(
         requests().filter(
           (call) => new URL(call.url, "http://test").pathname === "/api/v1/collections",
@@ -631,7 +636,7 @@ describe("ModelDetail", () => {
       expect(screen.queryByText(/Large 3D preview/)).not.toBeInTheDocument();
     });
 
-    it("shows resin print facts on Overview", async () => {
+    it("shows resin print facts in Print settings", async () => {
       renderDetail({
         model: aModel({
           files: [
@@ -643,6 +648,7 @@ describe("ModelDetail", () => {
           ],
         }),
       });
+      await userEvent.click(await screen.findByRole("tab", { name: "Print settings" }));
       expect(await screen.findByText("2.5 ml", { exact: true })).toBeVisible();
       expect(screen.getByText("120", { exact: true })).toBeVisible();
       expect(screen.getByText("2.5 s", { exact: true })).toBeVisible();
@@ -1129,7 +1135,7 @@ describe("ModelDetail", () => {
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     });
 
-    it("offers direct tag editing in the header", async () => {
+    it("offers direct tag editing in the overview", async () => {
       renderDetail();
 
       expect(await screen.findByRole("button", { name: "Add tags to Benchy" })).toBeVisible();

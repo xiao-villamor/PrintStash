@@ -1151,7 +1151,7 @@ function FileSlot({
           {file ? (
             <div className="flex w-full min-w-0 items-center gap-2">
               <FileIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate text-left text-xs font-medium">
+              <span className="min-w-0 flex-1 wrap-anywhere text-left text-xs font-medium">
                 {file.name}
               </span>
               <span className="shrink-0 font-mono text-3xs text-muted-foreground">

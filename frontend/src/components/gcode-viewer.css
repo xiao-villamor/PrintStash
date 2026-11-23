@@ -81,6 +81,15 @@
   gap: 0.375rem;
 }
 
+.toolpath-layer-entry input {
+  appearance: textfield;
+  padding-inline: 0.25rem;
+}
+
+.toolpath-layer-entry input::-webkit-inner-spin-button {
+  appearance: none;
+}
+
 .toolpath-layer-slider {
   width: 100%;
   min-height: 1.5rem;

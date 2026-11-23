@@ -48,6 +48,11 @@ afterEach(() => {
 });
 
 describe("ModelTagsDialog", () => {
+  it("focuses the tag search when opened", () => {
+    renderDialog();
+    expect(screen.getByRole("combobox", { name: "Find or create tag" })).toHaveFocus();
+  });
+
   it("publishes the confirmed tag version", async () => {
     const user = userEvent.setup();
     function Harness() {
@@ -196,7 +201,7 @@ describe("ModelTagsDialog conflict recovery", () => {
     await user.click(screen.getByRole("button", { name: "Save tags" }));
     expect(await screen.findByRole("button", { name: "Review latest version" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Save tags" })).toBeDisabled();
-    expect(screen.getByText("No tags assigned yet.")).toBeVisible();
+    expect(screen.queryByRole("group", { name: "Tags" })).toBeNull();
     expect(result.requestsWithMethod("POST")).toHaveLength(1);
   });
 
@@ -253,7 +258,7 @@ describe("ModelTagsDialog conflict recovery", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Review latest version" })).toBeEnabled(),
     );
-    expect(screen.getByText("No tags assigned yet.")).toBeVisible();
+    expect(screen.queryByRole("group", { name: "Tags" })).toBeNull();
     expect(screen.getByRole("button", { name: "Save tags" })).toBeDisabled();
   });
 

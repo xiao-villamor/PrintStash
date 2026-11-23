@@ -116,29 +116,15 @@ test.describe("Existing Model review", () => {
               expect(tray!.y + tray!.height).toBeLessThanOrEqual(frame!.y + frame!.height);
               await capturePanel(label.toLowerCase().replaceAll(" ", "-"));
               if (label === "Overview") {
-                const sections = [
-                  inspector.getByRole("heading", { name: "Print setup" }),
-                  inspector.getByRole("table", { name: "Plate estimates" }),
-                  inspector.getByRole("button", { name: "Download", exact: true }),
-                  inspector.getByRole("heading", { name: "Recorded prints" }),
-                  inspector.locator("summary").filter({ hasText: "G-code file" }),
-                ];
-                let previousBottom = Number.NEGATIVE_INFINITY;
-                for (const section of sections) {
-                  const bounds = await section.boundingBox();
-                  expect(bounds).toBeTruthy();
-                  expect(bounds!.y).toBeGreaterThanOrEqual(previousBottom);
-                  previousBottom = bounds!.y + bounds!.height;
-                }
-                const disclosure = sections[sections.length - 1];
-                const fileSize = inspector.getByText("File size", { exact: true });
-                await expect(fileSize).toBeHidden();
-                await disclosure.focus();
-                await disclosure.press("Enter");
-                await expect(fileSize).toBeVisible();
-                await capturePanel("overview-file-details");
-                await disclosure.press("Enter");
-                await expect(fileSize).toBeHidden();
+                await expect(
+                  inspector.getByRole("heading", { name: "About this model" }),
+                ).toBeVisible();
+                await expect(
+                  inspector.getByRole("button", { name: /Recommended revision/ }),
+                ).toBeVisible();
+                await expect(
+                  inspector.getByRole("button", { name: "Send to printer", exact: true }),
+                ).toHaveCount(0);
               }
             }
             await inspector.getByRole("button", { name: "Filters", exact: true }).click();
@@ -344,7 +330,7 @@ test.describe("Existing Model review", () => {
 
             for (const [origin, triggerName, backName] of [
               ["Files", "Compare", "Back to files"],
-              ["Overview", "Compare revisions", "Back to overview"],
+              ["Print settings", "Compare", "Back to print settings"],
             ] as const) {
               await tab(origin);
               const trigger = inspector.getByRole("button", { name: triggerName, exact: true });
@@ -355,16 +341,15 @@ test.describe("Existing Model review", () => {
             }
 
             // ── Inspect dialogs without saving, uploading, sharing or starting prints ──
-            await page.getByRole("button", { name: /^Source files \(\d+\)$/ }).click();
-            await expect(inspector).toBeFocused();
-            await page.getByRole("button", { name: /^G-code revisions \(\d+\)$/ }).click();
-            await expect(inspector).toBeFocused();
+            await tab("Files");
+            await tab("Revisions");
             await page.getByRole("button", { name: "More model actions", exact: true }).click();
             await review.capture("model-actions-menu");
             await page.getByRole("menuitem", { name: "Edit details" }).click();
             await review.capture("model-details-editor");
             await dismiss();
             await expect(revisionTab).toHaveAttribute("aria-selected", "true");
+            await tab("Overview");
             await page
               .getByRole("button", {
                 name: `${model.tags.length ? "Edit" : "Add"} tags ${model.tags.length ? "for" : "to"} ${model.name}`,
@@ -413,9 +398,11 @@ test.describe("Existing Model review", () => {
             }
             await queue.click();
             const send = page.getByRole("dialog");
-            await expect(send.getByLabel("Sliced plate")).toHaveValue(
-              String(slicedPlates.plates[1]),
-            );
+            const plateOption = (number: number) =>
+              send.getByRole("group", { name: "Sliced plate", exact: true }).getByRole("radio", {
+                name: new RegExp("^Plate " + String(number).padStart(2, "0") + "\\b"),
+              });
+            await expect(plateOption(slicedPlates.plates[1])).toBeChecked();
             const copies = send.getByRole("spinbutton", { name: "Copies" });
             const submitQueue = send.getByRole("button", { name: "Add to queue", exact: true });
             const evidence = send.getByLabel("Queue details");
@@ -423,7 +410,7 @@ test.describe("Existing Model review", () => {
             if (sliced!.revision_status === "needs_test")
               await expect(evidence.getByText("Needs test", { exact: true })).toBeVisible();
             for (const number of slicedPlates.plates.slice(0, 2)) {
-              await send.getByLabel("Sliced plate").selectOption(String(number));
+              await plateOption(number).check();
               for (const value of expectedEstimates.get(number)!) {
                 await expect(evidence.getByText(value, { exact: true }).first()).toBeVisible();
               }
@@ -445,22 +432,16 @@ test.describe("Existing Model review", () => {
               await setupPage.close();
               await page.bringToFront();
               await expect(copies).toHaveValue("2");
-              await expect(send.getByLabel("Sliced plate")).toHaveValue(
-                String(slicedPlates.plates[1]),
-              );
+              await expect(plateOption(slicedPlates.plates[1])).toBeChecked();
             }
             await review.capture("queue-inspected-plate");
             await send.getByRole("radio", { name: "Send now", exact: true }).check();
-            await expect(send.getByLabel("Sliced plate")).toHaveValue(
-              String(slicedPlates.plates[1]),
-            );
+            await expect(plateOption(slicedPlates.plates[1])).toBeChecked();
             await expect(
               send.getByRole("button", { name: "Send to printer", exact: true }),
             ).toBeDisabled();
             await review.capture("send-inspected-plate");
-            await send
-              .getByRole("combobox", { name: "Sliced plate", exact: true })
-              .selectOption(String(slicedPlates.plates[1]));
+            await plateOption(slicedPlates.plates[1]).check();
             await review.capture("send-plate-selected");
             await send.getByRole("radio", { name: "Add to queue", exact: true }).check();
             await expect(send.getByRole("heading", { name: /^Queue Rev / })).toBeVisible();
@@ -504,6 +485,7 @@ test.describe("Existing Model review", () => {
             await capturePanel("source-recovered");
           } else {
             // ── Source plates: capture before/after Fit instead of hiding framing faults ──
+            await tab("Source info");
             await expect(
               page.getByRole("heading", { name: "Whole source geometry", exact: true }),
             ).toBeVisible();

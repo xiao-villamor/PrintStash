@@ -21,7 +21,7 @@ import { readFile } from "node:fs/promises";
 
 import { collectPageProblems, useMockApi } from "./_setup";
 import type { ModelRead } from "../../src/types/models";
-import { aDerivative, aMetadata, aModel, aRevision } from "../../src/test-support/factories";
+import { aDerivative, aMetadata, aModel, aRevision, aTag } from "../../src/test-support/factories";
 
 useMockApi();
 
@@ -35,12 +35,69 @@ async function openToolpath(page: Page) {
   );
   await page.goto("/models/1");
   const preview = page.getByRole("region", { name: "Preview", exact: true });
-  await preview.getByRole("button", { name: "Layers", exact: true }).click();
+  await preview.getByRole("button", { name: "G-code", exact: true }).click();
   await expect(preview.getByRole("button", { name: "Screenshot", exact: true })).toBeEnabled();
   return preview;
 }
 
 test.describe("model detail route", () => {
+  test("keeps tag suggestions reachable in a short details editor", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 650 });
+    await page.route("**/api/v1/tags", (route) =>
+      route.fulfill({ json: [aTag({ name: "Short-editor tag" })] }),
+    );
+    await page.goto("/models/1");
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: "Edit Model details" });
+    const search = editor.getByRole("combobox", { name: "Model tags" });
+    await search.fill("short-editor");
+    const option = editor.getByRole("option", { name: /^Short-editor tag/ });
+    await option.scrollIntoViewIfNeeded();
+    await expect(option).toBeInViewport({ ratio: 0.95 });
+    await option.click();
+    await expect(editor.getByRole("button", { name: "Remove Short-editor tag" })).toBeVisible();
+  });
+
+  test("aligns the collection picker chevron with its path", async ({ page }) => {
+    const collectionLabel = "Parts/Brackets";
+    await page.route("**/api/v1/models/1", (route) =>
+      route.fulfill({
+        json: aModel({ id: 1, collection: "parts/brackets", collection_label: collectionLabel }),
+      }),
+    );
+    await page.goto("/models/1");
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: "Edit Model details" });
+    const collection = editor.getByRole("button", { name: collectionLabel, exact: true });
+    const offset = await collection.evaluate((element) => {
+      const path = element.querySelector("span[title]")?.getBoundingClientRect();
+      const icon = element.querySelector("svg")?.getBoundingClientRect();
+      if (!path || !icon) throw new Error("Missing collection path or chevron");
+      return Math.abs(icon.y + icon.height / 2 - path.y - path.height / 2);
+    });
+    expect(offset).toBeLessThanOrEqual(1);
+  });
+
+  test("keeps the details save button clear of overlays", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/models/1");
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: "Edit Model details" });
+    const save = editor.getByRole("button", { name: "Save changes", exact: true });
+    await expect(save).toBeEnabled();
+    await expect
+      .poll(() =>
+        save.evaluate((element) => {
+          const { left, right, top, bottom } = element.getBoundingClientRect();
+          const midY = (top + bottom) / 2;
+          return [left + 8, (left + right) / 2, right - 8].every((x) =>
+            element.contains(document.elementFromPoint(x, midY)),
+          );
+        }),
+      )
+      .toBe(true);
+  });
+
   test("renders prototype card actions outside the navigation link", async ({ page }) => {
     const problems = await collectPageProblems(page);
     await page.setViewportSize({ width: 1440, height: 1000 });
@@ -125,6 +182,131 @@ test.describe("model detail route", () => {
     await expect(rename).toBeFocused();
   });
 
+  test("fits long text into the model details workflow at narrow widths", async ({ page }) => {
+    const name = "Workshop bracket ".repeat(12).trim();
+    const label = "ContinuousRevisionIdentifier".repeat(4);
+    const notes = "ContinuousRevisionNote".repeat(6);
+    await page.route("**/api/v1/models/1", (route) =>
+      route.fulfill({
+        json: aModel({
+          id: 1,
+          name,
+          files: [
+            aRevision({ id: 2, gcode_revision_number: 1, revision_label: "15% infill" }),
+            aRevision({
+              id: 3,
+              version: 3,
+              gcode_revision_number: 2,
+              revision_label: label,
+              revision_notes: notes,
+              is_recommended: true,
+              metadata: aMetadata({ estimated_time_s: 4320, layer_height_mm: 0.2 }),
+            }),
+          ],
+        }),
+      }),
+    );
+    await page.setViewportSize({ width: 800, height: 650 });
+    await page.goto("/");
+    await page.getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true }).click();
+    const inspector = page.locator("#model-drawer");
+    const inspectorTitle = inspector.getByRole("heading", { name, exact: true });
+    await expect(inspectorTitle).toBeVisible();
+    await expect(inspectorTitle).toHaveAttribute("title", name);
+    await expect
+      .poll(() =>
+        inspectorTitle.evaluate((element) =>
+          Math.round(
+            element.clientHeight / Number.parseFloat(getComputedStyle(element).lineHeight),
+          ),
+        ),
+      )
+      .toBe(2);
+    await expect(inspector.getByRole("link", { name: "Open page", exact: true })).toBeVisible();
+    await page.goto("/models/1?tab=revisions");
+    const heading = page.getByRole("heading", { level: 1, name, exact: true });
+    await expect(heading).toBeVisible();
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await sidebar.getAttribute("aria-expanded")) === "false") await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "true");
+    for (const viewport of [
+      { width: 800, height: 650 },
+      { width: 770, height: 630 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await expect.poll(async () => (await heading.boundingBox())?.width ?? 0).toBeGreaterThan(260);
+    }
+
+    await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    const row = page.getByRole("button", { name: new RegExp(label) });
+    await row.click();
+    const revisionHeading = page.getByRole("heading", { name: new RegExp(label) });
+    await expect(revisionHeading).toBeVisible();
+    await expect
+      .poll(() =>
+        revisionHeading.getByText(label, { exact: true }).evaluate((element) => {
+          const panel = element.closest('[role="tabpanel"]')!;
+          return element.getBoundingClientRect().right - panel.getBoundingClientRect().right;
+        }),
+      )
+      .toBeLessThanOrEqual(1);
+    await expect
+      .poll(() =>
+        page.getByRole("table").evaluate((table) => {
+          const time = table.querySelector("tbody:last-child td:last-child")!;
+          const range = document.createRange();
+          range.selectNodeContents(time);
+          return range.getClientRects().length;
+        }),
+      )
+      .toBe(1);
+
+    await page.getByRole("button", { name: "Add revision", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Add G-code revision" });
+    const filename = `WorkshopBracket${"AlignmentGuide".repeat(13)}.gcode`;
+    await dialog.locator('input[type="file"]').setInputFiles({
+      name: filename,
+      mimeType: "text/plain",
+      buffer: Buffer.from("; generated by test\n"),
+    });
+    await expect
+      .poll(() =>
+        dialog.getByText(filename, { exact: true }).evaluate((element) => {
+          return element.scrollWidth - element.clientWidth;
+        }),
+      )
+      .toBeLessThanOrEqual(1);
+  });
+
+  test("keeps G-code controls clear of the camera dock in a short window", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 600 });
+    const preview = await openToolpath(page);
+    const controls = preview.getByRole("complementary", { name: "Toolpath controls" });
+    const viewport = preview.locator(".toolpath-viewport");
+    const fit = preview.getByRole("button", { name: "Fit to view", exact: true });
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+    await expect(controls.getByRole("spinbutton", { name: "Layer number" })).toBeVisible();
+
+    for (const expanded of [false, true]) {
+      if ((await sidebar.getAttribute("aria-expanded")) !== String(expanded)) {
+        await sidebar.click();
+      }
+      await expect
+        .poll(async () => {
+          const sidebarBox = (await controls.boundingBox())!;
+          const viewportBox = (await viewport.boundingBox())!;
+          const dockBox = (await preview.locator(".detail-viewer-dock").boundingBox())!;
+          return (
+            Math.max(sidebarBox.y + sidebarBox.height, viewportBox.y + viewportBox.height) -
+            dockBox.y
+          );
+        })
+        .toBeLessThanOrEqual(1);
+      await fit.click({ trial: true });
+    }
+  });
+
   test("downloads a rendered toolpath capture", async ({ page }) => {
     const preview = await openToolpath(page);
     const completed = page.waitForEvent("download");
@@ -174,12 +356,11 @@ test.describe("model detail route", () => {
     const preview = await openToolpath(page);
     const canvas = preview.locator("canvas");
     const before = await canvas.screenshot();
+    const top = preview.getByRole("button", { name: "Top", exact: true });
 
-    await preview.getByRole("combobox", { name: "Camera view", exact: true }).selectOption("top");
+    await top.click();
 
-    await expect(preview.getByRole("combobox", { name: "Camera view", exact: true })).toHaveValue(
-      "top",
-    );
+    await expect(top).toHaveAttribute("aria-pressed", "true");
     await expect.poll(async () => (await canvas.screenshot()).equals(before)).toBe(false);
   });
 
@@ -187,7 +368,8 @@ test.describe("model detail route", () => {
     const preview = await openToolpath(page);
     const canvas = preview.locator("canvas");
     const isometric = await canvas.screenshot();
-    await preview.getByRole("combobox", { name: "Camera view", exact: true }).selectOption("top");
+    const topView = preview.getByRole("button", { name: "Top", exact: true });
+    await topView.click();
     await expect.poll(async () => (await canvas.screenshot()).equals(isometric)).toBe(false);
     const slider = preview.getByRole("slider", { name: "Current layer" });
     const last = await slider.getAttribute("max");
@@ -198,9 +380,7 @@ test.describe("model detail route", () => {
     await slider.fill(last!);
 
     await expect.poll(async () => (await canvas.screenshot()).equals(top)).toBe(true);
-    await expect(preview.getByRole("combobox", { name: "Camera view", exact: true })).toHaveValue(
-      "top",
-    );
+    await expect(topView).toHaveAttribute("aria-pressed", "true");
   });
 
   test("restores the isometric fit after isolating a toolpath layer", async ({ page }) => {
@@ -216,10 +396,11 @@ test.describe("model detail route", () => {
     );
     await expect.poll(async () => (await canvas.screenshot()).equals(all)).toBe(false);
 
-    await preview.getByRole("combobox", { name: "Camera view", exact: true }).selectOption("top");
+    await preview.getByRole("button", { name: "Top", exact: true }).click();
     await preview.getByRole("button", { name: "Fit to view", exact: true }).click();
-    await expect(preview.getByRole("combobox", { name: "Camera view", exact: true })).toHaveValue(
-      "isometric",
+    await expect(preview.getByRole("button", { name: "Isometric", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
   });
 
@@ -528,15 +709,18 @@ test.describe("model detail route", () => {
     test(`wraps the full nested collection path in model information at ${width}px`, async ({
       page,
     }) => {
-      const collectionLabel = "PrintStash/Organization/Gridfinity/" + "NestedCollection".repeat(20);
+      const leaf = "NestedCollection".repeat(20);
+      const pathNames = ["PrintStash", "Organization", "Gridfinity", leaf];
+      const collectionLabel = pathNames.join("/");
       await page.setViewportSize({ width, height: 900 });
       await page.route("**/api/v1/models/1", (route) =>
         route.fulfill({ json: aModel({ id: 1, collection_label: collectionLabel }) }),
       );
       await page.goto("/models/1");
       const sidebar = page.getByRole("region", { name: "About this model" });
-      const path = sidebar.getByText(collectionLabel, { exact: true });
-      await expect(path).toBeVisible();
+      const collection = sidebar.getByRole("list", { name: "Collection" });
+      await expect(collection.getByRole("listitem")).toHaveText(pathNames);
+      const path = collection.getByText(leaf, { exact: true });
       await path.scrollIntoViewIfNeeded();
 
       const bounds = await sidebar.evaluate((element) => ({
@@ -547,13 +731,28 @@ test.describe("model detail route", () => {
         content: element.scrollWidth,
         width: element.clientWidth,
         height: element.getBoundingClientRect().height,
+        fontSize: Number.parseFloat(getComputedStyle(element).fontSize),
         lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
       }));
       expect(bounds.content).toBeLessThanOrEqual(bounds.width + 1);
       expect(pathBounds.content).toBeLessThanOrEqual(pathBounds.width + 1);
+      expect(pathBounds.fontSize).toBeGreaterThanOrEqual(16);
       expect(pathBounds.height).toBeGreaterThan(pathBounds.lineHeight * 2);
     });
   }
+
+  test("keeps file navigation in the inspector tabs", async ({ page }) => {
+    await page.goto("/models/1");
+    const overview = page.getByRole("tabpanel", { name: "Overview" });
+    await expect(overview.getByRole("heading", { name: "About this model" })).toBeVisible();
+    await expect(
+      overview.getByRole("button", { name: /^(Source files|G-code revisions) \(/ }),
+    ).toHaveCount(0);
+    await page.getByRole("tab", { name: /^Files/ }).click();
+    await expect(page.getByRole("tabpanel", { name: "Files" })).toBeVisible();
+    await page.getByRole("tab", { name: /^Revisions/ }).click();
+    await expect(page.getByRole("tabpanel", { name: "Revisions" })).toBeVisible();
+  });
 
   test("recovers a failed Model read without reloading the route", async ({ page }) => {
     let available = false;
@@ -944,16 +1143,13 @@ test.describe("model detail route", () => {
     await page.goto("/models/1");
 
     await expect(page.getByRole("heading", { name: "skadis_kitchen-roll_screw" })).toBeVisible();
-    await expect(page.getByText("Creality Ender-3 V3 SE").first()).toBeVisible();
     await expect(page.getByRole("link", { name: /source model/i })).toHaveAttribute(
       "href",
       /printables\.com\/model\/123-skadis-kitchen-roll-screw/,
     );
-    await expect(
-      page
-        .getByRole("region", { name: "Recorded prints" })
-        .getByRole("row", { name: "ender Successful 2" }),
-    ).toBeVisible();
+    await page.getByRole("tab", { name: /^Revisions/ }).click();
+    await page.getByText("Print setup", { exact: true }).click();
+    await expect(page.getByText("Creality Ender-3 V3 SE").first()).toBeVisible();
     await page.getByRole("button", { name: "Send to printer", exact: true }).last().click();
     await expect(
       page
@@ -1091,6 +1287,7 @@ test.describe("model detail route", () => {
     await expect(page.getByRole("menuitem", { name: "Delete model" })).toBeVisible();
     await page.keyboard.press("Escape");
 
+    await page.getByRole("tab", { name: /^Revisions/ }).click();
     await page.getByRole("button", { name: "Send to printer" }).last().click();
     const dialog = page.getByRole("dialog", { name: "Send Rev 1 to printer" });
     await expect(dialog).toBeVisible();
@@ -1172,7 +1369,7 @@ test.describe("model detail route", () => {
     await expect(
       page.getByTestId("model-detail-sidebar").getByText("PETG", { exact: true }),
     ).toBeVisible();
-    await page.getByRole("tab", { name: "Overview", exact: true }).click();
+    await page.getByRole("tab", { name: /^Revisions/ }).click();
     await page.getByRole("button", { name: "Send to printer", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Send Rev 2 to printer", exact: true });
     await expect(dialog).toBeVisible();
@@ -1182,8 +1379,11 @@ test.describe("model detail route", () => {
         .getByRole("radio", { name: /^Rev 2/ }),
     ).toBeChecked();
     await page.keyboard.press("Escape");
+    await page.getByRole("tab", { name: "Overview", exact: true }).click();
+    const recommended = page.getByRole("button", { name: /Recommended revision.*Rev 1/ });
+    await recommended.press("Enter");
+    await expect(page.getByRole("tabpanel", { name: "Revisions" })).toBeFocused();
     await page.getByRole("tab", { name: "Print settings", exact: true }).click();
-    await picker.getByRole("button", { name: "Return to recommended revision" }).click();
     await expect(picker.getByRole("button", { name: /Rev 1/ })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -1196,7 +1396,7 @@ test.describe("model detail route", () => {
     { width: 1908, height: 905 },
     { width: 390, height: 844 },
   ]) {
-    test(`keeps source facts beside a persistent preview at ${viewport.width}×${viewport.height}`, async ({
+    test(`keeps the model preview mounted across tabs at ${viewport.width}×${viewport.height}`, async ({
       page,
     }) => {
       await page.setViewportSize(viewport);
@@ -1206,7 +1406,7 @@ test.describe("model detail route", () => {
       const about = page.getByRole("region", { name: "About this model" });
       await expect(about).toBeVisible();
       await page.getByRole("tab", { name: "Print settings", exact: true }).click();
-      await expect(about).toBeVisible();
+      await expect(about).toBeHidden();
       expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
       await page.getByRole("tab", { name: "Overview", exact: true }).click();
       const tabs = (await page.getByRole("tablist").boundingBox())!;
@@ -1223,6 +1423,35 @@ test.describe("model detail route", () => {
       ).toBe(true);
     });
   }
+
+  test("keeps canvas size while inspecting model geometry", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto("/models/1");
+    const preview = page.getByRole("region", { name: "Preview", exact: true });
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+    if ((await sidebar.getAttribute("aria-expanded")) === "false") await sidebar.click();
+    const overview = page.getByRole("tab", { name: "Overview", exact: true });
+    const source = page.getByRole("tab", { name: "Source info", exact: true });
+    await expect(
+      page.getByRole("tabpanel", { name: "Overview" }).getByRole("heading", {
+        name: "About this model",
+      }),
+    ).toBeVisible();
+    const original = await preview.elementHandle();
+    const initialHeight = (await preview.boundingBox())!.height;
+    await overview.press("ArrowRight");
+    await expect(source).toBeFocused();
+    await expect(
+      page.getByRole("tabpanel", { name: "Source info" }).getByRole("heading", {
+        name: "Whole source geometry",
+      }),
+    ).toBeVisible();
+    await expect.poll(async () => (await preview.boundingBox())!.height).toBeCloseTo(initialHeight);
+    await overview.click();
+    await expect(page.getByRole("heading", { name: "About this model" })).toBeVisible();
+    await expect.poll(async () => (await preview.boundingBox())!.height).toBeCloseTo(initialHeight);
+    expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
+  });
 
   test("keeps an unresized inspector proportional to its available workspace", async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1080 });
@@ -1279,6 +1508,45 @@ test.describe("model detail route", () => {
     await expect
       .poll(async () => (await sidebar.boundingBox())!.width)
       .toBeCloseTo(resizedWidth, 0);
+  });
+
+  test("keeps the full inspector tab strip reachable at 1280 pixels", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/models/1");
+    const inspector = page.getByTestId("model-detail-sidebar");
+    const tabs = inspector.getByRole("tablist");
+    await expect(tabs.getByRole("tab", { name: /^Similar/ })).toBeVisible();
+    expect(
+      await tabs.evaluate((element) => {
+        const strip = element.getBoundingClientRect();
+        return [...element.querySelectorAll('[role="tab"]')].every((tab) => {
+          const bounds = tab.getBoundingClientRect();
+          return bounds.left >= strip.left && bounds.right <= strip.right + 1;
+        });
+      }),
+    ).toBe(true);
+    await tabs.getByRole("tab", { name: /^Files/ }).press("ArrowRight");
+    await expect(tabs.getByRole("tab", { name: /^History/ })).toBeFocused();
+    await expect(inspector.getByRole("tabpanel", { name: "History" })).toBeVisible();
+  });
+
+  test("keeps the recommendation visible in a short Overview window", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.route("**/api/v1/models/1", (route) =>
+      route.fulfill({
+        json: aModel({
+          files: [aRevision({ id: 11, is_recommended: true, gcode_revision_number: 1 })],
+        }),
+      }),
+    );
+    await page.goto("/models/1");
+    const overview = page.getByRole("tabpanel", { name: "Overview" });
+    await expect(
+      overview.getByRole("button", { name: /Recommended revision.*Rev 1/ }),
+    ).toBeInViewport({ ratio: 0.95 });
+    await expect(overview.getByRole("button", { name: "Add to queue", exact: true })).toHaveCount(
+      0,
+    );
   });
 
   test("add revision modal uses designed file picker and labeled fields", async ({ page }) => {

@@ -22,6 +22,7 @@ import {
 } from "@/lib/api";
 import { usePrinters, useSpoolmanStatus, useSpools } from "@/lib/queries";
 import { formatGrams } from "@/lib/format";
+import { displayModelName } from "@/lib/display-name";
 import { createTask, updateTask } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
@@ -114,6 +115,9 @@ export function SendToButtons({
   const defaultFile = gcodeFiles.find((f) => f.is_recommended) ?? gcodeFiles[gcodeFiles.length - 1];
   const [selectedFile, setSelectedFile] = useState<number>(defaultFile?.id ?? 0);
   const selectedFileDetails = gcodeFiles.find((file) => file.id === selectedFile);
+  const fileContext = modelName
+    ? displayModelName(modelName)
+    : selectedFileDetails?.original_filename;
   const selectedFileFormat = printArtifactFormat(selectedFileDetails?.original_filename ?? "");
   const sliced =
     selectedFileDetails?.original_filename.toLowerCase().endsWith(".gcode.3mf") === true;
@@ -636,11 +640,7 @@ export function SendToButtons({
                 )
               : uiText(deliveryMode === "queue" ? "Add to queue" : "Send to printer")
           }
-          description={uiText(
-            deliveryMode === "queue"
-              ? "Choose how this print job will be routed."
-              : "Upload the selected G-code Revision. Starting a print requires your explicit choice.",
-          )}
+          description={fileContext && <span className="wrap-anywhere">{fileContext}</span>}
           footer={
             <>
               <Button variant="outline" onClick={() => setShowSend(false)} disabled={sending}>
@@ -671,42 +671,189 @@ export function SendToButtons({
               </Button>
             </>
           }
-          className="flex max-h-[calc(100dvh-2rem)] w-full max-w-7xl flex-col overflow-hidden"
+          className="flex max-h-[calc(100dvh-2rem)] w-full max-w-5xl flex-col overflow-hidden"
         >
           <div
             data-testid="send-dialog-scroll-region"
             className="min-h-0 flex-1 space-y-5 overflow-y-auto px-1"
           >
-            <div className="detail-delivery-context">
-              <span className="text-muted-foreground">
-                {modelName ? uiText("Model") : uiText("G-code revision")}
-              </span>
-              <strong className="min-w-0 break-all font-medium">
-                {modelName ??
-                  selectedFileDetails?.original_filename ??
-                  uiText("Select G-code revision")}
-              </strong>
-              <div className="detail-delivery-mode">
-                <ChoiceField<"send" | "queue">
-                  label={uiText("Action")}
-                  value={deliveryMode}
-                  inline
-                  disabled={sending}
-                  options={[
-                    { value: "send", label: uiText("Send now") },
-                    { value: "queue", label: uiText("Add to queue") },
-                  ]}
-                  onChange={(mode) => {
-                    setDeliveryMode(mode);
-                    if (mode === "queue") {
-                      setStartPrint(false);
-                      if (!user?.is_superuser) setRoutingStrategy("manual");
-                    }
-                  }}
-                />
-              </div>
+            <div className="detail-delivery-mode border-b border-border pb-4">
+              <ChoiceField<"send" | "queue">
+                label={uiText("Action")}
+                value={deliveryMode}
+                inline
+                disabled={sending}
+                options={[
+                  { value: "send", label: uiText("Send now") },
+                  { value: "queue", label: uiText("Add to queue") },
+                ]}
+                onChange={(mode) => {
+                  setDeliveryMode(mode);
+                  if (mode === "queue") {
+                    setStartPrint(false);
+                    if (!user?.is_superuser) setRoutingStrategy("manual");
+                  }
+                }}
+              />
             </div>
             <div className="detail-delivery-layout">
+              <div className="min-w-0 space-y-5">
+                <div className="space-y-4">
+                  <ChoiceField
+                    label={uiText("G-code revision")}
+                    disabled={sending}
+                    value={selectedFile}
+                    onChange={(fileId) => {
+                      setSelectedFile(fileId);
+                      setPlateSelection(null);
+                    }}
+                    options={gcodeFiles.map((file) => ({
+                      value: file.id,
+                      label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}${file.revision_label ? ` · ${file.revision_label}` : ""}${file.is_recommended ? uiText(" · Recommended") : ""}`,
+                      description:
+                        [
+                          file.metadata?.material_type,
+                          file.metadata?.layer_height_mm != null
+                            ? `${file.metadata.layer_height_mm} mm`
+                            : null,
+                          file.metadata?.nozzle_diameter_mm != null
+                            ? `${file.metadata.nozzle_diameter_mm} mm ${uiText("Nozzle")}`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || file.original_filename,
+                    }))}
+                  />
+                  {sliced && (
+                    <div className="space-y-2">
+                      {platesQuery.isError ? (
+                        <div role="alert">
+                          <p>{uiText("Couldn’t load sliced plates")}</p>
+                          <Button variant="outline" onClick={() => void platesQuery.refetch()}>
+                            {uiText("Retry")}
+                          </Button>
+                        </div>
+                      ) : platesQuery.isPending ? (
+                        <p role="status">{uiText("Loading sliced plates…")}</p>
+                      ) : plates.length === 0 ? (
+                        <p role="alert">
+                          {uiText(
+                            "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.",
+                          )}
+                        </p>
+                      ) : (
+                        <ChoiceField
+                          label={uiText("Sliced plate")}
+                          value={plateIndex}
+                          disabled={sending}
+                          options={plates.map((index) => {
+                            const number = uiText("Plate {value1}", {
+                              value1: String(index).padStart(2, "0"),
+                            });
+                            const name = platesQuery.data?.identities?.find(
+                              (plate) => plate.number === index,
+                            )?.name;
+                            const metadata = platesQuery.data?.plate_metadata?.find(
+                              (plate) => plate.number === index,
+                            )?.metadata;
+                            const facts = [
+                              metadata?.estimated_time_s == null
+                                ? null
+                                : formatPlateEstimate(
+                                    "estimated_time_s",
+                                    metadata.estimated_time_s,
+                                  ),
+                              metadata?.filament_weight_g == null
+                                ? null
+                                : formatPlateEstimate(
+                                    "filament_weight_g",
+                                    metadata.filament_weight_g,
+                                  ),
+                            ].filter(Boolean);
+                            return {
+                              value: index,
+                              label: name ? `${number} · ${name}` : number,
+                              description: facts.join(" · "),
+                            };
+                          })}
+                          onChange={(index) => setPlateSelection({ fileId: selectedFile, index })}
+                        />
+                      )}
+                    </div>
+                  )}
+                  {deliveryMode === "queue" && selectedFileDetails && (
+                    <dl
+                      aria-label={uiText("Queue details")}
+                      className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-3 text-sm"
+                    >
+                      <div className="col-span-2">
+                        <dt className="text-xs text-muted-foreground">
+                          {uiText("Revision test status")}
+                        </dt>
+                        <dd>{revisionStatusLabel(selectedFileDetails.revision_status)}</dd>
+                      </div>
+                      {(!sliced || plateIndex !== null) && (
+                        <>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              {uiText("Estimated time per copy")}
+                            </dt>
+                            <dd className="tabular-nums">
+                              {formatPlateEstimate("estimated_time_s", estimate?.estimated_time_s)}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">
+                              {uiText("Filament per copy")}
+                            </dt>
+                            <dd className="tabular-nums">
+                              {formatPlateEstimate(
+                                "filament_weight_g",
+                                estimate?.filament_weight_g,
+                              )}
+                            </dd>
+                          </div>
+                        </>
+                      )}
+                    </dl>
+                  )}
+                  {spoolmanEnabled && spools.length > 0 && (
+                    <ChoiceField<number | "">
+                      label={uiText("Spool")}
+                      inline
+                      value={selectedSpoolId}
+                      onChange={setSelectedSpoolId}
+                      options={[
+                        { value: "", label: uiText("No spool") },
+                        ...spools.map((spool) => ({
+                          value: spool.id,
+                          label:
+                            spool.filament_name ||
+                            spool.name ||
+                            uiText("Spool {value1}", { value1: String(spool.id) }),
+                          description: [
+                            spool.vendor_name,
+                            spool.location,
+                            spool.remaining_weight != null
+                              ? uiText(" ({value1} left)", {
+                                  value1: formatGrams(spool.remaining_weight),
+                                })
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · "),
+                        })),
+                      ]}
+                    />
+                  )}
+                </div>
+
+                {spoolCoverageWarning && (
+                  <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+                    {spoolCoverageWarning}
+                  </div>
+                )}
+              </div>
               <div className="min-w-0 space-y-5">
                 {deliveryMode === "queue" && (
                   <div className="grid gap-4 sm:grid-cols-2">
@@ -805,8 +952,13 @@ export function SendToButtons({
                                 })}
                               />
                               <span className="min-w-0 flex-1">
-                                <span className="block truncate text-sm font-medium text-foreground">
-                                  {printer.name} · {knownUiText(printer.status)}
+                                <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                                  <span className="min-w-0 wrap-anywhere text-sm font-medium text-foreground">
+                                    {printer.name}
+                                  </span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {knownUiText(printer.status)}
+                                  </span>
                                 </span>
                                 <span className="mt-1 flex flex-wrap gap-1">
                                   <span
@@ -846,7 +998,7 @@ export function SendToButtons({
                                 <Link
                                   href={`/printers/${printer.id}`}
                                   onClick={(event) => event.stopPropagation()}
-                                  className={buttonVariants({ variant: "outline", size: "xs" })}
+                                  className={buttonVariants({ variant: "ghost", size: "xs" })}
                                 >
                                   {uiText("Printer details")}
                                 </Link>
@@ -889,165 +1041,8 @@ export function SendToButtons({
                       )}
                   </div>
                 )}
-              </div>
-              <div className="min-w-0 space-y-5">
-                <div className="space-y-4">
-                  <ChoiceField
-                    label={uiText("G-code revision")}
-                    value={selectedFile}
-                    onChange={(fileId) => {
-                      setSelectedFile(fileId);
-                      setPlateSelection(null);
-                    }}
-                    options={gcodeFiles.map((file) => ({
-                      value: file.id,
-                      label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}${file.revision_label ? ` · ${file.revision_label}` : ""}${file.is_recommended ? uiText(" · Recommended") : ""}`,
-                      description:
-                        [
-                          file.metadata?.material_type,
-                          file.metadata?.layer_height_mm != null
-                            ? `${file.metadata.layer_height_mm} mm`
-                            : null,
-                          file.metadata?.nozzle_diameter_mm != null
-                            ? `${file.metadata.nozzle_diameter_mm} mm ${uiText("Nozzle")}`
-                            : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ") || file.original_filename,
-                    }))}
-                  />
-                  {sliced && (
-                    <div className="space-y-2">
-                      {platesQuery.isError ? (
-                        <div role="alert">
-                          <p>{uiText("Couldn’t load sliced plates")}</p>
-                          <Button variant="outline" onClick={() => void platesQuery.refetch()}>
-                            {uiText("Retry")}
-                          </Button>
-                        </div>
-                      ) : platesQuery.isPending ? (
-                        <p role="status">{uiText("Loading sliced plates…")}</p>
-                      ) : plates.length === 0 ? (
-                        <p role="alert">
-                          {uiText(
-                            "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.",
-                          )}
-                        </p>
-                      ) : (
-                        <label className="grid gap-2 text-sm">
-                          {uiText("Sliced plate")}
-                          <select
-                            className={selectClassName}
-                            value={plateIndex ?? ""}
-                            disabled={sending}
-                            onChange={(event) =>
-                              setPlateSelection({
-                                fileId: selectedFile,
-                                index: Number(event.target.value),
-                              })
-                            }
-                          >
-                            <option value="" disabled>
-                              {uiText("Choose a plate")}
-                            </option>
-                            {plates.map((index) => {
-                              const number = uiText("Plate {value1}", {
-                                value1: String(index).padStart(2, "0"),
-                              });
-                              const name = platesQuery.data?.identities?.find(
-                                (plate) => plate.number === index,
-                              )?.name;
-                              return (
-                                <option key={index} value={index}>
-                                  {name ? `${number} · ${name}` : number}
-                                </option>
-                              );
-                            })}
-                          </select>
-                        </label>
-                      )}
-                    </div>
-                  )}
-                  {deliveryMode === "queue" && selectedFileDetails && (
-                    <dl
-                      aria-label={uiText("Queue details")}
-                      className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-3 text-sm"
-                    >
-                      <div className="col-span-2">
-                        <dt className="text-xs text-muted-foreground">
-                          {uiText("Revision test status")}
-                        </dt>
-                        <dd>{revisionStatusLabel(selectedFileDetails.revision_status)}</dd>
-                      </div>
-                      {(!sliced || plateIndex !== null) && (
-                        <>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              {uiText("Estimated time per copy")}
-                            </dt>
-                            <dd className="tabular-nums">
-                              {formatPlateEstimate("estimated_time_s", estimate?.estimated_time_s)}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              {uiText("Filament per copy")}
-                            </dt>
-                            <dd className="tabular-nums">
-                              {formatPlateEstimate(
-                                "filament_weight_g",
-                                estimate?.filament_weight_g,
-                              )}
-                            </dd>
-                          </div>
-                        </>
-                      )}
-                    </dl>
-                  )}
-                  {(deliveryMode === "send" || (spoolmanEnabled && spools.length > 0)) && (
-                    <h3 className="border-t border-border pt-5 text-sm font-semibold">
-                      {uiText("Delivery")}
-                    </h3>
-                  )}
-                  {spoolmanEnabled && spools.length > 0 && (
-                    <ChoiceField<number | "">
-                      label={uiText("Spool")}
-                      inline
-                      value={selectedSpoolId}
-                      onChange={setSelectedSpoolId}
-                      options={[
-                        { value: "", label: uiText("No spool") },
-                        ...spools.map((spool) => ({
-                          value: spool.id,
-                          label:
-                            spool.filament_name ||
-                            spool.name ||
-                            uiText("Spool {value1}", { value1: String(spool.id) }),
-                          description: [
-                            spool.vendor_name,
-                            spool.location,
-                            spool.remaining_weight != null
-                              ? uiText(" ({value1} left)", {
-                                  value1: formatGrams(spool.remaining_weight),
-                                })
-                              : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" · "),
-                        })),
-                      ]}
-                    />
-                  )}
-                </div>
-
-                {spoolCoverageWarning && (
-                  <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-                    {spoolCoverageWarning}
-                  </div>
-                )}
-
                 {deliveryMode === "send" && (
-                  <label className="flex items-start gap-3">
+                  <label className="flex items-start gap-3 border-t border-border pt-4">
                     <Checkbox
                       checked={startPrint}
                       onChange={setStartPrint}

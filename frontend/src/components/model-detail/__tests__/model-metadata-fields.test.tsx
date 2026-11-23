@@ -1,11 +1,9 @@
 /* The detail edit form retains tag keyboard behavior and writable model fields. */
-import { NO_PREVIEWS } from "@/types/previews";
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { OverviewTab, type ModelMetaEditor } from "@/components/model-detail/overview-tab";
-import type { ModelRead } from "@/types";
+import { ModelMetadataFields, type ModelMetaEditor } from "../model-metadata-fields";
 
 const editor: ModelMetaEditor = {
   collection: "",
@@ -29,31 +27,7 @@ const editor: ModelMetaEditor = {
   canCreate: false,
 };
 
-const model: ModelRead = {
-  previews: NO_PREVIEWS,
-  has_custom_cover: false,
-  edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  edit_version: 1,
-  id: 1,
-  name: "Calibration cube",
-  slug: "calibration-cube",
-  hash: "hash",
-  collection: null,
-  collection_id: null,
-  collection_label: null,
-  description: null,
-  source_url: null,
-  effective_role: "admin",
-  tags: [],
-  thumbnail_url: null,
-  created_at: "2026-08-24T00:00:00Z",
-  updated_at: "2026-08-24T00:00:00Z",
-  files: [],
-  starred: false,
-  derivatives_revision: "0",
-};
-
-describe("OverviewTab", () => {
+describe("ModelMetadataFields", () => {
   describe("choosing tags while editing", () => {
     /** The overview in edit mode, with a tag vocabulary to pick from. */
     function renderEditing(over: Partial<typeof editor> = {}) {
@@ -62,9 +36,7 @@ describe("OverviewTab", () => {
       const createTag = vi.fn<(name: string) => void>();
       const setTags = vi.fn<React.Dispatch<React.SetStateAction<string[]>>>();
       const result = render(
-        <OverviewTab
-          model={model}
-          editing
+        <ModelMetadataFields
           editor={{
             ...editor,
             setTagInput,
@@ -72,22 +44,6 @@ describe("OverviewTab", () => {
             createTag,
             setTags,
             ...over,
-          }}
-          revision={{
-            file: null,
-            canEdit: true,
-            canSend: false,
-            revisionCount: 0,
-            recommended: null,
-            jobs: null,
-            onRevisions: () => {},
-            onSettings: () => {},
-            onHistory: () => {},
-            onLogPrint: () => {},
-            onSend: () => {},
-            onInspect: () => {},
-            onAddRevision: () => {},
-            onCompare: () => {},
           }}
         />,
       );
@@ -105,23 +61,38 @@ describe("OverviewTab", () => {
       expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
         "## Assembly\n\n- Fit **both** clips.",
       );
-      fireEvent.click(screen.getByText("Preview", { exact: true }));
+      fireEvent.click(screen.getByRole("tab", { name: "Preview" }));
       expect(screen.getByRole("heading", { name: "Assembly" })).toBeVisible();
       expect(screen.getByText("both").tagName).toBe("STRONG");
+    });
+
+    it("keeps the draft when returning to Write", () => {
+      const description = "## Assembly";
+      renderEditing({ description });
+      fireEvent.click(screen.getByRole("tab", { name: "Preview" }));
+      expect(screen.queryByRole("textbox", { name: "Description" })).toBeNull();
+      fireEvent.click(screen.getByRole("tab", { name: "Write" }));
+      expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(description);
+    });
+
+    it("explains an empty preview", () => {
+      renderEditing();
+      fireEvent.click(screen.getByRole("tab", { name: "Preview" }));
+      expect(screen.getByRole("tabpanel", { name: "Preview" })).toHaveTextContent(
+        "No description yet",
+      );
     });
 
     it("offers a source URL field", () => {
       renderEditing();
 
-      expect(
-        screen.getByPlaceholderText("https://www.printables.com/model/..."),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Source URL" })).toBeInTheDocument();
     });
 
     it("passes what the user types to the tag search", () => {
       const { setTagInput } = renderEditing();
 
-      fireEvent.change(screen.getByPlaceholderText(/Search or create/), {
+      fireEvent.change(screen.getByRole("combobox", { name: "Model tags" }), {
         target: { value: "func" },
       });
 

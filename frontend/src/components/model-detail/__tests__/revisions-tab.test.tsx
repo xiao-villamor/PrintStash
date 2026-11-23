@@ -132,7 +132,10 @@ describe("RevisionsTab", () => {
   it("shows the selected revision filename once", async () => {
     renderRevisions({ revisions: [aRevision()] });
 
-    expect(await screen.findByText("part_0.2mm.gcode")).toBeVisible();
+    const filename = await screen.findByText("part_0.2mm.gcode");
+    expect(filename).not.toBeVisible();
+    await userEvent.click(screen.getByText("G-code file", { exact: true }));
+    expect(filename).toBeVisible();
     expect(screen.getAllByText("part_0.2mm.gcode")).toHaveLength(1);
   });
 
@@ -308,6 +311,40 @@ describe("RevisionsTab", () => {
       renderRevisions();
 
       expect(await screen.findAllByText(/part_0\.2mm\.gcode/)).not.toHaveLength(0);
+    });
+
+    it("shows technical details on demand for the selected revision", async () => {
+      const user = userEvent.setup();
+      renderRevisions({
+        revisions: [
+          aRevision({ revision_label: "Draft", revision_notes: "Check the fit." }),
+          aRevision({
+            id: 21,
+            version: 2,
+            gcode_revision_number: 2,
+            revision_label: "Final",
+            revision_notes: "Fit confirmed.",
+          }),
+        ],
+      });
+      expect(
+        within(screen.getByRole("table"))
+          .getAllByRole("columnheader")
+          .map((column) => column.textContent),
+      ).toEqual(["Revision", "Printer results", "Time"]);
+
+      await user.click(screen.getByRole("button", { name: /^Rev 1\s*Draft$/ }));
+      expect(screen.getByText("Check the fit.")).toBeVisible();
+      expect(screen.queryByText("Fit confirmed.")).not.toBeInTheDocument();
+      const profile = screen.getByText("Printer profile", { exact: true });
+      expect(profile).not.toBeVisible();
+      await user.click(screen.getByText("Print setup", { exact: true }));
+      expect(profile).toBeVisible();
+
+      await user.click(screen.getByRole("button", { name: /^Rev 2\s*Final$/ }));
+      expect(screen.getByText("Fit confirmed.")).toBeVisible();
+      expect(screen.queryByText("Check the fit.")).not.toBeInTheDocument();
+      expect(screen.getByText("Printer profile", { exact: true })).not.toBeVisible();
     });
 
     it("shows a revision's label", async () => {

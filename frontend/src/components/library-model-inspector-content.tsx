@@ -2,7 +2,17 @@
 
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Box, Check, ChevronRight, Download, Loader2, MoreHorizontal, X } from "lucide-react";
+import {
+  Box,
+  Check,
+  ChevronRight,
+  Download,
+  Loader2,
+  MoreHorizontal,
+  Printer,
+  Star,
+  X,
+} from "lucide-react";
 import {
   modelPrinterFilesOptions,
   useModelDetail,
@@ -110,6 +120,7 @@ export function InspectorContent({
   const [error, setError] = useState<string | null>(null);
   const failureInput = useRef<HTMLTextAreaElement>(null);
   const failedButton = useRef<HTMLButtonElement>(null);
+  const historyTab = useRef<HTMLButtonElement>(null);
   const workspace = useRef<HTMLElement>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
@@ -207,9 +218,7 @@ export function InspectorContent({
   const jobs = (history.isError ? [] : (history.data ?? [])).filter(
     (job) => job.file_id === file?.id,
   );
-  const onPrinter = jobs.filter((job) => job.printer_id === printer?.id);
-  const ok = onPrinter.filter((job) => job.state === "completed").length;
-  const failed = onPrinter.filter((job) => job.state === "failed").length;
+  const printFacts = file ? revisionFacts(file.metadata) : "";
   const canLog = canEdit && administrator && !!file && !!printer && !busy;
   const selectedFormat = file?.original_filename.toLowerCase().endsWith(".bgcode")
     ? "bgcode_binary"
@@ -220,6 +229,23 @@ export function InspectorContent({
     !!printer?.access.can_print &&
     printer.capabilities.can_upload &&
     printer.capabilities.accepted_print_formats.includes(selectedFormat);
+  const printerControl = printer && (
+    <label className="library-inspector-printer">
+      <span>{uiText("Printer")}</span>
+      <select
+        value={printer.id}
+        disabled={!administrator || busy || failing || printersQuery.isError}
+        aria-label={uiText("Printer for printing and logging")}
+        onChange={(event) => setPrinterId(Number(event.target.value))}
+      >
+        {printers.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 
   function cancelFailure() {
     setFailing(false);
@@ -228,7 +254,7 @@ export function InspectorContent({
   }
   function beginFailure() {
     if (!canLog || commandBusy.current) return;
-    setTab("print");
+    setTab("history");
     setFailing(true);
     setFailNote("");
     setError(null);
@@ -268,6 +294,7 @@ export function InspectorContent({
         setFailing(false);
         setFailNote("");
         setTab("history");
+        requestAnimationFrame(() => historyTab.current?.focus({ preventScroll: true }));
         toast.success(uiText("Print record added"));
       }
     } catch (cause) {
@@ -564,13 +591,20 @@ export function InspectorContent({
                 variant="ghost"
                 size="xs"
                 key={value}
+                ref={value === "history" ? historyTab : undefined}
                 id={`inspector-tab-${value}`}
                 type="button"
                 role="tab"
                 aria-selected={tab === value}
                 aria-controls={`inspector-pane-${value}`}
                 tabIndex={tab === value ? 0 : -1}
-                onClick={() => setTab(value)}
+                onClick={() => {
+                  if (value !== "history" && !commandBusy.current) {
+                    setFailing(false);
+                    setFailNote("");
+                  }
+                  setTab(value);
+                }}
               >
                 {value === "print" ? (
                   uiText("Print")
@@ -592,109 +626,59 @@ export function InspectorContent({
                 aria-labelledby="inspector-tab-print"
                 hidden={tab !== "print"}
               >
-                <div>
-                  <dl className="library-inspector-properties divide-y divide-border">
-                    <div className="library-inspector-revision">
-                      <dt>{uiText("Revision")}</dt>
-                      <dd>
-                        {revisions.length > 1 ? (
-                          <select
-                            disabled={busy}
-                            value={file.id}
-                            aria-label={uiText("Choose G-code revision")}
-                            onChange={(event) => selectRevision(Number(event.target.value))}
-                          >
-                            {revisions.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {revisionName(item)}
-                                {item.is_recommended ? ` · ★ ${uiText("Recommended")}` : ""}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="min-w-0 truncate" title={revisionName(file)}>
-                            <span className="font-medium">{revisionName(file)}</span>
-                            {file.is_recommended && (
-                              <span className="text-muted-foreground">
-                                {" · "}
-                                <span aria-hidden="true">★ </span>
-                                {uiText("Recommended")}
-                              </span>
-                            )}
-                          </span>
-                        )}
-                        {!file.is_recommended && (
-                          <Button
-                            className={sectionAction}
-                            variant="ghost"
-                            size="xs"
-                            disabled={!canEdit || revision.saving !== null}
-                            onClick={() => void revision.update(file, { is_recommended: true })}
-                          >
-                            {uiText("Recommend")}
-                          </Button>
-                        )}
-                      </dd>
-                    </div>
-                    {(ok > 0 || failed > 0) && (
-                      <div>
-                        <dt>{uiText("Result")}</dt>
-                        <dd>
-                          {ok > 0 && uiText("inspector.okCount", { count: ok })}
-                          {ok > 0 && failed > 0 && " · "}
-                          {failed > 0 && uiText("inspector.failedCount", { count: failed })}
-                          {onPrinter[0]?.error && <p className="mt-1">{onPrinter[0].error}</p>}
-                        </dd>
-                      </div>
+                <div className="library-inspector-print-summary">
+                  <div className="library-inspector-revision">
+                    {revisions.length > 1 ? (
+                      <select
+                        disabled={busy}
+                        value={file.id}
+                        aria-label={uiText("Choose G-code revision")}
+                        title={revisionName(file)}
+                        onChange={(event) => selectRevision(Number(event.target.value))}
+                      >
+                        {revisions.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {revisionName(item)}
+                            {item.is_recommended ? ` · ★ ${uiText("Recommended")}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <h4>{revisionName(file)}</h4>
                     )}
-                    <div>
-                      <dt>{uiText("Sliced for")}</dt>
-                      <dd>{file.metadata?.printer_model ?? uiText("Not recorded")}</dd>
-                    </div>
-                    <div>
-                      <dt>{uiText("File")}</dt>
-                      <dd className="font-mono text-xs">{revisionFacts(file.metadata)}</dd>
-                    </div>
-                  </dl>
-                  {administrator && history.isPending && (
-                    <p className="library-inspector-caption" role="status">
-                      {uiText("Loading...")}
-                    </p>
-                  )}
-                  {administrator && history.isError && (
-                    <div className="library-inspector-caption" role="alert">
-                      <p>{userMessage(history.error)}</p>
-                      <Button size="xs" variant="ghost" onClick={() => void history.refetch()}>
-                        {uiText("Retry")}
+                    {file.is_recommended && revisions.length === 1 && (
+                      <span className="library-inspector-recommended">
+                        <Star className="size-3.5 shrink-0" aria-hidden />
+                        {uiText("Recommended")}
+                      </span>
+                    )}
+                    {!file.is_recommended && canEdit && (
+                      <Button
+                        className={sectionAction}
+                        variant="ghost"
+                        size="xs"
+                        disabled={revision.saving !== null}
+                        onClick={() => void revision.update(file, { is_recommended: true })}
+                      >
+                        {uiText("Recommend")}
                       </Button>
-                    </div>
+                    )}
+                  </div>
+                  {printFacts && (
+                    <p className="library-inspector-caption wrap-anywhere">{printFacts}</p>
+                  )}
+                  {file.metadata?.printer_model && (
+                    <p className="library-inspector-caption wrap-anywhere">
+                      {uiText("Sliced for")}{" "}
+                      <span className="text-foreground">{file.metadata.printer_model}</span>
+                    </p>
                   )}
                 </div>
                 <section
                   className="library-inspector-print"
                   aria-label={uiText("Print this revision")}
                 >
-                  {printer && (
-                    <label className="library-inspector-control-row">
-                      <span>{uiText("Printer")}</span>
-                      <select
-                        value={printer.id}
-                        disabled={!administrator || busy || printersQuery.isError}
-                        aria-label={uiText("Printer for printing and logging")}
-                        onChange={(event) => {
-                          setPrinterId(Number(event.target.value));
-                          setFailing(false);
-                          setFailNote("");
-                        }}
-                      >
-                        {printers.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
+                  {printerControl}
                   {printersQuery.isError && (
                     <p className="library-inspector-caption" role="alert">
                       {userMessage(printersQuery.error)}
@@ -709,32 +693,78 @@ export function InspectorContent({
                           : uiText("Download the G-code and transfer it to your printer.")}
                     </p>
                   )}
-                  <div className="library-inspector-actions" data-library-revision-actions>
+                  <div className="library-inspector-delivery" data-library-revision-actions>
                     {canSend && (
-                      <Button size="xs" onClick={() => setSendOpen(true)}>
+                      <Button size="sm" onClick={() => setSendOpen(true)}>
+                        <Printer className="size-4 shrink-0" aria-hidden />
                         {uiText("Send to printer")}
                       </Button>
                     )}
                     <Button
-                      size="xs"
-                      variant={canSend ? "outline" : "default"}
-                      onClick={() =>
-                        void downloadAuthenticatedFile(
-                          `/api/v1/files/${file.id}/download`,
-                          file.original_filename,
-                        ).catch((cause) => toast.error(cause))
-                      }
+                      size="sm"
+                      variant={canSend ? "ghost" : "default"}
+                      onClick={() => download(file)}
                     >
+                      <Download className="size-4 shrink-0" aria-hidden />
                       {uiText("Download G-code")}
                     </Button>
                   </div>
                 </section>
-                {printer && (
+              </section>
+              <section
+                role="tabpanel"
+                id="inspector-pane-history"
+                aria-labelledby="inspector-tab-history"
+                hidden={tab !== "history"}
+                className="library-inspector-history"
+              >
+                <div className="library-inspector-view-context">
+                  <h4>{revisionName(file)}</h4>
+                  <span>{uiText("Print history")}</span>
+                </div>
+                {!administrator ? (
+                  <p>{uiText("Access restricted")}</p>
+                ) : history.isPending ? (
+                  <p>{uiText("Loading...")}</p>
+                ) : history.isError ? (
+                  <div role="alert">
+                    <p>{userMessage(history.error)}</p>
+                    <Button size="xs" variant="outline" onClick={() => void history.refetch()}>
+                      {uiText("Retry")}
+                    </Button>
+                  </div>
+                ) : jobs.length ? (
+                  <ol>
+                    {jobs.map((job) => (
+                      <li key={job.id}>
+                        <div>
+                          <p>
+                            <strong>
+                              {job.state === "completed"
+                                ? uiText("Completed")
+                                : job.state === "failed"
+                                  ? uiText("Failed")
+                                  : job.state === "cancelled"
+                                    ? uiText("Cancelled")
+                                    : job.state}
+                            </strong>{" "}
+                            · {job.printer_name} · {timeAgo(job.finished_at ?? job.created_at)}
+                          </p>
+                          {job.error && <p className="text-foreground">{job.error}</p>}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p>{uiText("No print results recorded yet.")}</p>
+                )}
+                {printer && canEdit && administrator && (
                   <section
                     className="library-inspector-results"
                     aria-label={uiText("Log print outcome")}
                   >
-                    <span>{uiText("Print outcome")}</span>
+                    <h4 className="font-medium">{uiText("Log print outcome")}</h4>
+                    {printerControl}
                     {!failing && (
                       <div className="library-inspector-actions" data-library-log-outcomes>
                         <Button
@@ -744,8 +774,8 @@ export function InspectorContent({
                           aria-keyshortcuts="1"
                           onClick={() => void log("completed")}
                         >
-                          <Check className="h-3.5 w-3.5" />
-                          {uiText("OK")}
+                          <Check className="h-3.5 w-3.5" aria-hidden />
+                          {uiText("Successful")}
                         </Button>
                         <Button
                           ref={failedButton}
@@ -755,7 +785,7 @@ export function InspectorContent({
                           aria-keyshortcuts="2"
                           onClick={beginFailure}
                         >
-                          <X className="h-3.5 w-3.5" />
+                          <X className="h-3.5 w-3.5" aria-hidden />
                           {uiText("Failed")}
                         </Button>
                       </div>
@@ -822,54 +852,6 @@ export function InspectorContent({
                       </div>
                     )}
                   </section>
-                )}
-              </section>
-              <section
-                role="tabpanel"
-                id="inspector-pane-history"
-                aria-labelledby="inspector-tab-history"
-                hidden={tab !== "history"}
-                className="library-inspector-history"
-              >
-                <div className="library-inspector-view-context">
-                  <h4>{revisionName(file)}</h4>
-                  <span>{uiText("Print history")}</span>
-                </div>
-                {!administrator ? (
-                  <p>{uiText("Access restricted")}</p>
-                ) : history.isPending ? (
-                  <p>{uiText("Loading...")}</p>
-                ) : history.isError ? (
-                  <div role="alert">
-                    <p>{userMessage(history.error)}</p>
-                    <Button size="xs" variant="outline" onClick={() => void history.refetch()}>
-                      {uiText("Retry")}
-                    </Button>
-                  </div>
-                ) : jobs.length ? (
-                  <ol>
-                    {jobs.map((job) => (
-                      <li key={job.id}>
-                        <div>
-                          <p>
-                            <strong>
-                              {job.state === "completed"
-                                ? uiText("Completed")
-                                : job.state === "failed"
-                                  ? uiText("Failed")
-                                  : job.state === "cancelled"
-                                    ? uiText("Cancelled")
-                                    : job.state}
-                            </strong>{" "}
-                            · {job.printer_name} · {timeAgo(job.finished_at ?? job.created_at)}
-                          </p>
-                          {job.error && <p className="text-foreground">{job.error}</p>}
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                ) : (
-                  <p>{uiText("No print results recorded yet.")}</p>
                 )}
               </section>
               <section
@@ -1249,16 +1231,14 @@ function revisionName(file: FileRead) {
   return `${uiText("Rev {value1}", { value1: String(file.gcode_revision_number ?? file.version) })}${file.revision_label ? ` · ${file.revision_label}` : ""}`;
 }
 function revisionFacts(meta: MetadataRead | null) {
-  return (
-    [
-      meta?.estimated_time_s != null ? formatDuration(meta.estimated_time_s) : null,
-      meta?.filament_weight_g != null ? formatGrams(meta.filament_weight_g) : null,
-      meta?.layer_height_mm != null ? `${formatNumber(meta.layer_height_mm)} mm` : null,
-      meta?.material_type,
-    ]
-      .filter(Boolean)
-      .join(" · ") || uiText("Not recorded")
-  );
+  return [
+    meta?.material_type,
+    meta?.estimated_time_s != null ? formatDuration(meta.estimated_time_s) : null,
+    meta?.filament_weight_g != null ? formatGrams(meta.filament_weight_g) : null,
+    meta?.layer_height_mm != null ? `${formatNumber(meta.layer_height_mm)} mm` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 function settingFacts(meta: MetadataRead | null): [string, string, boolean?][] {
   return [

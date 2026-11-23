@@ -455,8 +455,9 @@ class TestGcSoftDeleted:
         db_session.expire_all()
         assert db_session.get(Collection, collection_id) is None
 
+    @pytest.mark.parametrize("reference", ["readme", "cover", "both"])
     def test_gc_hard_deletes_expired_collection_referenced_image(
-        self, db_session: Session, storage
+        self, db_session: Session, storage, reference: str
     ) -> None:
         name = "a" * 64 + ".png"
         collection = build_collection(
@@ -466,9 +467,12 @@ class TestGcSoftDeleted:
             path="old-docs",
             deleted_at=utcnow() - timedelta(days=1),
         )
-        collection.readme = (
-            f"![diagram](/api/v1/collections/{collection.id}/images/{name})"
-        )
+        if reference in {"readme", "both"}:
+            collection.readme = (
+                f"![diagram](/api/v1/collections/{collection.id}/images/{name})"
+            )
+        if reference in {"cover", "both"}:
+            collection.cover_selection = {"kind": "image", "filename": name}
         db_session.add(collection)
         db_session.commit()
         key = store_owned_bytes(

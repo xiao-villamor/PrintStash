@@ -8,6 +8,7 @@ import {
   type GetJsonOptions,
 } from "@/lib/api/request";
 import {
+  CollectionCover,
   CollectionCreate,
   CollectionLookupRead,
   CollectionPage,
@@ -85,6 +86,14 @@ export function moveCollection(id: number, parentId: number | null): Promise<Col
 
 export function renameCollection(id: number, name: string): Promise<CollectionRead> {
   return sendJson<CollectionRead>(`/api/v1/collections/${id}`, "PATCH", { name });
+}
+
+export function getCollectionCover(id: number, options?: GetJsonOptions): Promise<CollectionCover> {
+  return getJson<CollectionCover>(`/api/v1/collections/${id}/cover`, options);
+}
+
+export function setCollectionCover(id: number, cover: CollectionCover): Promise<CollectionCover> {
+  return sendJson<CollectionCover>(`/api/v1/collections/${id}/cover`, "PUT", cover);
 }
 
 export function replaceCollectionTags(id: number, tags: string[]): Promise<CollectionRead> {

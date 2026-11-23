@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from sys import float_info
-from typing import ClassVar, List, Optional
+from typing import Any, ClassVar, List, Optional
 
 from printstash_core.mesh.measurements import (
     VolumeMethod,
@@ -11,6 +11,7 @@ from printstash_core.mesh.measurements import (
     VolumeUnavailableCause,
 )
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     Column,
@@ -321,6 +322,9 @@ class Collection(SQLModel, table=True):
     # Short markdown description shown on top of the collection view. Image refs
     # point at /collections/{id}/images/{name} (self-hosted).
     readme: Optional[str] = Field(default=None, sa_column=Column(Text))
+    cover_selection: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
+    )
 
     deleted_at: Optional[datetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")

@@ -119,6 +119,10 @@ import { ModelCard } from "@/components/model-card";
 import { LibraryModelInspector } from "@/components/library-model-inspector";
 import { InlineTitleEditor } from "@/components/inline-title-editor";
 import { CollectionOverviewCard } from "@/components/collection-overview";
+import {
+  CollectionCoverEditor,
+  type CollectionCardAction,
+} from "@/components/collection-card-editor";
 import { CollectionBreadcrumbs } from "@/components/collection-breadcrumbs";
 import { useModelDropTarget } from "@/lib/use-model-drop-target";
 import { DeferredDialog } from "@/components/deferred-dialog";
@@ -1531,6 +1535,28 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     item.kind === "multipart" ? [item.value] : [],
   );
   const visibleCollections = snapshot?.collections ?? [];
+  const [collectionCardTarget, setCollectionCardTarget] = useState<{
+    entry: LibraryEntry;
+    id: number;
+    action: CollectionCardAction;
+  } | null>(null);
+  const canManageCollectionCards = auth.isAuthenticated && !authority.authorizationChanged;
+  function canManageCard(collection: CollectionRead, action: CollectionCardAction) {
+    return (
+      canManageCollectionCards &&
+      (!!user?.is_superuser ||
+        collection.effective_role === "admin" ||
+        (action === "cover" && collection.effective_role === "edit"))
+    );
+  }
+  const managedCollection =
+    collectionCardTarget?.entry === entry
+      ? visibleCollections.find(
+          (collection) =>
+            collection.id === collectionCardTarget.id &&
+            canManageCard(collection, collectionCardTarget.action),
+        )
+      : undefined;
   const breadcrumbs = snapshot?.breadcrumbs ?? [];
   const selectedName = snapshot?.collection?.name ?? null;
   const canRenameCollection =
@@ -4183,6 +4209,40 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                                 onToggleSelect={
                                   auth.isAuthenticated ? toggleCollectionSelect : undefined
                                 }
+                                onRename={
+                                  canManageCard(collection, "rename")
+                                    ? () =>
+                                        setCollectionCardTarget({
+                                          entry,
+                                          id: collection.id,
+                                          action: "rename",
+                                        })
+                                    : undefined
+                                }
+                                onEditCover={
+                                  canManageCard(collection, "cover")
+                                    ? () =>
+                                        setCollectionCardTarget({
+                                          entry,
+                                          id: collection.id,
+                                          action: "cover",
+                                        })
+                                    : undefined
+                                }
+                                renaming={
+                                  managedCollection?.id === collection.id &&
+                                  collectionCardTarget?.action === "rename"
+                                }
+                                onRenameEnd={(saved) => {
+                                  setCollectionCardTarget((target) =>
+                                    target?.entry === entry &&
+                                    target.id === collection.id &&
+                                    target.action === "rename"
+                                      ? null
+                                      : target,
+                                  );
+                                  if (saved) void refresh();
+                                }}
                               />
                             </LibraryCardFill>
                           )}
@@ -4548,6 +4608,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           />
         )}
 
+        {managedCollection && collectionCardTarget?.action === "cover" && (
+          <CollectionCoverEditor
+            key={managedCollection.id}
+            collection={managedCollection}
+            onClose={() => setCollectionCardTarget(null)}
+            onSaved={() => {
+              setCollectionCardTarget(null);
+              void refresh();
+            }}
+          />
+        )}
         {currentBatchRecovery && (
           <LibraryBatchRecovery
             key={currentBatchRecovery.entry.key}

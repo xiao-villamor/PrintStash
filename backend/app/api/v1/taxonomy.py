@@ -26,7 +26,7 @@ from fastapi import (
 from printstash_core.files import slugify
 from sqlalchemy import func
 from sqlalchemy import select as sa_select
-from sqlmodel import Session, delete, select
+from sqlmodel import Session, col, delete, select
 
 from app.api.artifact_responses import serve_stored_file
 from app.api.command_actor import CommandActor, command_session, require_command_writer
@@ -52,13 +52,25 @@ from app.db.projections import content_changed
 from app.db.scopes import live
 from app.db.session import get_session
 from app.modules.identity import rbac
-from app.modules.library import collection_tree, library_search, taxonomy, trash
+from app.modules.library import (
+    collection_covers,
+    collection_tree,
+    library_search,
+    taxonomy,
+    trash,
+)
 from app.modules.storage.storage_backend.contracts import StorageCollisionError
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_ownership import (
     abandon_publication,
     adopt_publication,
     prepare_bytes,
+)
+from app.schemas.collection_covers import (
+    AutomaticCover,
+    CollectionCover,
+    ImageCover,
+    ModelsCover,
 )
 from app.schemas.models import (
     CollectionCreate,
@@ -114,6 +126,7 @@ def _collection_read(
         ),
         tags=tags.get(collection.id or 0, []),
         has_readme=bool(collection.readme),
+        has_custom_cover=collection.cover_selection is not None,
     )
 
 
@@ -227,6 +240,7 @@ def list_collections(
             Collection.parent_id,
             # Only whether a readme exists; the text can be large.
             func.coalesce(func.length(Collection.readme), 0) > 0,
+            col(Collection.cover_selection).is_not(None),
         )
         .where(Collection.id.in_(visible))  # type: ignore[union-attr]
         .order_by(Collection.path)
@@ -239,10 +253,10 @@ def list_collections(
         ).all()
     )
     totals = taxonomy.subtree_totals(
-        {path: direct_counts.get(cid, 0) for cid, _, _, path, _, _ in rows}
+        {path: direct_counts.get(cid, 0) for cid, _, _, path, _, _, _ in rows}
     )
     roles = rbac.effective_roles_for_paths(
-        session, current_user, ((cid, path) for cid, _, _, path, _, _ in rows)
+        session, current_user, ((cid, path) for cid, _, _, path, _, _, _ in rows)
     )
     tags_by_collection = collection_tree.collection_tags(session, visible)
     return [
@@ -256,8 +270,9 @@ def list_collections(
             effective_role=roles[cid],
             tags=tags_by_collection.get(cid, []),
             has_readme=has_readme,
+            has_custom_cover=has_custom_cover,
         )
-        for cid, name, slug, path, parent_id, has_readme in rows
+        for cid, name, slug, path, parent_id, has_readme, has_custom_cover in rows
     ]
 
 
@@ -453,6 +468,66 @@ def replace_collection_tags(
 
 
 @router.get(
+    "/collections/{collection_id}/cover",
+    response_model=CollectionCover,
+    summary="Read a collection's cover selection",
+)
+def get_collection_cover(
+    collection_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> CollectionCover:
+    collection = get_or_404(session, Collection, collection_id, "collection_not_found")
+    rbac.require_collection_role(
+        session, current_user, collection_id, CollectionRole.EDIT
+    )
+    return collection_covers.read_cover(
+        session, current_user, collection.path, collection.cover_selection
+    )
+
+
+@router.put(
+    "/collections/{collection_id}/cover",
+    response_model=CollectionCover,
+    dependencies=[Depends(require_auth)],
+    summary="Set a collection's cover selection",
+)
+def set_collection_cover(
+    collection_id: int,
+    payload: CollectionCover,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> CollectionCover:
+    collection = get_or_404(session, Collection, collection_id, "collection_not_found")
+    rbac.require_collection_role(
+        session, current_user, collection_id, CollectionRole.EDIT
+    )
+    if isinstance(payload, ImageCover):
+        backend = get_backend()
+        if not backend.exists(
+            backend.collection_image_key(collection_id, payload.filename)
+        ):
+            raise HTTPException(status_code=404, detail="image_not_found")
+    if isinstance(
+        payload, ModelsCover
+    ) and payload.model_ids != collection_covers.eligible_model_ids(
+        session, current_user, collection.path, payload.model_ids
+    ):
+        raise HTTPException(
+            status_code=422, detail="collection_cover_models_unavailable"
+        )
+
+    selection = None if isinstance(payload, AutomaticCover) else payload.model_dump()
+    if selection != collection.cover_selection:
+        collection.cover_selection = selection
+        collection.updated_by = current_user.id
+        session.add(collection)
+        content_changed(session, "collection", [collection_id])
+        session.commit()
+    return payload
+
+
+@router.get(
     "/collections/{collection_id}/readme",
     response_model=CollectionReadmeRead,
     summary="Get a collection's markdown landing page",
@@ -495,7 +570,7 @@ def set_collection_readme(
     "/collections/{collection_id}/images",
     response_model=CollectionImageUpload,
     status_code=status.HTTP_201_CREATED,
-    summary="Upload an image for a collection's readme",
+    summary="Upload an image for a collection",
 )
 @bounded_command
 def upload_collection_image(
@@ -554,12 +629,14 @@ def upload_collection_image(
             if candidate is not None and abandon_publication(session, candidate):
                 backend.rollback_create(candidate.receipt)
             raise
-        return CollectionImageUpload(url=f"/api/v1/collections/{col.id}/images/{name}")
+        return CollectionImageUpload(
+            url=collection_covers.image_url(collection_id, name)
+        )
 
 
 @router.get(
     "/collections/{collection_id}/images/{name}",
-    summary="Serve an image embedded in a collection's readme",
+    summary="Serve a collection image",
 )
 def get_collection_image(
     collection_id: int,

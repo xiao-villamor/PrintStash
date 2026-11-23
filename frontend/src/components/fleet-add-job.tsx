@@ -303,7 +303,7 @@ function AddJobForm({
                 <div className="grid gap-2">
                   <p className="text-xs text-muted-foreground">{uiText("Revision")}</p>
                   {file && chosen.data ? (
-                    <p className="break-words text-sm font-semibold">
+                    <p className="wrap-anywhere text-sm font-semibold">
                       {chosen.data.name} · {revisionLabel(file)}
                     </p>
                   ) : chosen.isFetching ? (

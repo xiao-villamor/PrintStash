@@ -6,6 +6,19 @@ import { json, renderApp } from "@/test-support/render";
 import { CaptureSourceSummary, ModelSourceSummary } from "../source-summary";
 
 describe("SourceSummary", () => {
+  it("omits the source summary without captured sources", () => {
+    renderApp(<ModelSourceSummary modelId={1} />, {
+      routes: {
+        "GET /api/v1/models/1/provenance": json({
+          edit_epoch: "a".repeat(32),
+          edit_version: 1,
+          sources: [],
+        }),
+      },
+    });
+    expect(screen.queryByRole("link", { name: "Source and license" })).not.toBeInTheDocument();
+  });
+
   it("identifies inferred terms without inventing rights", () => {
     render(
       <CaptureSourceSummary

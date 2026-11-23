@@ -17,6 +17,49 @@ import { collectPageProblems, useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("printer routes", () => {
+  test("fits a long saved revision through the queue selection flow", async ({ page }) => {
+    const name = "ContinuousWorkshopModel".repeat(9);
+    const label = "ContinuousRevisionLabel".repeat(5);
+    await page.route("**/api/v1/models/page?**", async (route) => {
+      const response = await route.fetch();
+      const result = await response.json();
+      result.items = result.items.map((item: { id: number }) =>
+        item.id === 1 ? { ...item, name } : item,
+      );
+      await route.fulfill({ response, json: result });
+    });
+    await page.route("**/api/v1/models/1", async (route) => {
+      const response = await route.fetch();
+      const model = await response.json();
+      model.name = name;
+      model.files[1].revision_label = label;
+      await route.fulfill({ response, json: model });
+    });
+    await page.setViewportSize({ width: 800, height: 650 });
+    await page.goto("/printers?tab=queue");
+    await page.getByRole("button", { name: "Add to queue", exact: true }).first().click();
+    await page.getByText("Browse saved Revisions", { exact: true }).click();
+    const picker = page.getByRole("dialog", { name: "Revision", exact: true });
+    await picker.getByRole("button", { name, exact: true }).click();
+    const revision = picker.getByRole("button", { name: new RegExp(label) });
+    await expect(revision).toBeVisible();
+    await expect
+      .poll(() => revision.evaluate((element) => element.scrollWidth - element.clientWidth))
+      .toBeLessThanOrEqual(1);
+    await revision.click();
+    await expect(picker).toBeHidden();
+    const dialog = page.getByRole("dialog", { name: "Add to queue" });
+    await expect(dialog.getByText(name, { exact: true })).toBeVisible();
+    await expect
+      .poll(() =>
+        dialog.locator(".queue-compose-body").evaluate((element) => {
+          return element.scrollWidth - element.clientWidth;
+        }),
+      )
+      .toBeLessThanOrEqual(1);
+    await expect(dialog.getByRole("button", { name: "Save job" })).toBeInViewport();
+  });
+
   test("printer list route loads configured printers through the frontend proxy", async ({
     page,
   }) => {
@@ -33,6 +76,83 @@ test.describe("printer routes", () => {
     await expect(page.getByText("Failed to fetch")).toHaveCount(0);
     await expect(page.getByText("This page could not be found")).toHaveCount(0);
     expect(problems).toEqual([]);
+  });
+
+  test("fleet cards contain telemetry when a job has a long filename", async ({ page }) => {
+    const currentJob = `workshop-${"continuous-filename-".repeat(10)}.gcode.3mf`;
+    await page.addInitScript(() =>
+      localStorage.setItem("printstash.printer-card.show-image", "true"),
+    );
+    await page.route("**/api/v1/fleet/summary", async (route) => {
+      const response = await route.fetch();
+      const summary = await response.json();
+      await route.fulfill({
+        response,
+        json: {
+          ...summary,
+          printers: [
+            ...summary.printers.filter(
+              (printer: { printer_id: number }) => printer.printer_id !== 3,
+            ),
+            {
+              printer_id: 3,
+              status: "ready",
+              current_job_id: 1,
+              current_job_name: currentJob,
+              progress: 0.37,
+              telemetry: { nozzle_c: 218, bed_c: 65, part_fan_speed: 0.7 },
+              nozzle_diameter_mm: 0.4,
+              loaded_slots: [],
+            },
+          ],
+        },
+      });
+    });
+    await page.route("**/api/v1/printers", async (route) => {
+      const response = await route.fetch();
+      const [printer] = await response.json();
+      await route.fulfill({
+        response,
+        json: [
+          { ...printer, model_name: "Creality Ender 3" },
+          { ...printer, id: 4, name: "Workshop Bambu", model_name: "Bambu Lab P1S" },
+        ],
+      });
+    });
+    await page.goto("/printers");
+    const toggle = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    const card = page
+      .getByRole("article")
+      .filter({ has: page.getByRole("link", { name: "ender", exact: true }) });
+    const job = card.getByText(currentJob, { exact: true });
+    const temperature = card.getByText("218 °C", { exact: true });
+    await expect(job).toHaveAttribute("title", currentJob);
+    await expect(temperature).toBeVisible();
+    const activity = page.getByRole("region", { name: "Fleet activity", exact: true });
+    const lastCard = page
+      .getByRole("article")
+      .filter({ has: page.getByRole("link", { name: "Workshop Bambu", exact: true }) });
+
+    for (const width of [1920, 1280, 720]) {
+      if (width === 720) await toggle.click();
+      await page.setViewportSize({ width, height: width === 1920 ? 1080 : 780 });
+      await expect
+        .poll(() => card.evaluate((element) => element.scrollWidth - element.clientWidth))
+        .toBeLessThanOrEqual(1);
+      const cardBox = (await card.boundingBox())!;
+      const temperatureBox = (await temperature.boundingBox())!;
+      const activityBox = (await activity.boundingBox())!;
+      const lastCardBox = (await lastCard.boundingBox())!;
+      expect(temperatureBox.x + temperatureBox.width).toBeLessThan(cardBox.x + cardBox.width);
+      expect(lastCardBox.x + lastCardBox.width).toBeLessThanOrEqual(width);
+      expect(activityBox.x + activityBox.width).toBeLessThanOrEqual(width);
+      if (width < 1920) {
+        expect(activityBox.y).toBeGreaterThan(lastCardBox.y + lastCardBox.height);
+      }
+    }
   });
 
   test("fleet cards open printers from the artwork or card body", async ({ page }) => {
@@ -81,6 +201,7 @@ test.describe("printer routes", () => {
     const toggle = page.getByRole("button", { name: "Toggle sidebar" });
     if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("#collections-pane")).toHaveCSS("width", "0px");
 
     const card = page
       .getByRole("article")

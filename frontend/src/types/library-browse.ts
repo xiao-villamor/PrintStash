@@ -41,4 +41,5 @@ export interface LibraryPreviewItem {
 export interface LibraryCollectionPreview {
   items: LibraryPreviewItem[];
   authorization_revision: string;
+  image_url?: string | null;
 }

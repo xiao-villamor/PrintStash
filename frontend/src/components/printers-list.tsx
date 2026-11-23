@@ -208,7 +208,7 @@ export function PrintersPage() {
           }
           confirmLabel={uiText("Remove")}
         />
-        <div className="flex w-full flex-col gap-4">
+        <div className="@container/fleet flex w-full min-w-0 flex-col gap-4">
           <PageHeader
             title={uiText("Printers")}
             description={uiText(
@@ -303,12 +303,12 @@ export function PrintersPage() {
                   selected={healthFilter === "attention"}
                   onClick={() => setHealthFilter(healthFilter === "attention" ? null : "attention")}
                 />
-                <label className="ml-1 flex items-center gap-2 border-l border-border pl-3 text-xs text-muted-foreground">
+                <label className="ml-1 flex min-w-0 max-w-full items-center gap-2 border-l border-border pl-3 text-xs text-muted-foreground">
                   {uiText("Group")}
                   <select
                     value={selectedGroup ?? ""}
                     onChange={(event) => setSelectedGroup(event.target.value || null)}
-                    className="h-8 border border-input bg-card px-2 text-xs text-foreground"
+                    className="h-8 min-w-0 border border-input bg-card px-2 text-xs text-foreground"
                   >
                     <option value="">{uiText("All groups")}</option>
                     {printerGroups.map((group) => (
@@ -361,7 +361,7 @@ export function PrintersPage() {
                   className="animate-panel-in rounded-lg border border-border bg-card shadow-sm"
                 />
               ) : (
-                <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,24%)]">
+                <div className="grid min-w-0 grid-cols-1 items-start gap-4 @5xl/fleet:grid-cols-[minmax(0,1fr)_minmax(17rem,24%)]">
                   {visiblePrinters.length === 0 ? (
                     <EmptyState
                       icon={PrinterIcon}
@@ -660,18 +660,18 @@ function FleetPrinterCard({
   const artworkUrl = printerArtwork(artworkPreference === "model" ? model : null).imageUrl;
   const lastSeen = parseApiInstant(printer.last_seen_at);
   return (
-    <article className="group relative flex min-w-0 flex-col border border-border bg-card text-card-foreground hover:border-border-strong motion-safe:transition-transform duration-fast ease-out motion-safe:hover:-translate-y-0.5 motion-safe:active:scale-[0.99]">
+    <article className="group @container/printer-card relative flex min-w-0 flex-col border border-border bg-card text-card-foreground hover:border-border-strong motion-safe:transition-transform duration-fast ease-out motion-safe:hover:-translate-y-0.5 motion-safe:active:scale-[0.99]">
       <div className="flex flex-1 items-stretch">
         {artworkPreference !== "off" && (
           <PrinterCardArtwork key={artworkUrl} url={artworkUrl} model={model} />
         )}
-        <div className="grid min-w-0 flex-1 content-start gap-3 px-4 py-4 text-xs">
+        <div className="grid min-w-0 flex-1 grid-cols-1 content-start gap-3 px-4 py-4 text-xs">
           <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
             <div className="min-w-0">
               <h2 className="text-lg font-semibold leading-tight tracking-tight">
                 <Link
                   href={`/printers/${printer.id}`}
-                  className="break-words after:absolute after:inset-0 after:z-10 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                  className="wrap-anywhere after:absolute after:inset-0 after:z-10 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
                 >
                   {printer.name}
                   <ArrowUpRight
@@ -680,16 +680,16 @@ function FleetPrinterCard({
                   />
                 </Link>
               </h2>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-1 wrap-anywhere text-xs text-muted-foreground">
                 {providerLabel(printer)}
                 {printer.capabilities.support_level === "beta" ? ` · ${uiText("Beta")}` : ""}
                 {printer.group ? ` · ${printer.group}` : ""}
               </p>
             </div>
-            <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium capitalize">
+            <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 wrap-anywhere text-xs font-medium capitalize">
               <span
                 aria-hidden="true"
-                className={`size-2 rounded-full ${STATUS_DOT[printer.status]}`}
+                className={`size-2 shrink-0 rounded-full ${STATUS_DOT[printer.status]}`}
               />
               {knownUiText(printer.status)}
             </span>
@@ -820,7 +820,7 @@ function FleetTelemetryReadings({ telemetry }: { telemetry: FleetPrinterTelemetr
       {readings.map(({ label, value, unit }) =>
         value == null ? null : (
           <div key={label} className="flex items-baseline justify-between gap-2">
-            <dt className="flex items-center gap-1 text-muted-foreground">
+            <dt className="flex min-w-0 items-center gap-1 wrap-anywhere text-muted-foreground">
               {unit === "%" && (
                 <Fan
                   aria-hidden="true"
@@ -844,7 +844,7 @@ function FleetTelemetryReadings({ telemetry }: { telemetry: FleetPrinterTelemetr
 function PrinterCardArtwork({ url, model }: { url: string; model: string | null | undefined }) {
   const [failed, setFailed] = useState(false);
   return (
-    <div className="grid min-h-36 w-24 shrink-0 place-items-center overflow-hidden border-e border-border bg-preview-image-matte px-1.5 py-2 sm:w-32">
+    <div className="grid min-h-36 w-20 shrink-0 place-items-center overflow-hidden border-e border-border bg-preview-image-matte px-1.5 py-2 @xs/printer-card:w-24 @lg/printer-card:w-32">
       <img
         src={failed ? printerArtwork(null).imageUrl : url}
         alt={model ? uiText("{value1} printer", { value1: model }) : uiText("Printer")}

@@ -10,11 +10,22 @@
 
 ### Changed
 
+- Model details are in Overview and mesh measurements and checks are in Source info, freeing the full preview pane for the viewer.
+- Model Overview uses larger text and a readable Collection path. File and Revision navigation stays in the inspector tabs.
+- Model Details tabs wrap in narrow inspectors. Overview shows the Model description and a shortcut to the recommended Revision. The description editor offers Write and Preview tabs for Markdown.
+- Source 3MF project settings appear in Print settings, separately from recorded Revision settings.
+- G-code layer controls fit above the camera toolbar in short Model previews.
+- Right-click a Collection card to rename it in place or edit its cover. Preview a collage of up to four Models, upload an image, or restore the automatic collage.
+- The Model tag editor opens with the tag field focused. Edit details starts at the Name field, aligns the Collection picker, and keeps tag suggestions inside the scrollable editor.
+
+- The Revisions tab shows print results and time in the list. Notes and actions follow the selected Revision, with print setup and G-code file details available on demand.
+
 - Klipper Status now includes an administrator console with printer replies and loaded macros. Select a macro to supply its parameters before sending.
 
 - Fleet admins can see waiting jobs that have no assigned printer in the queue and fleet totals. Replacing filament in an existing manual feed now saves and lets compatible work dispatch. Bambu printers preparing a print count as busy.
 
 - Add to queue shows the selected Revision, plate, routing rule, destination and priority before saving. The queue list groups the Revision, destination, status and actions into columns, with routing holds written in plain language.
+- Send to printer shows the Revision and named plates with their estimates before the printer choices. The same plate selection carries between Send now and Add to queue.
 - Fleet Queue opens a routing map. Select jobs, routing rules or printers to inspect them, or drag a queued job to a printer and confirm its new destination. The dispatcher shows available capacity, and printing nodes show reported progress and time remaining.
 - Bambu file transfers can resume the authenticated FTPS session on the data connection. Bambu LAN sends sliced Library projects intact and starts the chosen plate. A tracked project can also be started from the printer’s cache. Fleet Queue shows current work, progress, available time estimates, next jobs and dispatch holds per printer. The scheduler holds the next job while the previous dispatch awaits firmware updates.
 
@@ -23,6 +34,7 @@
 - Open a printer from anywhere on its Fleet card. The roster shows work, routing holds, reported material colors, and available nozzle, bed and part-cooling fan readings alongside recent and queued prints. Fleet totals open the matching queue view or filter printers by readiness. Printer Status distinguishes idle machines from active jobs, shows a rolling history of actual heater readings and the reported part-cooling fan level, and can queue a saved Revision for that printer. Bambu Status groups the printer portrait and reported AMS trays beside the current job, live telemetry and recent runs. The job summary includes available layer counts during a print.
 - Bambu LAN recognizes individually addressed external spools in firmware material reports and keeps their readings separate across incremental MQTT updates.
 - Fleet Queue and Maintenance selects align their text and chevrons in Chromium's native picker. Bambu LAN forwards available nozzle and bed readings, targets and part-cooling fan levels. Moonraker reads the part-cooling fan when configured.
+- Fleet cards keep status and temperatures inside the card with long job names. Fleet activity moves below the cards when horizontal space runs out.
 - Printer details put machine controls, job actions and live feedback beside the heater graph. Hotend and bed history use aligned plots on a shared scale. Moonraker includes available controller history and shows material presets before you send a preheat command. The bed surface shows measured heights and variation, and operators with an automatic probe can measure the bed from the dashboard.
 - Completed Vault prints have a **Queue again** action in Jobs. It opens the ordinary queue form with the original Revision, plate and printer selected.
 - Printer Files has a folder explorer and searchable inventory. Operators can upload a saved Revision directly to the selected printer and inspect the transferred file before starting it. Jobs shows outcomes and durations, with the selected run’s evidence and actions alongside it. Both show the Model name for matched files. Materials & maintenance brings loaded feeds, service history and routing together. Diagnostics shows individual check results, and Settings tracks unsaved changes.
@@ -37,7 +49,7 @@
 - The extension imports the default files with one Import click. Change the selection inline, choose a cover from the gallery thumbnails, or exclude the whole gallery. The Import button and status stay visible while the options scroll.
 - Opening Search keeps the collection and grid you were browsing. The Search sidebar searches the current collection and offers a switch to search the whole library and back. Recent searches can be removed one by one or cleared, and the AI Search status sits in one compact note. Switching sidebar tools no longer stalls the page and settles in 150 ms.
 - The Filters picker leads with quick toggles for Favorites, Printed and similar candidates, then groups the remaining filters into Files and library and Printing with a distinct icon per filter and a summary of each active selection. A filter page can be cleared on its own.
-- Model views fills the dialog with the selected image, separates renders from photos in the thumbnail strip, keeps the selected thumbnail in view, shows full view names and supports the arrow keys.
+- Model views fills the dialog with the selected image, separates renders from photos in the thumbnail strip, keeps the selected thumbnail in view, shows full view names and supports the arrow keys. Image controls in dark mode let the image show through.
 - Library cards move to their new places on the details panel's own motion when it opens or closes, the same way they follow the Collections sidebar, instead of jumping ahead of it. A card that moves to another row now slides in from the edge of that row instead of crossing the others.
 - G-code previews colour each line by what the slicer says it prints (outer and inner walls, infill, top and bottom, bridges, support, skirt and brim) instead of a rainbow by height. A legend under Layers hides or shows each feature. G-code without slicer feature markers is shaded in one hue by height.
 - G-code previews draw each printed line as a shaded tube as wide as the line itself, so a print reads as a solid object with visible layers instead of faint one-pixel lines.
@@ -54,10 +66,10 @@
 
 - Multi-angle previews render in the same pass as the cover, from the mesh it already loaded, on every native slot. A 60-file import with orbit views finishes in about a third of the time (239 s → 89 s on a 3-CPU host); a cover pass that stops early hands its views back so they are rendered again at once. Views follow the Model image quality setting (Compact, Standard or High) instead of a fixed 480 × 360, and Recreate all images rebuilds them with the covers; existing view sets update once in the background. A top or bottom view that would show only the edge of a plate is left out instead of failing the whole set.
 
-- Model details now show the selected G-code revision’s print setup and named plate estimates alongside preview and delivery actions. Overview presents setup, a plate-by-plate comparison and printing actions before recorded prints, with technical file details available on demand. Inspector tabs lead directly into their content, and source-to-revision comparisons prioritize recorded values. Send and Queue carry the inspected plate into confirmation. Queue shows its per-copy estimates and revision test status, validates whole-copy quantities, and keeps the draft open during printer setup. Compare returns to its originating tab and summarizes empty print histories. Libraries without printers offer queueing and printer setup.
+- Model details now show the selected G-code revision’s print setup and named plate estimates alongside preview and delivery actions in Revisions. Inspector tabs lead directly into their content, and source-to-revision comparisons prioritize recorded values. Send and Queue carry the inspected plate into confirmation. Queue shows its per-copy estimates and revision test status, validates whole-copy quantities, and keeps the draft open during printer setup. Compare returns to its originating tab and summarizes empty print histories. Libraries without printers offer queueing and printer setup.
 
 - Model-detail reviews have a repeatable desktop Playwright flow using existing Models and their actual files, covering tabs, preview modes, plates, revisions and dialogs with private screenshot, layout and metadata evidence for follow-up design audits.
-- G-code previews use a slicer-style side panel with Layers and View tabs for plate cards, direct layer entry, camera and display controls. Controls fit above the model information, and expanding the preview hides that information to give the viewer more room. Plate choices stay available while loading or retrying a preview.
+- G-code previews use a slicer-style side panel with Layers and View tabs for plate cards, direct layer entry, camera and display controls. Expanding the preview hides the inspector to give the viewer more room. Plate choices stay available while loading or retrying a preview.
 
 - New installations generate one thumbnail by default. Preview settings offer consistent oblique views for every Model, with optional top and bottom views; existing view sets update in the background.
 
@@ -137,6 +149,8 @@
 - The default number of simultaneous mesh jobs is now one per usable CPU (it was one more). With admission no longer stalling, the extra job only competed for the CPU: on a 3-CPU, 8 GB install a 60-file archive's thumbnails finish in 38.7 s instead of 44.9 s, at the same CPU cost. `VAULT_MAX_RENDER_JOBS` and *Models processed at once* still override it.
 
 ### Fixed
+
+- Long Model names, Revision labels, and G-code filenames fit in the model details, queue dialog, and upload form. Revision numbers and measurements stay together in the revision table.
 
 - OctoPrint shows Resume when a running job is paused externally. PrusaLink records an observed print as completed when the firmware retires its job details at the end of the run.
 

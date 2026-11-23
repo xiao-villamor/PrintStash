@@ -164,6 +164,7 @@
 }
 .queue-compose-fields {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 17px;
 }
 .queue-compose-group {
@@ -326,6 +327,7 @@
 }
 .queue-ticket-route > div {
   display: grid;
+  overflow-wrap: anywhere;
   gap: 2px;
 }
 .queue-ticket-route b,

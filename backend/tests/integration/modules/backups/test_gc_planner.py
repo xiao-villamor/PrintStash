@@ -216,6 +216,7 @@ class TestCreateGcPlan:
         collection.readme = (
             f"/api/v1/collections/{collection.id}/images/{'c' * 64}.webp"
         )
+        collection.cover_selection = {"kind": "image", "filename": f"{'d' * 64}.webp"}
         db_session.add_all([document, collection])
         db_session.commit()
 
@@ -227,7 +228,7 @@ class TestCreateGcPlan:
         assert model_candidate.size_bytes == 123
         assert gc_planner._file_metrics(external) == (0, 0)  # noqa: SLF001
         assert document_candidate.key_count == 2
-        assert collection_candidate.key_count == 1
+        assert collection_candidate.key_count == 2
 
     def test_batch_limits_stop_before_unsafe_candidates(
         self, db_session: Session

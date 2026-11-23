@@ -655,6 +655,7 @@ class CollectionRead(BaseModel):
     # Lets a folder view skip the readme request for the folders (most of them)
     # that have none.
     has_readme: bool = False
+    has_custom_cover: bool = False
 
 
 class CollectionNodeRead(CollectionRead):

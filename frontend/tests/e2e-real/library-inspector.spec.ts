@@ -78,11 +78,16 @@ test.describe("Library inline inspector", () => {
       await drawer
         .getByRole("combobox", { name: "Printer for printing and logging" })
         .selectOption(String(printer.id));
-      await expect(drawer.getByRole("button", { name: "Failed", exact: true })).toBeEnabled();
+      await expect(
+        drawer.getByRole("button", { name: "Send to printer", exact: true }),
+      ).toBeEnabled();
+      await expect(drawer.getByRole("button", { name: "Failed", exact: true })).toHaveCount(0);
       await drawer.getByRole("tab", { name: "Print", exact: true }).focus();
       await page.keyboard.press("2");
-      const failureNote = drawer.getByRole("textbox", { name: /What went wrong/ });
+      const historyPanel = drawer.getByRole("tabpanel", { name: /History/ });
+      const failureNote = historyPanel.getByRole("textbox", { name: /What went wrong/ });
       await expect(failureNote).toBeFocused();
+      await expect(historyPanel.getByRole("combobox")).toHaveValue(String(printer.id));
       await failureNote.fill(note);
       const accepted = page.waitForResponse(
         (response) =>
@@ -120,9 +125,9 @@ test.describe("Library inline inspector", () => {
       await page.reload();
       await modelCard(page, name).click();
       await drawer.getByRole("tab", { name: /History/ }).click();
-      const historyPanel = drawer.getByRole("tabpanel", { name: /History/ });
-      await expect(historyPanel.getByText(note, { exact: true })).toBeVisible();
-      await expect(historyPanel.getByText(new RegExp(printerName))).toBeVisible();
+      const recorded = historyPanel.getByRole("list");
+      await expect(recorded.getByText(note, { exact: true })).toBeVisible();
+      await expect(recorded.getByText(new RegExp(printerName))).toBeVisible();
     } finally {
       if (modelId !== null) {
         expect((await page.request.delete(`/api/v1/models/${modelId}`)).ok()).toBe(true);

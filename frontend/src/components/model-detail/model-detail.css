@@ -11,6 +11,7 @@
   overflow: auto;
 }
 .model-detail-visual {
+  container: model-preview / inline-size;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -23,22 +24,6 @@
 }
 .model-detail-inspector {
   max-width: calc(100% - 21rem);
-}
-.model-information {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-  gap: 1rem;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  border-top: 0;
-  background: var(--card);
-}
-.model-information:not(:has(.model-information-geometry)) {
-  grid-template-columns: minmax(0, 1fr);
-}
-.model-information-geometry {
-  border-left: 1px solid var(--border);
-  padding-left: 1rem;
 }
 .model-information-facts {
   display: grid;
@@ -54,9 +39,6 @@
 .model-information-facts dd {
   margin: 0;
   overflow-wrap: anywhere;
-}
-.model-information-geometry dd {
-  font-family: var(--font-mono);
 }
 .detail-revision-picker {
   max-height: 14rem;
@@ -88,15 +70,6 @@
   text-align: right;
 }
 @media (max-width: 1100px) {
-  .model-information {
-    grid-template-columns: 1fr;
-  }
-  .model-information-geometry {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-    padding-left: 0;
-    padding-top: 0.75rem;
-  }
   .detail-revision-facts {
     grid-template-columns: 1fr;
   }
@@ -130,9 +103,6 @@
   .model-detail-content {
     overflow: visible;
   }
-  .model-information {
-    padding: 0.75rem;
-  }
   .model-detail-tabs {
     margin-inline: 0.5rem;
   }
@@ -140,7 +110,7 @@
 
 /* Approved detail composition: a persistent source preview beside an artifact inspector. */
 .model-detail-tabs {
-  gap: 24px;
+  column-gap: 1.5rem;
   justify-content: flex-start;
   margin-inline: 20px;
   border-bottom-color: var(--border-strong);
@@ -156,127 +126,6 @@
 }
 .model-detail-content {
   padding: 16px 20px;
-}
-.detail-section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.detail-overview h2 {
-  font-size: 1rem;
-  font-weight: 600;
-}
-.detail-overview h3 {
-  font-size: 0.875rem;
-  font-weight: 600;
-}
-.detail-revision-identity h2 {
-  font-size: 1.25rem;
-  overflow-wrap: anywhere;
-}
-.detail-artifact-filename {
-  margin-top: 4px;
-  color: var(--muted-foreground);
-  font-size: 0.8125rem;
-  overflow-wrap: anywhere;
-}
-.detail-revision-note {
-  margin: 0 0 20px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: 0.875rem;
-  line-height: 1.5;
-}
-.detail-overview-block {
-  margin-top: 16px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-}
-.detail-overview-facts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
-  gap: 12px;
-  margin-top: 8px;
-  font-size: 0.875rem;
-}
-.detail-overview-facts dt,
-.detail-overview-plates thead th {
-  font-size: 0.75rem;
-  font-weight: 400;
-  color: var(--muted-foreground);
-}
-.detail-overview-facts dd {
-  margin-top: 3px;
-  overflow-wrap: anywhere;
-  font-variant-numeric: tabular-nums;
-}
-.detail-overview-plates {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.875rem;
-}
-.detail-overview-plates caption {
-  margin-bottom: 8px;
-  text-align: start;
-}
-.detail-overview-plates th,
-.detail-overview-plates td {
-  padding: 7px 6px;
-  border-bottom: 1px solid var(--border);
-  text-align: end;
-  vertical-align: middle;
-  font-variant-numeric: tabular-nums;
-}
-.detail-overview-plates th:first-child {
-  width: 48%;
-  text-align: start;
-  overflow-wrap: anywhere;
-  font-weight: 400;
-}
-.detail-print-results {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 8px;
-  font-size: 0.875rem;
-}
-.detail-print-results th,
-.detail-print-results td {
-  text-align: left;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--border);
-}
-.detail-print-results th {
-  font-size: 0.8125rem;
-  color: var(--muted-foreground);
-  font-weight: 400;
-}
-.detail-print-results th:first-child {
-  width: 48%;
-}
-.detail-print-results th:last-child,
-.detail-print-results td:last-child {
-  text-align: right;
-}
-.detail-log-print {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.8125rem;
-}
-.detail-empty-evidence {
-  margin-block: 14px;
-  color: var(--muted-foreground);
-  font-size: 0.875rem;
-}
-.detail-revision-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 12px;
 }
 .detail-printer-status {
   display: flex;
@@ -343,31 +192,11 @@
 }
 .detail-delivery-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
   gap: 24px 32px;
 }
-.detail-delivery-context {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 16px;
-  padding-bottom: 16px;
-  margin-bottom: 20px;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.8125rem;
-}
-.detail-delivery-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
-  padding-top: 16px;
-  margin-top: 20px;
-  border-top: 1px solid var(--border);
-}
-@media (max-width: 1099px) {
+@media (max-width: 899px) {
   .detail-delivery-layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 24px;
@@ -435,7 +264,7 @@
   }
   .model-detail-tabs {
     margin-inline: 12px;
-    gap: 20px;
+    column-gap: 1.25rem;
   }
   .model-detail-content {
     padding: 16px;
@@ -461,13 +290,16 @@
   white-space: nowrap;
 }
 .detail-revisions-table tbody tr:first-child > * {
-  padding: 12px 10px 2px;
-  vertical-align: baseline;
-}
-.detail-revisions-table .detail-revision-table-note {
-  padding: 0 10px 12px;
-  color: var(--muted-foreground);
+  padding: 12px 10px;
   border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.detail-revisions-table tr > :nth-child(-n + 2) {
+  overflow-wrap: anywhere;
+}
+.detail-revisions-table tr > td:last-child {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .detail-revisions-table .is-inspected {
   background: var(--accent);
@@ -478,9 +310,6 @@
 .model-detail-layout[data-expanded="true"] .model-detail-inspector {
   display: none;
 }
-.model-detail-layout[data-expanded="true"] .model-information {
-  display: none;
-}
 /* Controls occupy their own rows so loading/error content cannot be covered. */
 .model-detail-preview {
   display: grid;
@@ -488,9 +317,6 @@
   min-height: min-content;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto minmax(20rem, 1fr) auto auto;
-}
-.model-information {
-  flex-shrink: 0;
 }
 @media (min-width: 1100px) {
   .model-detail-layout {
@@ -520,8 +346,19 @@
 }
 /* The grid row owns the canvas height; the shared toolpath layout must not
    extend its larger standalone minimum into the camera dock. */
-.detail-preview-canvas .toolpath-workspace {
+.detail-preview-canvas .toolpath-workspace,
+.detail-preview-canvas .toolpath-viewport {
   min-height: 0;
+}
+@container model-preview (max-width: 28rem) {
+  .model-detail-preview:has(.toolpath-layout) {
+    flex: 1 0 auto;
+    grid-template-rows: auto auto minmax(20rem, max-content) auto auto;
+  }
+  .detail-preview-canvas:has(.toolpath-layout),
+  .detail-preview-canvas .toolpath-layout {
+    height: auto;
+  }
 }
 .detail-viewer-controls {
   display: contents;
@@ -724,9 +561,6 @@
   }
 }
 
-.detail-delivery-mode {
-  margin-left: auto;
-}
 .detail-delivery-mode .detail-choice-field {
   display: flex;
   align-items: center;
@@ -746,6 +580,7 @@
   min-height: 62px;
 }
 .model-detail-heading > div:first-child {
+  flex: 1 1 min(100%, 22rem);
   min-height: 36px;
   align-items: center;
 }
@@ -847,33 +682,6 @@
 .detail-tab-placeholder .animate-pulse {
   animation: none;
   border-radius: 2px;
-}
-/* Facts respond to their pane, including when the collection sidebar is open. */
-.model-detail-visual {
-  container-name: model-visual;
-  container-type: inline-size;
-}
-@container model-visual (max-width: 40rem) {
-  .model-information {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .model-information-geometry {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-    padding-left: 0;
-    padding-top: 0.75rem;
-  }
-}
-
-.detail-file-link {
-  color: var(--foreground);
-  text-decoration: underline;
-  text-decoration-color: var(--border-strong);
-  text-underline-offset: 0.2em;
-}
-.detail-file-link:hover,
-.detail-file-link:focus-visible {
-  text-decoration-color: currentColor;
 }
 .model-information-geometry dd {
   font-family: inherit;

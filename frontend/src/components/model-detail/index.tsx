@@ -18,7 +18,8 @@ import { ApiError } from "@/lib/errors";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { Modal } from "@/components/ui/modal";
 import { InlineTitleEditor } from "@/components/inline-title-editor";
-import { ModelInformation } from "./model-information";
+import { ModelGeometry, ModelInformation } from "./model-information";
+import { ProjectProfile } from "./project-profile";
 import { useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { RevisionPicker } from "./revision-picker";
 import { inspectedRevision } from "./inspected-revision";
@@ -78,7 +79,7 @@ import { TabBar } from "@/components/ui/tabs";
 import { AddGcodeRevisionModal } from "./add-revision-modal";
 import { SimilarityQueue } from "@/components/similarity-queue";
 import { FilesTab } from "./files-tab";
-import { OverviewTab, ModelMetadataFields, type ModelMetaEditor } from "./overview-tab";
+import { ModelMetadataFields, type ModelMetaEditor } from "./model-metadata-fields";
 import {
   TABS,
   TabKey,
@@ -91,7 +92,6 @@ import { RevisionsTab } from "./revisions-tab";
 import { SendToButtons } from "./send-to-buttons";
 import { ShareDialog } from "./share-dialog";
 import { SettingsTab } from "./settings-tab";
-import { PlateEstimates } from "./plate-estimates";
 import { SourceTab } from "./source-tab";
 import { useContentReveal } from "@/lib/use-content-reveal";
 import { DetailTabLoading } from "./tab-loading";
@@ -114,7 +114,6 @@ const GcodePreview = lazy(() =>
 
 const compareBackLabel = {
   files: "Back to files",
-  overview: "Back to overview",
   settings: "Back to print settings",
 } as const;
 
@@ -263,15 +262,6 @@ function ModelDetailPresentation({
     });
   }
   const [displayMode, setDisplayMode] = useState<ViewerDisplayMode>("solid");
-  const focusTab = useRef<TabKey | null>(null);
-  function focusInspector() {
-    detailLayout.current?.querySelector<HTMLElement>('[role="tabpanel"]')?.focus();
-  }
-  function openInspectorTab(tab: TabKey) {
-    if (activeTab === tab) focusInspector();
-    else focusTab.current = tab;
-    selectTab(tab);
-  }
   const detailLayout = useRef<HTMLDivElement>(null);
   const [detailLayoutWidth, setDetailLayoutWidth] = useState(() =>
     isBrowser() ? window.innerWidth - 93 : 1827,
@@ -363,6 +353,7 @@ function ModelDetailPresentation({
   } | null>(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsOpener = useRef<HTMLElement | null>(null);
   const { createTag, deleteTag } = useTaxonomyCommands();
   const metadataClient = useQueryClient();
   const [deleteTagTarget, setDeleteTagTarget] = useState<TagRead | null>(null);
@@ -419,10 +410,15 @@ function ModelDetailPresentation({
       detailLayout.current?.querySelector<HTMLButtonElement>("[data-compare-origin]")?.focus();
     }
     compareFocus.current = null;
-    if (focusTab.current === activeTab) focusInspector();
-    focusTab.current = null;
   }, [activeTab]);
   const detailTabBody = useContentReveal(activeTab, { scroll: "parent" });
+  const detailTabPanel = useRef<HTMLDivElement>(null);
+  const focusRevisionFromOverview = useRef(false);
+  useLayoutEffect(() => {
+    if (!focusRevisionFromOverview.current) return;
+    focusRevisionFromOverview.current = false;
+    if (activeTab === "revisions") detailTabPanel.current?.focus({ preventScroll: true });
+  }, [activeTab]);
   const visibleTabs = useMemo(
     () =>
       TABS.filter(
@@ -432,7 +428,6 @@ function ModelDetailPresentation({
     [canViewPrinters, canEditModel],
   );
 
-  // Quick actions on the Overview card (mark failed / recommend).
   // Thumbnails and metadata arrive after upload, derived in the background.
   useDerivativeRefresh(model.id);
 
@@ -988,9 +983,6 @@ function ModelDetailPresentation({
           title={uiText("Edit Model details")}
           className="absolute inset-y-0 right-0 h-dvh max-h-none max-w-[680px] rounded-none"
           bodyClassName="flex-1"
-          description={uiText(
-            "Edit the Model’s own metadata. Captured source fields and Artifact tags remain separate.",
-          )}
           footer={
             <>
               <Button variant="outline" onClick={cancelEdit} disabled={saving}>
@@ -1006,14 +998,7 @@ function ModelDetailPresentation({
             </>
           }
         >
-          <div className="space-y-5">
-            <div className="grid grid-cols-[1fr_2fr] gap-4 bg-plate p-4 text-[13px]">
-              <span className="text-muted-foreground">{uiText("Model")}</span>
-              <span className="break-words">{model.name}</span>
-            </div>
-            <p className="text-[13px] text-muted-foreground">
-              {uiText("Changes stay a draft until you save. Cancel restores the previous values.")}
-            </p>
+          <div className="space-y-4">
             {editing && editProblem && (
               <div role="alert" className="border-b border-border bg-muted px-4 py-3 text-sm">
                 <p>
@@ -1032,11 +1017,11 @@ function ModelDetailPresentation({
               </div>
             )}
 
-            <h3 className="text-sm font-semibold">{uiText("Model")}</h3>
-            <label className="block space-y-1.5 text-[13px] font-medium">
+            <label className="block space-y-1.5 text-sm font-medium">
               {uiText("Name (required)")}
               <Input
                 ref={nameInput}
+                required
                 value={editName}
                 onChange={(event) => setEditName(event.target.value)}
                 aria-invalid={!editName.trim()}
@@ -1044,9 +1029,6 @@ function ModelDetailPresentation({
                 disabled={saving}
               />
             </label>
-            <p className="text-xs text-muted-foreground">
-              {uiText("Required; separate quick Rename uses the same validation.")}
-            </p>
             {!editName.trim() && (
               <p id="model-name-error" className="text-sm text-destructive">
                 {uiText("Model name is required.")}
@@ -1058,6 +1040,7 @@ function ModelDetailPresentation({
         {/* Detail Header */}
         <DropdownMenu
           open={actionsOpen}
+          returnFocusRef={actionsOpener}
           onOpenChange={setActionsOpen}
           portal
           className="shrink-0"
@@ -1067,17 +1050,19 @@ function ModelDetailPresentation({
             <header
               onContextMenu={(event) => {
                 event.preventDefault();
+                actionsOpener.current = null;
                 setActionsOpen(true);
               }}
               onKeyDown={(event) => {
                 if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
                   event.preventDefault();
+                  actionsOpener.current = event.target instanceof HTMLElement ? event.target : null;
                   setActionsOpen(true);
                 }
               }}
               className="model-detail-heading flex flex-wrap items-center justify-between px-5 pt-4 pb-2.5 gap-2 bg-background shrink-0"
             >
-              <div className="flex w-full min-w-0 items-start gap-3 md:w-auto md:flex-1 md:gap-4">
+              <div className="flex min-w-0 items-start gap-3 md:gap-4">
                 <div className="min-w-0 flex-1">
                   <InlineTitleEditor
                     title={model.name}
@@ -1158,7 +1143,7 @@ function ModelDetailPresentation({
                 </div>
               </div>
               <div
-                className={`flex items-center gap-2 ${editing ? "w-full justify-end md:w-auto md:self-start" : ""}`}
+                className={`ms-auto flex min-w-0 flex-wrap items-center justify-end gap-2 ${editing ? "w-full md:w-auto md:self-start" : ""}`}
               >
                 <>
                   <Button
@@ -1206,7 +1191,10 @@ function ModelDetailPresentation({
                     title={uiText("Model actions")}
                     aria-haspopup="menu"
                     aria-expanded={actionsOpen}
-                    onClick={() => setActionsOpen(!actionsOpen)}
+                    onClick={(event) => {
+                      actionsOpener.current = event.currentTarget;
+                      setActionsOpen(!actionsOpen);
+                    }}
                   >
                     <MoreHorizontal className="h-4 w-4" />
                     {uiText("nav.more")}
@@ -1357,7 +1345,7 @@ function ModelDetailPresentation({
                   </div>
                 )}
                 {/* Source plate bounds are measured from the shown mesh, separately from
-                    the whole-source metadata shown below the preview. */}
+                    the whole-source metadata in Source info. */}
                 {viewerMode === "model" &&
                   showDimensions &&
                   viewerReady &&
@@ -1454,20 +1442,6 @@ function ModelDetailPresentation({
                 />
               )}
             </div>
-
-            <ModelInformation
-              model={model}
-              sourceFile={meshFile ?? null}
-              measurement={geometryMeasurement}
-              onFiles={() => openInspectorTab("files")}
-              onRevisions={() => openInspectorTab("revisions")}
-              canEdit={canEditModel}
-              onEdit={() => enterEdit("details")}
-              onTags={() => {
-                setTagDialogSession((value) => value + 1);
-                setTagDialogOpen(true);
-              }}
-            />
           </div>
 
           {/* Right: Settings & Files Panel */}
@@ -1525,11 +1499,12 @@ function ModelDetailPresentation({
               active={activeTab}
               onChange={selectTab}
               showIndicator={false}
-              className="model-detail-tabs shrink-0 overflow-x-auto border-b"
+              className="model-detail-tabs shrink-0 flex-wrap border-b"
               tabClassName="relative inline-flex items-center gap-1.5 h-10 min-w-max whitespace-nowrap px-0 py-0 text-sm font-medium text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               activeTabClassName="text-foreground"
             />
             <div
+              ref={detailTabPanel}
               role="tabpanel"
               tabIndex={0}
               aria-label={visibleTabs.find((tab) => tab.key === activeTab)?.label}
@@ -1537,60 +1512,31 @@ function ModelDetailPresentation({
             >
               <div ref={detailTabBody} className="model-detail-tab-body space-y-4">
                 {activeTab === "overview" && (
-                  <div className="space-y-4">
-                    {!inspectedGcode && gcodeOnly ? (
-                      slicedEstimates && (
-                        <PlateEstimates
-                          data={slicedEstimates}
-                          selected={selectedEstimatePlate}
-                          showCost={false}
-                        />
-                      )
-                    ) : (
-                      <OverviewTab
-                        model={model}
-                        editing={false}
-                        editor={modelMetadataEditor}
-                        revision={{
-                          file: inspectedGcode,
-                          plateEstimates: slicedEstimates,
-                          selectedSlicedPlate: selectedEstimatePlate,
-                          recommended: recommendedGcode,
-                          revisionCount: gcodeFiles.length,
-                          canEdit: canEditModel,
-                          canSend: canViewPrinters,
-                          printerless,
-                          jobs: canViewPrinters && printJobQuery.isSuccess ? printJobs : null,
-                          onRevisions: () => {
-                            setCompareOrigin(null);
-                            selectTab("revisions");
-                          },
-                          onSettings: () => selectTab("settings"),
-                          onHistory: () => selectTab("history"),
-                          onCompare: () => openComparison("overview"),
-                          onInspect: (fileId) =>
-                            setRevisionSelection({ modelId: model.id, fileId }),
-                          onSend: (mode) => {
-                            setDeliveryMode(mode);
-                            setSendOpen(true);
-                          },
-                          onLogPrint: (state) => {
-                            if (inspectedGcode)
-                              setHistoryDraft({ fileId: inspectedGcode.id, state });
-                            selectTab("history");
-                          },
-                          onAddRevision: requestAddRevision,
-                        }}
-                      />
-                    )}
-                    {!editing && !hasGcode && latestFile?.file_type === "resin" && (
-                      <SettingsTab
-                        meta={meta}
-                        printSettingRows={printSettingRows}
-                        preferences={metadataPreferences}
-                      />
-                    )}
-                  </div>
+                  <ModelInformation
+                    model={model}
+                    canEdit={canEditModel}
+                    recommendedRevision={
+                      recommendedGcode
+                        ? {
+                            file: recommendedGcode,
+                            open: () => {
+                              setCompareOrigin(null);
+                              setRevisionSelection({
+                                modelId: model.id,
+                                fileId: recommendedGcode.id,
+                              });
+                              focusRevisionFromOverview.current = true;
+                              selectTab("revisions");
+                            },
+                          }
+                        : null
+                    }
+                    onEdit={() => enterEdit("details")}
+                    onTags={() => {
+                      setTagDialogSession((value) => value + 1);
+                      setTagDialogOpen(true);
+                    }}
+                  />
                 )}
 
                 {activeTab === "settings" && (
@@ -1599,6 +1545,11 @@ function ModelDetailPresentation({
                     printSettingRows={printSettingRows}
                     preferences={metadataPreferences}
                     hasSlicedRevision={gcodeFiles.length > 0 || gcodeOnly}
+                    sourceProject={
+                      meshFile?.file_type === "3mf" ? (
+                        <ProjectProfile modelId={model.id} fileId={meshFile.id} />
+                      ) : undefined
+                    }
                     plateEstimates={slicedEstimates}
                     selectedSlicedPlate={selectedEstimatePlate}
                     headerActions={
@@ -1651,7 +1602,14 @@ function ModelDetailPresentation({
 
                 {activeTab === "similar" && canEditModel && <SimilarityQueue modelId={model.id} />}
                 {activeTab === "source" && (
-                  <SourceTab modelName={model.name} modelId={model.id} canEdit={canEditModel} />
+                  <>
+                    <ModelGeometry
+                      modelId={model.id}
+                      sourceFile={meshFile ?? null}
+                      measurement={geometryMeasurement}
+                    />
+                    <SourceTab modelName={model.name} modelId={model.id} canEdit={canEditModel} />
+                  </>
                 )}
 
                 {activeTab === "revisions" && canViewPrinters && printerFileQuery.isError && (
