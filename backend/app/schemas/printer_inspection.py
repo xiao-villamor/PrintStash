@@ -5,6 +5,17 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator
 
 
+class ConsoleCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    command: str = Field(min_length=1, max_length=2048, pattern=r"^[^\x00-\x1f\x7f]+$")
+
+
+class ConsoleEntry(BaseModel):
+    time: FiniteFloat
+    type: Literal["command", "response"]
+    message: str
+
+
 class RecordedHeaterSample(BaseModel):
     age_ms: Annotated[
         int, Field(ge=0, description="Nominal age relative to the newest store slot.")

@@ -20,13 +20,17 @@ from app.modules.identity.printer_rbac import require_printer_role
 from app.modules.printing.printer_inspection import (
     InvalidInspectionResponse,
     read_bed_mesh,
+    read_console_history,
     read_heater_history,
+    read_macro_names,
 )
 from app.modules.printing.printer_provider import MoonrakerProvider, get_provider_client
 from app.schemas.printer_inspection import (
     ActiveBedMesh,
     BedMeasurementAvailability,
     ConfirmBedMeasurement,
+    ConsoleCommand,
+    ConsoleEntry,
     PrinterBedMesh,
     PrinterHeaterHistory,
 )
@@ -140,3 +144,47 @@ async def measure_printer_bed(
     if not isinstance(mesh, ActiveBedMesh):
         raise HTTPException(502, detail="bed_measurement_mesh_unavailable")
     return mesh
+
+
+def _console_provider(
+    printer_id: int,
+    request: Request,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> MoonrakerProvider:
+    # Arbitrary Klipper commands include configuration writes and installed macros.
+    require_printer_role(session, current_user, printer_id, PrinterRole.ADMIN)
+    return _moonraker_provider(printer_id, request, session)
+
+
+@router.get(
+    "/{printer_id}/console", summary="Read recent Klipper commands and responses"
+)
+async def klipper_console(
+    response: Response, provider: MoonrakerProvider = Depends(_console_provider)
+) -> list[ConsoleEntry]:
+    response.headers["Cache-Control"] = "no-store"
+    return await _read(provider.console_history, read_console_history)
+
+
+@router.get("/{printer_id}/macros", summary="List macros loaded by Klipper")
+async def klipper_macros(
+    provider: MoonrakerProvider = Depends(_console_provider),
+) -> list[str]:
+    return await _read(provider.printer_objects, read_macro_names)
+
+
+@router.post(
+    "/{printer_id}/console",
+    summary="Send a Klipper console command",
+    status_code=204,
+    dependencies=[Depends(require_auth)],
+)
+async def send_klipper_command(
+    payload: ConsoleCommand, provider: MoonrakerProvider = Depends(_console_provider)
+) -> Response:
+    try:
+        await provider.run_gcode(payload.command)
+    except ProviderError as exc:
+        raise HTTPException(502, detail=exc.code) from exc
+    return Response(status_code=204)

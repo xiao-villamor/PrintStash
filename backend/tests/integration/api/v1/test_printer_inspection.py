@@ -33,7 +33,7 @@ def controller(monkeypatch):
 
 
 class TestPrinterInspection:
-    @pytest.mark.parametrize("endpoint", [_HISTORY, _MESH])
+    @pytest.mark.parametrize("endpoint", [_HISTORY, _MESH, "console", "macros"])
     def test_requires_authentication(self, client, make_printer, controller, endpoint):
         printer = make_printer()
 
@@ -42,7 +42,7 @@ class TestPrinterInspection:
         assert response.status_code == 401
         assert not controller[0]
 
-    @pytest.mark.parametrize("endpoint", [_HISTORY, _MESH])
+    @pytest.mark.parametrize("endpoint", [_HISTORY, _MESH, "console", "macros"])
     def test_denies_a_grant_for_a_different_printer(
         self,
         client,
@@ -71,7 +71,7 @@ class TestPrinterInspection:
         assert response.status_code == 403
         assert not controller[0]
 
-    @pytest.mark.parametrize("endpoint", [_HISTORY, _MESH])
+    @pytest.mark.parametrize("endpoint", [_HISTORY, _MESH, "console", "macros"])
     def test_excludes_trashed_printers(
         self, client, auth_headers, make_printer, controller, endpoint
     ):
@@ -84,7 +84,7 @@ class TestPrinterInspection:
         assert response.status_code == 404
         assert not controller[0]
 
-    @pytest.mark.parametrize("endpoint", [_HISTORY, _MESH])
+    @pytest.mark.parametrize("endpoint", [_HISTORY, _MESH, "console", "macros"])
     def test_provider_without_moonraker_is_unsupported(
         self, client, auth_headers, make_printer, controller, endpoint
     ):
@@ -203,3 +203,86 @@ class TestPrinterInspection:
 
         assert response.status_code == 502
         assert response.json()["detail"] == detail
+
+
+class TestKlipperConsole:
+    def test_only_lists_loaded_macro_names(
+        self, client, auth_headers, make_printer, controller
+    ):
+        printer = make_printer()
+        controller[1]["/printer/objects/list"] = {
+            "result": {"objects": ["toolhead", "gcode_macro PARK", "gcode_macro LOAD"]}
+        }
+        result = client.get(
+            f"/api/v1/printers/{printer.id}/macros", headers=auth_headers
+        )
+        assert result.json() == ["LOAD", "PARK"]
+
+    @pytest.mark.parametrize("command", ["", " ", "M105\nM114", "A" * 2049])
+    def test_invalid_command_never_reaches_device(
+        self, command, client, auth_headers, make_printer, controller
+    ):
+        printer = make_printer()
+        result = client.post(
+            f"/api/v1/printers/{printer.id}/console",
+            headers=auth_headers,
+            json={"command": command},
+        )
+        assert result.status_code == 422
+        assert not controller[0]
+
+    def test_control_grant_cannot_run_arbitrary_gcode(
+        self, client, auth_headers, headers_for, make_user, make_printer, controller
+    ):
+        printer = make_printer()
+        user = make_user()
+        base = f"/api/v1/printers/{printer.id}"
+        assert (
+            client.put(
+                f"{base}/permissions/{user.id}",
+                headers=auth_headers,
+                json={"role": "control"},
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                f"{base}/console", headers=headers_for(user), json={"command": "M105"}
+            ).status_code
+            == 403
+        )
+        assert not controller[0]
+
+    def test_console_round_trip(self, client, auth_headers, make_printer, controller):
+        printer = make_printer()
+        base = f"/api/v1/printers/{printer.id}/console"
+        controller[1]["/printer/gcode/script?script=M105"] = {"result": "ok"}
+        entries = [{"time": 100.0, "type": "response", "message": "T:22"}]
+        controller[1]["/server/gcode_store?count=100"] = {
+            "result": {"gcode_store": entries}
+        }
+        assert (
+            client.post(
+                base, headers=auth_headers, json={"command": "M105"}
+            ).status_code
+            == 204
+        )
+        assert client.get(base, headers=auth_headers).json() == entries
+
+    @pytest.mark.parametrize(
+        ("endpoint", "path"),
+        [
+            ("console", "/server/gcode_store?count=100"),
+            ("macros", "/printer/objects/list"),
+        ],
+    )
+    def test_malformed_response_is_distinct_from_empty(
+        self, client, auth_headers, make_printer, controller, endpoint, path
+    ):
+        printer = make_printer()
+        controller[1][path] = {"result": {}}
+        result = client.get(
+            f"/api/v1/printers/{printer.id}/{endpoint}", headers=auth_headers
+        )
+        assert result.status_code == 502
+        assert result.json()["detail"] == "printer_inspection_invalid_response"

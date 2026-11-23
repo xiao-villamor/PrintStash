@@ -42,6 +42,25 @@ test.describe("Native printer operator workflow", () => {
       await collapseNavigationSidebar(page);
       await page.getByRole("link", { name: printer.name, exact: true }).click();
       await expect(page.getByRole("heading", { name: printer.name, exact: true })).toBeVisible();
+      if (printer.kind === "klipper") {
+        const consolePanel = page.getByRole("region", { name: "Console", exact: true });
+        const field = consolePanel.getByRole("textbox", { name: "G-code command" });
+        await page
+          .getByRole("region", { name: "Macros", exact: true })
+          .getByRole("button", { name: "END_PRINT", exact: true })
+          .click();
+        await expect(field).toHaveValue("END_PRINT");
+        await field.press("Enter");
+        await expect(
+          consolePanel.getByRole("button", { name: "END_PRINT", exact: true }),
+        ).toBeVisible();
+        const message = "PrintStash console readback";
+        await field.fill(`RESPOND MSG="${message}"`);
+        await field.press("Enter");
+        await expect(consolePanel.getByText(`echo: ${message}`, { exact: true })).toBeVisible();
+        await page.reload();
+        await expect(consolePanel.getByText(`echo: ${message}`, { exact: true })).toBeVisible();
+      }
       if (printer.travelX !== null) {
         await page.getByRole("tab", { name: "Config", exact: true }).click();
         await page.getByRole("tab", { name: "Reported configuration" }).click();

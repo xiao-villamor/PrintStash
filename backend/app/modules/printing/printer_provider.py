@@ -322,6 +322,12 @@ class MoonrakerProvider(DelegatingProvider):
         result = body.get("result", [])
         return result if isinstance(result, list) else []
 
+    async def console_history(self) -> dict[str, Any]:
+        return await self._call("console_history")
+
+    async def printer_objects(self) -> dict[str, Any]:
+        return await self._call("printer_objects")
+
     async def temperature_store(self) -> dict[str, Any]:
         return await self._call("temperature_store")
 

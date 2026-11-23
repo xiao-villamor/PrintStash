@@ -5591,6 +5591,50 @@
         "title": "ConfirmBedMeasurement",
         "type": "object"
       },
+      "ConsoleCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Command",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "ConsoleCommand",
+        "type": "object"
+      },
+      "ConsoleEntry": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "time": {
+            "title": "Time",
+            "type": "number"
+          },
+          "type": {
+            "enum": [
+              "command",
+              "response"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "time",
+          "type",
+          "message"
+        ],
+        "title": "ConsoleEntry",
+        "type": "object"
+      },
       "CultsConnectRequest": {
         "additionalProperties": false,
         "properties": {
@@ -45964,6 +46008,105 @@
         ]
       }
     },
+    "/api/v1/printers/{printer_id}/console": {
+      "get": {
+        "operationId": "klipper_console_api_v1_printers__printer_id__console_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsoleEntry"
+                  },
+                  "title": "Response Klipper Console Api V1 Printers  Printer Id  Console Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read recent Klipper commands and responses",
+        "tags": [
+          "printers"
+        ]
+      },
+      "post": {
+        "operationId": "send_klipper_command_api_v1_printers__printer_id__console_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Send a Klipper console command",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
     "/api/v1/printers/{printer_id}/diagnostics": {
       "get": {
         "description": "Returns provider support level, configured capabilities, and live configuration/connectivity checks without exposing stored secrets. Bambu LAN is reported as beta/status-control-only until upload/send support is implemented.",
@@ -46505,6 +46648,57 @@
           }
         ],
         "summary": "Jog a homed axis by a signed distance",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/macros": {
+      "get": {
+        "operationId": "klipper_macros_api_v1_printers__printer_id__macros_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Response Klipper Macros Api V1 Printers  Printer Id  Macros Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List macros loaded by Klipper",
         "tags": [
           "printers"
         ]

@@ -4,8 +4,11 @@ from collections.abc import Mapping
 from math import isfinite
 from typing import Any
 
+from pydantic import TypeAdapter, ValidationError
+
 from app.schemas.printer_inspection import (
     ActiveBedMesh,
+    ConsoleEntry,
     InactiveBedMesh,
     PrinterBedMesh,
     PrinterHeaterHistory,
@@ -130,3 +133,30 @@ def read_bed_mesh(payload: object) -> PrinterBedMesh:
         probed_matrix=grid,
         variation_mm=_required_number(variation),
     )
+
+
+_CONSOLE_ENTRIES = TypeAdapter(list[ConsoleEntry])
+_OBJECT_NAMES = TypeAdapter(list[str])
+
+
+def read_console_history(data: object) -> list[ConsoleEntry]:
+    result = _object(_object(data).get("result"))
+    try:
+        return _CONSOLE_ENTRIES.validate_python(result.get("gcode_store"))[-100:]
+    except ValidationError as exc:
+        raise InvalidInspectionResponse from exc
+
+
+def read_macro_names(data: object) -> list[str]:
+    result = _object(_object(data).get("result"))
+    try:
+        objects = _OBJECT_NAMES.validate_python(result.get("objects"))
+    except ValidationError as exc:
+        raise InvalidInspectionResponse from exc
+    macros = {
+        name
+        for item in objects
+        if item.startswith("gcode_macro ")
+        and (name := item.removeprefix("gcode_macro ").strip())
+    }
+    return sorted(macros)

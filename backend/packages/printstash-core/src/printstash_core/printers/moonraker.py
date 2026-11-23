@@ -658,6 +658,12 @@ class MoonrakerClient:
         # The caller owns reconnects and invalidates its cached status on failure.
         await self.subscribe(on_status, stop_event=stop_event, reconnect=False)
 
+    async def console_history(self) -> dict[str, Any]:
+        return await self._request("GET", "/server/gcode_store", params={"count": 100})
+
+    async def printer_objects(self) -> dict[str, Any]:
+        return await self._request("GET", "/printer/objects/list")
+
     async def temperature_store(self) -> dict[str, Any]:
         return await self._request("GET", "/server/temperature_store")
 

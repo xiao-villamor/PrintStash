@@ -10,6 +10,8 @@
 
 ### Changed
 
+- Klipper Status now includes an administrator console with printer replies and loaded macros. Select a macro to supply its parameters before sending.
+
 - Fleet admins can see waiting jobs that have no assigned printer in the queue and fleet totals. Replacing filament in an existing manual feed now saves and lets compatible work dispatch. Bambu printers preparing a print count as busy.
 
 - Add to queue shows the selected Revision, plate, routing rule, destination and priority before saving. The queue list groups the Revision, destination, status and actions into columns, with routing holds written in plain language.

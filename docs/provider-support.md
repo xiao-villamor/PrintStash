@@ -69,6 +69,8 @@ individual check results and the capabilities reported for the integration.
 
 ## Moonraker / Klipper
 
+Printer admins can send a single G-code command from **Status → Console**. The console shows the latest 100 commands and firmware replies, newest first. Select a past command or a loaded macro to edit it in the prompt, then press Enter or **Send**. **Refresh macros** reloads the list after a Klipper configuration change.
+
 Support level: stable.
 
 Current behavior:

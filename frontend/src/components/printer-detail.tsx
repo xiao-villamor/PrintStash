@@ -79,6 +79,7 @@ import {
   ThermalPresets,
   type CommandReceipts,
 } from "@/components/printer-controls";
+import { PrinterConsole } from "./printer-console";
 import { MachineIdentity, MachineMaterials } from "@/components/printer-machine";
 import {
   PREHEAT_PRESETS,
@@ -797,16 +798,26 @@ function PrinterDetailView({
       openSettings={() => setActiveTab("settings")}
       inspection={
         printer.provider === "moonraker" ? (
-          <PrinterBedSurface
-            printerId={printer.id}
-            control={{
-              printer,
-              snapshot,
-              live: telemetry === "live",
-              busy: commandsBusy,
-              run: machineAction,
-            }}
-          />
+          <>
+            <PrinterBedSurface
+              printerId={printer.id}
+              control={{
+                printer,
+                snapshot,
+                live: telemetry === "live",
+                busy: commandsBusy,
+                run: machineAction,
+              }}
+            />
+            {availability.moonraker && printer.access.can_admin && (
+              <PrinterConsole
+                key={printer.id}
+                printerId={printer.id}
+                live={telemetry === "live"}
+                busy={commandsBusy}
+              />
+            )}
+          </>
         ) : undefined
       }
       fan={

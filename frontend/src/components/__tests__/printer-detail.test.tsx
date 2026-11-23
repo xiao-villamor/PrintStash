@@ -133,6 +133,8 @@ function renderPrinter(options: RenderAppOptions & { printer?: PrinterRead } = {
       // The live socket is opened against a short-lived ticket, so the page
       // cannot reach a snapshot at all without this one.
       "POST /api/v1/printers/4/ws-ticket": json({ ticket: "t", expires_in: 60 }),
+      "GET /api/v1/printers/4/console": json([]),
+      "GET /api/v1/printers/4/macros": json([]),
       "GET /api/v1/printers/4/heater-history": json(EMPTY_HEATER_HISTORY),
       "GET /api/v1/printers/4/bed-mesh": json({ state: "unconfigured" }),
       "GET /api/v1/printers/4/bed-mesh/measurement": json({ supported: false }),
@@ -160,6 +162,29 @@ afterEach(() => {
 
 describe("PrinterDetailPage", () => {
   describe("what it shows", () => {
+    it("stages a loaded macro for an explicit console submission", async () => {
+      const user = userEvent.setup();
+      const app = renderPrinter({
+        routes: {
+          "GET /api/v1/printers/4/macros": json(["PARK"]),
+          "POST /api/v1/printers/4/console": json({}),
+        },
+      });
+      await pushSnapshot(READY);
+      await user.click(await screen.findByRole("button", { name: "PARK" }));
+      const field = screen.getByRole("textbox", { name: "G-code command" });
+      expect(field).toHaveFocus();
+      expect(field).toHaveValue("PARK");
+      const writes = () =>
+        app.requestsWithMethod("POST").filter((call) => call.url.endsWith("/console"));
+      expect(writes()).toHaveLength(0);
+      await user.type(field, " X=12{Enter}");
+      await waitFor(() =>
+        expect(writes().map((call) => JSON.parse(call.body))).toEqual([{ command: "PARK X=12" }]),
+      );
+      expect(await screen.findByText("Command acknowledged")).toBeVisible();
+    });
+
     it("respects the operator’s local artwork preference", async () => {
       writePrinterCardImagePreference(true);
       renderPrinter({ printer: aPrinter({ id: 4, model_name: "Unknown custom printer" }) });
@@ -2529,6 +2554,8 @@ describe("PrinterDetailPage HTTP ownership", () => {
         ]),
         "GET /api/v1/printers/5/diagnostics": json({ provider: "moonraker", checks: [] }),
         "GET /api/v1/printers/5/config": json({ config: "" }),
+        "GET /api/v1/printers/5/console": json([]),
+        "GET /api/v1/printers/5/macros": json([]),
         "GET /api/v1/printers/5/heater-history": json(EMPTY_HEATER_HISTORY),
         "POST /api/v1/printers/5/ws-ticket": json({ ticket: "new", expires_in: 60 }),
       },
@@ -2570,6 +2597,8 @@ describe("PrinterDetailPage HTTP ownership", () => {
           "GET /api/v1/printers/4/config": json({ config: "" }),
           "GET /api/v1/printers/4/material-state": json({ tools: [], slots: [] }),
           "GET /api/v1/printers/4/bed-mesh": json({ state: "unconfigured" }),
+          "GET /api/v1/printers/4/console": json([]),
+          "GET /api/v1/printers/4/macros": json([]),
           "GET /api/v1/printers/4/heater-history": json(EMPTY_HEATER_HISTORY),
           "POST /api/v1/printers/4/ws-ticket": json({ ticket: "t", expires_in: 60 }),
         },
@@ -2727,6 +2756,8 @@ describe("PrinterDetailPage HTTP ownership", () => {
         ]),
         "GET /api/v1/printers/5/diagnostics": json({ provider: "moonraker", checks: [] }),
         "GET /api/v1/printers/5/config": json({ config: "" }),
+        "GET /api/v1/printers/5/console": json([]),
+        "GET /api/v1/printers/5/macros": json([]),
         "GET /api/v1/printers/5/heater-history": json(EMPTY_HEATER_HISTORY),
         "POST /api/v1/printers/5/ws-ticket": json({ ticket: "t", expires_in: 60 }),
       },
@@ -2773,6 +2804,8 @@ describe("PrinterDetailPage HTTP ownership", () => {
         "GET /api/v1/printers/4/config": json({ config: "" }),
         "GET /api/v1/printers/4/material-state": json({ tools: [], slots: [] }),
         "GET /api/v1/printers/4/bed-mesh": json({ state: "unconfigured" }),
+        "GET /api/v1/printers/4/console": json([]),
+        "GET /api/v1/printers/4/macros": json([]),
         "GET /api/v1/printers/4/heater-history": json(EMPTY_HEATER_HISTORY),
         "POST /api/v1/printers/4/ws-ticket": json({ ticket: "t", expires_in: 60 }),
       },
