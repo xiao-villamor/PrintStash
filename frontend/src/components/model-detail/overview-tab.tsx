@@ -68,7 +68,10 @@ export function OverviewTab({
 
 export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
   useUiLocale();
+  const collectionLabelId = useId();
   const descriptionId = useId();
+  const sourceUrlId = useId();
+  const tagsId = useId();
   const tagShown = editor.filteredTags.slice(0, 6);
   const tagItems = [...tagShown, ...(editor.canCreate ? [editor.tagInput.trim()] : [])];
   const tagNav = useComboboxNav(editor.tagInput ? tagItems.length : 0, {
@@ -94,9 +97,9 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
         <div className="space-y-4">
           {/* Collection picker */}
           <div>
-            <label className="block text-[13px] font-medium text-foreground mb-1.5">
+            <span id={collectionLabelId} className="mb-1.5 block text-sm font-medium">
               {uiText("Collection")}
-            </label>
+            </span>
             <DropdownMenu
               open={editor.catOpen}
               onOpenChange={editor.setCatOpen}
@@ -110,18 +113,24 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
                   onClick={() => editor.setCatOpen((v) => !v)}
                   aria-haspopup="dialog"
                   aria-expanded={editor.catOpen}
-                  className={cn(inputClasses, "flex items-center justify-between gap-2 text-left")}
+                  aria-describedby={collectionLabelId}
+                  className={cn(inputClasses, "text-start")}
                 >
-                  <span
-                    className={cn(
-                      "min-w-0 truncate",
-                      !editor.collection && "text-muted-foreground",
-                    )}
-                    title={editor.collectionLabel ?? undefined}
-                  >
-                    {editor.collectionLabel || uiText("None")}
+                  <span className="flex h-full items-center justify-between gap-2">
+                    <span
+                      className={cn(
+                        "min-w-0 truncate",
+                        !editor.collection && "text-muted-foreground",
+                      )}
+                      title={editor.collectionLabel ?? undefined}
+                    >
+                      {editor.collectionLabel || uiText("None")}
+                    </span>
+                    <ChevronDown
+                      className="size-3.5 shrink-0 text-muted-foreground"
+                      aria-hidden="true"
+                    />
                   </span>
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 </button>
               }
             >
@@ -136,16 +145,10 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
                 }}
               />
             </DropdownMenu>
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              {uiText("Only editable destinations; None only when permitted.")}
-            </p>
           </div>
           {/* Description */}
           <div>
-            <label
-              htmlFor={descriptionId}
-              className="block text-[13px] font-medium text-foreground mb-1.5"
-            >
+            <label htmlFor={descriptionId} className="mb-1.5 block text-sm font-medium">
               {uiText("Description")}
             </label>
             <textarea
@@ -169,32 +172,28 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
               </details>
             )}
           </div>
-          <h3 className="border-t border-border pt-5 text-sm font-semibold">
-            {uiText("Discovery")}
-          </h3>
           {/* Source URL */}
           <div>
-            <label className="block text-[13px] font-medium text-foreground mb-1.5">
+            <label htmlFor={sourceUrlId} className="mb-1.5 block text-sm font-medium">
               {uiText("Source URL")}
             </label>
             <input
+              id={sourceUrlId}
               type="url"
               value={editor.sourceUrl}
               onChange={(e) => editor.setSourceUrl(e.target.value)}
               className={inputClasses}
               placeholder="https://www.printables.com/model/..."
             />
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              {uiText("URL is preserved separately from captured provenance.")}
-            </p>
           </div>
           {/* Tags */}
           <div>
-            <label className="block text-[13px] font-medium text-foreground mb-1.5">
+            <label htmlFor={tagsId} className="mb-1.5 block text-sm font-medium">
               {uiText("Model tags")}
             </label>
-            <div className="relative">
+            <div>
               <input
+                id={tagsId}
                 value={editor.tagInput}
                 onChange={(e) => {
                   editor.setTagInput(e.target.value);
@@ -215,7 +214,7 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
                 <div
                   id={tagNav.listboxId}
                   role="listbox"
-                  className="pop-in absolute left-0 right-0 top-full mt-1 z-dropdown bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 max-h-40 overflow-y-auto"
+                  className="mt-1 max-h-40 overflow-y-auto rounded border border-border bg-surface-container-lowest py-1"
                 >
                   {tagShown.map((t, i) => (
                     <div
@@ -259,18 +258,17 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
                       }}
                       className={`w-full text-left px-3 py-1.5 text-[13px] text-primary hover:bg-surface-container-low flex items-center gap-2 ${tagShown.length === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
                     >
-                      <Plus className="h-3 w-3" />
-                      {uiText(' Create "')}
-                      {editor.tagInput.trim()}
-                      {uiText('"')}
+                      <Plus className="size-3 shrink-0" aria-hidden="true" />
+                      <span className="min-w-0 wrap-anywhere">
+                        {uiText(' Create "')}
+                        {editor.tagInput.trim()}
+                        {uiText('"')}
+                      </span>
                     </button>
                   )}
                 </div>
               )}
             </div>
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              {uiText("Search existing or create with Enter.")}
-            </p>
             {editor.tags.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {editor.tags.map((name) => (

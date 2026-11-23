@@ -13,13 +13,14 @@ import "@/fonts.css";
 import "@/globals.css";
 import { router } from "@/router";
 
-const ReactQueryDevtools = import.meta.env.DEV
-  ? lazy(() =>
-      import("@tanstack/react-query-devtools").then((m) => ({
-        default: m.ReactQueryDevtools,
-      })),
-    )
-  : null;
+const ReactQueryDevtools =
+  import.meta.env.DEV && import.meta.env.VITE_QUERY_DEVTOOLS === "true"
+    ? lazy(() =>
+        import("@tanstack/react-query-devtools").then((m) => ({
+          default: m.ReactQueryDevtools,
+        })),
+      )
+    : null;
 
 const stopTaskScope = startTaskCenterSessionScope();
 import.meta.hot?.dispose(stopTaskScope);

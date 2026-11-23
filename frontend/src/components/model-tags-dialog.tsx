@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Localized } from "@/components/ui/localized";
 import { Modal } from "@/components/ui/modal";
 import { getSessionVersion } from "@/lib/session-transport";
@@ -224,12 +225,7 @@ export function ModelTagsDialog({
   if (session !== currentSession) return null;
   if (readDenied)
     return (
-      <Modal
-        open={open}
-        onClose={close}
-        title={uiText("Edit Model tags")}
-        className="max-w-[640px]"
-      >
+      <Modal open={open} onClose={close} title={uiText("Edit Model tags")} className="max-w-md">
         <div role="alert" className="space-y-3">
           <p>{uiText("Couldn’t load this model")}</p>
           <Button variant="outline" loading={reviewing} onClick={() => void reviewLatest()}>
@@ -245,10 +241,8 @@ export function ModelTagsDialog({
         open={open}
         onClose={close}
         title={uiText("Edit Model tags")}
-        className="max-w-[640px]"
-        description={uiText(
-          "Direct Model tags and Artifact tags use the same compact picker with clear ownership.",
-        )}
+        className="max-w-md"
+        description={<span className="wrap-anywhere">{model.name}</span>}
         footer={
           <>
             <Button type="button" variant="outline" size="sm" disabled={busy} onClick={close}>
@@ -304,59 +298,7 @@ export function ModelTagsDialog({
             )}
           </div>
         )}
-        <div className="space-y-5">
-          <div className="grid grid-cols-[1fr_2fr] gap-4 bg-plate p-4 text-[13px]">
-            <span className="text-muted-foreground">{uiText("Model")}</span>
-            <span className="break-words">{model.name}</span>
-          </div>
-          <p className="text-sm">
-            {uiText(
-              "Artifact tags make the owning Model discoverable without changing its direct tags.",
-            )}
-          </p>
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold">{uiText("Tag ownership")}</h3>
-            <div className="grid grid-cols-[1fr_2fr] gap-4 bg-plate p-4 text-[13px]">
-              <span className="text-muted-foreground">{uiText("Applies to")}</span>
-              <span>
-                {uiText("Model")} · {model.name}
-              </span>
-            </div>
-          </section>
-          <h3 className="border-t border-border pt-5 text-sm font-semibold">{uiText("Tags")}</h3>
-
-          <div>
-            <p className="mb-2 text-[13px] font-medium text-foreground">{uiText("Tags")}</p>
-            {selected.length > 0 ? (
-              <div className="flex min-h-10 flex-wrap items-center gap-1.5 border border-input p-2">
-                {selected.map((name) => (
-                  <span
-                    key={normalized(name)}
-                    className="inline-flex items-center gap-1 bg-accent py-0.5 pl-2 pr-1 text-[13px] text-accent-foreground"
-                  >
-                    {name}
-                    <button
-                      type="button"
-                      disabled={busy || editDenied}
-                      onClick={() =>
-                        setSelected((current) =>
-                          current.filter((tag) => normalized(tag) !== normalized(name)),
-                        )
-                      }
-                      aria-label={uiText("Remove {value1}", { value1: String(name) })}
-                      className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="rounded border border-dashed border-border px-3 py-5 text-center text-sm text-muted-foreground">
-                {uiText("No tags assigned yet.")}
-              </p>
-            )}
-          </div>
+        <div className="space-y-3">
           <div>
             <label
               htmlFor={`model-tags-${model.id}`}
@@ -365,7 +307,8 @@ export function ModelTagsDialog({
               {uiText("Find or create tag")}
             </label>
             <div className="relative">
-              <input
+              <Input
+                data-autofocus
                 id={`model-tags-${model.id}`}
                 value={query}
                 maxLength={255}
@@ -376,13 +319,12 @@ export function ModelTagsDialog({
                   nav.setActiveIndex(-1);
                 }}
                 {...nav.inputProps}
-                className="h-10 w-full rounded border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
               {query && options.length > 0 && (
                 <div
                   id={nav.listboxId}
                   role="listbox"
-                  className="mt-3 max-h-60 divide-y divide-border overflow-y-auto"
+                  className="mt-1 max-h-40 divide-y divide-border overflow-y-auto border border-border"
                 >
                   {matching.map((tag, index) => (
                     <button
@@ -392,7 +334,7 @@ export function ModelTagsDialog({
                       role="option"
                       aria-selected={index === nav.activeIndex}
                       onClick={() => commit(tag.name)}
-                      className={`flex w-full items-center justify-between gap-2 px-0 py-3 text-left text-[13px] hover:bg-popover-hover ${index === nav.activeIndex ? "bg-popover-hover" : ""}`}
+                      className={`flex w-full items-center justify-between gap-2 px-2 py-2 text-left text-sm hover:bg-popover-hover ${index === nav.activeIndex ? "bg-popover-hover" : ""}`}
                     >
                       <span className="truncate">{tag.name}</span>
                       <span className="text-muted-foreground">
@@ -407,18 +349,47 @@ export function ModelTagsDialog({
                       role="option"
                       aria-selected={matching.length === nav.activeIndex}
                       onClick={() => commit(query)}
-                      className={`flex w-full items-center gap-2 px-0 py-3 text-left text-[13px] text-primary hover:bg-popover-hover ${matching.length === nav.activeIndex ? "bg-popover-hover" : ""}`}
+                      className={`flex w-full items-center gap-2 px-2 py-2 text-left text-sm text-primary hover:bg-popover-hover ${matching.length === nav.activeIndex ? "bg-popover-hover" : ""}`}
                     >
-                      <Plus className="h-3.5 w-3.5" />
-                      {uiText(' Create tag "')}
-                      {query.trim()}
-                      {uiText('"')}
+                      <Plus className="size-3.5 shrink-0" aria-hidden="true" />
+                      <span className="min-w-0 wrap-anywhere">
+                        {uiText(' Create tag "')}
+                        {query.trim()}
+                        {uiText('"')}
+                      </span>
                     </button>
                   )}
                 </div>
               )}
             </div>
           </div>
+          {selected.length > 0 && (
+            <div role="group" aria-label={uiText("Tags")} className="flex flex-wrap gap-1.5">
+              {selected.map((name) => (
+                <span
+                  key={normalized(name)}
+                  className="inline-flex min-w-0 items-center gap-1 rounded-sm bg-accent py-0.5 pl-2 pr-1 text-sm text-accent-foreground"
+                >
+                  <span className="min-w-0 wrap-anywhere">{name}</span>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    className="size-6 shrink-0"
+                    disabled={busy || editDenied}
+                    onClick={() =>
+                      setSelected((current) =>
+                        current.filter((tag) => normalized(tag) !== normalized(name)),
+                      )
+                    }
+                    aria-label={uiText("Remove {value1}", { value1: name })}
+                  >
+                    <X className="size-3.5" aria-hidden="true" />
+                  </Button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </Modal>
     </Localized>

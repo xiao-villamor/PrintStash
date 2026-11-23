@@ -21,7 +21,7 @@ import { readFile } from "node:fs/promises";
 
 import { collectPageProblems, useMockApi } from "./_setup";
 import type { ModelRead } from "../../src/types/models";
-import { aDerivative, aMetadata, aModel, aRevision } from "../../src/test-support/factories";
+import { aDerivative, aMetadata, aModel, aRevision, aTag } from "../../src/test-support/factories";
 
 useMockApi();
 
@@ -41,6 +41,63 @@ async function openToolpath(page: Page) {
 }
 
 test.describe("model detail route", () => {
+  test("keeps tag suggestions reachable in a short details editor", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 650 });
+    await page.route("**/api/v1/tags", (route) =>
+      route.fulfill({ json: [aTag({ name: "Short-editor tag" })] }),
+    );
+    await page.goto("/models/1");
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: "Edit Model details" });
+    const search = editor.getByRole("combobox", { name: "Model tags" });
+    await search.fill("short-editor");
+    const option = editor.getByRole("option", { name: /^Short-editor tag/ });
+    await option.scrollIntoViewIfNeeded();
+    await expect(option).toBeInViewport({ ratio: 0.95 });
+    await option.click();
+    await expect(editor.getByRole("button", { name: "Remove Short-editor tag" })).toBeVisible();
+  });
+
+  test("aligns the collection picker chevron with its path", async ({ page }) => {
+    const collectionLabel = "Parts/Brackets";
+    await page.route("**/api/v1/models/1", (route) =>
+      route.fulfill({
+        json: aModel({ id: 1, collection: "parts/brackets", collection_label: collectionLabel }),
+      }),
+    );
+    await page.goto("/models/1");
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: "Edit Model details" });
+    const collection = editor.getByRole("button", { name: collectionLabel, exact: true });
+    const offset = await collection.evaluate((element) => {
+      const path = element.querySelector("span[title]")?.getBoundingClientRect();
+      const icon = element.querySelector("svg")?.getBoundingClientRect();
+      if (!path || !icon) throw new Error("Missing collection path or chevron");
+      return Math.abs(icon.y + icon.height / 2 - path.y - path.height / 2);
+    });
+    expect(offset).toBeLessThanOrEqual(1);
+  });
+
+  test("keeps the details save button clear of overlays", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/models/1");
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    const editor = page.getByRole("dialog", { name: "Edit Model details" });
+    const save = editor.getByRole("button", { name: "Save changes", exact: true });
+    await expect(save).toBeEnabled();
+    await expect
+      .poll(() =>
+        save.evaluate((element) => {
+          const { left, right, top, bottom } = element.getBoundingClientRect();
+          const midY = (top + bottom) / 2;
+          return [left + 8, (left + right) / 2, right - 8].every((x) =>
+            element.contains(document.elementFromPoint(x, midY)),
+          );
+        }),
+      )
+      .toBe(true);
+  });
+
   test("renders prototype card actions outside the navigation link", async ({ page }) => {
     const problems = await collectPageProblems(page);
     await page.setViewportSize({ width: 1440, height: 1000 });

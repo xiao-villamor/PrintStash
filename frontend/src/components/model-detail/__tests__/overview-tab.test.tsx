@@ -113,15 +113,13 @@ describe("OverviewTab", () => {
     it("offers a source URL field", () => {
       renderEditing();
 
-      expect(
-        screen.getByPlaceholderText("https://www.printables.com/model/..."),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Source URL" })).toBeInTheDocument();
     });
 
     it("passes what the user types to the tag search", () => {
       const { setTagInput } = renderEditing();
 
-      fireEvent.change(screen.getByPlaceholderText(/Search or create/), {
+      fireEvent.change(screen.getByRole("combobox", { name: "Model tags" }), {
         target: { value: "func" },
       });
 

@@ -50,6 +50,7 @@ Open the URL Vite prints and create a local administrator account on a fresh
 database. Vite proxies API requests to the backend on port 8000 by default.
 Port 3000 serves the published app when the default Compose stack is running.
 Use Vite to see frontend source edits.
+Run `VITE_QUERY_DEVTOOLS=true pnpm dev` to show React Query Devtools.
 
 See [AGENTS.md](AGENTS.md) for repository conventions and verification guidance.
 

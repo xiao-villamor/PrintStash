@@ -9,21 +9,25 @@ import { test, expect } from "./helpers";
 import { openModelPage, clickModelAction, modelCard, uploadModel } from "./util";
 
 test.describe("tags", () => {
-  test("assigns a newly created tag from the model card", async ({ page }) => {
+  test("assigns a newly created tag from the model overview", async ({ page }) => {
     const tag = `e2e-quick-tag-${Date.now()}`;
     const model = `e2e-quick-tagged-${Date.now()}`;
 
     await uploadModel(page, model);
-    await modelCard(page, model).click({ button: "right" });
-    await page.getByRole("menuitem", { name: `Add tags to ${model}` }).click();
+    await openModelPage(page, model);
+    await page.getByRole("button", { name: `Add tags to ${model}` }).click();
     const dialog = page.getByRole("dialog", { name: "Edit Model tags" });
-    await dialog.getByLabel("Find or create tag").fill(tag);
-    await dialog.getByRole("option", { name: /Create tag/ }).click();
+    const search = dialog.getByRole("combobox", { name: "Find or create tag" });
+    await expect(search).toBeFocused();
+    await search.fill(tag);
+    await search.press("Enter");
     await dialog.getByRole("button", { name: "Save tags" }).click();
+    await expect(dialog).toBeHidden();
 
-    await modelCard(page, model).click({ button: "right" });
-    await page.getByRole("menuitem", { name: `Edit tags for ${model}` }).click();
-    await expect(dialog.getByRole("button", { name: `Remove ${tag}` })).toBeVisible();
+    await page.reload();
+    await expect(
+      page.getByRole("region", { name: "About this model" }).getByText(tag, { exact: true }),
+    ).toBeVisible();
   });
 
   test("reviews a conflicting quick-tag draft before replacing current tags", async ({ page }) => {

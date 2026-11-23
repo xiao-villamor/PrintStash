@@ -991,9 +991,6 @@ function ModelDetailPresentation({
           title={uiText("Edit Model details")}
           className="absolute inset-y-0 right-0 h-dvh max-h-none max-w-[680px] rounded-none"
           bodyClassName="flex-1"
-          description={uiText(
-            "Edit the Model’s own metadata. Captured source fields and Artifact tags remain separate.",
-          )}
           footer={
             <>
               <Button variant="outline" onClick={cancelEdit} disabled={saving}>
@@ -1009,14 +1006,7 @@ function ModelDetailPresentation({
             </>
           }
         >
-          <div className="space-y-5">
-            <div className="grid grid-cols-[1fr_2fr] gap-4 bg-plate p-4 text-[13px]">
-              <span className="text-muted-foreground">{uiText("Model")}</span>
-              <span className="break-words">{model.name}</span>
-            </div>
-            <p className="text-[13px] text-muted-foreground">
-              {uiText("Changes stay a draft until you save. Cancel restores the previous values.")}
-            </p>
+          <div className="space-y-4">
             {editing && editProblem && (
               <div role="alert" className="border-b border-border bg-muted px-4 py-3 text-sm">
                 <p>
@@ -1035,11 +1025,11 @@ function ModelDetailPresentation({
               </div>
             )}
 
-            <h3 className="text-sm font-semibold">{uiText("Model")}</h3>
-            <label className="block space-y-1.5 text-[13px] font-medium">
+            <label className="block space-y-1.5 text-sm font-medium">
               {uiText("Name (required)")}
               <Input
                 ref={nameInput}
+                required
                 value={editName}
                 onChange={(event) => setEditName(event.target.value)}
                 aria-invalid={!editName.trim()}
@@ -1047,9 +1037,6 @@ function ModelDetailPresentation({
                 disabled={saving}
               />
             </label>
-            <p className="text-xs text-muted-foreground">
-              {uiText("Required; separate quick Rename uses the same validation.")}
-            </p>
             {!editName.trim() && (
               <p id="model-name-error" className="text-sm text-destructive">
                 {uiText("Model name is required.")}
