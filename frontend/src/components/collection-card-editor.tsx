@@ -1,6 +1,15 @@
-import { useCallback, useDeferredValue, useId, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { Box, Check, Folder, X } from "lucide-react";
+import { Box, Check, Folder, ImagePlus, X } from "lucide-react";
 import { CollectionCoverArtwork } from "@/components/collection-cover-artwork";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { Button } from "@/components/ui/button";
@@ -10,6 +19,7 @@ import { TabBar } from "@/components/ui/tabs";
 import { useTaxonomyCommands } from "@/features/library/taxonomy";
 import { getLibraryThumbnails, listLibraryPage } from "@/lib/api/library-browse";
 import { getCollectionCover } from "@/lib/api/taxonomy";
+import { formatBytes } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 import { uiText } from "@/lib/locale";
 import { queryKeys } from "@/lib/query-client";
@@ -23,6 +33,180 @@ interface EditorProps {
   collection: CollectionRead;
   onClose: () => void;
   onSaved: () => void;
+}
+
+function CoverPreviewCard({ name, children }: { name: string; children: ReactNode }) {
+  return (
+    <div className="overflow-hidden border border-border bg-card">
+      {children}
+      <div className="flex min-w-0 items-center gap-2 border-t border-border px-3 py-2">
+        <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="min-w-0 wrap-anywhere text-sm font-medium">{name}</span>
+      </div>
+    </div>
+  );
+}
+
+function CoverImagePicker({
+  collection,
+  savedImage,
+  image,
+  busy,
+  onChoose,
+  onReady,
+}: {
+  collection: CollectionRead;
+  savedImage: string | null;
+  image: CoverImageDraft | null;
+  busy: boolean;
+  onChoose: (file: File | null) => void;
+  onReady: (url: string) => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const chooseButton = useRef<HTMLButtonElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [error, setError] = useState<
+    "aiSearch.oneImage" | "collection.coverImageInvalid" | "collection.coverImageUnreadable" | null
+  >(null);
+
+  function select(files: FileList) {
+    if (busy || files.length === 0) return;
+    if (files.length !== 1) {
+      setError("aiSearch.oneImage");
+      return;
+    }
+    const file = files[0];
+    if (
+      !/\.(?:gif|jpe?g|png|webp)$/i.test(file.name) ||
+      !file.size ||
+      file.size > 10 * 1024 * 1024
+    ) {
+      setError("collection.coverImageInvalid");
+      return;
+    }
+    setError(null);
+    onChoose(file);
+  }
+
+  return (
+    <section
+      aria-label={uiText("collection.coverPreview")}
+      className={`min-w-0 space-y-3 ${dragging && !busy ? "outline-2 outline-primary outline-offset-4" : ""}`}
+      onDragEnter={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        if (!busy) setDragging(true);
+      }}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = busy ? "none" : "copy";
+      }}
+      onDragLeave={(event) => {
+        if (
+          !(event.relatedTarget instanceof Node) ||
+          !event.currentTarget.contains(event.relatedTarget)
+        )
+          setDragging(false);
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        setDragging(false);
+        select(event.dataTransfer.files);
+      }}
+    >
+      <CoverPreviewCard name={collection.name}>
+        {image ? (
+          <div className="collection-card-collage overflow-hidden bg-muted">
+            <img
+              key={image.url}
+              src={image.url}
+              alt={uiText("collection.coverImageDraft")}
+              className="size-full object-cover"
+              onLoad={() => onReady(image.url)}
+              onError={() => {
+                setError("collection.coverImageUnreadable");
+                onChoose(null);
+              }}
+            />
+          </div>
+        ) : savedImage ? (
+          <CollectionCoverArtwork image={savedImage} className="collection-card-collage bg-muted" />
+        ) : (
+          <div className="collection-card-collage grid place-content-center justify-items-center gap-2 bg-muted px-3 text-center text-muted-foreground">
+            <ImagePlus className="size-7" aria-hidden />
+            <span className="text-sm font-medium">{uiText("collection.coverDropImage")}</span>
+          </div>
+        )}
+      </CoverPreviewCard>
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0 flex-1 basis-40">
+          {image ? (
+            <div role="status" className="min-w-0">
+              <p className="wrap-anywhere text-sm font-medium">{image.file.name}</p>
+              <p className="text-xs text-muted-foreground">{formatBytes(image.file.size)}</p>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {uiText("collection.coverImageFormats")}
+            </p>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <input
+            ref={input}
+            type="file"
+            hidden
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            aria-label={uiText("multipart.coverImage")}
+            disabled={busy}
+            onChange={(event) => {
+              if (event.currentTarget.files) select(event.currentTarget.files);
+              event.currentTarget.value = "";
+            }}
+          />
+          <Button
+            ref={chooseButton}
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() => input.current?.click()}
+          >
+            {uiText(image || savedImage ? "multipart.replaceCover" : "aiSearch.chooseImage")}
+          </Button>
+          {image && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={uiText("aiSearch.clearImage")}
+              disabled={busy}
+              onClick={() => {
+                setError(null);
+                onChoose(null);
+                chooseButton.current?.focus();
+              }}
+            >
+              <X className="size-4" aria-hidden />
+            </Button>
+          )}
+        </div>
+      </div>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {uiText(error)}
+        </p>
+      )}
+    </section>
+  );
+}
+
+interface CoverImageDraft {
+  file: File;
+  url: string;
+  ready: boolean;
 }
 
 export function CollectionCardRename({
@@ -148,10 +332,17 @@ function CoverForm({
   const initialModels = initial.kind === "models" ? initial.model_ids : [];
   const [selected, setSelected] = useState(initialModels);
   const [pickedThumbnails, setPickedThumbnails] = useState<Record<number, string | null>>({});
-  const [image, setImage] = useState<File | null>(null);
+  const [image, setImage] = useState<CoverImageDraft | null>(null);
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const formId = useId();
+  const previewUrl = image?.url;
+  useEffect(
+    () => () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    },
+    [previewUrl],
+  );
   const term = useDeferredValue(search.trim());
   const tabs = [
     { key: "automatic", label: uiText("Automatic") },
@@ -207,7 +398,7 @@ function CoverForm({
   }));
   const canSave =
     mode === "image"
-      ? !!image
+      ? !!image?.ready
       : mode === "models"
         ? selected.length > 0 &&
           (initial.kind !== "models" || selected.join(",") !== initial.model_ids.join(","))
@@ -218,8 +409,8 @@ function CoverForm({
     if (busy || !canSave) return;
     setBusy(true);
     try {
-      if (mode === "image" && image) {
-        await uploadCollectionCover(collection.id, image);
+      if (mode === "image" && image?.ready) {
+        await uploadCollectionCover(collection.id, image.file);
       } else if (mode === "models") {
         await setCollectionCover(collection.id, { kind: "models", model_ids: selected });
       } else if (mode === "automatic") {
@@ -267,24 +458,22 @@ function CoverForm({
             </p>
           )}
           {mode === "image" && (
-            <div className="space-y-3">
-              {initial.kind === "image" && (
-                <ProtectedThumbnail
-                  path={`/api/v1/collections/${collection.id}/images/${initial.filename}`}
-                  alt={uiText("collection.coverCurrent")}
-                  placeholder={null}
-                  className="flex h-28 items-center justify-center bg-muted"
-                  imageClassName="h-full w-full object-contain"
-                />
-              )}
-              <Input
-                aria-label={uiText("multipart.coverImage")}
-                type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
-                disabled={busy}
-                onChange={(event) => setImage(event.target.files?.[0] ?? null)}
-              />
-            </div>
+            <CoverImagePicker
+              collection={collection}
+              savedImage={
+                initial.kind === "image"
+                  ? `/api/v1/collections/${collection.id}/images/${initial.filename}`
+                  : null
+              }
+              image={image}
+              busy={busy}
+              onChoose={(file) =>
+                setImage(file ? { file, url: URL.createObjectURL(file), ready: false } : null)
+              }
+              onReady={(url) =>
+                setImage((draft) => (draft?.url === url ? { ...draft, ready: true } : draft))
+              }
+            />
           )}
           {mode === "models" && (
             <div className="@container/cover-picker">
@@ -299,16 +488,12 @@ function CoverForm({
                       {uiText("collection.coverSelectionCount", { count: selected.length })}
                     </span>
                   </div>
-                  <div className="overflow-hidden border border-border bg-card">
+                  <CoverPreviewCard name={collection.name}>
                     <CollectionCoverArtwork
                       models={coverModels}
                       className="collection-card-collage bg-muted"
                     />
-                    <div className="flex min-w-0 items-center gap-2 px-3 py-2">
-                      <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                      <span className="wrap-anywhere text-sm font-medium">{collection.name}</span>
-                    </div>
-                  </div>
+                  </CoverPreviewCard>
                   {selected.length > 0 ? (
                     <Button
                       type="button"

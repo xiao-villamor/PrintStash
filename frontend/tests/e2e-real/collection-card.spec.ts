@@ -111,12 +111,51 @@ test.describe("collection card", () => {
       await menu.getByRole("menuitem", { name: "Edit cover" }).click();
       await expect(cover.getByRole("checkbox", { name, exact: true })).toBeChecked();
       await cover.getByRole("tab", { name: "Upload image" }).click();
+      const save = cover.getByRole("button", { name: "Save cover", exact: true });
+      await expect(save).toBeDisabled();
       await cover.getByLabel("Cover image").setInputFiles({
+        name: "not-an-image.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from("not an image"),
+      });
+      await expect(cover.getByRole("alert")).toContainText("Choose a PNG");
+      await expect(save).toBeDisabled();
+      await cover.getByLabel("Cover image").setInputFiles({
+        name: "corrupt.png",
+        mimeType: "image/png",
+        buffer: Buffer.from("invalid PNG"),
+      });
+      await expect(cover.getByRole("alert")).toHaveText("This image couldn’t be opened.");
+      await expect(save).toBeDisabled();
+      const choose = cover.getByRole("button", { name: "Choose image", exact: true });
+      await choose.focus();
+      const [chooser] = await Promise.all([
+        page.waitForEvent("filechooser"),
+        choose.press("Enter"),
+      ]);
+      await chooser.setFiles({
         name: "cover.png",
         mimeType: "image/png",
         buffer: coverImage,
       });
-      await cover.getByRole("button", { name: "Save cover", exact: true }).click();
+      await expect(preview.getByRole("img", { name: "New cover image" })).toBeVisible();
+      await expect(preview.getByRole("status")).toContainText("cover.png");
+      await expect(save).toBeEnabled();
+      await preview.getByRole("button", { name: "Clear image" }).click();
+      await expect(choose).toBeFocused();
+      await expect(save).toBeDisabled();
+
+      const dropped = await page.evaluateHandle((bytes) => {
+        const transfer = new DataTransfer();
+        transfer.items.add(
+          new File([new Uint8Array(bytes)], "dropped-cover.png", { type: "image/png" }),
+        );
+        return transfer;
+      }, Array.from(coverImage));
+      await preview.dispatchEvent("drop", { dataTransfer: dropped });
+      await dropped.dispose();
+      await expect(preview.getByRole("status")).toContainText("dropped-cover.png");
+      await save.click();
       await expect(cover).toBeHidden();
       await page.reload();
       expect(await (await page.request.get(coverUrl)).json()).toMatchObject({ kind: "image" });
