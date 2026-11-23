@@ -102,6 +102,7 @@ from app.modules.media.worker_bootstrap import (
     terminate_worker,
 )
 from app.modules.media.worker_bootstrap import command as worker_command
+from app.runtime import preparation_runtime
 from app.runtime.native_admission import NativePermit, Resources
 from app.runtime.native_runtime import current_permit
 
@@ -727,6 +728,11 @@ def absolute(path: Path) -> str:
     return str(path.absolute())
 
 
+def _prepared_workspace() -> Path | None:
+    permit = preparation_runtime.current_permit()
+    return preparation_runtime.workspace(permit) if permit is not None else None
+
+
 def _run_worker(
     module: str,
     spec: dict[str, Any],
@@ -764,14 +770,22 @@ def _run_worker(
         if amount is not None
         else plan_sources(capacity, sources, work=work)
     )
-    with admission(
-        budget.admission, capacity, checkpoint=check, hard_bytes=budget.hard_bytes
-    ) as permit:
+    with (
+        admission(
+            budget.admission, capacity, checkpoint=check, hard_bytes=budget.hard_bytes
+        ) as permit,
+        ExitStack() as cleanup,
+    ):
         check()
+        temporary_directory = None
         if module == "app.modules.media.mesh_worker":
             from app.core.native_settings import capture
 
             payload = {**spec, "native_settings": capture()}
+            if workspace := _prepared_workspace():
+                temporary_directory = cleanup.enter_context(
+                    worker_output_directory(workspace)
+                )
         else:
             payload = {"overrides": runtime_overrides(), **spec}
         command = worker_command(
@@ -799,6 +813,7 @@ def _run_worker(
             lifecycle=WorkerLifecycle.GUARDED,
             on_chunk=on_chunk,
             template_headroom_bytes=template_headroom,
+            temporary_directory=temporary_directory,
         )
 
 
@@ -1103,7 +1118,7 @@ def _generate_once(
                 "step-tessellation:" + secrets.token_hex(12),
                 [
                     CapacityResource.for_path(
-                        Path(tempfile.gettempdir()),
+                        _prepared_workspace() or Path(tempfile.gettempdir()),
                         max(faces, 1) * 96 + 1024 * 1024 + 64 * 1024,
                         role="STEP tessellation",
                     )

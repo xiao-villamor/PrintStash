@@ -844,7 +844,7 @@ function FleetTelemetryReadings({ telemetry }: { telemetry: FleetPrinterTelemetr
 function PrinterCardArtwork({ url, model }: { url: string; model: string | null | undefined }) {
   const [failed, setFailed] = useState(false);
   return (
-    <div className="grid min-h-36 w-20 shrink-0 place-items-center overflow-hidden border-e border-border bg-preview-image-matte px-1.5 py-2 @xs/printer-card:w-24 @lg/printer-card:w-32">
+    <div className="grid min-h-36 w-20 shrink-0 place-items-center overflow-hidden border-e border-border bg-preview-image-matte px-1.5 py-2 dark:bg-muted @xs/printer-card:w-24 @lg/printer-card:w-32">
       <img
         src={failed ? printerArtwork(null).imageUrl : url}
         alt={model ? uiText("{value1} printer", { value1: model }) : uiText("Printer")}

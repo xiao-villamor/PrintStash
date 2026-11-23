@@ -684,13 +684,8 @@ def _derive_mesh(
                     [
                         CapacityResource.for_path(
                             prepared.directory,
-                            file_row.size_bytes * 2 + output_bytes,
-                            role="mesh source preparation",
-                        ),
-                        CapacityResource.for_path(
-                            Path(tempfile.gettempdir()),
-                            file_row.size_bytes * 3 + 16 * 1024**2,
-                            role="thumbnail rendering",
+                            file_row.size_bytes * 5 + output_bytes + 16 * 1024**2,
+                            role="mesh source preparation and rendering",
                         ),
                     ],
                     transient=True,

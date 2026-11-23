@@ -22,6 +22,8 @@
 
 - The Revisions tab shows print results and time in the list. Notes and actions follow the selected Revision, with print setup and G-code file details available on demand.
 
+- Printer artwork cards use a dark background in dark mode.
+
 - Klipper Status now includes an administrator console with printer replies and loaded macros. Select a macro to supply its parameters before sending.
 
 - Fleet admins can see waiting jobs that have no assigned printer in the queue and fleet totals. Replacing filament in an existing manual feed now saves and lets compatible work dispatch. Bambu printers preparing a print count as busy.
@@ -153,6 +155,8 @@
 - The default number of simultaneous mesh jobs is now one per usable CPU (it was one more). With admission no longer stalling, the extra job only competed for the CPU: on a 3-CPU, 8 GB install a 60-file archive's thumbnails finish in 38.7 s instead of 44.9 s, at the same CPU cost. `VAULT_MAX_RENDER_JOBS` and *Models processed at once* still override it.
 
 ### Fixed
+
+- Background mesh thumbnail generation uses temporary space on the PrintStash data volume, so a full system temp directory no longer blocks it.
 
 - The browser extension launcher can connect to HTTP PrintStash servers on marketplace pages that upgrade insecure requests to HTTPS.
 
