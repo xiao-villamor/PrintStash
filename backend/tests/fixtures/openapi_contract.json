@@ -29464,6 +29464,57 @@
         ]
       }
     },
+    "/api/v1/collections/{collection_id}/thumbnails/regenerate": {
+      "post": {
+        "operationId": "regenerate_collection_thumbnails_api_v1_collections__collection_id__thumbnails_regenerate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "title": "Collection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Regenerate Collection Thumbnails Api V1 Collections  Collection Id  Thumbnails Regenerate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Recreate model thumbnails in this collection",
+        "tags": [
+          "taxonomy"
+        ]
+      }
+    },
     "/api/v1/config": {
       "get": {
         "description": "Returns editable configuration from a coherent persisted snapshot. Secret values are masked.",

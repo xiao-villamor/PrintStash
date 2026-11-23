@@ -752,6 +752,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     renameCollection,
     deleteCollection,
     replaceCollectionTags,
+    regenerateThumbnails,
   } = useTaxonomyCommands();
   const startup = useLibraryStartup();
   const settleStartup = startup.settle;
@@ -1548,6 +1549,28 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         collection.effective_role === "admin" ||
         (action === "cover" && collection.effective_role === "edit"))
     );
+  }
+  const thumbnailRequests = useRef(new Map<number, number>());
+  async function regenerateCardThumbnails(collection: CollectionRead) {
+    const session = getSessionVersion();
+    if (
+      !canManageCard(collection, "cover") ||
+      thumbnailRequests.current.get(collection.id) === session
+    )
+      return;
+    thumbnailRequests.current.set(collection.id, session);
+    try {
+      const { queued } = await regenerateThumbnails(collection.id);
+      if (session === getSessionVersion()) {
+        if (queued > 0) toast.success(uiText("collection.thumbnailsQueued", { count: queued }));
+        else toast.info(uiText("collection.noThumbnailsQueued"));
+      }
+    } catch (error) {
+      if (session === getSessionVersion()) toast.error(error);
+    } finally {
+      if (thumbnailRequests.current.get(collection.id) === session)
+        thumbnailRequests.current.delete(collection.id);
+    }
   }
   const managedCollection =
     collectionCardTarget?.entry === entry
@@ -4227,6 +4250,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                                           id: collection.id,
                                           action: "cover",
                                         })
+                                    : undefined
+                                }
+                                onRegenerateThumbnails={
+                                  canManageCard(collection, "cover")
+                                    ? () => void regenerateCardThumbnails(collection)
                                     : undefined
                                 }
                                 renaming={

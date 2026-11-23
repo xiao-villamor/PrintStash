@@ -12,6 +12,7 @@ pending again, then derive it.
 
 from __future__ import annotations
 
+from sqlalchemy import case, func, or_
 from sqlmodel import Session, col, select
 
 from app.core.errors import OperationError
@@ -21,7 +22,7 @@ from app.db.session import get_session_factory
 from app.modules.work.contracts import SkipReason
 
 from . import policy, producers, records
-from .kinds import MESH_TYPES, groups_for, recipes_for
+from .kinds import GROUPS, MESH_TYPES, groups_for, recipes_for
 
 _PRODUCERS = {
     JobKind.DERIVATIVES_MESH: producers.derive_mesh,
@@ -75,6 +76,63 @@ def request(session: Session, file: File, kinds: list[DerivativeKind]) -> bool:
     for group in groups:
         nudge(group.definition)
     return bool(groups)
+
+
+def request_collection_thumbnails(session: Session, collection_id: int) -> int:
+    """Requeue one representative thumbnail for each direct, live Model."""
+    from app.modules.work import nudge
+
+    kind = DerivativeKind.THUMBNAIL
+    policy.lock(session)
+    controls = policy.resolve(session)
+    groups = [
+        group
+        for group in GROUPS
+        if kind in group.kinds and controls[group.definition].enabled
+    ]
+    if not groups:
+        return 0
+
+    ranked = (
+        select(
+            col(File.id).label("file_id"),
+            func.row_number()
+            .over(
+                partition_by=col(Model.id),
+                order_by=(
+                    case(
+                        (col(File.id) == col(Model.thumbnail_file_id), 1), else_=0
+                    ).desc(),
+                    col(File.file_type).in_(MESH_TYPES).desc(),
+                    col(File.id).desc(),
+                ),
+            )
+            .label("rank"),
+        )
+        .join(Model, col(File.model_id) == col(Model.id))
+        .where(
+            Model.collection_id == collection_id,
+            live(Model),
+            live(File),
+            or_(*(group.applies() for group in groups)),
+        )
+        .subquery()
+    )
+    files = session.exec(
+        select(File)
+        .join(ranked, col(File.id) == ranked.c.file_id)
+        .where(ranked.c.rank == 1)
+    ).all()
+    definitions: set[JobKind] = set()
+    for file in files:
+        records.invalidate(session, file, [kind])
+        definitions.update(
+            group.definition for group in groups if group.applies_to(file)
+        )
+    session.commit()
+    for definition in definitions:
+        nudge(definition)
+    return len(files)
 
 
 def now(

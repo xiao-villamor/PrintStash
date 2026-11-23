@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "./helpers";
 import { collapseNavigationSidebar, stlFor } from "./util";
+import type { DerivativeRead, ModelRead } from "../../src/types/models";
 
 const coverImage = Buffer.from(
   "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000002000154a24f6f0000000049454e44ae426082",
@@ -40,6 +41,81 @@ test.describe("collection card", () => {
       await expect(page).toHaveURL((url) => !url.searchParams.has("c"));
     } finally {
       await page.request.delete(`/api/v1/collections/${id}`);
+    }
+  });
+
+  test("recreates a model thumbnail from the collection context menu", async ({ page }) => {
+    const name = `e2e-thumbnails-${randomUUID().slice(0, 8)}`;
+    const created = await page.request.post("/api/v1/collections", { data: { name } });
+    expect(created.status()).toBe(201);
+    const collection = await created.json();
+    const imported = await page.request.post("/api/v1/ingest/model", {
+      multipart: {
+        file: { name: `${name}.stl`, mimeType: "text/plain", buffer: Buffer.from(stlFor(name)) },
+        model_name: name,
+        collection: name,
+      },
+    });
+    expect(imported.status(), await imported.text()).toBe(202);
+    const { job_id } = await imported.json();
+    let modelId: number | undefined;
+    await expect
+      .poll(
+        async () => {
+          const job = await (await page.request.get(`/api/v1/jobs/${job_id}`)).json();
+          modelId = job.model_id;
+          return job.state;
+        },
+        { timeout: 45_000 },
+      )
+      .toBe("completed");
+    expect(modelId).toBeGreaterThan(0);
+    const readModel = async (): Promise<ModelRead> =>
+      (await page.request.get(`/api/v1/models/${modelId}`)).json();
+    const readThumbnail = async () => {
+      const model = await readModel();
+      const file = model.files[0];
+      const derivatives: DerivativeRead[] = await (
+        await page.request.get(`/api/v1/files/${file.id}/derivatives`)
+      ).json();
+      const thumbnail = derivatives.find((item) => item.kind === "thumbnail");
+      return thumbnail?.state === "ready" ? thumbnail.updated_at : null;
+    };
+    try {
+      await expect.poll(readThumbnail, { timeout: 45_000 }).toBeTruthy();
+      const before = await readThumbnail();
+      await page.goto("/");
+      await collapseNavigationSidebar(page);
+      const card = page.locator(`[data-collection-path="${name}"]`);
+      const button = card.getByRole("button").first();
+      await button.click({ button: "right" });
+      const menu = page.getByRole("menu", { name: "Collection actions" });
+      const queued = page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/collections/${collection.id}/thumbnails/regenerate`) &&
+          response.request().method() === "POST",
+      );
+      await menu.getByRole("menuitem", { name: "Recreate thumbnails" }).click();
+      expect((await queued).status()).toBe(202);
+      expect(await (await queued).json()).toEqual({ queued: 1 });
+      await expect(button).toBeFocused();
+      await expect(page.getByText("1 thumbnail queued")).toBeVisible();
+      await expect
+        .poll(
+          async () => {
+            const thumbnail = await readThumbnail();
+            return Boolean(thumbnail && thumbnail !== before);
+          },
+          { timeout: 45_000 },
+        )
+        .toBe(true);
+      await page.reload();
+      const thumbnailUrl = (await readModel()).thumbnail_url;
+      expect(thumbnailUrl).toBeTruthy();
+      expect((await page.request.get(thumbnailUrl!)).ok()).toBe(true);
+    } finally {
+      await page.request.delete(`/api/v1/models/${modelId}`);
+      await page.request.delete(`/api/v1/collections/${collection.id}`);
     }
   });
 

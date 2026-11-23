@@ -3385,6 +3385,12 @@
     "other": "Renamed {count} folders"
   },
   "collection.cardActions": "Collection actions",
+  "collection.regenerateThumbnails": "Recreate thumbnails",
+  "collection.thumbnailsQueued": {
+    "one": "{count} thumbnail queued",
+    "other": "{count} thumbnails queued"
+  },
+  "collection.noThumbnailsQueued": "No thumbnails to recreate in this collection",
   "collection.coverTitle": "Edit collection cover",
   "collection.coverLoadFailed": "Could not load the collection cover.",
   "collection.coverModels": "Choose models",
