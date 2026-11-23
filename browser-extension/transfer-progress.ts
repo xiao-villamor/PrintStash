@@ -1,4 +1,4 @@
-import { vaultFetch } from "./vault-fetch.ts";
+import { httpPanelNetwork, vaultFetch } from "./vault-fetch.ts";
 
 export type ByteProgress = (loaded: number, total: number | null) => void;
 
@@ -30,6 +30,8 @@ export function captureTransferFetch(
 ): typeof fetch {
   return async (input, init) => {
     if (init?.method !== "PUT" || !(init.body instanceof Blob)) return fetchImpl(input, init);
+    const workerNetwork = httpPanelNetwork(input);
+    if (workerNetwork) return workerNetwork(input, init, progress);
     const body = init.body;
     const signal = init.signal;
     signal?.throwIfAborted();
