@@ -1931,6 +1931,49 @@ class TestPrinter:
 
 
 class TestFleet:
+    def test_unassigned_queue_is_visible_to_admins_before_printer_registration(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+    ) -> None:
+        artifact = a_gcode_artifact(db_session, "First farm job")
+        job = client.post(
+            "/api/v1/fleet/queue",
+            headers=auth_headers,
+            json={"file_id": artifact.id, "strategy": "least_busy"},
+        )
+        assert job.status_code == 201
+        queue = client.get("/api/v1/fleet/queue", headers=auth_headers).json()
+        assert [(row["id"], row["blocked_reason"]) for row in queue] == [
+            (job.json()["id"], "no_eligible_printer")
+        ]
+        summary = client.get("/api/v1/fleet/summary", headers=auth_headers).json()
+        assert (
+            summary["total_printers"],
+            summary["queued_jobs"],
+            summary["attention_jobs"],
+        ) == (0, 1, 1)
+
+    def test_printer_view_grant_excludes_unassigned_work(
+        self,
+        client: TestClient,
+        db_session: Session,
+        make_user: MakeUser,
+        headers_for: HeadersFor,
+    ) -> None:
+        viewer = make_user()
+        printer = build_printer(db_session)
+        grant_printer_role(db_session, viewer, printer, PrinterRole.VIEW)
+        artifact = a_gcode_artifact(db_session, "Scoped queue")
+        assigned = build_print_job(db_session, artifact, printer=printer)
+        build_print_job(db_session, artifact, blocked_reason="no_eligible_printer")
+        headers = headers_for(viewer, scope="read")
+        jobs = client.get("/api/v1/fleet/queue", headers=headers).json()
+        assert [job["id"] for job in jobs] == [assigned.id]
+        totals = client.get("/api/v1/fleet/summary", headers=headers).json()
+        assert (totals["queued_jobs"], totals["attention_jobs"]) == (1, 0)
+
     def test_summary_names_a_live_print_from_the_granted_printer_cache(
         self,
         app: FastAPI,

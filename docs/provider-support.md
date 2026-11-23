@@ -155,7 +155,7 @@ Current behavior:
 
 Safety rules:
 
-- PrintStash checks readiness before a Bambu Vault send or a start from Files.
+- PrintStash checks readiness before a Bambu Vault send or a start from Files. A printer reporting `PREPARE` is already busy with its next print.
 - **Upload from library** transfers the file. Choose **Start** in Files or select
   **Start print immediately** in the send dialog to run it.
 - Upload and start remain beta until validated against more firmware versions.

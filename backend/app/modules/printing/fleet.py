@@ -9,9 +9,9 @@ from typing import Literal
 
 from printstash_core.gcode import declared_print_artifact_format
 from printstash_core.printers import PrintArtifactFormat
-from sqlalchemy import case, func
+from sqlalchemy import ColumnElement, and_, case, func, or_
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.core.config import settings
 from app.core.time import utcnow
@@ -749,17 +749,33 @@ def list_queue(session: Session) -> list[PrintJob]:
     return list_queue_page(session)
 
 
+def _visible_jobs(
+    printer_ids: set[int], include_unassigned_queue: bool
+) -> ColumnElement[bool]:
+    assigned = col(PrintJob.printer_id).in_(printer_ids)
+    if include_unassigned_queue:
+        return or_(
+            assigned,
+            and_(
+                col(PrintJob.printer_id).is_(None),
+                col(PrintJob.state) == PrintJobState.QUEUED,
+            ),
+        )
+    return assigned
+
+
 def list_queue_page(
     session: Session,
     *,
     history_limit: int = 20,
     history_offset: int = 0,
     visible_printer_ids: set[int] | None = None,
+    include_unassigned_queue: bool = False,
 ) -> list[PrintJob]:
-    if visible_printer_ids is not None and not visible_printer_ids:
+    if visible_printer_ids == set() and not include_unassigned_queue:
         return []
     visibility = (
-        PrintJob.printer_id.in_(visible_printer_ids)  # type: ignore[union-attr]
+        _visible_jobs(visible_printer_ids, include_unassigned_queue)
         if visible_printer_ids is not None
         else True
     )
@@ -1235,6 +1251,7 @@ def fleet_summary(
     printer_ids: set[int] | None = None,
     *,
     snapshots: Mapping[int, Mapping[str, Mapping[str, object]]] | None = None,
+    include_unassigned_queue: bool = False,
 ) -> dict[str, object]:
     cached_snapshots = snapshots if snapshots is not None else {}
     printer_stmt = select(Printer).where(live(Printer))
@@ -1242,12 +1259,16 @@ def fleet_summary(
     window_stmt = select(PrinterMaintenanceWindow).where(live(PrinterMaintenanceWindow))
     if printer_ids is not None:
         printer_stmt = printer_stmt.where(Printer.id.in_(printer_ids))  # type: ignore[union-attr]
-        job_stmt = job_stmt.where(PrintJob.printer_id.in_(printer_ids))  # type: ignore[union-attr]
+        job_stmt = job_stmt.where(_visible_jobs(printer_ids, include_unassigned_queue))
         window_stmt = window_stmt.where(
             PrinterMaintenanceWindow.printer_id.in_(printer_ids)  # type: ignore[union-attr]
         )
     printers = list(session.exec(printer_stmt).all()) if printer_ids != set() else []
-    jobs = list(session.exec(job_stmt).all()) if printer_ids != set() else []
+    jobs = (
+        list(session.exec(job_stmt).all())
+        if printer_ids != set() or include_unassigned_queue
+        else []
+    )
     now = utcnow()
     maintenance_printers = {
         row.printer_id

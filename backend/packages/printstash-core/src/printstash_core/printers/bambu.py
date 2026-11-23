@@ -199,7 +199,7 @@ class BambuClient:
     }
     _STATE_TO_MOONRAKER = {
         "idle": "standby",
-        "prepare": "standby",
+        "prepare": "printing",
         "slicing": "standby",
         "running": "printing",
         "pause": "paused",

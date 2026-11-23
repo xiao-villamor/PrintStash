@@ -10,6 +10,8 @@
 
 ### Changed
 
+- Fleet admins can see waiting jobs that have no assigned printer in the queue and fleet totals. Replacing filament in an existing manual feed now saves and lets compatible work dispatch. Bambu printers preparing a print count as busy.
+
 - Add to queue shows the selected Revision, plate, routing rule, destination and priority before saving. The queue list groups the Revision, destination, status and actions into columns, with routing holds written in plain language.
 - Fleet Queue opens a routing map. Select jobs, routing rules or printers to inspect them, or drag a queued job to a printer and confirm its new destination. The dispatcher shows available capacity, and printing nodes show reported progress and time remaining.
 - Bambu file transfers can resume the authenticated FTPS session on the data connection. Bambu LAN sends sliced Library projects intact and starts the chosen plate. A tracked project can also be started from the printer’s cache. Fleet Queue shows current work, progress, available time estimates, next jobs and dispatch holds per printer. The scheduler holds the next job while the previous dispatch awaits firmware updates.

@@ -70,7 +70,12 @@ def get_fleet_summary(
 ) -> FleetSummary:
     printer_ids = printer_rbac.accessible_printer_ids(session, current_user)
     return FleetSummary.model_validate(
-        fleet.fleet_summary(session, printer_ids, snapshots=hub.snapshots)
+        fleet.fleet_summary(
+            session,
+            printer_ids,
+            snapshots=hub.snapshots,
+            include_unassigned_queue=current_user.is_superuser,
+        )
     )
 
 
@@ -87,6 +92,7 @@ def get_queue(
         history_limit=history_limit,
         history_offset=history_offset,
         visible_printer_ids=visible_ids,
+        include_unassigned_queue=current_user.is_superuser,
     )
     return [_print_job_read(session, job) for job in rows]
 

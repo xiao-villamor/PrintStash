@@ -1,0 +1,42 @@
+{
+  "ams": {
+    "ams_exist_bits": "1",
+    "tray_exist_bits": "3",
+    "tray_is_bbl_bits": "0",
+    "tray_read_done_bits": "3",
+    "tray_reading_bits": "0",
+    "tray_now": "0",
+    "ams": [
+      {
+        "id": "0",
+        "humidity": "2",
+        "temp": "22",
+        "tray": [
+          {
+            "id": "0",
+            "tray_type": "PLA",
+            "remain": 75,
+            "tray_color": "4169E1FF"
+          },
+          {
+            "id": "1",
+            "tray_type": "PETG",
+            "remain": 75,
+            "tray_color": "FFFFFFFF"
+          },
+          {
+            "id": "2"
+          },
+          {
+            "id": "3"
+          }
+        ]
+      }
+    ]
+  },
+  "vt_tray": {
+    "id": "254",
+    "tray_type": ""
+  },
+  "nozzle_diameter": "0.4"
+}

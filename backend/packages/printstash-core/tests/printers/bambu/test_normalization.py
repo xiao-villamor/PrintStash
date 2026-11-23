@@ -223,7 +223,7 @@ class TestNormalizeStatus:
         ("raw", "normalized"),
         [
             ("IDLE", "standby"),
-            ("PREPARE", "standby"),
+            ("PREPARE", "printing"),
             ("SLICING", "standby"),
             ("RUNNING", "printing"),
             ("PAUSE", "paused"),
