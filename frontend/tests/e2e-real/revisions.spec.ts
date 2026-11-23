@@ -26,9 +26,10 @@ test.describe("revisions", () => {
     await expect(page.getByRole("heading", { name })).toBeVisible();
 
     // The first uploaded G-code is auto-marked recommended.
-    await page.getByRole("tab", { name: /Revisions/ }).click();
-    await expect(page.getByText("Rev 1", { exact: true }).first()).toBeVisible();
-    await expect(revRow(page, 1).getByText("Recommended")).toBeVisible();
+    await page.getByRole("button", { name: /Recommended revision.*Rev 1/ }).press("Enter");
+    const revisions = page.getByRole("tabpanel", { name: "Revisions" });
+    await expect(revisions).toBeFocused();
+    await expect(revisions.getByRole("heading", { name: /Rev 1.*Recommended/ })).toBeVisible();
 
     // Add a second revision (unique bytes so the content-hash dedupe keeps it).
     await page.getByRole("button", { name: "Add revision", exact: true }).click();
@@ -61,6 +62,10 @@ test.describe("revisions", () => {
     await expect(revRow(page, 1).getByText("Recommended")).toHaveCount(0);
 
     await expect(revRow(page, 2).getByText("Known good", { exact: true })).toBeVisible();
+
+    await page.getByRole("tab", { name: "Overview", exact: true }).click();
+    await page.getByRole("button", { name: /Recommended revision.*Rev 2/ }).click();
+    await expect(revisions.getByRole("heading", { name: /^Rev 2/ })).toBeVisible();
 
     // Comparison is an explicit command in the compact Revisions toolbar.
     await page.getByRole("button", { name: "Compare", exact: true }).click();

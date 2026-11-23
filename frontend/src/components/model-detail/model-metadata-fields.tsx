@@ -1,14 +1,13 @@
 "use client";
 
 import { useId } from "react";
-import { MarkdownView } from "@/components/markdown-view";
 
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { ChevronDown, Plus, Trash2, X } from "lucide-react";
 
-import { ModelRead, TagRead } from "@/types";
+import type { TagRead } from "@/types";
 
 import { CollectionPicker } from "@/components/collection-picker";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
@@ -16,7 +15,7 @@ import { inputClasses } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
 
-import { InspectedPrintCard } from "./inspected-print-card";
+import { ModelDescriptionEditor } from "./model-description";
 import { Localized } from "@/components/ui/localized";
 
 /** Edit-form state owned by the controller (Save lives in the Model editor drawer). */
@@ -42,34 +41,9 @@ export type ModelMetaEditor = {
   canCreate: boolean;
 };
 
-export function OverviewTab({
-  model,
-  editing,
-  editor,
-  revision,
-}: {
-  model: ModelRead;
-  editing: boolean;
-  editor: ModelMetaEditor;
-  revision: React.ComponentProps<typeof InspectedPrintCard>;
-}) {
-  useUiLocale();
-  return (
-    <Localized>
-      <>
-        {(revision.file || !model.files.some((file) => file.file_type === "resin")) && (
-          <InspectedPrintCard {...revision} />
-        )}
-        {editing && <ModelMetadataFields editor={editor} />}
-      </>
-    </Localized>
-  );
-}
-
 export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
   useUiLocale();
   const collectionLabelId = useId();
-  const descriptionId = useId();
   const sourceUrlId = useId();
   const tagsId = useId();
   const tagShown = editor.filteredTags.slice(0, 6);
@@ -146,32 +120,10 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
               />
             </DropdownMenu>
           </div>
-          {/* Description */}
-          <div>
-            <label htmlFor={descriptionId} className="mb-1.5 block text-sm font-medium">
-              {uiText("Description")}
-            </label>
-            <textarea
-              id={descriptionId}
-              aria-describedby={`${descriptionId}-hint`}
-              value={editor.description}
-              onChange={(e) => editor.setDescription(e.target.value)}
-              rows={3}
-              className={inputClasses}
-              placeholder={uiText("Optional description")}
-            />
-            <p id={`${descriptionId}-hint`} className="mt-1.5 text-xs text-muted-foreground">
-              {uiText("Markdown supported: headings, lists, links and tables.")}
-            </p>
-            {editor.description.trim() && (
-              <details className="mt-2 rounded border border-border p-3">
-                <summary className="text-sm font-medium">{uiText("Preview")}</summary>
-                <div className="mt-3">
-                  <MarkdownView source={editor.description} />
-                </div>
-              </details>
-            )}
-          </div>
+          <ModelDescriptionEditor
+            description={editor.description}
+            onChange={editor.setDescription}
+          />
           {/* Source URL */}
           <div>
             <label htmlFor={sourceUrlId} className="mb-1.5 block text-sm font-medium">

@@ -1548,6 +1548,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     ]);
     return;
   }
+  if (url.pathname === "/api/v1/models/1/artifact-outcomes" && req.method === "GET") {
+    sendJson(res, []);
+    return;
+  }
   if (url.pathname === "/api/v1/models/1/print-jobs") {
     if (req.method === "POST") {
       let body = "";

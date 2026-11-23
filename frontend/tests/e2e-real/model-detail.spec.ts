@@ -18,21 +18,21 @@ test.describe("model detail", () => {
     const modelId = new URL(page.url()).pathname.split("/").at(-1);
     await page.getByRole("button", { name: "Edit details", exact: true }).click();
     const description =
-      "## Assembly instructions\n\n- Fit **both** clips.\n- Check [the source](https://www.printables.com/).";
-    await page.getByRole("textbox", { name: "Description", exact: true }).fill(description);
-    await page
-      .getByRole("dialog", { name: "Edit Model details" })
-      .getByText("Preview", { exact: true })
-      .click();
-    await expect(page.getByRole("heading", { name: "Assembly instructions" })).toBeVisible();
-    await page
-      .getByRole("dialog", { name: "Edit Model details" })
-      .getByRole("button", { name: "Save changes", exact: true })
-      .click();
+      "## Assembly instructions\n\n- Fit **both** clips.\n- Check [the source](https://www.printables.com/).\n\n| Part | Count |\n| --- | --- |\n| Clip | 2 |";
+    const editor = page.getByRole("dialog", { name: "Edit Model details" });
+    const input = editor.getByRole("textbox", { name: "Description", exact: true });
+    await input.fill(description);
+    await editor.getByRole("tab", { name: "Write", exact: true }).press("ArrowRight");
+    const preview = editor.getByRole("tabpanel", { name: "Preview", exact: true });
+    await expect(preview.getByRole("heading", { name: "Assembly instructions" })).toBeVisible();
+    await expect(preview.getByRole("table")).toBeVisible();
+    await editor.getByRole("tab", { name: "Write", exact: true }).click();
+    await expect(input).toHaveValue(description);
+    await editor.getByRole("button", { name: "Save changes", exact: true }).click();
+    await expect(editor).toBeHidden();
     await page.reload();
-    const more = page.getByRole("button", { name: "Show more", exact: true });
-    if (await more.isVisible()) await more.click();
     await expect(page.getByRole("heading", { name: "Assembly instructions" })).toBeVisible();
+    await expect(page.getByRole("table").getByRole("cell", { name: "Clip" })).toBeVisible();
     await expect(page.getByRole("link", { name: "the source", exact: true })).toHaveAttribute(
       "href",
       "https://www.printables.com/",

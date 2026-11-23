@@ -2,17 +2,23 @@
  * stays zero, and untrusted legacy source URLs never become executable links. */
 import { renderApp, json } from "@/test-support/render";
 import "@testing-library/jest-dom/vitest";
-import { screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { ModelGeometry, ModelInformation } from "../model-information";
 import { aMetadata, aModel, aRevision } from "@/test-support/factories";
 import type { FileRead } from "@/types";
 
-function show(sourceUrl: string | null = null, canEdit = false, description: string | null = null) {
+function show(
+  sourceUrl: string | null = null,
+  canEdit = false,
+  description: string | null = null,
+  recommendedRevision: React.ComponentProps<typeof ModelInformation>["recommendedRevision"] = null,
+) {
   return renderApp(
     <ModelInformation
       model={aModel({ source_url: sourceUrl, description })}
       canEdit={canEdit}
+      recommendedRevision={recommendedRevision}
       onEdit={() => {}}
       onTags={() => {}}
     />,
@@ -36,6 +42,21 @@ function showGeometry(sourceFile: FileRead | null) {
 }
 
 describe("ModelInformation", () => {
+  it("opens the named recommended revision", () => {
+    const open = vi.fn<() => void>();
+    show(null, false, null, {
+      file: aRevision({ gcode_revision_number: 2, revision_label: "Wall mount" }),
+      open,
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Recommended revision.*Rev 2.*Wall mount/ }),
+    );
+    expect(open).toHaveBeenCalledOnce();
+  });
+  it("omits the shortcut without a recommended revision", () => {
+    show();
+    expect(screen.queryByRole("button", { name: /Recommended revision/ })).toBeNull();
+  });
   it("renders a Markdown model description", () => {
     show(
       null,

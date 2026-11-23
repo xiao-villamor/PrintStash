@@ -117,7 +117,7 @@ export function RevisionsTab({
   onPreview?: (fileId: number) => void;
   onInspect?: (id: number) => void;
   startComparing?: boolean;
-  backLabel?: "Back to revisions" | "Back to overview" | "Back to files" | "Back to print settings";
+  backLabel?: "Back to revisions" | "Back to files" | "Back to print settings";
   onReturnToOrigin?: () => void;
   comparisonMode?: ComparisonMode;
   printerless?: boolean;

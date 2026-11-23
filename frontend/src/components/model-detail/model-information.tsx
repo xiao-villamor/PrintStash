@@ -1,31 +1,34 @@
-import { MarkdownView } from "@/components/markdown-view";
 import { RelatedProfiles } from "./related-profiles";
 import { GeometryReport } from "./geometry-report";
 import { ModelSourceSummary } from "./source-summary";
-import { Fragment, useId, useLayoutEffect, useRef, useState } from "react";
-import { ChevronRight, ExternalLink } from "lucide-react";
+import { Fragment } from "react";
+import { ChevronRight, ExternalLink, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { meshGeometryFacts, type useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { currentLocale, uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import type { FileRead, ModelRead } from "@/types";
 import { safeHttpUrl } from "./source-url";
+import { ModelDescription } from "./model-description";
 
 /** Model facts in Overview describe the Model independently of the inspected Revision. */
 export function ModelInformation({
   model,
   canEdit,
+  recommendedRevision,
   onEdit,
   onTags,
 }: {
   model: ModelRead;
   canEdit: boolean;
+  recommendedRevision?: { file: FileRead; open: () => void } | null;
   onEdit: () => void;
   onTags: () => void;
 }) {
   useUiLocale();
   const sourceUrl = model.source_url ? safeHttpUrl(model.source_url) : null;
   const collectionNames = model.collection_label ? model.collection_label.split("/") : null;
+  const revision = recommendedRevision?.file;
   return (
     <section aria-label={uiText("About this model")} className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -36,9 +39,27 @@ export function ModelInformation({
           </Button>
         )}
       </div>
-      {model.description && (
-        <ModelDescription key={model.description} description={model.description} />
+      {recommendedRevision && revision && (
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={recommendedRevision.open}
+          className="h-auto min-h-10 w-full justify-start gap-2.5 whitespace-normal border border-border px-3 py-2 text-start"
+        >
+          <Star className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="flex min-w-0 grow flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className="text-muted-foreground">{uiText("Recommended revision")}</span>
+            <span className="min-w-0 font-semibold wrap-anywhere">
+              {uiText("Rev {value1}", {
+                value1: String(revision.gcode_revision_number ?? revision.version),
+              })}
+              {revision.revision_label && ` · ${revision.revision_label}`}
+            </span>
+          </span>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        </Button>
       )}
+      {model.description?.trim() && <ModelDescription description={model.description} />}
       <dl className="flex flex-wrap gap-x-10 gap-y-4 text-base [&_dt]:text-sm [&_dt]:font-medium [&_dt]:text-muted-foreground">
         {collectionNames && (
           <div className="min-w-0 basis-full space-y-1">
@@ -158,47 +179,5 @@ export function ModelGeometry({
         volume={sourceFile.metadata?.volume_measurement ?? null}
       />
     </section>
-  );
-}
-
-function ModelDescription({ description }: { description: string }) {
-  const id = useId();
-  const content = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [overflows, setOverflows] = useState(false);
-  useLayoutEffect(() => {
-    const element = content.current;
-    if (!element) return;
-    const measure = () => {
-      const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight);
-      setOverflows(element.scrollHeight > lineHeight * 4 + 1);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [description]);
-  return (
-    <div>
-      <div
-        id={id}
-        ref={content}
-        className={`wrap-anywhere text-sm leading-5 text-muted-foreground ${expanded ? "" : "max-h-20 overflow-hidden"}`}
-      >
-        <MarkdownView source={description} />
-      </div>
-      {overflows && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="mt-1"
-          aria-controls={id}
-          aria-expanded={expanded}
-          onClick={() => setExpanded(!expanded)}
-        >
-          {uiText(expanded ? "Show less" : "Show more")}
-        </Button>
-      )}
-    </div>
   );
 }

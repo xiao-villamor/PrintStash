@@ -116,29 +116,15 @@ test.describe("Existing Model review", () => {
               expect(tray!.y + tray!.height).toBeLessThanOrEqual(frame!.y + frame!.height);
               await capturePanel(label.toLowerCase().replaceAll(" ", "-"));
               if (label === "Overview") {
-                const sections = [
-                  inspector.getByRole("heading", { name: "Print setup" }),
-                  inspector.getByRole("table", { name: "Plate estimates" }),
-                  inspector.getByRole("button", { name: "Download", exact: true }),
-                  inspector.getByRole("heading", { name: "Recorded prints" }),
-                  inspector.locator("summary").filter({ hasText: "G-code file" }),
-                ];
-                let previousBottom = Number.NEGATIVE_INFINITY;
-                for (const section of sections) {
-                  const bounds = await section.boundingBox();
-                  expect(bounds).toBeTruthy();
-                  expect(bounds!.y).toBeGreaterThanOrEqual(previousBottom);
-                  previousBottom = bounds!.y + bounds!.height;
-                }
-                const disclosure = sections[sections.length - 1];
-                const fileSize = inspector.getByText("File size", { exact: true });
-                await expect(fileSize).toBeHidden();
-                await disclosure.focus();
-                await disclosure.press("Enter");
-                await expect(fileSize).toBeVisible();
-                await capturePanel("overview-file-details");
-                await disclosure.press("Enter");
-                await expect(fileSize).toBeHidden();
+                await expect(
+                  inspector.getByRole("heading", { name: "About this model" }),
+                ).toBeVisible();
+                await expect(
+                  inspector.getByRole("button", { name: /Recommended revision/ }),
+                ).toBeVisible();
+                await expect(
+                  inspector.getByRole("button", { name: "Send to printer", exact: true }),
+                ).toHaveCount(0);
               }
             }
             await inspector.getByRole("button", { name: "Filters", exact: true }).click();
@@ -344,7 +330,7 @@ test.describe("Existing Model review", () => {
 
             for (const [origin, triggerName, backName] of [
               ["Files", "Compare", "Back to files"],
-              ["Overview", "Compare revisions", "Back to overview"],
+              ["Print settings", "Compare", "Back to print settings"],
             ] as const) {
               await tab(origin);
               const trigger = inspector.getByRole("button", { name: triggerName, exact: true });

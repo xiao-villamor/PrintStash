@@ -79,7 +79,7 @@ import { TabBar } from "@/components/ui/tabs";
 import { AddGcodeRevisionModal } from "./add-revision-modal";
 import { SimilarityQueue } from "@/components/similarity-queue";
 import { FilesTab } from "./files-tab";
-import { OverviewTab, ModelMetadataFields, type ModelMetaEditor } from "./overview-tab";
+import { ModelMetadataFields, type ModelMetaEditor } from "./model-metadata-fields";
 import {
   TABS,
   TabKey,
@@ -92,7 +92,6 @@ import { RevisionsTab } from "./revisions-tab";
 import { SendToButtons } from "./send-to-buttons";
 import { ShareDialog } from "./share-dialog";
 import { SettingsTab } from "./settings-tab";
-import { PlateEstimates } from "./plate-estimates";
 import { SourceTab } from "./source-tab";
 import { useContentReveal } from "@/lib/use-content-reveal";
 import { DetailTabLoading } from "./tab-loading";
@@ -115,7 +114,6 @@ const GcodePreview = lazy(() =>
 
 const compareBackLabel = {
   files: "Back to files",
-  overview: "Back to overview",
   settings: "Back to print settings",
 } as const;
 
@@ -414,6 +412,13 @@ function ModelDetailPresentation({
     compareFocus.current = null;
   }, [activeTab]);
   const detailTabBody = useContentReveal(activeTab, { scroll: "parent" });
+  const detailTabPanel = useRef<HTMLDivElement>(null);
+  const focusRevisionFromOverview = useRef(false);
+  useLayoutEffect(() => {
+    if (!focusRevisionFromOverview.current) return;
+    focusRevisionFromOverview.current = false;
+    if (activeTab === "revisions") detailTabPanel.current?.focus({ preventScroll: true });
+  }, [activeTab]);
   const visibleTabs = useMemo(
     () =>
       TABS.filter(
@@ -423,7 +428,6 @@ function ModelDetailPresentation({
     [canViewPrinters, canEditModel],
   );
 
-  // Quick actions on the Overview card (mark failed / recommend).
   // Thumbnails and metadata arrive after upload, derived in the background.
   useDerivativeRefresh(model.id);
 
@@ -844,18 +848,6 @@ function ModelDetailPresentation({
     filteredTags: editFilteredTags,
     canCreate: editCanCreate,
   };
-  const showPrintFirst = Boolean(inspectedGcode || gcodeOnly);
-  const modelInformation = (
-    <ModelInformation
-      model={model}
-      canEdit={canEditModel}
-      onEdit={() => enterEdit("details")}
-      onTags={() => {
-        setTagDialogSession((value) => value + 1);
-        setTagDialogOpen(true);
-      }}
-    />
-  );
 
   return (
     <Localized>
@@ -1512,6 +1504,7 @@ function ModelDetailPresentation({
               activeTabClassName="text-foreground"
             />
             <div
+              ref={detailTabPanel}
               role="tabpanel"
               tabIndex={0}
               aria-label={visibleTabs.find((tab) => tab.key === activeTab)?.label}
@@ -1519,64 +1512,31 @@ function ModelDetailPresentation({
             >
               <div ref={detailTabBody} className="model-detail-tab-body space-y-4">
                 {activeTab === "overview" && (
-                  <div className="space-y-4">
-                    {!showPrintFirst && modelInformation}
-                    {!inspectedGcode && gcodeOnly ? (
-                      slicedEstimates && (
-                        <PlateEstimates
-                          data={slicedEstimates}
-                          selected={selectedEstimatePlate}
-                          showCost={false}
-                        />
-                      )
-                    ) : (
-                      <OverviewTab
-                        model={model}
-                        editing={false}
-                        editor={modelMetadataEditor}
-                        revision={{
-                          file: inspectedGcode,
-                          plateEstimates: slicedEstimates,
-                          selectedSlicedPlate: selectedEstimatePlate,
-                          recommended: recommendedGcode,
-                          revisionCount: gcodeFiles.length,
-                          canEdit: canEditModel,
-                          canSend: canViewPrinters,
-                          printerless,
-                          jobs: canViewPrinters && printJobQuery.isSuccess ? printJobs : null,
-                          onRevisions: () => {
-                            setCompareOrigin(null);
-                            selectTab("revisions");
-                          },
-                          onSettings: () => selectTab("settings"),
-                          onHistory: () => selectTab("history"),
-                          onCompare: () => openComparison("overview"),
-                          onInspect: (fileId) =>
-                            setRevisionSelection({ modelId: model.id, fileId }),
-                          onSend: (mode) => {
-                            setDeliveryMode(mode);
-                            setSendOpen(true);
-                          },
-                          onLogPrint: (state) => {
-                            if (inspectedGcode)
-                              setHistoryDraft({ fileId: inspectedGcode.id, state });
-                            selectTab("history");
-                          },
-                          onAddRevision: requestAddRevision,
-                        }}
-                      />
-                    )}
-                    {!editing && !hasGcode && latestFile?.file_type === "resin" && (
-                      <SettingsTab
-                        meta={meta}
-                        printSettingRows={printSettingRows}
-                        preferences={metadataPreferences}
-                      />
-                    )}
-                    {showPrintFirst && (
-                      <div className="border-t border-border pt-4">{modelInformation}</div>
-                    )}
-                  </div>
+                  <ModelInformation
+                    model={model}
+                    canEdit={canEditModel}
+                    recommendedRevision={
+                      recommendedGcode
+                        ? {
+                            file: recommendedGcode,
+                            open: () => {
+                              setCompareOrigin(null);
+                              setRevisionSelection({
+                                modelId: model.id,
+                                fileId: recommendedGcode.id,
+                              });
+                              focusRevisionFromOverview.current = true;
+                              selectTab("revisions");
+                            },
+                          }
+                        : null
+                    }
+                    onEdit={() => enterEdit("details")}
+                    onTags={() => {
+                      setTagDialogSession((value) => value + 1);
+                      setTagDialogOpen(true);
+                    }}
+                  />
                 )}
 
                 {activeTab === "settings" && (

@@ -636,7 +636,7 @@ describe("ModelDetail", () => {
       expect(screen.queryByText(/Large 3D preview/)).not.toBeInTheDocument();
     });
 
-    it("shows resin print facts on Overview", async () => {
+    it("shows resin print facts in Print settings", async () => {
       renderDetail({
         model: aModel({
           files: [
@@ -648,6 +648,7 @@ describe("ModelDetail", () => {
           ],
         }),
       });
+      await userEvent.click(await screen.findByRole("tab", { name: "Print settings" }));
       expect(await screen.findByText("2.5 ml", { exact: true })).toBeVisible();
       expect(screen.getByText("120", { exact: true })).toBeVisible();
       expect(screen.getByText("2.5 s", { exact: true })).toBeVisible();
