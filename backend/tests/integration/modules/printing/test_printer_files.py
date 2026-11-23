@@ -145,6 +145,7 @@ class TestRemoteFieldParsers:
 
     def test_remote_size_coerces_whatever_the_printer_reported(self) -> None:
         assert pf._remote_size({"size": "456"}) == 456
+        assert pf._remote_size({"size": 0}) == 0
         assert pf._remote_size({"size_bytes": 789}) == 789
         assert pf._remote_size({"size": "not-a-number"}) is None
         assert pf._remote_size({}) is None

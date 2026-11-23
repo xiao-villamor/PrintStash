@@ -1995,6 +1995,24 @@ describe("PrinterDetailPage", () => {
       expect(within(fan).getByText("60%")).toBeVisible();
     });
 
+    it("shows reported Bambu card, chamber and job estimate independently", async () => {
+      renderPrinter({ printer: aPrinter({ id: 4, provider: "bambu_lan" }) });
+      await pushSnapshot({
+        print_stats: { state: "printing", remaining_minutes: 37 },
+        bambu_storage: { card_present: false },
+        "temperature_sensor chamber": { temperature: 30 },
+      });
+      const machine = within(screen.getByRole("region", { name: "Machine" }));
+      expect(machine.getByText("Not inserted")).toBeVisible();
+      expect(machine.getByText("30 °C")).toBeVisible();
+      const job = within(screen.getByRole("region", { name: "Current job" }));
+      expect(job.getByText("37 min")).toBeVisible();
+      await pushUpdate({ print_stats: { remaining_minutes: 0 } });
+      expect(job.getByText("0 min")).toBeVisible();
+      await pushUpdate({ print_stats: { state: "complete" } });
+      expect(job.queryByText("Time remaining")).not.toBeInTheDocument();
+    });
+
     it("keeps the Bambu layer total across a sparse layer update", async () => {
       renderPrinter({ printer: aPrinter({ id: 4, provider: "bambu_lan" }) });
       await pushSnapshot({

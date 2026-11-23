@@ -35,7 +35,7 @@ def _remote_name(raw: dict[str, Any]) -> str | None:
 
 
 def _remote_size(raw: dict[str, Any]) -> int | None:
-    value = raw.get("size") or raw.get("size_bytes")
+    value = raw.get("size") if raw.get("size") is not None else raw.get("size_bytes")
     try:
         return int(value) if value is not None else None
     except TypeError, ValueError:

@@ -252,6 +252,17 @@ class TestDownloadArtifact:
 
 class TestStart:
     @pytest.mark.asyncio
+    async def test_starts_nested_text_gcode_and_declines_project_archives(self):
+        sent = []
+        client = make_client()
+        client._send_command = _recorder(sent)  # type: ignore[method-assign]
+        await client.start("Fixtures/Test plate.GCODE")
+        assert sent[0]["print"]["param"] == "/cache/Fixtures/Test plate.GCODE"
+        with pytest.raises(ProviderError, match="artifact_format_not_supported"):
+            await client.start("Fixtures/Test plate.3mf")
+        assert len(sent) == 1
+
+    @pytest.mark.asyncio
     async def test_sends_the_absolute_cache_path_bambu_expects(self) -> None:
         payloads: list[dict[str, Any]] = []
         client = make_client(sequence_id_factory=lambda: "sequence-42")
@@ -269,10 +280,8 @@ class TestStart:
         ]
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("remote_filename", ["folder/cube.gcode", "/cube.gcode"])
-    async def test_refuses_a_name_that_is_not_a_bare_filename(
-        self, remote_filename: str
-    ) -> None:
+    @pytest.mark.parametrize("remote_filename", ["../cube.gcode", "/cube.gcode"])
+    async def test_refuses_paths_outside_the_cache(self, remote_filename: str) -> None:
         client = make_client()
 
         with pytest.raises(ProviderError) as error:
@@ -321,7 +330,6 @@ class TestUnsupportedOperations:
     @pytest.mark.parametrize(
         ("method", "arguments"),
         [
-            ("list_files", ()),
             ("delete_file", ("cube.gcode",)),
             ("run_gcode", ("G28",)),
             ("emergency_stop", ()),

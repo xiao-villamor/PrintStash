@@ -50,7 +50,7 @@ Developed features in the current app:
 - Prometheus `/metrics` endpoint (request latency, ingestion counts, live printer status) and operational health output for database, storage, backup, background jobs, external-library scans, and printer provider readiness
 - Moonraker/Klipper provider with live status, upload/send, optional start, pause/resume/cancel, printer file inventory sync, remote-file start, and job history
 - Optional Spoolman integration (OFF by default): spool inventory display, per-print spool selection, consumption write-back on measured-print completion, and Moonraker-native-hook double-count detection
-- Bambu LAN beta provider with local status, upload/send with explicit opt-in start, and pause/resume/cancel controls; remote file inventory remains unsupported
+- Bambu LAN beta provider with local status, upload/send with explicit opt-in start, and pause/resume/cancel controls; G-code and 3MF inventory under `/cache`
 - PrusaLink and OctoPrint beta providers (status, upload/send, file inventory, pause/resume/cancel), plus Elegoo Neptune 4-family and Centauri Carbon/Carbon 2 support; every provider declares its capabilities, and the UI disables what a printer cannot do
 - Responsive Vite/React UI with a light/dark theme toggle (system-preference aware) and a refreshed mobile layout: a five-slot bottom navigation with an overflow "More" sheet, on-canvas mobile search, slide-out filter drawers, and a floating action button across the library, model detail, upload, taxonomy, profiles, settings, setup, and printer workflows
 - Atomic bulk editing for tags, collections, trash, and revision labels across selected Models

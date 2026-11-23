@@ -30,7 +30,7 @@ available builds. Anything marked beta here remains beta.
   after the revision check. Review the readback when an upload is unconfirmed.
 - Bambu LAN support is beta. It supports local status, upload of plain-text
   Vault G-code, explicit send-to-print, and pause/resume/cancel controls.
-- Bambu LAN remote-file inventory, deletion, manual motion and tuning
+- Bambu LAN browsing outside `/cache`, remote deletion, manual motion and tuning
   controls, and measured filament consumption are not implemented.
 - Multipart Models reference existing Models as named pieces and alternatives.
   Quantities and [manufacturing builds](multipart-builds.md) track selected

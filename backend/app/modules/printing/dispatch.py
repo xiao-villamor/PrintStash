@@ -53,6 +53,22 @@ from app.schemas.printers import (
 logger = get_logger(__name__)
 
 
+async def require_ready_before_send(provider: PrinterProviderClient) -> None:
+    if provider.capabilities.requires_ready_before_send:
+        try:
+            status = await provider.query_status()
+        except ProviderError as exc:
+            raise OperationError(exc.code, kind=ErrorKind.UPSTREAM) from exc
+        state = str(
+            status.get("result", {})
+            .get("status", {})
+            .get("print_stats", {})
+            .get("state", "")
+        ).lower()
+        if state not in {"standby", "ready", "idle", "complete", "cancelled"}:
+            raise OperationError("printer_not_ready", kind=ErrorKind.CONFLICT)
+
+
 async def send_to_printer(
     printer_id: int,
     payload: SendToPrinter,
@@ -80,19 +96,7 @@ async def send_to_printer(
         raise OperationError("artifact_format_not_supported", kind=ErrorKind.CONFLICT)
     _require_file_role(session, current_user, f, CollectionRole.EDIT)
     plate_index = await asyncio.to_thread(selected_plate, f, payload.plate_index)
-    if provider.capabilities.requires_ready_before_send:
-        try:
-            status = await provider.query_status()
-        except ProviderError as exc:
-            raise OperationError(exc.code, kind=ErrorKind.UPSTREAM) from exc
-        state = str(
-            status.get("result", {})
-            .get("status", {})
-            .get("print_stats", {})
-            .get("state", "")
-        ).lower()
-        if state not in {"standby", "ready", "idle", "complete", "cancelled"}:
-            raise OperationError("printer_not_ready", kind=ErrorKind.CONFLICT)
+    await require_ready_before_send(provider)
     if payload.start_print:
         try:
             compatibility = materials.compatibility_for_printer(

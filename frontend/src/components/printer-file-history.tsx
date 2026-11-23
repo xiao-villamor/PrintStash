@@ -250,7 +250,12 @@ export function PrinterFiles({
   useUiLocale();
   const id = useId();
   const status = useReadStatus(printerKeys.files(printer.id));
-  const rootLabel = printer.provider === "moonraker" ? "gcodes" : uiText("Printer files");
+  const rootLabel =
+    printer.provider === "moonraker"
+      ? "gcodes"
+      : printer.provider === "bambu_lan"
+        ? "/cache"
+        : uiText("Printer files");
   const inventory = useMemo(() => files.filter((file) => !file.missing_since), [files]);
   const folders = useMemo(() => buildFolders(inventory), [inventory]);
   const [path, setPath] = useState("");
@@ -487,45 +492,50 @@ export function PrinterFiles({
                     ]}
                   />
                   <div className="printer-explorer-actions">
-                    <Button
-                      size="sm"
-                      onClick={() => onStart(selected)}
-                      loading={startingId === selected.id}
-                      disabled={
-                        !printer.access.can_print ||
-                        !printer.capabilities.can_start ||
-                        selectionBusy
-                      }
-                      title={authBlockReason ?? uiText("Start this printer file")}
-                    >
-                      <Play aria-hidden="true" className="h-3.5 w-3.5" />
-                      {uiText("Start")}
-                    </Button>
+                    {(printer.provider !== "bambu_lan" ||
+                      /\.(?:gcode|gco|g)$/i.test(selected.remote_filename)) && (
+                      <Button
+                        size="sm"
+                        onClick={() => onStart(selected)}
+                        loading={startingId === selected.id}
+                        disabled={
+                          !printer.access.can_print ||
+                          !printer.capabilities.can_start ||
+                          selectionBusy
+                        }
+                        title={authBlockReason ?? uiText("Start this printer file")}
+                      >
+                        <Play aria-hidden="true" className="h-3.5 w-3.5" />
+                        {uiText("Start")}
+                      </Button>
+                    )}
                     {selected.model_id && (
                       <Button asChild size="sm" variant="outline">
                         <Link href={`/models/${selected.model_id}`}>{uiText("Open Model")}</Link>
                       </Button>
                     )}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onDelete(selected)}
-                      loading={deletingId === selected.id}
-                      disabled={
-                        !printer.access.can_admin ||
-                        printer.provider !== "moonraker" ||
-                        selectionBusy ||
-                        activeSelection
-                      }
-                      title={
-                        activeSelection
-                          ? uiText("Cannot delete active print file")
-                          : (authBlockReason ?? uiText("Delete this printer file"))
-                      }
-                    >
-                      <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
-                      {uiText("Delete")}
-                    </Button>
+                    {printer.provider !== "bambu_lan" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onDelete(selected)}
+                        loading={deletingId === selected.id}
+                        disabled={
+                          !printer.access.can_admin ||
+                          printer.provider !== "moonraker" ||
+                          selectionBusy ||
+                          activeSelection
+                        }
+                        title={
+                          activeSelection
+                            ? uiText("Cannot delete active print file")
+                            : (authBlockReason ?? uiText("Delete this printer file"))
+                        }
+                      >
+                        <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+                        {uiText("Delete")}
+                      </Button>
+                    )}
                   </div>
                 </>
               ) : (
@@ -536,9 +546,13 @@ export function PrinterFiles({
             </aside>
           </div>
           <p className="printer-explorer-footnote text-xs text-muted-foreground">
-            {uiText(
-              "An active print file cannot be deleted. Start checks the loaded material; it does not check that the G-code is safe for this printer.",
-            )}
+            {printer.provider === "bambu_lan"
+              ? uiText(
+                  "To print a sliced 3MF from the Library, choose its plate when sending the Revision.",
+                )
+              : uiText(
+                  "An active print file cannot be deleted. Start checks the loaded material; it does not check that the G-code is safe for this printer.",
+                )}
           </p>
         </>
       )}

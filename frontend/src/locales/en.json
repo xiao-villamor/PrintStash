@@ -1,4 +1,12 @@
 {
+  "To print a sliced 3MF from the Library, choose its plate when sending the Revision.": "To print a sliced 3MF from the Library, choose its plate when sending the Revision.",
+  "File deletion, raw G-code controls, and measured filament consumption are unavailable.": "File deletion, raw G-code controls, and measured filament consumption are unavailable.",
+  "{value1} °C": "{value1} °C",
+  "Time remaining": "Time remaining",
+  "Not inserted": "Not inserted",
+  "Inserted": "Inserted",
+  "SD card": "SD card",
+  "Chamber": "Chamber",
   "Configuration files": "Configuration files",
   "Refresh files": "Refresh files",
   "Configuration file browser": "Configuration file browser",

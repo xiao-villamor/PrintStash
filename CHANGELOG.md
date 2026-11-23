@@ -10,6 +10,8 @@
 
 ### Changed
 
+- Bambu LAN uploads now use the configured FTPS connection timeout. Files can sync the printer’s cache and browse nested G-code and 3MF files. Status shows available chamber temperature, SD card presence and remaining print time.
+
 - Open a printer from anywhere on its Fleet card. The roster shows work, routing holds, reported material colors, and available nozzle, bed and part-cooling fan readings alongside recent and queued prints. Fleet totals open the matching queue view or filter printers by readiness. Printer Status distinguishes idle machines from active jobs, shows a rolling history of actual heater readings and the reported part-cooling fan level, and can queue a saved Revision for that printer. Bambu Status groups the printer portrait and reported AMS trays beside the current job, live telemetry and recent runs. The job summary includes available layer counts during a print.
 - Bambu LAN recognizes individually addressed external spools in firmware material reports and keeps their readings separate across incremental MQTT updates.
 - Fleet Queue and Maintenance selects align their text and chevrons in Chromium's native picker. Bambu LAN forwards available nozzle and bed readings, targets and part-cooling fan levels. Moonraker reads the part-cooling fan when configured.

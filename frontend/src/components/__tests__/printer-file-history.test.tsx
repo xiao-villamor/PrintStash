@@ -192,7 +192,21 @@ describe("Printer files", () => {
     expect(screen.getByRole("link", { name: "Open Model" })).toHaveAttribute("href", "/models/1");
   });
 
-  it("offers Jobs as the provider alternative for Bambu", async () => {
+  it("browses Bambu cache archives without offering a plain G-code start", () => {
+    renderApp(
+      <PrinterFiles
+        {...fileProps([aPrinterFile({ ...file, remote_filename: "plate.3mf" })])}
+        printer={aPrinter({ ...printer, provider: "bambu_lan" })}
+      />,
+    );
+    expect(
+      within(screen.getByRole("navigation", { name: "Printer file path" })).getByText("/cache"),
+    ).toBeVisible();
+    expect(screen.getByRole("table", { name: "Printer files" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
+  });
+
+  it("offers Jobs as the alternative for a transfer-only provider", async () => {
     const user = userEvent.setup();
     const props = fileProps([]);
     renderApp(

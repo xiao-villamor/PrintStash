@@ -41,7 +41,7 @@ export function MachineIdentity({
   printer: PrinterRead;
   status: string;
   nozzle: number | null | undefined;
-  summary?: { live: boolean; openSettings?: () => void };
+  summary?: { live: boolean; chamber?: number; cardPresent?: boolean; openSettings?: () => void };
 }) {
   const model = printer.model_name || printer.detected_model;
   return (
@@ -81,6 +81,22 @@ export function MachineIdentity({
           </Button>
         )}
       </div>
+      {summary?.live && (summary.chamber != null || summary.cardPresent != null) && (
+        <dl className="printer-machine-facts">
+          {summary.chamber != null && (
+            <MachineFact
+              label={uiText("Chamber")}
+              value={uiText("{value1} °C", { value1: formatNumber(summary.chamber) })}
+            />
+          )}
+          {summary.cardPresent != null && (
+            <MachineFact
+              label={uiText("SD card")}
+              value={summary.cardPresent ? uiText("Inserted") : uiText("Not inserted")}
+            />
+          )}
+        </dl>
+      )}
       {!summary && (
         <dl className="printer-machine-facts">
           <MachineFact label={uiText("Connection")} value={status} />

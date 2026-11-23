@@ -39,3 +39,49 @@ class TestUploadFromLibrary:
             assert files.json()[0]["matched_by"] == "upload_history"
         finally:
             running.stop()
+
+    @pytest.mark.asyncio
+    async def test_bambu_upload_then_sync_preserves_revision_and_external_project(
+        self, api, superuser_headers, e2e_db, monkeypatch
+    ) -> None:
+        from app.modules.printing.bambu_adapter import BambuLanProvider
+        from tests.fakes.mock_bambu import FakeFtpTls, make_mqtt_factory
+        from tests.fakes.print_sim import PrintSim
+
+        sim = PrintSim(total_mm=10, total_seconds=10, print_seconds=1)
+        mqtt, _ = make_mqtt_factory(sim)
+        ftp = FakeFtpTls(files={"cache/Slicer/External project.3mf": b"zip"})
+        monkeypatch.setattr(
+            BambuLanProvider, "_default_mqtt_client", staticmethod(mqtt)
+        )
+        monkeypatch.setattr(BambuLanProvider, "_ftps_client", lambda self: ftp)
+        printer = build_printer(
+            e2e_db,
+            provider="bambu_lan",
+            bambu_host="127.0.0.1",
+            bambu_serial="TEST",
+            bambu_access_code="test-code",
+        )
+        revision = a_gcode_artifact(e2e_db, "bambu-cache-transfer")
+        get_backend().write_bytes(b"G28\n", revision.path)
+        path = f"/api/v1/printers/{printer.id}"
+        sent = await api.post(
+            f"{path}/send",
+            headers=superuser_headers,
+            json={"file_id": revision.id, "start_print": False},
+        )
+        assert sent.status_code == 200, sent.text
+        name = sent.json()["remote_filename"]
+        assert ftp.files[f"cache/{name}"] == b"G28\n"
+        assert sent.json()["started_at"] is None
+
+        synced = await api.post(f"{path}/files/sync", headers=superuser_headers)
+        assert synced.status_code == 200, synced.text
+        files = await api.get(f"{path}/files", headers=superuser_headers)
+        assert files.status_code == 200, files.text
+        rows = {row["remote_filename"]: row for row in files.json()}
+        assert set(rows) == {name, "Slicer/External project.3mf"}
+        assert rows[name]["file_id"] == revision.id
+        assert rows[name]["size_bytes"] == 4
+        assert rows["Slicer/External project.3mf"]["size_bytes"] == 3
+        assert sim.state == "standby"

@@ -18,14 +18,13 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
+from .catalog import PROVIDER_DEFINITIONS
 from .contracts import PrinterClient, SnapshotCallback
 from .models import (
     BambuConfig,
     Capability,
-    PrintArtifactFormat,
     PrinterConfig,
     PrinterSnapshot,
-    ProviderCapabilities,
     ProviderError,
     ProviderId,
 )
@@ -38,6 +37,17 @@ _TEMPERATURE_FIELDS = {
     "heater_bed": {"temperature": "bed_temper", "target": "bed_target_temper"},
 }
 _PART_FAN_FIELD = "cooling_fan_speed"
+_TEXT_GCODE = (".gcode", ".g", ".gco")
+
+
+def _cache_component(name: str) -> bool:
+    return bool(
+        name
+        and not name.startswith(".")
+        and name.isprintable()
+        and "/" not in name
+        and "\\" not in name
+    )
 
 
 def _telemetry_number(value: object) -> float | None:
@@ -133,10 +143,11 @@ class _ImplicitFTP_TLS(FTP_TLS):
     ) -> str:
         self.host = host
         self.port = port
-        self.timeout = timeout
+        if timeout != -999:  # ftplib sentinel: retain the constructor timeout
+            self.timeout = timeout
         self.source_address = source_address
         self.sock = socket.create_connection(
-            (host, port), timeout, source_address=source_address
+            (host, port), self.timeout, source_address=source_address
         )
         self.af = self.sock.family
         self.sock = self.context.wrap_socket(self.sock, server_hostname=host)
@@ -148,26 +159,7 @@ class _ImplicitFTP_TLS(FTP_TLS):
 class BambuClient:
     """Bambu LAN transport constructed solely from :class:`BambuConfig`."""
 
-    capabilities = ProviderCapabilities(
-        supported=frozenset(
-            {
-                Capability.START,
-                Capability.PAUSE,
-                Capability.RESUME,
-                Capability.CANCEL,
-                Capability.LIVE_STATUS,
-                Capability.UPLOAD,
-                Capability.MATERIAL_STATE,
-            }
-        ),
-        support_level="beta",
-        accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
-        support_notes=(
-            "Bambu LAN upload and explicit start are beta features.",
-            "Printer file inventory, deletion, raw G-code controls, and measured filament consumption are unavailable.",
-        ),
-        requires_ready_before_send=True,
-    )
+    capabilities = PROVIDER_DEFINITIONS[ProviderId.BAMBU_LAN].capabilities
 
     _METHOD_CAPABILITY = {
         "server_info": Capability.SERVER_INFO,
@@ -499,13 +491,12 @@ class BambuClient:
         return cls._ftps_error(code, action_code=code, retryable=retryable)
 
     @classmethod
-    def _with_ftps_retry(cls, operation: Callable[[], None]) -> None:
+    def _with_ftps_retry[T](cls, operation: Callable[[], T]) -> T:
         """Replay exactly once when the transport outcome is safely retryable."""
 
         for attempt in range(2):
             try:
-                operation()
-                return
+                return operation()
             except Exception as exc:  # noqa: BLE001 - classify at the seam
                 classified = cls._classify_ftps_exception(exc)
                 if (
@@ -515,6 +506,7 @@ class BambuClient:
                 ):
                     continue
                 raise classified from exc
+        raise AssertionError("FTPS retry exhausted")
 
     @staticmethod
     def _close_ftps(ftp: FTP_TLS) -> None:
@@ -525,6 +517,53 @@ class BambuClient:
                 ftp.close()
             except Exception:  # noqa: BLE001 - best-effort socket cleanup
                 pass
+
+    def _read_cache(self) -> list[Mapping[str, Any]]:
+        ftp = self._ftps_client()
+        files: list[Mapping[str, Any]] = []
+        folders = [""]
+        entries = 0
+        try:
+            ftp.connect(self.host, 990)
+            ftp.login("bblp", self.access_code)
+            ftp.prot_p()
+            # LIST works on devices without the optional MLSD command. Walk
+            # only real directories. A partial scan must never mark files missing.
+            for folder in folders:
+
+                def collect(line: str, folder: str = folder) -> None:
+                    nonlocal entries
+                    if line.startswith("total ") and line[6:].isdigit():
+                        return
+                    entries += 1
+                    if entries > 20000:
+                        raise ProviderError("bambu_inventory_too_large")
+                    fields = line.split(maxsplit=8)
+                    if (
+                        len(fields) != 9
+                        or not fields[4].isascii()
+                        or not fields[4].isdigit()
+                    ):
+                        raise ProviderError("bambu_inventory_invalid_listing")
+                    mode, name = fields[0], fields[8]
+                    if not _cache_component(name):
+                        return
+                    path = f"{folder}/{name}" if folder else name
+                    if mode.startswith("d"):
+                        if len(folders) >= 512:
+                            raise ProviderError("bambu_inventory_too_large")
+                        folders.append(path)
+                    elif mode.startswith("-") and name.lower().endswith(
+                        (*_TEXT_GCODE, ".3mf")
+                    ):
+                        files.append({"path": path, "size": int(fields[4])})
+
+                ftp.retrlines(
+                    f"LIST cache/{folder}" if folder else "LIST cache", collect
+                )
+            return files
+        finally:
+            self._close_ftps(ftp)
 
     def _upload_once(self, local_path: Path, remote_name: str) -> None:
         temp_name = f".{remote_name}.{self._next_sequence_id()}.uploading"
@@ -549,7 +588,7 @@ class BambuClient:
         """Store a plain-text G-code file in Bambu's cache over implicit FTPS."""
 
         remote_name = Path(remote_filename).name
-        if not remote_name or remote_name != remote_filename:
+        if not _cache_component(remote_filename) or remote_name != remote_filename:
             raise self._ftps_error(
                 "invalid_bambu_remote_filename",
                 action_code="bambu_ftps_path_invalid",
@@ -658,6 +697,18 @@ class BambuClient:
         )
         if filename:
             print_stats["filename"] = str(filename)
+        if "mc_remaining_time" in print_report:
+            minutes = _telemetry_number(print_report["mc_remaining_time"])
+            print_stats["remaining_minutes"] = (
+                int(minutes)
+                if minutes is not None and minutes >= 0 and minutes.is_integer()
+                else None
+            )
+        if isinstance(print_report.get("sdcard"), bool):
+            status["bambu_storage"] = {"card_present": print_report["sdcard"]}
+        chamber = _telemetry_number(print_report.get("chamber_temper"))
+        if chamber is not None:
+            status["temperature_sensor chamber"] = {"temperature": chamber}
         if "print_error" in print_report:
             print_stats["message"] = print_report.get("print_error") or ""
         if print_stats:
@@ -909,7 +960,7 @@ class BambuClient:
 
     async def list_files(self) -> list[Mapping[str, Any]]:
         self._check("list_files")
-        raise NotImplementedError
+        return await asyncio.to_thread(self._with_ftps_retry, self._read_cache)
 
     async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
         self._check("upload")
@@ -944,15 +995,16 @@ class BambuClient:
 
     async def start(self, remote_filename: str) -> dict[str, Any]:
         self._check("start")
-        remote_name = Path(remote_filename).name
-        if not remote_name or remote_name != remote_filename:
+        if not all(_cache_component(part) for part in remote_filename.split("/")):
             raise ProviderError("invalid_bambu_remote_filename", code="provider_error")
+        if not remote_filename.lower().endswith(_TEXT_GCODE):
+            raise ProviderError("artifact_format_not_supported")
         return await self._send_command(
             {
                 "print": {
                     "sequence_id": self._next_sequence_id(),
                     "command": "gcode_file",
-                    "param": f"/cache/{remote_name}",
+                    "param": f"/cache/{remote_filename}",
                 }
             }
         )

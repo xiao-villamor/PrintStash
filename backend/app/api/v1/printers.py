@@ -17,6 +17,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from printstash_core.printers import (
+    Capability,
     MachineControlClient,
     MachineControlError,
     MotionAxis,
@@ -951,6 +952,13 @@ async def start_printer_file(
                 file_row = candidate
                 source = "vault"
 
+    if (
+        p.provider == PrinterProvider.BAMBU_LAN
+        and not payload.remote_filename.lower().endswith((".gcode", ".g", ".gco"))
+    ):
+        raise HTTPException(status_code=409, detail="artifact_format_not_supported")
+    await dispatch.require_ready_before_send(provider)
+
     if file_row is not None:
         file_id = int(file_row.id)
         model_id = file_row.model_id
@@ -1374,7 +1382,7 @@ async def delete_file_on_printer(
     )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     provider = _provider_client(request, p)
-    if not provider.capabilities.can_list_files:
+    if not provider.capabilities.supports(Capability.DELETE_FILE):
         raise HTTPException(
             status_code=409,
             detail="operation_not_supported_for_provider",

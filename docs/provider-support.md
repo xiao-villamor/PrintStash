@@ -142,8 +142,12 @@ Support level: beta.
 Current behavior:
 
 - local MQTT status, including nozzle and bed readings and targets and
-  part-cooling output and current layer counts when supplied by the installed firmware
+  part-cooling output, current layer counts, estimated minutes remaining, chamber
+  temperature and SD card presence when supplied by the installed firmware
 - upload plain-text Vault G-code over LAN FTPS
+- use **Files → Sync printer files** to browse G-code and 3MF files under
+  `/cache`, including nested folders. **Start** accepts plain-text G-code.
+  To print a sliced project from the Library, select the Revision and plate.
 - explicitly start a just-uploaded G-code file; upload alone never starts it
 - pause, resume, and cancel controls
 - record externally-started jobs with the task, subtask, project, profile,
@@ -154,14 +158,14 @@ Current behavior:
 
 Safety rules:
 
-- PrintStash checks that the printer is idle before a Bambu Vault send.
-- Start requires the user to select **Start print immediately** in the send
-  dialog; the default is upload-only.
+- PrintStash checks readiness before a Bambu Vault send or a start from Files.
+- **Upload from library** transfers the file. Choose **Start** in Files or select
+  **Start print immediately** in the send dialog to run it.
 - Upload and start remain beta until validated against more firmware versions.
 
 Not supported:
 
-- remote file inventory
+- browsing storage outside the printer’s FTPS `/cache` directory
 - delete remote files
 - manual homing, jogging, filament feed/retract, heater targets, or fan,
   speed, and flow tuning through PrintStash

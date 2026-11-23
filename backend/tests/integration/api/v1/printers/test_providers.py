@@ -48,7 +48,7 @@ class TestBambuPrinter:
         assert body["capabilities"]["can_start"] is True
         assert body["capabilities"]["can_pause"] is True
         assert body["capabilities"]["support_level"] == "beta"
-        assert "list_files" in body["capabilities"]["unsupported_actions"]
+        assert body["capabilities"]["can_list_files"] is True
 
     def test_create_bambu_missing_fields_422(self, client: TestClient, auth_headers):
         resp = client.post(
@@ -312,7 +312,7 @@ class TestBambuPrinter:
         assert body["support_level"] == "beta"
         assert body["capabilities"]["can_upload"] is True
         assert body["capabilities"]["can_start"] is True
-        assert "list_files" in body["unsupported_actions"]
+        assert body["capabilities"]["can_list_files"] is True
         assert body["ok"] is True
         assert [check["name"] for check in body["checks"]] == [
             "configuration",

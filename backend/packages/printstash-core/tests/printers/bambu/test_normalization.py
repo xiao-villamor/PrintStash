@@ -50,6 +50,24 @@ def slots_by_key(status: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 class TestNormalizeStatus:
+    def test_reports_chamber_storage_and_remaining_time_independently(self):
+        client = make_client()
+        report = client._normalize_status(
+            {
+                "print": {
+                    "chamber_temper": 32.5,
+                    "sdcard": False,
+                    "mc_remaining_time": "0",
+                }
+            }
+        )
+        assert report["temperature_sensor chamber"] == {"temperature": 32.5}
+        assert report["bambu_storage"] == {"card_present": False}
+        assert report["print_stats"]["remaining_minutes"] == 0
+        invalid = client._normalize_status({"print": {"mc_remaining_time": -1}})
+        assert invalid["print_stats"]["remaining_minutes"] is None
+        assert "bambu_storage" not in invalid
+
     def test_external_inputs_keep_identity_across_sparse_reports(self) -> None:
         client = make_client()
         client._normalize_status(

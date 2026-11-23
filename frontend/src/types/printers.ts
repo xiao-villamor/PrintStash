@@ -364,6 +364,7 @@ export interface PrinterSnapshot {
     filename?: string;
     print_duration?: number;
     total_duration?: number;
+    remaining_minutes?: number | null;
     external_current_layer?: number;
     external_total_layers?: number;
     message?: string;
@@ -380,6 +381,8 @@ export interface PrinterSnapshot {
     absolute_coordinates?: boolean;
     absolute_extrude?: boolean;
   };
+  bambu_storage?: { card_present?: boolean };
+  "temperature_sensor chamber"?: { temperature?: number };
   heater_bed?: { temperature?: number | null; target?: number };
   fan?: { speed?: number | null };
   toolhead?: {

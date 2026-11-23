@@ -208,6 +208,20 @@ class FakeFtpTls:
         _, _, path = cmd.partition(" ")
         self.files[path] = source.read()
 
+    def retrlines(self, command: str, callback: Callable[[str], None]) -> None:
+        verb, folder = command.split(" ", 1)
+        assert verb == "LIST" and self.private_data
+        prefix = folder + "/"
+        children = {}
+        for path, data in self.files.items():
+            if path.startswith(prefix):
+                name, slash, _ = path[len(prefix) :].partition("/")
+                children[name] = (
+                    ("drwxr-xr-x", 0) if slash else ("-rw-r--r--", len(data))
+                )
+        for name, (mode, size) in children.items():
+            callback(f"{mode} 1 bblp ftp {size} Nov 10 10:00 {name}")
+
     def size(self, path: str) -> Optional[int]:
         data = self.files.get(path)
         return len(data) if data is not None else None

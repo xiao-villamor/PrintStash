@@ -65,7 +65,7 @@ class TestCapabilities:
         assert caps.can_start is True
         assert caps.can_pause is True
         assert caps.support_level == "beta"
-        assert "list_files" in caps.unsupported_actions
+        assert caps.can_list_files
 
     def test_prusalink_declares_its_beta_capability_set(self):
         caps = PrusaLinkProvider.capabilities
@@ -739,10 +739,10 @@ class TestBambuLanProvider:
             # Both cleanup calls fail; the upload itself must not raise.
             provider._upload_via_ftps(source, "cube.gcode")
 
-    def test_start_rejects_nested_remote_filename(self):
+    def test_start_rejects_dot_segments(self):
         provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
         with pytest.raises(ProviderError, match="invalid_bambu_remote_filename"):
-            asyncio.run(provider.start("sub/dir/cube.gcode"))
+            asyncio.run(provider.start("sub/../cube.gcode"))
 
     def test_subscribe_status_returns_immediately_when_stop_already_set(self):
         provider = BambuLanProvider("192.168.1.50", "SN123", "acc")

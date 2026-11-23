@@ -1,4 +1,12 @@
 {
+  "To print a sliced 3MF from the Library, choose its plate when sending the Revision.": "Para imprimir un 3MF laminado de la biblioteca, selecciona su placa al enviar la revisión.",
+  "File deletion, raw G-code controls, and measured filament consumption are unavailable.": "No están disponibles el borrado de archivos, los controles G-code directos ni el consumo medido de filamento.",
+  "{value1} °C": "{value1} °C",
+  "Time remaining": "Tiempo restante",
+  "Not inserted": "Sin insertar",
+  "Inserted": "Insertada",
+  "SD card": "Tarjeta SD",
+  "Chamber": "Cámara",
   "Configuration files": "Archivos de configuración",
   "Refresh files": "Actualizar archivos",
   "Configuration file browser": "Explorador de archivos de configuración",

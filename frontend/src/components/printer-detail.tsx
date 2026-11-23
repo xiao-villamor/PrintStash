@@ -733,6 +733,12 @@ function PrinterDetailView({
               }
             />
           )}
+          {ps?.remaining_minutes != null && (
+            <StatusMetric
+              label={uiText("Time remaining")}
+              value={uiText("{value1} min", { value1: formatNumber(ps.remaining_minutes) })}
+            />
+          )}
           {elapsed !== null && (
             <StatusMetric label={uiText("Elapsed")} value={formatDuration(elapsed)} />
           )}
@@ -782,6 +788,8 @@ function PrinterDetailView({
     <PrinterStatusRail
       printer={printer}
       setup={machineSetup}
+      chamber={snapshot["temperature_sensor chamber"]?.temperature}
+      cardPresent={snapshot.bambu_storage?.card_present}
       reportsMaterials={reportsMaterials}
       connectionLabel={connectionLabel}
       live={telemetry === "live"}
@@ -1096,10 +1104,10 @@ function PrinterDetailView({
               onDelete={deleteRemoteFile}
               onOpenJobs={() => setActiveTab("jobs")}
               notes={
-                (printer.capabilities.support_notes.length > 0 ||
+                ((!bambu && printer.capabilities.support_notes.length > 0) ||
                   (printer.last_error && printer.status === "offline")) && (
                   <div className="printer-explorer-provider-notes">
-                    <PrinterProviderNotes printer={printer} />
+                    {!bambu && <PrinterProviderNotes printer={printer} />}
                     {printer.last_error && printer.status === "offline" && (
                       <p className="text-sm text-destructive">
                         {uiText(
@@ -1742,6 +1750,8 @@ function PrinterProviderNotes({ printer }: { printer: PrinterRead }) {
 
 function PrinterStatusRail({
   printer,
+  chamber,
+  cardPresent,
   setup,
   reportsMaterials,
   connectionLabel,
@@ -1752,6 +1762,8 @@ function PrinterStatusRail({
   fan,
 }: {
   printer: PrinterRead;
+  chamber?: number;
+  cardPresent?: boolean;
   setup: ReturnType<typeof useMachineSetup>;
   reportsMaterials: boolean;
   connectionLabel: string;
@@ -1768,6 +1780,8 @@ function PrinterStatusRail({
         status={connectionLabel}
         nozzle={setup.nozzle}
         summary={{
+          chamber,
+          cardPresent,
           live,
           openSettings: printer.access.can_admin ? openSettings : undefined,
         }}
