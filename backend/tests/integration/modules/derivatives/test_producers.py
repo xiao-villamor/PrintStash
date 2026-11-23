@@ -14,6 +14,7 @@ import io
 import json
 import logging
 import math
+import tempfile
 import time
 import zipfile
 from collections.abc import Callable, Iterator
@@ -71,7 +72,7 @@ from app.modules.media.mesh_protocol import BasicOutput, GeometryOutput, Thumbna
 from app.modules.media.thumbnail_publication import ThumbnailPublicationError
 from app.modules.media.worker_bootstrap import command
 from app.modules.similarity import ingestion as similarity_ingestion
-from app.modules.storage.capacity import CapacityManager
+from app.modules.storage.capacity import CapacityManager, CapacityResource
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.work import events, runner, service
 from app.modules.work.jobs import jobs
@@ -234,6 +235,43 @@ def _rows(session: Session, file_id: int) -> dict[str, ArtifactDerivative]:
 
 
 class TestDeriveMesh:
+    def test_renders_thumbnail_with_full_system_temporary_storage(
+        self, db_session, stored, tmp_path, monkeypatch
+    ):
+        artifact = stored("cube.stl", content.binary_stl())
+        system_temp = tmp_path / "full-system-temp"
+        system_temp.mkdir()
+        monkeypatch.setattr(tempfile, "tempdir", str(system_temp))
+        measure = CapacityResource.measure
+
+        def measure_capacity(resource: CapacityResource):
+            if resource.path == str(system_temp):
+                return 0, 8 * 1024**3
+            return measure(resource)
+
+        monkeypatch.setattr(CapacityResource, "measure", measure_capacity)
+        launch = mesh_isolation.worker_launch.launch
+        scratch_paths = []
+
+        def record_scratch(command, *, environment, **options):
+            scratch = Path(environment["TMPDIR"])
+            assert scratch.is_dir()
+            scratch_paths.append(scratch)
+            return launch(command, environment=environment, **options)
+
+        monkeypatch.setattr(mesh_isolation.worker_launch, "launch", record_scratch)
+        file_id = artifact.id
+
+        producers.derive_mesh(file_id)
+
+        row = _rows(db_session, file_id)[DerivativeKind.THUMBNAIL]
+        assert row.state == DerivativeState.READY
+        assert row.storage_key and get_backend().exists(row.storage_key)
+        assert scratch_paths
+        workspace = settings.data_root / "runtime" / "prepared" / "sources"
+        assert all(path.is_relative_to(workspace) for path in scratch_paths)
+        assert all(not path.exists() for path in scratch_paths)
+
     def test_required_capability_replaces_old_parser_receipts(
         self,
         db_session,

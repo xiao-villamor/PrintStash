@@ -152,6 +152,8 @@
 
 ### Fixed
 
+- Background mesh thumbnail generation uses temporary space on the PrintStash data volume, so a full system temp directory no longer blocks it.
+
 - The desktop Pending Imports sidebar links to the full inbox, including when the queue is empty.
 
 - Long Model names, Revision labels, and G-code filenames fit in the model details, queue dialog, and upload form. Revision numbers and measurements stay together in the revision table.

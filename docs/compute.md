@@ -25,6 +25,11 @@ memory against other applications. Stop all API and worker processes before
 changing native memory policies. In split deployments, API and workers must
 share the same local data root and service user on one host.
 
+Background mesh thumbnail generation uses scratch space under
+`VAULT_DATA_ROOT/runtime/prepared/sources/`. PrintStash checks free space on
+that volume before rendering and removes the scratch files when the work
+finishes. Published thumbnails use the configured thumbnail storage.
+
 ## Linux, Docker and WSL
 
 Source install:
