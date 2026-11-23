@@ -43,7 +43,18 @@ import {
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import { useLocation } from "@tanstack/react-router";
-import { FileText, Link2, Loader2, MoreHorizontal, Pencil, Star, Trash2, Wifi } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  FileText,
+  Link2,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Star,
+  Trash2,
+  Wifi,
+} from "lucide-react";
 
 import type {
   STLViewerControls,
@@ -137,6 +148,8 @@ interface BedSize {
 }
 
 const DETAIL_SIDEBAR_STORAGE_KEY = "ps-model-detail-inspector-preferred-width";
+const DETAIL_TABS_COMPACT_WIDTH = 760;
+const DETAIL_PRIMARY_TABS = new Set<TabKey>(["overview", "revisions", "files"]);
 const DETAIL_SIDEBAR_MIN_WIDTH = 400;
 const DETAIL_SIDEBAR_MAX_WIDTH = 1100;
 
@@ -402,7 +415,6 @@ function ModelDetailPresentation({
   );
   const printJobs = canViewPrinters ? (printJobQuery.data ?? []) : [];
   const activeTab =
-    (!auth.isAuthenticated && requestedTab === "documents") ||
     (!canViewPrinters && requestedTab === "history") ||
     (!canEditModel && requestedTab === "similar")
       ? "overview"
@@ -425,12 +437,21 @@ function ModelDetailPresentation({
     () =>
       TABS.filter(
         (tab) =>
-          (tab.key !== "documents" || auth.isAuthenticated) &&
-          (tab.key !== "history" || canViewPrinters) &&
-          (tab.key !== "similar" || canEditModel),
+          (tab.key !== "history" || canViewPrinters) && (tab.key !== "similar" || canEditModel),
       ),
-    [auth.isAuthenticated, canViewPrinters, canEditModel],
+    [canViewPrinters, canEditModel],
   );
+
+  const [moreTabsOpen, setMoreTabsOpen] = useState(false);
+  const compactTabs = detailSidebarWidth < DETAIL_TABS_COMPACT_WIDTH;
+  if (!compactTabs && moreTabsOpen) setMoreTabsOpen(false);
+  const primaryTabs = compactTabs
+    ? visibleTabs.filter((tab) => DETAIL_PRIMARY_TABS.has(tab.key))
+    : visibleTabs;
+  const overflowTabs = compactTabs
+    ? visibleTabs.filter((tab) => !DETAIL_PRIMARY_TABS.has(tab.key))
+    : [];
+  const selectedOverflowTab = overflowTabs.find((tab) => tab.key === activeTab);
 
   // Thumbnails and metadata arrive after upload, derived in the background.
   useDerivativeRefresh(model.id);
@@ -1482,31 +1503,75 @@ function ModelDetailPresentation({
               <span className="absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-border transition-colors duration-press group-hover:bg-primary group-focus-visible:bg-primary" />
             </div>
 
-            <TabBar
-              tabs={visibleTabs.map((tab) => ({
-                key: tab.key,
-                label: (
-                  <>
-                    {tab.label}
-                    {tab.key === "revisions" && gcodeFiles.length > 0 && (
-                      <span className="model-detail-tab-count">{gcodeFiles.length}</span>
-                    )}
-                    {tab.key === "files" && sourceFiles.length > 0 && (
-                      <span className="model-detail-tab-count">{sourceFiles.length}</span>
-                    )}
-                    {tab.key === "history" && printJobs.length > 0 && (
-                      <span className="model-detail-tab-count">{printJobs.length}</span>
-                    )}
-                  </>
-                ),
-              }))}
-              active={activeTab}
-              onChange={selectTab}
-              showIndicator={false}
-              className="model-detail-tabs shrink-0 flex-wrap border-b"
-              tabClassName="relative inline-flex items-center gap-1.5 h-10 min-w-max whitespace-nowrap px-0 py-0 text-sm font-medium text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-              activeTabClassName="text-foreground"
-            />
+            <div className="model-detail-tabs flex shrink-0 items-center border-b">
+              <TabBar
+                tabs={primaryTabs.map((tab) => ({
+                  key: tab.key,
+                  label: (
+                    <>
+                      {tab.label}
+                      {tab.key === "revisions" && gcodeFiles.length > 0 && (
+                        <span className="model-detail-tab-count">{gcodeFiles.length}</span>
+                      )}
+                      {tab.key === "files" && sourceFiles.length > 0 && (
+                        <span className="model-detail-tab-count">{sourceFiles.length}</span>
+                      )}
+                      {tab.key === "history" && printJobs.length > 0 && (
+                        <span className="model-detail-tab-count">{printJobs.length}</span>
+                      )}
+                    </>
+                  ),
+                }))}
+                active={selectedOverflowTab ? null : activeTab}
+                onChange={selectTab}
+                showIndicator={false}
+                className="model-detail-tab-list"
+                tabClassName="relative inline-flex items-center gap-1.5 h-10 whitespace-nowrap px-0 py-0 text-sm font-medium text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                activeTabClassName="text-foreground"
+              />
+              {overflowTabs.length > 0 && (
+                <DropdownMenu
+                  portal
+                  open={moreTabsOpen}
+                  onOpenChange={setMoreTabsOpen}
+                  aria-label={uiText("More tabs")}
+                  className="ml-auto shrink-0"
+                  trigger={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      aria-label={uiText("More tabs")}
+                      aria-haspopup="menu"
+                      aria-expanded={moreTabsOpen}
+                      title={selectedOverflowTab?.label}
+                      data-active={selectedOverflowTab ? "true" : undefined}
+                      className="model-detail-tab-overflow relative h-10 gap-1 rounded-none px-0 text-sm font-medium"
+                      onClick={() => setMoreTabsOpen((open) => !open)}
+                    >
+                      {uiText("nav.more")}
+                      <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                    </Button>
+                  }
+                >
+                  {overflowTabs.map((tab) => (
+                    <Button
+                      key={tab.key}
+                      variant="ghost"
+                      role="menuitemradio"
+                      aria-checked={activeTab === tab.key}
+                      className="w-full justify-between"
+                      onClick={() => {
+                        selectTab(tab.key);
+                        setMoreTabsOpen(false);
+                      }}
+                    >
+                      {tab.label}
+                      {activeTab === tab.key && <Check className="h-4 w-4" aria-hidden />}
+                    </Button>
+                  ))}
+                </DropdownMenu>
+              )}
+            </div>
             <div
               ref={detailTabPanel}
               role="tabpanel"
@@ -1673,11 +1738,8 @@ function ModelDetailPresentation({
                   />
                 )}
 
-                {activeTab === "documents" && (
-                  <DocumentBrowser key={model.id} modelId={model.id} canCreate={canEditModel} />
-                )}
                 {activeTab === "files" && (
-                  <>
+                  <div className="space-y-5">
                     <FilesTab
                       modelId={model.id}
                       onCompare={() => openComparison("files")}
@@ -1693,7 +1755,10 @@ function ModelDetailPresentation({
                       canEdit={canEditModel}
                       onModel={setModel}
                     />
-                  </>
+                    {auth.isAuthenticated && (
+                      <DocumentBrowser key={model.id} modelId={model.id} canCreate={canEditModel} />
+                    )}
+                  </div>
                 )}
 
                 {activeTab === "history" && canViewPrinters && printJobQuery.isError && (

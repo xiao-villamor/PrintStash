@@ -110,10 +110,13 @@
 
 /* Approved detail composition: a persistent source preview beside an artifact inspector. */
 .model-detail-tabs {
-  column-gap: 1.5rem;
+  column-gap: 0.75rem;
   justify-content: flex-start;
   margin-inline: 20px;
   border-bottom-color: var(--border-strong);
+}
+.model-detail-tab-list {
+  column-gap: clamp(0.625rem, 2.5cqw, 1.5rem);
 }
 .model-detail-layout {
   padding: 16px 20px 20px;
@@ -264,7 +267,6 @@
   }
   .model-detail-tabs {
     margin-inline: 12px;
-    column-gap: 1.25rem;
   }
   .model-detail-content {
     padding: 16px;
@@ -615,7 +617,8 @@
   transform: scale(var(--scale-detail-enter));
   transition-duration: 0s;
 }
-.model-detail-tabs [role="tab"]::after {
+.model-detail-tabs [role="tab"]::after,
+.model-detail-tab-overflow::after {
   content: "";
   position: absolute;
   inset-inline: 0;

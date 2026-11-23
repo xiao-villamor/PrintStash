@@ -25,7 +25,7 @@ async function openDocsTab(page: Page, col: string): Promise<void> {
   await expect(page.getByRole("heading", { name: col, exact: true })).toBeVisible();
   await page.getByRole("button", { name: "More", exact: true }).click();
   await page.getByRole("menuitem", { name: "Documents", exact: true }).click();
-  await expect(page.getByText("No documents here yet.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Documents", exact: true })).toBeVisible();
 }
 
 // A fully-valid single-page PDF (correct xref offsets) so pdf.js loads it cleanly.
@@ -146,7 +146,7 @@ test.describe("binary collection files", () => {
         const path = await download.path();
         expect(path).not.toBeNull();
         expect(await readFile(path!)).toEqual(bytes);
-        await page.goto(`/?c=${col}&v=docs`);
+        await openDocsTab(page, col);
         await expect(
           page.locator(`a[href="${new URL(documentUrl).pathname}"]`).first(),
         ).toBeVisible();
@@ -178,9 +178,9 @@ test("attaches guides to one Model and opens them after reload", async ({ page }
   const { model_id: modelId } = await (await page.request.get(jobPath)).json();
   await page.goto(`/models/${modelId}`);
   await collapseNavigationSidebar(page);
-  await page.getByRole("tab", { name: "Documents", exact: true }).click();
-  await expect(page.getByText("No documents here yet.")).toBeVisible();
-  await page.screenshot({ path: info.outputPath("model-documents-empty.png") });
+  await page.getByRole("tab", { name: /^Files(?: \d+)?$/ }).click();
+  await expect(page.getByText("No attachments yet.")).toBeVisible();
+  await page.screenshot({ path: info.outputPath("model-files-empty.png") });
   const modelUrl = page.url();
 
   const videoBytes = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]);
@@ -188,26 +188,24 @@ test("attaches guides to one Model and opens them after reload", async ({ page }
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aEioAAAAASUVORK5CYII=",
     "base64",
   );
-  const pane = page.getByRole("tabpanel", { name: "Documents", exact: true });
+  const pane = page.getByRole("region", { name: "Attachments", exact: true });
   for (const [name, mimeType, buffer] of [
     ["assembly.pdf", "application/pdf", minimalPdf()],
     ["reference.png", "image/png", photo],
     ["build.mp4", "video/mp4", videoBytes],
   ] as const) {
     const selection = page.waitForEvent("filechooser");
-    await pane.getByRole("button", { name: "Upload file", exact: true }).click();
+    await pane.getByRole("button", { name: "Attach file", exact: true }).click();
     await (await selection).setFiles({ name, mimeType, buffer });
     await expect(pane.getByRole("link", { name: new RegExp(name.split(".")[0]!) })).toBeVisible();
   }
 
   await page.reload();
   await expect(pane.getByRole("link", { name: /assembly/ })).toBeVisible();
-  await page.screenshot({ path: info.outputPath("model-documents-populated.png") });
+  await page.screenshot({ path: info.outputPath("model-files-populated.png") });
   await pane.getByRole("link", { name: /assembly/ }).click();
   await expect(page.getByText("1 / 1")).toBeVisible({ timeout: 30_000 });
-  const back = page
-    .locator(`a[href="/models/${modelId}?tab=documents"]`)
-    .filter({ hasText: "Back" });
+  const back = page.locator(`a[href="/models/${modelId}?tab=files"]`).filter({ hasText: "Back" });
   await back.click();
   await expect(page).toHaveURL(modelUrl);
 
@@ -233,6 +231,38 @@ test("attaches guides to one Model and opens them after reload", async ({ page }
   await page.reload();
   await expect(pane.getByRole("link", { name: /assembly/ })).toBeVisible();
   await expect(pane.getByRole("link", { name: /build/ })).toHaveCount(0);
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  const resize = page.getByRole("separator", { name: "Resize details panel" });
+  await resize.press("Home");
+  await expect(resize).toHaveAttribute("aria-valuenow", "400");
+  const navigation = page.getByTestId("model-detail-sidebar").locator(".model-detail-tabs");
+  await expect
+    .poll(() =>
+      navigation.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const labels = Array.from(
+          element.querySelectorAll('[role="tab"], [aria-haspopup="menu"]'),
+          (button) => button.getBoundingClientRect(),
+        );
+        return {
+          horizontalOverflow: element.scrollWidth > element.clientWidth,
+          everyTabFits: labels.every((tab) => tab.left >= bounds.left && tab.right <= bounds.right),
+          oneRow: labels.every((tab) => Math.abs(tab.top - labels[0]!.top) < 1),
+        };
+      }),
+    )
+    .toEqual({ horizontalOverflow: false, everyTabFits: true, oneRow: true });
+  const moreTabs = navigation.getByRole("button", { name: "More tabs", exact: true });
+  await moreTabs.press("Enter");
+  const history = page.getByRole("menuitemradio", { name: "History", exact: true });
+  await expect(history).toBeVisible();
+  await history.click();
+  await expect(page.getByRole("tabpanel", { name: "History", exact: true })).toBeVisible();
+  await expect(moreTabs).toHaveAttribute("data-active", "true");
+  await navigation.getByRole("tab", { name: /^Files(?: \d+)?$/ }).click();
+  await expect(pane).toBeVisible();
+  await page.screenshot({ path: info.outputPath("model-files-narrow-inspector.png") });
 });
 
 test.describe("PDF documents", () => {

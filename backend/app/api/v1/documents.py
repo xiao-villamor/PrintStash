@@ -55,6 +55,7 @@ from app.modules.library.trash import (
     hard_delete_document,
     restore_document,
 )
+from app.modules.storage.artifact_delivery import PRIVATE_NO_STORE
 from app.modules.storage.storage_backend.contracts import StorageCollisionError
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_deletion import process_storage_delete_intents
@@ -572,7 +573,9 @@ def get_document_image(
         name,
         media_type,
         headers={
-            "Cache-Control": "public, max-age=3600",
+            "Cache-Control": PRIVATE_NO_STORE
+            if doc.model_id is not None
+            else "public, max-age=3600",
             "X-Content-Type-Options": "nosniff",
         },
     )

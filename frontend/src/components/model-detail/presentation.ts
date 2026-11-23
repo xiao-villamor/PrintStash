@@ -21,7 +21,6 @@ export type TabKey =
   | "settings"
   | "revisions"
   | "files"
-  | "documents"
   | "history"
   | "similar";
 
@@ -54,12 +53,6 @@ export const TABS: { key: TabKey; label: string }[] = [
     key: "files",
     get label() {
       return uiText("Files");
-    },
-  },
-  {
-    key: "documents",
-    get label() {
-      return uiText("Documents");
     },
   },
   {

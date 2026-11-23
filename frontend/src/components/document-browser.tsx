@@ -3,7 +3,7 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { FileText, FileType2, Loader2 } from "lucide-react";
 
 import { MODEL_DOCUMENT_PAGE_SIZE } from "@/lib/api/documents";
@@ -40,6 +40,8 @@ export function DocumentBrowser({
 )) {
   useUiLocale();
   const router = useRouter();
+  const headingId = useId();
+  const uploadLabel = modelId === undefined ? uiText("Upload file") : uiText("Attach file");
   const [offset, setOffset] = useState(0);
   const documents = useDocuments(
     modelId === undefined
@@ -120,6 +122,7 @@ export function DocumentBrowser({
         }
       />
       <section
+        aria-labelledby={headingId}
         className={
           modelId === undefined
             ? "mx-4 my-5 overflow-hidden border border-border bg-card sm:mx-6"
@@ -132,7 +135,9 @@ export function DocumentBrowser({
               <FileText className="h-4 w-4" aria-hidden />
             </span>
             <div>
-              <h2 className="text-sm font-semibold">{uiText("Documents")}</h2>
+              <h2 id={headingId} className="text-sm font-semibold">
+                {modelId === undefined ? uiText("Documents") : uiText("Attachments")}
+              </h2>
               <p className="mt-1 text-xs text-muted-foreground">
                 {modelId === undefined
                   ? uiText("Guides, notes and files in this collection.")
@@ -149,7 +154,7 @@ export function DocumentBrowser({
                 disabled={busy}
                 loading={busy}
               >
-                {uiText("Upload file")}
+                {uploadLabel}
               </Button>
               {modelId === undefined && (
                 <Button size="xs" onClick={newMarkdown}>
@@ -159,7 +164,7 @@ export function DocumentBrowser({
               <input
                 ref={fileRef}
                 type="file"
-                aria-label={uiText("Upload file")}
+                aria-label={uploadLabel}
                 onChange={onFilePicked}
                 className="hidden"
               />
@@ -181,7 +186,11 @@ export function DocumentBrowser({
         ) : docs.length === 0 ? (
           <div className="flex flex-col items-start gap-1 px-5 py-6 text-muted-foreground">
             <FileText className="w-8 h-8 mb-2 opacity-40" />
-            <p className="text-sm">{uiText("No documents here yet.")}</p>
+            <p className="text-sm">
+              {modelId === undefined
+                ? uiText("No documents here yet.")
+                : uiText("No attachments yet.")}
+            </p>
             {canCreate && modelId === undefined && (
               <p className="text-xs mt-1">
                 {uiText(
