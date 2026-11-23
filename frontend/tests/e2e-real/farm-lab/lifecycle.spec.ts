@@ -1,3 +1,4 @@
+/** The operator can resume an external pause and identify a completed run after restarting its file. */
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { collapseNavigationSidebar } from "../util";
@@ -42,7 +43,9 @@ for (const printer of session.printers) {
         .toBe("printing");
     });
   } else {
-    test("PrusaLink preserves a finished run after reload and a second start", async ({ page }) => {
+    test("PrusaLink keeps the finished run in history when the same file starts again", async ({
+      page,
+    }) => {
       await page.goto(`/printers/${printer.id}?tab=jobs`);
       await collapseNavigationSidebar(page);
       const row = (id: number) =>
