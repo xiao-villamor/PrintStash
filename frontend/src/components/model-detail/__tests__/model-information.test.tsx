@@ -12,7 +12,6 @@ function show(sourceUrl: string | null = null, canEdit = false, description: str
   return renderApp(
     <ModelInformation
       model={aModel({ source_url: sourceUrl, description })}
-      sourceFile={null}
       canEdit={canEdit}
       onEdit={() => {}}
       onTags={() => {}}

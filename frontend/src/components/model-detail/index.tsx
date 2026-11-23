@@ -19,6 +19,7 @@ import { getSessionVersion, requireSessionVersion } from "@/lib/session-transpor
 import { Modal } from "@/components/ui/modal";
 import { InlineTitleEditor } from "@/components/inline-title-editor";
 import { ModelGeometry, ModelInformation } from "./model-information";
+import { ProjectProfile } from "./project-profile";
 import { useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { RevisionPicker } from "./revision-picker";
 import { inspectedRevision } from "./inspected-revision";
@@ -847,7 +848,6 @@ function ModelDetailPresentation({
   const modelInformation = (
     <ModelInformation
       model={model}
-      sourceFile={meshFile ?? null}
       canEdit={canEditModel}
       onEdit={() => enterEdit("details")}
       onTags={() => {
@@ -1507,7 +1507,7 @@ function ModelDetailPresentation({
               active={activeTab}
               onChange={selectTab}
               showIndicator={false}
-              className="model-detail-tabs shrink-0 overflow-x-auto border-b"
+              className="model-detail-tabs shrink-0 flex-wrap border-b"
               tabClassName="relative inline-flex items-center gap-1.5 h-10 min-w-max whitespace-nowrap px-0 py-0 text-sm font-medium text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               activeTabClassName="text-foreground"
             />
@@ -1585,6 +1585,11 @@ function ModelDetailPresentation({
                     printSettingRows={printSettingRows}
                     preferences={metadataPreferences}
                     hasSlicedRevision={gcodeFiles.length > 0 || gcodeOnly}
+                    sourceProject={
+                      meshFile?.file_type === "3mf" ? (
+                        <ProjectProfile modelId={model.id} fileId={meshFile.id} />
+                      ) : undefined
+                    }
                     plateEstimates={slicedEstimates}
                     selectedSlicedPlate={selectedEstimatePlate}
                     headerActions={

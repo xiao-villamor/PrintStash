@@ -1482,6 +1482,37 @@ test.describe("model detail route", () => {
       .toBeCloseTo(resizedWidth, 0);
   });
 
+  test("keeps the full inspector tab strip reachable at 1280 pixels", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/models/1");
+    const inspector = page.getByTestId("model-detail-sidebar");
+    const tabs = inspector.getByRole("tablist");
+    await expect(tabs.getByRole("tab", { name: /^Similar/ })).toBeVisible();
+    expect(
+      await tabs.evaluate((element) => {
+        const strip = element.getBoundingClientRect();
+        return [...element.querySelectorAll('[role="tab"]')].every((tab) => {
+          const bounds = tab.getBoundingClientRect();
+          return bounds.left >= strip.left && bounds.right <= strip.right + 1;
+        });
+      }),
+    ).toBe(true);
+    await tabs.getByRole("tab", { name: /^Files/ }).press("ArrowRight");
+    await expect(tabs.getByRole("tab", { name: /^History/ })).toBeFocused();
+    await expect(inspector.getByRole("tabpanel", { name: "History" })).toBeVisible();
+  });
+
+  test("shows the Overview queue action in a short window", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/models/1");
+    const overview = page.getByRole("tabpanel", { name: "Overview" });
+    await expect(
+      overview.getByRole("button", { name: "Add to queue", exact: true }),
+    ).toBeInViewport({
+      ratio: 0.95,
+    });
+  });
+
   test("add revision modal uses designed file picker and labeled fields", async ({ page }) => {
     await page.goto("/models/1");
     await page.getByRole("tab", { name: /Revisions/ }).click();

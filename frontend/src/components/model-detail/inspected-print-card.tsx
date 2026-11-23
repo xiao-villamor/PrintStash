@@ -124,6 +124,28 @@ export function InspectedPrintCard({
         <p className="detail-artifact-filename">{file.original_filename}</p>
       </header>
       {file.revision_notes && <p className="detail-revision-note">{file.revision_notes}</p>}
+      <div className="detail-revision-actions">
+        <div className="flex flex-wrap gap-2">
+          {canSend && (
+            <RevisionDeliveryActions printerless={printerless} onSend={onSend} size="sm" />
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              void downloadAuthenticatedFile(
+                `/api/v1/files/${file.id}/download`,
+                file.original_filename,
+              ).catch((error) => toast.error(error))
+            }
+          >
+            {uiText("Download")}
+          </Button>
+        </div>
+        <Button size="sm" variant="ghost" data-compare-origin onClick={onCompare}>
+          {uiText("Compare revisions")}
+        </Button>
+      </div>
       <section className="detail-overview-block">
         <div className="detail-section-heading">
           <h3>{uiText("Print setup")}</h3>
@@ -152,28 +174,6 @@ export function InspectedPrintCard({
           </>
         )}
       </section>
-      <div className="detail-revision-actions">
-        <div className="flex flex-wrap gap-2">
-          {canSend && (
-            <RevisionDeliveryActions printerless={printerless} onSend={onSend} size="sm" />
-          )}
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() =>
-              void downloadAuthenticatedFile(
-                `/api/v1/files/${file.id}/download`,
-                file.original_filename,
-              ).catch((error) => toast.error(error))
-            }
-          >
-            {uiText("Download")}
-          </Button>
-        </div>
-        <Button size="sm" variant="ghost" data-compare-origin onClick={onCompare}>
-          {uiText("Compare revisions")}
-        </Button>
-      </div>
       <section className="detail-overview-block" aria-label={uiText("Recorded prints")}>
         <div className="detail-section-heading">
           <h3>{uiText("Recorded prints")}</h3>

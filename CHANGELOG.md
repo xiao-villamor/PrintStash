@@ -12,6 +12,8 @@
 
 - Model details are in Overview and mesh measurements and checks are in Source info, freeing the full preview pane for the viewer.
 - Model Overview uses larger text and a readable Collection path. File and Revision navigation stays in the inspector tabs.
+- Model Details tabs wrap in narrow inspectors. The Overview places print actions beside the inspected Revision.
+- Source 3MF project settings appear in Print settings, separately from recorded Revision settings.
 - The Model tag editor opens with the tag field focused. Edit details starts at the Name field, aligns the Collection picker, and keeps tag suggestions inside the scrollable editor.
 
 - The Revisions tab shows print results and time in the list. Notes and actions follow the selected Revision, with print setup and G-code file details available on demand.

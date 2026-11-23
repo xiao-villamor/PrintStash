@@ -62,6 +62,7 @@ export function SettingsTab({
   headerActions,
   revisionPicker,
   actions,
+  sourceProject,
   hasSlicedRevision = false,
   plateEstimates,
   selectedSlicedPlate = null,
@@ -72,6 +73,7 @@ export function SettingsTab({
   headerActions?: ReactNode;
   revisionPicker?: ReactNode;
   actions?: ReactNode;
+  sourceProject?: ReactNode;
   hasSlicedRevision?: boolean;
   plateEstimates?: GcodePlates | null;
   selectedSlicedPlate?: number | null;
@@ -107,6 +109,8 @@ export function SettingsTab({
     ].some((value) => value !== null),
   );
   const geometryOnly = hasMeshGeometry && !hasEmbeddedSlicerMetadata && !hasSlicedRevision;
+  const showSourceProjectFirst =
+    Boolean(sourceProject) && !hasEmbeddedSlicerMetadata && !hasSlicedRevision;
   const multiPlate = (plateEstimates?.plates.length ?? 0) > 1;
   const resin = meta?.layer_count != null;
   const text = (value: string | null | undefined) =>
@@ -257,7 +261,9 @@ export function SettingsTab({
           {headerActions}
         </div>
         {revisionPicker}
-        {geometryOnly ? (
+        {showSourceProjectFirst ? (
+          sourceProject
+        ) : geometryOnly ? (
           <p className="text-sm leading-relaxed text-muted-foreground">
             {uiText(
               "This file contains mesh geometry only. Printer, material, and slicer settings are not embedded. Add a sliced G-code or 3MF revision to capture them.",
@@ -296,7 +302,7 @@ export function SettingsTab({
           </>
         )}
         <Group group={geometry} />
-        {preferences.slicer_info && (
+        {preferences.slicer_info && !showSourceProjectFirst && (
           <p className="text-xs text-muted-foreground">
             {uiText("Sliced with ")}
             {slicer ? (
@@ -307,6 +313,7 @@ export function SettingsTab({
           </p>
         )}
         {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+        {!showSourceProjectFirst && sourceProject}
       </section>
     </Localized>
   );

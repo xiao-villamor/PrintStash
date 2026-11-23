@@ -49,8 +49,10 @@ test.describe("project-profile", () => {
         );
         expect(artifact).toBeDefined();
         await page.goto(`/models/${modelId}?artifact=${artifact.id}`);
+        await page.getByRole("tab", { name: "Print settings", exact: true }).click();
         const profile = page.getByRole("region", { name: "3MF project settings" });
         await expect(profile.getByText(printer, { exact: true })).toBeVisible({ timeout: 60000 });
+        await expect(page.getByText(/This file contains mesh geometry only/)).toHaveCount(0);
         await expect(profile.getByText("10 min · 12.5 g")).toBeVisible();
         await expect(profile.getByText(/Estimates are not measured print results/)).toBeVisible();
         await page.reload();

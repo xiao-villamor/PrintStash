@@ -109,7 +109,7 @@
 
 /* Approved detail composition: a persistent source preview beside an artifact inspector. */
 .model-detail-tabs {
-  gap: 24px;
+  column-gap: 1.5rem;
   justify-content: flex-start;
   margin-inline: 20px;
   border-bottom-color: var(--border-strong);
@@ -404,7 +404,7 @@
   }
   .model-detail-tabs {
     margin-inline: 12px;
-    gap: 20px;
+    column-gap: 1.25rem;
   }
   .model-detail-content {
     padding: 16px;
