@@ -255,7 +255,12 @@ test("attaches guides to one Model and opens them after reload", async ({ page }
     .toEqual({ horizontalOverflow: false, everyTabFits: true, oneRow: true });
   const moreTabs = navigation.getByRole("button", { name: "More tabs", exact: true });
   await moreTabs.press("Enter");
-  const history = page.getByRole("menuitemradio", { name: "History", exact: true });
+  const menu = page.getByRole("menu", { name: "More tabs", exact: true });
+  await expect(menu).toBeVisible();
+  expect(await menu.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(
+    "rgba(0, 0, 0, 0)",
+  );
+  const history = menu.getByRole("menuitemradio", { name: "History", exact: true });
   await expect(history).toBeVisible();
   await history.click();
   await expect(page.getByRole("tabpanel", { name: "History", exact: true })).toBeVisible();
@@ -263,6 +268,12 @@ test("attaches guides to one Model and opens them after reload", async ({ page }
   await navigation.getByRole("tab", { name: /^Files(?: \d+)?$/ }).click();
   await expect(pane).toBeVisible();
   await page.screenshot({ path: info.outputPath("model-files-narrow-inspector.png") });
+
+  for (let step = 0; step < 18; step += 1) await resize.press("ArrowLeft");
+  await expect(resize).toHaveAttribute("aria-valuenow", "688");
+  await expect(navigation.getByRole("tab", { name: "Source info", exact: true })).toBeVisible();
+  await expect(navigation.getByRole("tab", { name: /^History/ })).toBeVisible();
+  await expect(moreTabs).toBeHidden();
 });
 
 test.describe("PDF documents", () => {

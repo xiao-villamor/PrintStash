@@ -16,6 +16,7 @@
  * at the default width and unreadable at the smallest one is a bug users hit by
  * dragging, and nothing else would catch it.
  */
+import { selectModelDetailTab } from "../model-detail-navigation";
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
@@ -1166,7 +1167,7 @@ test.describe("model detail route", () => {
 
   test("Source tab displays and replaces a private representative cover", async ({ page }) => {
     await page.goto("/models/1");
-    await page.getByRole("tab", { name: "Source info" }).click();
+    await selectModelDetailTab(page, "Source info");
 
     await expect(
       page.getByRole("heading", { name: "Source information", exact: true }),
@@ -1192,7 +1193,7 @@ test.describe("model detail route", () => {
       localStorage.setItem("ps-model-detail-inspector-preferred-width", "400");
     });
     await page.goto("/models/1");
-    await page.getByRole("tab", { name: "Source info" }).click();
+    await selectModelDetailTab(page, "Source info");
 
     const sidebar = page.getByTestId("model-detail-sidebar");
     const sourceHeading = page.getByRole("heading", { name: "Source information", exact: true });
@@ -1229,7 +1230,7 @@ test.describe("model detail route", () => {
     page,
   }) => {
     await page.goto("/models/1");
-    await page.getByRole("tab", { name: /History/ }).click();
+    await selectModelDetailTab(page, /History/);
 
     const evidence = page.getByTestId("print-job-reproducibility");
     await expect(evidence).toHaveCount(3);
@@ -1355,7 +1356,7 @@ test.describe("model detail route", () => {
         writes++;
     });
     await page.goto("/models/1");
-    await page.getByRole("tab", { name: "Print settings", exact: true }).click();
+    await selectModelDetailTab(page, "Print settings");
     const picker = page.getByRole("region", { name: "Inspect revision" });
     await picker.getByRole("button", { name: "Rev 2", exact: true }).click();
     await expect(picker.getByRole("button", { name: "Rev 2", exact: true })).toHaveAttribute(
@@ -1365,7 +1366,7 @@ test.describe("model detail route", () => {
     await expect(
       page.getByTestId("model-detail-sidebar").getByText("PETG", { exact: true }),
     ).toBeVisible();
-    await page.getByRole("tab", { name: "Print settings", exact: true }).click();
+    await selectModelDetailTab(page, "Print settings");
     await expect(
       page.getByTestId("model-detail-sidebar").getByText("PETG", { exact: true }),
     ).toBeVisible();
@@ -1383,7 +1384,7 @@ test.describe("model detail route", () => {
     const recommended = page.getByRole("button", { name: /Recommended revision.*Rev 1/ });
     await recommended.press("Enter");
     await expect(page.getByRole("tabpanel", { name: "Revisions" })).toBeFocused();
-    await page.getByRole("tab", { name: "Print settings", exact: true }).click();
+    await selectModelDetailTab(page, "Print settings");
     await expect(picker.getByRole("button", { name: /Rev 1/ })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -1405,7 +1406,7 @@ test.describe("model detail route", () => {
       const original = await preview.elementHandle();
       const about = page.getByRole("region", { name: "About this model" });
       await expect(about).toBeVisible();
-      await page.getByRole("tab", { name: "Print settings", exact: true }).click();
+      await selectModelDetailTab(page, "Print settings");
       await expect(about).toBeHidden();
       expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
       await page.getByRole("tab", { name: "Overview", exact: true }).click();
@@ -1510,24 +1511,22 @@ test.describe("model detail route", () => {
       .toBeCloseTo(resizedWidth, 0);
   });
 
-  test("keeps the full inspector tab strip reachable at 1280 pixels", async ({ page }) => {
+  test("keeps Model detail navigation on one row at 1280 pixels", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/models/1");
     const inspector = page.getByTestId("model-detail-sidebar");
-    const tabs = inspector.getByRole("tablist");
-    await expect(tabs.getByRole("tab", { name: /^Similar/ })).toBeVisible();
+    const navigation = inspector.locator(".model-detail-tabs");
+    const more = navigation.getByRole("button", { name: "More tabs", exact: true });
+    await expect(more).toBeVisible();
     expect(
-      await tabs.evaluate((element) => {
-        const strip = element.getBoundingClientRect();
-        return [...element.querySelectorAll('[role="tab"]')].every((tab) => {
-          const bounds = tab.getBoundingClientRect();
-          return bounds.left >= strip.left && bounds.right <= strip.right + 1;
-        });
-      }),
+      await navigation.evaluate((element) => element.scrollWidth === element.clientWidth),
     ).toBe(true);
-    await tabs.getByRole("tab", { name: /^Files/ }).press("ArrowRight");
-    await expect(tabs.getByRole("tab", { name: /^History/ })).toBeFocused();
+
+    await more.press("Enter");
+    await expect(page.getByRole("menuitemradio", { name: "Similar", exact: true })).toBeVisible();
+    await page.getByRole("menuitemradio", { name: "History", exact: true }).click();
     await expect(inspector.getByRole("tabpanel", { name: "History" })).toBeVisible();
+    await expect(more).toHaveAttribute("data-active", "true");
   });
 
   test("keeps the recommendation visible in a short Overview window", async ({ page }) => {

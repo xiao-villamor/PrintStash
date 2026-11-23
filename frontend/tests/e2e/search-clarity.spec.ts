@@ -108,43 +108,42 @@ test.describe("search clarity", () => {
     await page.screenshot({ path: testInfo.outputPath("search-dense-mobile-list-dark.png") });
   });
 
-  test("keeps Model detail navigation on one row responsively", async ({ page }, testInfo) => {
-    await page.addInitScript(() => localStorage.setItem("ps-model-detail-sidebar-width", "400"));
-    for (const viewport of [
-      { width: 1920, height: 1080 },
-      { width: 390, height: 844 },
-    ]) {
+  for (const viewport of [
+    { width: 1920, height: 1080 },
+    { width: 390, height: 844 },
+  ]) {
+    test(`keeps Model detail navigation in one row at ${viewport.width}px`, async ({
+      page,
+    }, testInfo) => {
+      await page.addInitScript(() =>
+        localStorage.setItem("ps-model-detail-inspector-preferred-width", "400"),
+      );
       await page.setViewportSize(viewport);
       await page.goto("/models/1");
-      // The dev-only query launcher overlaps the last tab on narrow screens.
-      await page.addStyleTag({ content: ".tsqd-parent-container{display:none!important}" });
-      const tabs = page.getByRole("tablist");
-      const overview = tabs.getByRole("tab", { name: "Overview", exact: true });
-      const similar = tabs.getByRole("tab", { name: "Similar", exact: true });
-      await expect(similar).toBeVisible();
-      // The tab strip scrolls horizontally on phones without widening the page.
-      await similar.scrollIntoViewIfNeeded();
-      await expect(similar).toBeInViewport();
-      const positions = await Promise.all([
-        overview.evaluate((el) => el.getBoundingClientRect().top),
-        similar.evaluate((el) => el.getBoundingClientRect().top),
-      ]);
-      expect(Math.abs(positions[0] - positions[1])).toBeLessThan(2);
+      const inspector = page.getByTestId("model-detail-sidebar");
+      const row = inspector.locator(".model-detail-tabs");
+      const overview = row.getByRole("tab", { name: "Overview", exact: true });
+      const more = row.getByRole("button", { name: "More tabs", exact: true });
+      await expect(more).toBeInViewport();
+      const [first, last] = await Promise.all([overview.boundingBox(), more.boundingBox()]);
+      expect(Math.abs(first!.y - last!.y)).toBeLessThan(2);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
-      await overview.focus();
-      await page.keyboard.press("ArrowLeft");
-      await expect(similar).toBeFocused();
-      await similar.click();
-      await expect(similar).toHaveAttribute("aria-selected", "true");
-      await page.screenshot({ path: testInfo.outputPath(`model-tabs-${viewport.width}.png`) });
-    }
-  });
+      await more.press("Enter");
+      await page.getByRole("menuitemradio", { name: "Similar", exact: true }).click();
+      await expect(inspector.getByRole("tabpanel", { name: "Similar", exact: true })).toBeVisible();
+      await page.screenshot({
+        path: testInfo.outputPath(`model-tabs-narrow-${viewport.width}.png`),
+      });
+    });
+  }
 
   test("keeps similar Model names readable in a narrow desktop panel", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.addInitScript(() => localStorage.setItem("ps-model-detail-sidebar-width", "400"));
+    await page.addInitScript(() =>
+      localStorage.setItem("ps-model-detail-inspector-preferred-width", "400"),
+    );
     const candidate = aSimilarityCandidate({
       model_a: { id: 1, name: "m3Sorter_04_mini", slug: "sorter-mini", thumbnail_file_id: null },
       model_b: { id: 2, name: "m3Sorter_top", slug: "sorter-top", thumbnail_file_id: null },
@@ -156,7 +155,8 @@ test.describe("search clarity", () => {
       route.fulfill({ json: { items: [candidate], next_cursor: null } }),
     );
     await page.goto("/models/1");
-    await page.getByRole("tab", { name: "Similar", exact: true }).click();
+    await page.getByRole("button", { name: "More tabs", exact: true }).click();
+    await page.getByRole("menuitemradio", { name: "Similar", exact: true }).click();
     const name = page.getByText("m3Sorter_04_mini ↔ m3Sorter_top", { exact: true });
     await expect(name).toBeVisible();
     expect(await name.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(220);

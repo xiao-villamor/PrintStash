@@ -148,7 +148,6 @@ interface BedSize {
 }
 
 const DETAIL_SIDEBAR_STORAGE_KEY = "ps-model-detail-inspector-preferred-width";
-const DETAIL_TABS_COMPACT_WIDTH = 760;
 const DETAIL_PRIMARY_TABS = new Set<TabKey>(["overview", "revisions", "files"]);
 const DETAIL_SIDEBAR_MIN_WIDTH = 400;
 const DETAIL_SIDEBAR_MAX_WIDTH = 1100;
@@ -443,14 +442,59 @@ function ModelDetailPresentation({
   );
 
   const [moreTabsOpen, setMoreTabsOpen] = useState(false);
-  const compactTabs = detailSidebarWidth < DETAIL_TABS_COMPACT_WIDTH;
-  if (!compactTabs && moreTabsOpen) setMoreTabsOpen(false);
-  const primaryTabs = compactTabs
-    ? visibleTabs.filter((tab) => DETAIL_PRIMARY_TABS.has(tab.key))
-    : visibleTabs;
-  const overflowTabs = compactTabs
-    ? visibleTabs.filter((tab) => !DETAIL_PRIMARY_TABS.has(tab.key))
-    : [];
+  const moreTabsButton = useRef<HTMLButtonElement>(null);
+  const [overflowKeys, setOverflowKeys] = useState<string[]>([]);
+  const tabsRow = useRef<HTMLDivElement>(null);
+  const measuredTabs = useRef<HTMLDivElement>(null);
+  const measuredMore = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const row = tabsRow.current;
+    const measurements = measuredTabs.current;
+    const more = measuredMore.current;
+    if (!row || !measurements || !more) return;
+    const fit = () => {
+      const available = row.clientWidth;
+      if (measurements.getBoundingClientRect().width <= available) {
+        setOverflowKeys((current) => (current.length === 0 ? current : []));
+        setMoreTabsOpen(false);
+        return;
+      }
+      const gap = Number.parseFloat(getComputedStyle(measurements).columnGap);
+      const widths = new Map(
+        Array.from(measurements.children, (element) => [
+          element.getAttribute("data-measured-tab"),
+          element.getBoundingClientRect().width,
+        ]),
+      );
+      let remaining =
+        available -
+        more.getBoundingClientRect().width -
+        Number.parseFloat(getComputedStyle(row).columnGap);
+      for (const tab of visibleTabs) {
+        if (DETAIL_PRIMARY_TABS.has(tab.key)) remaining -= (widths.get(tab.key) ?? 0) + gap;
+      }
+      const secondary = visibleTabs.filter((tab) => !DETAIL_PRIMARY_TABS.has(tab.key));
+      const visibleCount = secondary.findIndex((tab) => {
+        remaining -= (widths.get(tab.key) ?? 0) + gap;
+        return remaining < 0;
+      });
+      const next = secondary
+        .slice(visibleCount < 0 ? secondary.length : visibleCount)
+        .map((tab) => tab.key);
+      setOverflowKeys((current) =>
+        current.length === next.length && current.every((key, index) => key === next[index])
+          ? current
+          : next,
+      );
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(row);
+    observer.observe(measurements);
+    observer.observe(more);
+    return () => observer.disconnect();
+  }, [previewExpanded, visibleTabs]);
+  const overflowTabs = visibleTabs.filter((tab) => overflowKeys.includes(tab.key));
   const selectedOverflowTab = overflowTabs.find((tab) => tab.key === activeTab);
 
   // Thumbnails and metadata arrive after upload, derived in the background.
@@ -748,6 +792,26 @@ function ModelDetailPresentation({
     () => sortedFiles.filter((f) => f.file_type !== "gcode"),
     [sortedFiles],
   );
+  const tabItems = visibleTabs.map((tab) => {
+    const count =
+      tab.key === "revisions"
+        ? gcodeFiles.length
+        : tab.key === "files"
+          ? sourceFiles.length
+          : tab.key === "history"
+            ? printJobs.length
+            : 0;
+    return {
+      key: tab.key,
+      label: (
+        <>
+          {tab.label}
+          {count > 0 && <span className="model-detail-tab-count">{count}</span>}
+        </>
+      ),
+    };
+  });
+
   const recommendedGcode = gcodeFiles.find((f) => f.is_recommended) ?? null;
   const inspectedGcode = inspectedRevision(
     gcodeFiles,
@@ -1503,30 +1567,40 @@ function ModelDetailPresentation({
               <span className="absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-border transition-colors duration-press group-hover:bg-primary group-focus-visible:bg-primary" />
             </div>
 
-            <div className="model-detail-tabs flex shrink-0 items-center border-b">
-              <TabBar
-                tabs={primaryTabs.map((tab) => ({
-                  key: tab.key,
-                  label: (
-                    <>
+            <div
+              ref={tabsRow}
+              className="model-detail-tabs relative flex shrink-0 items-center border-b"
+            >
+              <div
+                aria-hidden="true"
+                className="pointer-events-none invisible absolute inset-0 overflow-hidden"
+              >
+                <div ref={measuredTabs} className="model-detail-tab-list flex w-max">
+                  {tabItems.map((tab) => (
+                    <span
+                      key={tab.key}
+                      data-measured-tab={tab.key}
+                      className="model-detail-tab-label"
+                    >
                       {tab.label}
-                      {tab.key === "revisions" && gcodeFiles.length > 0 && (
-                        <span className="model-detail-tab-count">{gcodeFiles.length}</span>
-                      )}
-                      {tab.key === "files" && sourceFiles.length > 0 && (
-                        <span className="model-detail-tab-count">{sourceFiles.length}</span>
-                      )}
-                      {tab.key === "history" && printJobs.length > 0 && (
-                        <span className="model-detail-tab-count">{printJobs.length}</span>
-                      )}
-                    </>
-                  ),
-                }))}
+                    </span>
+                  ))}
+                </div>
+                <span
+                  ref={measuredMore}
+                  className="inline-flex w-max items-center gap-1 text-sm font-medium"
+                >
+                  {uiText("nav.more")}
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </span>
+              </div>
+              <TabBar
+                tabs={tabItems.filter((tab) => !overflowKeys.includes(tab.key))}
                 active={selectedOverflowTab ? null : activeTab}
                 onChange={selectTab}
                 showIndicator={false}
                 className="model-detail-tab-list"
-                tabClassName="relative inline-flex items-center gap-1.5 h-10 whitespace-nowrap px-0 py-0 text-sm font-medium text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                tabClassName="model-detail-tab-label relative h-10 px-0 py-0 text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 activeTabClassName="text-foreground"
               />
               {overflowTabs.length > 0 && (
@@ -1534,10 +1608,13 @@ function ModelDetailPresentation({
                   portal
                   open={moreTabsOpen}
                   onOpenChange={setMoreTabsOpen}
+                  returnFocusRef={moreTabsButton}
                   aria-label={uiText("More tabs")}
+                  contentClassName="w-44 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
                   className="ml-auto shrink-0"
                   trigger={
                     <Button
+                      ref={moreTabsButton}
                       type="button"
                       variant="ghost"
                       aria-label={uiText("More tabs")}
@@ -1563,6 +1640,7 @@ function ModelDetailPresentation({
                       onClick={() => {
                         selectTab(tab.key);
                         setMoreTabsOpen(false);
+                        moreTabsButton.current?.focus();
                       }}
                     >
                       {tab.label}

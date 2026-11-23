@@ -1,4 +1,5 @@
 /** Standalone similarity retains the independently printable Models after human review. */
+import { selectModelDetailTab } from "../model-detail-navigation";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test, expect } from "./helpers";
@@ -176,7 +177,7 @@ test.describe("Standalone similarity", () => {
         });
       }
       await page.goto(`/models/${models[0].id}`);
-      await page.getByRole("tab", { name: "Similar", exact: true }).click();
+      await selectModelDetailTab(page, "Similar");
       const [findResponse] = await Promise.all([
         page.waitForResponse(
           (response) =>

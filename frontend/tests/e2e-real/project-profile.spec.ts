@@ -1,4 +1,5 @@
 /** A real uploaded project's file estimates remain separate from observed print results. */
+import { selectModelDetailTab } from "../model-detail-navigation";
 import { execFileSync } from "node:child_process";
 import { randomUUID, createHash } from "node:crypto";
 import { resolve } from "node:path";
@@ -49,7 +50,7 @@ test.describe("project-profile", () => {
         );
         expect(artifact).toBeDefined();
         await page.goto(`/models/${modelId}?artifact=${artifact.id}`);
-        await page.getByRole("tab", { name: "Print settings", exact: true }).click();
+        await selectModelDetailTab(page, "Print settings");
         const profile = page.getByRole("region", { name: "3MF project settings" });
         await expect(profile.getByText(printer, { exact: true })).toBeVisible({ timeout: 60000 });
         await expect(page.getByText(/This file contains mesh geometry only/)).toHaveCount(0);
