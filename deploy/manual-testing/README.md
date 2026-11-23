@@ -124,6 +124,72 @@ docker compose -p printstash-manual -f deploy/manual-testing/compose.yml \
 For the SQLite/no-identity mode, omit `--profile identity` and add only
 `--profile emulators`.
 
+### Opt-in Farm Lab integration tests
+
+From the PrintStash checkout run:
+
+```sh
+./deploy/manual-testing/bin/farm-lab.sh
+```
+
+Requires Bash, Python 3, local Docker with Compose v2 and Buildx Bake, and a
+clean sibling checkout of `printstash-tooling` at
+`58fad10265638e2801e403a74cf43eb06e53c689`. Set `FARM_TEST_TOOLING` to use
+another checkout location. The first build needs access to the image and
+package registries. The running tests use disposable Docker networks, a random
+loopback app port and fresh storage. The fast Compose mocks above remain
+available independently. A private CI runner with access to the tooling checkout
+can run the same command. The test does not publish the tooling or its images.
+
+The command builds the bundled image from this checkout as
+`printstash:emulator-test`, then runs the pinned HTTP runner for Klipper, Bambu
+LAN, OctoPrint, PrusaLink MK4, Centauri Carbon, MINI+, MK4S, CORE One, Neptune
+4, Neptune 4 Plus and Centauri Carbon 2. The runner ingests a shared Revision,
+registers each native connection, verifies upload-only against device storage,
+and compares PrintStash status and job history with the device through start,
+pause, resume, completion and cancellation of a second print.
+
+A second fresh project tests dispatch. It loads PLA in PrintStash’s Klipper
+manual inventory, changes a Bambu AMS tray on the emulator, waits for PrintStash
+to receive it over MQTT, then ingests a PETG Revision and submits it to the
+queue with automatic routing. The test checks the compatibility verdict for
+both printers, the queued job’s destination, the transferred file and progress
+on Bambu, and the absence of that file on idle Klipper. Each project removes
+its containers, network and volumes on exit. Either lane failing makes the
+command exit nonzero. Look for the profile names and `mixed-farm` in its output.
+
+### Manual review with a shared Farm Lab
+
+1. On the lab LAN, open PrintStash at `http://<lab-host>:3470` and Farm Lab at
+   `http://<lab-host>:7125/lab`. Read `/lab/openapi.json` for the API contract
+   and `/lab/api/v1/state` for available capacity. In **New farm**, use a unique
+   run name, then **Add printer** for a ready spare of each needed kind. Record
+   the new farm ID and each printer ID and allocation. If a kind has no ready
+   spare, leave existing reservations in place.
+2. In each allocated printer’s **Connection details**, use its native connection
+   and model variant in PrintStash’s **Printers → Add printer**. Give each new
+   registration the run name as its group. The PrintStash backend and worker
+   need to reach the supplied device hostname (typically on the shared Docker
+   network). Klipper and Neptune use Moonraker. OctoPrint and PrusaLink use
+   their own HTTP URL and API key. Bambu uses its certificate-matching hostname,
+   serial and LAN access code, MQTT TLS on 8883, implicit FTPS on 990 and the
+   reported passive ports. Trust the lab CA in the PrintStash processes.
+   Centauri Carbon uses its host and mainboard ID, Carbon 2 its host and access
+   code. Obtain credentials from the operator. Check Diagnostics before printing.
+3. Record the spares’ original materials. Set the Klipper manual feed to PLA
+   in PrintStash and the Bambu AMS tray to PETG in Farm Lab. Ingest a uniquely
+   named PETG G-code Revision and queue it in PrintStash with automatic routing,
+   required material compatibility and **only the temporary group**. Compare
+   the selected destination, file, progress, heaters and resulting history with
+   the matching spare in Farm Lab.
+4. Once your jobs finish, remove only your uploads, registrations and test Model
+   from PrintStash and your uploaded files from the allocated devices. Restore
+   any changed material or speed. Release your idle spares using their current
+   allocations (`POST /lab/api/v1/printers/{id}/release` with `allocation`),
+   then archive your empty farm (`POST /lab/api/v1/farms/archive` with its
+   `id`). Stop on an allocation mismatch. Releasing a spare preserves its files
+   and settings for the next user.
+
 ## URLs and deterministic test credentials
 
 | Service | Host URL | Default credential or key |
