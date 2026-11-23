@@ -214,6 +214,16 @@ describe("collection mosaic reuse", () => {
     expect(collectionPreviewItems(collection, "a1", page)).toEqual(page.page.items);
   });
 
+  it("fetches the dedicated preview when a collection has a custom cover", () => {
+    expect(
+      collectionPreviewItems(
+        aCollection({ has_custom_cover: true }),
+        "a1",
+        source({ collection: "parts" }),
+      ),
+    ).toBeNull();
+  });
+
   it("honors the server's recursive scope over the requested direct scope", () => {
     const page = source({ direct: true });
     page.page.effective_direct = false;

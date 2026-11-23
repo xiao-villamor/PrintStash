@@ -78,7 +78,7 @@ test.describe("printer routes", () => {
     expect(problems).toEqual([]);
   });
 
-  test("fleet cards keep long jobs and telemetry inside the available width", async ({ page }) => {
+  test("fleet cards contain telemetry when a job has a long filename", async ({ page }) => {
     const currentJob = `workshop-${"continuous-filename-".repeat(10)}.gcode.3mf`;
     await page.addInitScript(() =>
       localStorage.setItem("printstash.printer-card.show-image", "true"),

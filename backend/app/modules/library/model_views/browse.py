@@ -37,7 +37,8 @@ from app.db.models import (
 )
 from app.db.scopes import live
 from app.modules.identity import rbac
-from app.modules.library import multipart_models
+from app.modules.library import collection_covers, multipart_models
+from app.schemas.collection_covers import ImageCover, ModelsCover
 from app.schemas.library_browse import (
     BrowseKind,
     BrowseModel,
@@ -447,16 +448,52 @@ def collection_preview(
     session.refresh(user)
     if not user.is_active or user.auth_version != authenticated_version:
         raise OperationError("collection_permission_denied", kind=ErrorKind.FORBIDDEN)
-    source = _source(session, user, BrowseQuery(collection=collection))
-    rows = list(
-        session.execute(
-            select(source)
-            .order_by(source.c.value.desc(), source.c.kind.asc(), source.c.id.asc())
-            .limit(4)
+    custom_collection = session.execute(
+        select(
+            col(Collection.id),
+            col(Collection.path),
+            col(Collection.cover_selection),
+        ).where(
+            col(Collection.path) == collection.strip().strip("/").lower(),
+            col(Collection.cover_selection).is_not(None),
+            live(Collection),
+            col(Collection.id).in_(rbac.accessible_collection_ids_stmt(session, user)),
         )
+    ).one_or_none()
+    selection = (
+        collection_covers.read_cover(
+            session, user, custom_collection.path, custom_collection.cover_selection
+        )
+        if custom_collection is not None
+        else None
     )
-    model_ids = [row.id for row in rows if row.kind == BrowseKind.MODEL.value]
-    group_ids = [row.id for row in rows if row.kind == BrowseKind.MULTIPART.value]
+    if isinstance(selection, ImageCover):
+        assert custom_collection is not None and custom_collection.id is not None
+        if revision(session) != authority:
+            raise OperationError("browse_refresh_required", kind=ErrorKind.CONFLICT)
+        return CollectionPreviewRead(
+            items=[],
+            authorization_revision=authority.authorization_revision,
+            image_url=collection_covers.image_url(
+                custom_collection.id, selection.filename
+            ),
+        )
+
+    if isinstance(selection, ModelsCover):
+        rows = [(BrowseKind.MODEL.value, model_id) for model_id in selection.model_ids]
+    else:
+        source = _source(session, user, BrowseQuery(collection=collection))
+        rows = list(
+            session.execute(
+                select(source.c.kind, source.c.id)
+                .order_by(source.c.value.desc(), source.c.kind.asc(), source.c.id.asc())
+                .limit(4)
+            ).tuples()
+        )
+    model_ids = [item_id for kind, item_id in rows if kind == BrowseKind.MODEL.value]
+    group_ids = [
+        item_id for kind, item_id in rows if kind == BrowseKind.MULTIPART.value
+    ]
     models = (
         {
             model.id: thumb_url(model)
@@ -478,13 +515,13 @@ def collection_preview(
     return CollectionPreviewRead(
         items=[
             LibraryPreviewItem(
-                kind=row.kind,
-                id=row.id,
+                kind=BrowseKind(kind),
+                id=item_id,
                 thumbnail_url=(
-                    models if row.kind == BrowseKind.MODEL.value else groups
-                )[row.id],
+                    models if kind == BrowseKind.MODEL.value else groups
+                ).get(item_id),
             )
-            for row in rows
+            for kind, item_id in rows
         ],
         authorization_revision=authority.authorization_revision,
     )

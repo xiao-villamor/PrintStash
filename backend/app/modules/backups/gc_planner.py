@@ -43,6 +43,7 @@ from app.db.models import (
 )
 from app.db.scopes import trashed
 from app.db.session import get_session_factory
+from app.modules.library import collection_covers
 from app.modules.storage.storage_backend.contracts import StorageTier
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_identity import independent_evidence
@@ -176,6 +177,9 @@ def _collection_candidate(row: Collection) -> _Candidate:
         for collection_id, name in _COLLECTION_IMAGE_RE.findall(row.readme or "")
         if int(collection_id) == row.id
     }
+    cover = collection_covers.image_filename(row)
+    if cover is not None:
+        images.add(cover)
     return _Candidate(
         kind="collection",
         resource_id=int(row.id),

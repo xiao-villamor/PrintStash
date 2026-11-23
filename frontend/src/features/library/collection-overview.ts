@@ -30,7 +30,12 @@ export function collectionPreviewItems(
   authorizationRevision: string | undefined,
   source: CollectionPreviewSource | undefined,
 ): LibraryBrowseEntry[] | null {
-  if (!source || source.page.authorization_revision !== authorizationRevision) return null;
+  if (
+    collection.has_custom_cover ||
+    !source ||
+    source.page.authorization_revision !== authorizationRevision
+  )
+    return null;
   const {
     collection: parent,
     direct: requestedDirect,
@@ -95,7 +100,7 @@ export function useCollectionOverview(
       startup.canLoad("collection-previews") &&
       reused === null &&
       !!authorizationRevision &&
-      collection.model_count > 0,
+      (collection.model_count > 0 || !!collection.has_custom_cover),
     queryFn: async ({ signal }) => {
       requireSessionVersion(session);
       const page = await getCollectionPreview(collection.path, { signal });
@@ -131,10 +136,11 @@ export function useCollectionOverview(
       active &&
       admitted &&
       reused === null &&
-      collection.model_count > 0 &&
+      (collection.model_count > 0 || !!collection.has_custom_cover) &&
       (!authorizationRevision || query.isPending),
+    image: visible && reused === null ? query.data?.image_url : undefined,
     models: visible
-      ? collection.model_count === 0
+      ? collection.model_count === 0 && !collection.has_custom_cover
         ? []
         : (reused?.map(previewItem) ?? query.data?.items)?.map((item) => ({
             key: `${item.kind}:${item.id}`,

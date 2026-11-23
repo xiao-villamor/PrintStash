@@ -93,3 +93,4 @@ class LibraryPreviewItem(BaseModel):
 class CollectionPreviewRead(BaseModel):
     items: list[LibraryPreviewItem] = Field(max_length=4)
     authorization_revision: str
+    image_url: str | None = None

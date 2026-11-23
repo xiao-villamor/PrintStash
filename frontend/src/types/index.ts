@@ -87,6 +87,7 @@ export type {
   CollectionLookupRead,
   CollectionNodeRead,
   CollectionPage,
+  CollectionCover,
   CollectionRead,
   CollectionPermissionRead,
   CollectionPermissionUpdate,

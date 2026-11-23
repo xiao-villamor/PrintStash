@@ -48,6 +48,18 @@ export function useTaxonomyCommands(overrides?: Pick<typeof api, "createCollecti
       change("collections", () => api.moveCollection(...args)),
     renameCollection: (...args: Parameters<typeof api.renameCollection>) =>
       change("collections", () => api.renameCollection(...args)),
+    setCollectionCover: (...args: Parameters<typeof api.setCollectionCover>) =>
+      change("collections", () => api.setCollectionCover(...args)),
+    uploadCollectionCover: (id: number, file: File) =>
+      change("collections", () =>
+        withSessionRequest(async (request) => {
+          const { url } = await api.uploadCollectionImage(id, file);
+          request.assertCurrent();
+          const filename = url.split("/").at(-1);
+          if (!filename) throw new Error("Collection image response has no filename");
+          return api.setCollectionCover(id, { kind: "image", filename });
+        }),
+      ),
     replaceCollectionTags: (...args: Parameters<typeof api.replaceCollectionTags>) =>
       change("collections", () => api.replaceCollectionTags(...args)),
     setCollectionReadme: (...args: Parameters<typeof api.setCollectionReadme>) =>

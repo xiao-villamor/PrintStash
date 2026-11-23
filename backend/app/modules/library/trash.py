@@ -61,7 +61,7 @@ from app.db.models import (
 from app.db.projections import content_changed
 from app.db.scopes import live, trashed
 from app.db.session import get_session_factory
-from app.modules.library import part_options
+from app.modules.library import collection_covers, part_options
 from app.modules.storage.storage_backend.contracts import (
     CreationReceipt,
     StorageBackend,
@@ -382,6 +382,16 @@ def prepare_purge_deletions(
                 if int(identifier) == resource.id
             )
         elif isinstance(resource, Collection):
+            names = {
+                name
+                for identifier, name in _COLLECTION_IMAGE_RE.findall(
+                    resource.readme or ""
+                )
+                if int(identifier) == resource.id
+            }
+            cover = collection_covers.image_filename(resource)
+            if cover is not None:
+                names.add(cover)
             keys.extend(
                 (
                     backend.collection_image_key(resource.id, name),
@@ -389,10 +399,7 @@ def prepare_purge_deletions(
                     "collection_image",
                     resource.id,
                 )
-                for identifier, name in _COLLECTION_IMAGE_RE.findall(
-                    resource.readme or ""
-                )
-                if int(identifier) == resource.id
+                for name in sorted(names)
             )
         elif isinstance(resource, Printer):
             # Printer inventory names remote files; it owns no Vault bytes.
@@ -881,7 +888,10 @@ def hard_delete_collection(
         return
     _require_storage_risk(
         operation="purge_collection",
-        storage_backed=bool(_COLLECTION_IMAGE_RE.search(collection.readme or "")),
+        storage_backed=bool(
+            _COLLECTION_IMAGE_RE.search(collection.readme or "")
+            or collection_covers.image_filename(collection)
+        ),
         confirmed=confirm_storage_risk,
     )
     own_deletions = prepared_deletions is None

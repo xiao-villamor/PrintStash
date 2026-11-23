@@ -1051,7 +1051,13 @@ export interface CollectionRead {
   tags: string[];
   /** False lets a folder view skip the readme request entirely. */
   has_readme: boolean;
+  has_custom_cover?: boolean;
 }
+
+export type CollectionCover =
+  | { kind: "automatic" }
+  | { kind: "image"; filename: string }
+  | { kind: "models"; model_ids: number[] };
 
 /** One collection of the lazily loaded tree (`/collections/children`, `/lookup`, `/search`). */
 export interface CollectionNodeRead extends CollectionRead {

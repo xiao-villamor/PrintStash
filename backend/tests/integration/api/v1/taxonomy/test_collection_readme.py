@@ -148,6 +148,49 @@ class TestCollectionReadme:
         )
 
 
+class TestCollectionCoverImage:
+    def test_uploaded_image_can_cover_an_empty_collection(
+        self, db_session: Session, client: TestClient, tmp_path: Path
+    ) -> None:
+        collection, headers = _editable_collection(db_session, tmp_path)
+        upload = client.post(
+            f"/api/v1/collections/{collection.id}/images",
+            files={"file": ("cover.png", _PNG, "image/png")},
+            headers=headers,
+        )
+        assert upload.status_code == 201, upload.text
+        image_url = upload.json()["url"]
+        selection = {"kind": "image", "filename": image_url.rsplit("/", 1)[1]}
+
+        result = client.put(
+            f"/api/v1/collections/{collection.id}/cover",
+            json=selection,
+            headers=headers,
+        )
+
+        assert result.status_code == 200, result.text
+        preview = client.get(
+            "/api/v1/models/browse/collection-preview",
+            params={"collection": collection.path},
+            headers=headers,
+        )
+        assert preview.json()["items"] == []
+        assert preview.json()["image_url"] == image_url
+
+    def test_missing_image_does_not_change_the_cover(
+        self, db_session: Session, client: TestClient, tmp_path: Path
+    ) -> None:
+        collection, headers = _editable_collection(db_session, tmp_path)
+        url = f"/api/v1/collections/{collection.id}/cover"
+
+        response = client.put(
+            url, json={"kind": "image", "filename": f"{'f' * 64}.png"}, headers=headers
+        )
+
+        assert response.status_code == 404
+        assert client.get(url, headers=headers).json() == {"kind": "automatic"}
+
+
 class TestHasReadme:
     """`CollectionRead.has_readme` lets a folder view skip the readme request.
 
