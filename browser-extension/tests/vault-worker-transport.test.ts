@@ -1,4 +1,5 @@
 // @vitest-environment node
+/** The launcher worker preserves the Vault request, response, and transfer contracts across realms. */
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { workerVaultNetwork, type VaultWorkerRequest } from "../vault-worker-transport.ts";
 import { UploadRequest } from "./support/upload-request.ts";
@@ -24,7 +25,7 @@ class WorkerConnection extends EventTarget {
 
 const url = "http://192.168.0.5:3475/api/v1/health";
 
-it("preserves request options, response metadata and the manual redirect signal", async () => {
+it("preserves the fetch contract across the worker boundary", async () => {
   const fetch = vi.fn<typeof globalThis.fetch>();
   vi.stubGlobal("fetch", fetch);
   const redirect = Response.error();
@@ -57,7 +58,7 @@ it("preserves request options, response metadata and the manual redirect signal"
   );
 });
 
-it("reconstructs multipart data with the original filename and handles empty responses", async () => {
+it("preserves multipart filenames on a successful upload", async () => {
   const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
     const form = init?.body;
     expect(form).toBeInstanceOf(FormData);
@@ -83,14 +84,19 @@ it("reconstructs multipart data with the original filename and handles empty res
   expect(fetch).toHaveBeenCalledTimes(1);
 });
 
-it("propagates network failures and aborts an in-flight request on the worker", async () => {
+it("propagates network failures from its worker", async () => {
   const fetch = vi
     .fn<typeof globalThis.fetch>()
     .mockRejectedValueOnce(new TypeError("Failed to fetch"));
   vi.stubGlobal("fetch", fetch);
   const request = workerVaultNetwork(() => new WorkerConnection());
   await expect(request(url)).rejects.toThrow("Failed to fetch");
+});
 
+it("aborts an in-flight request on the worker", async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>();
+  vi.stubGlobal("fetch", fetch);
+  const request = workerVaultNetwork(() => new WorkerConnection());
   const controller = new AbortController();
   let observeAbort: () => void = () => {};
   const workerAborted = new Promise<void>((resolve) => {
@@ -112,7 +118,7 @@ it("propagates network failures and aborts an in-flight request on the worker", 
   await expect(request(url, { signal: controller.signal })).rejects.toMatchObject({
     name: "AbortError",
   });
-  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch).toHaveBeenCalledTimes(1);
 });
 
 it("reports upload progress before returning the server acknowledgement", async () => {
@@ -148,7 +154,7 @@ it("reports upload progress before returning the server acknowledgement", async 
   expect(UploadRequest.instances[0].headers.get("authorization")).toBe("Bearer paired-browser");
 });
 
-it("rejects a worker loading failure and creates a fresh worker for the next call", async () => {
+it("recovers on the next request after a worker loading failure", async () => {
   const broken = new WorkerConnection();
   vi.spyOn(broken, "postMessage").mockImplementation(() => {});
   const createWorker = vi.fn(() => new WorkerConnection()).mockReturnValueOnce(broken);
@@ -162,4 +168,17 @@ it("rejects a worker loading failure and creates a fresh worker for the next cal
   await expect(failed).rejects.toThrow("network worker failed");
   await expect((await request(url)).json()).resolves.toEqual({ ok: true });
   expect(createWorker).toHaveBeenCalledTimes(2);
+});
+
+it("keeps response bodies streaming with cancellation after headers", async () => {
+  const upstream = vi.fn();
+  const body = new ReadableStream<Uint8Array>({ cancel: upstream });
+  vi.stubGlobal("fetch", vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(body)));
+  const request = workerVaultNetwork(() => new WorkerConnection());
+  const controller = new AbortController();
+  const response = await request(url, { signal: controller.signal });
+  const read = response.text();
+  controller.abort();
+  await expect(read).rejects.toMatchObject({ name: "AbortError" });
+  await vi.waitFor(() => expect(upstream).toHaveBeenCalledTimes(1));
 });
