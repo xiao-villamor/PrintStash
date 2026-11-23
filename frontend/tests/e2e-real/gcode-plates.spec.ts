@@ -9,7 +9,7 @@ import type { PrintJobRead } from "@/types";
 async function clippedControls(panel: Locator): Promise<string[]> {
   return panel.evaluate((element) => {
     const boundary = element.getBoundingClientRect();
-    return [...element.querySelectorAll<HTMLElement>("button, input, select, .toolpath-section")]
+    return [...element.querySelectorAll<HTMLElement>("button, input, select")]
       .filter((control) => {
         const box = control.getBoundingClientRect();
         // A hidden tab is deliberately absent from layout; overflow-clipped
@@ -133,14 +133,18 @@ test.describe("Sliced G-code plates", () => {
       try {
         await page.goto(`/models/${modelId}`);
         await collapseNavigationSidebar(page);
-        await page.getByRole("button", { name: "Layers", exact: true }).click();
+        await page.getByRole("button", { name: "G-code", exact: true }).click();
         const panel = page.getByRole("complementary", { name: "Toolpath controls" });
         await expect(panel.getByRole("spinbutton", { name: "Layer number" })).toHaveValue("2");
         expect(await clippedControls(panel)).toEqual([]);
         await panel.getByRole("tab", { name: "View", exact: true }).click();
-        await expect(panel.getByRole("button", { name: "Dimensions", exact: true })).toBeVisible();
+        await expect(panel.getByRole("button", { name: "Travel", exact: true })).toBeVisible();
         expect(await clippedControls(panel)).toEqual([]);
         expect(await coveredControls(panel)).toEqual([]);
+        const bounds = panel.getByRole("region", { name: "Toolpath bounds", exact: true });
+        await bounds.scrollIntoViewIfNeeded();
+        await expect(bounds).toBeInViewport({ ratio: 0.99 });
+        await panel.evaluate((element) => element.scrollTo({ top: 0 }));
         const preview = page.getByRole("region", { name: "Preview", exact: true });
         const previewBox = await preview.boundingBox();
         const panelBox = await panel.boundingBox();
@@ -172,7 +176,10 @@ test.describe("Sliced G-code plates", () => {
         await page.getByRole("tab", { name: "Files", exact: true }).click();
         expect(await clippedControls(panel)).toEqual([]);
         await panel.getByRole("tab", { name: "Layers", exact: true }).click();
-        await panel.getByRole("button", { name: "Plate 02", exact: true }).click();
+        await preview
+          .getByRole("group", { name: "Sliced plates", exact: true })
+          .getByRole("button", { name: "Plate 02", exact: true })
+          .click();
         await expect(panel.getByRole("spinbutton", { name: "Layer number" })).toHaveValue("2");
         expect(await clippedControls(panel)).toEqual([]);
         await expect
