@@ -117,6 +117,13 @@ describe("TabBar", () => {
       expect(screen.getAllByRole("tab").map((tab) => tab.tabIndex)).toEqual([-1, 0, -1]);
     });
 
+    it("keeps the first visible tab keyboard reachable when selection is elsewhere", () => {
+      render(<TabBar tabs={TABS} active={null} onChange={vi.fn<(key: string) => void>()} />);
+
+      expect(screen.getAllByRole("tab").map((tab) => tab.tabIndex)).toEqual([0, -1, -1]);
+      expect(screen.queryByRole("tab", { selected: true })).toBeNull();
+    });
+
     it("applies the active class only to the active tab", () => {
       render(
         <TabBar

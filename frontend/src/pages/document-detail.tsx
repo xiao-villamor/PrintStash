@@ -90,6 +90,7 @@ export default function DocumentDetailPage({
       collection: collectionParam,
       collection_id: collectionId,
       multipart_model_id: null,
+      model_id: null,
       filename: null,
       effective_role: "edit",
       updated_at: "",
@@ -143,9 +144,12 @@ export default function DocumentDetailPage({
       [401, 403, 404].includes(documentQuery.error.status));
 
   const canEdit = !accessDenied && canEditDoc(doc, !!user?.is_superuser);
-  const backHref = doc?.collection
-    ? `/?c=${encodeURIComponent(doc.collection)}&v=docs`
-    : "/?v=docs";
+  const backHref =
+    doc?.model_id != null
+      ? `/models/${doc.model_id}?tab=files`
+      : doc?.collection
+        ? `/?c=${encodeURIComponent(doc.collection)}&v=docs`
+        : "/?v=docs";
 
   function setDraftName(name: string) {
     if (!doc) return;

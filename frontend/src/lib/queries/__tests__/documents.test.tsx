@@ -16,6 +16,7 @@ const document: DocumentRead = {
   collection: "parts",
   collection_id: 1,
   multipart_model_id: null,
+  model_id: null,
   filename: null,
   effective_role: "edit",
   updated_at: FROZEN_NOW,

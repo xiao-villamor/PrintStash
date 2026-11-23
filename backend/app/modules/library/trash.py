@@ -347,6 +347,9 @@ def prepare_purge_deletions(
                 for cover in covers
                 if cover.id is not None
             )
+            resources.extend(
+                session.exec(select(Document).where(Document.model_id == resource.id))
+            )
         elif isinstance(resource, MultipartModel):
             if resource.cover_filename:
                 keys.append(
@@ -833,6 +836,12 @@ def hard_delete_printer(session: Session, printer: Printer) -> None:
     session.delete(printer)
 
 
+def _document_has_storage(document: Document) -> bool:
+    return bool(document.filename) or bool(
+        _DOCUMENT_IMAGE_RE.search(document.body or "")
+    )
+
+
 @guarded_destructive_operation
 def hard_delete_document(
     session: Session,
@@ -845,12 +854,9 @@ def hard_delete_document(
     """Permanently remove a Document row and every vault-owned blob."""
     if document.id is None:
         return
-    storage_backed = bool(document.filename) or bool(
-        _DOCUMENT_IMAGE_RE.search(document.body or "")
-    )
     _require_storage_risk(
         operation="purge_document",
-        storage_backed=storage_backed,
+        storage_backed=_document_has_storage(document),
         confirmed=confirm_storage_risk,
     )
     own_deletions = prepared_deletions is None
@@ -930,6 +936,9 @@ def hard_delete_model(
     if model.id is None:
         return
     file_rows = session.exec(select(File).where(File.model_id == model.id)).all()
+    documents = session.exec(
+        select(Document).where(Document.model_id == model.id)
+    ).all()
     has_cover = session.exec(
         select(ModelSourceCover.id)
         .join(ModelProvenanceSource)
@@ -940,7 +949,8 @@ def hard_delete_model(
         operation="purge_model",
         storage_backed=bool(file_rows)
         or has_cover is not None
-        or model.cover_filename is not None,
+        or model.cover_filename is not None
+        or any(_document_has_storage(doc) for doc in documents),
         confirmed=confirm_storage_risk,
     )
 
@@ -967,6 +977,13 @@ def hard_delete_model(
             maintain_revision_invariant=False,
             ownership_preflighted=True,
             purge_claimed_by_parent=True,
+            confirm_storage_risk=confirm_storage_risk,
+            prepared_deletions=deletions,
+        )
+    for document in documents:
+        hard_delete_document(
+            session,
+            document,
             confirm_storage_risk=confirm_storage_risk,
             prepared_deletions=deletions,
         )
@@ -1146,6 +1163,8 @@ def gc_soft_deleted(
                     "gc skipped unverifiable model", extra={"model_id": model.id}
                 )
         for document in expired_documents:
+            if document.model_id in expired_model_ids:
+                continue
             try:
                 hard_delete_document(
                     session,

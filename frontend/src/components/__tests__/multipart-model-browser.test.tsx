@@ -750,7 +750,11 @@ describe("MultipartModelDetailPage", () => {
     );
   });
 
-  it("uploads a guide directly from the overview", async () => {
+  it.each([
+    ["assembly.pdf", "application/pdf", "pdf"],
+    ["assembly.mp4", "video/mp4", "other"],
+    ["assembly.mov", "video/quicktime", "other"],
+  ])("uploads %s as a guide from the overview", async (filename, mimeType, kind) => {
     const user = userEvent.setup();
     renderApp(<MultipartModelDetailPage />, {
       at: "/multipart-models/7",
@@ -762,11 +766,12 @@ describe("MultipartModelDetailPage", () => {
           edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           edit_version: 1,
           name: "Assembly",
-          kind: "pdf",
+          kind,
           collection: null,
           collection_id: null,
           multipart_model_id: 7,
-          filename: "assembly.pdf",
+          model_id: null,
+          filename,
           effective_role: "admin",
           updated_at: "2026-01-02T00:00:00Z",
           body: null,
@@ -777,7 +782,7 @@ describe("MultipartModelDetailPage", () => {
     expect(await screen.findByRole("button", { name: "Upload guide" })).toBeEnabled();
     const input = document.querySelector<HTMLInputElement>('input[type="file"][accept^=".pdf"]');
     expect(input).not.toBeNull();
-    await user.upload(input!, new File(["pdf"], "assembly.pdf", { type: "application/pdf" }));
+    await user.upload(input!, new File(["guide"], filename, { type: mimeType }));
     expect(await screen.findByRole("link", { name: "Assembly" })).toHaveAttribute(
       "href",
       "/documents/44",
@@ -795,6 +800,7 @@ describe("MultipartModelDetailPage", () => {
       collection: null,
       collection_id: null,
       multipart_model_id: 7,
+      model_id: null,
       filename: "assembly.pdf",
       effective_role: "admin" as const,
       updated_at: "2026-01-02T00:00:00Z",

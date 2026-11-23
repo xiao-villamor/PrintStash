@@ -566,7 +566,7 @@ function MultipartOverview({
                   <input
                     ref={guideInput}
                     type="file"
-                    accept=".pdf,.md,.markdown,.txt,.png,.jpg,.jpeg,.gif,.webp"
+                    accept={GUIDE_FILE_TYPES}
                     className="hidden"
                     onChange={(event) => {
                       const file = event.target.files?.[0];
@@ -763,6 +763,8 @@ export function MultipartModelDetailPage() {
   return <MultipartDetail key={params.id} id={Number(params.id)} />;
 }
 
+const GUIDE_FILE_TYPES = ".pdf,.md,.markdown,.txt,.png,.jpg,.jpeg,.gif,.webp,.mp4,.mov";
+
 type CoverIntent = { kind: "upload"; file: File } | { kind: "remove" };
 
 function MultipartDetail({ id }: { id: number }) {
@@ -896,7 +898,9 @@ function MultipartDetail({ id }: { id: number }) {
     setGuideBusy(true);
     setSaveError(null);
     try {
-      const guide = await uploadDocument(file, model.collection_id, undefined, model.id);
+      const guide = await uploadDocument(file, model.collection_id, undefined, {
+        multipartModelId: model.id,
+      });
       if (!isCurrent()) return;
       const add = (base: MultipartModelRead) => ({
         ...base,
@@ -1628,7 +1632,7 @@ function MultipartDetail({ id }: { id: number }) {
                   <input
                     ref={guideInput}
                     type="file"
-                    accept=".pdf,.md,.markdown,.txt,.png,.jpg,.jpeg,.gif,.webp"
+                    accept={GUIDE_FILE_TYPES}
                     className="hidden"
                     onChange={(event) => {
                       const file = event.target.files?.[0];

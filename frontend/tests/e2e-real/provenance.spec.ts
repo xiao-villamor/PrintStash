@@ -1,4 +1,5 @@
 /** A Source draft conflicts against the real Model version, then saves only after review. */
+import { selectModelDetailTab } from "../model-detail-navigation";
 import { createHash } from "node:crypto";
 import { test, expect } from "./helpers";
 import { gcodeFor } from "./util";
@@ -66,7 +67,7 @@ test.describe("Source editing", () => {
       ).json();
       const writePath = `${readPath}/${initial.sources[0].id}`;
       await page.goto(`/models/${modelId}`);
-      await page.getByRole("tab", { name: "Source info", exact: true }).click();
+      await selectModelDetailTab(page, "Source info");
       await page.getByRole("button", { name: "Edit Title" }).click();
       const draft = page.getByRole("textbox", { name: "Title override" });
       await draft.fill("My reviewed source draft");

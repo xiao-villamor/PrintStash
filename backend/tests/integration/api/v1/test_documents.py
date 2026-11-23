@@ -35,6 +35,8 @@ from app.modules.storage.storage_backend.runtime import get_backend
 from tests._env import use_local_storage
 from tests.factories import (
     bearer,
+    build_collection,
+    build_model,
     build_multipart_model,
     build_user,
     grant_collection_role,
@@ -1423,3 +1425,188 @@ class TestBinaryCommitAcknowledgement:
             select(OwnedStorageObject).where(OwnedStorageObject.key == key)
         ).one()
         assert proof.state is StorageObjectState.COMMITTED
+
+
+class TestModelDocuments:
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "assembly.pdf",
+            "assembly.jpg",
+            "assembly.png",
+            "assembly.mp4",
+            "assembly.mov",
+        ],
+    )
+    def test_model_documents_round_trip(
+        self,
+        filename: str,
+        client: TestClient,
+        db_session: Session,
+        admin_headers: dict[str, str],
+    ) -> None:
+        model = build_model(db_session)
+        other = build_model(db_session)
+        scope = f"?model_id={model.id}"
+        payload = b"original attachment bytes"
+        response = client.post(
+            "/api/v1/documents/upload",
+            files={"file": (filename, payload)},
+            data={"model_id": model.id},
+            headers=admin_headers,
+        )
+        assert response.status_code == 201, response.text
+        document = response.json()
+        assert document["model_id"] == model.id
+        assert document["filename"] == filename
+        assert (
+            client.get(
+                f"/api/v1/documents/{document['id']}/file", headers=admin_headers
+            ).content
+            == payload
+        )
+        assert [
+            item["id"]
+            for item in client.get(
+                f"/api/v1/documents{scope}", headers=admin_headers
+            ).json()
+        ] == [document["id"]]
+        for query in ("", f"?model_id={other.id}"):
+            assert document["id"] not in {
+                item["id"]
+                for item in client.get(
+                    f"/api/v1/documents{query}", headers=admin_headers
+                ).json()
+            }
+
+    def test_model_document_access_follows_model(
+        self, client: TestClient, db_session: Session, admin_headers: dict[str, str]
+    ) -> None:
+        source = build_collection(db_session, "Document source")
+        destination = build_collection(db_session, "Document destination")
+        model = build_model(db_session, collection=source)
+        viewer = build_user(db_session, "model-document-viewer")
+        _grant(db_session, viewer, source.id, CollectionRole.VIEW)
+        scope = f"/api/v1/documents?model_id={model.id}"
+        upload = {
+            "files": {"file": ("guide.pdf", PDF_BYTES)},
+            "data": {"model_id": model.id},
+        }
+        headers = bearer(viewer)
+        assert (
+            client.post(
+                "/api/v1/documents/upload", headers=headers, **upload
+            ).status_code
+            == 403
+        )
+        created = client.post(
+            "/api/v1/documents/upload", headers=admin_headers, **upload
+        )
+        assert created.status_code == 201, created.text
+        doc_id = created.json()["id"]
+        path = f"/api/v1/documents/{doc_id}"
+        assert client.get(scope, headers=headers).json()[0]["id"] == doc_id
+        assert client.get(f"{path}/file", headers=headers).content == PDF_BYTES
+        assert client.delete(path, headers=headers).status_code == 403
+
+        model.collection_id = destination.id
+        db_session.add(model)
+        db_session.commit()
+        assert client.get(scope, headers=headers).status_code == 403
+        assert client.get(path, headers=headers).status_code == 403
+        assert client.get(f"{path}/file", headers=headers).status_code == 403
+        _grant(db_session, viewer, destination.id, CollectionRole.EDIT)
+        assert (
+            client.get(path, headers=headers).json()["collection_id"] == destination.id
+        )
+        assert (
+            client.put(
+                path, json={"name": "Assembly guide"}, headers=headers
+            ).status_code
+            == 200
+        )
+        assert client.delete(path, headers=headers).status_code == 204
+        assert [
+            item["id"]
+            for item in client.get("/api/v1/documents/trash", headers=headers).json()
+        ] == [doc_id]
+        assert client.post(f"{path}/restore", headers=headers).status_code == 200
+        assert client.get(f"{path}/file", headers=headers).content == PDF_BYTES
+
+    def test_model_document_visibility_lifecycle(
+        self, client: TestClient, db_session: Session, admin_headers: dict[str, str]
+    ) -> None:
+        model = build_model(db_session)
+        model_path = f"/api/v1/models/{model.id}"
+        doc = client.post(
+            "/api/v1/documents/upload",
+            files={"file": ("guide.pdf", PDF_BYTES)},
+            data={"model_id": model.id},
+            headers=admin_headers,
+        ).json()
+        doc_path = f"/api/v1/documents/{doc['id']}"
+        assert client.delete(model_path, headers=admin_headers).status_code == 204
+        assert client.get(f"{doc_path}/file", headers=admin_headers).status_code == 404
+        assert (
+            client.post(f"{model_path}/restore", headers=admin_headers).status_code
+            == 200
+        )
+        assert (
+            client.get(f"{doc_path}/file", headers=admin_headers).content == PDF_BYTES
+        )
+        assert client.delete(model_path, headers=admin_headers).status_code == 204
+        assert (
+            client.delete(f"{model_path}/purge", headers=admin_headers).status_code
+            == 200
+        )
+        assert db_session.get(Document, doc["id"]) is None
+        backend = get_backend()
+        assert not backend.exists(backend.document_file_key(doc["id"], doc["filename"]))
+
+    def test_rejects_invalid_model_document_owner(
+        self, client: TestClient, db_session: Session, admin_headers: dict[str, str]
+    ) -> None:
+        model = build_model(db_session, trashed=True)
+        path = "/api/v1/documents"
+        assert (
+            client.get(f"{path}?model_id={model.id}", headers=admin_headers).status_code
+            == 404
+        )
+        assert (
+            client.get(
+                f"{path}?model_id={model.id}&direct=true", headers=admin_headers
+            ).status_code
+            == 400
+        )
+        for data, expected in (
+            ({"model_id": model.id}, 404),
+            ({"model_id": model.id, "collection_id": 1}, 400),
+            ({"model_id": model.id, "multipart_model_id": 1}, 400),
+        ):
+            response = client.post(
+                f"{path}/upload",
+                files={"file": ("guide.pdf", PDF_BYTES)},
+                data=data,
+                headers=admin_headers,
+            )
+            assert response.status_code == expected, response.text
+
+    def test_embedded_model_document_images_use_private_caching(
+        self, client: TestClient, db_session: Session, admin_headers: dict[str, str]
+    ) -> None:
+        model = build_model(db_session)
+        document = client.post(
+            "/api/v1/documents/upload",
+            files={"file": ("guide.md", b"# Assembly")},
+            data={"model_id": model.id},
+            headers=admin_headers,
+        ).json()
+        upload = client.post(
+            f"/api/v1/documents/{document['id']}/images",
+            files={"file": ("photo.png", _PNG)},
+            headers=admin_headers,
+        )
+        assert upload.status_code == 201, upload.text
+        image = client.get(upload.json()["url"], headers=admin_headers)
+        assert image.content == _PNG
+        assert image.headers["cache-control"] == "private, no-store"

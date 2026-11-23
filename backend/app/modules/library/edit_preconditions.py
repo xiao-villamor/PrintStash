@@ -25,6 +25,7 @@ from app.db.models import (
 )
 from app.db.scopes import live
 from app.modules.identity import rbac
+from app.modules.library import document_access
 from app.schemas.editing import EditContract as EditContract
 from app.schemas.editing import EditingBase
 from app.schemas.editing import EditPrecondition as EditPrecondition
@@ -115,7 +116,12 @@ def claim(
     set_committed_value(row, "edit_version", claimed)
     # A concurrent move can have changed the collection between initial lookup
     # and the atomic UPDATE; authorize the row we actually locked/refreshed.
-    rbac.require_collection_role(session, actor, row.collection_id, CollectionRole.EDIT)
+    collection_id = (
+        document_access.collection_id(session, row)
+        if isinstance(row, Document)
+        else row.collection_id
+    )
+    rbac.require_collection_role(session, actor, collection_id, CollectionRole.EDIT)
 
 
 def validate_batch(

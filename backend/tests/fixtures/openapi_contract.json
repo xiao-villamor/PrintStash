@@ -2098,6 +2098,18 @@
             "title": "File",
             "type": "string"
           },
+          "model_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
           "multipart_model_id": {
             "anyOf": [
               {
@@ -6146,6 +6158,17 @@
           "kind": {
             "$ref": "#/components/schemas/DocumentKind"
           },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
           "multipart_model_id": {
             "anyOf": [
               {
@@ -6173,6 +6196,7 @@
           "id",
           "name",
           "kind",
+          "model_id",
           "updated_at"
         ],
         "title": "DocumentListItem",
@@ -6251,6 +6275,17 @@
           "kind": {
             "$ref": "#/components/schemas/DocumentKind"
           },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
           "multipart_model_id": {
             "anyOf": [
               {
@@ -6278,6 +6313,7 @@
           "id",
           "name",
           "kind",
+          "model_id",
           "updated_at"
         ],
         "title": "DocumentRead",
@@ -30867,6 +30903,23 @@
                 }
               ],
               "title": "Collection"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Model Id"
             }
           },
           {

@@ -114,6 +114,8 @@
 
 ### Added
 
+- Attach guides, photos and videos to individual Models under Files → Attachments. Preview PDFs and images, and download videos and other files. Documents follow the Model when it moves Collections or goes to Trash. Multipart Guides also accept MP4 and MOV.
+
 - **Moonraker configuration editor.** Printer administrators can browse, edit, and verify saves to existing configuration files. The editor keeps local drafts when a conflict needs review.
 
 - **Klipper printer controls.** Operators can home or jog individual axes, feed or retract filament once the primary hotend is ready, and adjust the part-cooling fan, print speed, and extrusion flow when available.

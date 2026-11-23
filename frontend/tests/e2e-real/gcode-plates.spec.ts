@@ -1,4 +1,5 @@
 /** Uploaded sliced 3MF files show the exact selected plate's toolpath in the browser. */
+import { selectModelDetailTab } from "../model-detail-navigation";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { test, expect } from "./helpers";
@@ -167,7 +168,7 @@ test.describe("Sliced G-code plates", () => {
 
         await page.getByRole("button", { name: "Collapse preview", exact: true }).click();
         await expect(page.getByRole("heading", { name: "About this model" })).toBeVisible();
-        await page.getByRole("tab", { name: "Source info", exact: true }).click();
+        await selectModelDetailTab(page, "Source info");
         await expect(panel.getByRole("tab", { name: "View", exact: true })).toHaveAttribute(
           "aria-selected",
           "true",

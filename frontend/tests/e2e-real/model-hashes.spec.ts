@@ -1,4 +1,5 @@
 /** Real stored bytes identify the file; geometry appears only after the background analysis calculates it. */
+import { selectModelDetailTab } from "../model-detail-navigation";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test, expect } from "./helpers";
@@ -36,7 +37,7 @@ test.describe("Model file hashes", () => {
         data: { enabled: true, embeddings_enabled: false },
       });
       expect(enabled.ok()).toBe(true);
-      await page.getByRole("tab", { name: "Similar", exact: true }).click();
+      await selectModelDetailTab(page, "Similar");
       await page.getByRole("button", { name: "Find similar", exact: true }).click();
       let geometricSha: string | null = null;
       await expect(async () => {

@@ -354,7 +354,9 @@ def _multipart(session: Session, subject_id: int) -> SubjectProjection | None:
 
 def _document(session: Session, subject_id: int) -> SubjectProjection | None:
     document = session.exec(
-        select(Document).where(Document.id == subject_id, live(Document))
+        select(Document).where(
+            Document.id == subject_id, live(Document), col(Document.model_id).is_(None)
+        )
     ).first()
     if document is None:
         return None
