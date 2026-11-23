@@ -27,6 +27,7 @@ import {
 } from "@/features/printers/queries";
 import { toast } from "@/lib/toast";
 import type {
+  FleetSummary,
   CompatibilityPolicy,
   JobPriority,
   PrinterRead,
@@ -104,6 +105,154 @@ const REAL_FLEET_QUEUE_DEPS: FleetQueueDeps = {
 
 export type FleetQueueView = "queued" | "active" | "recent";
 
+function dispatchName(filename: string) {
+  // Keep the complete remote name in the inspector and in the cell title.
+  return filename.replace(/__vault-f\d+-[a-f0-9]{8,64}(?=\.[^.]+$)/i, "");
+}
+
+function FarmDispatchBoard({
+  rows,
+  queued,
+  selected,
+  onSelect,
+}: {
+  rows: FleetSummary["printers"];
+  queued: PrintJobRead[];
+  selected: string;
+  onSelect: (id: string, view?: FleetQueueView) => void;
+}) {
+  if (!rows.length) return null;
+  const printing = rows.filter((row) => row.status === "printing").length;
+  const laneCounts = new Map<number, number>();
+  const queuedById = new Map(queued.map((job) => [job.id, job]));
+  for (const job of queued) {
+    if (job.printer_id != null)
+      laneCounts.set(job.printer_id, (laneCounts.get(job.printer_id) ?? 0) + 1);
+  }
+  return (
+    <div className="farm-dispatch-board">
+      <table aria-label={uiText("Farm dispatch")}>
+        <caption>
+          <div className="farm-board-title">
+            <span>{uiText("Farm dispatch")}</span>
+            <div className="farm-capacity">
+              <span>
+                {uiText("{running} of {total} printing", { running: printing, total: rows.length })}
+              </span>
+              <div className="farm-capacity-track" aria-hidden="true">
+                {rows.map((row) => (
+                  <span key={row.printer_id} data-state={row.status} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">{uiText("Printer")}</th>
+            <th scope="col">{uiText("Current job")}</th>
+            <th scope="col">{uiText("Next job")}</th>
+            <th scope="col">{uiText("Routing")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const id = String(row.printer_id);
+            const hold = row.maintenance
+              ? uiText("Maintenance")
+              : row.pending_operator_release
+                ? uiText("Operator release required")
+                : row.drain_mode
+                  ? uiText("Draining")
+                  : null;
+            const next = row.next_job_id != null ? queuedById.get(row.next_job_id) : null;
+            const depth = laneCounts.get(row.printer_id) ?? 0;
+            const running = row.status === "printing" || row.status === "paused";
+            const review = !running && row.current_job_id != null;
+            const percent =
+              running && row.current_job_name && row.progress != null
+                ? Math.round(row.progress * 100)
+                : null;
+            return (
+              <tr key={id} data-selected={selected === id}>
+                <th scope="row">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-pressed={selected === id}
+                    onClick={() => onSelect(selected === id ? "all" : id)}
+                  >
+                    {row.name}
+                  </Button>
+                  <small>{row.group}</small>
+                </th>
+                <td>
+                  <span
+                    className={row.current_job_name ? "farm-job-name" : "text-muted-foreground"}
+                  >
+                    {row.current_job_name ? (
+                      <span title={row.current_job_name}>{dispatchName(row.current_job_name)}</span>
+                    ) : (
+                      uiText("No active print")
+                    )}
+                  </span>
+                  {review && (
+                    <Button variant="link" size="xs" onClick={() => onSelect(id, "active")}>
+                      {uiText("Review active job")}
+                    </Button>
+                  )}
+                  {percent != null && (
+                    <div className="farm-job-progress">
+                      <progress aria-label={uiText("Progress")} value={percent} max={100} />
+                      <span>{percent}%</span>
+                      {row.remaining_minutes != null && (
+                        <small>
+                          {uiText("{value1} min remaining", { value1: row.remaining_minutes })}
+                        </small>
+                      )}
+                    </div>
+                  )}
+                </td>
+                <td>
+                  <span className={row.next_job_name ? "farm-job-name" : "text-muted-foreground"}>
+                    {row.next_job_name ? (
+                      <span title={row.next_job_name}>{dispatchName(row.next_job_name)}</span>
+                    ) : (
+                      uiText("No queued job")
+                    )}
+                  </span>
+                  {row.next_job_name && (
+                    <small>
+                      {[
+                        row.next_priority && knownUiText(row.next_priority),
+                        depth > 1 && uiText("{value1} queued", { value1: depth }),
+                        next?.blocked_reason && knownUiText(next.blocked_reason),
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </small>
+                  )}
+                </td>
+                <td>
+                  <strong className="farm-routing-state" data-state={hold ? "held" : row.status}>
+                    {hold ?? knownUiText(row.status)}
+                  </strong>
+                  {hold && <small>{knownUiText(row.status)}</small>}
+                  {row.pending_operator_release && (
+                    <Button variant="link" size="xs" onClick={() => onSelect(id, "recent")}>
+                      {uiText("Review release")}
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function FleetQueuePanel({
   printers,
   initialView = "queued",
@@ -146,7 +295,8 @@ export function FleetQueuePanel({
     const group =
       job.target_group ?? printers.find((printer) => printer.id === job.printer_id)?.group;
     return (
-      (printerFilter === "all" || String(job.printer_id) === printerFilter) &&
+      (printerFilter === "all" ||
+        (job.printer_id == null ? "unassigned" : String(job.printer_id)) === printerFilter) &&
       (groupFilter === "all" || groupFilter === group)
     );
   }
@@ -413,23 +563,55 @@ export function FleetQueuePanel({
             </div>
           )}
         </Modal>
+        {summaryQuery.isError && (
+          <div role="alert">
+            {userMessage(summaryQuery.error)}{" "}
+            <Button size="sm" variant="outline" onClick={() => void summaryQuery.refetch()}>
+              {uiText("Retry")}
+            </Button>
+          </div>
+        )}
+        <FarmDispatchBoard
+          queued={queued}
+          rows={(summaryQuery.data?.printers ?? []).filter(
+            (row) =>
+              printerNames.has(row.printer_id) &&
+              (groupFilter === "all" || row.group === groupFilter),
+          )}
+          selected={printerFilter}
+          onSelect={(id, view) => {
+            setPrinterFilter(id);
+            if (view) setQueueView(view);
+          }}
+        />
         <div className="fleet-filter-row">
-          <label>
-            {uiText("View")}
-            <select
-              className={inputClasses}
-              aria-label={uiText("View")}
-              value={queueView}
-              onChange={(event) => {
-                const next = event.target.value;
-                if (next === "queued" || next === "active" || next === "recent") setQueueView(next);
-              }}
-            >
-              <option value="queued">{uiText("Queued")}</option>
-              <option value="active">{uiText("Active")}</option>
-              <option value="recent">{uiText("Recent")}</option>
-            </select>
-          </label>
+          <div className="farm-queue-scopes" role="group" aria-label={uiText("View")}>
+            {(["queued", "active", "recent"] as const).map((view) => {
+              const label =
+                view === "queued"
+                  ? uiText("Queued")
+                  : view === "active"
+                    ? uiText("Active")
+                    : uiText("Recent");
+              return (
+                <Button
+                  key={view}
+                  size="sm"
+                  variant={queueView === view ? "secondary" : "ghost"}
+                  aria-label={label}
+                  aria-pressed={queueView === view}
+                  onClick={() => setQueueView(view)}
+                >
+                  {label}
+                  {view !== "recent" && (
+                    <span>
+                      {(view === "queued" ? queued : active).filter(matchesFilters).length}
+                    </span>
+                  )}
+                </Button>
+              );
+            })}
+          </div>
           <label>
             {uiText("Printer")}
             <select
@@ -439,6 +621,7 @@ export function FleetQueuePanel({
               onChange={(event) => setPrinterFilter(event.target.value)}
             >
               <option value="all">{uiText("All printers")}</option>
+              <option value="unassigned">{uiText("Unassigned")}</option>
               {printers.map((printer) => (
                 <option key={printer.id} value={printer.id}>
                   {printer.name}
@@ -452,7 +635,10 @@ export function FleetQueuePanel({
               className={inputClasses}
               aria-label={uiText("Group")}
               value={groupFilter}
-              onChange={(event) => setGroupFilter(event.target.value)}
+              onChange={(event) => {
+                setGroupFilter(event.target.value);
+                setPrinterFilter("all");
+              }}
             >
               <option value="all">{uiText("All groups")}</option>
               {groups.map((group) => (
@@ -469,20 +655,6 @@ export function FleetQueuePanel({
             <Button variant="outline" size="sm" onClick={() => void queueQuery.refetch()}>
               {uiText("Retry")}
             </Button>
-          </div>
-        )}
-        {summaryQuery.data?.printers?.some(
-          (printer) => printer.current_job_name || printer.next_job_name,
-        ) && (
-          <div className="border border-border bg-accent px-3.5 py-3 text-xs leading-relaxed text-foreground">
-            {summaryQuery.data.printers
-              .filter((printer) => printer.current_job_name || printer.next_job_name)
-              .map((printer) => (
-                <span key={printer.printer_id} className="mr-4 inline-block">
-                  {printer.name} · {printer.current_job_name ?? uiText("Idle")}
-                  {printer.next_job_name ? ` · ${uiText("Next:")} ${printer.next_job_name}` : ""}
-                </span>
-              ))}
           </div>
         )}
         {queueView === "queued" && (
@@ -509,7 +681,10 @@ export function FleetQueuePanel({
                         disabled={busy === job.id || laneIndex === 0}
                         onClick={() =>
                           void mutate(job.id, () =>
-                            updateJob(job.id, { queue_position: laneIndex }),
+                            updateJob(job.id, {
+                              queue_position: laneIndex,
+                              expected_updated_at: job.updated_at,
+                            }),
                           )
                         }
                       >
@@ -524,7 +699,10 @@ export function FleetQueuePanel({
                         disabled={busy === job.id || laneIndex === lane.length - 1}
                         onClick={() =>
                           void mutate(job.id, () =>
-                            updateJob(job.id, { queue_position: laneIndex + 2 }),
+                            updateJob(job.id, {
+                              queue_position: laneIndex + 2,
+                              expected_updated_at: job.updated_at,
+                            }),
                           )
                         }
                       >
@@ -631,11 +809,6 @@ export function FleetQueuePanel({
             </Button>
           </div>
         )}
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          {uiText(
-            "Held jobs keep their position. Older jobs load on demand. Queue changes do not change a Model’s recommended Revision.",
-          )}
-        </p>
       </div>
     </Localized>
   );

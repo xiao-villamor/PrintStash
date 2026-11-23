@@ -163,6 +163,7 @@ export interface MoonrakerConfigRead {
 }
 
 export interface PrinterFileRead {
+  plate_index?: number | null;
   id: number;
   printer_id: number;
   printer_name: string | null;
@@ -423,6 +424,7 @@ export interface FleetSummary {
     name: string;
     status: string;
     progress: number | null;
+    remaining_minutes?: number | null;
     group: string | null;
     loaded_slots: string[];
     loaded_material_slots?: Pick<

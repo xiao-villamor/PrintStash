@@ -7497,6 +7497,17 @@
             ],
             "title": "Progress"
           },
+          "remaining_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining Minutes"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -17959,6 +17970,17 @@
               }
             ],
             "title": "Original Filename"
+          },
+          "plate_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
           },
           "printer_id": {
             "title": "Printer Id",

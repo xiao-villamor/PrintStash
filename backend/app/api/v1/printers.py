@@ -24,6 +24,7 @@ from printstash_core.printers import (
     ProviderError,
     ProviderRegistry,
 )
+from printstash_core.printers.contracts import ProjectPrintClient
 from sqlmodel import Session, select
 
 from app.api.edit_preconditions import edit_precondition
@@ -50,6 +51,7 @@ from app.db.scopes import live
 from app.db.session import get_session
 from app.modules.identity import printer_rbac, rbac, ws_tickets
 from app.modules.identity.auth import get_user_by_id, verify_access_token
+from app.modules.media.sliced_gcode import is_sliced_filename
 from app.modules.printing import dispatch, materials, printer_edits
 from app.modules.printing.printer_files import (
     list_printer_files,
@@ -57,6 +59,7 @@ from app.modules.printing.printer_files import (
 )
 from app.modules.printing.printer_hub import PrinterHub
 from app.modules.printing.printer_jobs import (
+    project_subtask_id,
     reproducibility_payload,
 )
 from app.modules.printing.printer_provider import (
@@ -258,6 +261,7 @@ def _to_printer_file_read(
         model_id=file_row.model_id if file_row else None,
         model_name=model_row.name if model_row else None,
         original_filename=file_row.original_filename if file_row else None,
+        plate_index=row.plate_index if file_row else None,
         remote_filename=row.remote_filename,
         size_bytes=row.size_bytes,
         sha256=row.sha256,
@@ -952,7 +956,31 @@ async def start_printer_file(
                 file_row = candidate
                 source = "vault"
 
-    if (
+    native_project = (
+        p.provider == PrinterProvider.BAMBU_LAN
+        and payload.remote_filename.lower().endswith(".3mf")
+    )
+    if native_project:
+        if (
+            not isinstance(provider, ProjectPrintClient)
+            or stored_remote is None
+            or stored_remote.plate_index is None
+            or file_row is None
+            or stored_remote.file_id != file_row.id
+            or not is_sliced_filename(file_row.original_filename)
+            or stored_remote.matched_by not in {"upload_history", "vault_marker"}
+        ):
+            raise HTTPException(status_code=409, detail="artifact_format_not_supported")
+        if (
+            materials.compatibility_for_printer(
+                session, int(file_row.id), printer_id
+            ).verdict
+            == "mismatch"
+        ):
+            raise HTTPException(
+                status_code=409, detail="material_mismatch_confirmation_required"
+            )
+    elif (
         p.provider == PrinterProvider.BAMBU_LAN
         and not payload.remote_filename.lower().endswith((".gcode", ".g", ".gco"))
     ):
@@ -970,6 +998,7 @@ async def start_printer_file(
         file_id=file_id,
         model_id=model_id,
         remote_filename=payload.remote_filename,
+        provider_job_id=project_subtask_id() if native_project else None,
         plate_index=(
             stored_remote.plate_index
             if stored_remote is not None and stored_remote.file_id == file_id
@@ -984,7 +1013,17 @@ async def start_printer_file(
     session.refresh(job)
 
     try:
-        await provider.start(payload.remote_filename)
+        if (
+            native_project
+            and isinstance(provider, ProjectPrintClient)
+            and job.plate_index is not None
+            and job.provider_job_id is not None
+        ):
+            await provider.start_project(
+                payload.remote_filename, job.plate_index, job.provider_job_id
+            )
+        else:
+            await provider.start(payload.remote_filename)
     except ProviderError as exc:
         job.state = PrintJobState.FAILED
         job.error = _provider_action_code(exc)

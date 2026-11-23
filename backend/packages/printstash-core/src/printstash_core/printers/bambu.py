@@ -15,7 +15,7 @@ from ftplib import FTP_TLS, error_perm, error_reply, error_temp
 from importlib import import_module
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 from uuid import uuid4
 
 from .catalog import PROVIDER_DEFINITIONS
@@ -585,7 +585,7 @@ class BambuClient:
             self._close_ftps(ftp)
 
     def _upload_via_ftps(self, local_path: Path, remote_filename: str) -> None:
-        """Store a plain-text G-code file in Bambu's cache over implicit FTPS."""
+        """Store a print file in Bambu's cache over implicit FTPS."""
 
         remote_name = Path(remote_filename).name
         if not _cache_component(remote_filename) or remote_name != remote_filename:
@@ -1005,6 +1005,29 @@ class BambuClient:
                     "sequence_id": self._next_sequence_id(),
                     "command": "gcode_file",
                     "param": f"/cache/{remote_filename}",
+                }
+            }
+        )
+
+    async def start_project(
+        self, remote_filename: str, plate_index: int, subtask_id: str
+    ) -> dict[str, Any]:
+        """Start the selected toolpath in an uploaded SD-card project."""
+        self._check("start")
+        if not _cache_component(
+            remote_filename
+        ) or not remote_filename.lower().endswith(".3mf"):
+            raise ProviderError("invalid_bambu_remote_filename", code="provider_error")
+        if type(plate_index) is not int or plate_index < 0:
+            raise ProviderError("invalid_plate_index", code="provider_error")
+        return await self._send_command(
+            {
+                "print": {
+                    "sequence_id": self._next_sequence_id(),
+                    "command": "project_file",
+                    "subtask_id": subtask_id,
+                    "url": f"file:///sdcard/cache/{quote(remote_filename, safe='')}",
+                    "param": f"Metadata/plate_{plate_index}.gcode",
                 }
             }
         )

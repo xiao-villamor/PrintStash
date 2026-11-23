@@ -29,7 +29,7 @@ available builds. Anything marked beta here remains beta.
   upload, so a concurrent edit or removal from another client can race a save
   after the revision check. Review the readback when an upload is unconfirmed.
 - Bambu LAN support is beta. It supports local status, upload of plain-text
-  Vault G-code, explicit send-to-print, and pause/resume/cancel controls.
+  Vault G-code and sliced projects, explicit plate starts, and pause/resume/cancel controls.
 - Bambu LAN browsing outside `/cache`, remote deletion, manual motion and tuning
   controls, and measured filament consumption are not implemented.
 - Multipart Models reference existing Models as named pieces and alternatives.
@@ -189,8 +189,7 @@ available builds. Anything marked beta here remains beta.
   have no toolpath to preview. Explicit `.gcode.3mf` files are Revisions, and
   the Send dialog separately selects the plate to send, queue or batch.
   A single sliced plate is selected automatically; multiple plates require a choice.
-  Printing extracts that plate as ordinary G-code through the existing provider
-  transport. Native Bambu project commands and AMS mapping options are not included.
+  Bambu LAN sends the archive and selected plate. Other providers receive the extracted toolpath. PrintStash does not set per-print AMS mappings.
   Multi-plate revision-wide estimates and material requirements are left unknown
   because the plates can use different settings; single-plate metadata is parsed.
 

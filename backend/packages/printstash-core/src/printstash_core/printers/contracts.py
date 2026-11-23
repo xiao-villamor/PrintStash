@@ -62,6 +62,13 @@ class PrinterClient(Protocol):
 
 
 @runtime_checkable
+class ProjectPrintClient(Protocol):
+    async def start_project(
+        self, remote_filename: str, plate_index: int, subtask_id: str
+    ) -> Mapping[str, Any]: ...
+
+
+@runtime_checkable
 class ArtifactCaptureClient(Protocol):
     async def download_artifact(
         self, remote_path: str, destination: Path, *, max_bytes: int

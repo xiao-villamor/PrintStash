@@ -11,11 +11,9 @@ they must make unsupported actions explicit in the API and UI.
 
 Files named `.gcode.3mf` can be stored as one Revision with several sliced plates.
 Sending, queuing or batching requires a selected plate when more than one exists.
-PrintStash uploads only that plate’s extracted `.gcode` through the provider’s
-existing G-code transport, and retains the original archive for downloading.
-The commands must already be sliced for the target printer. This does not add
-native Bambu project dispatch, AMS mapping options or new hardware certification.
-Ordinary unsliced `.3mf` projects remain source files.
+Bambu LAN receives the original archive over FTPS and starts the selected plate with
+a project command. Other providers receive the extracted G-code for that plate.
+Slice for the target printer before sending. Ordinary unsliced `.3mf` projects remain source files.
 
 ## Material and tool state
 
@@ -144,11 +142,10 @@ Current behavior:
 - local MQTT status, including nozzle and bed readings and targets and
   part-cooling output, current layer counts, estimated minutes remaining, chamber
   temperature and SD card presence when supplied by the installed firmware
-- upload plain-text Vault G-code over LAN FTPS
+- upload plain-text G-code and sliced Library projects over LAN FTPS
 - use **Files → Sync printer files** to browse G-code and 3MF files under
-  `/cache`, including nested folders. **Start** accepts plain-text G-code.
-  To print a sliced project from the Library, select the Revision and plate.
-- explicitly start a just-uploaded G-code file; upload alone never starts it
+  `/cache`, including nested folders. **Start** accepts plain-text G-code and a PrintStash-uploaded project with a recorded plate. For other projects, import the sliced Revision and select its plate.
+- choose upload only, send and start, or queue. The farm board shows the running job, progress, reported time remaining, next job, and routing holds.
 - pause, resume, and cancel controls
 - record externally-started jobs with the task, subtask, project, profile,
   plate, layer, nozzle, and G-code identity fields the printer actually reports

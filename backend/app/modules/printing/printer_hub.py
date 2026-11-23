@@ -14,6 +14,7 @@ import asyncio
 import tempfile
 import threading
 import time
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict
 from urllib.parse import unquote, urlparse
@@ -23,7 +24,7 @@ from sqlmodel import select
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.core.time import utcnow
+from app.core.time import ensure_utc, utcnow
 from app.db.models import (
     FileType,
     JobKind,
@@ -911,6 +912,24 @@ class PrinterHub:
                     if _bambu_identity_matches(incoming_identity, candidate_identity):
                         job = candidate
                         break
+                # A locally started project receives a unique subtask ID before upload.
+                # The first MQTT report can precede the command acknowledgement.
+                subtask = incoming_identity.get("external_subtask_id")
+                if job is None and bambu_printer and subtask:
+                    job = next(
+                        (
+                            row
+                            for row in rows
+                            if row.source == "vault"
+                            and row.plate_index is not None
+                            and row.provider_job_id == subtask
+                            and row.finished_at is None
+                            and not _bambu_identity(row)
+                            and row.state
+                            in (PrintJobState.UPLOADING, PrintJobState.STARTED)
+                        ),
+                        None,
+                    )
                 # A project-only -> task-only transition has no overlapping
                 # value. Match only that active external row by the same
                 # reported filename; filename alone is never an identity.
@@ -921,6 +940,34 @@ class PrinterHub:
                         ):
                             job = candidate
                             break
+                if (
+                    job is None
+                    and bambu_printer
+                    and incoming_identity
+                    and ms_state in ("printing", "paused")
+                ):
+                    # Plain G-code starts have no client subtask ID. Bind the first
+                    # report only to a single recent, acknowledged start of the
+                    # exact cache path. Old unresolved jobs remain operator-owned.
+                    remote_path = print_stats.get("external_gcode_file")
+                    now = ensure_utc(utcnow())
+                    starting = [
+                        row
+                        for row in rows
+                        if row.source == "vault"
+                        and row.plate_index is None
+                        and row.state == PrintJobState.STARTED
+                        and row.started_at is not None
+                        and row.finished_at is None
+                        and not _bambu_identity(row)
+                        and row.provider_job_id is None
+                        and remote_path == f"/cache/{row.remote_filename}"
+                        and timedelta(0)
+                        <= now - ensure_utc(row.started_at)
+                        <= timedelta(seconds=60)
+                    ]
+                    if len(starting) == 1:
+                        job = starting[0]
                 # Provider-neutral reports (Moonraker, OctoPrint, PrusaLink,
                 # manual vault dispatch, and identityless Bambu external
                 # runs) have only a filename to reconcile to an active row.

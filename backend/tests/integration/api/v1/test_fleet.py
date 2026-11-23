@@ -567,6 +567,37 @@ class TestQueueScheduler:
         provider.upload.assert_awaited_once()
         provider.start.assert_awaited_once()
 
+    def test_a_second_job_waits_for_the_dispatched_run_to_finish(
+        self,
+        db_session: Session,
+    ) -> None:
+        from app.core.time import utcnow
+        from app.modules.printing.printer_jobs import _claim_next_sync
+
+        printer = build_printer(db_session, status=PrinterStatus.READY)
+        artifact = a_gcode_artifact(db_session, "Spare parts")
+        current = build_print_job(
+            db_session,
+            artifact,
+            printer=printer,
+            dispatch_claimed_at=utcnow(),
+            state=PrintJobState.STARTED,
+        )
+        waiting = build_print_job(
+            db_session,
+            artifact,
+            printer=printer,
+            routing_strategy="manual",
+            state=PrintJobState.QUEUED,
+        )
+        assert _claim_next_sync() is None
+        db_session.refresh(waiting)
+        assert waiting.state == PrintJobState.QUEUED
+        current.state = PrintJobState.COMPLETED
+        db_session.add(current)
+        db_session.commit()
+        assert _claim_next_sync() == waiting.id
+
     def test_scheduler_rechecks_drain_before_dispatch(
         self,
         client: TestClient,
@@ -1916,7 +1947,12 @@ class TestFleet:
         grant_printer_role(db_session, viewer, visible, PrinterRole.VIEW)
         hub: PrinterHub = app.state.printer_hub
         hub.snapshots[visible.id] = {
-            "print_stats": {"state": "printing", "filename": "Calibration/bed.gcode"}
+            "print_stats": {
+                "state": "printing",
+                "filename": "Calibration/bed.gcode",
+                "remaining_minutes": 3,
+            },
+            "virtual_sdcard": {"progress": 0.45},
         }
         hub.snapshots[hidden.id] = {
             "print_stats": {"state": "printing", "filename": "private.gcode"}
@@ -1931,6 +1967,8 @@ class TestFleet:
         assert [row["printer_id"] for row in rows] == [visible.id]
         assert rows[0]["current_job_name"] == "Calibration/bed.gcode"
         assert rows[0]["current_job_id"] is None
+        assert rows[0]["progress"] == 0.45
+        assert rows[0]["remaining_minutes"] == 3
 
     def test_summary_projects_only_granted_printer_readings_from_the_cache(
         self,
@@ -2126,6 +2164,7 @@ class TestFleet:
                 "name": "Summary",
                 "status": "ready",
                 "progress": None,
+                "remaining_minutes": None,
                 "group": None,
                 "loaded_slots": [],
                 "loaded_material_slots": [],

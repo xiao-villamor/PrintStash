@@ -480,6 +480,9 @@ export function PrinterFiles({
                         selected.original_filename ?? uiText("Not recorded"),
                       ],
                       [uiText("Model"), selected.model_name ?? "—"],
+                      ...(selected.plate_index != null
+                        ? [[uiText("Plate"), String(selected.plate_index)] as const]
+                        : []),
                       [
                         uiText("Size"),
                         selected.size_bytes === null ? "—" : formatBytes(selected.size_bytes),
@@ -493,6 +496,11 @@ export function PrinterFiles({
                   />
                   <div className="printer-explorer-actions">
                     {(printer.provider !== "bambu_lan" ||
+                      (selected.plate_index != null &&
+                        selected.file_id != null &&
+                        selected.original_filename?.toLowerCase().endsWith(".gcode.3mf") &&
+                        selected.remote_filename.toLowerCase().endsWith(".3mf") &&
+                        ["upload_history", "vault_marker"].includes(selected.matched_by)) ||
                       /\.(?:gcode|gco|g)$/i.test(selected.remote_filename)) && (
                       <Button
                         size="sm"

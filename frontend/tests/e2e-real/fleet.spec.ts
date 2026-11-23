@@ -67,7 +67,7 @@ test.describe("fleet queue", () => {
     await expect(async () => {
       await page.reload();
       await page.getByRole("tab", { name: "Queue" }).click();
-      await page.getByRole("combobox", { name: "View", exact: true }).selectOption("recent");
+      await page.getByRole("button", { name: "Recent", exact: true }).click();
       await expect(page.getByText(/\.gcode/).first()).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 30_000 });
 
@@ -164,16 +164,19 @@ test.describe("fleet queue", () => {
     // ── Use the native Queue and Maintenance pickers with the keyboard ──
     await page.goto("/printers");
     await page.getByRole("button", { name: /^Active jobs/ }).click();
-    const view = page.getByRole("combobox", { name: "View", exact: true });
-    await expect(view).toHaveValue("active");
-    await expect(view).toHaveCSS("display", /^(?:inline-)?flex$/);
-    await expect(view).toHaveCSS("align-items", "center");
-    await view.press("Space");
-    await expect.poll(() => view.evaluate((select) => select.matches(":open"))).toBe(true);
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("Enter");
-    await expect(view).toHaveValue("recent");
-    await expect(page.getByText(job.remote_filename, { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Active", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    const recent = page.getByRole("button", { name: "Recent", exact: true });
+    await recent.focus();
+    await recent.press("Enter");
+    await expect(recent).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      page
+        .getByRole("region", { name: "Recent print jobs" })
+        .getByText(job.remote_filename, { exact: true }),
+    ).toBeVisible();
 
     await page.getByRole("tab", { name: "Maintenance" }).click();
     const windows = page.getByRole("combobox", { name: "Windows" });

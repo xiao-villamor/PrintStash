@@ -591,6 +591,67 @@ class TestPrinterHubSyncActiveJob:
             assert rows[0].progress == pytest.approx(1.0)
             assert rows[0].finished_at is not None
 
+    @pytest.mark.parametrize(("age", "same_job"), [(1, True), (120, False)])
+    def test_bambu_plain_start_matches_only_a_recent_explicit_cache_start(
+        self, hub, db_session, age, same_job
+    ):
+        from datetime import timedelta
+
+        from app.core.time import utcnow
+
+        pid, job = self._setup_job(db_session)
+        printer = db_session.get(Printer, pid)
+        printer.provider = PrinterProvider.BAMBU_LAN
+        job.started_at = utcnow() - timedelta(seconds=age)
+        db_session.add_all([printer, job])
+        db_session.commit()
+        for state in ("printing", "complete"):
+            hub._sync_active_job_db(
+                pid,
+                state,
+                "sync.gcode",
+                0.5,
+                {
+                    "external_subtask_id": "device-assigned",
+                    "external_gcode_file": "/cache/sync.gcode",
+                },
+            )
+        db_session.refresh(job)
+        assert (job.state == PrintJobState.COMPLETED) is same_job
+        assert len(
+            db_session.exec(select(PrintJob).where(PrintJob.printer_id == pid)).all()
+        ) == (1 if same_job else 2)
+
+    def test_native_project_subtask_closes_the_original_queued_run(
+        self, hub, db_session
+    ):
+        pid, job = self._setup_job(db_session)
+        printer = db_session.get(Printer, pid)
+        printer.provider = PrinterProvider.BAMBU_LAN
+        job.provider_job_id = "726543901"
+        job.plate_index = 2
+        db_session.add_all([printer, job])
+        db_session.commit()
+        for state, progress in [("printing", 0.3), ("complete", 1.0)]:
+            hub._sync_active_job_db(
+                pid,
+                state,
+                "plate_2.gcode",
+                progress,
+                {"external_subtask_id": "726543901"},
+            )
+        db_session.refresh(job)
+        assert job.state == PrintJobState.COMPLETED
+        assert job.external_subtask_id == "726543901"
+        assert (
+            len(
+                db_session.exec(
+                    select(PrintJob).where(PrintJob.printer_id == pid)
+                ).all()
+            )
+            == 1
+        )
+
     def test_sync_complete_sets_finished_at(self, hub, db_session):
         pid, job = self._setup_job(db_session)
 

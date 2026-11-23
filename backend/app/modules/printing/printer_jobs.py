@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
 from printstash_core.gcode import PrintArtifactFormatError, classify_print_artifact
+from printstash_core.printers.contracts import ProjectPrintClient
 from sqlalchemy import case, update
 from sqlmodel import select
 
@@ -20,6 +22,7 @@ from app.db.models import (
     JobPriority,
     Model,
     Printer,
+    PrinterProvider,
     PrinterRole,
     PrintJob,
     PrintJobState,
@@ -31,7 +34,10 @@ from app.modules.identity import printer_rbac, rbac
 from app.modules.media.sliced_gcode import is_container, plate_toolpath
 from app.modules.media.three_mf_preview import EmbeddedGcodeError
 from app.modules.printing import fleet
-from app.modules.printing.printer_files import upsert_printer_file
+from app.modules.printing.printer_files import (
+    build_traceable_remote_filename,
+    upsert_printer_file,
+)
 from app.modules.printing.printer_provider import PrinterProviderClient, ProviderError
 from app.modules.storage.artifact_content import (
     ArtifactContentError,
@@ -163,6 +169,11 @@ class TransferReceipt:
     sha256: str
 
 
+def project_subtask_id() -> str:
+    """A LAN run ID shared with firmware before the first status report."""
+    return str(secrets.randbelow(2**63 - 1) + 1)
+
+
 async def transfer_artifact(
     backend,
     provider,
@@ -171,6 +182,7 @@ async def transfer_artifact(
     *,
     start_print: bool,
     mark_outcome_unknown: bool = False,
+    subtask_id: str | None = None,
     plate_index: int | None = None,
 ) -> TransferReceipt:
     """Single storage-to-provider transfer seam for immediate and queued sends."""
@@ -179,21 +191,31 @@ async def transfer_artifact(
             handle = resolve(artifact, backend=backend)
             with ExitStack() as stack:
                 local = stack.enter_context(handle.materialize())
+                toolpath = local
                 filename = artifact.original_filename
                 if is_container(artifact):
                     if plate_index is None:
                         raise PrinterJobError("plate_selection_required")
-                    local = stack.enter_context(plate_toolpath(local, plate_index))
-                    filename = local.name
+                    toolpath = stack.enter_context(plate_toolpath(local, plate_index))
+                    filename = toolpath.name
                 elif plate_index is not None:
                     raise PrinterJobError("plate_not_supported")
                 artifact_format = await asyncio.to_thread(
                     classify_print_artifact,
-                    local,
+                    toolpath,
                     filename=filename,
                 )
                 if not provider.capabilities.accepts_format(artifact_format):
                     raise PrinterJobError("artifact_format_not_supported")
+                project = plate_index is not None and remote_filename.lower().endswith(
+                    ".3mf"
+                )
+                if project and not isinstance(provider, ProjectPrintClient):
+                    raise PrinterJobError("artifact_format_not_supported")
+                if project and start_print and subtask_id is None:
+                    raise PrinterJobError("project_subtask_required")
+                if not project:
+                    local = toolpath
                 receipt = TransferReceipt(
                     size_bytes=local.stat().st_size,
                     sha256=await asyncio.to_thread(sha256_file, local),
@@ -201,7 +223,16 @@ async def transfer_artifact(
                 try:
                     await provider.upload(local, remote_filename)
                     if start_print:
-                        await provider.start(remote_filename)
+                        if (
+                            project
+                            and plate_index is not None
+                            and subtask_id is not None
+                        ):
+                            await provider.start_project(
+                                remote_filename, plate_index, subtask_id
+                            )
+                        else:
+                            await provider.start(remote_filename)
                     return receipt
                 except Exception as exc:
                     # Upload and start are non-transactional remote operations. A
@@ -453,6 +484,7 @@ class DispatchContext:
     artifact: File
     remote_filename: str
     plate_index: int | None
+    subtask_id: str | None
 
 
 def _load_dispatch_context(job_id: int) -> DispatchContext:
@@ -464,11 +496,25 @@ def _load_dispatch_context(job_id: int) -> DispatchContext:
         artifact = session.get(File, job.file_id)
         if printer is None or artifact is None:
             raise RuntimeError("queue_dependency_missing")
+        if job.plate_index is not None:
+            # Automatic routing can change the destination after the job was queued.
+            job.remote_filename = build_traceable_remote_filename(
+                artifact,
+                plate_index=job.plate_index,
+                native_project=printer.provider == PrinterProvider.BAMBU_LAN,
+            )
+            if printer.provider == PrinterProvider.BAMBU_LAN:
+                job.provider_job_id = project_subtask_id()
+            session.add(job)
+            session.commit()
+            session.refresh(printer)
+            session.refresh(artifact)
         return DispatchContext(
             printer=printer,
             artifact=artifact,
             remote_filename=job.remote_filename,
             plate_index=job.plate_index,
+            subtask_id=job.provider_job_id,
         )
 
 
@@ -489,16 +535,20 @@ def _mark_dispatch_started(
     job_id: int, context: DispatchContext, receipt: TransferReceipt
 ) -> None:
     with get_session_factory().scoped_session() as session:
-        job = session.get(PrintJob, job_id)
-        if job is None:
-            return
-        job.state = PrintJobState.STARTED
-        job.started_at = utcnow()
-        job.error = None
-        job.retryable = False
-        job.blocked_reason = None
-        job.updated_at = utcnow()
-        session.add(job)
+        now = utcnow()
+        # MQTT progress or completion can arrive before the start acknowledgement.
+        session.exec(
+            update(PrintJob)
+            .where(PrintJob.id == job_id, PrintJob.state == PrintJobState.UPLOADING)
+            .values(
+                state=PrintJobState.STARTED,
+                started_at=now,
+                error=None,
+                retryable=False,
+                blocked_reason=None,
+                updated_at=now,
+            )
+        )
         session.commit()
         upsert_printer_file(
             session,
@@ -543,6 +593,7 @@ async def _dispatch_claimed(job_id: int, provider_builder: ProviderBuilder) -> N
         start_print=True,
         mark_outcome_unknown=True,
         plate_index=context.plate_index,
+        subtask_id=context.subtask_id,
     )
 
     await asyncio.to_thread(_mark_dispatch_started, job_id, context, receipt)

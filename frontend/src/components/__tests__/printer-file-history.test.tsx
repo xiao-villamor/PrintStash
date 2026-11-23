@@ -206,6 +206,24 @@ describe("Printer files", () => {
     expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
   });
 
+  it("starts the selected cached Bambu project with its saved plate", async () => {
+    const project = aPrinterFile({
+      ...file,
+      original_filename: "project.gcode.3mf",
+      remote_filename: "project.3mf",
+      matched_by: "vault_marker",
+      plate_index: 2,
+    });
+    const props = fileProps([project]);
+    renderApp(
+      <PrinterFiles {...props} printer={aPrinter({ ...printer, provider: "bambu_lan" })} />,
+    );
+    const inspector = within(screen.getByRole("complementary", { name: "Selected file" }));
+    expect(inspector.getByText("Plate")).toBeVisible();
+    await userEvent.click(inspector.getByRole("button", { name: "Start" }));
+    expect(props.onStart).toHaveBeenCalledWith(project);
+  });
+
   it("offers Jobs as the alternative for a transfer-only provider", async () => {
     const user = userEvent.setup();
     const props = fileProps([]);

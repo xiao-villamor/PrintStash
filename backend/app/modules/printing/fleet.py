@@ -31,6 +31,7 @@ from app.db.models import (
     PrinterMaintenanceLog,
     PrinterMaintenanceWindow,
     PrinterMaterialSlot,
+    PrinterProvider,
     PrinterStatus,
     PrinterTool,
     PrintJob,
@@ -83,6 +84,7 @@ class RoutingSnapshot:
     tools_by_printer: dict[int, tuple[PrinterTool, ...]]
     requirements_by_file: dict[int, tuple[ArtifactMaterialRequirement, ...]]
     nozzle_by_file: dict[int, float | None]
+    dispatching_printer_ids: frozenset[int] = frozenset()
     artifact_formats_by_file: dict[int, PrintArtifactFormat] = dataclass_field(
         default_factory=dict
     )
@@ -111,19 +113,32 @@ def build_routing_snapshot(
         if printer_ids
         else set()
     )
-    counts = {
-        int(printer_id): int(count)
-        for printer_id, count in session.exec(
-            select(PrintJob.printer_id, func.count(PrintJob.id))
-            .where(
-                PrintJob.printer_id.in_(printer_ids),  # type: ignore[union-attr]
-                PrintJob.state.in_(_ACTIVE_STATES),
-                live(PrintJob),
-            )
-            .group_by(PrintJob.printer_id)
-        ).all()
-        if printer_id is not None
-    }
+    workload = session.exec(
+        select(
+            PrintJob.printer_id,
+            func.count(PrintJob.id),
+            func.max(
+                case(
+                    (
+                        (PrintJob.dispatch_claimed_at.is_not(None))
+                        & PrintJob.state.in_(_RESOLVABLE_STATES),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ),
+        )
+        .where(
+            PrintJob.printer_id.in_(printer_ids),
+            PrintJob.state.in_(_ACTIVE_STATES),
+            live(PrintJob),
+        )
+        .group_by(PrintJob.printer_id)
+    ).all()
+    counts = {int(pid): count for pid, count, _ in workload if pid is not None}
+    dispatching_ids = frozenset(
+        int(pid) for pid, _, busy in workload if pid is not None and busy
+    )
     pending_release_ids = {
         int(printer_id)
         for printer_id in session.exec(
@@ -179,6 +194,7 @@ def build_routing_snapshot(
         printers=printers,
         active_maintenance_ids=frozenset(maintenance_ids),
         active_counts=counts,
+        dispatching_printer_ids=dispatching_ids,
         pending_release_ids=frozenset(pending_release_ids),
         slots_by_printer={key: tuple(value) for key, value in slots_by_printer.items()},
         tools_by_printer={key: tuple(value) for key, value in tools_by_printer.items()},
@@ -222,6 +238,7 @@ def _eligible(
         and printer.status == PrinterStatus.READY
         and caps.can_upload
         and caps.can_start
+        and (snapshot is None or printer.id not in snapshot.dispatching_printer_ids)
         and not maintained
         and (
             snapshot is None or int(printer.id or 0) not in snapshot.pending_release_ids
@@ -534,7 +551,11 @@ def enqueue_job(
         file_id=artifact.id,
         model_id=artifact.model_id,
         remote_filename=build_traceable_remote_filename(
-            artifact, plate_index=plate_index
+            artifact,
+            plate_index=plate_index,
+            native_project=printer is not None
+            and printer.provider == PrinterProvider.BAMBU_LAN
+            and plate_index is not None,
         ),
         plate_index=plate_index,
         state=PrintJobState.QUEUED,
@@ -637,7 +658,11 @@ def create_batch(
             batch_id=batch.id,
             copy_index=copy_index,
             remote_filename=build_traceable_remote_filename(
-                artifact, plate_index=plate_index
+                artifact,
+                plate_index=plate_index,
+                native_project=printer is not None
+                and printer.provider == PrinterProvider.BAMBU_LAN
+                and plate_index is not None,
             ),
             plate_index=plate_index,
             state=PrintJobState.QUEUED,
@@ -1278,8 +1303,26 @@ def fleet_summary(
             else None
         )
         printer_jobs = [row for row in jobs if row.printer_id == printer_id]
-        current = next(
-            (row for row in printer_jobs if row.state in active_states), None
+        current = max(
+            (row for row in printer_jobs if row.state in active_states),
+            key=lambda row: (
+                row.remote_filename == running_filename,
+                row.updated_at,
+                row.id or 0,
+            ),
+            default=None,
+        )
+        live_progress = (
+            _observed_number(snapshot.get("virtual_sdcard", {}).get("progress"))
+            if snapshot and running_filename
+            else None
+        )
+        if live_progress is not None and not 0 <= live_progress <= 1:
+            live_progress = None
+        minutes = (
+            _observed_number(stats.get("remaining_minutes"))
+            if running_filename
+            else None
         )
         queued = sorted(
             (row for row in printer_jobs if row.state == PrintJobState.QUEUED),
@@ -1353,7 +1396,20 @@ def fleet_summary(
                 "printer_id": printer_id,
                 "name": printer.name,
                 "status": printer.status.value,
-                "progress": current.progress if current else None,
+                "progress": live_progress
+                if live_progress is not None
+                else (
+                    current.progress
+                    if current
+                    and (
+                        not running_filename
+                        or current.remote_filename == running_filename
+                    )
+                    else None
+                ),
+                "remaining_minutes": int(minutes)
+                if minutes is not None and minutes >= 0 and minutes.is_integer()
+                else None,
                 "group": printer.group,
                 "loaded_slots": [
                     " · ".join(

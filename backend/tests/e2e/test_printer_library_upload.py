@@ -8,6 +8,27 @@ from tests.fakes.mock_printer import create_app
 from tests.fakes.server import start_server
 
 
+@pytest.fixture
+def bambu_cache(e2e_db, monkeypatch):
+    from app.modules.printing.bambu_adapter import BambuLanProvider
+    from tests.fakes.mock_bambu import FakeFtpTls, make_mqtt_factory
+    from tests.fakes.print_sim import PrintSim
+
+    sim = PrintSim(total_mm=10, total_seconds=10, print_seconds=1)
+    mqtt, clients = make_mqtt_factory(sim)
+    ftp = FakeFtpTls(files={"cache/Slicer/External project.3mf": b"zip"})
+    monkeypatch.setattr(BambuLanProvider, "_default_mqtt_client", staticmethod(mqtt))
+    monkeypatch.setattr(BambuLanProvider, "_ftps_client", lambda self: ftp)
+    printer = build_printer(
+        e2e_db,
+        provider="bambu_lan",
+        bambu_host="127.0.0.1",
+        bambu_serial="TEST",
+        bambu_access_code="test-code",
+    )
+    return printer, ftp, clients, sim
+
+
 class TestUploadFromLibrary:
     @pytest.mark.asyncio
     async def test_upload_only_exposes_the_confirmed_file_without_starting_the_printer(
@@ -42,26 +63,9 @@ class TestUploadFromLibrary:
 
     @pytest.mark.asyncio
     async def test_bambu_upload_then_sync_preserves_revision_and_external_project(
-        self, api, superuser_headers, e2e_db, monkeypatch
+        self, api, superuser_headers, e2e_db, bambu_cache
     ) -> None:
-        from app.modules.printing.bambu_adapter import BambuLanProvider
-        from tests.fakes.mock_bambu import FakeFtpTls, make_mqtt_factory
-        from tests.fakes.print_sim import PrintSim
-
-        sim = PrintSim(total_mm=10, total_seconds=10, print_seconds=1)
-        mqtt, _ = make_mqtt_factory(sim)
-        ftp = FakeFtpTls(files={"cache/Slicer/External project.3mf": b"zip"})
-        monkeypatch.setattr(
-            BambuLanProvider, "_default_mqtt_client", staticmethod(mqtt)
-        )
-        monkeypatch.setattr(BambuLanProvider, "_ftps_client", lambda self: ftp)
-        printer = build_printer(
-            e2e_db,
-            provider="bambu_lan",
-            bambu_host="127.0.0.1",
-            bambu_serial="TEST",
-            bambu_access_code="test-code",
-        )
+        printer, ftp, _, sim = bambu_cache
         revision = a_gcode_artifact(e2e_db, "bambu-cache-transfer")
         get_backend().write_bytes(b"G28\n", revision.path)
         path = f"/api/v1/printers/{printer.id}"
@@ -85,3 +89,75 @@ class TestUploadFromLibrary:
         assert rows[name]["size_bytes"] == 4
         assert rows["Slicer/External project.3mf"]["size_bytes"] == 3
         assert sim.state == "standby"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("route", ["send", "files", "queue"])
+    async def test_bambu_native_project_starts_only_the_chosen_plate(
+        self, api, superuser_headers, e2e_db, bambu_cache, route
+    ):
+        from app.modules.printing.bambu_adapter import BambuLanProvider
+        from app.modules.printing.printer_jobs import dispatch_next
+        from tests.fixtures.three_mf_projects import build_sliced_project
+
+        printer, ftp, clients, _ = bambu_cache
+        rev = a_gcode_artifact(e2e_db, "Native project", dispatchable=True)
+        rev.original_filename = "native.gcode.3mf"
+        archive = build_sliced_project()
+        get_backend().write_bytes(archive, rev.path)
+        e2e_db.add(rev)
+        e2e_db.commit()
+        path = f"/api/v1/printers/{printer.id}"
+        payload = {"file_id": rev.id, "plate_index": 2}
+        if route == "queue":
+            queued = await api.post(
+                "/api/v1/fleet/queue",
+                headers=superuser_headers,
+                json={**payload, "strategy": "manual", "printer_id": printer.id},
+            )
+            assert queued.status_code == 201, queued.text
+            name = queued.json()["remote_filename"]
+            assert await dispatch_next(BambuLanProvider.build) == queued.json()["id"]
+        else:
+            sent = await api.post(
+                f"{path}/send",
+                headers=superuser_headers,
+                json={**payload, "start_print": route == "send"},
+            )
+            assert sent.status_code == 200, sent.text
+            name = sent.json()["remote_filename"]
+        assert name.endswith(".3mf")
+        assert ftp.files[f"cache/{name}"] == archive
+        if route == "files":
+            assert not any(
+                "print" in msg for client in clients for msg in client.published
+            )
+            synced = await api.post(f"{path}/files/sync", headers=superuser_headers)
+            assert synced.status_code == 200
+            row = next(row for row in synced.json() if row["remote_filename"] == name)
+            assert row["plate_index"] == 2
+            unknown = await api.post(
+                f"{path}/start",
+                headers=superuser_headers,
+                json={
+                    "remote_filename": "Slicer/External project.3mf",
+                    "file_id": rev.id,
+                },
+            )
+            assert unknown.status_code == 409
+            started = await api.post(
+                f"{path}/start",
+                headers=superuser_headers,
+                json={"remote_filename": name},
+            )
+            assert started.status_code == 200, started.text
+        commands = [
+            msg["print"]
+            for client in clients
+            for msg in client.published
+            if "print" in msg
+        ]
+        assert len(commands) == 1
+        assert commands[0]["command"] == "project_file"
+        assert commands[0]["param"] == "Metadata/plate_2.gcode"
+        assert commands[0]["url"] == f"file:///sdcard/cache/{name}"
+        assert commands[0]["subtask_id"].isdigit()

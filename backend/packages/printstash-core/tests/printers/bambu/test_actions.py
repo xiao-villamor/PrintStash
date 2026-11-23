@@ -252,6 +252,37 @@ class TestDownloadArtifact:
 
 class TestStart:
     @pytest.mark.asyncio
+    async def test_project_command_encodes_the_cache_name_and_selects_the_exact_member(
+        self,
+    ):
+        sent = []
+        client = make_client()
+        client._send_command = _recorder(sent)  # type: ignore[method-assign]
+        await client.start_project("hinge #2.3mf", 2, "1742")
+        request = sent[0]["print"]
+        assert request["url"] == "file:///sdcard/cache/hinge%20%232.3mf"
+        assert request["param"] == "Metadata/plate_2.gcode"
+        assert request["subtask_id"] == "1742"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("name", "plate"),
+        [
+            ("../part.3mf", 2),
+            ("part.gcode", 2),
+            ("part.3mf", -1),
+            ("part.3mf", True),
+        ],
+    )
+    async def test_invalid_project_or_plate_is_rejected_before_mqtt(self, name, plate):
+        sent = []
+        client = make_client()
+        client._send_command = _recorder(sent)  # type: ignore[method-assign]
+        with pytest.raises(ProviderError):
+            await client.start_project(name, plate, "1742")
+        assert not sent
+
+    @pytest.mark.asyncio
     async def test_starts_nested_text_gcode_and_declines_project_archives(self):
         sent = []
         client = make_client()

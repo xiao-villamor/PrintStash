@@ -194,6 +194,7 @@ class FleetPrinterBoardRead(BaseModel):
     name: str
     status: str
     progress: float | None = None
+    remaining_minutes: int | None = None
     group: Optional[str] = None
     loaded_slots: list[str] = Field(default_factory=list)
     loaded_material_slots: list[FleetLoadedSlot] = Field(default_factory=list)

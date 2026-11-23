@@ -463,6 +463,7 @@ class PrinterFileRead(BaseModel):
     model_id: Optional[int] = None
     model_name: Optional[str] = None
     original_filename: Optional[str] = None
+    plate_index: int | None = None
     remote_filename: str
     size_bytes: Optional[int] = None
     sha256: Optional[str] = None

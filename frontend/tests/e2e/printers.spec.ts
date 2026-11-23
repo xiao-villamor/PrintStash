@@ -217,19 +217,17 @@ test.describe("printer routes", () => {
 
     await page.goto("/printers");
     await page.getByRole("tab", { name: "Queue" }).click();
-    await page
-      .getByRole("combobox", { name: "View", exact: true })
-      .selectOption({ label: "Active" });
-    await expect(page.getByText("interrupted-part.gcode")).toBeVisible();
+    await page.getByRole("button", { name: "Active", exact: true }).click();
+    await expect(
+      page.getByRole("region", { name: "Active print jobs" }).getByText("interrupted-part.gcode"),
+    ).toBeVisible();
     await page.getByRole("button", { name: "Resolve" }).click();
 
     const dialog = page.getByRole("dialog", { name: "Resolve stale job" });
     await expect(dialog).toContainText("does not send a command to the printer");
     await dialog.getByRole("button", { name: "Mark failed" }).click();
 
-    await page
-      .getByRole("combobox", { name: "View", exact: true })
-      .selectOption({ label: "Recent" });
+    await page.getByRole("button", { name: "Recent", exact: true }).click();
     await expect(page.getByRole("region", { name: "Recent print jobs" })).toBeVisible();
     await expect(
       page.getByRole("region", { name: "Recent print jobs" }).getByText(/ · failed$/),
