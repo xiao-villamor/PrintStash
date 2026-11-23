@@ -142,7 +142,7 @@ Current behavior:
 - local MQTT status, including nozzle and bed readings and targets and
   part-cooling output, current layer counts, estimated minutes remaining, chamber
   temperature and SD card presence when supplied by the installed firmware
-- upload plain-text G-code and sliced Library projects over LAN FTPS
+- upload plain-text G-code and sliced Library projects over LAN FTPS. File transfers offer the authenticated TLS session on the passive data connection for firmware that requires session reuse
 - use **Files → Sync printer files** to browse G-code and 3MF files under
   `/cache`, including nested folders. **Start** accepts plain-text G-code and a PrintStash-uploaded project with a recorded plate. For other projects, import the sliced Revision and select its plate.
 - choose upload only, send and start, or queue. The farm board shows the running job, progress, reported time remaining, next job, and routing holds.

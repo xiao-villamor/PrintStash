@@ -11,7 +11,7 @@ import socket
 import ssl
 import threading
 from collections.abc import Awaitable, Callable, Mapping
-from ftplib import FTP_TLS, error_perm, error_reply, error_temp
+from ftplib import FTP, FTP_TLS, error_perm, error_reply, error_temp
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -134,6 +134,8 @@ Blbjg3obpHo9
 class _ImplicitFTP_TLS(FTP_TLS):
     """``ftplib`` variant for Bambu's implicit-TLS port 990."""
 
+    _prot_p: bool  # FTP_TLS tracks the negotiated PROT mode on the connection.
+
     def connect(
         self,
         host: str = "",
@@ -154,6 +156,25 @@ class _ImplicitFTP_TLS(FTP_TLS):
         self.file = self.sock.makefile("r", encoding=self.encoding)
         self.welcome = self.getresp()
         return self.welcome
+
+    def ntransfercmd(
+        self, cmd: str, rest: int | str | None = None
+    ) -> tuple[socket.socket, int | None]:
+        # Some printer firmware accepts a protected data socket only when it
+        # resumes the TLS session used to authenticate the control connection.
+        data, size = FTP.ntransfercmd(self, cmd, rest)
+        if not self._prot_p:
+            return data, size
+        try:
+            if not isinstance(self.sock, ssl.SSLSocket):
+                raise OSError("Missing FTPS control connection")
+            protected = self.context.wrap_socket(
+                data, server_hostname=self.host, session=self.sock.session
+            )
+        except BaseException:
+            data.close()
+            raise
+        return protected, size
 
 
 class BambuClient:

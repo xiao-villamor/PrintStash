@@ -26,8 +26,9 @@ from __future__ import annotations
 import errno
 import socket
 import ssl
-from ftplib import error_perm, error_reply, error_temp
+from ftplib import FTP, error_perm, error_reply, error_temp
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -626,6 +627,35 @@ class TestImplicitConnection:
         with pytest.raises(TimeoutError):
             make_client()._ftps_client().connect(HOST, 990)
         assert timeouts == [30]
+
+
+class TestProtectedDataConnection:
+    def test_offers_the_authenticated_session_on_a_passive_transfer(self, monkeypatch):
+        raw = MagicMock(spec=socket.socket)
+        monkeypatch.setattr(FTP, "ntransfercmd", lambda self, cmd, rest: (raw, 44))
+        ftp = make_client()._ftps_client()
+        ftp.sock = MagicMock(spec=ssl.SSLSocket)
+        ftp.context = MagicMock(spec=ssl.SSLContext)
+        ftp.host = HOST
+        ftp._prot_p = True
+        data, size = ftp.ntransfercmd("LIST cache")
+        ftp.context.wrap_socket.assert_called_once_with(
+            raw, server_hostname=HOST, session=ftp.sock.session
+        )
+        assert data is ftp.context.wrap_socket.return_value
+        assert size == 44
+
+    def test_closes_the_data_socket_when_tls_negotiation_fails(self, monkeypatch):
+        raw = MagicMock(spec=socket.socket)
+        monkeypatch.setattr(FTP, "ntransfercmd", lambda self, cmd, rest: (raw, None))
+        ftp = make_client()._ftps_client()
+        ftp.sock = MagicMock(spec=ssl.SSLSocket)
+        ftp.context = MagicMock(spec=ssl.SSLContext)
+        ftp.context.wrap_socket.side_effect = ssl.SSLError("handshake")
+        ftp._prot_p = True
+        with pytest.raises(ssl.SSLError):
+            ftp.ntransfercmd("LIST cache")
+        raw.close.assert_called_once()
 
 
 class TestCacheInventory:

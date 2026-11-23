@@ -10,7 +10,7 @@
 
 ### Changed
 
-- Bambu LAN sends sliced Library projects intact and starts the chosen plate. A tracked project can also be started from the printer’s cache. Fleet Queue shows current work, progress, available time estimates, next jobs and dispatch holds per printer. The scheduler holds the next job while the previous dispatch awaits firmware updates.
+- Bambu file transfers can resume the authenticated FTPS session on the data connection. Bambu LAN sends sliced Library projects intact and starts the chosen plate. A tracked project can also be started from the printer’s cache. Fleet Queue shows current work, progress, available time estimates, next jobs and dispatch holds per printer. The scheduler holds the next job while the previous dispatch awaits firmware updates.
 
 - Bambu LAN uploads now use the configured FTPS connection timeout. Files can sync the printer’s cache and browse nested G-code and 3MF files. Status shows available chamber temperature, SD card presence and remaining print time.
 
