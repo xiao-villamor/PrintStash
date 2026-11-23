@@ -15,7 +15,7 @@
 - Model Details tabs wrap in narrow inspectors. The Overview places print actions beside the inspected Revision.
 - Source 3MF project settings appear in Print settings, separately from recorded Revision settings.
 - G-code layer controls fit above the camera toolbar in short Model previews.
-- Right-click a Collection card to rename the Collection or edit its cover. Use the automatic collage, upload an image, or select up to four Models from the Collection.
+- Right-click a Collection card to rename it in place or edit its cover. Preview a collage of up to four Models, upload an image, or restore the automatic collage.
 - The Model tag editor opens with the tag field focused. Edit details starts at the Name field, aligns the Collection picker, and keeps tag suggestions inside the scrollable editor.
 
 - The Revisions tab shows print results and time in the list. Notes and actions follow the selected Revision, with print setup and G-code file details available on demand.

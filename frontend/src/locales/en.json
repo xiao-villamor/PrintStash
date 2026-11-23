@@ -3383,7 +3383,6 @@
     "other": "Renamed {count} folders"
   },
   "collection.cardActions": "Collection actions",
-  "collection.renameTitle": "Rename collection",
   "collection.coverTitle": "Edit collection cover",
   "collection.coverLoadFailed": "Could not load the collection cover.",
   "collection.coverModels": "Choose models",
@@ -3392,6 +3391,8 @@
   "collection.coverCurrent": "Current cover",
   "collection.coverSelectionCount": "{count} of 4 selected",
   "collection.coverCandidatesFailed": "Could not load models.",
+  "collection.coverPreview": "Cover preview",
+  "collection.coverChooseHint": "Choose up to four models.",
   "collection_cover_models_unavailable": "Choose models that are still in this collection.",
   "printer.cooldownSuccess": "Cooling down",
   "printer.emergencyStopSuccess": "Emergency stop sent",

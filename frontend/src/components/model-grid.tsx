@@ -120,7 +120,7 @@ import { LibraryModelInspector } from "@/components/library-model-inspector";
 import { InlineTitleEditor } from "@/components/inline-title-editor";
 import { CollectionOverviewCard } from "@/components/collection-overview";
 import {
-  CollectionCardEditor,
+  CollectionCoverEditor,
   type CollectionCardAction,
 } from "@/components/collection-card-editor";
 import { CollectionBreadcrumbs } from "@/components/collection-breadcrumbs";
@@ -4229,6 +4229,20 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                                         })
                                     : undefined
                                 }
+                                renaming={
+                                  managedCollection?.id === collection.id &&
+                                  collectionCardTarget?.action === "rename"
+                                }
+                                onRenameEnd={(saved) => {
+                                  setCollectionCardTarget((target) =>
+                                    target?.entry === entry &&
+                                    target.id === collection.id &&
+                                    target.action === "rename"
+                                      ? null
+                                      : target,
+                                  );
+                                  if (saved) void refresh();
+                                }}
                               />
                             </LibraryCardFill>
                           )}
@@ -4594,11 +4608,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           />
         )}
 
-        {managedCollection && collectionCardTarget && (
-          <CollectionCardEditor
-            key={`${managedCollection.id}:${collectionCardTarget.action}`}
+        {managedCollection && collectionCardTarget?.action === "cover" && (
+          <CollectionCoverEditor
+            key={managedCollection.id}
             collection={managedCollection}
-            action={collectionCardTarget.action}
             onClose={() => setCollectionCardTarget(null)}
             onSaved={() => {
               setCollectionCardTarget(null);

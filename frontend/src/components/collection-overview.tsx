@@ -1,8 +1,8 @@
-import { useRef, useState } from "react";
-import { ArrowRight, Box, Folder, Image, Pencil, RotateCw } from "lucide-react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { ArrowRight, Folder, Image, Pencil, RotateCw } from "lucide-react";
 import { LibraryCardSelection } from "@/components/library-card-selection";
-import { ProtectedThumbnail } from "@/components/protected-thumbnail";
-import { LibraryPreviewPlaceholder } from "@/components/library-card-placeholder";
+import { CollectionCoverArtwork } from "@/components/collection-cover-artwork";
+import { CollectionCardRename } from "@/components/collection-card-editor";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import {
@@ -31,6 +31,8 @@ export function CollectionOverviewCard({
   previewSource,
   onRename,
   onEditCover,
+  renaming = false,
+  onRenameEnd,
 }: {
   collection: CollectionRead;
   compact?: boolean;
@@ -48,12 +50,19 @@ export function CollectionOverviewCard({
   previewSource?: CollectionPreviewSource;
   onRename?: () => void;
   onEditCover?: () => void;
+  renaming?: boolean;
+  onRenameEnd?: (saved: boolean) => void;
 }) {
   useUiLocale();
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
-  const hasActions = !selectable && !!(onRename || onEditCover);
+  const hasActions = !selectable && !renaming && !!(onRename || onEditCover);
+  const wasRenaming = useRef(false);
+  useLayoutEffect(() => {
+    if (wasRenaming.current && !renaming) opener.current?.focus();
+    wasRenaming.current = renaming;
+  }, [renaming]);
   const { ref, pending, models, image, error, retry } = useCollectionOverview(
     collection,
     authorizationRevision,
@@ -62,8 +71,7 @@ export function CollectionOverviewCard({
     previewSource,
   );
   const { dragOver, handlers } = useModelDropTarget(collection.path, onDropModel);
-  const count = image ? 1 : (models?.length ?? (pending ? 4 : 0));
-  const columns = count > 1 ? "grid-cols-2" : "grid-cols-1";
+  const modelCount = uiText("counts.models", { count: collection.model_count });
   const card = (
     <div
       ref={ref}
@@ -82,14 +90,17 @@ export function CollectionOverviewCard({
             }
           : undefined
       }
-      className={`${arriving ? "animate-card-arrive" : ""} group group/selection-card relative min-w-0 overflow-hidden border bg-card transition-[border-color,scale] duration-press ease-out active:scale-[0.99] motion-reduce:active:scale-100 ${
+      className={`${arriving ? "animate-card-arrive" : ""} group group/selection-card relative min-w-0 overflow-hidden border bg-card transition-[border-color,scale] duration-press ease-out ${renaming ? "" : "active:scale-[0.99] motion-reduce:active:scale-100"} ${
         selected || dragOver ? "border-primary" : "border-border hover:border-border-strong"
       }`}
     >
       <button
         ref={opener}
         type="button"
+        aria-label={`${collection.name} ${modelCount}`}
         aria-keyshortcuts={hasActions ? "Shift+F10" : undefined}
+        disabled={renaming}
+        aria-hidden={renaming || undefined}
         onKeyDown={
           hasActions
             ? (event) => {
@@ -109,82 +120,45 @@ export function CollectionOverviewCard({
           selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path, collection.id)
         }
         title={collection.name}
-        className={`${compact ? "flex items-center gap-3 px-2 py-[7px]" : "block"} w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`}
-      >
-        <div
-          data-library-preview={
+        className="absolute inset-0 z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      />
+      <div className={compact ? "flex items-center gap-3 px-2 py-[7px]" : "block"}>
+        <CollectionCoverArtwork
+          models={models}
+          image={image}
+          pending={pending}
+          compact={compact}
+          state={
             error
               ? "failed"
               : (collection.model_count > 0 || collection.has_custom_cover) && !models && !image
                 ? "pending"
                 : "ready"
           }
-          className={`collection-card-collage library-preview grid gap-px overflow-hidden ${columns} ${count > 2 ? "grid-rows-2" : "grid-rows-1"} ${compact ? "shrink-0" : ""}`}
-          aria-hidden="true"
-        >
-          {image ? (
-            <ProtectedThumbnail
-              path={image}
-              alt=""
-              fade
-              priority="background"
-              loadingPlaceholder={<LibraryPreviewPlaceholder />}
-              placeholder={
-                <Folder className={`${compact ? "h-5 w-5" : "h-8 w-8"} text-muted-foreground`} />
-              }
-              className="flex min-h-0 min-w-0 items-center justify-center overflow-hidden"
-              imageClassName="h-full w-full object-cover"
-            />
-          ) : models && models.length > 0 ? (
-            models.map((model, index) => (
-              <ProtectedThumbnail
-                key={model.key}
-                path={model.thumbnail}
-                alt=""
-                fade
-                priority="background"
-                loadingPlaceholder={<LibraryPreviewPlaceholder />}
-                className={`flex min-h-0 min-w-0 items-center justify-center overflow-hidden ${count === 3 && index === 0 ? "row-span-2" : ""}`}
-                imageClassName="h-full w-full object-contain"
-                placeholder={
-                  <div className="flex h-full w-full items-center justify-center">
-                    <Box className={`${compact ? "h-3 w-3" : "h-6 w-6"} text-muted-foreground`} />
-                  </div>
-                }
-              />
-            ))
-          ) : pending ? (
-            Array.from({ length: 4 }, (_, index) => (
-              <div key={index} className="library-loading-placeholder min-h-0">
-                <LibraryPreviewPlaceholder />
-              </div>
-            ))
-          ) : (
-            <div className="col-span-full flex items-center justify-center bg-muted/30">
-              <Folder className={`${compact ? "h-5 w-5" : "h-8 w-8"} text-muted-foreground`} />
-            </div>
-          )}
-        </div>
+          className={compact ? "collection-card-collage shrink-0" : "collection-card-collage"}
+        />
         <div className={`flex min-w-0 flex-1 items-center gap-3 ${compact ? "" : "px-3 py-3"}`}>
           <div className="min-w-0 flex-1">
-            <p
+            <div
               className={`collection-card-name flex min-w-0 items-start gap-1.5 text-sm font-semibold leading-5 text-foreground ${compact ? "" : "min-h-10"}`}
             >
               <Folder className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-              <span className={compact ? "truncate" : "line-clamp-2 wrap-anywhere"}>
-                {collection.name}
-              </span>
-            </p>
-            <p className={`text-xs text-muted-foreground ${compact ? "" : "mt-1"}`}>
-              {uiText("counts.models", { count: collection.model_count })}
-            </p>
+              {renaming && onRenameEnd ? (
+                <CollectionCardRename collection={collection} onEnd={onRenameEnd} />
+              ) : (
+                <span className={compact ? "truncate" : "line-clamp-2 wrap-anywhere"}>
+                  {collection.name}
+                </span>
+              )}
+            </div>
+            <p className={`text-xs text-muted-foreground ${compact ? "" : "mt-1"}`}>{modelCount}</p>
           </div>
-          {!compact && (
+          {!compact && !renaming && (
             <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
           )}
         </div>
-      </button>
-      {onToggleSelect && (
+      </div>
+      {onToggleSelect && !renaming && (
         <LibraryCardSelection
           selecting={!!selectable}
           checked={!!selected}
@@ -207,7 +181,7 @@ export function CollectionOverviewCard({
           type="button"
           variant="outline"
           size="icon-sm"
-          className="absolute right-2 top-2 bg-card"
+          className="absolute right-2 top-2 z-20 bg-card"
           aria-label={`${uiText("library.collectionOverview.previewRetry")}: ${collection.name}`}
           title={uiText("library.collectionOverview.previewError")}
           onClick={retry}
@@ -217,10 +191,10 @@ export function CollectionOverviewCard({
       )}
     </div>
   );
-  if (!hasActions) return card;
+  if (!onRename && !onEditCover) return card;
   return (
     <DropdownMenu
-      open={menuOpen}
+      open={hasActions && menuOpen}
       onOpenChange={setMenuOpen}
       trigger={card}
       returnFocusRef={opener}

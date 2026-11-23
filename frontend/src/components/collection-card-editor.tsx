@@ -1,13 +1,14 @@
-import { useDeferredValue, useId, useState, type FormEvent } from "react";
+import { useCallback, useDeferredValue, useId, useState, type FormEvent } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { Box } from "lucide-react";
+import { Box, Check, Folder, X } from "lucide-react";
+import { CollectionCoverArtwork } from "@/components/collection-cover-artwork";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { TabBar } from "@/components/ui/tabs";
 import { useTaxonomyCommands } from "@/features/library/taxonomy";
-import { listLibraryPage } from "@/lib/api/library-browse";
+import { getLibraryThumbnails, listLibraryPage } from "@/lib/api/library-browse";
 import { getCollectionCover } from "@/lib/api/taxonomy";
 import { useUiLocale } from "@/lib/i18n";
 import { uiText } from "@/lib/locale";
@@ -24,20 +25,21 @@ interface EditorProps {
   onSaved: () => void;
 }
 
-export function CollectionCardEditor({
-  action,
-  ...props
-}: EditorProps & { action: CollectionCardAction }) {
-  useUiLocale();
-  return action === "rename" ? <RenameDialog {...props} /> : <CoverDialog {...props} />;
-}
-
-function RenameDialog({ collection, onClose, onSaved }: EditorProps) {
+export function CollectionCardRename({
+  collection,
+  onEnd,
+}: {
+  collection: CollectionRead;
+  onEnd: (saved: boolean) => void;
+}) {
   const { renameCollection } = useTaxonomyCommands();
-  const formId = useId();
   const [name, setName] = useState(collection.name);
   const [busy, setBusy] = useState(false);
   const changed = name.trim().length > 0 && name.trim() !== collection.name;
+  const focusName = useCallback((input: HTMLInputElement | null) => {
+    input?.focus();
+    input?.select();
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -46,7 +48,7 @@ function RenameDialog({ collection, onClose, onSaved }: EditorProps) {
     try {
       await renameCollection(collection.id, name.trim());
       toast.success(uiText("collection.renameSuccess", { count: 1 }));
-      onSaved();
+      onEnd(true);
     } catch (error) {
       toast.error(error);
     } finally {
@@ -55,42 +57,55 @@ function RenameDialog({ collection, onClose, onSaved }: EditorProps) {
   }
 
   return (
-    <Modal
-      open
-      onClose={() => !busy && onClose()}
-      title={uiText("collection.renameTitle")}
-      className="max-w-sm"
-      footer={
-        <>
-          <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
-            {uiText("Cancel")}
-          </Button>
-          <Button type="submit" form={formId} loading={busy} disabled={!changed}>
-            {uiText("Rename")}
-          </Button>
-        </>
-      }
+    <form
+      className="relative z-20 flex min-w-0 flex-1 items-center gap-1"
+      onSubmit={submit}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !busy) {
+          event.stopPropagation();
+          onEnd(false);
+        }
+      }}
     >
-      <form id={formId} className="space-y-2" onSubmit={submit}>
-        <label className="text-sm font-medium" htmlFor={`${formId}-name`}>
-          {uiText("inbox.collectionName")}
-        </label>
-        <Input
-          id={`${formId}-name`}
-          data-autofocus
-          value={name}
-          onFocus={(event) => event.currentTarget.select()}
-          onChange={(event) => setName(event.target.value)}
-          maxLength={100}
-          required
-          disabled={busy}
-        />
-      </form>
-    </Modal>
+      <Input
+        ref={focusName}
+        aria-label={uiText("inbox.collectionName")}
+        className="h-7 min-w-0 px-1.5 text-sm"
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        maxLength={100}
+        required
+        readOnly={busy}
+        aria-busy={busy}
+      />
+      <Button
+        type="submit"
+        variant="ghost"
+        size="icon-sm"
+        className="size-7 shrink-0"
+        loading={busy}
+        disabled={!changed}
+        aria-label={uiText("Save")}
+      >
+        <Check className="size-4" aria-hidden />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        className="size-7 shrink-0"
+        disabled={busy}
+        onClick={() => onEnd(false)}
+        aria-label={uiText("Cancel")}
+      >
+        <X className="size-4" aria-hidden />
+      </Button>
+    </form>
   );
 }
 
-function CoverDialog({ collection, ...props }: EditorProps) {
+export function CollectionCoverEditor({ collection, ...props }: EditorProps) {
+  useUiLocale();
   const selection = useQuery({
     queryKey: [...queryKeys.collections, "cover", collection.id, getSessionVersion()],
     queryFn: ({ signal }) => getCollectionCover(collection.id, { signal }),
@@ -130,7 +145,9 @@ function CoverForm({
 }: EditorProps & { initial: CollectionCover }) {
   const { setCollectionCover, uploadCollectionCover } = useTaxonomyCommands();
   const [mode, setMode] = useState(initial.kind);
-  const [selected, setSelected] = useState(initial.kind === "models" ? initial.model_ids : []);
+  const initialModels = initial.kind === "models" ? initial.model_ids : [];
+  const [selected, setSelected] = useState(initialModels);
+  const [pickedThumbnails, setPickedThumbnails] = useState<Record<number, string | null>>({});
   const [image, setImage] = useState<File | null>(null);
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
@@ -169,6 +186,25 @@ function CoverForm({
     models.data?.pages.flatMap((page) =>
       page.items.flatMap((entry) => (entry.kind === "model" ? [entry.model] : [])),
     ) ?? [];
+  const candidateThumbnails = new Map(candidates.map((model) => [model.id, model.thumbnail_url]));
+  const selectedThumbnails = useQuery({
+    queryKey: [
+      ...queryKeys.models,
+      "collection-cover-selected",
+      collection.id,
+      getSessionVersion(),
+      initialModels,
+    ],
+    queryFn: ({ signal }) => getLibraryThumbnails(initialModels, { signal }),
+    enabled: mode === "models" && initialModels.length > 0,
+  });
+  const savedThumbnails = new Map(
+    selectedThumbnails.data?.items.map((item) => [item.model_id, item.thumbnail_url]) ?? [],
+  );
+  const coverModels = selected.map((id) => ({
+    key: String(id),
+    thumbnail: candidateThumbnails.get(id) ?? pickedThumbnails[id] ?? savedThumbnails.get(id),
+  }));
   const canSave =
     mode === "image"
       ? !!image
@@ -203,7 +239,7 @@ function CoverForm({
       onClose={() => !busy && onClose()}
       title={uiText("collection.coverTitle")}
       description={<span className="wrap-anywhere">{collection.name}</span>}
-      className="max-w-lg"
+      className={mode === "models" ? "max-w-4xl" : "max-w-lg"}
       footer={
         <>
           <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
@@ -251,100 +287,140 @@ function CoverForm({
             </div>
           )}
           {mode === "models" && (
-            <div className="space-y-3">
-              <Input
-                type="search"
-                aria-label={uiText("Search models")}
-                placeholder={uiText("Search models")}
-                value={search}
-                disabled={busy}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-muted-foreground" role="status">
-                  {uiText("collection.coverSelectionCount", { count: selected.length })}
-                </p>
-                {selected.length > 0 && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    disabled={busy}
-                    onClick={() => setSelected([])}
-                  >
-                    {uiText("Clear selection")}
-                  </Button>
-                )}
-              </div>
-              {models.isError && (
-                <div className="flex items-center gap-2">
-                  <p role="alert" className="text-sm">
-                    {uiText("collection.coverCandidatesFailed")}
-                  </p>
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="outline"
-                    onClick={() => void models.refetch()}
-                  >
-                    {uiText("Retry")}
-                  </Button>
-                </div>
-              )}
-              {models.isPending ? (
-                <p role="status" className="text-sm text-muted-foreground">
-                  {uiText("Loading")}
-                </p>
-              ) : !models.isError && candidates.length === 0 && !models.hasNextPage ? (
-                <p className="text-sm text-muted-foreground">{uiText("No models found")}</p>
-              ) : null}
-              {candidates.length > 0 && (
-                <ul className="max-h-64 divide-y divide-border overflow-y-auto border border-border">
-                  {candidates.map((model) => {
-                    const checked = selected.includes(model.id);
-                    return (
-                      <li key={model.id}>
-                        <label className="flex min-w-0 cursor-action items-center gap-3 px-3 py-2 text-sm hover:bg-muted">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            disabled={busy || (!checked && selected.length === 4)}
-                            onChange={() =>
-                              setSelected((current) =>
-                                checked
-                                  ? current.filter((id) => id !== model.id)
-                                  : [...current, model.id],
-                              )
-                            }
-                          />
-                          <ProtectedThumbnail
-                            path={model.thumbnail_url}
-                            alt=""
-                            placeholder={
-                              <Box className="size-4 text-muted-foreground" aria-hidden />
-                            }
-                            priority="background"
-                            className="grid size-9 shrink-0 place-items-center overflow-hidden bg-muted"
-                            imageClassName="h-full w-full object-contain"
-                          />
-                          <span className="wrap-anywhere">{model.name}</span>
-                        </label>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {models.hasNextPage && (
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="outline"
-                  loading={models.isFetchingNextPage}
-                  onClick={() => void models.fetchNextPage()}
+            <div className="@container/cover-picker">
+              <div className="grid min-w-0 gap-5 @2xl/cover-picker:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                <section
+                  aria-label={uiText("collection.coverPreview")}
+                  className="min-w-0 space-y-3"
                 >
-                  {uiText("Load more")}
-                </Button>
-              )}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold">{uiText("collection.coverPreview")}</h3>
+                    <span className="text-xs text-muted-foreground" role="status">
+                      {uiText("collection.coverSelectionCount", { count: selected.length })}
+                    </span>
+                  </div>
+                  <div className="overflow-hidden border border-border bg-card">
+                    <CollectionCoverArtwork
+                      models={coverModels}
+                      className="collection-card-collage bg-muted"
+                    />
+                    <div className="flex min-w-0 items-center gap-2 px-3 py-2">
+                      <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                      <span className="wrap-anywhere text-sm font-medium">{collection.name}</span>
+                    </div>
+                  </div>
+                  {selected.length > 0 ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      disabled={busy}
+                      onClick={() => setSelected([])}
+                    >
+                      {uiText("Clear selection")}
+                    </Button>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {uiText("collection.coverChooseHint")}
+                    </p>
+                  )}
+                </section>
+                <div className="min-w-0 space-y-3">
+                  <Input
+                    type="search"
+                    aria-label={uiText("Search models")}
+                    placeholder={uiText("Search models")}
+                    value={search}
+                    disabled={busy}
+                    onChange={(event) => setSearch(event.target.value)}
+                  />
+                  {models.isError && (
+                    <div className="flex items-center gap-2">
+                      <p role="alert" className="text-sm">
+                        {uiText("collection.coverCandidatesFailed")}
+                      </p>
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        onClick={() => void models.refetch()}
+                      >
+                        {uiText("Retry")}
+                      </Button>
+                    </div>
+                  )}
+                  {models.isPending ? (
+                    <p role="status" className="text-sm text-muted-foreground">
+                      {uiText("Loading")}
+                    </p>
+                  ) : !models.isError && candidates.length === 0 && !models.hasNextPage ? (
+                    <p className="text-sm text-muted-foreground">{uiText("No models found")}</p>
+                  ) : null}
+                  {candidates.length > 0 && (
+                    <ul className="grid max-h-80 grid-cols-[repeat(auto-fill,minmax(min(100%,7rem),1fr))] gap-2 overflow-y-auto p-1">
+                      {candidates.map((model) => {
+                        const checked = selected.includes(model.id);
+                        return (
+                          <li key={model.id}>
+                            <label
+                              className={`relative flex h-full min-w-0 cursor-action flex-col border text-left focus-within:ring-2 focus-within:ring-ring ${checked ? "border-primary bg-accent" : "border-border bg-card hover:border-border-strong"}`}
+                            >
+                              <input
+                                type="checkbox"
+                                className="absolute right-2 top-2 z-10 size-4"
+                                checked={checked}
+                                disabled={busy || (!checked && selected.length === 4)}
+                                onChange={() => {
+                                  if (!checked) {
+                                    setPickedThumbnails((current) => ({
+                                      ...current,
+                                      [model.id]: model.thumbnail_url,
+                                    }));
+                                  }
+                                  setSelected((current) =>
+                                    checked
+                                      ? current.filter((id) => id !== model.id)
+                                      : [...current, model.id],
+                                  );
+                                }}
+                              />
+                              <ProtectedThumbnail
+                                path={model.thumbnail_url}
+                                alt=""
+                                placeholder={
+                                  <Box className="size-4 text-muted-foreground" aria-hidden />
+                                }
+                                priority="background"
+                                className="grid aspect-[4/3] min-w-0 shrink-0 place-items-center overflow-hidden bg-muted"
+                                imageClassName="h-full w-full object-contain"
+                              />
+                              <span className="px-2 py-1.5">
+                                <span
+                                  className="line-clamp-2 min-h-8 wrap-anywhere text-xs leading-4"
+                                  title={model.name}
+                                >
+                                  {model.name}
+                                </span>
+                              </span>
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  {models.hasNextPage && (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      loading={models.isFetchingNextPage}
+                      onClick={() => void models.fetchNextPage()}
+                    >
+                      {uiText("Load more")}
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>
