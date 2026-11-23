@@ -3385,6 +3385,12 @@
     "other": "Se cambió el nombre de {count} carpetas"
   },
   "collection.cardActions": "Acciones de la colección",
+  "collection.regenerateThumbnails": "Regenerar miniaturas",
+  "collection.thumbnailsQueued": {
+    "one": "{count} miniatura en cola",
+    "other": "{count} miniaturas en cola"
+  },
+  "collection.noThumbnailsQueued": "No hay miniaturas para regenerar en esta colección",
   "collection.coverTitle": "Editar portada de la colección",
   "collection.coverLoadFailed": "No se pudo cargar la portada de la colección.",
   "collection.coverModels": "Elegir modelos",

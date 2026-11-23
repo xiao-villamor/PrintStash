@@ -31,6 +31,7 @@ export function CollectionOverviewCard({
   previewSource,
   onRename,
   onEditCover,
+  onRegenerateThumbnails,
   renaming = false,
   onRenameEnd,
 }: {
@@ -50,6 +51,7 @@ export function CollectionOverviewCard({
   previewSource?: CollectionPreviewSource;
   onRename?: () => void;
   onEditCover?: () => void;
+  onRegenerateThumbnails?: () => void;
   renaming?: boolean;
   onRenameEnd?: (saved: boolean) => void;
 }) {
@@ -57,7 +59,8 @@ export function CollectionOverviewCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
-  const hasActions = !selectable && !renaming && !!(onRename || onEditCover);
+  const hasActions =
+    !selectable && !renaming && !!(onRename || onEditCover || onRegenerateThumbnails);
   const wasRenaming = useRef(false);
   useLayoutEffect(() => {
     if (wasRenaming.current && !renaming) opener.current?.focus();
@@ -191,7 +194,7 @@ export function CollectionOverviewCard({
       )}
     </div>
   );
-  if (!onRename && !onEditCover) return card;
+  if (!onRename && !onEditCover && !onRegenerateThumbnails) return card;
   return (
     <DropdownMenu
       open={hasActions && menuOpen}
@@ -202,7 +205,7 @@ export function CollectionOverviewCard({
       anchorPoint={menuPoint}
       portal
       aria-label={uiText("collection.cardActions")}
-      contentClassName="w-48 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+      contentClassName="w-56 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
     >
       {onRename && (
         <button
@@ -232,6 +235,21 @@ export function CollectionOverviewCard({
         >
           <Image className="size-4 text-muted-foreground" aria-hidden />
           {uiText("modelCover.edit")}
+        </button>
+      )}
+      {onRegenerateThumbnails && (
+        <button
+          type="button"
+          role="menuitem"
+          className="library-card-menu-item"
+          onClick={() => {
+            setMenuOpen(false);
+            opener.current?.focus();
+            onRegenerateThumbnails();
+          }}
+        >
+          <RotateCw className="size-4 text-muted-foreground" aria-hidden />
+          {uiText("collection.regenerateThumbnails")}
         </button>
       )}
     </DropdownMenu>

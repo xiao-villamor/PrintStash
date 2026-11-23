@@ -36,6 +36,13 @@ export function useTaxonomyCommands(overrides?: Pick<typeof api, "createCollecti
     });
   }
   return {
+    regenerateThumbnails: (id: number) =>
+      withSessionRequest(async (request) => {
+        const receipt = await api.regenerateCollectionThumbnails(id);
+        request.assertCurrent();
+        void client.invalidateQueries({ queryKey: queryKeys.previewActivity });
+        return receipt;
+      }),
     createTag: (...args: Parameters<typeof api.createTag>) =>
       change("tags", () => api.createTag(...args)),
     deleteTag: (...args: Parameters<typeof api.deleteTag>) =>

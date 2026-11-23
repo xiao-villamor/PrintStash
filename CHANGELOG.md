@@ -10,6 +10,8 @@
 
 ### Changed
 
+- Right-click a collection card to recreate thumbnails for the models directly in that collection.
+
 - Model details are in Overview and mesh measurements and checks are in Source info, freeing the full preview pane for the viewer.
 - Model Overview uses larger text and a readable Collection path. File and Revision navigation stays in the inspector tabs.
 - Model Details tabs wrap in narrow inspectors. Overview shows the Model description and a shortcut to the recommended Revision. The description editor offers Write and Preview tabs for Markdown.

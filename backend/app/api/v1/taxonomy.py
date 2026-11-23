@@ -51,6 +51,7 @@ from app.db.models import (
 from app.db.projections import content_changed
 from app.db.scopes import live
 from app.db.session import get_session
+from app.modules.derivatives import repair
 from app.modules.identity import rbac
 from app.modules.library import (
     collection_covers,
@@ -525,6 +526,27 @@ def set_collection_cover(
         content_changed(session, "collection", [collection_id])
         session.commit()
     return payload
+
+
+@router.post(
+    "/collections/{collection_id}/thumbnails/regenerate",
+    status_code=202,
+    dependencies=[Depends(require_auth)],
+    summary="Recreate model thumbnails in this collection",
+)
+def regenerate_collection_thumbnails(
+    collection_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> dict[str, int]:
+    if not session.exec(
+        select(Collection.id).where(Collection.id == collection_id, live(Collection))
+    ).first():
+        raise HTTPException(status_code=404, detail="collection_not_found")
+    rbac.require_collection_role(
+        session, current_user, collection_id, CollectionRole.EDIT
+    )
+    return {"queued": repair.request_collection_thumbnails(session, collection_id)}
 
 
 @router.get(

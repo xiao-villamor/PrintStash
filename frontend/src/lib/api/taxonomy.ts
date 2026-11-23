@@ -96,6 +96,12 @@ export function setCollectionCover(id: number, cover: CollectionCover): Promise<
   return sendJson<CollectionCover>(`/api/v1/collections/${id}/cover`, "PUT", cover);
 }
 
+export function regenerateCollectionThumbnails(id: number): Promise<{ queued: number }> {
+  return requestApi<{ queued: number }>(`/api/v1/collections/${id}/thumbnails/regenerate`, {
+    method: "POST",
+  });
+}
+
 export function replaceCollectionTags(id: number, tags: string[]): Promise<CollectionRead> {
   return sendJson<CollectionRead>(`/api/v1/collections/${id}/tags`, "PUT", { tags });
 }

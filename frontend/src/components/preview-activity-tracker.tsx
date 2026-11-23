@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
 import { getPreviewActivity } from "@/lib/api/work";
+import { queryKeys } from "@/lib/query-client";
 import { previewProgress } from "@/lib/preview-activity";
 import { uiText } from "@/lib/locale";
 import { useLibraryStartup } from "@/lib/library-startup-context";
@@ -20,7 +21,7 @@ const IDLE_MS = 30_000;
 export function PreviewActivityTracker({ enabled }: { enabled: boolean }) {
   const startup = useLibraryStartup();
   const jobs = useQuery({
-    queryKey: ["work", "preview-activity"],
+    queryKey: queryKeys.previewActivity,
     queryFn: ({ signal }) => getPreviewActivity({ signal }),
     enabled: enabled && startup.canLoad("activity"),
     retry: false,
