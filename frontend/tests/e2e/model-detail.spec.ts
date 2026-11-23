@@ -197,7 +197,7 @@ test.describe("model detail route", () => {
     await expect
       .poll(() =>
         page.getByRole("table").evaluate((table) => {
-          const time = table.querySelector("tbody:last-child td:nth-child(5)")!;
+          const time = table.querySelector("tbody:last-child td:last-child")!;
           const range = document.createRange();
           range.selectNodeContents(time);
           return range.getClientRects().length;

@@ -461,21 +461,16 @@
   white-space: nowrap;
 }
 .detail-revisions-table tbody tr:first-child > * {
-  padding: 12px 10px 2px;
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--border);
   vertical-align: top;
 }
-.detail-revisions-table tr:first-child > :nth-child(-n + 2),
-.detail-revisions-table .detail-revision-table-note {
+.detail-revisions-table tr > :nth-child(-n + 2) {
   overflow-wrap: anywhere;
 }
-.detail-revisions-table tr:first-child > td:nth-child(n + 3) {
+.detail-revisions-table tr > td:last-child {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-}
-.detail-revisions-table .detail-revision-table-note {
-  padding: 0 10px 12px;
-  color: var(--muted-foreground);
-  border-bottom: 1px solid var(--border);
 }
 .detail-revisions-table .is-inspected {
   background: var(--accent);

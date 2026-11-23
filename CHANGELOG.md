@@ -10,6 +10,8 @@
 
 ### Changed
 
+- The Revisions tab shows print results and time in the list. Notes and actions follow the selected Revision, with print setup and G-code file details available on demand.
+
 - Klipper Status now includes an administrator console with printer replies and loaded macros. Select a macro to supply its parameters before sending.
 
 - Fleet admins can see waiting jobs that have no assigned printer in the queue and fleet totals. Replacing filament in an existing manual feed now saves and lets compatible work dispatch. Bambu printers preparing a print count as busy.

@@ -8,7 +8,7 @@ import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
-import { Box, MoreHorizontal, Trash2, Star, Wifi } from "lucide-react";
+import { Box, ChevronRight, MoreHorizontal, Trash2, Star, Wifi } from "lucide-react";
 
 import {
   batchSetRevisionLabels,
@@ -440,10 +440,7 @@ export function RevisionsTab({
                   <tr>
                     <th>{uiText("Revision")}</th>
                     <th>{uiText("Printer results")}</th>
-                    <th>{uiText("Material")}</th>
-                    <th>{uiText("Layer")}</th>
                     <th>{uiText("Time")}</th>
-                    <th>{uiText("Filament")}</th>
                   </tr>
                 </thead>
                 {gcodeFiles.map((file) => (
@@ -473,7 +470,7 @@ export function RevisionsTab({
                           <button
                             type="button"
                             data-revision-id={file.id}
-                            className="min-w-0 wrap-anywhere text-left"
+                            className="flex min-w-0 items-baseline gap-2 text-left"
                             aria-pressed={file.id === selectedId}
                             onClick={() => inspect(file.id)}
                           >
@@ -483,7 +480,12 @@ export function RevisionsTab({
                               })}
                             </strong>
                             {file.revision_label && (
-                              <span className="ms-2 font-normal">{` ${file.revision_label}`}</span>
+                              <span
+                                className="line-clamp-2 min-w-0 wrap-anywhere font-normal"
+                                title={file.revision_label}
+                              >
+                                {file.revision_label}
+                              </span>
                             )}
                           </button>
                           {file.is_recommended && (
@@ -497,8 +499,6 @@ export function RevisionsTab({
                       <td>
                         <RevisionResults fileId={file.id} jobs={jobs} />
                       </td>
-                      <td>{file.metadata?.material_type ?? uiText("Not recorded")}</td>
-                      <td>{formatMillimeters(file.metadata?.layer_height_mm)}</td>
                       <td>
                         {file.id === selectedId &&
                         plateEstimates?.plate_metadata.some(
@@ -507,25 +507,6 @@ export function RevisionsTab({
                         plateEstimates.plates.length > 1
                           ? uiText("Per plate")
                           : formatDuration(file.metadata?.estimated_time_s ?? null)}
-                      </td>
-                      <td>
-                        {file.id === selectedId &&
-                        plateEstimates?.plate_metadata.some(
-                          (entry) => entry.metadata.filament_weight_g != null,
-                        ) &&
-                        plateEstimates.plates.length > 1
-                          ? uiText("Per plate")
-                          : formatGrams(file.metadata?.filament_weight_g)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td colSpan={6} className="detail-revision-table-note">
-                        {file.revision_notes}
-                        {file.revision_status && (
-                          <span className={file.revision_notes ? "ml-2" : undefined}>
-                            {revisionStatusLabel(file.revision_status)}
-                          </span>
-                        )}
                       </td>
                     </tr>
                   </tbody>
@@ -561,7 +542,7 @@ export function RevisionsTab({
                                 value1: String(f.gcode_revision_number ?? f.version),
                               })}
                             </span>
-                            {f.revision_status && gcodeFiles.length === 1 && (
+                            {f.revision_status && (
                               <span className="rounded border border-border px-2 py-0.5 text-xs font-medium">
                                 {revisionStatusLabel(f.revision_status)}
                               </span>
@@ -585,88 +566,13 @@ export function RevisionsTab({
                             </Button>
                           )}
                         </div>
-                        <p className="wrap-anywhere text-sm text-muted-foreground">
-                          {f.original_filename}
-                        </p>
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                          <span>
-                            {uiText("Added")} {timeAgo(f.uploaded_at)}
-                          </span>
-                          <span>{formatBytes(f.size_bytes)}</span>
-                          <HashValue
-                            sha={f.sha256}
-                            label={uiText("File SHA-256")}
-                            filename={f.original_filename}
-                          />
-                        </div>
-                        {uploadedTo.length > 0 && (
-                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                            {uploadedTo.map((row) => (
-                              <span
-                                key={`${row.printer_id}-${row.remote_filename}`}
-                                className="inline-flex items-center gap-1"
-                              >
-                                <Wifi className="h-3 w-3" />
-                                {row.printer_name}
-                              </span>
-                            ))}
-                          </div>
+                        {f.revision_notes && (
+                          <p className="wrap-anywhere text-sm text-muted-foreground">
+                            {f.revision_notes}
+                          </p>
                         )}
+                        {gcodeFiles.length === 1 && <RevisionResults fileId={f.id} jobs={jobs} />}
                       </div>
-                      <section
-                        className="border-t border-border pt-3"
-                        aria-label={uiText("Print setup")}
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <h4 className="text-sm font-semibold">{uiText("Print setup")}</h4>
-                          {onSettings && (
-                            <Button size="xs" variant="ghost" onClick={onSettings}>
-                              {uiText("Full print settings")}
-                            </Button>
-                          )}
-                        </div>
-                        <dl className="mt-2 grid grid-cols-2 gap-3 @lg:grid-cols-4">
-                          {[
-                            [uiText("Printer profile"), fileMeta?.printer_model],
-                            [uiText("Material"), fileMeta?.material_type],
-                            [uiText("Layer height"), formatMillimeters(fileMeta?.layer_height_mm)],
-                            [uiText("Nozzle"), formatMillimeters(fileMeta?.nozzle_diameter_mm)],
-                          ].map(([label, value]) => (
-                            <div key={label}>
-                              <dt className="text-xs text-muted-foreground">{label}</dt>
-                              <dd className="wrap-anywhere text-sm font-medium">
-                                {value ?? uiText("Not recorded")}
-                              </dd>
-                            </div>
-                          ))}
-                        </dl>
-                      </section>
-                      {plateEstimates && plateEstimates.plates.length > 1 ? (
-                        <PlateEstimates data={plateEstimates} selected={selectedPlate} />
-                      ) : (
-                        <dl className="flex flex-wrap gap-x-6 text-sm">
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              {uiText("Estimated time")}
-                            </dt>
-                            <dd>{formatDuration(fileMeta?.estimated_time_s ?? null)}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              {uiText("Filament weight")}
-                            </dt>
-                            <dd>{formatGrams(fileMeta?.filament_weight_g)}</dd>
-                          </div>
-                        </dl>
-                      )}
-                      {gcodeFiles.length === 1 && (
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                          <RevisionResults fileId={f.id} jobs={jobs} />
-                          {f.revision_notes && (
-                            <p className="w-full wrap-anywhere">{f.revision_notes}</p>
-                          )}
-                        </div>
-                      )}
                       <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
                         {onSend && (
                           <RevisionDeliveryActions printerless={printerless} onSend={onSend} />
@@ -683,6 +589,96 @@ export function RevisionsTab({
                           >
                             {uiText("Download")}
                           </Button>
+                        </div>
+                      </div>
+                      <details className="group border-t border-border pt-3">
+                        <summary className="flex w-fit items-center gap-2 text-sm font-medium focus-visible:outline-ring">
+                          <ChevronRight
+                            className="size-4 group-open:rotate-90"
+                            aria-hidden="true"
+                          />
+                          {uiText("Print setup")}
+                        </summary>
+                        <div className="mt-3 space-y-3">
+                          <dl className="grid grid-cols-2 gap-3 @lg:grid-cols-4">
+                            {[
+                              [uiText("Printer profile"), fileMeta?.printer_model],
+                              [uiText("Material"), fileMeta?.material_type],
+                              [
+                                uiText("Layer height"),
+                                formatMillimeters(fileMeta?.layer_height_mm),
+                              ],
+                              [uiText("Nozzle"), formatMillimeters(fileMeta?.nozzle_diameter_mm)],
+                            ].map(([label, value]) => (
+                              <div key={label}>
+                                <dt className="text-xs text-muted-foreground">{label}</dt>
+                                <dd className="wrap-anywhere text-sm font-medium">
+                                  {value ?? uiText("Not recorded")}
+                                </dd>
+                              </div>
+                            ))}
+                          </dl>
+                          {plateEstimates && plateEstimates.plates.length > 1 ? (
+                            <PlateEstimates data={plateEstimates} selected={selectedPlate} />
+                          ) : (
+                            <dl className="flex flex-wrap gap-x-6 text-sm">
+                              <div>
+                                <dt className="text-xs text-muted-foreground">
+                                  {uiText("Estimated time")}
+                                </dt>
+                                <dd>{formatDuration(fileMeta?.estimated_time_s ?? null)}</dd>
+                              </div>
+                              <div>
+                                <dt className="text-xs text-muted-foreground">
+                                  {uiText("Filament weight")}
+                                </dt>
+                                <dd>{formatGrams(fileMeta?.filament_weight_g)}</dd>
+                              </div>
+                            </dl>
+                          )}
+                          {onSettings && (
+                            <Button size="xs" variant="ghost" onClick={onSettings}>
+                              {uiText("Full print settings")}
+                            </Button>
+                          )}
+                        </div>
+                      </details>
+                      <details className="group border-t border-border pt-3">
+                        <summary className="flex w-fit items-center gap-2 text-sm font-medium focus-visible:outline-ring">
+                          <ChevronRight
+                            className="size-4 group-open:rotate-90"
+                            aria-hidden="true"
+                          />
+                          {uiText("G-code file")}
+                        </summary>
+                        <div className="mt-3 space-y-2">
+                          <p className="wrap-anywhere text-sm text-muted-foreground">
+                            {f.original_filename}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                            <span>
+                              {uiText("Added")} {timeAgo(f.uploaded_at)}
+                            </span>
+                            <span>{formatBytes(f.size_bytes)}</span>
+                            <HashValue
+                              sha={f.sha256}
+                              label={uiText("File SHA-256")}
+                              filename={f.original_filename}
+                            />
+                          </div>
+                          {uploadedTo.length > 0 && (
+                            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                              {uploadedTo.map((row) => (
+                                <span
+                                  key={`${row.printer_id}-${row.remote_filename}`}
+                                  className="inline-flex items-center gap-1"
+                                >
+                                  <Wifi className="h-3 w-3" />
+                                  {row.printer_name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                           <SlicerOpenButton
                             fileId={f.id}
                             fileType={
@@ -694,7 +690,7 @@ export function RevisionsTab({
                             showLabel
                           />
                         </div>
-                      </div>
+                      </details>
                       <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
                         <Button
                           size="sm"
