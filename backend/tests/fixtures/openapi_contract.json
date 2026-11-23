@@ -1465,6 +1465,21 @@
         "title": "AuthProvidersRead",
         "type": "object"
       },
+      "AutomaticCover": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "automatic",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "AutomaticCover",
+        "type": "object"
+      },
       "BatchCreate": {
         "additionalProperties": false,
         "properties": {
@@ -4772,6 +4787,11 @@
               }
             ]
           },
+          "has_custom_cover": {
+            "default": false,
+            "title": "Has Custom Cover",
+            "type": "boolean"
+          },
           "has_readme": {
             "default": false,
             "title": "Has Readme",
@@ -4909,6 +4929,17 @@
             "title": "Authorization Revision",
             "type": "string"
           },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/LibraryPreviewItem"
@@ -4936,6 +4967,11 @@
                 "type": "null"
               }
             ]
+          },
+          "has_custom_cover": {
+            "default": false,
+            "title": "Has Custom Cover",
+            "type": "boolean"
           },
           "has_readme": {
             "default": false,
@@ -8395,6 +8431,27 @@
           }
         },
         "title": "HomeAxes",
+        "type": "object"
+      },
+      "ImageCover": {
+        "additionalProperties": false,
+        "properties": {
+          "filename": {
+            "pattern": "^[a-f0-9]{64}\\.(?:jpg|png|gif|webp)$",
+            "title": "Filename",
+            "type": "string"
+          },
+          "kind": {
+            "const": "image",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "filename"
+        ],
+        "title": "ImageCover",
         "type": "object"
       },
       "ImportedPrintJobRead": {
@@ -13722,6 +13779,32 @@
         "title": "ModelValidationRead",
         "type": "object"
       },
+      "ModelsCover": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "models",
+            "title": "Kind",
+            "type": "string"
+          },
+          "model_ids": {
+            "items": {
+              "exclusiveMinimum": 0.0,
+              "type": "integer"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Model Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "model_ids"
+        ],
+        "title": "ModelsCover",
+        "type": "object"
+      },
       "MoonrakerConfigRead": {
         "properties": {
           "klipper_config": {
@@ -15303,6 +15386,11 @@
                 "type": "null"
               }
             ]
+          },
+          "has_custom_cover": {
+            "default": false,
+            "title": "Has Custom Cover",
+            "type": "boolean"
           },
           "has_readme": {
             "default": false,
@@ -28747,6 +28835,165 @@
         ]
       }
     },
+    "/api/v1/collections/{collection_id}/cover": {
+      "get": {
+        "operationId": "get_collection_cover_api_v1_collections__collection_id__cover_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "title": "Collection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "automatic": "#/components/schemas/AutomaticCover",
+                      "image": "#/components/schemas/ImageCover",
+                      "models": "#/components/schemas/ModelsCover"
+                    },
+                    "propertyName": "kind"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AutomaticCover"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ImageCover"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ModelsCover"
+                    }
+                  ],
+                  "title": "Response Get Collection Cover Api V1 Collections  Collection Id  Cover Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read a collection's cover selection",
+        "tags": [
+          "taxonomy"
+        ]
+      },
+      "put": {
+        "operationId": "set_collection_cover_api_v1_collections__collection_id__cover_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "title": "Collection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "discriminator": {
+                  "mapping": {
+                    "automatic": "#/components/schemas/AutomaticCover",
+                    "image": "#/components/schemas/ImageCover",
+                    "models": "#/components/schemas/ModelsCover"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/AutomaticCover"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ImageCover"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ModelsCover"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "automatic": "#/components/schemas/AutomaticCover",
+                      "image": "#/components/schemas/ImageCover",
+                      "models": "#/components/schemas/ModelsCover"
+                    },
+                    "propertyName": "kind"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AutomaticCover"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ImageCover"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ModelsCover"
+                    }
+                  ],
+                  "title": "Response Set Collection Cover Api V1 Collections  Collection Id  Cover Put"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Set a collection's cover selection",
+        "tags": [
+          "taxonomy"
+        ]
+      }
+    },
     "/api/v1/collections/{collection_id}/images": {
       "post": {
         "operationId": "upload_collection_image_api_v1_collections__collection_id__images_post",
@@ -28798,7 +29045,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Upload an image for a collection's readme",
+        "summary": "Upload an image for a collection",
         "tags": [
           "taxonomy"
         ]
@@ -28852,7 +29099,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Serve an image embedded in a collection's readme",
+        "summary": "Serve a collection image",
         "tags": [
           "taxonomy"
         ]

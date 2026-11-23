@@ -1,3 +1,10 @@
+"""Collection covers follow the saved selection without losing access checks.
+
+The preview is what people see on the Library card. It must honor saved order,
+ignore Models that have become unavailable, and retain the previous cover when
+a write is rejected.
+"""
+
 import pytest
 
 from app.db.models import CollectionRole

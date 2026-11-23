@@ -1,6 +1,6 @@
 /** Inline inspection shares real query/edit/session owners; keys must keep that command context. */
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryModelInspector } from "@/components/library-model-inspector";
@@ -55,7 +55,9 @@ function setup(routes: RouteTable = {}, canWrite = true) {
 }
 async function ready() {
   await screen.findByRole("heading", { name: "Bracket" });
-  await waitFor(() => expect(screen.getByRole("button", { name: "OK" })).toBeEnabled());
+  expect(
+    await screen.findByRole("combobox", { name: "Printer for printing and logging" }),
+  ).toBeEnabled();
 }
 // Load the real lazy module before assertions, outside their DOM polling budget.
 beforeAll(async () => {
@@ -72,6 +74,33 @@ describe("Library model inspector", () => {
     });
     expect(await screen.findByRole("heading", { name: "Assembly" })).toBeVisible();
     expect(screen.getByText("two").tagName).toBe("STRONG");
+  });
+
+  it("prioritizes delivery actions in the Print tab", async () => {
+    const longLabel = "WallMount".repeat(12);
+    setup({
+      "GET /api/v1/models/1": json(
+        aModel({ ...model, files: [{ ...file, revision_label: longLabel }] }),
+      ),
+    });
+    await ready();
+    const print = within(screen.getByRole("tabpanel", { name: "Print" }));
+    expect(print.getByRole("heading", { name: `Rev 1 · ${longLabel}` })).toBeVisible();
+    expect(print.getByRole("button", { name: "Send to printer" })).toBeEnabled();
+    expect(print.getByRole("button", { name: "Download G-code" })).toBeEnabled();
+    expect(print.queryByRole("region", { name: "Log print outcome" })).toBeNull();
+
+    await userEvent.click(screen.getByRole("tab", { name: /History/ }));
+    const outcomes = within(screen.getByRole("region", { name: "Log print outcome" }));
+    expect(outcomes.getByRole("combobox")).toHaveDisplayValue("Workshop");
+    expect(outcomes.getByRole("button", { name: "Successful" })).toBeEnabled();
+  });
+
+  it("offers download when there is no configured printer", async () => {
+    setup({ "GET /api/v1/printers": json([]) });
+    await screen.findByRole("heading", { name: "Bracket" });
+    expect(screen.getByRole("button", { name: "Download G-code" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Send to printer" })).toBeNull();
   });
 
   it("logs the focused revision once when a numeric key is held", async () => {
@@ -130,6 +159,7 @@ describe("Library model inspector", () => {
       "POST /api/v1/models/1/print-jobs": json({ ...record("failed"), error: "Corner lifted" }),
     });
     await ready();
+    await userEvent.click(screen.getByRole("tab", { name: /History/ }));
     await userEvent.click(screen.getByRole("button", { name: "Failed" }));
     const note = screen.getByRole("textbox", { name: /What went wrong/ });
     await userEvent.type(note, "Corner lifted");
@@ -154,7 +184,8 @@ describe("Library model inspector", () => {
   it("disables outcome writes for a read-only inspector", async () => {
     const app = setup({}, false);
     await screen.findByRole("heading", { name: "Bracket" });
-    expect(screen.queryByRole("button", { name: "OK" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: /History/ }));
+    expect(screen.queryByRole("button", { name: "Successful" })).not.toBeInTheDocument();
     screen.getByRole("tab", { name: "Print" }).focus();
     fireEvent.keyDown(window, { key: "1" });
     expect(app.requestsWithMethod("POST")).toEqual([]);
@@ -165,7 +196,8 @@ describe("Library model inspector", () => {
     const pending = Promise.withResolvers<Response>();
     const app = setup({ "POST /api/v1/models/1/print-jobs": () => pending.promise });
     await ready();
-    await userEvent.click(screen.getByRole("button", { name: "OK" }));
+    await userEvent.click(screen.getByRole("tab", { name: /History/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Successful" }));
     await act(async () => clearLogin());
     await act(async () => pending.resolve(json(record())));
     expect(screen.queryByText(/Workshop ·/)).not.toBeInTheDocument();

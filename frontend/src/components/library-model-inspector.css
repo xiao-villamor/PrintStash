@@ -97,24 +97,15 @@
   background: var(--muted);
   color: var(--foreground);
 }
-.library-inspector-control-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-}
-.library-inspector-control-row select {
-  flex: 1;
-}
 .library-inspector-workspace select {
   width: 100%;
   min-width: 0;
-  height: 32px;
+  height: 36px;
   border: 1px solid var(--input);
-  padding: 0 6px;
+  padding: 0 8px;
   background: var(--card);
   color: var(--foreground);
-  font-size: 12px;
+  font-size: 13px;
 }
 .library-inspector-properties > div {
   display: grid;
@@ -123,17 +114,35 @@
   align-items: baseline;
   padding: 8px 0;
 }
-.library-inspector-properties > .library-inspector-revision {
-  align-items: center;
+.library-inspector-print-summary {
+  display: grid;
+  gap: 4px;
+  padding-block: 8px 12px;
 }
-.library-inspector-revision dd {
+.library-inspector-revision {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+  gap: 4px 12px;
 }
-.library-inspector-properties dt,
-.library-inspector-control-row > span {
+.library-inspector-revision select {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+.library-inspector-revision h4 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  font-weight: 600;
+}
+.library-inspector-recommended {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.library-inspector-properties dt {
   color: var(--muted-foreground);
 }
 .library-inspector-properties dd {
@@ -146,12 +155,32 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 12px;
 }
-.library-inspector-results > span,
+.library-inspector-results {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.library-inspector-printer {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  font-weight: 500;
+}
 .library-inspector-caption {
   color: var(--muted-foreground);
   font-size: 12px;
+}
+.library-inspector-delivery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.library-inspector-delivery button {
+  min-height: 36px;
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.2;
 }
 .library-inspector-actions {
   display: grid;
