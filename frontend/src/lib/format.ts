@@ -35,3 +35,7 @@ export function formatNumber(value: number, options?: Intl.NumberFormatOptions):
 }
 export const formatCalendarDate = (value: string) =>
   display.formatCalendarDate(value, currentLocale());
+
+export function dispatchName(filename: string) {
+  return filename.replace(/__vault-f\d+-[a-f0-9]{8,64}(?=\.[^.]+$)/i, "");
+}

@@ -393,6 +393,7 @@ export function PrintersPage() {
           {activeView === "queue" && (
             <FleetQueuePanel
               initialView={queueView}
+              onAdd={() => setAddJobOpen(true)}
               printers={printers.filter((printer) => printer.access.can_print)}
             />
           )}

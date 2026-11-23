@@ -274,6 +274,11 @@ describe("FleetQueuePanel", () => {
         makeJob({ id: 7, printer_id: null, remote_filename: "unrouted.gcode" }),
       ],
     });
+    const map = within(screen.getByRole("region", { name: "Farm routing" }));
+    expect(map.getByText("42%")).toBeInTheDocument();
+    expect(map.getByText("3 min remaining")).toBeInTheDocument();
+    expect(map.getByText("Available capacity")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Table" }));
     const board = within(screen.getByRole("table", { name: "Farm dispatch" }));
     expect(board.getByText("1 of 2 printing")).toBeVisible();
     expect(board.getByRole("progressbar")).toHaveValue(42);
@@ -289,7 +294,7 @@ describe("FleetQueuePanel", () => {
     expect(list.queryByText("next.gcode")).toBeNull();
   });
 
-  it("shows reported time remaining before progress arrives", () => {
+  it("shows reported time remaining before progress arrives", async () => {
     const printer = makePrinter();
     renderQueuePanel({
       printers: [printer],
@@ -317,6 +322,10 @@ describe("FleetQueuePanel", () => {
         ],
       }),
     });
+    const map = within(screen.getByRole("region", { name: "Farm routing" }));
+    expect(map.getByText("Awaiting progress")).toBeInTheDocument();
+    expect(map.getByText("0 min remaining")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Table" }));
     const board = within(screen.getByRole("table", { name: "Farm dispatch" }));
     expect(board.getByText("0 min remaining")).toBeVisible();
     expect(board.queryByRole("progressbar")).toBeNull();

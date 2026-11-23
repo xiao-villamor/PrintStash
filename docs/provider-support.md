@@ -145,7 +145,7 @@ Current behavior:
 - upload plain-text G-code and sliced Library projects over LAN FTPS. File transfers offer the authenticated TLS session on the passive data connection for firmware that requires session reuse
 - use **Files → Sync printer files** to browse G-code and 3MF files under
   `/cache`, including nested folders. **Start** accepts plain-text G-code and a PrintStash-uploaded project with a recorded plate. For other projects, import the sliced Revision and select its plate.
-- choose upload only, send and start, or queue. The farm board shows the running job, progress, reported time remaining, next job, and routing holds.
+- choose upload only, send and start, or queue. The Queue map connects each queued Revision to its routing rule and assigned printer. Drag its output port to another printer, or select the job and choose **Edit routing**, then **Save job**. Printer nodes show reported progress and time remaining during a print. Select a printer to inspect its current job and next job. Switch to **Table** for a list of printers and routing holds.
 - pause, resume, and cancel controls
 - record externally-started jobs with the task, subtask, project, profile,
   plate, layer, nozzle, and G-code identity fields the printer actually reports

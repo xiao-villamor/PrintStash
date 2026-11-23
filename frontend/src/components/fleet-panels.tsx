@@ -3,11 +3,22 @@ import { refreshFleet } from "@/features/printers/queries";
 import { knownUiText } from "@/lib/locale";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
-import { parseApiInstant } from "@/lib/format";
+import { dispatchName, parseApiInstant } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDown, ArrowUp, CalendarClock, Pencil, RotateCcw, Trash2, Wrench } from "lucide-react";
+import {
+  GitFork,
+  Network,
+  Table2,
+  ArrowDown,
+  ArrowUp,
+  CalendarClock,
+  Pencil,
+  RotateCcw,
+  Trash2,
+  Wrench,
+} from "lucide-react";
 
 import {
   deleteFleetJob,
@@ -42,6 +53,7 @@ import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Localized } from "@/components/ui/localized";
+import { FleetRoutingCanvas } from "./fleet-routing-canvas";
 import "./fleet-panels.css";
 
 const ACTIVE = new Set(["uploading", "started", "printing", "paused"]);
@@ -104,11 +116,6 @@ const REAL_FLEET_QUEUE_DEPS: FleetQueueDeps = {
 };
 
 export type FleetQueueView = "queued" | "active" | "recent";
-
-function dispatchName(filename: string) {
-  // Keep the complete remote name in the inspector and in the cell title.
-  return filename.replace(/__vault-f\d+-[a-f0-9]{8,64}(?=\.[^.]+$)/i, "");
-}
 
 function FarmDispatchBoard({
   rows,
@@ -260,10 +267,12 @@ function FarmDispatchBoard({
 export function FleetQueuePanel({
   printers,
   initialView = "queued",
+  onAdd,
   deps,
 }: {
   printers: PrinterRead[];
   initialView?: FleetQueueView;
+  onAdd?: () => void;
   deps?: Partial<FleetQueueDeps>;
 }) {
   useUiLocale();
@@ -271,6 +280,7 @@ export function FleetQueuePanel({
     ...REAL_FLEET_QUEUE_DEPS,
     ...deps,
   };
+  const [mapView, setMapView] = useState(true);
   const [queueView, setQueueView] = useState<FleetQueueView>(initialView);
   const [printerFilter, setPrinterFilter] = useState("all");
   const [groupFilter, setGroupFilter] = useState("all");
@@ -306,6 +316,10 @@ export function FleetQueuePanel({
   }
   const queued = jobs.filter((job) => job.state === "queued");
   const active = jobs.filter((job) => ACTIVE.has(job.state));
+  const farmRows = (summaryQuery.data?.printers ?? []).filter(
+    (row) =>
+      printerNames.has(row.printer_id) && (groupFilter === "all" || row.group === groupFilter),
+  );
   const recent = jobs.filter((job) => !ACTIVE.has(job.state) && job.state !== "queued");
 
   async function mutate<T>(jobId: number, action: () => Promise<T>): Promise<boolean> {
@@ -325,9 +339,19 @@ export function FleetQueuePanel({
     }
   }
 
-  function beginEdit(job: PrintJobRead) {
+  function beginEdit(job: PrintJobRead, destination?: PrinterRead) {
     setEditTarget(job);
-    setDraft(editDraft(job));
+    const initial = editDraft(job);
+    setDraft(
+      destination
+        ? {
+            ...initial,
+            strategy: "manual",
+            printerId: String(destination.id),
+            targetGroup: initial.targetGroup === destination.group ? initial.targetGroup : "",
+          }
+        : initial,
+    );
   }
 
   async function saveEdit() {
@@ -496,6 +520,7 @@ export function FleetQueuePanel({
                     {uiText("Printer")}
                     <select
                       className={inputClasses}
+                      aria-label={uiText("Printer")}
                       value={draft.printerId}
                       onChange={(event) => setDraft({ ...draft, printerId: event.target.value })}
                     >
@@ -575,19 +600,59 @@ export function FleetQueuePanel({
             </Button>
           </div>
         )}
-        <FarmDispatchBoard
-          queued={queued}
-          rows={(summaryQuery.data?.printers ?? []).filter(
-            (row) =>
-              printerNames.has(row.printer_id) &&
-              (groupFilter === "all" || row.group === groupFilter),
-          )}
-          selected={printerFilter}
-          onSelect={(id, view) => {
-            setPrinterFilter(id);
-            if (view) setQueueView(view);
-          }}
-        />
+        {!!summaryQuery.data?.printers.length && (
+          <section className="routing-map-shell" aria-label={uiText("Farm routing")}>
+            <header className="routing-map-title">
+              <h2 className="routing-map-heading">
+                <GitFork size={20} />
+                {uiText("Farm routing")}
+              </h2>
+              <div className="routing-map-actions">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-pressed={mapView}
+                  onClick={() => setMapView(true)}
+                >
+                  <Network />
+                  {uiText("Map")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-pressed={!mapView}
+                  onClick={() => setMapView(false)}
+                >
+                  <Table2 />
+                  {uiText("Table")}
+                </Button>
+              </div>
+            </header>
+            {mapView ? (
+              <FleetRoutingCanvas
+                rows={farmRows}
+                printers={printers}
+                jobs={queued.filter(matchesFilters)}
+                onEdit={beginEdit}
+                onAdd={onAdd}
+                onJobs={(id, running) => {
+                  setPrinterFilter(id);
+                  setQueueView(running ? "active" : "queued");
+                }}
+              />
+            ) : (
+              <FarmDispatchBoard
+                queued={queued}
+                rows={farmRows}
+                selected={printerFilter}
+                onSelect={(id, view) => {
+                  setPrinterFilter(id);
+                  if (view) setQueueView(view);
+                }}
+              />
+            )}
+          </section>
+        )}
         <div className="fleet-filter-row">
           <div className="farm-queue-scopes" role="group" aria-label={uiText("View")}>
             {(["queued", "active", "recent"] as const).map((view) => {
