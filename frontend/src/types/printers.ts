@@ -163,6 +163,7 @@ export interface MoonrakerConfigRead {
 }
 
 export interface PrinterFileRead {
+  plate_index?: number | null;
   id: number;
   printer_id: number;
   printer_name: string | null;
@@ -355,12 +356,18 @@ export interface DashboardGroup {
   status_counts: Record<string, number>;
 }
 
+export type PrinterAxis = "x" | "y" | "z";
+export type PrinterTuning = "fan" | "speed" | "flow";
+
 export interface PrinterSnapshot {
   print_stats?: {
     state?: string;
     filename?: string;
     print_duration?: number;
     total_duration?: number;
+    remaining_minutes?: number | null;
+    external_current_layer?: number;
+    external_total_layers?: number;
     message?: string;
   };
   virtual_sdcard?: {
@@ -368,9 +375,25 @@ export interface PrinterSnapshot {
     file_position?: number;
     file_size?: number;
   };
-  extruder?: { temperature?: number; target?: number };
-  heater_bed?: { temperature?: number; target?: number };
-  toolhead?: { position?: number[]; homed_axes?: string };
+  extruder?: { temperature?: number | null; target?: number; can_extrude?: boolean };
+  gcode_move?: {
+    speed_factor?: number;
+    extrude_factor?: number;
+    absolute_coordinates?: boolean;
+    absolute_extrude?: boolean;
+  };
+  bambu_storage?: { card_present?: boolean };
+  "temperature_sensor chamber"?: { temperature?: number };
+  heater_bed?: { temperature?: number | null; target?: number };
+  fan?: { speed?: number | null };
+  toolhead?: {
+    position?: number[];
+    homed_axes?: string;
+    axis_minimum?: number[];
+    axis_maximum?: number[];
+    extruder?: string;
+  };
+  idle_timeout?: { state?: string };
   webhooks?: { state?: string; state_message?: string };
   // Providers send more sections than the ones named above (and differ between
   // Moonraker, Bambu and OctoPrint), so the snapshot stays open — but open to
@@ -383,6 +406,12 @@ export interface PrinterStatusResponse {
   snapshot: PrinterSnapshot;
 }
 
+export interface FleetPrinterTelemetry {
+  nozzle_c: number | null;
+  bed_c: number | null;
+  part_fan_speed: number | null;
+}
+
 export interface FleetSummary {
   total_printers: number;
   queued_jobs: number;
@@ -390,13 +419,19 @@ export interface FleetSummary {
   draining_printers: number;
   maintenance_printers: number;
   attention_jobs: number;
-  printers?: Array<{
+  printers: Array<{
     printer_id: number;
     name: string;
     status: string;
     progress: number | null;
+    remaining_minutes?: number | null;
     group: string | null;
     loaded_slots: string[];
+    loaded_material_slots?: Pick<
+      MaterialSlotRead,
+      "slot_key" | "label" | "material_type" | "color_hex"
+    >[];
+    telemetry?: FleetPrinterTelemetry | null;
     nozzle_diameter_mm: number | null;
     current_job_id: number | null;
     current_job_name: string | null;

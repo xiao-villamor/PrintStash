@@ -350,6 +350,7 @@ class TestCapability:
                         Capability.CANCEL,
                         Capability.LIVE_STATUS,
                         Capability.UPLOAD,
+                        Capability.LIST_FILES,
                         Capability.MATERIAL_STATE,
                     }
                 ),

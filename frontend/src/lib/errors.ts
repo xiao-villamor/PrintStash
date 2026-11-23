@@ -131,6 +131,20 @@ const ERROR_MESSAGES = {
   // Printers
   printer_not_found: "This printer no longer exists.",
   printer_offline: "The printer is offline.",
+  printer_not_ready: "The printer is not ready. Check its live status.",
+  printer_not_idle: "Wait until the printer is idle to use this control.",
+  axis_not_homed: "Home this axis before moving it.",
+  move_out_of_bounds: "The move would go outside the printer's travel limits.",
+  extruder_too_cold: "Heat the hotend before moving filament.",
+  machine_control_unavailable: "The printer did not report the state needed for this command.",
+  bed_measurement_axes_not_homed: "Home X, Y and Z before measuring the bed.",
+  bed_measurement_unsupported: "This printer does not report an automatic bed mesh probe.",
+  bed_measurement_unknown:
+    "The measurement outcome is unknown. Wait for the printer to stop, then refresh the bed mesh.",
+  bed_measurement_mesh_unavailable:
+    "The printer finished measuring, but the new grid could not be read. Refresh the bed mesh.",
+  part_cooling_fan_unavailable: "The printer did not report a controllable part cooling fan.",
+  operation_not_supported_for_provider: "This action is unavailable for the printer integration.",
   provider_transport_error:
     "Could not connect to the printer. Check its address and network connection, then retry.",
   printer_permission_denied: "Your role does not allow this printer action.",

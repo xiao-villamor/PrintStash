@@ -60,6 +60,26 @@ async def _wait_state(
     raise AssertionError(f"never reached state {state!r}")
 
 
+class TestExternalInputs:
+    def test_polls_an_external_input_only_report(self) -> None:
+        report = {
+            "print": {
+                "vir_slot": [
+                    {"id": 254, "tray_type": "PETG"},
+                    {"id": 255, "tray_type": "PLA"},
+                ]
+            }
+        }
+        sim = PrintSim(total_mm=1000.0, total_seconds=10.0, print_seconds=1.0)
+        provider, _ = _provider(sim, pushall_report=report)
+        result = asyncio.run(provider.query_status())
+        slots = result["result"]["status"]["material_slots"]
+        assert {slot["slot_key"]: slot["material_type"] for slot in slots} == {
+            "external:254": "PETG",
+            "external": "PLA",
+        }
+
+
 class TestStart:
     def test_send_print_completes(self) -> None:
         sim = PrintSim(total_mm=1000.0, total_seconds=10.0, print_seconds=1.0)

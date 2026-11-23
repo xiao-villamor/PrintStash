@@ -1,3 +1,4 @@
+import type { PrinterAxis, PrinterTuning } from "@/types/printers";
 import { editHeaders, requireEditingReceipt } from "./editing";
 import type { EditingBase } from "@/types/editing";
 import { withSessionRequest } from "@/lib/session-transport";
@@ -173,6 +174,18 @@ export function setPrinterTemperature(
 
 export function homePrinter(id: number, axes?: string): Promise<void> {
   return sendJson(`/api/v1/printers/${id}/home`, "POST", { axes: axes ?? null });
+}
+
+export function jogPrinter(id: number, axis: PrinterAxis, distance: number): Promise<void> {
+  return sendJson(`/api/v1/printers/${id}/jog`, "POST", { axis, distance });
+}
+
+export function extrudePrinter(id: number, distance: number): Promise<void> {
+  return sendJson(`/api/v1/printers/${id}/extrude`, "POST", { distance });
+}
+
+export function tunePrinter(id: number, control: PrinterTuning, percent: number): Promise<void> {
+  return sendJson(`/api/v1/printers/${id}/tune`, "POST", { control, percent });
 }
 
 export function emergencyStopPrinter(id: number): Promise<void> {

@@ -145,6 +145,7 @@ class TestRemoteFieldParsers:
 
     def test_remote_size_coerces_whatever_the_printer_reported(self) -> None:
         assert pf._remote_size({"size": "456"}) == 456
+        assert pf._remote_size({"size": 0}) == 0
         assert pf._remote_size({"size_bytes": 789}) == 789
         assert pf._remote_size({"size": "not-a-number"}) is None
         assert pf._remote_size({}) is None
@@ -216,6 +217,34 @@ class TestSyncPrinterFiles:
         )
         assert rows[0].file_id == file.id
         assert rows[0].plate_index == 10
+
+    @pytest.mark.parametrize("reappears", [False, True])
+    def test_replaced_cached_project_loses_its_saved_plate(
+        self, db_session: Session, reappears
+    ):
+        _, revision = _make_gcode(db_session, name="bracket.gcode.3mf")
+        printer = build_printer(db_session)
+        remote = build_traceable_remote_filename(
+            revision, plate_index=2, native_project=True
+        )
+        pf.upsert_printer_file(
+            db_session,
+            printer_id=printer.id,
+            remote_filename=remote,
+            file_id=revision.id,
+            size_bytes=400,
+            plate_index=2,
+            matched_by="upload_history",
+        )
+        if reappears:
+            sync_printer_files(db_session, printer_id=printer.id, remote_files=[])
+        rows = sync_printer_files(
+            db_session,
+            printer_id=printer.id,
+            remote_files=[{"path": remote, "size": 400 if reappears else 399}],
+        )
+        assert rows[0].file_id == revision.id
+        assert rows[0].plate_index is None
 
     def test_replacing_sliced_upload_clears_selected_plate(self, db_session: Session):
         _, sliced = _make_gcode(db_session, name="part.gcode.3mf")

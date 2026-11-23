@@ -59,6 +59,18 @@ describe("getFleetSummary", () => {
     expectRequest("/api/v1/fleet/summary");
   });
 
+  it("forwards the fleet summary cancellation signal", async () => {
+    const response = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(response.promise);
+    const controller = new AbortController();
+    const request = getFleetSummary({ signal: controller.signal });
+
+    controller.abort();
+    expect(lastCall().init?.signal?.aborted).toBe(true);
+    response.resolve(new Response("{}"));
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("never serves a cached fleet state", async () => {
     respondWith({});
 

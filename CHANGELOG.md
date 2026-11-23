@@ -10,6 +10,24 @@
 
 ### Changed
 
+- Klipper Status now includes an administrator console with printer replies and loaded macros. Select a macro to supply its parameters before sending.
+
+- Fleet admins can see waiting jobs that have no assigned printer in the queue and fleet totals. Replacing filament in an existing manual feed now saves and lets compatible work dispatch. Bambu printers preparing a print count as busy.
+
+- Add to queue shows the selected Revision, plate, routing rule, destination and priority before saving. The queue list groups the Revision, destination, status and actions into columns, with routing holds written in plain language.
+- Fleet Queue opens a routing map. Select jobs, routing rules or printers to inspect them, or drag a queued job to a printer and confirm its new destination. The dispatcher shows available capacity, and printing nodes show reported progress and time remaining.
+- Bambu file transfers can resume the authenticated FTPS session on the data connection. Bambu LAN sends sliced Library projects intact and starts the chosen plate. A tracked project can also be started from the printer’s cache. Fleet Queue shows current work, progress, available time estimates, next jobs and dispatch holds per printer. The scheduler holds the next job while the previous dispatch awaits firmware updates.
+
+- Bambu LAN uploads now use the configured FTPS connection timeout. Files can sync the printer’s cache and browse nested G-code and 3MF files. Status shows available chamber temperature, SD card presence and remaining print time.
+
+- Open a printer from anywhere on its Fleet card. The roster shows work, routing holds, reported material colors, and available nozzle, bed and part-cooling fan readings alongside recent and queued prints. Fleet totals open the matching queue view or filter printers by readiness. Printer Status distinguishes idle machines from active jobs, shows a rolling history of actual heater readings and the reported part-cooling fan level, and can queue a saved Revision for that printer. Bambu Status groups the printer portrait and reported AMS trays beside the current job, live telemetry and recent runs. The job summary includes available layer counts during a print.
+- Bambu LAN recognizes individually addressed external spools in firmware material reports and keeps their readings separate across incremental MQTT updates.
+- Fleet Queue and Maintenance selects align their text and chevrons in Chromium's native picker. Bambu LAN forwards available nozzle and bed readings, targets and part-cooling fan levels. Moonraker reads the part-cooling fan when configured.
+- Printer details put machine controls, job actions and live feedback beside the heater graph. Hotend and bed history use aligned plots on a shared scale. Moonraker includes available controller history and shows material presets before you send a preheat command. The bed surface shows measured heights and variation, and operators with an automatic probe can measure the bed from the dashboard.
+- Completed Vault prints have a **Queue again** action in Jobs. It opens the ordinary queue form with the original Revision, plate and printer selected.
+- Printer Files has a folder explorer and searchable inventory. Operators can upload a saved Revision directly to the selected printer and inspect the transferred file before starting it. Jobs shows outcomes and durations, with the selected run’s evidence and actions alongside it. Both show the Model name for matched files. Materials & maintenance brings loaded feeds, service history and routing together. Diagnostics shows individual check results, and Settings tracks unsaved changes.
+- The Moonraker Config editor keeps line numbers aligned on long files, including when a wide line adds a horizontal scrollbar. Selecting a different file opens its source at the top. Switch to Reported configuration to search the printer’s configuration sections without losing your file draft.
+
 - Web captures can import directly from the browser extension. Pending Imports retains the result and opens the resulting Model. Captures that need a decision stay available for review. The extension remembers collection and tag choices and can be set to always review.
 - Pending Imports shows saved destinations, simpler review controls, and single or bulk import actions for ready captures. Direct files appear as one selected file. The on-page panel fits its content and uses the marketplace title when available.
 - The extension keeps the server URL, browser name and connection method while its popup closes to copy a pairing code. Pairing codes and API keys are never kept.
@@ -84,6 +102,10 @@
 
 ### Added
 
+- **Moonraker configuration editor.** Printer administrators can browse, edit, and verify saves to existing configuration files. The editor keeps local drafts when a conflict needs review.
+
+- **Klipper printer controls.** Operators can home or jog individual axes, feed or retract filament once the primary hotend is ready, and adjust the part-cooling fan, print speed, and extrusion flow when available.
+
 - Review folders and archives as separate Models or a Multipart with named pieces. Preserve selected guides and images as Documents, retain completed results when retrying, and open saved results from Tasks. Folder review is bounded to 256 MiB and 2,000 files; original files remain unchanged.
 
 
@@ -115,6 +137,8 @@
 - The default number of simultaneous mesh jobs is now one per usable CPU (it was one more). With admission no longer stalling, the extra job only competed for the CPU: on a 3-CPU, 8 GB install a 60-file archive's thumbnails finish in 38.7 s instead of 44.9 s, at the same CPU cost. `VAULT_MAX_RENDER_JOBS` and *Models processed at once* still override it.
 
 ### Fixed
+
+- OctoPrint shows Resume when a running job is paused externally. PrusaLink records an observed print as completed when the firmware retires its job details at the end of the run.
 
 - The browser extension popup improves contrast, puts credentials before the browser name, and provides keyboard-accessible file selectors that show the selected filename.
 - Partial imports show every file result and its failure reason. Expired browser staging prompts a fresh capture, and collection selection is distinguished from physical storage.

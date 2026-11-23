@@ -28,7 +28,7 @@ class TestPrinterConfig:
 
         with (
             patch(
-                "app.modules.printing.printer_provider.MoonrakerProvider.server_info",
+                "app.modules.printing.printer_provider.MoonrakerClient.server_info",
                 new_callable=AsyncMock,
             ) as mock_server_info,
             patch(

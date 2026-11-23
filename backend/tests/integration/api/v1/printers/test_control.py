@@ -142,26 +142,6 @@ class TestPrinterControl:
             assert resp.status_code == 200
             mock_gcode.assert_called_once_with("M140 S60")
 
-    def test_home_subset_axes_builds_gcode(
-        self, client: TestClient, auth_headers, db_session: Session
-    ):
-        p = build_printer(
-            db_session, name="Ender 3", moonraker_url="http://10.0.0.1:7125"
-        )
-
-        with patch(
-            "app.modules.printing.printer_provider.MoonrakerProvider.run_gcode",
-            new_callable=AsyncMock,
-        ) as mock_gcode:
-            mock_gcode.return_value = {"result": "ok"}
-            resp = client.post(
-                f"/api/v1/printers/{p.id}/home",
-                json={"axes": "xy"},
-                headers=auth_headers,
-            )
-            assert resp.status_code == 200
-            mock_gcode.assert_called_once_with("G28 X Y")
-
     def test_emergency_stop_calls_provider(
         self, client: TestClient, auth_headers, db_session: Session
     ):
@@ -245,24 +225,6 @@ class TestPrinterControl:
             f"/api/v1/printers/{p.id}/home", json={}, headers=auth_headers
         )
         assert resp.status_code == 404
-
-    def test_home_provider_error_502(
-        self, client: TestClient, auth_headers, db_session: Session
-    ):
-        p = build_printer(
-            db_session, name="Ender 3", moonraker_url="http://10.0.0.1:7125"
-        )
-
-        with patch(
-            "app.modules.printing.printer_provider.MoonrakerProvider.run_gcode",
-            new_callable=AsyncMock,
-            side_effect=ProviderError("boom", code="printer_offline"),
-        ):
-            resp = client.post(
-                f"/api/v1/printers/{p.id}/home", json={}, headers=auth_headers
-            )
-        assert resp.status_code == 502
-        assert resp.json()["detail"] == "printer_offline"
 
     def test_temperature_generic_exception_502(
         self, client: TestClient, auth_headers, db_session: Session

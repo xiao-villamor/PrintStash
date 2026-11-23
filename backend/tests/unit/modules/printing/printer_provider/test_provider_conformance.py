@@ -96,6 +96,12 @@ DELEGATING_PROVIDERS = [
 
 @pytest.mark.parametrize("provider", ALL_PROVIDERS)
 class TestProviderConformance:
+    def test_registry_builds_the_registered_adapter_from_its_typed_config(self, provider):
+        adapter = PROVIDERS[provider]
+        config = adapter.config_from_model(_printer(provider))
+        assert config.provider_id.value == provider.value
+        assert type(REGISTRY.build(config.provider_id, config)) is adapter
+
     def test_implements_the_provider_protocol(self, provider):
         assert isinstance(_build(provider), PrinterProviderClient)
 

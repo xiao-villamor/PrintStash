@@ -1,12 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronLeft } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { Button } from "@/components/ui/button";
-import { DropdownMenu } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import {
+  useSavedRevision,
+  revisionLabel,
+  isSlicedRevision,
+  printFormat,
+  type RevisionSelection,
+} from "@/features/printers/saved-revision";
+import { SavedRevisionPicker } from "@/components/saved-revision-picker";
+import { Check, FileBox, GitBranch, Layers3, Printer, ShieldCheck, Star } from "lucide-react";
+import { providerLabel } from "@/lib/printer-providers";
+import { knownUiText } from "@/lib/locale";
+import "./fleet-queue-workspace.css";
 import { Modal } from "@/components/ui/modal";
-import { modelDetailOptions } from "@/features/library/model-detail";
 import { refreshFleet } from "@/features/printers/queries";
 import { checkFleetCompatibility, enqueueFleetJob } from "@/lib/api/fleet";
 import { onAuthChange } from "@/lib/auth-store";
@@ -14,15 +22,14 @@ import { useAuth } from "@/lib/auth-context";
 import { userMessage } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
 import { uiText } from "@/lib/locale";
-import { useModelList, type ModelListFilters } from "@/lib/queries";
+import { gcodePlatesOptions } from "@/lib/queries/file-plates";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { toast } from "@/lib/toast";
 import type {
   CompatibilityPolicy,
-  FileRead,
   JobPriority,
-  ModelListItem,
   PrinterRead,
+  PrintJobRead,
   QueueJobCreate,
   RoutingStrategy,
 } from "@/types";
@@ -30,15 +37,93 @@ import type {
 const selectClass =
   "h-[38px] w-full border border-input bg-card px-3 text-[13px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
 
+interface RepeatRevision extends RevisionSelection {
+  plateIndex: number | null;
+}
+
+export function FleetQueueAgainAction({
+  job,
+  printer,
+}: {
+  job: PrintJobRead;
+  printer: PrinterRead;
+}) {
+  const { user } = useAuth();
+  if (
+    !user ||
+    !printer.access.can_print ||
+    job.printer_id !== printer.id ||
+    job.state !== "completed" ||
+    // Upload-only transfers also report completed, without a print start.
+    job.started_at === null ||
+    job.source !== "vault" ||
+    job.artifact_evidence !== "vault" ||
+    // Build attempts are fleet batch copies with separate unit accounting.
+    job.batch_id != null ||
+    job.model_id <= 0 ||
+    job.file_id <= 0
+  )
+    return null;
+
+  return (
+    <QueueAgainButton
+      printer={printer}
+      revision={{ modelId: job.model_id, fileId: job.file_id, plateIndex: job.plate_index }}
+    />
+  );
+}
+
+function QueueAgainButton({
+  printer,
+  revision,
+}: {
+  printer: PrinterRead;
+  revision: RepeatRevision;
+}) {
+  const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
+  const [openedInSession, setOpenedInSession] = useState<number | null>(null);
+  const { file } = useSavedRevision(revision, true);
+  const canRepeat =
+    file &&
+    isSlicedRevision(file) === (revision.plateIndex !== null) &&
+    printer.capabilities.accepted_print_formats.includes(printFormat(file));
+
+  return (
+    <>
+      <Button
+        size="xs"
+        variant="outline"
+        disabled={!canRepeat}
+        onClick={() => setOpenedInSession(session)}
+      >
+        {uiText("Queue again")}
+      </Button>
+      {openedInSession === session && (
+        <FleetAddJobDialog
+          open
+          onClose={() => setOpenedInSession(null)}
+          printers={[printer]}
+          fixedPrinterId={printer.id}
+          repeatRevision={revision}
+        />
+      )}
+    </>
+  );
+}
+
 /** Fleet owns the resulting queue; Library Query owners supply selectable revisions. */
 export function FleetAddJobDialog({
   open,
   onClose,
   printers,
+  fixedPrinterId,
+  repeatRevision,
 }: {
   open: boolean;
   onClose: () => void;
   printers: readonly PrinterRead[];
+  fixedPrinterId?: number;
+  repeatRevision?: RepeatRevision;
 }) {
   const { user } = useAuth();
   const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
@@ -50,6 +135,8 @@ export function FleetAddJobDialog({
       onClose={onClose}
       printers={printers}
       administrator={user.is_superuser}
+      fixedPrinterId={fixedPrinterId}
+      repeatRevision={repeatRevision}
     />
   );
 }
@@ -59,11 +146,15 @@ function AddJobForm({
   onClose,
   printers,
   administrator,
+  fixedPrinterId,
+  repeatRevision,
 }: {
   session: number;
   onClose: () => void;
   printers: readonly PrinterRead[];
   administrator: boolean;
+  fixedPrinterId?: number;
+  repeatRevision?: RepeatRevision;
 }) {
   useUiLocale();
   const client = useQueryClient();
@@ -76,47 +167,24 @@ function AddJobForm({
     };
   }, []);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [settledQuery, setSettledQuery] = useState("");
-  useEffect(() => {
-    const timer = window.setTimeout(() => setSettledQuery(query), 250);
-    return () => window.clearTimeout(timer);
-  }, [query]);
-  const filters = useMemo<ModelListFilters>(
-    () => ({ q: settledQuery.trim() || undefined, file_type: ["gcode"], direct: false }),
-    [settledQuery],
-  );
-  const models = useModelList(filters, 24, "date-desc", pickerOpen);
-  const rows = models.data?.pages.flatMap((page) => page.items) ?? [];
-  const [browsedModel, setBrowsedModel] = useState<ModelListItem | null>(null);
-  const [selection, setSelection] = useState<{ modelId: number; fileId: number } | null>(null);
-  const browsed = useQuery({
-    ...modelDetailOptions(browsedModel?.id ?? null),
-    enabled: pickerOpen && browsedModel !== null,
-  });
-  const chosen = useQuery({
-    ...modelDetailOptions(selection?.modelId ?? null),
-    enabled: selection !== null,
-  });
-  const revisions = browsed.isError
-    ? []
-    : (browsed.data?.files.filter((file) => file.file_type === "gcode") ?? []);
-  const file = chosen.isError
-    ? undefined
-    : chosen.data?.files.find(
-        (value) => value.id === selection?.fileId && value.file_type === "gcode",
-      );
+  const [selection, setSelection] = useState<RevisionSelection | null>(null);
+  const { query: chosen, file } = useSavedRevision(repeatRevision ?? selection, !!repeatRevision);
+  const [chosenPlate, setChosenPlate] = useState<number | null>(null);
+  const repeatedPlate = repeatRevision ? repeatRevision.plateIndex : chosenPlate;
+  const sliced = !!file && isSlicedRevision(file);
+  const plates = useQuery(gcodePlatesOptions(sliced ? file.id : null));
+  const plateReady = sliced
+    ? repeatedPlate !== null && plates.isSuccess && plates.data.plates.includes(repeatedPlate)
+    : repeatedPlate === null;
   const [strategy, setStrategy] = useState<RoutingStrategy>("manual");
-  const effectiveStrategy = administrator ? strategy : "manual";
+  const fixedPrinter = printers.find((printer) => printer.id === fixedPrinterId);
+  const effectiveStrategy = administrator && fixedPrinterId === undefined ? strategy : "manual";
   const [printerId, setPrinterId] = useState<number | null>(null);
   const [group, setGroup] = useState("");
   const [priority, setPriority] = useState<JobPriority>("normal");
   const [policy, setPolicy] = useState<CompatibilityPolicy>("safe");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const format = file?.original_filename.toLowerCase().endsWith(".bgcode")
-    ? "bgcode_binary"
-    : "gcode_text";
   const printable = printers.filter((printer) => printer.access.can_print);
   const groups = Array.from(
     new Set(printable.flatMap((printer) => (printer.group ? [printer.group] : []))),
@@ -124,12 +192,13 @@ function AddJobForm({
   const targets = printable.filter(
     (printer) =>
       (!group || printer.group === group) &&
-      (!file || printer.capabilities.accepted_print_formats.includes(format)),
+      (!file || printer.capabilities.accepted_print_formats.includes(printFormat(file))),
   );
+  const requestedPrinterId = fixedPrinterId ?? printerId;
   const target =
-    printerId === null
+    requestedPrinterId === null
       ? (targets.find((printer) => printer.is_default) ?? targets[0])
-      : targets.find((printer) => printer.id === printerId);
+      : targets.find((printer) => printer.id === requestedPrinterId);
   const enqueue = useMutation({
     retry: false,
     mutationFn: async (command: { payload: QueueJobCreate; session: number }) => {
@@ -143,16 +212,10 @@ function AddJobForm({
   function close() {
     if (!submitting.current) onClose();
   }
-  function revisionLabel(revision: FileRead) {
-    return (
-      revision.revision_label ||
-      `${uiText("Revision")} ${revision.gcode_revision_number ?? revision.version}`
-    );
-  }
+  const canSubmit = file && plateReady && !pickerOpen && (effectiveStrategy !== "manual" || target);
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (submitting.current || !file || pickerOpen || (effectiveStrategy === "manual" && !target))
-      return;
+    if (submitting.current || !canSubmit) return;
     submitting.current = true;
     setBusy(true);
     setError(null);
@@ -177,6 +240,7 @@ function AddJobForm({
         session,
         payload: {
           file_id: file.id,
+          plate_index: repeatedPlate ?? undefined,
           strategy: effectiveStrategy,
           printer_id: effectiveStrategy === "manual" ? target?.id : undefined,
           target_group: group || null,
@@ -196,14 +260,19 @@ function AddJobForm({
       if (session === getSessionVersion() && alive.current) setBusy(false);
     }
   }
+  const destination =
+    effectiveStrategy === "manual"
+      ? (target?.name ?? uiText("Choose printer"))
+      : effectiveStrategy === "default"
+        ? uiText("Default printer")
+        : uiText("Least busy");
   return (
     <Modal
       open
       onClose={close}
       title={uiText("Add to queue")}
-      description={uiText("Adjust the queue without changing the Model’s recommended Revision.")}
-      className="max-w-[640px]"
-      bodyClassName="max-h-[70vh] overflow-y-auto"
+      className="queue-compose-dialog"
+      bodyClassName="queue-compose-body"
       footer={
         <>
           <Button type="button" variant="outline" size="sm" disabled={busy} onClick={close}>
@@ -214,296 +283,278 @@ function AddJobForm({
             type="submit"
             size="sm"
             loading={busy}
-            disabled={!file || pickerOpen || (effectiveStrategy === "manual" && !target)}
+            disabled={!canSubmit}
           >
             {uiText("Save job")}
           </Button>
         </>
       }
     >
-      <form id="fleet-add-job-form" onSubmit={(event) => void submit(event)} className="space-y-5">
-        <fieldset disabled={busy} className="min-w-0 space-y-5">
-          <div className="grid gap-2">
-            <label className="text-[13px]" htmlFor="fleet-queue-revision">
-              {uiText("Revision")}
-            </label>
-            <DropdownMenu
-              open={pickerOpen}
-              onOpenChange={(value) => {
-                setPickerOpen(value);
-                if (!value) setBrowsedModel(null);
-              }}
-              portal
-              align="start"
-              role="dialog"
-              aria-label={uiText("Revision")}
-              className="w-full"
-              contentClassName="w-[36rem] max-w-[calc(100vw-2rem)] overflow-hidden border border-border bg-popover text-popover-foreground shadow-lg"
-              trigger={
-                <Button
-                  id="fleet-queue-revision"
-                  type="button"
-                  variant="outline"
-                  className="h-[38px] w-full justify-between border-input text-left text-[13px] font-normal"
-                  aria-haspopup="dialog"
-                  aria-expanded={pickerOpen}
-                  onClick={() => setPickerOpen(!pickerOpen)}
-                >
-                  <span className="min-w-0 truncate">
-                    {file && chosen.data
-                      ? `${chosen.data.name} · ${revisionLabel(file)}`
-                      : uiText("Select")}
-                  </span>
-                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-                </Button>
-              }
-            >
-              {browsedModel ? (
-                <div className="max-h-[60vh] overflow-y-auto p-3">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => setBrowsedModel(null)}
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                    {uiText("Models")}
-                  </Button>
-                  <h3 className="my-3 break-words text-sm font-semibold">
-                    {browsed.data?.name ?? browsedModel.name}
-                  </h3>
-                  {browsed.isPending ? (
-                    <p role="status" className="py-4 text-xs text-muted-foreground">
+      <form
+        id="fleet-add-job-form"
+        onSubmit={(event) => void submit(event)}
+        className="queue-compose"
+      >
+        <fieldset disabled={busy} className="queue-compose-fields">
+          <div className="queue-revision-choice">
+            <FileBox size={23} />
+            <div>
+              {repeatRevision ? (
+                <div className="grid gap-2">
+                  <p className="text-xs text-muted-foreground">{uiText("Revision")}</p>
+                  {file && chosen.data ? (
+                    <p className="break-words text-sm font-semibold">
+                      {chosen.data.name} · {revisionLabel(file)}
+                    </p>
+                  ) : chosen.isFetching ? (
+                    <p role="status" className="text-sm">
                       {uiText("Loading...")}
                     </p>
-                  ) : browsed.isError ? (
-                    <div role="alert" className="space-y-2 text-sm">
-                      <p>{userMessage(browsed.error)}</p>
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        onClick={() => void browsed.refetch()}
-                      >
-                        {uiText("Retry")}
-                      </Button>
-                    </div>
-                  ) : revisions.length ? (
-                    <div className="divide-y divide-border">
-                      {revisions.map((revision) => (
-                        <button
-                          key={revision.id}
-                          type="button"
-                          className="block w-full px-2 py-3 text-left text-sm hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          onClick={() => {
-                            setSelection({ modelId: browsedModel.id, fileId: revision.id });
-                            setBrowsedModel(null);
-                            setPickerOpen(false);
-                            setError(null);
-                          }}
-                        >
-                          <span className="font-medium">
-                            {revisionLabel(revision)}
-                            {revision.is_recommended ? ` ★ ${uiText("Recommended")}` : ""}
-                          </span>
-                          <span className="mt-1 block break-words text-xs text-muted-foreground">
-                            {revision.original_filename}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
                   ) : (
-                    <p className="py-4 text-sm text-muted-foreground">
-                      {uiText("No G-code revision yet")}
+                    <p role="alert" className="text-xs text-destructive">
+                      {chosen.isError
+                        ? userMessage(chosen.error)
+                        : uiText("This Revision cannot be queued on this printer.")}
                     </p>
+                  )}
+                  {sliced && (
+                    <>
+                      <p className="text-sm">
+                        {uiText("Sliced plate")}: {repeatedPlate}
+                      </p>
+                      {plates.isPending ? (
+                        <p role="status" className="text-sm">
+                          {uiText("Loading sliced plates…")}
+                        </p>
+                      ) : (
+                        !plateReady && (
+                          <p role="alert" className="text-xs text-destructive">
+                            {plates.isError
+                              ? userMessage(plates.error)
+                              : uiText("This Revision cannot be queued on this printer.")}
+                          </p>
+                        )
+                      )}
+                    </>
                   )}
                 </div>
               ) : (
-                <>
-                  <div className="border-b border-border p-3">
-                    <Input
-                      autoFocus
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      maxLength={512}
-                      aria-label={uiText("Search models")}
-                      placeholder={uiText("Search models")}
-                    />
-                  </div>
-                  <div className="max-h-64 overflow-y-auto p-1">
-                    {models.isError ? (
-                      <div role="alert" className="space-y-2 p-3 text-sm">
-                        <p>{userMessage(models.error)}</p>
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="outline"
-                          onClick={() => void models.refetch()}
-                        >
-                          {uiText("Retry")}
-                        </Button>
-                      </div>
-                    ) : models.isPending ? (
-                      <p role="status" className="p-3 text-xs text-muted-foreground">
-                        {uiText("Loading...")}
-                      </p>
-                    ) : rows.length ? (
-                      rows.map((model) => (
-                        <button
-                          key={model.id}
-                          type="button"
-                          disabled={models.isPlaceholderData}
-                          onClick={() => setBrowsedModel(model)}
-                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                        >
-                          <span className="min-w-0 break-words">{model.name}</span>
-                          <ChevronDown className="h-3.5 w-3.5 shrink-0 -rotate-90 text-muted-foreground" />
-                        </button>
-                      ))
-                    ) : (
-                      <p className="p-3 text-sm text-muted-foreground">
-                        {uiText("No models found")}
-                      </p>
-                    )}
-                  </div>
-                  {models.hasNextPage && (
-                    <div className="border-t border-border p-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="xs"
-                        className="w-full"
-                        loading={models.isFetchingNextPage}
-                        onClick={() => void models.fetchNextPage()}
-                      >
-                        {uiText("Load more")}
-                      </Button>
-                    </div>
-                  )}
-                </>
-              )}
-            </DropdownMenu>
-            {chosen.isError && (
-              <p role="alert" className="text-xs text-destructive">
-                {userMessage(chosen.error)}
-              </p>
-            )}
-          </div>
-          <fieldset className="grid min-w-0 gap-3">
-            <legend className="float-left w-full p-0 text-sm font-semibold">
-              {uiText("Routing")}
-            </legend>
-            <label className="mb-4 grid gap-2 text-[13px]">
-              <span>{uiText("Routing")}</span>
-              <select
-                value={effectiveStrategy}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (
-                    value === "manual" ||
-                    (administrator && (value === "default" || value === "least_busy"))
-                  )
-                    setStrategy(value);
-                  setError(null);
-                }}
-                className={selectClass}
-              >
-                <option value="manual">{uiText("Choose printer")}</option>
-                {administrator && (
-                  <>
-                    <option value="default">{uiText("Default printer")}</option>
-                    <option value="least_busy">{uiText("Least busy")}</option>
-                  </>
-                )}
-              </select>
-            </label>
-            {effectiveStrategy === "manual" && (
-              <label className="grid gap-2 text-[13px]">
-                <span>{uiText("Printer")}</span>
-                <select
-                  value={target?.id ?? ""}
-                  onChange={(event) => {
-                    setPrinterId(Number(event.target.value));
+                <SavedRevisionPicker
+                  emptyLabel={uiText("Browse saved Revisions")}
+                  pickerOpen={pickerOpen}
+                  onOpenChange={setPickerOpen}
+                  onChoose={(revision) => {
+                    setSelection(revision);
+                    setChosenPlate(null);
                     setError(null);
                   }}
-                  className={selectClass}
-                  required
-                >
-                  <option value="">{uiText("Choose printer")}</option>
-                  {targets.map((printer) => (
-                    <option key={printer.id} value={printer.id}>
-                      {printer.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <label className="grid gap-2 text-[13px]">
-              <span>{uiText("Target group")}</span>
-              <select
-                value={group}
-                onChange={(event) => {
-                  setGroup(event.target.value);
-                  setError(null);
-                }}
-                className={selectClass}
-              >
-                <option value="">{uiText("All groups")}</option>
-                {groups.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </fieldset>
-          <fieldset className="grid min-w-0 gap-3">
-            <legend className="float-left w-full p-0 text-sm font-semibold">
-              {uiText("Queue settings")}
-            </legend>
-            <div className="mb-4 grid gap-[18px] sm:grid-cols-2">
-              <label className="grid gap-2 text-[13px]">
-                <span>{uiText("Priority")}</span>
-                <select
-                  value={priority}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    if (value === "low" || value === "normal" || value === "rush")
-                      setPriority(value);
-                  }}
-                  className={selectClass}
-                >
-                  <option value="low">{uiText("Low")}</option>
-                  <option value="normal">{uiText("Normal")}</option>
-                  <option value="rush">{uiText("Rush")}</option>
-                </select>
-              </label>
-              <label className="grid gap-2 text-[13px]">
-                <span>{uiText("Queue position")}</span>
-                <Input
-                  readOnly
-                  value={uiText("End of queue")}
-                  className="h-[38px] max-w-[160px] bg-muted/30 text-[13px] text-muted-foreground"
+                  file={file}
+                  chosen={chosen}
                 />
-              </label>
+              )}
             </div>
-            <label className="grid gap-2 text-[13px]">
-              <span>{uiText("Material compatibility")}</span>
-              <select
-                value={policy}
-                onChange={(event) => {
-                  if (event.target.value === "safe" || event.target.value === "allow_mismatch")
-                    setPolicy(event.target.value);
-                  setError(null);
-                }}
-                className={selectClass}
-              >
-                <option value="safe">{uiText("Require compatible material")}</option>
-                <option value="allow_mismatch">{uiText("Allow mismatch")}</option>
-              </select>
-            </label>
+          </div>
+          {!repeatRevision && sliced && (
+            <fieldset className="queue-compose-group">
+              <legend>{uiText("Sliced plate")}</legend>
+              {plates.isError ? (
+                <div role="alert">
+                  <span>{userMessage(plates.error)}</span>{" "}
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    onClick={() => void plates.refetch()}
+                  >
+                    {uiText("Retry")}
+                  </Button>
+                </div>
+              ) : plates.isPending ? (
+                <p role="status">{uiText("Loading sliced plates…")}</p>
+              ) : (
+                <div className="queue-options queue-plates">
+                  {plates.data.plates.map((plate) => (
+                    <label key={plate}>
+                      <input
+                        type="radio"
+                        name="queue-plate"
+                        checked={chosenPlate === plate}
+                        onChange={() => setChosenPlate(plate)}
+                      />
+                      <span>{uiText("Plate {plate}", { plate })}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </fieldset>
+          )}
+          {fixedPrinterId === undefined && (
+            <>
+              {administrator && (
+                <fieldset className="queue-compose-group">
+                  <legend>{uiText("Routing")}</legend>
+                  <div className="queue-options">
+                    {(["manual", "default", "least_busy"] as const).map((value) => {
+                      const Icon =
+                        value === "manual" ? Printer : value === "default" ? Star : GitBranch;
+                      const label =
+                        value === "manual"
+                          ? uiText("Choose printer")
+                          : value === "default"
+                            ? uiText("Default printer")
+                            : uiText("Least busy");
+                      return (
+                        <label key={value}>
+                          <input
+                            type="radio"
+                            name="queue-routing"
+                            checked={strategy === value}
+                            onChange={() => {
+                              setStrategy(value);
+                              setError(null);
+                            }}
+                          />
+                          <span>
+                            <Icon size={15} />
+                            {label}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              )}
+              {!!groups.length && (
+                <label className="queue-group-filter">
+                  {uiText("Target group")}
+                  <select
+                    className={selectClass}
+                    value={group}
+                    onChange={(e) => {
+                      setGroup(e.target.value);
+                      setPrinterId(null);
+                      setError(null);
+                    }}
+                  >
+                    <option value="">{uiText("All groups")}</option>
+                    {groups.map((name) => (
+                      <option key={name}>{name}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {effectiveStrategy === "manual" && (
+                <fieldset className="queue-compose-group">
+                  <legend>{uiText("Destination")}</legend>
+                  <div className="queue-printer-choices">
+                    {targets.map((printer) => (
+                      <label key={printer.id}>
+                        <input
+                          type="radio"
+                          name="queue-destination"
+                          checked={target?.id === printer.id}
+                          onChange={() => {
+                            setPrinterId(printer.id);
+                            setError(null);
+                          }}
+                        />
+                        <span>
+                          <Printer size={17} />
+                          <span>
+                            <b>{printer.name}</b>
+                            <small>{providerLabel(printer)}</small>
+                          </span>
+                          <Check size={15} />
+                        </span>
+                      </label>
+                    ))}
+                    {!targets.length && <p>{uiText("No compatible printers")}</p>}
+                  </div>
+                </fieldset>
+              )}
+            </>
+          )}
+          <fieldset className="queue-compose-group">
+            <legend>{uiText("Priority")}</legend>
+            <div className="queue-options queue-priority">
+              {(["low", "normal", "rush"] as const).map((value) => (
+                <label key={value}>
+                  <input
+                    type="radio"
+                    name="queue-priority"
+                    checked={priority === value}
+                    onChange={() => setPriority(value)}
+                  />
+                  <span>
+                    {value === "low"
+                      ? uiText("Low")
+                      : value === "normal"
+                        ? uiText("Normal")
+                        : uiText("Rush")}
+                  </span>
+                </label>
+              ))}
+            </div>
           </fieldset>
+          <label className="queue-material-policy">
+            <input
+              type="checkbox"
+              checked={policy === "allow_mismatch"}
+              onChange={(e) => {
+                setPolicy(e.target.checked ? "allow_mismatch" : "safe");
+                setError(null);
+              }}
+            />
+            {uiText("Allow material or nozzle mismatch")}
+          </label>
         </fieldset>
+        <aside className="queue-ticket" aria-label={uiText("Dispatch details")}>
+          <h3>
+            <Layers3 size={17} />
+            {uiText("Dispatch details")}
+          </h3>
+          <div className="queue-ticket-route">
+            <FileBox size={15} />
+            <div>
+              <small>{uiText("Revision")}</small>
+              <b>{chosen.data && file ? chosen.data.name : uiText("Select a saved Revision")}</b>
+              {file && <small>{revisionLabel(file)}</small>}
+            </div>
+            <Printer size={15} />
+            <div>
+              <small>{uiText("Destination")}</small>
+              <b>{fixedPrinter?.name ?? destination}</b>
+              {target && effectiveStrategy === "manual" && (
+                <small>{target.drain_mode ? uiText("Draining") : knownUiText(target.status)}</small>
+              )}
+            </div>
+          </div>
+          <dl>
+            <dt>{uiText("Queue position")}</dt>
+            <dd>{uiText("End of queue")}</dd>
+            <dt>{uiText("Priority")}</dt>
+            <dd>
+              {priority === "rush"
+                ? uiText("Rush")
+                : priority === "low"
+                  ? uiText("Low")
+                  : uiText("Normal")}
+            </dd>
+            {repeatedPlate !== null && (
+              <>
+                <dt>{uiText("Sliced plate")}</dt>
+                <dd>{repeatedPlate}</dd>
+              </>
+            )}
+          </dl>
+          <p>
+            <ShieldCheck size={16} />
+            {policy === "safe" ? uiText("Require compatible material") : uiText("Allow mismatch")}
+          </p>
+          {fixedPrinterId !== undefined && file && !target && (
+            <p role="alert">{uiText("This Revision cannot be queued on this printer.")}</p>
+          )}
+        </aside>
         {error && (
           <p role="alert" className="text-sm text-destructive">
             {error}

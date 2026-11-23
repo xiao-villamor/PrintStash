@@ -15,11 +15,11 @@ test.describe("Manual printer materials", () => {
     const other = await context.newPage();
     try {
       await page.goto(`/printers/${printer.id}`);
-      await page.getByRole("tab", { name: "Materials & tools" }).click();
+      await page.getByRole("tab", { name: "Materials & maintenance" }).click();
       const nozzle = page.getByRole("spinbutton", { name: "Tool 0 nozzle diameter (mm)" });
       await nozzle.fill("0.6");
       await other.goto(`/printers/${printer.id}`);
-      await other.getByRole("tab", { name: "Materials & tools" }).click();
+      await other.getByRole("tab", { name: "Materials & maintenance" }).click();
       await other.getByRole("spinbutton", { name: "Tool 0 nozzle diameter (mm)" }).fill("0.8");
       await other.getByRole("button", { name: "Save state" }).click();
       await expect(other.getByText("Materials and tools saved")).toBeVisible();

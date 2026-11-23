@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from printstash_core.printers import PrintArtifactFormat
+from printstash_core.printers import MotionAxis, PrintArtifactFormat, TuningControl
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.db.models import (
@@ -335,6 +335,65 @@ class HomeAxes(BaseModel):
         return cleaned
 
 
+class JogPrinter(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    axis: MotionAxis
+    distance: float = Field(
+        strict=True,
+        ge=-10,
+        le=10,
+        allow_inf_nan=False,
+        description="Signed distance in millimeters. Magnitude must be at least 0.1.",
+    )
+
+    @field_validator("distance")
+    @classmethod
+    def validate_distance(cls, value: float) -> float:
+        if abs(value) < 0.1:
+            raise ValueError("distance_below_minimum")
+        return value
+
+
+class ExtrudeFilament(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    distance: float = Field(
+        strict=True,
+        ge=-50,
+        le=50,
+        allow_inf_nan=False,
+        description="Signed filament distance in millimeters. Magnitude must be at least 0.1.",
+    )
+
+    @field_validator("distance")
+    @classmethod
+    def validate_distance(cls, value: float) -> float:
+        return JogPrinter.validate_distance(value)
+
+
+class TunePrinter(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    control: TuningControl
+    percent: float = Field(
+        strict=True,
+        ge=0,
+        le=150,
+        allow_inf_nan=False,
+        description="0–100 for the part-cooling fan and 50–150 for speed or flow.",
+    )
+
+    @model_validator(mode="after")
+    def validate_control_range(self) -> TunePrinter:
+        if self.control is TuningControl.FAN:
+            if self.percent > 100:
+                raise ValueError("fan_percent_out_of_range")
+        elif self.percent < 50:
+            raise ValueError("override_percent_out_of_range")
+        return self
+
+
 class PrintJobRead(BaseModel):
     id: int
     printer_id: Optional[int] = None
@@ -404,6 +463,7 @@ class PrinterFileRead(BaseModel):
     model_id: Optional[int] = None
     model_name: Optional[str] = None
     original_filename: Optional[str] = None
+    plate_index: int | None = None
     remote_filename: str
     size_bytes: Optional[int] = None
     sha256: Optional[str] = None

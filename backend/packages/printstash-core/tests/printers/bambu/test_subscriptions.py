@@ -62,6 +62,19 @@ def collector(into: list[dict[str, Any]]) -> Any:
 
 class TestSubscribeStatus:
     @pytest.mark.asyncio
+    async def test_status_subscription_surfaces_disconnect_to_its_owner(self) -> None:
+        wire = ScriptedMqttClient(messages=[PRINTING_REPORT])
+        client = make_client(mqtt_client_factory=lambda: wire)
+
+        async def on_status(_status: dict[str, Any]) -> None:
+            wire.on_disconnect(wire, None, None, 128, None)
+
+        async with asyncio.timeout(2):
+            with pytest.raises(ProviderError, match="bambu_mqtt_disconnected"):
+                await client.subscribe_status(on_status, stop_event=asyncio.Event())
+        assert wire.calls[-2:] == [("disconnect",), ("loop_stop",)]
+
+    @pytest.mark.asyncio
     async def test_delivers_the_first_status_report(self) -> None:
         wire = ScriptedMqttClient(messages=[PRINTING_REPORT])
         client = make_client(mqtt_client_factory=lambda: wire)
@@ -142,8 +155,21 @@ class TestSubscribeStatus:
         assert len(received) == 1
 
     @pytest.mark.asyncio
-    async def test_ignores_a_frame_with_no_print_section(self) -> None:
-        wire = ScriptedMqttClient(messages=[{"info": {}}, PRINTING_REPORT])
+    async def test_delivers_a_telemetry_only_report(self) -> None:
+        wire = ScriptedMqttClient(
+            messages=[{"print": {"bed_temper": 22, "cooling_fan_speed": "0"}}]
+        )
+        client = make_client(mqtt_client_factory=lambda: wire)
+        received: list[dict[str, Any]] = []
+
+        await client.subscribe_status(collector(received))
+
+        assert received == [{"heater_bed": {"temperature": 22}, "fan": {"speed": 0}}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("report", [{"info": {}}, b"[]", b"null"])
+    async def test_ignores_a_frame_with_no_print_section(self, report: Any) -> None:
+        wire = ScriptedMqttClient(messages=[report, PRINTING_REPORT])
         client = make_client(mqtt_client_factory=lambda: wire)
         received: list[dict[str, Any]] = []
 

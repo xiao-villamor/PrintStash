@@ -99,10 +99,12 @@ PROVIDER_DEFINITIONS: Mapping[ProviderId, ProviderDefinition] = MappingProxyType
             capabilities=_capabilities(
                 *_CONTROL_AND_STATUS,
                 Capability.UPLOAD,
+                Capability.LIST_FILES,
+                Capability.MATERIAL_STATE,
                 support_level="beta",
                 support_notes=(
                     "Bambu LAN upload and explicit start are beta features.",
-                    "Printer file inventory, deletion, raw G-code controls, and measured filament consumption are unavailable.",
+                    "File deletion, raw G-code controls, and measured filament consumption are unavailable.",
                 ),
                 requires_ready_before_send=True,
                 accepted_print_formats=(PrintArtifactFormat.GCODE_TEXT,),

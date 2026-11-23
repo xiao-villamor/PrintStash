@@ -214,12 +214,11 @@ class TestPrinterFiles:
     ):
         p = build_printer(
             db_session,
-            name="Bambu",
-            provider="bambu_lan",
+            name="Centauri",
+            provider="elegoo_centauri",
             moonraker_url="",
-            bambu_host="192.168.1.50",
-            bambu_serial="SN123",
-            bambu_access_code="access",
+            elegoo_centauri_host="192.0.2.5",
+            elegoo_centauri_mainboard_id="board",
         )
         resp = client.post(f"/api/v1/printers/{p.id}/files/sync", headers=auth_headers)
         assert resp.status_code == 409
@@ -440,16 +439,37 @@ class TestPrinterFiles:
             bambu_access_code="access",
         )
 
-        with patch(
-            "app.modules.printing.printer_provider.BambuLanProvider.start",
-            new_callable=AsyncMock,
-            return_value={"ok": True},
+        with (
+            patch(
+                "app.modules.printing.bambu_adapter.BambuLanProvider.query_status",
+                new_callable=AsyncMock,
+            ) as status,
+            patch(
+                "app.modules.printing.bambu_adapter.BambuLanProvider.start",
+                new_callable=AsyncMock,
+            ) as start,
         ):
-            resp = client.post(
-                f"/api/v1/printers/{p.id}/start",
-                json={"remote_filename": "part.gcode"},
-                headers=auth_headers,
+            path = f"/api/v1/printers/{p.id}/start"
+            archive = client.post(
+                path, json={"remote_filename": "project.3mf"}, headers=auth_headers
             )
+            assert archive.status_code == 409
+            status.assert_not_awaited()
+            status.return_value = {
+                "result": {"status": {"print_stats": {"state": "printing"}}}
+            }
+            busy = client.post(
+                path, json={"remote_filename": "part.gcode"}, headers=auth_headers
+            )
+            assert busy.status_code == 409
+            start.assert_not_awaited()
+            status.return_value = {
+                "result": {"status": {"print_stats": {"state": "standby"}}}
+            }
+            resp = client.post(
+                path, json={"remote_filename": "part.gcode"}, headers=auth_headers
+            )
+            start.assert_awaited_once_with("part.gcode")
 
         assert resp.status_code == 200
 

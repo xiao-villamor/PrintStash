@@ -1888,6 +1888,28 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     sendJson(res, printer);
     return;
   }
+  if (url.pathname === "/api/v1/printers/3/heater-history") {
+    sendJson(res, { sample_interval_ms: 1000, extruder: [], heater_bed: [] });
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/bed-mesh/measurement" && req.method === "GET") {
+    sendJson(res, { supported: false });
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/bed-mesh") {
+    sendJson(res, { state: "unconfigured" });
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/material-state") {
+    sendJson(res, {
+      printer_id: printer.id,
+      updated_at: printer.updated_at,
+      provider_sync_enabled: printer.provider_material_sync_enabled,
+      tools: [],
+      slots: [],
+    });
+    return;
+  }
   if (url.pathname === "/api/v1/printers/3/config") {
     sendJson(res, {
       printer_id: printer.id,
@@ -1895,6 +1917,21 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       printer_info: {},
       moonraker_config: {},
       klipper_config: {},
+    });
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/config/files" && req.method === "GET") {
+    sendJson(res, {
+      files: [{ path: "printer.cfg", size_bytes: 32, modified: 1700000000, writable: false }],
+    });
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/config/file" && req.method === "GET") {
+    sendJson(res, {
+      path: "printer.cfg",
+      content: "[printer]\nkinematics: cartesian\n",
+      revision: "70c8eea2a5f90a6d5abd8b8329deb76f45fc898cec5c3a11f628f21aee0dedcb",
+      writable: false,
     });
     return;
   }

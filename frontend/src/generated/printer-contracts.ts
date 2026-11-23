@@ -75,12 +75,14 @@ export const SHARED_PRINTER_CONTRACT = {
         "resume",
         "cancel",
         "live_status",
-        "upload"
+        "upload",
+        "list_files",
+        "material_state"
       ],
       "supportLevel": "beta",
       "supportNotes": [
         "Bambu LAN upload and explicit start are beta features.",
-        "Printer file inventory, deletion, raw G-code controls, and measured filament consumption are unavailable."
+        "File deletion, raw G-code controls, and measured filament consumption are unavailable."
       ],
       "requiresReadyBeforeSend": true,
       "acceptedPrintFormats": [

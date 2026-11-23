@@ -5,6 +5,7 @@
 @plugin "@tailwindcss/typography";
 @source "./app";
 @source "./components";
+@source "./features/printers/config-editor.tsx";
 @source "./pages";
 @source "../packages/ui/src";
 

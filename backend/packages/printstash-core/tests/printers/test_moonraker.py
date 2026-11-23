@@ -32,6 +32,7 @@ import pytest
 
 from printstash_core.printers.contracts import PrinterClient
 from printstash_core.printers.models import (
+    MachineControlError,
     MoonrakerConfig,
     OctoPrintConfig,
     PrinterSnapshot,
@@ -55,6 +56,56 @@ def _client(handler: Any, *, api_key: str | None = API_KEY) -> MoonrakerClient:
         MoonrakerConfig(BASE_URL, api_key),
         http_client_factory=lambda: httpx.AsyncClient(transport=transport),
     )
+
+
+class TestBedMeshMeasurement:
+    @pytest.mark.asyncio
+    async def test_measurement_holds_controller_lock_until_grid_is_read(self) -> None:
+        reading_grid = asyncio.Event()
+        release_grid = asyncio.Event()
+        scripts: list[str] = []
+
+        async def handle(request: httpx.Request) -> httpx.Response:
+            if request.method == "POST":
+                scripts.append(request.url.params["script"])
+                return httpx.Response(200, json={"result": "ok"})
+            if list(request.url.params) == ["bed_mesh"]:
+                reading_grid.set()
+                await release_grid.wait()
+                return httpx.Response(
+                    200, json={"result": {"status": {"bed_mesh": {}}}}
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "result": {
+                        "status": {
+                            "print_stats": {"state": "standby"},
+                            "webhooks": {"state": "ready"},
+                            "idle_timeout": {"state": "Ready"},
+                            "toolhead": {"homed_axes": "xyz"},
+                            "bed_mesh": {"probed_matrix": [[]]},
+                            "probe": {"last_query": False, "last_z_result": 0},
+                            "configfile": {"settings": {"bed_mesh": {}, "bltouch": {}}},
+                            "gcode": {"commands": {"BED_MESH_CALIBRATE": {}}},
+                        }
+                    }
+                },
+            )
+
+        first, second = _client(handle), _client(handle)
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(first.measure_bed())
+            try:
+                async with asyncio.timeout(1):
+                    await reading_grid.wait()
+                with pytest.raises(MachineControlError, match="printer_not_idle"):
+                    await second.measure_bed()
+            finally:
+                release_grid.set()
+        assert scripts == ["BED_MESH_CALIBRATE"]
+        await first.aclose()
+        await second.aclose()
 
 
 class _FakeWebSocket:
@@ -215,6 +266,18 @@ class TestRequest:
 
 
 class TestQueryStatus:
+    @pytest.mark.parametrize("body", [b"null", b"[]", b'"ok"'])
+    @pytest.mark.asyncio
+    async def test_rejects_non_object_json_before_reading_status(
+        self, body: bytes
+    ) -> None:
+        client = _client(lambda _request: httpx.Response(200, content=body))
+        try:
+            with pytest.raises(MoonrakerError, match="expected a JSON object"):
+                await client.query_status()
+        finally:
+            await client.aclose()
+
     @pytest.mark.asyncio
     async def test_asks_for_every_subscribed_object(self) -> None:
         seen: list[httpx.URL] = []
@@ -232,6 +295,27 @@ class TestQueryStatus:
             await client.aclose()
 
         assert set(seen[0].params) == set(SUBSCRIPTIONS)
+        assert seen[0].params["fan"] == "speed"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "fan", [{}, {"fan": {"speed": None}}, {"fan": {"speed": 0}}]
+    )
+    async def test_query_accepts_optional_fan(self, fan: dict[str, Any]) -> None:
+        snapshot = {"print_stats": {"state": "standby"}, **fan}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/server/spoolman/spool_id":
+                return httpx.Response(404)
+            return httpx.Response(200, json={"result": {"status": snapshot}})
+
+        client = _client(handler)
+        try:
+            result = await client.query_status()
+        finally:
+            await client.aclose()
+
+        assert {key: result["result"]["status"][key] for key in snapshot} == snapshot
 
     @pytest.mark.asyncio
     async def test_reports_the_active_spool_as_a_loaded_material_slot(self) -> None:
@@ -521,6 +605,34 @@ class TestPrintActions:
             == "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=0"
         )
 
+    @pytest.mark.parametrize(
+        "body",
+        [
+            b"[]",
+            b"<html>Bad gateway</html>",
+            b'{"error": "failed"}',
+            b'{"result": null}',
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_rejects_malformed_gcode_receipt(self, body: bytes) -> None:
+        client = _client(lambda _request: httpx.Response(200, content=body))
+        try:
+            with pytest.raises(
+                MoonrakerError, match="expected a JSON object|no G-code receipt"
+            ):
+                await client.run_gcode("G28")
+        finally:
+            await client.aclose()
+
+    @pytest.mark.asyncio
+    async def test_accepts_bare_ok_gcode_receipt(self) -> None:
+        client = _client(lambda _request: httpx.Response(200, text="OK"))
+        try:
+            assert await client.run_gcode("G28") == {"raw": "OK"}
+        finally:
+            await client.aclose()
+
 
 class TestGetPrintHistory:
     @pytest.mark.asyncio
@@ -596,6 +708,8 @@ class TestSubscribe:
 
         assert websocket.sent[0]["method"] == "printer.objects.subscribe"
         assert websocket.sent[0]["params"] == {"objects": SUBSCRIPTIONS}
+        assert websocket.sent[0]["params"]["objects"]["fan"] == ["speed"]
+        assert websocket.sent[0]["params"]["objects"]["idle_timeout"] == ["state"]
 
     @pytest.mark.asyncio
     async def test_identifies_itself_before_subscribing_when_a_key_is_set(self) -> None:
@@ -951,6 +1065,28 @@ class TestSubscribeSnapshots:
         await client.aclose()
 
         assert seen == [{"print_stats": {}}]
+
+    @pytest.mark.asyncio
+    async def test_status_subscription_surfaces_disconnect_to_its_owner(self) -> None:
+        status = {"extruder": {"temperature": 72}}
+        websocket = _FakeWebSocket(
+            [_subscribe_result(1, status), OSError("connection reset by peer")]
+        )
+        client = MoonrakerClient(
+            MoonrakerConfig(BASE_URL, None), websocket_connector=_connector(websocket)
+        )
+        seen: list[dict[str, Any]] = []
+
+        async def on_status(patch: dict[str, Any]) -> None:
+            seen.append(patch)
+
+        try:
+            async with asyncio.timeout(2):
+                with pytest.raises(MoonrakerError, match="websocket disconnected"):
+                    await client.subscribe_status(on_status, stop_event=asyncio.Event())
+        finally:
+            await client.aclose()
+        assert seen == [status]
 
 
 class TestMoonrakerFactory:

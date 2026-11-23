@@ -35,7 +35,7 @@ def _remote_name(raw: dict[str, Any]) -> str | None:
 
 
 def _remote_size(raw: dict[str, Any]) -> int | None:
-    value = raw.get("size") or raw.get("size_bytes")
+    value = raw.get("size") if raw.get("size") is not None else raw.get("size_bytes")
     try:
         return int(value) if value is not None else None
     except TypeError, ValueError:
@@ -56,9 +56,9 @@ def _remote_modified(raw: dict[str, Any]) -> datetime | None:
 
 
 def build_traceable_remote_filename(
-    file: File, *, plate_index: int | None = None
+    file: File, *, plate_index: int | None = None, native_project: bool = False
 ) -> str:
-    """Return a Moonraker-safe filename with a Vault revision marker."""
+    """Return the delivery filename with its Vault revision and selected plate."""
     filename = PurePosixPath(file.original_filename)
     recognized_suffixes = {".gcode", ".bgcode", ".g", ".gco"}
     extension_only_suffix = "." + filename.name.lstrip(".")
@@ -75,6 +75,8 @@ def build_traceable_remote_filename(
         if suffix.lower() not in recognized_suffixes:
             suffix = ".gcode"
         stem = filename.stem or "print"
+    if native_project:
+        suffix = ".3mf"
     safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip(".-_") or "print"
     plate_suffix = f"-plate-{plate_index}" if plate_index is not None else ""
     marker = f"vault-f{file.id}-{file.sha256[:12]}"
@@ -181,7 +183,16 @@ def upsert_printer_file(
         )
         # Inventory refresh does not carry plate metadata. Keep the known plate
         # only while the remote file still resolves to the same Artifact.
-        if row.file_id != file_id:
+        if (
+            row.file_id != file_id
+            or row.missing_since is not None
+            or (
+                size_bytes is not None
+                and row.size_bytes is not None
+                and size_bytes != row.size_bytes
+            )
+            or (sha256 and row.sha256 and sha256 != row.sha256)
+        ):
             row.plate_index = None
     else:
         row.plate_index = plate_index

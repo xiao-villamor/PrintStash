@@ -11,6 +11,7 @@ import asyncio
 from typing import Callable
 
 from printstash_core.gcode import declared_print_artifact_format
+from sqlalchemy import update
 from sqlmodel import Session
 
 from app.core.errors import ErrorKind, OperationError
@@ -23,6 +24,7 @@ from app.db.models import (
     FileType,
     Model,
     Printer,
+    PrinterProvider,
     PrinterRole,
     PrintJob,
     PrintJobState,
@@ -37,6 +39,7 @@ from app.modules.printing.printer_files import (
 )
 from app.modules.printing.printer_jobs import (
     PrinterJobError,
+    project_subtask_id,
     reproducibility_payload,
     transfer_artifact,
 )
@@ -51,6 +54,22 @@ from app.schemas.printers import (
 )
 
 logger = get_logger(__name__)
+
+
+async def require_ready_before_send(provider: PrinterProviderClient) -> None:
+    if provider.capabilities.requires_ready_before_send:
+        try:
+            status = await provider.query_status()
+        except ProviderError as exc:
+            raise OperationError(exc.code, kind=ErrorKind.UPSTREAM) from exc
+        state = str(
+            status.get("result", {})
+            .get("status", {})
+            .get("print_stats", {})
+            .get("state", "")
+        ).lower()
+        if state not in {"standby", "ready", "idle", "complete", "cancelled"}:
+            raise OperationError("printer_not_ready", kind=ErrorKind.CONFLICT)
 
 
 async def send_to_printer(
@@ -80,19 +99,7 @@ async def send_to_printer(
         raise OperationError("artifact_format_not_supported", kind=ErrorKind.CONFLICT)
     _require_file_role(session, current_user, f, CollectionRole.EDIT)
     plate_index = await asyncio.to_thread(selected_plate, f, payload.plate_index)
-    if provider.capabilities.requires_ready_before_send:
-        try:
-            status = await provider.query_status()
-        except ProviderError as exc:
-            raise OperationError(exc.code, kind=ErrorKind.UPSTREAM) from exc
-        state = str(
-            status.get("result", {})
-            .get("status", {})
-            .get("print_stats", {})
-            .get("state", "")
-        ).lower()
-        if state not in {"standby", "ready", "idle", "complete", "cancelled"}:
-            raise OperationError("printer_not_ready", kind=ErrorKind.CONFLICT)
+    await require_ready_before_send(provider)
     if payload.start_print:
         try:
             compatibility = materials.compatibility_for_printer(
@@ -111,12 +118,18 @@ async def send_to_printer(
     blob_exists = await asyncio.to_thread(backend.exists, f.path)
     if not blob_exists:
         raise OperationError("file_blob_missing", kind=ErrorKind.GONE)
+    native_project = plate_index is not None and p.provider == PrinterProvider.BAMBU_LAN
     remote_name = (
         payload.remote_filename.strip()
         if payload.remote_filename
-        else build_traceable_remote_filename(f, plate_index=plate_index)
+        else build_traceable_remote_filename(
+            f, plate_index=plate_index, native_project=native_project
+        )
     )
-    if artifact_format.value == "bgcode_binary":
+    if native_project:
+        if not remote_name.lower().endswith(".3mf"):
+            remote_name += ".3mf"
+    elif artifact_format.value == "bgcode_binary":
         if not remote_name.lower().endswith(".bgcode"):
             remote_name += ".bgcode"
     elif not remote_name.lower().endswith((".gcode", ".g", ".gco")):
@@ -128,6 +141,9 @@ async def send_to_printer(
         model_id=f.model_id,
         remote_filename=remote_name,
         state=PrintJobState.UPLOADING,
+        provider_job_id=project_subtask_id()
+        if native_project and payload.start_print
+        else None,
         plate_index=plate_index,
         spool_id=payload.spool_id,
         spool_name=payload.spool_name,
@@ -155,6 +171,7 @@ async def send_to_printer(
             f,
             remote_name,
             start_print=payload.start_print,
+            subtask_id=job.provider_job_id,
             plate_index=plate_index,
         )
     except ProviderError as exc:
@@ -191,13 +208,19 @@ async def send_to_printer(
         raise OperationError("provider_error", kind=ErrorKind.UPSTREAM) from exc
     # Upload-only is not a queued print. It only records transfer history; user
     # can start the remote file later from printer inventory.
-    job.state = (
-        PrintJobState.STARTED if payload.start_print else PrintJobState.COMPLETED
+    now = utcnow()
+    session.exec(
+        update(PrintJob)
+        .where(PrintJob.id == job.id, PrintJob.state == PrintJobState.UPLOADING)
+        .values(
+            state=PrintJobState.STARTED
+            if payload.start_print
+            else PrintJobState.COMPLETED,
+            started_at=now if payload.start_print else None,
+            finished_at=None if payload.start_print else now,
+            updated_at=now,
+        )
     )
-    if not payload.start_print:
-        job.finished_at = utcnow()
-    job.updated_at = utcnow()
-    session.add(job)
     session.commit()
     session.refresh(job)
     out = PrintJobRead(

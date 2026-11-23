@@ -280,6 +280,35 @@ class TestPrinterHubMarkStatus:
 
 
 class TestPrinterHubHandleStatus:
+    @pytest.mark.asyncio
+    async def test_telemetry_deltas_keep_independent_observations(
+        self, printer: Printer, hub
+    ):
+        initial = {"extruder": {"temperature": 22, "target": 0}}
+        later = {"heater_bed": {"temperature": 24}, "fan": {"speed": 0}}
+        sink = AsyncMock()
+        await hub.attach(printer.id, sink)
+        await hub._handle_status(printer.id, initial)
+        await hub._handle_status(printer.id, later)
+
+        assert sink.await_args.args[0]["data"] == later
+        snapshot_sink = AsyncMock()
+        await hub.attach(printer.id, snapshot_sink)
+        assert snapshot_sink.await_args.args[0]["data"] == {**initial, **later}
+
+    @pytest.mark.asyncio
+    async def test_provider_outage_retires_cached_observations(
+        self, printer: Printer, hub
+    ):
+        await hub._handle_status(printer.id, {"extruder": {"temperature": 22}})
+        sink = AsyncMock()
+        await hub.attach(printer.id, sink)
+
+        await hub._provider_offline(printer.id, "fixture disconnected")
+
+        assert sink.await_args.args[0] == {"type": "offline", "printer_id": printer.id}
+        assert printer.id not in hub.snapshots
+
     def test_handle_status_merges_snapshot(self, printer: Printer, hub):
         status = {
             "print_stats": {"state": "printing", "filename": "test.gcode"},
@@ -561,6 +590,67 @@ class TestPrinterHubSyncActiveJob:
             assert rows[0].state == PrintJobState.COMPLETED
             assert rows[0].progress == pytest.approx(1.0)
             assert rows[0].finished_at is not None
+
+    @pytest.mark.parametrize(("age", "same_job"), [(1, True), (120, False)])
+    def test_bambu_plain_start_matches_only_a_recent_explicit_cache_start(
+        self, hub, db_session, age, same_job
+    ):
+        from datetime import timedelta
+
+        from app.core.time import utcnow
+
+        pid, job = self._setup_job(db_session)
+        printer = db_session.get(Printer, pid)
+        printer.provider = PrinterProvider.BAMBU_LAN
+        job.started_at = utcnow() - timedelta(seconds=age)
+        db_session.add_all([printer, job])
+        db_session.commit()
+        for state in ("printing", "complete"):
+            hub._sync_active_job_db(
+                pid,
+                state,
+                "sync.gcode",
+                0.5,
+                {
+                    "external_subtask_id": "device-assigned",
+                    "external_gcode_file": "/cache/sync.gcode",
+                },
+            )
+        db_session.refresh(job)
+        assert (job.state == PrintJobState.COMPLETED) is same_job
+        assert len(
+            db_session.exec(select(PrintJob).where(PrintJob.printer_id == pid)).all()
+        ) == (1 if same_job else 2)
+
+    def test_native_project_subtask_closes_the_original_queued_run(
+        self, hub, db_session
+    ):
+        pid, job = self._setup_job(db_session)
+        printer = db_session.get(Printer, pid)
+        printer.provider = PrinterProvider.BAMBU_LAN
+        job.provider_job_id = "726543901"
+        job.plate_index = 2
+        db_session.add_all([printer, job])
+        db_session.commit()
+        for state, progress in [("printing", 0.3), ("complete", 1.0)]:
+            hub._sync_active_job_db(
+                pid,
+                state,
+                "plate_2.gcode",
+                progress,
+                {"external_subtask_id": "726543901"},
+            )
+        db_session.refresh(job)
+        assert job.state == PrintJobState.COMPLETED
+        assert job.external_subtask_id == "726543901"
+        assert (
+            len(
+                db_session.exec(
+                    select(PrintJob).where(PrintJob.printer_id == pid)
+                ).all()
+            )
+            == 1
+        )
 
     def test_sync_complete_sets_finished_at(self, hub, db_session):
         pid, job = self._setup_job(db_session)
@@ -1029,6 +1119,40 @@ class TestPrinterHubSyncActiveJob:
         assert jobs[0].state == PrintJobState.COMPLETED  # first run preserved
         assert jobs[0].finished_at is not None
         assert jobs[1].state == PrintJobState.PRINTING  # new run
+
+    @pytest.mark.parametrize("disconnect", [False, True])
+    def test_unnamed_completion_requires_continuous_observation(
+        self, hub, db_session, disconnect
+    ):
+        pid, job = self._setup_job(db_session)
+        asyncio.run(hub._sync_active_job(pid, "printing", "sync.gcode", 0.4, {}))
+        if disconnect:
+            asyncio.run(hub._provider_offline(pid, "lost connection"))
+        for _ in range(2):
+            asyncio.run(hub._sync_active_job(pid, "complete", None, 1.0, {}))
+        db_session.refresh(job)
+        assert job.state == (
+            PrintJobState.PRINTING if disconnect else PrintJobState.COMPLETED
+        )
+        assert job.progress == (0.4 if disconnect else 1.0)
+        assert len(db_session.exec(select(PrintJob)).all()) == 1
+
+    def test_unnamed_stop_preserves_progress_from_paused_print(self, hub, db_session):
+        pid, job = self._setup_job(db_session)
+        asyncio.run(hub._sync_active_job(pid, "paused", "sync.gcode", 0.4, {}))
+        asyncio.run(hub._sync_active_job(pid, "cancelled", None, 0, {}))
+        db_session.refresh(job)
+        assert job.state == PrintJobState.CANCELLED
+        assert job.progress == 0.4
+
+    def test_anonymous_completion_cannot_claim_an_unobserved_start(
+        self, hub, db_session
+    ):
+        pid, job = self._setup_job(db_session)
+        asyncio.run(hub._sync_active_job(pid, "complete", None, 1.0, {}))
+        db_session.refresh(job)
+        assert job.state == PrintJobState.STARTED
+        assert job.finished_at is None
 
     def test_active_job_cache_is_used_on_repeat_tick(self, hub, db_session):
         """After the first tick, a same-filename tick hits the cache: the

@@ -19,6 +19,7 @@ export default defineConfig({
   testIgnore: [
     // Opt-in read-only review of an existing deployment; never seed its data.
     "review/**/*.spec.ts",
+    "farm-lab/**/*.spec.ts",
     "ai-search/**/*.spec.ts",
     "storage/**/*.spec.ts",
     "storage-presets/**/*.spec.ts",

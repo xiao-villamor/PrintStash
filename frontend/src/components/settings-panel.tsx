@@ -5053,7 +5053,7 @@ export function SettingsPanel() {
                           {uiText("Show printer image on printer cards")}
                         </p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
-                          {uiText("Adds a brand-neutral printer visual above each card.")}
+                          {uiText("Shows a printer portrait in Fleet and printer details.")}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">

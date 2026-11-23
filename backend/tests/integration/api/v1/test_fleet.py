@@ -33,6 +33,7 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import event
 from sqlmodel import Session, select
@@ -55,7 +56,9 @@ from app.db.models import (
 )
 from app.modules.identity.auth import create_access_token
 from app.modules.printing import fleet
+from app.modules.printing.printer_hub import PrinterHub
 from app.modules.printing.printer_provider import PrinterProviderClient
+from tests._statements import StatementLog
 from tests.factories import (
     a_gcode_artifact,
     build_collection,
@@ -69,8 +72,10 @@ from tests.factories import (
     build_printer_tool,
     build_user,
     grant_collection_role,
+    grant_printer_role,
     printer_config,
 )
+from tests.factories.protocols import HeadersFor, MakePrinter, MakeUser
 
 
 def _provider_builder(provider: PrinterProviderClient):
@@ -561,6 +566,37 @@ class TestQueueScheduler:
         assert job["dispatch_attempts"] == 1
         provider.upload.assert_awaited_once()
         provider.start.assert_awaited_once()
+
+    def test_a_second_job_waits_for_the_dispatched_run_to_finish(
+        self,
+        db_session: Session,
+    ) -> None:
+        from app.core.time import utcnow
+        from app.modules.printing.printer_jobs import _claim_next_sync
+
+        printer = build_printer(db_session, status=PrinterStatus.READY)
+        artifact = a_gcode_artifact(db_session, "Spare parts")
+        current = build_print_job(
+            db_session,
+            artifact,
+            printer=printer,
+            dispatch_claimed_at=utcnow(),
+            state=PrintJobState.STARTED,
+        )
+        waiting = build_print_job(
+            db_session,
+            artifact,
+            printer=printer,
+            routing_strategy="manual",
+            state=PrintJobState.QUEUED,
+        )
+        assert _claim_next_sync() is None
+        db_session.refresh(waiting)
+        assert waiting.state == PrintJobState.QUEUED
+        current.state = PrintJobState.COMPLETED
+        db_session.add(current)
+        db_session.commit()
+        assert _claim_next_sync() == waiting.id
 
     def test_scheduler_rechecks_drain_before_dispatch(
         self,
@@ -1895,6 +1931,207 @@ class TestPrinter:
 
 
 class TestFleet:
+    def test_unassigned_queue_is_visible_to_admins_before_printer_registration(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+    ) -> None:
+        artifact = a_gcode_artifact(db_session, "First farm job")
+        job = client.post(
+            "/api/v1/fleet/queue",
+            headers=auth_headers,
+            json={"file_id": artifact.id, "strategy": "least_busy"},
+        )
+        assert job.status_code == 201
+        queue = client.get("/api/v1/fleet/queue", headers=auth_headers).json()
+        assert [(row["id"], row["blocked_reason"]) for row in queue] == [
+            (job.json()["id"], "no_eligible_printer")
+        ]
+        summary = client.get("/api/v1/fleet/summary", headers=auth_headers).json()
+        assert (
+            summary["total_printers"],
+            summary["queued_jobs"],
+            summary["attention_jobs"],
+        ) == (0, 1, 1)
+
+    def test_printer_view_grant_excludes_unassigned_work(
+        self,
+        client: TestClient,
+        db_session: Session,
+        make_user: MakeUser,
+        headers_for: HeadersFor,
+    ) -> None:
+        viewer = make_user()
+        printer = build_printer(db_session)
+        grant_printer_role(db_session, viewer, printer, PrinterRole.VIEW)
+        artifact = a_gcode_artifact(db_session, "Scoped queue")
+        assigned = build_print_job(db_session, artifact, printer=printer)
+        build_print_job(db_session, artifact, blocked_reason="no_eligible_printer")
+        headers = headers_for(viewer, scope="read")
+        jobs = client.get("/api/v1/fleet/queue", headers=headers).json()
+        assert [job["id"] for job in jobs] == [assigned.id]
+        totals = client.get("/api/v1/fleet/summary", headers=headers).json()
+        assert (totals["queued_jobs"], totals["attention_jobs"]) == (1, 0)
+
+    def test_summary_names_a_live_print_from_the_granted_printer_cache(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        db_session: Session,
+        make_printer: MakePrinter,
+        make_user: MakeUser,
+        headers_for: HeadersFor,
+    ) -> None:
+        visible = make_printer("Granted", status=PrinterStatus.PRINTING)
+        hidden = make_printer("Private", status=PrinterStatus.PRINTING)
+        assert visible.id is not None and hidden.id is not None
+        viewer = make_user()
+        grant_printer_role(db_session, viewer, visible, PrinterRole.VIEW)
+        hub: PrinterHub = app.state.printer_hub
+        hub.snapshots[visible.id] = {
+            "print_stats": {
+                "state": "printing",
+                "filename": "Calibration/bed.gcode",
+                "remaining_minutes": 3,
+            },
+            "virtual_sdcard": {"progress": 0.45},
+        }
+        hub.snapshots[hidden.id] = {
+            "print_stats": {"state": "printing", "filename": "private.gcode"}
+        }
+
+        response = client.get(
+            "/api/v1/fleet/summary", headers=headers_for(viewer, scope="read")
+        )
+
+        assert response.status_code == 200, response.text
+        rows = response.json()["printers"]
+        assert [row["printer_id"] for row in rows] == [visible.id]
+        assert rows[0]["current_job_name"] == "Calibration/bed.gcode"
+        assert rows[0]["current_job_id"] is None
+        assert rows[0]["progress"] == 0.45
+        assert rows[0]["remaining_minutes"] == 3
+
+    def test_summary_projects_only_granted_printer_readings_from_the_cache(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        db_session: Session,
+        make_printer: MakePrinter,
+        make_user: MakeUser,
+        headers_for: HeadersFor,
+        sql_statements: StatementLog,
+    ) -> None:
+        visible = make_printer("Granted printer")
+        hidden = make_printer("Private printer")
+        assert visible.id is not None and hidden.id is not None
+        viewer = make_user()
+        grant_printer_role(db_session, viewer, visible, PrinterRole.VIEW)
+        headers = headers_for(viewer, scope="read")
+        hub: PrinterHub = app.state.printer_hub
+        hub.snapshots[visible.id] = {
+            "extruder": {"temperature": 72.5, "target": 0},
+            "heater_bed": {"temperature": 0, "target": 60},
+            "fan": {"speed": 0},
+            "print_stats": {"filename": "private-provider-file.gcode"},
+        }
+        hub.snapshots[hidden.id] = {"extruder": {"temperature": 257}}
+
+        with sql_statements.recording():
+            response = client.get("/api/v1/fleet/summary", headers=headers)
+
+        assert response.status_code == 200, response.text
+        rows = response.json()["printers"]
+        assert [row["printer_id"] for row in rows] == [visible.id]
+        assert rows[0]["telemetry"] == {
+            "nozzle_c": 72.5,
+            "bed_c": 0.0,
+            "part_fan_speed": 0.0,
+        }
+        assert "private-provider-file.gcode" not in response.text
+        assert all(
+            query.sql.startswith("SELECT") for query in sql_statements.statements
+        )
+
+        hub.snapshots[visible.id]["fan"]["speed"] = 0.6
+        refreshed = client.get("/api/v1/fleet/summary", headers=headers)
+        assert refreshed.json()["printers"][0]["telemetry"]["part_fan_speed"] == 0.6
+
+    def test_summary_omits_unavailable_readings(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        make_printer: MakePrinter,
+    ) -> None:
+        sparse = make_printer("Sparse")
+        offline = make_printer("Offline", status=PrinterStatus.OFFLINE)
+        shutdown = make_printer("Shutdown")
+        no_readings = make_printer("No sensor data")
+        uncached = make_printer("Uncached")
+        assert sparse.id is not None and offline.id is not None
+        assert shutdown.id is not None and no_readings.id is not None
+        hub: PrinterHub = app.state.printer_hub
+        hub.snapshots[sparse.id] = {
+            "extruder": {"target": 210},
+            "heater_bed": {"temperature": 45},
+            "fan": {"speed": -0.1},
+        }
+        hub.snapshots[offline.id] = {"extruder": {"temperature": 25}}
+        hub.snapshots[shutdown.id] = {
+            "webhooks": {"state": "shutdown"},
+            "extruder": {"temperature": 35},
+        }
+        hub.snapshots[no_readings.id] = {
+            "extruder": {"temperature": float("nan")},
+            "heater_bed": {"temperature": False},
+        }
+
+        response = client.get("/api/v1/fleet/summary", headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        assert {
+            row["printer_id"]: row["telemetry"] for row in response.json()["printers"]
+        } == {
+            sparse.id: {"nozzle_c": None, "bed_c": 45.0, "part_fan_speed": None},
+            offline.id: None,
+            shutdown.id: None,
+            no_readings.id: None,
+            uncached.id: None,
+        }
+
+    def test_summary_preserves_the_identity_of_each_loaded_slot(
+        self, client: TestClient, auth_headers: dict[str, str], db_session: Session
+    ) -> None:
+        printer = build_printer(db_session)
+        build_material_slot(db_session, printer, slot_key="red", color_hex="#D42C2C")
+        build_material_slot(
+            db_session,
+            printer,
+            slot_key="duplicate",
+            label="Right · rear",
+            material_type="PETG",
+            color_hex="#D42C2C",
+        )
+        build_material_slot(
+            db_session, printer, slot_key="empty", color_hex="#333333", state="empty"
+        )
+        build_material_slot(db_session, printer, slot_key="colorless")
+
+        response = client.get("/api/v1/fleet/summary", headers=auth_headers)
+
+        assert response.status_code == 200
+        slots = response.json()["printers"][0]["loaded_material_slots"]
+        assert {
+            row["slot_key"]: (row["label"], row["material_type"], row["color_hex"])
+            for row in slots
+        } == {
+            "red": ("red", "PLA", "#D42C2C"),
+            "duplicate": ("Right · rear", "PETG", "#D42C2C"),
+            "colorless": ("colorless", "PLA", None),
+        }
+
     def test_summarises_every_state_that_makes_a_printer_unavailable(
         self,
         client: TestClient,
@@ -1970,8 +2207,11 @@ class TestFleet:
                 "name": "Summary",
                 "status": "ready",
                 "progress": None,
+                "remaining_minutes": None,
                 "group": None,
                 "loaded_slots": [],
+                "loaded_material_slots": [],
+                "telemetry": None,
                 "nozzle_diameter_mm": None,
                 "current_job_id": None,
                 "current_job_name": None,

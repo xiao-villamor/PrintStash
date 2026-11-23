@@ -173,10 +173,10 @@ class OctoPrintClient:
         file_data: dict[str, Any] = raw_file if isinstance(raw_file, dict) else {}
         completion = progress.get("completion")
 
-        if flags.get("printing"):
-            state = "printing"
-        elif flags.get("paused") or flags.get("pausing"):
+        if flags.get("paused") or flags.get("pausing"):
             state = "paused"
+        elif flags.get("printing"):
+            state = "printing"
         elif flags.get("cancelling"):
             state = "cancelled"
         elif flags.get("error") or flags.get("closedOrError"):

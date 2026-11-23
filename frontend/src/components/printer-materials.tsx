@@ -16,6 +16,7 @@ import { toast } from "@/lib/toast";
 import type { MaterialSlotRead, PrinterMaterialStateRead, PrinterRead } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MachineMaterials } from "@/components/printer-machine";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const selectClassName =
@@ -59,18 +60,29 @@ function slotStateLabel(state: SlotState): string {
 export function PrinterMaterials({
   printer,
   actionsHost,
+  inWorkspace = false,
 }: {
   printer: PrinterRead;
   actionsHost?: HTMLDivElement | null;
+  inWorkspace?: boolean;
 }) {
-  return <MaterialEditor key={printer.id} printer={printer} actionsHost={actionsHost} />;
+  return (
+    <MaterialEditor
+      key={printer.id}
+      printer={printer}
+      actionsHost={actionsHost}
+      inWorkspace={inWorkspace}
+    />
+  );
 }
 function MaterialEditor({
   printer,
   actionsHost,
+  inWorkspace = false,
 }: {
   printer: PrinterRead;
   actionsHost?: HTMLDivElement | null;
+  inWorkspace?: boolean;
 }) {
   useUiLocale();
   const nozzleId = useId();
@@ -280,11 +292,9 @@ function MaterialEditor({
   }
   return (
     <div className="printer-reference-surface printer-materials-reference">
-      {actionsHost ? (
-        createPortal(actions, actionsHost)
-      ) : (
-        <div className="flex justify-end">{actions}</div>
-      )}
+      {actionsHost
+        ? createPortal(actions, actionsHost)
+        : !inWorkspace && <div className="flex justify-end">{actions}</div>}
       {!editing && !loadedTarget && reviewContent}
       <div className="printer-materials-nozzle">
         <label htmlFor={nozzleId} className="space-y-2 text-[13px] font-medium text-foreground">
@@ -310,29 +320,72 @@ function MaterialEditor({
           placeholder={uiText("Unknown")}
         />
       </div>
+      {inWorkspace &&
+        (owner.query.data ?? state).tools.some((tool) => tool.tool_key !== "tool0") && (
+          <dl className="printer-machine-facts">
+            {(owner.query.data ?? state).tools
+              .filter((tool) => tool.tool_key !== "tool0")
+              .map((tool) => (
+                <div key={tool.tool_key}>
+                  <dt>{tool.label}</dt>
+                  <dd>
+                    {!tool.stale && tool.nozzle_diameter_mm !== null
+                      ? uiText("{value1} mm", { value1: tool.nozzle_diameter_mm })
+                      : uiText("Unknown")}
+                  </dd>
+                </div>
+              ))}
+          </dl>
+        )}
+      {inWorkspace && providerSlots.some((slot) => slot.source === "bambu_ams") && (
+        <MachineMaterials
+          setup={{
+            slots: providerSlots.filter((slot) => slot.source === "bambu_ams"),
+            nozzle: undefined,
+            isPending: false,
+            isError: false,
+          }}
+          reportsMaterials
+          heading={uiText("Provider state")}
+        />
+      )}
       <div className="printer-reference-list">
-        {providerSlots.map((slot) => (
-          <div key={`${slot.source}-${slot.slot_key}`} className="printer-reference-row">
-            <div>
-              <h3>{slot.label}</h3>
-              <p>
-                {sourceLabel(slot)} ·{" "}
-                {slot.state === "loaded"
-                  ? [slot.material_brand, slot.material_type].filter(Boolean).join(" · ") ||
-                    uiText("Unknown")
-                  : slotStateLabel(slot.state)}
-                {slot.state === "loaded" ? ` · ${slotStateLabel(slot.state)}` : ""}
-                {slot.observed_at
-                  ? ` · ${new Date(slot.observed_at).toLocaleString(currentLocale())}`
-                  : ""}
-              </p>
+        {providerSlots
+          .filter((slot) => !inWorkspace || slot.source !== "bambu_ams")
+          .map((slot) => (
+            <div key={`${slot.source}-${slot.slot_key}`} className="printer-reference-row">
+              <div>
+                <h3>{slot.label}</h3>
+                <p>
+                  {sourceLabel(slot)} ·{" "}
+                  {slot.state === "loaded"
+                    ? [slot.material_brand, slot.material_type].filter(Boolean).join(" · ") ||
+                      uiText("Unknown")
+                    : slotStateLabel(slot.state)}
+                  {slot.state === "loaded" ? ` · ${slotStateLabel(slot.state)}` : ""}
+                  {slot.observed_at
+                    ? ` · ${new Date(slot.observed_at).toLocaleString(currentLocale())}`
+                    : ""}
+                </p>
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
         {slots.map((slot) => (
           <div key={slot.slot_key} className="printer-reference-row">
             <div>
-              <h3>{slot.label}</h3>
+              <h3 className="flex items-center gap-2">
+                {inWorkspace &&
+                  slot.state === "loaded" &&
+                  slot.color_hex &&
+                  /^#[\da-f]{6}$/i.test(slot.color_hex) && (
+                    <span
+                      aria-hidden="true"
+                      className="size-3 border border-border"
+                      style={{ backgroundColor: slot.color_hex }}
+                    />
+                  )}
+                {slot.label}
+              </h3>
               <p>
                 {uiText("Manual feed")} · {slotStateLabel(slot.state)}
                 {slot.material_type ? ` · ${slot.material_type}` : ""}
@@ -385,6 +438,7 @@ function MaterialEditor({
           "Selecting a tracked spool does not mark it loaded; use “Set as loaded” explicitly.",
         )}
       </p>
+      {inWorkspace && <div className="flex justify-end border-t border-border pt-3">{actions}</div>}
       <Modal
         open={editing !== null}
         onClose={() => {

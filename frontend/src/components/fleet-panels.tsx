@@ -3,10 +3,27 @@ import { refreshFleet } from "@/features/printers/queries";
 import { knownUiText } from "@/lib/locale";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
+import { dispatchName, parseApiInstant } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDown, ArrowUp, CalendarClock, Pencil, RotateCcw, Trash2, Wrench } from "lucide-react";
+import {
+  FileBox,
+  Layers3,
+  ListOrdered,
+  Printer,
+  Plus,
+  GitFork,
+  Network,
+  Table2,
+  ArrowDown,
+  ArrowUp,
+  CalendarClock,
+  Pencil,
+  RotateCcw,
+  Trash2,
+  Wrench,
+} from "lucide-react";
 
 import {
   deleteFleetJob,
@@ -26,6 +43,7 @@ import {
 } from "@/features/printers/queries";
 import { toast } from "@/lib/toast";
 import type {
+  FleetSummary,
   CompatibilityPolicy,
   JobPriority,
   PrinterRead,
@@ -40,7 +58,9 @@ import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Localized } from "@/components/ui/localized";
+import { FleetRoutingCanvas } from "./fleet-routing-canvas";
 import "./fleet-panels.css";
+import "./fleet-queue-workspace.css";
 
 const ACTIVE = new Set(["uploading", "started", "printing", "paused"]);
 
@@ -101,11 +121,164 @@ const REAL_FLEET_QUEUE_DEPS: FleetQueueDeps = {
   decideOperatorGate: decideFleetOperatorGate,
 };
 
+export type FleetQueueView = "queued" | "active" | "recent";
+
+function FarmDispatchBoard({
+  rows,
+  queued,
+  selected,
+  onSelect,
+}: {
+  rows: FleetSummary["printers"];
+  queued: PrintJobRead[];
+  selected: string;
+  onSelect: (id: string, view?: FleetQueueView) => void;
+}) {
+  if (!rows.length) return null;
+  const printing = rows.filter((row) => row.status === "printing").length;
+  const laneCounts = new Map<number, number>();
+  const queuedById = new Map(queued.map((job) => [job.id, job]));
+  for (const job of queued) {
+    if (job.printer_id != null)
+      laneCounts.set(job.printer_id, (laneCounts.get(job.printer_id) ?? 0) + 1);
+  }
+  return (
+    <div className="farm-dispatch-board">
+      <table aria-label={uiText("Farm dispatch")}>
+        <caption>
+          <div className="farm-board-title">
+            <span>{uiText("Farm dispatch")}</span>
+            <div className="farm-capacity">
+              <span>
+                {uiText("{running} of {total} printing", { running: printing, total: rows.length })}
+              </span>
+              <div className="farm-capacity-track" aria-hidden="true">
+                {rows.map((row) => (
+                  <span key={row.printer_id} data-state={row.status} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">{uiText("Printer")}</th>
+            <th scope="col">{uiText("Current job")}</th>
+            <th scope="col">{uiText("Next job")}</th>
+            <th scope="col">{uiText("Routing")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const id = String(row.printer_id);
+            const hold = row.maintenance
+              ? uiText("Maintenance")
+              : row.pending_operator_release
+                ? uiText("Operator release required")
+                : row.drain_mode
+                  ? uiText("Draining")
+                  : null;
+            const next = row.next_job_id != null ? queuedById.get(row.next_job_id) : null;
+            const depth = laneCounts.get(row.printer_id) ?? 0;
+            const running = row.status === "printing" || row.status === "paused";
+            const review = !running && row.current_job_id != null;
+            const percent =
+              running && row.current_job_name && row.progress != null
+                ? Math.round(row.progress * 100)
+                : null;
+            return (
+              <tr key={id} data-selected={selected === id}>
+                <th scope="row">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-pressed={selected === id}
+                    onClick={() => onSelect(selected === id ? "all" : id)}
+                  >
+                    {row.name}
+                  </Button>
+                  <small>{row.group}</small>
+                </th>
+                <td>
+                  <span
+                    className={row.current_job_name ? "farm-job-name" : "text-muted-foreground"}
+                  >
+                    {row.current_job_name ? (
+                      <span title={row.current_job_name}>{dispatchName(row.current_job_name)}</span>
+                    ) : (
+                      uiText("No active print")
+                    )}
+                  </span>
+                  {review && (
+                    <Button variant="link" size="xs" onClick={() => onSelect(id, "active")}>
+                      {uiText("Review active job")}
+                    </Button>
+                  )}
+                  {running && (percent != null || row.remaining_minutes != null) && (
+                    <div className="farm-job-progress">
+                      {percent != null && (
+                        <>
+                          <progress aria-label={uiText("Progress")} value={percent} max={100} />
+                          <span>{percent}%</span>
+                        </>
+                      )}
+                      {row.remaining_minutes != null && (
+                        <small>
+                          {uiText("{value1} min remaining", { value1: row.remaining_minutes })}
+                        </small>
+                      )}
+                    </div>
+                  )}
+                </td>
+                <td>
+                  <span className={row.next_job_name ? "farm-job-name" : "text-muted-foreground"}>
+                    {row.next_job_name ? (
+                      <span title={row.next_job_name}>{dispatchName(row.next_job_name)}</span>
+                    ) : (
+                      uiText("No queued job")
+                    )}
+                  </span>
+                  {row.next_job_name && (
+                    <small>
+                      {[
+                        row.next_priority && knownUiText(row.next_priority),
+                        depth > 1 && uiText("{value1} queued", { value1: depth }),
+                        next?.blocked_reason && knownUiText(next.blocked_reason),
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </small>
+                  )}
+                </td>
+                <td>
+                  <strong className="farm-routing-state" data-state={hold ? "held" : row.status}>
+                    {hold ?? knownUiText(row.status)}
+                  </strong>
+                  {hold && <small>{knownUiText(row.status)}</small>}
+                  {row.pending_operator_release && (
+                    <Button variant="link" size="xs" onClick={() => onSelect(id, "recent")}>
+                      {uiText("Review release")}
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function FleetQueuePanel({
   printers,
+  initialView = "queued",
+  onAdd,
   deps,
 }: {
   printers: PrinterRead[];
+  initialView?: FleetQueueView;
+  onAdd?: () => void;
   deps?: Partial<FleetQueueDeps>;
 }) {
   useUiLocale();
@@ -113,7 +286,8 @@ export function FleetQueuePanel({
     ...REAL_FLEET_QUEUE_DEPS,
     ...deps,
   };
-  const [queueView, setQueueView] = useState<"queued" | "active" | "recent">("queued");
+  const [mapView, setMapView] = useState(true);
+  const [queueView, setQueueView] = useState<FleetQueueView>(initialView);
   const [printerFilter, setPrinterFilter] = useState("all");
   const [groupFilter, setGroupFilter] = useState("all");
   const [historyLimit, setHistoryLimit] = useState(20);
@@ -141,14 +315,52 @@ export function FleetQueuePanel({
     const group =
       job.target_group ?? printers.find((printer) => printer.id === job.printer_id)?.group;
     return (
-      (printerFilter === "all" || String(job.printer_id) === printerFilter) &&
+      (printerFilter === "all" ||
+        (job.printer_id == null ? "unassigned" : String(job.printer_id)) === printerFilter) &&
       (groupFilter === "all" || groupFilter === group)
     );
   }
   const queued = jobs.filter((job) => job.state === "queued");
   const active = jobs.filter((job) => ACTIVE.has(job.state));
+  const farmRows = (summaryQuery.data?.printers ?? []).filter(
+    (row) =>
+      printerNames.has(row.printer_id) && (groupFilter === "all" || row.group === groupFilter),
+  );
   const recent = jobs.filter((job) => !ACTIVE.has(job.state) && job.state !== "queued");
 
+  const filtered = printerFilter !== "all" || groupFilter !== "all";
+  const emptyState = filtered
+    ? uiText("No jobs match these filters.")
+    : queueView === "queued"
+      ? uiText("The queue is empty")
+      : queueView === "active"
+        ? uiText("No active prints")
+        : uiText("No recent jobs");
+  const emptyAction = filtered ? (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => {
+        setPrinterFilter("all");
+        setGroupFilter("all");
+      }}
+    >
+      {uiText("Clear filters")}
+    </Button>
+  ) : queueView === "queued" && active.length ? (
+    <Button variant="outline" size="sm" onClick={() => setQueueView("active")}>
+      {uiText("View active jobs")}
+    </Button>
+  ) : queueView === "queued" && recent.length ? (
+    <Button variant="outline" size="sm" onClick={() => setQueueView("recent")}>
+      {uiText("View recent jobs")}
+    </Button>
+  ) : queueView === "queued" && onAdd ? (
+    <Button variant="outline" size="sm" onClick={onAdd}>
+      <Plus size={15} />
+      {uiText("Add to queue")}
+    </Button>
+  ) : null;
   async function mutate<T>(jobId: number, action: () => Promise<T>): Promise<boolean> {
     const session = getSessionVersion();
     setBusy(jobId);
@@ -166,9 +378,19 @@ export function FleetQueuePanel({
     }
   }
 
-  function beginEdit(job: PrintJobRead) {
+  function beginEdit(job: PrintJobRead, destination?: PrinterRead) {
     setEditTarget(job);
-    setDraft(editDraft(job));
+    const initial = editDraft(job);
+    setDraft(
+      destination
+        ? {
+            ...initial,
+            strategy: "manual",
+            printerId: String(destination.id),
+            targetGroup: initial.targetGroup === destination.group ? initial.targetGroup : "",
+          }
+        : initial,
+    );
   }
 
   async function saveEdit() {
@@ -337,6 +559,7 @@ export function FleetQueuePanel({
                     {uiText("Printer")}
                     <select
                       className={inputClasses}
+                      aria-label={uiText("Printer")}
                       value={draft.printerId}
                       onChange={(event) => setDraft({ ...draft, printerId: event.target.value })}
                     >
@@ -408,229 +631,306 @@ export function FleetQueuePanel({
             </div>
           )}
         </Modal>
-        <div className="fleet-filter-row">
-          <label>
-            {uiText("View")}
-            <select
-              className={inputClasses}
-              aria-label={uiText("View")}
-              value={queueView}
-              onChange={(event) => {
-                const next = event.target.value;
-                if (next === "queued" || next === "active" || next === "recent") setQueueView(next);
-              }}
-            >
-              <option value="queued">{uiText("Queued")}</option>
-              <option value="active">{uiText("Active")}</option>
-              <option value="recent">{uiText("Recent")}</option>
-            </select>
-          </label>
-          <label>
-            {uiText("Printer")}
-            <select
-              className={inputClasses}
-              aria-label={uiText("Printer")}
-              value={printerFilter}
-              onChange={(event) => setPrinterFilter(event.target.value)}
-            >
-              <option value="all">{uiText("All printers")}</option>
-              {printers.map((printer) => (
-                <option key={printer.id} value={printer.id}>
-                  {printer.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            {uiText("Group")}
-            <select
-              className={inputClasses}
-              aria-label={uiText("Group")}
-              value={groupFilter}
-              onChange={(event) => setGroupFilter(event.target.value)}
-            >
-              <option value="all">{uiText("All groups")}</option>
-              {groups.map((group) => (
-                <option key={group} value={group}>
-                  {group}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        {queueQuery.isError && (
-          <div role="alert" className="space-y-2 text-sm text-destructive">
-            <p>{userMessage(queueQuery.error)}</p>
-            <Button variant="outline" size="sm" onClick={() => void queueQuery.refetch()}>
+        {summaryQuery.isError && (
+          <div role="alert">
+            {userMessage(summaryQuery.error)}{" "}
+            <Button size="sm" variant="outline" onClick={() => void summaryQuery.refetch()}>
               {uiText("Retry")}
             </Button>
           </div>
         )}
-        {summaryQuery.data?.printers?.some(
-          (printer) => printer.current_job_name || printer.next_job_name,
-        ) && (
-          <div className="border border-border bg-accent px-3.5 py-3 text-xs leading-relaxed text-foreground">
-            {summaryQuery.data.printers
-              .filter((printer) => printer.current_job_name || printer.next_job_name)
-              .map((printer) => (
-                <span key={printer.printer_id} className="mr-4 inline-block">
-                  {printer.name} · {printer.current_job_name ?? uiText("Idle")}
-                  {printer.next_job_name ? ` · ${uiText("Next:")} ${printer.next_job_name}` : ""}
-                </span>
-              ))}
-          </div>
-        )}
-        {queueView === "queued" && (
-          <QueueSection
-            title={uiText("Queued")}
-            jobs={queued.filter(matchesFilters)}
-            printerNames={printerNames}
-            busy={busy}
-            actions={(job) => (
-              <>
-                {(() => {
-                  const lane = queued.filter(
-                    (row) => (row.priority ?? "normal") === (job.priority ?? "normal"),
-                  );
-                  const laneIndex = lane.findIndex((row) => row.id === job.id);
-                  return (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={uiText("Move {value1} up", {
-                          value1: String(job.remote_filename),
-                        })}
-                        disabled={busy === job.id || laneIndex === 0}
-                        onClick={() =>
-                          void mutate(job.id, () =>
-                            updateJob(job.id, { queue_position: laneIndex }),
-                          )
-                        }
-                      >
-                        <ArrowUp className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={uiText("Move {value1} down", {
-                          value1: String(job.remote_filename),
-                        })}
-                        disabled={busy === job.id || laneIndex === lane.length - 1}
-                        onClick={() =>
-                          void mutate(job.id, () =>
-                            updateJob(job.id, { queue_position: laneIndex + 2 }),
-                          )
-                        }
-                      >
-                        <ArrowDown className="h-3.5 w-3.5" />
-                      </Button>
-                    </>
-                  );
-                })()}
+        {!!summaryQuery.data?.printers.length && (
+          <section className="routing-map-shell" aria-label={uiText("Farm routing")}>
+            <header className="routing-map-title">
+              <h2 className="routing-map-heading">
+                <GitFork size={20} />
+                {uiText("Farm routing")}
+              </h2>
+              <div className="routing-map-actions">
                 <Button
+                  size="sm"
                   variant="ghost"
-                  size="icon-sm"
-                  aria-label={uiText("Edit {value1}", { value1: String(job.remote_filename) })}
-                  disabled={busy === job.id}
-                  onClick={() => beginEdit(job)}
+                  aria-pressed={mapView}
+                  onClick={() => setMapView(true)}
                 >
-                  <Pencil className="h-3.5 w-3.5" />
+                  <Network />
+                  {uiText("Map")}
                 </Button>
                 <Button
+                  size="sm"
                   variant="ghost"
-                  size="icon-sm"
-                  aria-label={uiText("Delete {value1}", { value1: String(job.remote_filename) })}
-                  disabled={busy === job.id}
-                  onClick={() => setDeleteTarget(job)}
+                  aria-pressed={!mapView}
+                  onClick={() => setMapView(false)}
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <Table2 />
+                  {uiText("Table")}
                 </Button>
-              </>
+              </div>
+            </header>
+            {mapView ? (
+              <FleetRoutingCanvas
+                rows={farmRows}
+                printers={printers}
+                jobs={queued.filter(matchesFilters)}
+                onEdit={beginEdit}
+                onAdd={onAdd}
+                onJobs={(id, running) => {
+                  setPrinterFilter(id);
+                  setQueueView(running ? "active" : "queued");
+                }}
+              />
+            ) : (
+              <FarmDispatchBoard
+                queued={queued}
+                rows={farmRows}
+                selected={printerFilter}
+                onSelect={(id, view) => {
+                  setPrinterFilter(id);
+                  if (view) setQueueView(view);
+                }}
+              />
             )}
-          />
+          </section>
         )}
-        {queueView === "active" && (
-          <QueueSection
-            title={uiText("Active")}
-            jobs={active.filter(matchesFilters)}
-            printerNames={printerNames}
-            busy={busy}
-            actions={(job) =>
-              job.printer_id != null && controllablePrinterIds.has(job.printer_id) ? (
-                <Button
-                  variant="outline"
-                  size="xs"
-                  disabled={busy === job.id}
-                  onClick={() => setResolveTarget(job)}
-                >
-                  {uiText("Resolve")}
-                </Button>
-              ) : null
-            }
-          />
-        )}
-        {queueView === "recent" && (
-          <QueueSection
-            title={uiText("Recent")}
-            jobs={recent.filter(matchesFilters)}
-            printerNames={printerNames}
-            busy={busy}
-            actions={(job) => (
-              <>
-                {job.operator_gate_state === "pending" && (
-                  <>
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      disabled={busy === job.id}
-                      onClick={() =>
-                        void mutate(job.id, () => decideOperatorGate(job.id, "release"))
-                      }
-                    >
-                      {uiText("Release")}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      disabled={busy === job.id}
-                      onClick={() => void mutate(job.id, () => decideOperatorGate(job.id, "hold"))}
-                    >
-                      {uiText("Hold")}
-                    </Button>
-                  </>
-                )}
-                {job.retryable && (
+        <div className="queue-register">
+          <div className="fleet-filter-row queue-register-toolbar">
+            <h2>
+              <ListOrdered size={19} />
+              {uiText("Print queue")}
+            </h2>
+            <div className="farm-queue-scopes" role="group" aria-label={uiText("View")}>
+              {(["queued", "active", "recent"] as const).map((view) => {
+                const label =
+                  view === "queued"
+                    ? uiText("Queued")
+                    : view === "active"
+                      ? uiText("Active")
+                      : uiText("Recent");
+                return (
+                  <Button
+                    key={view}
+                    size="sm"
+                    variant={queueView === view ? "secondary" : "ghost"}
+                    aria-label={label}
+                    aria-pressed={queueView === view}
+                    onClick={() => setQueueView(view)}
+                  >
+                    {label}
+                    {view !== "recent" && (
+                      <span>
+                        {(view === "queued" ? queued : active).filter(matchesFilters).length}
+                      </span>
+                    )}
+                  </Button>
+                );
+              })}
+            </div>
+            <label>
+              {uiText("Printer")}
+              <select
+                className={inputClasses}
+                aria-label={uiText("Printer")}
+                value={printerFilter}
+                onChange={(event) => setPrinterFilter(event.target.value)}
+              >
+                <option value="all">{uiText("All printers")}</option>
+                <option value="unassigned">{uiText("Unassigned")}</option>
+                {printers.map((printer) => (
+                  <option key={printer.id} value={printer.id}>
+                    {printer.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {uiText("Group")}
+              <select
+                className={inputClasses}
+                aria-label={uiText("Group")}
+                value={groupFilter}
+                onChange={(event) => {
+                  setGroupFilter(event.target.value);
+                  setPrinterFilter("all");
+                }}
+              >
+                <option value="all">{uiText("All groups")}</option>
+                {groups.map((group) => (
+                  <option key={group} value={group}>
+                    {group}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {queueQuery.isError && (
+            <div role="alert" className="space-y-2 text-sm text-destructive">
+              <p>{userMessage(queueQuery.error)}</p>
+              <Button variant="outline" size="sm" onClick={() => void queueQuery.refetch()}>
+                {uiText("Retry")}
+              </Button>
+            </div>
+          )}
+          {queueView === "queued" && (
+            <QueueSection
+              emptyState={emptyState}
+              emptyAction={emptyAction}
+              title={uiText("Queued")}
+              jobs={queued.filter(matchesFilters)}
+              printerNames={printerNames}
+              busy={busy}
+              actions={(job) => (
+                <>
+                  {(() => {
+                    const lane = queued.filter(
+                      (row) => (row.priority ?? "normal") === (job.priority ?? "normal"),
+                    );
+                    const laneIndex = lane.findIndex((row) => row.id === job.id);
+                    return (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={uiText("Move {value1} up", {
+                            value1: String(job.remote_filename),
+                          })}
+                          disabled={busy === job.id || laneIndex === 0}
+                          onClick={() =>
+                            void mutate(job.id, () =>
+                              updateJob(job.id, {
+                                queue_position: laneIndex,
+                                expected_updated_at: job.updated_at,
+                              }),
+                            )
+                          }
+                        >
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={uiText("Move {value1} down", {
+                            value1: String(job.remote_filename),
+                          })}
+                          disabled={busy === job.id || laneIndex === lane.length - 1}
+                          onClick={() =>
+                            void mutate(job.id, () =>
+                              updateJob(job.id, {
+                                queue_position: laneIndex + 2,
+                                expected_updated_at: job.updated_at,
+                              }),
+                            )
+                          }
+                        >
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    );
+                  })()}
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={uiText("Edit {value1}", { value1: String(job.remote_filename) })}
+                    disabled={busy === job.id}
+                    onClick={() => beginEdit(job)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={uiText("Delete {value1}", { value1: String(job.remote_filename) })}
+                    disabled={busy === job.id}
+                    onClick={() => setDeleteTarget(job)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </>
+              )}
+            />
+          )}
+          {queueView === "active" && (
+            <QueueSection
+              emptyState={emptyState}
+              emptyAction={emptyAction}
+              title={uiText("Active")}
+              jobs={active.filter(matchesFilters)}
+              printerNames={printerNames}
+              busy={busy}
+              actions={(job) =>
+                job.printer_id != null && controllablePrinterIds.has(job.printer_id) ? (
                   <Button
                     variant="outline"
                     size="xs"
                     disabled={busy === job.id}
-                    onClick={() => void mutate(job.id, () => retryJob(job.id))}
+                    onClick={() => setResolveTarget(job)}
                   >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    {uiText("Retry")}
+                    {uiText("Resolve")}
                   </Button>
-                )}
-              </>
-            )}
-          />
-        )}
-        {queueView === "recent" && recent.length >= historyLimit && historyLimit < 100 && (
-          <div className="flex justify-center">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setHistoryLimit((value) => Math.min(value + 20, 100))}
-            >
-              {uiText("Load older jobs")}
-            </Button>
-          </div>
-        )}
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          {uiText(
-            "Held jobs keep their position. Older jobs load on demand. Queue changes do not change a Model’s recommended Revision.",
+                ) : null
+              }
+            />
           )}
-        </p>
+          {queueView === "recent" && (
+            <QueueSection
+              emptyState={emptyState}
+              emptyAction={emptyAction}
+              title={uiText("Recent")}
+              jobs={recent.filter(matchesFilters)}
+              printerNames={printerNames}
+              busy={busy}
+              actions={(job) => (
+                <>
+                  {job.operator_gate_state === "pending" && (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        disabled={busy === job.id}
+                        onClick={() =>
+                          void mutate(job.id, () => decideOperatorGate(job.id, "release"))
+                        }
+                      >
+                        {uiText("Release")}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        disabled={busy === job.id}
+                        onClick={() =>
+                          void mutate(job.id, () => decideOperatorGate(job.id, "hold"))
+                        }
+                      >
+                        {uiText("Hold")}
+                      </Button>
+                    </>
+                  )}
+                  {job.retryable && (
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      disabled={busy === job.id}
+                      onClick={() => void mutate(job.id, () => retryJob(job.id))}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      {uiText("Retry")}
+                    </Button>
+                  )}
+                </>
+              )}
+            />
+          )}
+          {queueView === "recent" && recent.length >= historyLimit && historyLimit < 100 && (
+            <div className="flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setHistoryLimit((value) => Math.min(value + 20, 100))}
+              >
+                {uiText("Load older jobs")}
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
     </Localized>
   );
@@ -638,12 +938,16 @@ export function FleetQueuePanel({
 
 function QueueSection({
   title,
+  emptyState,
+  emptyAction,
   jobs,
   printerNames,
   busy,
   actions,
 }: {
   title: string;
+  emptyState: string;
+  emptyAction: React.ReactNode;
   jobs: PrintJobRead[];
   printerNames: Map<number, string>;
   busy: number | null;
@@ -660,30 +964,62 @@ function QueueSection({
     }, new Map<string, Array<{ job: PrintJobRead; index: number }>>()),
   );
   const row = (job: PrintJobRead, index: number) => (
-    <div key={job.id} className="fleet-plain-row">
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-foreground">
-          {job.remote_filename}
-          {job.copy_index != null
-            ? uiText(" · copy {value1}", { value1: String(job.copy_index) })
-            : ""}
-        </p>
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">
-          {job.printer_id
-            ? (printerNames.get(job.printer_id) ??
-              uiText("Printer {value1}", { value1: String(job.printer_id) }))
-            : uiText("Unassigned")}{" "}
-          · {knownUiText(job.routing_strategy)}
-          {job.target_group ? ` · ${job.target_group}` : ""}
-          {` · ${knownUiText(job.priority ?? "normal")} · ${knownUiText(job.state)}`}
-          {job.state === "queued"
-            ? ` · ${uiText("Position {value1}", { value1: String(job.queue_position) })}`
-            : ""}
-          {job.operator_gate_state === "pending" ? ` · ${uiText("release needed")}` : ""}
-          {job.blocked_reason ? ` · ${knownUiText(job.blocked_reason)}` : ""}
-        </p>
+    <div key={job.id} className="queue-register-row">
+      <div className="queue-register-name">
+        <span className="queue-file-mark">
+          <FileBox size={17} />
+        </span>
+        <div>
+          <strong title={job.remote_filename}>
+            {dispatchName(job.remote_filename)}
+            {job.copy_index != null
+              ? uiText(" · copy {value1}", { value1: String(job.copy_index) })
+              : ""}
+          </strong>
+          <small>
+            {job.state === "queued"
+              ? uiText("Position {value1}", { value1: String(job.queue_position) })
+              : "#" + job.id}{" "}
+            · {knownUiText(job.priority ?? "normal")}
+            {job.plate_index != null && " · " + uiText("Sliced plate") + " " + job.plate_index}
+          </small>
+        </div>
       </div>
-      <div className="flex items-center gap-1" aria-busy={busy === job.id}>
+      <div className="queue-register-destination">
+        <Printer size={15} />
+        <div>
+          <strong>
+            {job.printer_id
+              ? (printerNames.get(job.printer_id) ??
+                uiText("Printer {value1}", { value1: String(job.printer_id) }))
+              : uiText("Unassigned")}
+          </strong>
+          <small>
+            {knownUiText(job.routing_strategy)}
+            {job.target_group && " · " + job.target_group}
+          </small>
+        </div>
+      </div>
+      <div
+        className="queue-register-state"
+        data-state={
+          job.blocked_reason || job.operator_gate_state === "pending" ? "held" : job.state
+        }
+      >
+        <strong>
+          <i />
+          {knownUiText(job.state)}
+        </strong>
+        {job.blocked_reason && <small>{knownUiText(job.blocked_reason)}</small>}
+        {job.operator_gate_state === "pending" && <small>{uiText("release needed")}</small>}
+        {["printing", "paused"].includes(job.state) && (
+          <div className="queue-register-progress">
+            <progress aria-label={uiText("Progress")} max={1} value={job.progress} />
+            <span>{Math.round(job.progress * 100)}%</span>
+          </div>
+        )}
+      </div>
+      <div className="queue-register-actions" aria-busy={busy === job.id}>
         {actions?.(job, index)}
       </div>
     </div>
@@ -694,12 +1030,20 @@ function QueueSection({
         className="space-y-2"
         aria-label={uiText("{value1} print jobs", { value1: String(title) })}
       >
-        <div className="fleet-list-panel">
-          <h2>{uiText("{value1} jobs", { value1: title })}</h2>
-          {jobs.length === 0 && (
-            <p className="p-5 text-[13px] text-muted-foreground">
-              {uiText("No jobs match these filters.")}
-            </p>
+        <div className="queue-register-entries">
+          {jobs.length ? (
+            <div className="queue-register-columns" aria-hidden="true">
+              <span>{uiText("Revision")}</span>
+              <span>{uiText("Destination")}</span>
+              <span>{uiText("Status")}</span>
+              <span>{uiText("Actions")}</span>
+            </div>
+          ) : (
+            <div className="queue-register-empty">
+              <Layers3 size={22} />
+              <strong>{emptyState}</strong>
+              {emptyAction}
+            </div>
           )}
           {groups.map(([key, entries]) =>
             entries[0].job.batch_id == null ? (
@@ -1091,13 +1435,12 @@ export function FleetMaintenancePanel({
               </p>
             )}
             {visiblePrinters.map((printer) => {
-              const printerWindows = windows.filter(
-                (row) =>
-                  row.printer_id === printer.id &&
-                  (compact ||
-                    windowFilter === "all" ||
-                    new Date(row.ends_at).getTime() >= Date.now()),
-              );
+              const printerWindows = windows.filter((row) => {
+                if (row.printer_id !== printer.id) return false;
+                if (compact || windowFilter === "all") return true;
+                const end = parseApiInstant(row.ends_at);
+                return end !== null && end.getTime() >= Date.now();
+              });
               const printerLogs =
                 compact || windowFilter === "all"
                   ? logs.filter((row) => row.printer_id === printer.id)
@@ -1163,15 +1506,34 @@ export function FleetMaintenancePanel({
                       )}
                     </div>
                   </div>
+                  {compact && (
+                    <div className="printer-service-subhead">
+                      <h3>{uiText("Maintenance windows")}</h3>
+                      {!printerWindows.length && (
+                        <p>
+                          {uiText(
+                            maintenance.loadingWindows
+                              ? "Loading…"
+                              : "No maintenance windows scheduled.",
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   {printerWindows.map((row) => (
                     <div key={`window-${row.id}`} className="fleet-plain-row">
                       <div>
                         <h3 className="text-[13px] font-medium">
-                          {printer.name} · {uiText("Maintenance window")}
+                          {compact
+                            ? uiText("Maintenance window")
+                            : `${printer.name} · ${uiText("Maintenance window")}`}
                         </h3>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {new Date(row.starts_at).toLocaleString(currentLocale())} –{" "}
-                          {new Date(row.ends_at).toLocaleString(currentLocale())}
+                          {parseApiInstant(row.starts_at)?.toLocaleString(currentLocale()) ??
+                            uiText("Not recorded")}{" "}
+                          –{" "}
+                          {parseApiInstant(row.ends_at)?.toLocaleString(currentLocale()) ??
+                            uiText("Not recorded")}
                           {row.reason ? ` · ${row.reason}` : ""}
                         </p>
                       </div>
@@ -1196,11 +1558,23 @@ export function FleetMaintenancePanel({
                       </div>
                     </div>
                   ))}
+                  {compact && (
+                    <div className="printer-service-subhead">
+                      <h3>{uiText("Service history")}</h3>
+                      {!printerLogs.length && (
+                        <p>
+                          {uiText(
+                            maintenance.loadingLogs ? "Loading…" : "No service entries recorded.",
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   {printerLogs.map((row) => (
                     <div key={`log-${row.id}`} className="fleet-plain-row">
                       <div>
                         <h3 className="text-[13px] font-medium">
-                          {printer.name} · {row.category}
+                          {compact ? row.category : `${printer.name} · ${row.category}`}
                         </h3>
                         <p className="mt-1 text-xs text-muted-foreground">
                           {new Date(row.performed_at).toLocaleDateString(currentLocale())} ·{" "}

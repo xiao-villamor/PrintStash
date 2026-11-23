@@ -6,30 +6,59 @@ import asyncio
 import errno
 import json
 import logging
+import math
 import socket
 import ssl
 import threading
 from collections.abc import Awaitable, Callable, Mapping
-from ftplib import FTP_TLS, error_perm, error_reply, error_temp
+from ftplib import FTP, FTP_TLS, error_perm, error_reply, error_temp
 from importlib import import_module
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 from uuid import uuid4
 
+from .catalog import PROVIDER_DEFINITIONS
 from .contracts import PrinterClient, SnapshotCallback
 from .models import (
     BambuConfig,
     Capability,
-    PrintArtifactFormat,
     PrinterConfig,
     PrinterSnapshot,
-    ProviderCapabilities,
     ProviderError,
     ProviderId,
 )
 
 LegacyStatusCallback = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+_TEMPERATURE_FIELDS = {
+    "extruder": {"temperature": "nozzle_temper", "target": "nozzle_target_temper"},
+    "heater_bed": {"temperature": "bed_temper", "target": "bed_target_temper"},
+}
+_PART_FAN_FIELD = "cooling_fan_speed"
+_TEXT_GCODE = (".gcode", ".g", ".gco")
+
+
+def _cache_component(name: str) -> bool:
+    return bool(
+        name
+        and not name.startswith(".")
+        and name.isprintable()
+        and "/" not in name
+        and "\\" not in name
+    )
+
+
+def _telemetry_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return None
+    try:
+        number = float(value)
+    except ValueError, OverflowError:
+        return None
+    return number if math.isfinite(number) else None
+
 
 # MQTT connects by LAN address while the leaf certificate identifies the
 # printer by serial. The Bambu CA chain verifies the handshake; the serial is
@@ -105,6 +134,8 @@ Blbjg3obpHo9
 class _ImplicitFTP_TLS(FTP_TLS):
     """``ftplib`` variant for Bambu's implicit-TLS port 990."""
 
+    _prot_p: bool  # FTP_TLS tracks the negotiated PROT mode on the connection.
+
     def connect(
         self,
         host: str = "",
@@ -114,10 +145,11 @@ class _ImplicitFTP_TLS(FTP_TLS):
     ) -> str:
         self.host = host
         self.port = port
-        self.timeout = timeout
+        if timeout != -999:  # ftplib sentinel: retain the constructor timeout
+            self.timeout = timeout
         self.source_address = source_address
         self.sock = socket.create_connection(
-            (host, port), timeout, source_address=source_address
+            (host, port), self.timeout, source_address=source_address
         )
         self.af = self.sock.family
         self.sock = self.context.wrap_socket(self.sock, server_hostname=host)
@@ -125,30 +157,30 @@ class _ImplicitFTP_TLS(FTP_TLS):
         self.welcome = self.getresp()
         return self.welcome
 
+    def ntransfercmd(
+        self, cmd: str, rest: int | str | None = None
+    ) -> tuple[socket.socket, int | None]:
+        # Some printer firmware accepts a protected data socket only when it
+        # resumes the TLS session used to authenticate the control connection.
+        data, size = FTP.ntransfercmd(self, cmd, rest)
+        if not self._prot_p:
+            return data, size
+        try:
+            if not isinstance(self.sock, ssl.SSLSocket):
+                raise OSError("Missing FTPS control connection")
+            protected = self.context.wrap_socket(
+                data, server_hostname=self.host, session=self.sock.session
+            )
+        except BaseException:
+            data.close()
+            raise
+        return protected, size
+
 
 class BambuClient:
     """Bambu LAN transport constructed solely from :class:`BambuConfig`."""
 
-    capabilities = ProviderCapabilities(
-        supported=frozenset(
-            {
-                Capability.START,
-                Capability.PAUSE,
-                Capability.RESUME,
-                Capability.CANCEL,
-                Capability.LIVE_STATUS,
-                Capability.UPLOAD,
-                Capability.MATERIAL_STATE,
-            }
-        ),
-        support_level="beta",
-        accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
-        support_notes=(
-            "Bambu LAN upload and explicit start are beta features.",
-            "Printer file inventory, deletion, raw G-code controls, and measured filament consumption are unavailable.",
-        ),
-        requires_ready_before_send=True,
-    )
+    capabilities = PROVIDER_DEFINITIONS[ProviderId.BAMBU_LAN].capabilities
 
     _METHOD_CAPABILITY = {
         "server_info": Capability.SERVER_INFO,
@@ -167,7 +199,7 @@ class BambuClient:
     }
     _STATE_TO_MOONRAKER = {
         "idle": "standby",
-        "prepare": "standby",
+        "prepare": "printing",
         "slicing": "standby",
         "running": "printing",
         "pause": "paused",
@@ -480,13 +512,12 @@ class BambuClient:
         return cls._ftps_error(code, action_code=code, retryable=retryable)
 
     @classmethod
-    def _with_ftps_retry(cls, operation: Callable[[], None]) -> None:
+    def _with_ftps_retry[T](cls, operation: Callable[[], T]) -> T:
         """Replay exactly once when the transport outcome is safely retryable."""
 
         for attempt in range(2):
             try:
-                operation()
-                return
+                return operation()
             except Exception as exc:  # noqa: BLE001 - classify at the seam
                 classified = cls._classify_ftps_exception(exc)
                 if (
@@ -496,6 +527,7 @@ class BambuClient:
                 ):
                     continue
                 raise classified from exc
+        raise AssertionError("FTPS retry exhausted")
 
     @staticmethod
     def _close_ftps(ftp: FTP_TLS) -> None:
@@ -506,6 +538,53 @@ class BambuClient:
                 ftp.close()
             except Exception:  # noqa: BLE001 - best-effort socket cleanup
                 pass
+
+    def _read_cache(self) -> list[Mapping[str, Any]]:
+        ftp = self._ftps_client()
+        files: list[Mapping[str, Any]] = []
+        folders = [""]
+        entries = 0
+        try:
+            ftp.connect(self.host, 990)
+            ftp.login("bblp", self.access_code)
+            ftp.prot_p()
+            # LIST works on devices without the optional MLSD command. Walk
+            # only real directories. A partial scan must never mark files missing.
+            for folder in folders:
+
+                def collect(line: str, folder: str = folder) -> None:
+                    nonlocal entries
+                    if line.startswith("total ") and line[6:].isdigit():
+                        return
+                    entries += 1
+                    if entries > 20000:
+                        raise ProviderError("bambu_inventory_too_large")
+                    fields = line.split(maxsplit=8)
+                    if (
+                        len(fields) != 9
+                        or not fields[4].isascii()
+                        or not fields[4].isdigit()
+                    ):
+                        raise ProviderError("bambu_inventory_invalid_listing")
+                    mode, name = fields[0], fields[8]
+                    if not _cache_component(name):
+                        return
+                    path = f"{folder}/{name}" if folder else name
+                    if mode.startswith("d"):
+                        if len(folders) >= 512:
+                            raise ProviderError("bambu_inventory_too_large")
+                        folders.append(path)
+                    elif mode.startswith("-") and name.lower().endswith(
+                        (*_TEXT_GCODE, ".3mf")
+                    ):
+                        files.append({"path": path, "size": int(fields[4])})
+
+                ftp.retrlines(
+                    f"LIST cache/{folder}" if folder else "LIST cache", collect
+                )
+            return files
+        finally:
+            self._close_ftps(ftp)
 
     def _upload_once(self, local_path: Path, remote_name: str) -> None:
         temp_name = f".{remote_name}.{self._next_sequence_id()}.uploading"
@@ -527,10 +606,10 @@ class BambuClient:
             self._close_ftps(ftp)
 
     def _upload_via_ftps(self, local_path: Path, remote_filename: str) -> None:
-        """Store a plain-text G-code file in Bambu's cache over implicit FTPS."""
+        """Store a print file in Bambu's cache over implicit FTPS."""
 
         remote_name = Path(remote_filename).name
-        if not remote_name or remote_name != remote_filename:
+        if not _cache_component(remote_filename) or remote_name != remote_filename:
             raise self._ftps_error(
                 "invalid_bambu_remote_filename",
                 action_code="bambu_ftps_path_invalid",
@@ -639,6 +718,18 @@ class BambuClient:
         )
         if filename:
             print_stats["filename"] = str(filename)
+        if "mc_remaining_time" in print_report:
+            minutes = _telemetry_number(print_report["mc_remaining_time"])
+            print_stats["remaining_minutes"] = (
+                int(minutes)
+                if minutes is not None and minutes >= 0 and minutes.is_integer()
+                else None
+            )
+        if isinstance(print_report.get("sdcard"), bool):
+            status["bambu_storage"] = {"card_present": print_report["sdcard"]}
+        chamber = _telemetry_number(print_report.get("chamber_temper"))
+        if chamber is not None:
+            status["temperature_sensor chamber"] = {"temperature": chamber}
         if "print_error" in print_report:
             print_stats["message"] = print_report.get("print_error") or ""
         if print_stats:
@@ -651,6 +742,18 @@ class BambuClient:
             else:
                 status["virtual_sdcard"] = {"progress": max(0.0, min(1.0, progress))}
 
+        for heater, fields in _TEMPERATURE_FIELDS.items():
+            readings = {
+                field: number
+                for field, source in fields.items()
+                if (number := _telemetry_number(print_report.get(source))) is not None
+            }
+            if readings:
+                status[heater] = readings
+        fan_level = _telemetry_number(print_report.get(_PART_FAN_FIELD))
+        if fan_level is not None and 0 <= fan_level <= 15:
+            status["fan"] = {"speed": fan_level / 15}
+
         metadata_fields = {
             "subtask_name": "external_display_name",
             "task_id": "external_task_id",
@@ -659,21 +762,35 @@ class BambuClient:
             "profile_id": "external_profile_id",
             "gcode_file": "external_gcode_file",
             "plate_num": "external_plate_index",
-            "layer_num": "external_current_layer",
-            "total_layer_num": "external_total_layers",
             "nozzle_diameter": "external_nozzle_diameter",
         }
         for source, target in metadata_fields.items():
             value = print_report.get(source)
             if value is not None and value != "":
                 print_stats[target] = value
+        for source, target in (
+            ("layer_num", "external_current_layer"),
+            ("total_layer_num", "external_total_layers"),
+        ):
+            count = _telemetry_number(print_report.get(source))
+            if count is not None and count >= 0 and count.is_integer():
+                print_stats[target] = int(count)
         if print_stats:
             status["print_stats"] = print_stats
         if isinstance(print_report, dict) and (
             "ams" in print_report or "vt_tray" in print_report
         ):
             for slot in self._normalize_ams_slots(print_report):
-                self._material_slots[str(slot["slot_key"])] = slot
+                key = str(slot["slot_key"])
+                if (
+                    key == "external"
+                    and self._material_slots.get(key, {}).get("tool_key", "tool0")
+                    is None
+                ):
+                    # A legacy main-spool report carries no new nozzle binding.
+                    slot.update(label="External spool 255", tool_key=None)
+                self._material_slots[key] = slot
+        self._update_external_inputs(print_report.get("vir_slot"))
         if self._material_slots:
             status["material_slots"] = list(self._material_slots.values())
         nozzle = print_report.get("nozzle_diameter")
@@ -690,6 +807,49 @@ class BambuClient:
                 }
             ]
         return status
+
+    def _update_external_inputs(self, inputs: object) -> None:
+        """Merge addressable external feeds without assigning them to a nozzle."""
+        if not isinstance(inputs, list):
+            return
+        for feed in inputs:
+            if not isinstance(feed, dict):
+                continue
+            address = str(feed.get("id"))
+            if address not in {"254", "255"}:
+                continue
+            # The main feed keeps its existing identity when firmware sends
+            # both the older vt_tray object and the addressable input list.
+            key = "external" if address == "255" else "external:254"
+            slot = dict(
+                self._material_slots.get(
+                    key,
+                    {
+                        "slot_key": key,
+                        "state": "unknown",
+                        "material_type": None,
+                        "color_hex": None,
+                    },
+                )
+            )
+            slot.update(label=f"External spool {address}", tool_key=None)
+            material = feed.get("tray_type")
+            if isinstance(material, str):
+                if material.strip() != slot["material_type"]:
+                    slot["color_hex"] = None
+                slot["material_type"] = material.strip() or None
+                slot["state"] = "loaded" if slot["material_type"] else "empty"
+                if slot["state"] == "empty":
+                    slot["color_hex"] = None
+            color = feed.get("tray_color")
+            if isinstance(color, str) and slot["state"] != "empty":
+                rgb = color[:6].upper()
+                slot["color_hex"] = (
+                    f"#{rgb}"
+                    if len(rgb) == 6 and all(c in "0123456789ABCDEF" for c in rgb)
+                    else None
+                )
+            self._material_slots[key] = slot
 
     @staticmethod
     def _normalize_ams_slots(print_report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -806,6 +966,7 @@ class BambuClient:
                         "print_error",
                         "ams",
                         "vt_tray",
+                        "vir_slot",
                     }.intersection(report["print"])
                 ),
             )
@@ -820,7 +981,7 @@ class BambuClient:
 
     async def list_files(self) -> list[Mapping[str, Any]]:
         self._check("list_files")
-        raise NotImplementedError
+        return await asyncio.to_thread(self._with_ftps_retry, self._read_cache)
 
     async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
         self._check("upload")
@@ -855,15 +1016,39 @@ class BambuClient:
 
     async def start(self, remote_filename: str) -> dict[str, Any]:
         self._check("start")
-        remote_name = Path(remote_filename).name
-        if not remote_name or remote_name != remote_filename:
+        if not all(_cache_component(part) for part in remote_filename.split("/")):
             raise ProviderError("invalid_bambu_remote_filename", code="provider_error")
+        if not remote_filename.lower().endswith(_TEXT_GCODE):
+            raise ProviderError("artifact_format_not_supported")
         return await self._send_command(
             {
                 "print": {
                     "sequence_id": self._next_sequence_id(),
                     "command": "gcode_file",
-                    "param": f"/cache/{remote_name}",
+                    "param": f"/cache/{remote_filename}",
+                }
+            }
+        )
+
+    async def start_project(
+        self, remote_filename: str, plate_index: int, subtask_id: str
+    ) -> dict[str, Any]:
+        """Start the selected toolpath in an uploaded SD-card project."""
+        self._check("start")
+        if not _cache_component(
+            remote_filename
+        ) or not remote_filename.lower().endswith(".3mf"):
+            raise ProviderError("invalid_bambu_remote_filename", code="provider_error")
+        if type(plate_index) is not int or plate_index < 0:
+            raise ProviderError("invalid_plate_index", code="provider_error")
+        return await self._send_command(
+            {
+                "print": {
+                    "sequence_id": self._next_sequence_id(),
+                    "command": "project_file",
+                    "subtask_id": subtask_id,
+                    "url": f"file:///sdcard/cache/{quote(remote_filename, safe='')}",
+                    "param": f"Metadata/plate_{plate_index}.gcode",
                 }
             }
         )
@@ -907,10 +1092,15 @@ class BambuClient:
         loop = asyncio.get_running_loop()
         connected = asyncio.Event()
         first_status = asyncio.Event()
+        disconnected = asyncio.Event()
         connection_error: list[str] = []
 
         async def dispatch(status: dict[str, Any]) -> None:
-            await on_status(status)
+            if not disconnected.is_set():
+                await on_status(status)
+
+        def on_disconnect(*_args: object) -> None:
+            loop.call_soon_threadsafe(disconnected.set)
 
         def on_connect(
             client: Any,
@@ -946,7 +1136,7 @@ class BambuClient:
                 body = json.loads(message.payload.decode("utf-8"))
             except UnicodeDecodeError, ValueError:
                 return
-            if not isinstance(body.get("print"), dict):
+            if not isinstance(body, dict) or not isinstance(body.get("print"), dict):
                 return
             # Bambu can put project_file capture hints on the report topic,
             # which is the only topic this persistent session subscribes to.
@@ -970,6 +1160,7 @@ class BambuClient:
 
         client = self._mqtt_client()
         client.on_connect = on_connect
+        client.on_disconnect = on_disconnect
         client.on_message = on_message
         try:
             client.connect(self.host, 8883, keepalive=30)
@@ -987,7 +1178,18 @@ class BambuClient:
             if stop_event is None:
                 await asyncio.wait_for(first_status.wait(), timeout=10.0)
                 return
-            await stop_event.wait()
+            async with asyncio.TaskGroup() as waiters:
+                stopped = waiters.create_task(stop_event.wait())
+                dropped = waiters.create_task(disconnected.wait())
+                await asyncio.wait(
+                    (stopped, dropped), return_when=asyncio.FIRST_COMPLETED
+                )
+                stopped.cancel()
+                dropped.cancel()
+            if disconnected.is_set() and not stop_event.is_set():
+                raise ProviderError(
+                    "bambu_mqtt_disconnected", code="provider_transport_error"
+                )
         finally:
             try:
                 client.disconnect()

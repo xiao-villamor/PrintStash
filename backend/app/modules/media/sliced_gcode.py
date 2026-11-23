@@ -1,4 +1,4 @@
-"""Sliced archives remain one Revision; only a chosen plate reaches a printer."""
+"""Validate sliced Revisions and resolve the toolpath selected for dispatch."""
 
 from __future__ import annotations
 

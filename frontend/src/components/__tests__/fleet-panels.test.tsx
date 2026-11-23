@@ -180,6 +180,7 @@ function makeSummary(overrides: Partial<FleetSummary> = {}): FleetSummary {
     draining_printers: 0,
     maintenance_printers: 0,
     attention_jobs: 0,
+    printers: [],
     ...overrides,
   };
 }
@@ -229,6 +230,107 @@ beforeEach(() => {
 });
 
 describe("FleetQueuePanel", () => {
+  it("filters jobs from the farm dispatch board", async () => {
+    const first = makePrinter();
+    const second = makePrinter({ id: 2, name: "Spare" });
+    const running = {
+      printer_id: 1,
+      name: first.name,
+      group: null,
+      status: "printing",
+      progress: 0.42,
+      remaining_minutes: 3,
+      loaded_slots: [],
+      nozzle_diameter_mm: null,
+      current_job_id: 5,
+      current_job_name: "part__vault-f5-abcdef012345.3mf",
+      current_priority: null,
+      next_job_id: 6,
+      next_job_name: "next.gcode",
+      next_priority: "normal" as const,
+      drain_mode: false,
+      maintenance: false,
+      pending_operator_release: false,
+    };
+    renderQueuePanel({
+      printers: [first, second],
+      summary: makeSummary({
+        printers: [
+          running,
+          {
+            ...running,
+            printer_id: 2,
+            name: "Spare",
+            status: "ready",
+            current_job_id: null,
+            current_job_name: null,
+            next_job_name: null,
+            pending_operator_release: true,
+          },
+        ],
+      }),
+      jobs: [
+        makeJob({ id: 6, remote_filename: "next.gcode" }),
+        makeJob({ id: 7, printer_id: null, remote_filename: "unrouted.gcode" }),
+      ],
+    });
+    const map = within(screen.getByRole("region", { name: "Farm routing" }));
+    expect(map.getByText("42%")).toBeInTheDocument();
+    expect(map.getByText("3 min remaining")).toBeInTheDocument();
+    expect(map.getByText("Available capacity")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Table" }));
+    const board = within(screen.getByRole("table", { name: "Farm dispatch" }));
+    expect(board.getByText("1 of 2 printing")).toBeVisible();
+    expect(board.getByRole("progressbar")).toHaveValue(42);
+    expect(board.getByText("3 min remaining")).toBeVisible();
+    expect(board.getByTitle("part__vault-f5-abcdef012345.3mf")).toHaveTextContent("part.3mf");
+    expect(board.getByText("Operator release required")).toBeVisible();
+    await userEvent.click(board.getByRole("button", { name: first.name }));
+    const list = within(screen.getByRole("region", { name: "Queued print jobs" }));
+    expect(list.getByText("next.gcode")).toBeVisible();
+    expect(list.queryByText("unrouted.gcode")).toBeNull();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Printer" }), "unassigned");
+    expect(list.getByText("unrouted.gcode")).toBeVisible();
+    expect(list.queryByText("next.gcode")).toBeNull();
+  });
+
+  it("shows reported time remaining before progress arrives", async () => {
+    const printer = makePrinter();
+    renderQueuePanel({
+      printers: [printer],
+      summary: makeSummary({
+        printers: [
+          {
+            printer_id: printer.id,
+            name: printer.name,
+            group: null,
+            status: "printing",
+            progress: null,
+            remaining_minutes: 0,
+            loaded_slots: [],
+            nozzle_diameter_mm: null,
+            current_job_id: null,
+            current_job_name: "tool.gcode",
+            current_priority: null,
+            next_job_id: null,
+            next_job_name: null,
+            next_priority: null,
+            drain_mode: false,
+            maintenance: false,
+            pending_operator_release: false,
+          },
+        ],
+      }),
+    });
+    const map = within(screen.getByRole("region", { name: "Farm routing" }));
+    expect(map.getByText("Awaiting progress")).toBeInTheDocument();
+    expect(map.getByText("0 min remaining")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Table" }));
+    const board = within(screen.getByRole("table", { name: "Farm dispatch" }));
+    expect(board.getByText("0 min remaining")).toBeVisible();
+    expect(board.queryByRole("progressbar")).toBeNull();
+  });
+
   it("switches the visible queue scope", async () => {
     renderQueuePanel({
       jobs: [
@@ -241,16 +343,28 @@ describe("FleetQueuePanel", () => {
 
     expect(screen.getByText("first.gcode")).toBeInTheDocument();
     expect(screen.queryByText("active.gcode")).not.toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "View" }), "active");
+    await userEvent.click(screen.getByRole("button", { name: "Active" }));
     expect(screen.getByText("active.gcode")).toBeInTheDocument();
     expect(screen.queryByText("first.gcode")).not.toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "View" }), "recent");
+    await userEvent.click(screen.getByRole("button", { name: "Recent" }));
     expect(screen.getByText("done.gcode")).toBeInTheDocument();
   });
 
   it("shows the empty state when there are no jobs", () => {
     renderQueuePanel({ printers: [] });
-    expect(screen.getByText("No jobs match these filters.")).toBeInTheDocument();
+    expect(screen.getByText("The queue is empty")).toBeInTheDocument();
+  });
+
+  it("clears an empty printer filter from the queue", async () => {
+    renderQueuePanel({
+      jobs: [makeJob({ remote_filename: "bracket.gcode", blocked_reason: "printer_unavailable" })],
+    });
+    const list = within(screen.getByRole("region", { name: "Queued print jobs" }));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Printer" }), "unassigned");
+    expect(list.getByText("No jobs match these filters.")).toBeVisible();
+    await userEvent.click(list.getByRole("button", { name: "Clear filters" }));
+    expect(list.getByText("bracket.gcode")).toBeVisible();
+    expect(list.getByText("Waiting for the printer to accept work")).toBeVisible();
   });
 
   it("moving a queued job down calls updateFleetJob with the new queue position", async () => {
@@ -264,7 +378,12 @@ describe("FleetQueuePanel", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Move first.gcode down" }));
 
-    await waitFor(() => expect(updateJob).toHaveBeenCalledWith(1, { queue_position: 2 }));
+    await waitFor(() =>
+      expect(updateJob).toHaveBeenCalledWith(1, {
+        queue_position: 2,
+        expected_updated_at: "2026-07-15T00:00:00Z",
+      }),
+    );
   });
 
   it("moving a queued job up calls updateFleetJob with the new queue position", async () => {
@@ -278,7 +397,12 @@ describe("FleetQueuePanel", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Move second.gcode up" }));
 
-    await waitFor(() => expect(updateJob).toHaveBeenCalledWith(2, { queue_position: 1 }));
+    await waitFor(() =>
+      expect(updateJob).toHaveBeenCalledWith(2, {
+        queue_position: 1,
+        expected_updated_at: "2026-07-15T00:00:00Z",
+      }),
+    );
   });
 
   it("deleting a queued job confirms then calls deleteFleetJob", async () => {
@@ -338,7 +462,7 @@ describe("FleetQueuePanel", () => {
       ],
     });
 
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "View" }), "recent");
+    await userEvent.click(screen.getByRole("button", { name: "Recent" }));
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     await waitFor(() => expect(retryJob).toHaveBeenCalledWith(9));
@@ -350,7 +474,7 @@ describe("FleetQueuePanel", () => {
       jobs: [makeJob({ id: 11, state: "paused", remote_filename: "stale.gcode" })],
     });
 
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "View" }), "active");
+    await userEvent.click(screen.getByRole("button", { name: "Active" }));
     await userEvent.click(screen.getByRole("button", { name: "Resolve" }));
     const dialog = screen.getByRole("dialog", { name: "Resolve stale job" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Mark failed" }));
@@ -365,7 +489,7 @@ describe("FleetQueuePanel", () => {
       jobs: [makeJob({ id: 12, state: "paused", remote_filename: "cancelled.gcode" })],
     });
 
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "View" }), "active");
+    await userEvent.click(screen.getByRole("button", { name: "Active" }));
     await userEvent.click(screen.getByRole("button", { name: "Resolve" }));
     const dialog = screen.getByRole("dialog", { name: "Resolve stale job" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Mark cancelled" }));
@@ -379,7 +503,7 @@ describe("FleetQueuePanel", () => {
       jobs: [makeJob({ id: 13, state: "paused", remote_filename: "still-live.gcode" })],
     });
 
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "View" }), "active");
+    await userEvent.click(screen.getByRole("button", { name: "Active" }));
     await userEvent.click(screen.getByRole("button", { name: "Resolve" }));
     const dialog = screen.getByRole("dialog", { name: "Resolve stale job" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Mark failed" }));
@@ -675,6 +799,36 @@ describe("FleetMaintenancePanel remote ownership", () => {
       app.requests().filter((request) => request.url.endsWith("/maintenance-log")),
     ).toHaveLength(1);
     expect(windowReads).toBe(2);
+  });
+
+  it("filters upcoming maintenance by UTC when the API omits offsets", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-01-01T03:00:00Z"));
+    try {
+      renderApp(<FleetMaintenancePanel printers={[aPrinter()]} onPrintersChanged={() => {}} />, {
+        routes: {
+          "GET /api/v1/fleet/printers/1/maintenance-windows": json([
+            aMaintenanceWindow({
+              id: 1,
+              starts_at: "2026-01-01T02:00:00",
+              ends_at: "2026-01-01T02:30:00",
+              reason: "Expired window",
+            }),
+            aMaintenanceWindow({
+              id: 2,
+              starts_at: "2026-01-01T03:15:00",
+              ends_at: "2026-01-01T04:00:00",
+              reason: "Service after cutoff",
+            }),
+          ]),
+          "GET /api/v1/fleet/printers/1/maintenance-log": json([]),
+        },
+      });
+      const start = new Date("2026-01-01T03:15:00Z").toLocaleString("en");
+      expect(await screen.findByText(/Service after cutoff/)).toHaveTextContent(start);
+      expect(screen.queryByText(/Expired window/)).not.toBeInTheDocument();
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it("refreshes only confirmed maintenance logs", async () => {

@@ -66,6 +66,7 @@ describe("inspectDependencies", () => {
   });
 
   it.each([
+    "src/features/printers/config-workspace.tsx",
     "src/features/printers/settings-edit.ts",
     "src/features/printers/settings-review.tsx",
     "src/features/library/builds.ts",

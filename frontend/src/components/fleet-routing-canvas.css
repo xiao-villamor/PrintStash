@@ -1,0 +1,397 @@
+.routing-map-shell {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--card);
+}
+.routing-map-title,
+.routing-map-actions,
+.routing-map-heading,
+.routing-foot,
+.routing-inspector-title,
+.routing-key div,
+.routing-detail-link,
+.routing-camera,
+.routing-pager {
+  display: flex;
+  align-items: center;
+}
+.routing-map-title {
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+.routing-map-heading {
+  gap: 9px;
+  font-size: 16px;
+  font-weight: 650;
+}
+.routing-map-heading svg {
+  color: var(--primary);
+}
+.routing-map-actions {
+  gap: 2px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  padding: 2px;
+  border-radius: var(--radius);
+}
+.routing-map-actions button[aria-pressed="true"] {
+  background: var(--card);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) 15%, transparent);
+}
+.routing-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(238px, 19%, 310px);
+}
+.routing-stage {
+  height: clamp(365px, 39vh, 470px);
+  min-width: 0;
+  position: relative;
+  isolation: isolate;
+  background: color-mix(in srgb, var(--muted) 74%, var(--card));
+}
+.routing-stage .react-flow {
+  --xy-connectionline-stroke: var(--primary);
+  --xy-connectionline-stroke-width: 3;
+  --xy-attribution-background-color: var(--card);
+}
+.routing-station {
+  pointer-events: auto;
+  --port: var(--primary);
+  width: 225px;
+  background: var(--card);
+  color: var(--foreground);
+  border: 1px solid color-mix(in srgb, var(--port) 38%, var(--border));
+  border-radius: 8px;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--foreground) 8%, transparent);
+  position: relative;
+  transition:
+    box-shadow var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+.routing-station[data-kind="rule"] {
+  --port: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, var(--card));
+}
+.routing-station[data-kind="printer"] {
+  --port: var(--success);
+}
+.routing-station[data-held="true"] {
+  --port: var(--warning);
+}
+.routing-station:is(:hover, :focus-within, [data-chosen="true"]) {
+  border-color: var(--port);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--port) 20%, transparent),
+    0 4px 10px color-mix(in srgb, var(--foreground) 9%, transparent);
+}
+.routing-station button {
+  display: flex;
+  align-items: center;
+  text-align: start;
+  width: 100%;
+  gap: 10px;
+  padding: 13px;
+  background: none;
+  border: 0;
+  color: inherit;
+}
+.routing-station-glyph {
+  display: grid;
+  place-items: center;
+  width: 39px;
+  height: 43px;
+  flex: none;
+  background: color-mix(in srgb, var(--port) 10%, var(--card));
+  color: var(--port);
+  border-radius: 5px;
+}
+.routing-station-glyph img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.routing-station-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.routing-station-copy > * {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.routing-station-copy small {
+  color: var(--port);
+  font-size: 11px;
+  font-weight: 650;
+}
+.routing-station-copy strong {
+  font-size: 15px;
+  line-height: 1.4;
+}
+.routing-station-copy > span {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.routing-station .react-flow__handle {
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--port);
+  background: var(--card);
+}
+.routing-station .react-flow__handle.connectingto,
+.routing-station .react-flow__handle:hover {
+  background: var(--port);
+}
+.routing-print-progress {
+  margin: 0 13px 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 5px;
+  color: var(--muted-foreground);
+}
+.routing-print-progress > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.routing-print-progress strong {
+  color: var(--foreground);
+  font-size: 12px;
+}
+.routing-print-progress progress {
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin-top: 4px;
+  border: 0;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--muted);
+  accent-color: var(--primary);
+}
+.routing-print-progress progress::-webkit-progress-bar {
+  background: var(--muted);
+}
+.routing-print-progress progress::-webkit-progress-value {
+  background: var(--primary);
+}
+.routing-print-progress progress::-moz-progress-bar {
+  background: var(--primary);
+}
+
+.routing-link-available .react-flow__edge-path {
+  stroke: var(--muted-foreground);
+  stroke-dasharray: 5 5;
+  stroke-width: 1.6;
+}
+.routing-link-assigned .react-flow__edge-path,
+.routing-link-selected .react-flow__edge-path {
+  stroke: var(--primary);
+  stroke-width: 2.4;
+}
+.routing-link-selected .react-flow__edge-path {
+  stroke-width: 4;
+}
+.routing-camera,
+.routing-pager {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.routing-camera button,
+.routing-pager button {
+  width: 32px;
+  height: 32px;
+}
+.routing-pager {
+  left: auto;
+  right: 14px;
+  bottom: 21px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.routing-inspector {
+  border-left: 1px solid var(--border);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+}
+.routing-inspector-title {
+  align-items: flex-start;
+  gap: 8px;
+}
+.routing-inspector-title svg {
+  color: var(--primary);
+  flex: none;
+  margin-top: 3px;
+}
+.routing-inspector-title h3 {
+  font-size: 16px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.routing-inspector dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px 12px;
+  width: 100%;
+  font-size: 12px;
+}
+.routing-inspector dt {
+  color: var(--muted-foreground);
+}
+.routing-inspector dd {
+  text-align: end;
+  overflow-wrap: anywhere;
+  font-weight: 550;
+}
+.routing-key {
+  margin-top: auto;
+  padding-top: 15px;
+  border-top: 1px solid var(--border);
+  width: 100%;
+  display: grid;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.routing-key div,
+.routing-detail-link,
+.routing-foot {
+  gap: 8px;
+}
+.routing-key i {
+  width: 24px;
+  border-top: 2px solid var(--primary);
+}
+.routing-key div + div i {
+  border-top: 2px dashed var(--muted-foreground);
+}
+.routing-detail-link {
+  color: var(--primary);
+  font-size: 13px;
+}
+.routing-foot {
+  padding: 9px 16px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  border-top: 1px solid var(--border);
+}
+@media (max-width: 850px) {
+  .routing-grid {
+    grid-template-columns: 1fr;
+  }
+  .routing-inspector {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .routing-stage {
+    height: 340px;
+  }
+  .routing-key {
+    display: flex;
+    gap: 14px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .routing-station {
+    transition: none;
+  }
+}
+
+.routing-capacity {
+  width: 100%;
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+}
+.routing-capacity > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-weight: 550;
+  font-size: 12px;
+}
+.routing-capacity strong {
+  font-size: 22px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.routing-capacity small,
+.routing-capacity p {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.routing-capacity-meter {
+  height: 6px;
+  display: flex;
+  gap: 3px;
+  margin: 9px 0;
+}
+.routing-capacity-meter i {
+  flex: 1;
+  background: var(--border);
+  border-radius: 2px;
+}
+.routing-capacity-meter i[data-available="true"] {
+  background: var(--success);
+}
+.routing-capacity-meter i[data-running="true"] {
+  background: var(--primary);
+}
+.routing-directory {
+  width: 100%;
+  overflow: auto;
+  max-height: 145px;
+}
+.routing-directory button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 2px;
+  text-align: start;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+.routing-directory button:hover {
+  background: var(--accent);
+}
+.routing-directory span {
+  display: grid;
+  flex: 1;
+}
+.routing-directory strong {
+  font-size: 13px;
+  color: var(--foreground);
+}
+.routing-directory small {
+  font-size: 11px;
+}
+.routing-stage .routing-key {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  margin: 0;
+  padding: 5px 8px;
+  display: flex;
+  gap: 12px;
+  width: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card);
+  font-size: 10px;
+  pointer-events: none;
+}
