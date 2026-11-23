@@ -2258,7 +2258,7 @@
   "multipart.guidesHelp": "Guarda aquí las instrucciones de montaje y las imágenes de referencia.",
   "multipart.uploadGuide": "Subir",
   "multipart.noGuides": "Todavía no hay guías",
-  "multipart.guideFormats": "PDF, Markdown, TXT, PNG, JPG, GIF o WebP",
+  "multipart.guideFormats": "PDF, Markdown, TXT, PNG, JPG, GIF, WebP, MP4 o MOV",
   "multipart.removeGuide": "Eliminar guía",
   "multipart.guideUploaded": "Guía subida",
   "multipart.guideUploadError": "No se ha podido subir esta guía. Inténtalo de nuevo.",

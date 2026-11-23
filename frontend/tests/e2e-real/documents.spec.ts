@@ -9,7 +9,7 @@
 import { readFile } from "node:fs/promises";
 import { devices } from "@playwright/test";
 import { test, expect, authBundleFor, authedContext, type Page } from "./helpers";
-import { collapseNavigationSidebar, createCollectionViaVault, gcodeFor } from "./util";
+import { collapseNavigationSidebar, createCollectionViaVault, stlFor } from "./util";
 
 // Collection documents (new in 0.8.0): markdown editor, collection README, and
 // the pdf.js viewer. All real — every save/upload hits the backend DB + storage.
@@ -159,13 +159,13 @@ test.describe("binary collection files", () => {
 });
 
 test("attaches guides to one Model and opens them after reload", async ({ page }, info) => {
-  const name = `e2e-model-docs-${Date.now()}`;
-  const seeded = await page.request.post("/api/v1/ingest/orca", {
+  const name = "Assembly bracket";
+  const seeded = await page.request.post("/api/v1/ingest/model", {
     multipart: {
       file: {
-        name: `${name}.gcode`,
-        mimeType: "text/plain",
-        buffer: Buffer.from(gcodeFor(name)),
+        name: "assembly-bracket.stl",
+        mimeType: "model/stl",
+        buffer: Buffer.from(stlFor(`bracket-${Date.now()}`)),
       },
       model_name: name,
     },

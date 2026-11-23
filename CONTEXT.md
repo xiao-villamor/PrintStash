@@ -53,7 +53,7 @@ the original file bytes.
 
 **Multipart Guide**:
 A Document linked to one Multipart Model for assembly or printing guidance.
-Guides may be Markdown, PDF or raster images and remain visible in Documents.
+Guides may be Markdown, PDF, raster images or videos and remain visible in Documents.
 Moving a grouping to Trash retains its guide links; permanent purge detaches
 them as ordinary Documents.
 _Avoid_: Model file, Artifact, attachment

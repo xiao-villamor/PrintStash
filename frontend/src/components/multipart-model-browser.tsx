@@ -566,7 +566,7 @@ function MultipartOverview({
                   <input
                     ref={guideInput}
                     type="file"
-                    accept=".pdf,.md,.markdown,.txt,.png,.jpg,.jpeg,.gif,.webp"
+                    accept={GUIDE_FILE_TYPES}
                     className="hidden"
                     onChange={(event) => {
                       const file = event.target.files?.[0];
@@ -762,6 +762,8 @@ export function MultipartModelDetailPage() {
   const params = useParams({ strict: false });
   return <MultipartDetail key={params.id} id={Number(params.id)} />;
 }
+
+const GUIDE_FILE_TYPES = ".pdf,.md,.markdown,.txt,.png,.jpg,.jpeg,.gif,.webp,.mp4,.mov";
 
 type CoverIntent = { kind: "upload"; file: File } | { kind: "remove" };
 
@@ -1630,7 +1632,7 @@ function MultipartDetail({ id }: { id: number }) {
                   <input
                     ref={guideInput}
                     type="file"
-                    accept=".pdf,.md,.markdown,.txt,.png,.jpg,.jpeg,.gif,.webp"
+                    accept={GUIDE_FILE_TYPES}
                     className="hidden"
                     onChange={(event) => {
                       const file = event.target.files?.[0];

@@ -2258,7 +2258,7 @@
   "multipart.guidesHelp": "Keep assembly instructions and reference images with the complete set.",
   "multipart.uploadGuide": "Upload",
   "multipart.noGuides": "No guides yet",
-  "multipart.guideFormats": "PDF, Markdown, TXT, PNG, JPG, GIF or WebP",
+  "multipart.guideFormats": "PDF, Markdown, TXT, PNG, JPG, GIF, WebP, MP4 or MOV",
   "multipart.removeGuide": "Remove guide",
   "multipart.guideUploaded": "Guide uploaded",
   "multipart.guideUploadError": "Couldn't upload this guide. Try again.",
