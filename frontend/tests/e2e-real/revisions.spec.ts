@@ -61,7 +61,7 @@ test.describe("revisions", () => {
     await expect(revRow(page, 2).getByText("Recommended")).toBeVisible();
     await expect(revRow(page, 1).getByText("Recommended")).toHaveCount(0);
 
-    await expect(revRow(page, 2).getByText("Known good", { exact: true })).toBeVisible();
+    await expect(revisions.getByRole("heading", { name: /Rev 2.*Known good/ })).toBeVisible();
 
     await page.getByRole("tab", { name: "Overview", exact: true }).click();
     await page.getByRole("button", { name: /Recommended revision.*Rev 2/ }).click();
