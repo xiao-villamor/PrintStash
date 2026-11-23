@@ -10,5 +10,6 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   reporter: "list",
   outputDir: process.env.FARM_BROWSER_OUTPUT,
-  use: { ...DESKTOP_CHROMIUM, baseURL: process.env.FARM_BROWSER_URL, trace: "off" },
+  projects: [{ name: "chromium", use: { ...DESKTOP_CHROMIUM } }],
+  use: { baseURL: process.env.FARM_BROWSER_URL, trace: "off" },
 });

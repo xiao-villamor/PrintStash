@@ -208,13 +208,7 @@ def run(kinds):
             )
             command("run", "--rm", "-T", "--no-deps", "observer", "_seed", *kinds)
             result = subprocess.run(
-                [
-                    "pnpm",
-                    "exec",
-                    "playwright",
-                    "test",
-                    "--config=playwright.farm.config.ts",
-                ],
+                ["pnpm", "run", "test:e2e:farm"],
                 check=False,
                 cwd=HERE.parents[2] / "frontend",
                 env={
