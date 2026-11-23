@@ -158,122 +158,126 @@ test.describe("binary collection files", () => {
   }
 });
 
-test("attaches guides to one Model and opens them after reload", async ({ page }, info) => {
-  const name = "Assembly bracket";
-  const seeded = await page.request.post("/api/v1/ingest/model", {
-    multipart: {
-      file: {
-        name: "assembly-bracket.stl",
-        mimeType: "model/stl",
-        buffer: Buffer.from(stlFor(`bracket-${Date.now()}`)),
+test.describe("Model attachments", () => {
+  test("attaches guides to one Model", async ({ page }, info) => {
+    const name = "Assembly bracket";
+    const seeded = await page.request.post("/api/v1/ingest/model", {
+      multipart: {
+        file: {
+          name: "assembly-bracket.stl",
+          mimeType: "model/stl",
+          buffer: Buffer.from(stlFor(`bracket-${Date.now()}`)),
+        },
+        model_name: name,
       },
-      model_name: name,
-    },
+    });
+    expect(seeded.status(), await seeded.text()).toBe(202);
+    const jobPath = `/api/v1/jobs/${(await seeded.json()).job_id}`;
+    await expect
+      .poll(async () => (await (await page.request.get(jobPath)).json()).state)
+      .toBe("completed");
+    const { model_id: modelId } = await (await page.request.get(jobPath)).json();
+    await page.goto(`/models/${modelId}`);
+    await collapseNavigationSidebar(page);
+    await page.getByRole("tab", { name: /^Files(?: \d+)?$/ }).click();
+    await expect(page.getByText("No attachments yet.")).toBeVisible();
+    await page.screenshot({ path: info.outputPath("model-files-empty.png") });
+    const modelUrl = page.url();
+
+    const videoBytes = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]);
+    const photo = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aEioAAAAASUVORK5CYII=",
+      "base64",
+    );
+    const pane = page.getByRole("region", { name: "Attachments", exact: true });
+    for (const [name, mimeType, buffer] of [
+      ["assembly.pdf", "application/pdf", minimalPdf()],
+      ["reference.png", "image/png", photo],
+      ["build.mp4", "video/mp4", videoBytes],
+    ] as const) {
+      const selection = page.waitForEvent("filechooser");
+      await pane.getByRole("button", { name: "Attach file", exact: true }).click();
+      await (await selection).setFiles({ name, mimeType, buffer });
+      await expect(pane.getByRole("link", { name: new RegExp(name.split(".")[0]!) })).toBeVisible();
+    }
+
+    await page.reload();
+    await expect(pane.getByRole("link", { name: /assembly/ })).toBeVisible();
+    await page.screenshot({ path: info.outputPath("model-files-populated.png") });
+    await pane.getByRole("link", { name: /assembly/ }).click();
+    await expect(page.getByText("1 / 1")).toBeVisible({ timeout: 30_000 });
+    const back = page.locator(`a[href="/models/${modelId}?tab=files"]`).filter({ hasText: "Back" });
+    await back.click();
+    await expect(page).toHaveURL(modelUrl);
+
+    await pane.getByRole("link", { name: /reference/ }).click();
+    const image = page.getByRole("img", { name: "reference", exact: true });
+    await expect(image).toBeVisible();
+    await expect(image).toHaveJSProperty("naturalWidth", 1);
+    await back.click();
+    await pane.getByRole("link", { name: /build/ }).click();
+    await expect(page.getByText("build.mp4 — use Download to open it.")).toBeVisible();
+    const downloading = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download", exact: true }).click();
+    const download = await downloading;
+    expect(download.suggestedFilename()).toBe("build.mp4");
+    expect(await readFile(await download.path())).toEqual(videoBytes);
+
+    await back.click();
+    await pane.getByRole("button", { name: "Delete document" }).first().click();
+    const confirmation = page.getByRole("dialog", { name: "Delete document?" });
+    await expect(confirmation.getByText(/"build" will be moved to trash/)).toBeVisible();
+    await confirmation.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(pane.getByRole("link", { name: /build/ })).toHaveCount(0);
+    await page.reload();
+    await expect(pane.getByRole("link", { name: /assembly/ })).toBeVisible();
+    await expect(pane.getByRole("link", { name: /build/ })).toHaveCount(0);
+
+    await page.emulateMedia({ colorScheme: "dark" });
+    const resize = page.getByRole("separator", { name: "Resize details panel" });
+    await resize.press("Home");
+    await expect(resize).toHaveAttribute("aria-valuenow", "400");
+    const navigation = page.getByTestId("model-detail-sidebar").locator(".model-detail-tabs");
+    await expect
+      .poll(() =>
+        navigation.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          const labels = Array.from(
+            element.querySelectorAll('[role="tab"], [aria-haspopup="menu"]'),
+            (button) => button.getBoundingClientRect(),
+          );
+          return {
+            horizontalOverflow: element.scrollWidth > element.clientWidth,
+            everyTabFits: labels.every(
+              (tab) => tab.left >= bounds.left && tab.right <= bounds.right,
+            ),
+            oneRow: labels.every((tab) => Math.abs(tab.top - labels[0]!.top) < 1),
+          };
+        }),
+      )
+      .toEqual({ horizontalOverflow: false, everyTabFits: true, oneRow: true });
+    const moreTabs = navigation.getByRole("button", { name: "More tabs", exact: true });
+    await moreTabs.press("Enter");
+    const menu = page.getByRole("menu", { name: "More tabs", exact: true });
+    await expect(menu).toBeVisible();
+    expect(await menu.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(
+      "rgba(0, 0, 0, 0)",
+    );
+    const history = menu.getByRole("menuitemradio", { name: "History", exact: true });
+    await expect(history).toBeVisible();
+    await history.click();
+    await expect(page.getByRole("tabpanel", { name: "History", exact: true })).toBeVisible();
+    await expect(moreTabs).toHaveAttribute("data-active", "true");
+    await navigation.getByRole("tab", { name: /^Files(?: \d+)?$/ }).click();
+    await expect(pane).toBeVisible();
+    await page.screenshot({ path: info.outputPath("model-files-narrow-inspector.png") });
+
+    for (let step = 0; step < 18; step += 1) await resize.press("ArrowLeft");
+    await expect(resize).toHaveAttribute("aria-valuenow", "688");
+    await expect(navigation.getByRole("tab", { name: "Source info", exact: true })).toBeVisible();
+    await expect(navigation.getByRole("tab", { name: /^History/ })).toBeVisible();
+    await expect(moreTabs).toBeHidden();
   });
-  expect(seeded.status(), await seeded.text()).toBe(202);
-  const jobPath = `/api/v1/jobs/${(await seeded.json()).job_id}`;
-  await expect
-    .poll(async () => (await (await page.request.get(jobPath)).json()).state)
-    .toBe("completed");
-  const { model_id: modelId } = await (await page.request.get(jobPath)).json();
-  await page.goto(`/models/${modelId}`);
-  await collapseNavigationSidebar(page);
-  await page.getByRole("tab", { name: /^Files(?: \d+)?$/ }).click();
-  await expect(page.getByText("No attachments yet.")).toBeVisible();
-  await page.screenshot({ path: info.outputPath("model-files-empty.png") });
-  const modelUrl = page.url();
-
-  const videoBytes = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]);
-  const photo = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aEioAAAAASUVORK5CYII=",
-    "base64",
-  );
-  const pane = page.getByRole("region", { name: "Attachments", exact: true });
-  for (const [name, mimeType, buffer] of [
-    ["assembly.pdf", "application/pdf", minimalPdf()],
-    ["reference.png", "image/png", photo],
-    ["build.mp4", "video/mp4", videoBytes],
-  ] as const) {
-    const selection = page.waitForEvent("filechooser");
-    await pane.getByRole("button", { name: "Attach file", exact: true }).click();
-    await (await selection).setFiles({ name, mimeType, buffer });
-    await expect(pane.getByRole("link", { name: new RegExp(name.split(".")[0]!) })).toBeVisible();
-  }
-
-  await page.reload();
-  await expect(pane.getByRole("link", { name: /assembly/ })).toBeVisible();
-  await page.screenshot({ path: info.outputPath("model-files-populated.png") });
-  await pane.getByRole("link", { name: /assembly/ }).click();
-  await expect(page.getByText("1 / 1")).toBeVisible({ timeout: 30_000 });
-  const back = page.locator(`a[href="/models/${modelId}?tab=files"]`).filter({ hasText: "Back" });
-  await back.click();
-  await expect(page).toHaveURL(modelUrl);
-
-  await pane.getByRole("link", { name: /reference/ }).click();
-  const image = page.getByRole("img", { name: "reference", exact: true });
-  await expect(image).toBeVisible();
-  await expect(image).toHaveJSProperty("naturalWidth", 1);
-  await back.click();
-  await pane.getByRole("link", { name: /build/ }).click();
-  await expect(page.getByText("build.mp4 — use Download to open it.")).toBeVisible();
-  const downloading = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Download", exact: true }).click();
-  const download = await downloading;
-  expect(download.suggestedFilename()).toBe("build.mp4");
-  expect(await readFile(await download.path())).toEqual(videoBytes);
-
-  await back.click();
-  await pane.getByRole("button", { name: "Delete document" }).first().click();
-  const confirmation = page.getByRole("dialog", { name: "Delete document?" });
-  await expect(confirmation.getByText(/"build" will be moved to trash/)).toBeVisible();
-  await confirmation.getByRole("button", { name: "Delete", exact: true }).click();
-  await expect(pane.getByRole("link", { name: /build/ })).toHaveCount(0);
-  await page.reload();
-  await expect(pane.getByRole("link", { name: /assembly/ })).toBeVisible();
-  await expect(pane.getByRole("link", { name: /build/ })).toHaveCount(0);
-
-  await page.emulateMedia({ colorScheme: "dark" });
-  const resize = page.getByRole("separator", { name: "Resize details panel" });
-  await resize.press("Home");
-  await expect(resize).toHaveAttribute("aria-valuenow", "400");
-  const navigation = page.getByTestId("model-detail-sidebar").locator(".model-detail-tabs");
-  await expect
-    .poll(() =>
-      navigation.evaluate((element) => {
-        const bounds = element.getBoundingClientRect();
-        const labels = Array.from(
-          element.querySelectorAll('[role="tab"], [aria-haspopup="menu"]'),
-          (button) => button.getBoundingClientRect(),
-        );
-        return {
-          horizontalOverflow: element.scrollWidth > element.clientWidth,
-          everyTabFits: labels.every((tab) => tab.left >= bounds.left && tab.right <= bounds.right),
-          oneRow: labels.every((tab) => Math.abs(tab.top - labels[0]!.top) < 1),
-        };
-      }),
-    )
-    .toEqual({ horizontalOverflow: false, everyTabFits: true, oneRow: true });
-  const moreTabs = navigation.getByRole("button", { name: "More tabs", exact: true });
-  await moreTabs.press("Enter");
-  const menu = page.getByRole("menu", { name: "More tabs", exact: true });
-  await expect(menu).toBeVisible();
-  expect(await menu.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(
-    "rgba(0, 0, 0, 0)",
-  );
-  const history = menu.getByRole("menuitemradio", { name: "History", exact: true });
-  await expect(history).toBeVisible();
-  await history.click();
-  await expect(page.getByRole("tabpanel", { name: "History", exact: true })).toBeVisible();
-  await expect(moreTabs).toHaveAttribute("data-active", "true");
-  await navigation.getByRole("tab", { name: /^Files(?: \d+)?$/ }).click();
-  await expect(pane).toBeVisible();
-  await page.screenshot({ path: info.outputPath("model-files-narrow-inspector.png") });
-
-  for (let step = 0; step < 18; step += 1) await resize.press("ArrowLeft");
-  await expect(resize).toHaveAttribute("aria-valuenow", "688");
-  await expect(navigation.getByRole("tab", { name: "Source info", exact: true })).toBeVisible();
-  await expect(navigation.getByRole("tab", { name: /^History/ })).toBeVisible();
-  await expect(moreTabs).toBeHidden();
 });
 
 test.describe("PDF documents", () => {
