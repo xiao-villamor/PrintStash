@@ -201,6 +201,7 @@ test.describe("printer routes", () => {
     const toggle = page.getByRole("button", { name: "Toggle sidebar" });
     if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("#collections-pane")).toHaveCSS("width", "0px");
 
     const card = page
       .getByRole("article")
