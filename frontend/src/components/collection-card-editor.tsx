@@ -73,7 +73,7 @@ function RenameDialog({ collection, onClose, onSaved }: EditorProps) {
     >
       <form id={formId} className="space-y-2" onSubmit={submit}>
         <label className="text-sm font-medium" htmlFor={`${formId}-name`}>
-          {uiText("Collection name")}
+          {uiText("inbox.collectionName")}
         </label>
         <Input
           id={`${formId}-name`}
