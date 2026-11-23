@@ -6,6 +6,7 @@ import asyncio
 import errno
 import json
 import logging
+import math
 import socket
 import ssl
 import threading
@@ -30,6 +31,24 @@ from .models import (
 )
 
 LegacyStatusCallback = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+_TEMPERATURE_FIELDS = {
+    "extruder": {"temperature": "nozzle_temper", "target": "nozzle_target_temper"},
+    "heater_bed": {"temperature": "bed_temper", "target": "bed_target_temper"},
+}
+_PART_FAN_FIELD = "cooling_fan_speed"
+
+
+def _telemetry_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return None
+    try:
+        number = float(value)
+    except ValueError, OverflowError:
+        return None
+    return number if math.isfinite(number) else None
+
 
 # MQTT connects by LAN address while the leaf certificate identifies the
 # printer by serial. The Bambu CA chain verifies the handshake; the serial is
@@ -651,6 +670,18 @@ class BambuClient:
             else:
                 status["virtual_sdcard"] = {"progress": max(0.0, min(1.0, progress))}
 
+        for heater, fields in _TEMPERATURE_FIELDS.items():
+            readings = {
+                field: number
+                for field, source in fields.items()
+                if (number := _telemetry_number(print_report.get(source))) is not None
+            }
+            if readings:
+                status[heater] = readings
+        fan_level = _telemetry_number(print_report.get(_PART_FAN_FIELD))
+        if fan_level is not None and 0 <= fan_level <= 15:
+            status["fan"] = {"speed": fan_level / 15}
+
         metadata_fields = {
             "subtask_name": "external_display_name",
             "task_id": "external_task_id",
@@ -659,14 +690,19 @@ class BambuClient:
             "profile_id": "external_profile_id",
             "gcode_file": "external_gcode_file",
             "plate_num": "external_plate_index",
-            "layer_num": "external_current_layer",
-            "total_layer_num": "external_total_layers",
             "nozzle_diameter": "external_nozzle_diameter",
         }
         for source, target in metadata_fields.items():
             value = print_report.get(source)
             if value is not None and value != "":
                 print_stats[target] = value
+        for source, target in (
+            ("layer_num", "external_current_layer"),
+            ("total_layer_num", "external_total_layers"),
+        ):
+            count = _telemetry_number(print_report.get(source))
+            if count is not None and count >= 0 and count.is_integer():
+                print_stats[target] = int(count)
         if print_stats:
             status["print_stats"] = print_stats
         if isinstance(print_report, dict) and (
@@ -907,10 +943,15 @@ class BambuClient:
         loop = asyncio.get_running_loop()
         connected = asyncio.Event()
         first_status = asyncio.Event()
+        disconnected = asyncio.Event()
         connection_error: list[str] = []
 
         async def dispatch(status: dict[str, Any]) -> None:
-            await on_status(status)
+            if not disconnected.is_set():
+                await on_status(status)
+
+        def on_disconnect(*_args: object) -> None:
+            loop.call_soon_threadsafe(disconnected.set)
 
         def on_connect(
             client: Any,
@@ -946,7 +987,7 @@ class BambuClient:
                 body = json.loads(message.payload.decode("utf-8"))
             except UnicodeDecodeError, ValueError:
                 return
-            if not isinstance(body.get("print"), dict):
+            if not isinstance(body, dict) or not isinstance(body.get("print"), dict):
                 return
             # Bambu can put project_file capture hints on the report topic,
             # which is the only topic this persistent session subscribes to.
@@ -970,6 +1011,7 @@ class BambuClient:
 
         client = self._mqtt_client()
         client.on_connect = on_connect
+        client.on_disconnect = on_disconnect
         client.on_message = on_message
         try:
             client.connect(self.host, 8883, keepalive=30)
@@ -987,7 +1029,18 @@ class BambuClient:
             if stop_event is None:
                 await asyncio.wait_for(first_status.wait(), timeout=10.0)
                 return
-            await stop_event.wait()
+            async with asyncio.TaskGroup() as waiters:
+                stopped = waiters.create_task(stop_event.wait())
+                dropped = waiters.create_task(disconnected.wait())
+                await asyncio.wait(
+                    (stopped, dropped), return_when=asyncio.FIRST_COMPLETED
+                )
+                stopped.cancel()
+                dropped.cancel()
+            if disconnected.is_set() and not stop_event.is_set():
+                raise ProviderError(
+                    "bambu_mqtt_disconnected", code="provider_transport_error"
+                )
         finally:
             try:
                 client.disconnect()

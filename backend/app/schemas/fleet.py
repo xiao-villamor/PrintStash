@@ -176,6 +176,19 @@ class MaintenanceLogUpdate(BaseModel):
     counter_unit: Optional[str] = Field(default=None, max_length=32)
 
 
+class FleetLoadedSlot(BaseModel):
+    slot_key: str
+    label: str
+    material_type: str | None
+    color_hex: str | None
+
+
+class FleetPrinterTelemetry(BaseModel):
+    nozzle_c: float | None = None
+    bed_c: float | None = None
+    part_fan_speed: float | None = Field(default=None, ge=0, le=1)
+
+
 class FleetPrinterBoardRead(BaseModel):
     printer_id: int
     name: str
@@ -183,6 +196,8 @@ class FleetPrinterBoardRead(BaseModel):
     progress: float | None = None
     group: Optional[str] = None
     loaded_slots: list[str] = Field(default_factory=list)
+    loaded_material_slots: list[FleetLoadedSlot] = Field(default_factory=list)
+    telemetry: FleetPrinterTelemetry | None = None
     nozzle_diameter_mm: float | None = None
     current_job_id: int | None = None
     current_job_name: str | None = None

@@ -31,24 +31,37 @@ function report(verdict: "compatible" | "unknown" | "mismatch" = "unknown"): Com
     ],
   };
 }
-function setup(routes: RouteTable = {}, printers: PrinterRead[] = [printer], member = false) {
+function setup(
+  routes: RouteTable = {},
+  printers: PrinterRead[] = [printer],
+  member = false,
+  fixedPrinterId?: number,
+) {
   const onClose = vi.fn<() => void>();
   return {
     onClose,
-    ...renderApp(<FleetAddJobDialog open onClose={onClose} printers={printers} />, {
-      auth: member ? memberSession() : undefined,
-      routes: {
-        "GET /api/v1/models/page": json({
-          items: [aModelListItem({ id: 1, name: "Bracket" })],
-          total: 1,
-          next_cursor: null,
-        }),
-        "GET /api/v1/models/1": json(model),
-        "POST /api/v1/fleet/compatibility": json(report()),
-        "POST /api/v1/fleet/queue": json(aPrintJob({ id: 9, file_id: 7, printer_id: 8 })),
-        ...routes,
+    ...renderApp(
+      <FleetAddJobDialog
+        open
+        onClose={onClose}
+        printers={printers}
+        fixedPrinterId={fixedPrinterId}
+      />,
+      {
+        auth: member ? memberSession() : undefined,
+        routes: {
+          "GET /api/v1/models/page": json({
+            items: [aModelListItem({ id: 1, name: "Bracket" })],
+            total: 1,
+            next_cursor: null,
+          }),
+          "GET /api/v1/models/1": json(model),
+          "POST /api/v1/fleet/compatibility": json(report()),
+          "POST /api/v1/fleet/queue": json(aPrintJob({ id: 9, file_id: 7, printer_id: 8 })),
+          ...routes,
+        },
       },
-    }),
+    ),
   };
 }
 async function selectRevision() {
@@ -113,6 +126,49 @@ describe("Fleet Add to queue", () => {
       compatibility_policy: "safe",
     });
     expect(JSON.parse(command?.body ?? "{}")).not.toHaveProperty("printer_id");
+  });
+
+  it("keeps the detail printer as the manual destination even with another default", async () => {
+    const app = setup(
+      {},
+      [aPrinter({ id: 2, name: "Default", is_default: true }), printer],
+      false,
+      8,
+    );
+    await selectRevision();
+    expect(screen.queryByRole("combobox", { name: "Routing" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save job" }));
+    await waitFor(() => expect(app.onClose).toHaveBeenCalledOnce());
+
+    const command = app.requestsWithMethod("POST").find(({ url }) => url.endsWith("/fleet/queue"));
+    expect(JSON.parse(command?.body ?? "{}")).toMatchObject({
+      file_id: 7,
+      printer_id: 8,
+      strategy: "manual",
+    });
+  });
+
+  it("blocks a targeted revision when the printer does not accept its format", async () => {
+    setup(
+      {},
+      [
+        aPrinter({ id: 2, name: "Default", is_default: true }),
+        aPrinter({
+          ...printer,
+          capabilities: printerCapabilities({ accepted_print_formats: ["bgcode_binary"] }),
+        }),
+      ],
+      false,
+      8,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Revision" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Bracket" }));
+    await userEvent.click(await screen.findByRole("button", { name: /Revision 1/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This Revision cannot be queued on this printer.",
+    );
+    expect(screen.getByRole("button", { name: "Save job" })).toBeDisabled();
   });
 
   it("guards a double gesture while compatibility is pending", async () => {

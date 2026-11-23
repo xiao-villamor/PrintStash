@@ -103,6 +103,44 @@ Use the MCP window to look; use the scripts to measure and to click.
 7. **Report with numbers.** Before/after table per scenario: findings by kind,
    motion settled ms, p95 frame ms. List what remains, by finding.
 
+## Iterate on the design in Playwright
+
+For a redesign, pair the motion audit with a walkthrough on the preview the user
+will open. A page can pass geometry checks while its next action is hard to
+find. Keep captures and observations in the task's private `reports/` folder.
+
+1. Start from the user's screenshot or ordinary entry route. Write down the
+   operator's task and what on screen should tell them their next step. Capture
+   both the first visit and a representative populated state.
+2. Compare the working page with the prototype at the same viewport, sidebar
+   state, theme and zoom. Inspect the screenshot at full size. Look for space
+   a repeated heading or oversized panel takes away from useful information.
+   For device views, check an idle machine as well as a running one.
+   Align the content origins before comparing captures. Measure the first
+   actionable row and the top of each important panel. A matching column
+   count can still put the next control below the fold. Compare sparse and
+   populated lists so an explorer works with both one file and many folders.
+3. Walk the task with real pointer and keyboard input. Try the *expected*
+   targets, including a card's image and body, then try its secondary controls
+   independently. Observe focus, hover, pending feedback and reduced motion
+   where relevant. For a write, check the visible receipt and persisted value
+   after reload on the designated test instance.
+   For a file editor, select a disposable file by its full path and check the
+   request targets that file. Reopen the URL after reload and in a second tab
+   to verify selection, unsaved drafts and concurrent saves.
+   On a live control screen, perform one adjustment while watching the process
+   it affects. Check that the command, its acknowledgement and the measured
+   response are visible on the same screen. A heater target and the measured
+   temperature answer different operator questions.
+4. Record each actionable mismatch as a state, gesture, observed result and
+   expected result. Save the frame or measurable assertion that would have
+   caught it. Where several arrangements could work, compare a second
+   composition against the same operator task before choosing one.
+5. Change the design, open a fresh page and replay the original gesture plus
+   the next step in the workflow. Keep the before/after pair. Repeat while a
+   reproduced issue still affects the task. Report the states exercised and
+   any remaining mismatch with its evidence.
+
 ## Rest checks that must always pass
 
 At 1920×1080 (the user's real resolution) on the views below, `rest` has zero

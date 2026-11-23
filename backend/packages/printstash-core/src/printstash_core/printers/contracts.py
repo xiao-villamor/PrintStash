@@ -7,7 +7,14 @@ from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from .models import PrinterConfig, PrinterSnapshot, ProviderCapabilities, ProviderId
+from .models import (
+    MotionAxis,
+    PrinterConfig,
+    PrinterSnapshot,
+    ProviderCapabilities,
+    ProviderId,
+    TuningControl,
+)
 
 SnapshotCallback = Callable[[PrinterSnapshot], Awaitable[None]]
 
@@ -59,6 +66,19 @@ class ArtifactCaptureClient(Protocol):
     async def download_artifact(
         self, remote_path: str, destination: Path, *, max_bytes: int
     ) -> None: ...
+
+
+@runtime_checkable
+class MachineControlClient(Protocol):
+    async def home(self, axes: tuple[MotionAxis, ...]) -> Mapping[str, Any]: ...
+
+    async def jog(self, axis: MotionAxis, distance: float) -> Mapping[str, Any]: ...
+
+    async def extrude(self, distance: float) -> Mapping[str, Any]: ...
+
+    async def tune(
+        self, control: TuningControl, percent: float
+    ) -> Mapping[str, Any]: ...
 
 
 class ProviderFactory(Protocol):

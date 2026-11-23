@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from typing import Awaitable, Callable, List, Optional
 
 from fastapi import (
@@ -15,14 +16,20 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from printstash_core.printers import ProviderError, ProviderRegistry
+from printstash_core.printers import (
+    MachineControlClient,
+    MachineControlError,
+    MotionAxis,
+    ProviderError,
+    ProviderRegistry,
+)
 from sqlmodel import Session, select
 
 from app.api.edit_preconditions import edit_precondition
 from app.bootstrap.dependencies import get_hub, get_hub_from_ws
 from app.core.http import get_or_404
 from app.core.logging import get_logger
-from app.core.security import require_superuser, require_user
+from app.core.security import require_auth, require_superuser, require_user
 from app.core.time import utcnow
 from app.db.models import (
     CollectionRole,
@@ -62,7 +69,9 @@ from app.modules.storage.storage_backend.runtime import get_backend
 from app.schemas.editing import EditPrecondition
 from app.schemas.materials import ManualMaterialStateUpdate, PrinterMaterialStateRead
 from app.schemas.printers import (
+    ExtrudeFilament,
     HomeAxes,
+    JogPrinter,
     MoonrakerConfigRead,
     PrinterCapabilities,
     PrinterCreate,
@@ -75,6 +84,7 @@ from app.schemas.printers import (
     SendToPrinter,
     SetTemperature,
     StartPrinterFile,
+    TunePrinter,
 )
 
 logger = get_logger(__name__)
@@ -1144,6 +1154,7 @@ async def set_printer_temperature(
 @router.post(
     "/{printer_id}/home",
     summary="Home the toolhead (all axes, or a subset)",
+    dependencies=[Depends(require_auth)],
 )
 async def home_printer(
     printer_id: int,
@@ -1152,12 +1163,95 @@ async def home_printer(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict:
+    axes = tuple(MotionAxis(axis) for axis in payload.axes) if payload.axes else ()
+    return await _machine_control(
+        request, printer_id, current_user, session, lambda provider: provider.home(axes)
+    )
+
+
+async def _machine_control(
+    request: Request,
+    printer_id: int,
+    current_user: User,
+    session: Session,
+    command: Callable[[MachineControlClient], Awaitable[Mapping[str, object]]],
+) -> dict:
     printer_rbac.require_printer_role(
         session, current_user, printer_id, PrinterRole.CONTROL
     )
-    provider = _require_gcode_provider(request, session, printer_id)
-    script = "G28" if not payload.axes else "G28 " + " ".join(payload.axes.upper())
-    return await _run_gcode(provider, script)
+    try:
+        provider = _require_gcode_provider(request, session, printer_id)
+        if not isinstance(provider, MachineControlClient):
+            raise HTTPException(409, detail="operation_not_supported_for_provider")
+        await command(provider)
+    except MachineControlError as exc:
+        raise HTTPException(409, detail=exc.reason.value) from exc
+    except ProviderError as exc:
+        raise HTTPException(502, detail=exc.code) from exc
+    return {"ok": True}
+
+
+@router.post(
+    "/{printer_id}/jog",
+    summary="Jog a homed axis by a signed distance",
+    dependencies=[Depends(require_auth)],
+)
+async def jog_printer(
+    printer_id: int,
+    payload: JogPrinter,
+    request: Request,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> dict:
+    return await _machine_control(
+        request,
+        printer_id,
+        current_user,
+        session,
+        lambda provider: provider.jog(payload.axis, payload.distance),
+    )
+
+
+@router.post(
+    "/{printer_id}/extrude",
+    summary="Feed or retract filament",
+    dependencies=[Depends(require_auth)],
+)
+async def extrude_filament(
+    printer_id: int,
+    payload: ExtrudeFilament,
+    request: Request,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> dict:
+    return await _machine_control(
+        request,
+        printer_id,
+        current_user,
+        session,
+        lambda provider: provider.extrude(payload.distance),
+    )
+
+
+@router.post(
+    "/{printer_id}/tune",
+    summary="Set a fan, speed, or flow percentage",
+    dependencies=[Depends(require_auth)],
+)
+async def tune_printer(
+    printer_id: int,
+    payload: TunePrinter,
+    request: Request,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> dict:
+    return await _machine_control(
+        request,
+        printer_id,
+        current_user,
+        session,
+        lambda provider: provider.tune(payload.control, payload.percent),
+    )
 
 
 @router.post(
@@ -1399,6 +1493,7 @@ async def printer_ws(
 
         {"type": "snapshot", "printer_id": <id>, "data": {...full snapshot...}}
         {"type": "update",   "printer_id": <id>, "data": {...changed objects...}}
+        {"type": "offline",  "printer_id": <id>}
     """
     ticket = websocket.query_params.get("ticket")
     token = None

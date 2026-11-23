@@ -6,10 +6,39 @@
  * amount of control-endpoint coverage matters.
  */
 import { test, expect, authBundleFor, ADMIN } from "./helpers";
+import { collapseNavigationSidebar } from "./util";
 
 // Adds a real Moonraker printer record (it will sit offline — no hardware — but
 // the create/list/remove path is fully exercised against the backend).
 test.describe("printers", () => {
+  test("shows idle printer telemetry in Fleet", async ({ page }) => {
+    const name = `e2e-fleet-readings-${Date.now()}`;
+    const port = Number(process.env.PLAYWRIGHT_MOCK_PRINTER_PORT ?? 7530);
+    await page.goto("/printers");
+    await collapseNavigationSidebar(page);
+    await page.getByRole("button", { name: "Add printer" }).click();
+    const setup = page.getByRole("dialog", { name: "Add printer", exact: true });
+    await setup.getByLabel("Name", { exact: true }).fill(name);
+    await setup.getByPlaceholder("http://printer.local:7125").fill(`http://127.0.0.1:${port}`);
+    await setup.getByRole("button", { name: "Add printer" }).click();
+
+    const link = page.getByRole("link", { name, exact: true });
+    const path = await link.getAttribute("href");
+    const card = page.getByRole("article").filter({ has: link });
+    try {
+      await expect(card.getByText("No active print")).toBeVisible();
+      await expect(card.getByText("Nozzle", { exact: true })).toBeVisible();
+      await expect(card.getByText("Bed", { exact: true })).toBeVisible();
+      await expect(card.getByText("25 °C", { exact: true })).toHaveCount(2);
+      await expect(card.getByText("Part cooling fan", { exact: true })).toBeVisible();
+      await expect(card.getByText("0%", { exact: true })).toBeVisible();
+      await link.press("Enter");
+      await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+    } finally {
+      expect((await page.request.delete(`/api/v1${path}`)).ok()).toBe(true);
+    }
+  });
+
   test("add and remove a printer", async ({ page }) => {
     const name = `e2e-printer-${Date.now()}`;
     await page.goto("/printers");

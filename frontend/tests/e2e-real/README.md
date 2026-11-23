@@ -194,6 +194,26 @@ About (running version + changelog) · design customization (metadata visibility
 card-metric slots + reset) · printer add/remove and short-screen provider setup (320px, 390px and landscape; accessible dialog name, reachable actions and keyboard cancellation) · cross-cutting (theme
 persistence, health version, routes free of uncaught errors).
 
+Fleet Status queues an uploaded Revision for a fixed destination through the
+real backend and Moonraker emulator. The browser observes the print heat up and
+cool, reloads to verify job history, and opens Queue and Maintenance selects
+with the keyboard.
+
+The Fleet overview shows measured nozzle and bed temperatures and a stopped
+part-cooling fan on an idle Moonraker emulator. Enter opens the printer.
+
+Completed printer Jobs can open the queue dialog with the original sliced
+Revision, saved plate and destination. The browser confirms the repeat job
+and verifies both print runs persist through reload.
+
+`printer-file-history.spec.ts` browses synced Moonraker paths, starts and
+deletes selected remote files, then compares recorded and unrecorded durations,
+filters outcomes, and opens evidence from the resulting Jobs history.
+
+`printer-library-upload.spec.ts` prepares a saved Revision from Files on a
+disposable Moonraker emulator. It verifies the upload-only request, confirmed
+remote filename, inspectable inventory entry, and absence of a printer start.
+
 The mock-API browser suite also exercises operator recovery for an active fleet
 job whose physical print has disappeared; the real printer contract covers the
 automatic emergency-stop reconciliation path.
@@ -289,3 +309,13 @@ sends no further setup probe.
 `inbox-capture.spec.ts`: pairs a browser, interrupts a two-file transfer, resumes only the pending file, imports both Models through review, and verifies revocation denies importer recovery. Provider bytes are controlled; the API, staging and ingestion are real.
 
 - `gcode-plates.spec.ts`: upload sliced 3MF exports with or without meshes, switch plate toolpaths, preview a dense 750-layer revision, and send the selected revision to a printer emulator. Desktop layout cases check that Layers and View controls fit without clipping or overlap in normal and expanded previews and across model tabs. The default render is 1920×1080 with the main navigation collapsed; explicit 1280×720 and 1440×1000 cases reproduce the reported sidebar clipping.
+
+The default Klipper dashboard scenario in `fleet.spec.ts` homes and jogs an axis,
+applies an override, then preheats, feeds filament, and cools down. It verifies
+the reported position, speed, and extrusion availability from real emulator telemetry.
+
+`printer-sections.spec.ts` exercises the combined per-printer materials and maintenance
+workspace on the Moonraker emulator, persists routing and notes, and verifies
+Diagnostics and browser history at the desktop viewport.
+
+- `printer-config.spec.ts` uses the throwaway Moonraker config root to check nested navigation, dirty-draft guards, keyboard save, exact CRLF readback after reload, external-edit review, and read-only files.

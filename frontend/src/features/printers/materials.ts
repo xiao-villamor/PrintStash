@@ -62,3 +62,14 @@ export function usePrinterMaterials(id: number) {
   }
   return { query, save, current, retired };
 }
+
+export function useMachineSetup(printerId: number, enabled: boolean) {
+  const { data, isPending, isError } = useQuery({
+    ...printerMaterialsOptions(printerId),
+    enabled,
+  });
+  const nozzle = data?.tools.find(
+    (tool) => !tool.stale && tool.nozzle_diameter_mm !== null,
+  )?.nozzle_diameter_mm;
+  return { nozzle, slots: data?.slots ?? [], isPending, isError };
+}

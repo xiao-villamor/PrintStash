@@ -1,6 +1,78 @@
 {
   "components": {
     "schemas": {
+      "ActiveBedMesh": {
+        "properties": {
+          "mesh_max": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Mesh Max",
+            "type": "array"
+          },
+          "mesh_min": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Mesh Min",
+            "type": "array"
+          },
+          "probed_matrix": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "title": "Probed Matrix",
+            "type": "array"
+          },
+          "profile_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Name"
+          },
+          "state": {
+            "const": "active",
+            "title": "State",
+            "type": "string"
+          },
+          "variation_mm": {
+            "title": "Variation Mm",
+            "type": "number"
+          }
+        },
+        "required": [
+          "state",
+          "profile_name",
+          "mesh_min",
+          "mesh_max",
+          "probed_matrix",
+          "variation_mm"
+        ],
+        "title": "ActiveBedMesh",
+        "type": "object"
+      },
       "ActiveJobResolution": {
         "additionalProperties": false,
         "properties": {
@@ -1571,6 +1643,19 @@
           }
         },
         "title": "BatchRouting",
+        "type": "object"
+      },
+      "BedMeasurementAvailability": {
+        "properties": {
+          "supported": {
+            "title": "Supported",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "supported"
+        ],
+        "title": "BedMeasurementAvailability",
         "type": "object"
       },
       "Body_add_gcode_revision_api_v1_models__model_id__gcode_revisions_post": {
@@ -5491,6 +5576,21 @@
         "title": "ComputeStatus",
         "type": "object"
       },
+      "ConfirmBedMeasurement": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmed": {
+            "const": true,
+            "title": "Confirmed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "confirmed"
+        ],
+        "title": "ConfirmBedMeasurement",
+        "type": "object"
+      },
       "CultsConnectRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6489,6 +6589,23 @@
         "title": "ExternalLibraryWatchMode",
         "type": "string"
       },
+      "ExtrudeFilament": {
+        "additionalProperties": false,
+        "properties": {
+          "distance": {
+            "description": "Signed filament distance in millimeters. Magnitude must be at least 0.1.",
+            "maximum": 50.0,
+            "minimum": -50.0,
+            "title": "Distance",
+            "type": "number"
+          }
+        },
+        "required": [
+          "distance"
+        ],
+        "title": "ExtrudeFilament",
+        "type": "object"
+      },
       "FacetValueRead": {
         "properties": {
           "count": {
@@ -7202,6 +7319,48 @@
         "title": "FileType",
         "type": "string"
       },
+      "FleetLoadedSlot": {
+        "properties": {
+          "color_hex": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Hex"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "material_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Type"
+          },
+          "slot_key": {
+            "title": "Slot Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot_key",
+          "label",
+          "material_type",
+          "color_hex"
+        ],
+        "title": "FleetLoadedSlot",
+        "type": "object"
+      },
       "FleetPrinterBoardRead": {
         "properties": {
           "current_job_id": {
@@ -7251,6 +7410,13 @@
               }
             ],
             "title": "Group"
+          },
+          "loaded_material_slots": {
+            "items": {
+              "$ref": "#/components/schemas/FleetLoadedSlot"
+            },
+            "title": "Loaded Material Slots",
+            "type": "array"
           },
           "loaded_slots": {
             "items": {
@@ -7334,6 +7500,16 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "telemetry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetPrinterTelemetry"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -7342,6 +7518,47 @@
           "status"
         ],
         "title": "FleetPrinterBoardRead",
+        "type": "object"
+      },
+      "FleetPrinterTelemetry": {
+        "properties": {
+          "bed_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bed C"
+          },
+          "nozzle_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nozzle C"
+          },
+          "part_fan_speed": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Part Fan Speed"
+          }
+        },
+        "title": "FleetPrinterTelemetry",
         "type": "object"
       },
       "FleetSummary": {
@@ -8190,6 +8407,20 @@
           "status"
         ],
         "title": "ImportedPrintJobRead",
+        "type": "object"
+      },
+      "InactiveBedMesh": {
+        "properties": {
+          "state": {
+            "const": "inactive",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "InactiveBedMesh",
         "type": "object"
       },
       "InboxBatchRequest": {
@@ -9396,6 +9627,27 @@
           "updated_at"
         ],
         "title": "JobStatus",
+        "type": "object"
+      },
+      "JogPrinter": {
+        "additionalProperties": false,
+        "properties": {
+          "axis": {
+            "$ref": "#/components/schemas/MotionAxis"
+          },
+          "distance": {
+            "description": "Signed distance in millimeters. Magnitude must be at least 0.1.",
+            "maximum": 10.0,
+            "minimum": -10.0,
+            "title": "Distance",
+            "type": "number"
+          }
+        },
+        "required": [
+          "axis",
+          "distance"
+        ],
+        "title": "JogPrinter",
         "type": "object"
       },
       "LaneName": {
@@ -13448,6 +13700,15 @@
         "title": "MoonrakerConfigRead",
         "type": "object"
       },
+      "MotionAxis": {
+        "enum": [
+          "x",
+          "y",
+          "z"
+        ],
+        "title": "MotionAxis",
+        "type": "string"
+      },
       "MultipartChoiceWrite": {
         "additionalProperties": false,
         "properties": {
@@ -17272,6 +17533,79 @@
         "title": "PrinterCapabilities",
         "type": "object"
       },
+      "PrinterConfigFile": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Revision",
+            "type": "string"
+          },
+          "writable": {
+            "title": "Writable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "content",
+          "revision",
+          "writable"
+        ],
+        "title": "PrinterConfigFile",
+        "type": "object"
+      },
+      "PrinterConfigFileEntry": {
+        "properties": {
+          "modified": {
+            "title": "Modified",
+            "type": "number"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "writable": {
+            "title": "Writable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "size_bytes",
+          "modified",
+          "writable"
+        ],
+        "title": "PrinterConfigFileEntry",
+        "type": "object"
+      },
+      "PrinterConfigFiles": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/PrinterConfigFileEntry"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "PrinterConfigFiles",
+        "type": "object"
+      },
       "PrinterCreate": {
         "additionalProperties": false,
         "properties": {
@@ -17683,6 +18017,37 @@
           "updated_at"
         ],
         "title": "PrinterFileRead",
+        "type": "object"
+      },
+      "PrinterHeaterHistory": {
+        "properties": {
+          "extruder": {
+            "items": {
+              "$ref": "#/components/schemas/RecordedHeaterSample"
+            },
+            "title": "Extruder",
+            "type": "array"
+          },
+          "heater_bed": {
+            "items": {
+              "$ref": "#/components/schemas/RecordedHeaterSample"
+            },
+            "title": "Heater Bed",
+            "type": "array"
+          },
+          "sample_interval_ms": {
+            "const": 1000,
+            "description": "Moonraker's nominal cadence. The store omits timestamps.",
+            "title": "Sample Interval Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sample_interval_ms",
+          "extruder",
+          "heater_bed"
+        ],
+        "title": "PrinterHeaterHistory",
         "type": "object"
       },
       "PrinterMaterialStateRead": {
@@ -19479,6 +19844,45 @@
         ],
         "title": "Reason",
         "type": "string"
+      },
+      "RecordedHeaterSample": {
+        "properties": {
+          "age_ms": {
+            "description": "Nominal age relative to the newest store slot.",
+            "minimum": 0.0,
+            "title": "Age Ms",
+            "type": "integer"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature"
+          }
+        },
+        "required": [
+          "age_ms",
+          "temperature",
+          "target"
+        ],
+        "title": "RecordedHeaterSample",
+        "type": "object"
       },
       "RefreshRequest": {
         "additionalProperties": false,
@@ -23126,6 +23530,36 @@
         "title": "TrashedSourceFileRead",
         "type": "object"
       },
+      "TunePrinter": {
+        "additionalProperties": false,
+        "properties": {
+          "control": {
+            "$ref": "#/components/schemas/TuningControl"
+          },
+          "percent": {
+            "description": "0–100 for the part-cooling fan and 50–150 for speed or flow.",
+            "maximum": 150.0,
+            "minimum": 0.0,
+            "title": "Percent",
+            "type": "number"
+          }
+        },
+        "required": [
+          "control",
+          "percent"
+        ],
+        "title": "TunePrinter",
+        "type": "object"
+      },
+      "TuningControl": {
+        "enum": [
+          "fan",
+          "speed",
+          "flow"
+        ],
+        "title": "TuningControl",
+        "type": "string"
+      },
       "UnavailableVolumeRead": {
         "additionalProperties": false,
         "properties": {
@@ -23160,6 +23594,20 @@
           "cause"
         ],
         "title": "UnavailableVolumeRead",
+        "type": "object"
+      },
+      "UnconfiguredBedMesh": {
+        "properties": {
+          "state": {
+            "const": "unconfigured",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "UnconfiguredBedMesh",
         "type": "object"
       },
       "UrlIngestRequest": {
@@ -45041,6 +45489,174 @@
         ]
       }
     },
+    "/api/v1/printers/{printer_id}/bed-mesh": {
+      "get": {
+        "operationId": "printer_bed_mesh_api_v1_printers__printer_id__bed_mesh_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "active": "#/components/schemas/ActiveBedMesh",
+                      "inactive": "#/components/schemas/InactiveBedMesh",
+                      "unconfigured": "#/components/schemas/UnconfiguredBedMesh"
+                    },
+                    "propertyName": "state"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ActiveBedMesh"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InactiveBedMesh"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnconfiguredBedMesh"
+                    }
+                  ],
+                  "title": "Response Printer Bed Mesh Api V1 Printers  Printer Id  Bed Mesh Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read Klipper's active bed mesh",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/bed-mesh/measurement": {
+      "get": {
+        "operationId": "printer_bed_measurement_availability_api_v1_printers__printer_id__bed_mesh_measurement_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BedMeasurementAvailability"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Check for automatic bed measurement",
+        "tags": [
+          "printers"
+        ]
+      },
+      "post": {
+        "operationId": "measure_printer_bed_api_v1_printers__printer_id__bed_mesh_measurement_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmBedMeasurement"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveBedMesh"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Measure the bed with Klipper's automatic probe",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
     "/api/v1/printers/{printer_id}/cancel": {
       "post": {
         "operationId": "cancel_printer_api_v1_printers__printer_id__cancel_post",
@@ -45132,6 +45748,195 @@
           }
         ],
         "summary": "Get Moonraker and Klipper configuration",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/config/file": {
+      "get": {
+        "operationId": "read_printer_config_file_api_v1_printers__printer_id__config_file_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrinterConfigFile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read an existing Moonraker configuration file",
+        "tags": [
+          "printers"
+        ]
+      },
+      "put": {
+        "operationId": "save_printer_config_file_api_v1_printers__printer_id__config_file_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "base_revision": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "title": "Base Revision",
+                    "type": "string"
+                  },
+                  "content": {
+                    "maxLength": 262144,
+                    "title": "Content",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content",
+                  "base_revision"
+                ],
+                "title": "PrinterConfigFileUpdate",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrinterConfigFile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Save an existing Moonraker configuration file and verify readback",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/config/files": {
+      "get": {
+        "operationId": "list_printer_config_files_api_v1_printers__printer_id__config_files_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrinterConfigFiles"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List existing Moonraker configuration files",
         "tags": [
           "printers"
         ]
@@ -45231,6 +46036,65 @@
           }
         ],
         "summary": "Immediately halt the printer (Klipper emergency stop)",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/extrude": {
+      "post": {
+        "operationId": "extrude_filament_api_v1_printers__printer_id__extrude_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtrudeFilament"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Extrude Filament Api V1 Printers  Printer Id  Extrude Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Feed or retract filament",
         "tags": [
           "printers"
         ]
@@ -45398,6 +46262,53 @@
         ]
       }
     },
+    "/api/v1/printers/{printer_id}/heater-history": {
+      "get": {
+        "operationId": "printer_heater_history_api_v1_printers__printer_id__heater_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrinterHeaterHistory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read Moonraker's recent heater samples",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
     "/api/v1/printers/{printer_id}/home": {
       "post": {
         "operationId": "home_printer_api_v1_printers__printer_id__home_post",
@@ -45513,6 +46424,65 @@
           }
         ],
         "summary": "List recent print jobs for a printer",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/jog": {
+      "post": {
+        "operationId": "jog_printer_api_v1_printers__printer_id__jog_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JogPrinter"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Jog Printer Api V1 Printers  Printer Id  Jog Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Jog a homed axis by a signed distance",
         "tags": [
           "printers"
         ]
@@ -46103,6 +47073,65 @@
           }
         ],
         "summary": "Set a heater target temperature",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/tune": {
+      "post": {
+        "operationId": "tune_printer_api_v1_printers__printer_id__tune_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TunePrinter"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Tune Printer Api V1 Printers  Printer Id  Tune Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Set a fan, speed, or flow percentage",
         "tags": [
           "printers"
         ]

@@ -180,6 +180,7 @@ function makeSummary(overrides: Partial<FleetSummary> = {}): FleetSummary {
     draining_printers: 0,
     maintenance_printers: 0,
     attention_jobs: 0,
+    printers: [],
     ...overrides,
   };
 }
@@ -675,6 +676,36 @@ describe("FleetMaintenancePanel remote ownership", () => {
       app.requests().filter((request) => request.url.endsWith("/maintenance-log")),
     ).toHaveLength(1);
     expect(windowReads).toBe(2);
+  });
+
+  it("filters upcoming maintenance by UTC when the API omits offsets", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-01-01T03:00:00Z"));
+    try {
+      renderApp(<FleetMaintenancePanel printers={[aPrinter()]} onPrintersChanged={() => {}} />, {
+        routes: {
+          "GET /api/v1/fleet/printers/1/maintenance-windows": json([
+            aMaintenanceWindow({
+              id: 1,
+              starts_at: "2026-01-01T02:00:00",
+              ends_at: "2026-01-01T02:30:00",
+              reason: "Expired window",
+            }),
+            aMaintenanceWindow({
+              id: 2,
+              starts_at: "2026-01-01T03:15:00",
+              ends_at: "2026-01-01T04:00:00",
+              reason: "Service after cutoff",
+            }),
+          ]),
+          "GET /api/v1/fleet/printers/1/maintenance-log": json([]),
+        },
+      });
+      const start = new Date("2026-01-01T03:15:00Z").toLocaleString("en");
+      expect(await screen.findByText(/Service after cutoff/)).toHaveTextContent(start);
+      expect(screen.queryByText(/Expired window/)).not.toBeInTheDocument();
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it("refreshes only confirmed maintenance logs", async () => {

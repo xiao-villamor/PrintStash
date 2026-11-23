@@ -25,6 +25,8 @@ from app.api.v1 import (
     multipart_models,
     notifications,
     outliner,
+    printer_config_files,
+    printer_inspection,
     printer_profiles,
     printers,
     provider_connections,
@@ -77,6 +79,8 @@ api_router.include_router(slicer_profiles.router)
 api_router.include_router(taxonomy.router)
 api_router.include_router(documents.router)
 api_router.include_router(printers.router)
+api_router.include_router(printer_config_files.router)
+api_router.include_router(printer_inspection.router)
 api_router.include_router(backup.router)
 api_router.include_router(config.router)
 api_router.include_router(artifact_cache.router)

@@ -10,6 +10,12 @@
 
 ### Changed
 
+- Open a printer from anywhere on its Fleet card. The roster shows work, routing holds, reported material colors, and available nozzle, bed and part-cooling fan readings alongside recent and queued prints. Fleet totals open the matching queue view or filter printers by readiness. Printer Status distinguishes idle machines from active jobs, shows a rolling history of actual heater readings and the reported part-cooling fan level, and can queue a saved Revision for that printer. Bambu Status also shows available layer counts and a compact machine and materials summary.
+- Fleet Queue and Maintenance selects align their text and chevrons in Chromium's native picker. Bambu LAN forwards available nozzle and bed readings, targets and part-cooling fan levels. Moonraker reads the part-cooling fan when configured.
+- Printer details put machine controls, job actions and live feedback beside the heater graph. Moonraker includes available controller history on opening. The bed surface shows measured heights and variation, and operators with an automatic probe can measure the bed from the dashboard.
+- Completed Vault prints have a **Queue again** action in Jobs. It opens the ordinary queue form with the original Revision, plate and printer selected.
+- Printer Files has a folder explorer and searchable inventory. Operators can upload a saved Revision directly to the selected printer and inspect the transferred file before starting it. Jobs shows outcomes and durations, with the selected run’s evidence and actions alongside it. Both show the Model name for matched files. Materials & maintenance brings loaded feeds, service history and routing together. Diagnostics shows individual check results, and Settings tracks unsaved changes.
+
 - Web captures can import directly from the browser extension. Pending Imports retains the result and opens the resulting Model. Captures that need a decision stay available for review. The extension remembers collection and tag choices and can be set to always review.
 - Pending Imports shows saved destinations, simpler review controls, and single or bulk import actions for ready captures. Direct files appear as one selected file. The on-page panel fits its content and uses the marketplace title when available.
 - The extension keeps the server URL, browser name and connection method while its popup closes to copy a pairing code. Pairing codes and API keys are never kept.
@@ -83,6 +89,10 @@
 - The background engine uses DBOS 3.5.0 (was 3.3.0). Its first start adds indexes, a column and a table to the disposable engine database; queued Jobs resume. Stop every API and worker process and restart them together on the same image. DBOS 3.3.0 is not guaranteed to read the migrated engine database: to roll back, stop every process and discard the engine state (the `-dbos` SQLite sibling with its `-wal` and `-shm` files, or the PostgreSQL `dbos` schema) before starting the previous image; Jobs are recorded in the application database and are submitted again.
 
 ### Added
+
+- **Moonraker configuration editor.** Printer administrators can browse, edit, and verify saves to existing configuration files. The editor keeps local drafts when a conflict needs review.
+
+- **Klipper printer controls.** Operators can home or jog individual axes, feed or retract filament once the primary hotend is ready, and adjust the part-cooling fan, print speed, and extrusion flow when available.
 
 - Review folders and archives as separate Models or a Multipart with named pieces. Preserve selected guides and images as Documents, retain completed results when retrying, and open saved results from Tasks. Folder review is bounded to 256 MiB and 2,000 files; original files remain unchanged.
 

@@ -280,6 +280,35 @@ class TestPrinterHubMarkStatus:
 
 
 class TestPrinterHubHandleStatus:
+    @pytest.mark.asyncio
+    async def test_telemetry_deltas_keep_independent_observations(
+        self, printer: Printer, hub
+    ):
+        initial = {"extruder": {"temperature": 22, "target": 0}}
+        later = {"heater_bed": {"temperature": 24}, "fan": {"speed": 0}}
+        sink = AsyncMock()
+        await hub.attach(printer.id, sink)
+        await hub._handle_status(printer.id, initial)
+        await hub._handle_status(printer.id, later)
+
+        assert sink.await_args.args[0]["data"] == later
+        snapshot_sink = AsyncMock()
+        await hub.attach(printer.id, snapshot_sink)
+        assert snapshot_sink.await_args.args[0]["data"] == {**initial, **later}
+
+    @pytest.mark.asyncio
+    async def test_provider_outage_retires_cached_observations(
+        self, printer: Printer, hub
+    ):
+        await hub._handle_status(printer.id, {"extruder": {"temperature": 22}})
+        sink = AsyncMock()
+        await hub.attach(printer.id, sink)
+
+        await hub._provider_offline(printer.id, "fixture disconnected")
+
+        assert sink.await_args.args[0] == {"type": "offline", "printer_id": printer.id}
+        assert printer.id not in hub.snapshots
+
     def test_handle_status_merges_snapshot(self, printer: Printer, hub):
         status = {
             "print_stats": {"state": "printing", "filename": "test.gcode"},

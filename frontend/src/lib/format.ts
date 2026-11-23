@@ -1,6 +1,18 @@
 import * as display from "@printstash/domain/format";
 import { currentLocale } from "./locale";
 
+/** SQLite can omit the UTC offset when serializing API timestamps. */
+export function parseApiInstant(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const iso = value.replace(" ", "T");
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})?$/.exec(iso);
+  if (!match) return null;
+  const [, time, fraction = "", offset = "Z"] = match;
+  const milliseconds = fraction.slice(0, 3).padEnd(3, "0");
+  const date = new Date(`${time}.${milliseconds}${offset}`);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
 export const formatBytes = (value: number | null | undefined) =>
   display.formatBytes(value, currentLocale());
 export const formatDuration = (value: number | null | undefined) =>

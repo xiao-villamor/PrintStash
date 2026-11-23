@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, AsyncContextManager, Protocol, cast
 from urllib.parse import quote
+from weakref import WeakValueDictionary
 
 import httpx
 import websockets
@@ -17,13 +19,17 @@ from websockets.exceptions import WebSocketException
 from .contracts import PrinterClient, SnapshotCallback
 from .models import (
     Capability,
+    MachineControlConflict,
+    MachineControlError,
     MoonrakerConfig,
+    MotionAxis,
     PrintArtifactFormat,
     PrinterConfig,
     PrinterSnapshot,
     ProviderCapabilities,
     ProviderError,
     ProviderId,
+    TuningControl,
 )
 
 
@@ -42,10 +48,50 @@ SUBSCRIPTIONS: dict[str, list[str] | None] = {
     ],
     "virtual_sdcard": ["progress", "file_position", "file_size"],
     "heater_bed": ["temperature", "target"],
-    "extruder": ["temperature", "target"],
-    "toolhead": ["position", "homed_axes"],
+    "extruder": ["temperature", "target", "can_extrude"],
+    "toolhead": ["position", "homed_axes", "axis_minimum", "axis_maximum", "extruder"],
+    "gcode_move": [
+        "gcode_position",
+        "speed_factor",
+        "extrude_factor",
+        "absolute_coordinates",
+        "absolute_extrude",
+    ],
+    "fan": ["speed"],  # Optional Klipper object; absent hardware returns no speed.
+    "idle_timeout": ["state"],
     "webhooks": ["state", "state_message"],
 }
+
+_BED_MEASUREMENT_OBJECTS = {
+    "bed_mesh": ["probed_matrix"],
+    "probe": None,
+    "configfile": ["settings"],
+    "gcode": ["commands"],
+    "manual_probe": ["is_active"],
+}
+_MEASURE_BED_COMMAND = "BED_MESH_CALIBRATE"
+_BED_MEASUREMENT_TIMEOUT = 105.0  # Probe grids commonly outlast an ordinary request.
+_BED_MEASUREMENT_READ_TIMEOUT = 5.0
+_IDLE_PRINT_STATES = frozenset({"standby", "complete", "cancelled"})
+_LIVE_PRINT_STATES = _IDLE_PRINT_STATES | {"printing", "paused"}
+
+# API, dispatch and provider clients are separate objects. Serialize commands
+# for the same Moonraker controller within this process, without retaining
+# locks for removed printers. Emergency stop always bypasses this queue.
+_COMMAND_LOCKS: WeakValueDictionary[tuple[asyncio.AbstractEventLoop, str], asyncio.Lock]
+_COMMAND_LOCKS = WeakValueDictionary()
+
+
+def _coordinate(position: tuple[int | float, ...] | None, index: int) -> int | float:
+    if position is None or len(position) <= index:
+        raise MachineControlError(MachineControlConflict.UNAVAILABLE)
+    return position[index]
+
+
+def _gcode_decimal(value: float) -> str:
+    # Scientific notation would introduce an E parameter in a traditional G-code.
+    return f"{value:.9f}".rstrip("0").rstrip(".")
+
 
 MOONRAKER_CAPABILITIES = ProviderCapabilities(
     supported=frozenset(Capability),
@@ -102,14 +148,16 @@ class MoonrakerClient:
             return {"X-Api-Key": self.api_key}
         return {}
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+    async def _request(
+        self, method: str, path: str, *, timeout: float | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         try:
             response = await self._http_client.request(
                 method,
                 url,
                 headers=self._headers(),
-                timeout=self.timeout,
+                timeout=self.timeout if timeout is None else timeout,
                 **kwargs,
             )
         except httpx.HTTPError as exc:
@@ -132,12 +180,17 @@ class MoonrakerClient:
     async def server_config(self) -> dict[str, Any]:
         return await self._request("GET", "/server/config")
 
-    async def query_status(self) -> dict[str, Any]:
+    async def _query_objects(
+        self, objects: dict[str, list[str] | None]
+    ) -> dict[str, Any]:
         params = "&".join(
             (f"{name}={','.join(fields)}" if fields else name)
-            for name, fields in SUBSCRIPTIONS.items()
+            for name, fields in objects.items()
         )
-        status = await self._request("GET", f"/printer/objects/query?{params}")
+        return await self._request("GET", f"/printer/objects/query?{params}")
+
+    async def query_status(self) -> dict[str, Any]:
+        status = await self._query_objects(SUBSCRIPTIONS)
         try:
             spool = await self._request("GET", "/server/spoolman/spool_id")
         except MoonrakerError:
@@ -231,9 +284,10 @@ class MoonrakerClient:
         return await self.upload_gcode(local_path, remote_filename, start_print=False)
 
     async def start_print(self, remote_filename: str) -> dict[str, Any]:
-        return await self._request(
-            "POST", "/printer/print/start", params={"filename": remote_filename}
-        )
+        async with self._command_lock():
+            return await self._request(
+                "POST", "/printer/print/start", params={"filename": remote_filename}
+            )
 
     async def start(self, remote_filename: str) -> dict[str, Any]:
         return await self.start_print(remote_filename)
@@ -245,7 +299,8 @@ class MoonrakerClient:
         return await self.pause_print()
 
     async def resume_print(self) -> dict[str, Any]:
-        return await self._request("POST", "/printer/print/resume")
+        async with self._command_lock():
+            return await self._request("POST", "/printer/print/resume")
 
     async def resume(self) -> dict[str, Any]:
         return await self.resume_print()
@@ -257,9 +312,168 @@ class MoonrakerClient:
         return await self.cancel_print()
 
     async def run_gcode(self, script: str) -> dict[str, Any]:
+        async with self._command_lock():
+            return await self._send_gcode(script)
+
+    async def _send_gcode(
+        self, script: str, *, timeout: float | None = None
+    ) -> dict[str, Any]:
         return await self._request(
-            "POST", "/printer/gcode/script", params={"script": script}
+            "POST", "/printer/gcode/script", params={"script": script}, timeout=timeout
         )
+
+    def _command_lock(self) -> asyncio.Lock:
+        key = (asyncio.get_running_loop(), self.base_url)
+        lock = _COMMAND_LOCKS.get(key)
+        if lock is None:
+            lock = _COMMAND_LOCKS[key] = asyncio.Lock()
+        return lock
+
+    async def _machine_state(self, *, idle: bool) -> PrinterSnapshot:
+        return self._validate_machine_state(
+            await self._query_objects(SUBSCRIPTIONS), idle=idle
+        )
+
+    @staticmethod
+    def _validate_machine_state(
+        report: dict[str, Any], *, idle: bool
+    ) -> PrinterSnapshot:
+        result = report.get("result") if isinstance(report, Mapping) else None
+        if not isinstance(result, Mapping) or not isinstance(
+            result.get("status"), Mapping
+        ):
+            raise MachineControlError(MachineControlConflict.UNAVAILABLE)
+        snapshot = PrinterSnapshot.from_legacy_payload(report)
+        if snapshot.webhook_state != "ready":
+            raise MachineControlError(MachineControlConflict.NOT_READY)
+        if snapshot.state not in _LIVE_PRINT_STATES:
+            raise MachineControlError(MachineControlConflict.UNAVAILABLE)
+        if idle and snapshot.state not in _IDLE_PRINT_STATES:
+            raise MachineControlError(MachineControlConflict.BUSY)
+        return snapshot
+
+    @staticmethod
+    def _require_idle_motion(snapshot: PrinterSnapshot) -> None:
+        idle_timeout = snapshot.extra.get("idle_timeout")
+        state = idle_timeout.get("state") if isinstance(idle_timeout, Mapping) else None
+        if state == "Printing":
+            raise MachineControlError(MachineControlConflict.BUSY)
+        if state not in ("Idle", "Ready"):
+            raise MachineControlError(MachineControlConflict.UNAVAILABLE)
+
+    async def home(self, axes: tuple[MotionAxis, ...]) -> dict[str, Any]:
+        async with self._command_lock():
+            snapshot = await self._machine_state(idle=True)
+            self._require_idle_motion(snapshot)
+            script = " ".join(("G28", *(axis.value.upper() for axis in axes)))
+            return await self._send_gcode(script)
+
+    async def jog(self, axis: MotionAxis, distance: float) -> dict[str, Any]:
+        if not 0.1 <= abs(distance) <= 10:
+            raise ValueError(
+                "Jog distance must be between 0.1 and 10 mm in either direction"
+            )
+        async with self._command_lock():
+            snapshot = await self._machine_state(idle=True)
+            if snapshot.homed_axes is None:
+                raise MachineControlError(MachineControlConflict.UNAVAILABLE)
+            if axis.value not in snapshot.homed_axes:
+                raise MachineControlError(MachineControlConflict.AXIS_NOT_HOMED)
+            self._check_jog_bounds(snapshot, axis, distance)
+            move = snapshot.gcode_move
+            if move.absolute_coordinates is None:
+                raise MachineControlError(MachineControlConflict.UNAVAILABLE)
+            return await self._linear_move(
+                axis.value.upper(),
+                axis.coordinate_index,
+                distance,
+                move.position,
+                move.absolute_coordinates,
+            )
+
+    @staticmethod
+    def _check_jog_bounds(
+        snapshot: PrinterSnapshot, axis: MotionAxis, distance: float
+    ) -> None:
+        # Klipper checks its full kinematic envelope, including geometries
+        # that cannot be described by three individual min/max ranges.
+        if snapshot.axis_minimum is None and snapshot.axis_maximum is None:
+            return
+        index = axis.coordinate_index
+        minimum = _coordinate(snapshot.axis_minimum, index)
+        maximum = _coordinate(snapshot.axis_maximum, index)
+        target = _coordinate(snapshot.position, index) + distance
+        if not minimum <= target <= maximum:
+            raise MachineControlError(MachineControlConflict.OUT_OF_BOUNDS)
+
+    async def extrude(self, distance: float) -> dict[str, Any]:
+        if not 0.1 <= abs(distance) <= 50:
+            raise ValueError(
+                "Extrusion distance must be between 0.1 and 50 mm in either direction"
+            )
+        async with self._command_lock():
+            snapshot = await self._machine_state(idle=True)
+            extruder = snapshot.extruder
+            if (
+                snapshot.active_extruder != "extruder"
+                or extruder is None
+                or extruder.can_extrude is None
+            ):
+                raise MachineControlError(MachineControlConflict.UNAVAILABLE)
+            if not extruder.can_extrude:
+                raise MachineControlError(MachineControlConflict.COLD_EXTRUDER)
+            move = snapshot.gcode_move
+            if (
+                move.absolute_coordinates is None
+                or move.absolute_extrude is None
+                or move.extrude_factor is None
+                or move.extrude_factor <= 0
+            ):
+                raise MachineControlError(MachineControlConflict.UNAVAILABLE)
+            return await self._linear_move(
+                "E",
+                3,
+                distance / move.extrude_factor,
+                move.position,
+                move.absolute_coordinates and move.absolute_extrude,
+            )
+
+    async def _linear_move(
+        self,
+        axis: str,
+        index: int,
+        distance: float,
+        position: tuple[int | float, ...] | None,
+        absolute: bool,
+    ) -> dict[str, Any]:
+        value = _coordinate(position, index) + distance if absolute else distance
+        if not math.isfinite(value):
+            raise MachineControlError(MachineControlConflict.UNAVAILABLE)
+        # A single G1 avoids leaving G90/G91, M82/M83, feed rate, or overrides
+        # changed if Klipper rejects the move or the response is lost.
+        return await self._send_gcode(f"G1 {axis}{_gcode_decimal(value)}")
+
+    async def tune(self, control: TuningControl, percent: float) -> dict[str, Any]:
+        if control is TuningControl.FAN:
+            if not 0 <= percent <= 100:
+                raise ValueError("Fan percentage must be between 0 and 100")
+        elif not 50 <= percent <= 150:
+            raise ValueError("Print override percentage must be between 50 and 150")
+        async with self._command_lock():
+            snapshot = await self._machine_state(idle=False)
+            if control is TuningControl.FAN:
+                if snapshot.fan_speed is None or not 0 <= snapshot.fan_speed <= 1:
+                    raise MachineControlError(MachineControlConflict.FAN_UNAVAILABLE)
+                return await self._send_gcode(
+                    f"M106 S{_gcode_decimal(percent * 255 / 100)}"
+                )
+            if control is TuningControl.SPEED:
+                factor, command = snapshot.gcode_move.speed_factor, "M220"
+            else:
+                factor, command = snapshot.gcode_move.extrude_factor, "M221"
+            if factor is None or factor <= 0:
+                raise MachineControlError(MachineControlConflict.UNAVAILABLE)
+            return await self._send_gcode(f"{command} S{_gcode_decimal(percent)}")
 
     async def emergency_stop(self) -> dict[str, Any]:
         return await self._request("POST", "/printer/emergency_stop")
@@ -283,6 +497,7 @@ class MoonrakerClient:
         on_status: Callable[[dict[str, Any]], Awaitable[None]],
         *,
         stop_event: asyncio.Event | None = None,
+        reconnect: bool = True,
     ) -> None:
         """Subscribe to flat status updates, preserving the legacy callback shape."""
 
@@ -398,6 +613,8 @@ class MoonrakerClient:
                             )
                             continue
             except (WebSocketException, OSError) as exc:
+                if not reconnect:
+                    raise MoonrakerError("moonraker websocket disconnected") from exc
                 self._logger.warning(
                     "moonraker ws error (%s); reconnect in %.1fs", exc, backoff
                 )
@@ -418,7 +635,92 @@ class MoonrakerClient:
         *,
         stop_event: asyncio.Event | None = None,
     ) -> None:
-        await self.subscribe(on_status, stop_event=stop_event)
+        # The caller owns reconnects and invalidates its cached status on failure.
+        await self.subscribe(on_status, stop_event=stop_event, reconnect=False)
+
+    async def temperature_store(self) -> dict[str, Any]:
+        return await self._request("GET", "/server/temperature_store")
+
+    async def bed_mesh_status(self) -> dict[str, Any]:
+        return await self._request("GET", "/printer/objects/query?bed_mesh")
+
+    @staticmethod
+    def _bed_measurement_supported(status: Mapping[str, Any]) -> bool:
+        mesh, probe = status.get("bed_mesh"), status.get("probe")
+        config, gcode = status.get("configfile"), status.get("gcode")
+        settings = config.get("settings") if isinstance(config, Mapping) else None
+        commands = gcode.get("commands") if isinstance(gcode, Mapping) else None
+        # Klipper's automatic bed mesh uses the registered "probe" object.
+        # BLTouch, eddy current, and other compatible plugins can publish it
+        # even when their config section isn't named [probe].
+        return (
+            isinstance(mesh, Mapping)
+            and "probed_matrix" in mesh
+            and isinstance(probe, Mapping)
+            and bool(probe)
+            and isinstance(settings, Mapping)
+            and "bed_mesh" in settings
+            and not any(
+                section.lower().split() == ["gcode_macro", "bed_mesh_calibrate"]
+                for section in settings
+            )
+            and isinstance(commands, Mapping)
+            and _MEASURE_BED_COMMAND in commands
+        )
+
+    async def bed_measurement_supported(self) -> bool:
+        report = await self._query_objects(_BED_MEASUREMENT_OBJECTS)
+        result = report.get("result") if isinstance(report, Mapping) else None
+        status = result.get("status") if isinstance(result, Mapping) else None
+        if not isinstance(status, Mapping):
+            raise MoonrakerError("invalid bed measurement status")
+        return self._bed_measurement_supported(status)
+
+    async def measure_bed(self) -> dict[str, Any]:
+        lock = self._command_lock()
+        if lock.locked():
+            raise MachineControlError(MachineControlConflict.BUSY)
+        async with lock:
+            try:
+                async with asyncio.timeout(_BED_MEASUREMENT_READ_TIMEOUT):
+                    report = await self._query_objects(
+                        {**SUBSCRIPTIONS, **_BED_MEASUREMENT_OBJECTS}
+                    )
+            except (MoonrakerError, TimeoutError) as exc:
+                raise ProviderError("printer_offline", code="printer_offline") from exc
+            snapshot = self._validate_machine_state(report, idle=True)
+            self._require_idle_motion(snapshot)
+            if not set("xyz").issubset(snapshot.homed_axes or ""):
+                raise MachineControlError(MachineControlConflict.BED_AXES_NOT_HOMED)
+            status = report["result"]["status"]
+            if not self._bed_measurement_supported(status):
+                raise MachineControlError(
+                    MachineControlConflict.BED_MEASUREMENT_UNSUPPORTED
+                )
+            manual = status.get("manual_probe")
+            if isinstance(manual, Mapping) and manual.get("is_active") is True:
+                raise MachineControlError(MachineControlConflict.BUSY)
+
+            try:
+                async with asyncio.timeout(_BED_MEASUREMENT_TIMEOUT):
+                    receipt = await self._send_gcode(
+                        _MEASURE_BED_COMMAND, timeout=_BED_MEASUREMENT_TIMEOUT
+                    )
+                if not isinstance(receipt, Mapping) or receipt.get("result") != "ok":
+                    raise MoonrakerError("no bed measurement receipt")
+            except (MoonrakerError, TimeoutError) as exc:
+                raise ProviderError(
+                    "bed_measurement_unknown", code="bed_measurement_unknown"
+                ) from exc
+
+            try:
+                async with asyncio.timeout(_BED_MEASUREMENT_READ_TIMEOUT):
+                    return await self.bed_mesh_status()
+            except (MoonrakerError, TimeoutError) as exc:
+                raise ProviderError(
+                    "bed_measurement_mesh_unavailable",
+                    code="bed_measurement_mesh_unavailable",
+                ) from exc
 
     async def subscribe_snapshots(
         self,

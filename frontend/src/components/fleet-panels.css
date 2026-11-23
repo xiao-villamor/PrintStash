@@ -15,7 +15,7 @@
   width: auto;
   min-width: 144px;
   height: 36px;
-  padding: 0 32px 0 10px;
+  padding-inline: 10px;
   font-size: 13px;
   color: var(--foreground);
 }

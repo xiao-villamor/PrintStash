@@ -389,9 +389,7 @@ class PrinterHub:
                 if isinstance(initial_status, dict) and initial_status:
                     await self._handle_status(printer_id, initial_status, client=client)
             except Exception as exc:  # noqa: BLE001 - provider-specific failures
-                await self._mark_status(
-                    printer_id, PrinterStatus.OFFLINE, error=str(exc)
-                )
+                await self._provider_offline(printer_id, str(exc))
                 logger.warning(
                     "printer worker[%s] initial status query failed: %s",
                     printer_id,
@@ -408,20 +406,24 @@ class PrinterHub:
                 logger.exception(
                     "printer worker[%s] subscribe crash: %s", printer_id, exc
                 )
-                await self._mark_status(
-                    printer_id, PrinterStatus.OFFLINE, error=str(exc)
-                )
+                await self._provider_offline(printer_id, str(exc))
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 30.0)
+
+    async def _provider_offline(self, printer_id: int, error: str) -> None:
+        self.snapshots.pop(printer_id, None)
+        await self._mark_status(printer_id, PrinterStatus.OFFLINE, error=error)
+        await self._broadcast(printer_id, {"type": "offline", "printer_id": printer_id})
 
     async def _handle_status(
         self, printer_id: int, status: Dict[str, Any], *, client: Any | None = None
     ) -> None:
         # Merge into in-memory snapshot.
         snap = self.snapshots.setdefault(printer_id, {})
-        for obj_name, fields in status.items():
-            if not isinstance(fields, dict):
-                continue
+        changes = {
+            name: fields for name, fields in status.items() if isinstance(fields, dict)
+        }
+        for obj_name, fields in changes.items():
             existing = snap.setdefault(obj_name, {})
             existing.update(fields)
 
@@ -484,9 +486,11 @@ class PrinterHub:
                     )
                 )
 
+        # Stream the observations in this frame. The full cache is for new
+        # subscribers, so an unrelated delta cannot replay an old sensor value.
         await self._broadcast(
             printer_id,
-            {"type": "update", "printer_id": printer_id, "data": snap},
+            {"type": "update", "printer_id": printer_id, "data": changes},
         )
 
     def _spoolman_config(self) -> tuple[str, str | None] | None:

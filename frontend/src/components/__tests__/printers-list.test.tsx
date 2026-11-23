@@ -21,10 +21,10 @@
  * nameable, or the fleet view shows an unlabelled machine forever.
  */
 
-import { anEditingBase } from "@/test-support/factories";
+import { anEditingBase, aPrintJob } from "@/test-support/factories";
 import "@testing-library/jest-dom/vitest";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TestRouter } from "@/test-support/router";
@@ -33,7 +33,13 @@ import { PrintersPage } from "@/components/printers-list";
 import { writePrinterCardImagePreference } from "@/lib/printer-card-display";
 import { AuthContext, type AuthState } from "@/lib/auth-context";
 import { queryKeys } from "@/lib/query-client";
-import type { Dashboard, FleetSummary, PrinterCreate, PrinterRead, PrinterUpdate } from "@/types";
+import type {
+  FleetSummary,
+  PrintJobRead,
+  PrinterCreate,
+  PrinterRead,
+  PrinterUpdate,
+} from "@/types";
 
 /**
  * The page runs against its real collaborators here: the real query hooks over
@@ -58,13 +64,6 @@ function requestsWithMethod(method: string) {
     .map(([input, init]) => ({ url: String(input), body: String(init?.body ?? "") }));
 }
 
-const EMPTY_DASHBOARD: Dashboard = {
-  total_printers: 0,
-  status_counts: {},
-  active_jobs: 0,
-  groups: [],
-};
-
 const EMPTY_FLEET_SUMMARY: FleetSummary = {
   total_printers: 0,
   queued_jobs: 0,
@@ -72,6 +71,7 @@ const EMPTY_FLEET_SUMMARY: FleetSummary = {
   draining_printers: 0,
   maintenance_printers: 0,
   attention_jobs: 0,
+  printers: [],
 };
 
 const ADMIN_AUTH: AuthState = {
@@ -85,7 +85,9 @@ const ADMIN_AUTH: AuthState = {
 /** FleetQueuePanel's history window is part of its query key. */
 const FLEET_QUEUE_HISTORY_LIMIT = 20;
 
-function renderPrintersPage(seed: { printers?: PrinterRead[]; dashboard?: Dashboard } = {}) {
+function renderPrintersPage(
+  seed: { printers?: PrinterRead[]; summary?: FleetSummary; jobs?: PrintJobRead[] } = {},
+) {
   const client = new QueryClient({
     defaultOptions: {
       // Seeded data must stay put: nothing here may fall back to the network.
@@ -93,9 +95,8 @@ function renderPrintersPage(seed: { printers?: PrinterRead[]; dashboard?: Dashbo
     },
   });
   client.setQueryData(queryKeys.printers, seed.printers ?? []);
-  client.setQueryData(queryKeys.printerDashboard, seed.dashboard ?? EMPTY_DASHBOARD);
-  client.setQueryData([...queryKeys.fleetQueue, FLEET_QUEUE_HISTORY_LIMIT], []);
-  client.setQueryData(queryKeys.fleetSummary, EMPTY_FLEET_SUMMARY);
+  client.setQueryData([...queryKeys.fleetQueue, FLEET_QUEUE_HISTORY_LIMIT], seed.jobs ?? []);
+  client.setQueryData(queryKeys.fleetSummary, seed.summary ?? EMPTY_FLEET_SUMMARY);
 
   return render(
     <TestRouter>
@@ -159,7 +160,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation((input, init) => {
     if (!init?.method || init.method === "GET") {
-      const body = String(input).includes("/dashboard") ? EMPTY_DASHBOARD : [makePrinter()];
+      const body = String(input).includes("/fleet/summary") ? EMPTY_FLEET_SUMMARY : [makePrinter()];
       return Promise.resolve(
         new Response(JSON.stringify(body), {
           status: 200,
@@ -198,7 +199,7 @@ describe("PrinterSetupForm", () => {
         : Promise.resolve(
             new Response(
               JSON.stringify(
-                String(input).includes("/dashboard") ? EMPTY_DASHBOARD : [makePrinter()],
+                String(input).includes("/fleet/summary") ? EMPTY_FLEET_SUMMARY : [makePrinter()],
               ),
               { status: 200, headers: { "content-type": "application/json" } },
             ),
@@ -316,15 +317,7 @@ describe("PrinterCard", () => {
         makePrinter({ id: 1, name: "Workshop Voron", group: "Workshop", status: "printing" }),
         makePrinter({ id: 2, name: "Garage Prusa", group: "Garage", status: "offline" }),
       ],
-      dashboard: {
-        total_printers: 2,
-        status_counts: { printing: 1, offline: 1 },
-        active_jobs: 1,
-        groups: [
-          { name: "Garage", count: 1, status_counts: { offline: 1 } },
-          { name: "Workshop", count: 1, status_counts: { printing: 1 } },
-        ],
-      },
+      summary: { ...EMPTY_FLEET_SUMMARY, total_printers: 2, active_jobs: 1 },
     });
 
     expect(screen.getByLabelText("Fleet summary")).toHaveTextContent("1");
@@ -334,23 +327,189 @@ describe("PrinterCard", () => {
     expect(screen.queryByRole("link", { name: "Garage Prusa" })).not.toBeInTheDocument();
   });
 
-  it("shows optional printer artwork only when enabled in display settings", () => {
-    const plain = renderPrintersPage({ printers: [makePrinter()] });
-    expect(screen.queryByAltText("Voron 2.4 printer")).not.toBeInTheDocument();
+  it("presents the scoped fleet workload in each printer card", () => {
+    renderPrintersPage({
+      printers: [makePrinter({ id: 1, status: "printing" })],
+      summary: {
+        ...EMPTY_FLEET_SUMMARY,
+        active_jobs: 1,
+        queued_jobs: 1,
+        printers: [
+          {
+            printer_id: 1,
+            name: "Voron 2.4",
+            group: null,
+            status: "printing",
+            current_job_id: 12,
+            current_job_name: "current.gcode",
+            current_priority: "normal",
+            progress: 0.42,
+            next_job_id: 14,
+            next_job_name: "next.gcode",
+            next_priority: "normal",
+            drain_mode: false,
+            maintenance: false,
+            pending_operator_release: true,
+            loaded_slots: ["AMS 0 tray 0 · PLA · #D42C2C"],
+            loaded_material_slots: [
+              {
+                slot_key: "ams0-tray0",
+                label: "AMS 0 tray 0 · front",
+                material_type: "PLA",
+                color_hex: "#D42C2C",
+              },
+            ],
+            nozzle_diameter_mm: 0.4,
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByText("current.gcode")).toBeVisible();
+    expect(screen.getByText("42%")).toBeVisible();
+    expect(screen.getByText("next.gcode")).toBeVisible();
+    expect(screen.getByText("Operator release required")).toBeVisible();
+    expect(screen.getByText("PLA")).toBeVisible();
+    expect(screen.getByTitle("#D42C2C")).toHaveTextContent("AMS 0 tray 0 · front");
+    expect(screen.queryByText(/#D42C2C/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Part cooling fan")).not.toBeInTheDocument();
+  });
+
+  it("shows only observed cooldown readings", () => {
+    const printer = makePrinter();
+    renderPrintersPage({
+      printers: [printer],
+      summary: {
+        ...EMPTY_FLEET_SUMMARY,
+        total_printers: 1,
+        printers: [
+          {
+            printer_id: printer.id,
+            name: printer.name,
+            status: "ready",
+            group: null,
+            progress: null,
+            loaded_slots: ["Front feed"],
+            nozzle_diameter_mm: null,
+            current_job_id: null,
+            current_job_name: null,
+            current_priority: null,
+            next_job_id: null,
+            next_job_name: null,
+            next_priority: null,
+            drain_mode: false,
+            maintenance: false,
+            pending_operator_release: false,
+            telemetry: { nozzle_c: 72, bed_c: null, part_fan_speed: 0 },
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByText("No active print")).toBeVisible();
+    expect(screen.getByText("Nozzle").parentElement).toHaveTextContent("72 °C");
+    expect(screen.getByText("Part cooling fan").parentElement).toHaveTextContent("0%");
+    expect(screen.queryByText("Bed", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText("Front feed")).toBeVisible();
+  });
+
+  it("filters the fleet from the attention count", async () => {
+    renderPrintersPage({
+      printers: [
+        makePrinter({ id: 1, name: "Available Voron", status: "ready" }),
+        makePrinter({ id: 2, name: "Draining Voron", status: "ready", drain_mode: true }),
+      ],
+    });
+
+    const filter = screen.getByRole("button", { name: /Needs attention/ });
+    await userEvent.click(filter);
+    expect(filter).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("link", { name: "Draining Voron" })).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Available Voron" })).not.toBeInTheDocument();
+  });
+
+  it("bounds the activity panel while keeping recent printer history reachable", () => {
+    renderPrintersPage({
+      printers: [makePrinter()],
+      jobs: [
+        ...Array.from({ length: 5 }, (_, index) =>
+          aPrintJob({
+            id: index + 1,
+            printer_id: 1,
+            remote_filename: `active-${index}.gcode`,
+            state: "printing",
+          }),
+        ),
+        ...Array.from({ length: 8 }, (_, index) =>
+          aPrintJob({
+            id: index + 6,
+            printer_id: 1,
+            remote_filename: `finished-${index}.gcode`,
+            state: "completed",
+          }),
+        ),
+      ],
+    });
+    const activity = within(screen.getByRole("region", { name: "Fleet activity" }));
+    expect(activity.getAllByRole("listitem")).toHaveLength(7);
+    expect(activity.getByRole("link", { name: /finished-0/ })).toHaveAttribute(
+      "href",
+      "/printers/1?tab=jobs",
+    );
+  });
+
+  it("renders SQLite Fleet timestamps as UTC instants", () => {
+    renderPrintersPage({
+      printers: [makePrinter({ last_seen_at: "2026-01-01T03:23:06" })],
+      jobs: [aPrintJob({ state: "completed", finished_at: "2026-01-01T03:23:06" })],
+    });
+    const instant = new Date("2026-01-01T03:23:06Z");
+    const activity = within(screen.getByRole("region", { name: "Fleet activity" }));
+    expect(activity.getByRole("time")).toHaveAttribute("datetime", instant.toISOString());
+    expect(
+      screen.getByText(`Seen ${instant.toLocaleString("en")}`, { exact: false }),
+    ).toBeVisible();
+  });
+
+  it("omits artwork when the preference explicitly disables it", () => {
+    window.localStorage.setItem("printstash.printer-card.show-image", "false");
+    const plain = renderPrintersPage({
+      printers: [makePrinter({ model_name: "Bambu Lab P1S" })],
+    });
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
     plain.unmount();
 
     window.localStorage.setItem("printstash.printer-card.show-image", "true");
-    renderPrintersPage({ printers: [makePrinter()] });
+    renderPrintersPage({ printers: [makePrinter({ model_name: "Voron 2.4" })] });
     expect(screen.getByAltText("Voron 2.4 printer")).toBeInTheDocument();
   });
 
-  it("updates a mounted printer page when the saved display preference changes", () => {
+  it("defaults to local FDM artwork for an unknown model", () => {
     renderPrintersPage({ printers: [makePrinter()] });
-    expect(screen.queryByAltText("Voron 2.4 printer")).not.toBeInTheDocument();
+    expect(screen.getByAltText("Printer")).toHaveAttribute(
+      "src",
+      "/images/printers/generic-fdm.png",
+    );
+  });
+
+  it("loads the exact P1S cover only after enabling model artwork", () => {
+    renderPrintersPage({ printers: [makePrinter({ model_name: "Bambu Lab P1S" })] });
+    expect(screen.getByRole("img", { name: "Bambu Lab P1S printer" })).toHaveAttribute(
+      "src",
+      "/images/printers/generic-fdm.png",
+    );
 
     act(() => writePrinterCardImagePreference(true));
 
-    expect(screen.getByAltText("Voron 2.4 printer")).toBeInTheDocument();
+    expect(screen.getByAltText("Bambu Lab P1S printer")).toHaveAttribute(
+      "src",
+      expect.stringContaining("/BBL/Bambu%20Lab%20P1S_cover.png"),
+    );
+    fireEvent.error(screen.getByAltText("Bambu Lab P1S printer"));
+    expect(screen.getByAltText("Bambu Lab P1S printer")).toHaveAttribute(
+      "src",
+      "/images/printers/generic-fdm.png",
+    );
   });
 
   it("shows the detected model", () => {
@@ -393,8 +552,8 @@ describe("PrinterCard", () => {
         latest = { ...latest, model_name: "Homebrew CoreXY", edit_version: 3 };
         return Promise.resolve(printerResponse(latest));
       }
-      const value = url.endsWith("/dashboard")
-        ? EMPTY_DASHBOARD
+      const value = url.endsWith("/fleet/summary")
+        ? EMPTY_FLEET_SUMMARY
         : url.endsWith("/printers")
           ? [latest]
           : latest;
@@ -446,6 +605,11 @@ describe("PrinterCard", () => {
 
 describe("PrintersPage", () => {
   describe("removing a printer", () => {
+    beforeAll(async () => {
+      // Resolve the editor's lazy module before querying its controls.
+      await import("@/components/printer-detail");
+    });
+
     it("asks before removing", async () => {
       // Removing a printer takes its access grants and its job history with it.
       renderPrintersPage({ printers: [makePrinter()] });

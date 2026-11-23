@@ -3,6 +3,7 @@ import { refreshFleet } from "@/features/printers/queries";
 import { knownUiText } from "@/lib/locale";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
+import { parseApiInstant } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -101,11 +102,15 @@ const REAL_FLEET_QUEUE_DEPS: FleetQueueDeps = {
   decideOperatorGate: decideFleetOperatorGate,
 };
 
+export type FleetQueueView = "queued" | "active" | "recent";
+
 export function FleetQueuePanel({
   printers,
+  initialView = "queued",
   deps,
 }: {
   printers: PrinterRead[];
+  initialView?: FleetQueueView;
   deps?: Partial<FleetQueueDeps>;
 }) {
   useUiLocale();
@@ -113,7 +118,7 @@ export function FleetQueuePanel({
     ...REAL_FLEET_QUEUE_DEPS,
     ...deps,
   };
-  const [queueView, setQueueView] = useState<"queued" | "active" | "recent">("queued");
+  const [queueView, setQueueView] = useState<FleetQueueView>(initialView);
   const [printerFilter, setPrinterFilter] = useState("all");
   const [groupFilter, setGroupFilter] = useState("all");
   const [historyLimit, setHistoryLimit] = useState(20);
@@ -1091,13 +1096,12 @@ export function FleetMaintenancePanel({
               </p>
             )}
             {visiblePrinters.map((printer) => {
-              const printerWindows = windows.filter(
-                (row) =>
-                  row.printer_id === printer.id &&
-                  (compact ||
-                    windowFilter === "all" ||
-                    new Date(row.ends_at).getTime() >= Date.now()),
-              );
+              const printerWindows = windows.filter((row) => {
+                if (row.printer_id !== printer.id) return false;
+                if (compact || windowFilter === "all") return true;
+                const end = parseApiInstant(row.ends_at);
+                return end !== null && end.getTime() >= Date.now();
+              });
               const printerLogs =
                 compact || windowFilter === "all"
                   ? logs.filter((row) => row.printer_id === printer.id)
@@ -1163,15 +1167,34 @@ export function FleetMaintenancePanel({
                       )}
                     </div>
                   </div>
+                  {compact && (
+                    <div className="printer-service-subhead">
+                      <h3>{uiText("Maintenance windows")}</h3>
+                      {!printerWindows.length && (
+                        <p>
+                          {uiText(
+                            maintenance.loadingWindows
+                              ? "Loading…"
+                              : "No maintenance windows scheduled.",
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   {printerWindows.map((row) => (
                     <div key={`window-${row.id}`} className="fleet-plain-row">
                       <div>
                         <h3 className="text-[13px] font-medium">
-                          {printer.name} · {uiText("Maintenance window")}
+                          {compact
+                            ? uiText("Maintenance window")
+                            : `${printer.name} · ${uiText("Maintenance window")}`}
                         </h3>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {new Date(row.starts_at).toLocaleString(currentLocale())} –{" "}
-                          {new Date(row.ends_at).toLocaleString(currentLocale())}
+                          {parseApiInstant(row.starts_at)?.toLocaleString(currentLocale()) ??
+                            uiText("Not recorded")}{" "}
+                          –{" "}
+                          {parseApiInstant(row.ends_at)?.toLocaleString(currentLocale()) ??
+                            uiText("Not recorded")}
                           {row.reason ? ` · ${row.reason}` : ""}
                         </p>
                       </div>
@@ -1196,11 +1219,23 @@ export function FleetMaintenancePanel({
                       </div>
                     </div>
                   ))}
+                  {compact && (
+                    <div className="printer-service-subhead">
+                      <h3>{uiText("Service history")}</h3>
+                      {!printerLogs.length && (
+                        <p>
+                          {uiText(
+                            maintenance.loadingLogs ? "Loading…" : "No service entries recorded.",
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   {printerLogs.map((row) => (
                     <div key={`log-${row.id}`} className="fleet-plain-row">
                       <div>
                         <h3 className="text-[13px] font-medium">
-                          {printer.name} · {row.category}
+                          {compact ? row.category : `${printer.name} · ${row.category}`}
                         </h3>
                         <p className="mt-1 text-xs text-muted-foreground">
                           {new Date(row.performed_at).toLocaleDateString(currentLocale())} ·{" "}

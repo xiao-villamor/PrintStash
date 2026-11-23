@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { test, expect } from "./helpers";
 import { collapseNavigationSidebar, openModelPage, uploadGcodeModel } from "./util";
 import type { Locator, Page } from "@playwright/test";
+import type { PrintJobRead } from "@/types";
 
 async function clippedControls(panel: Locator): Promise<string[]> {
   return panel.evaluate((element) => {
@@ -325,6 +326,106 @@ test.describe("Sliced G-code plates", () => {
       expect(job.state).toBe("started");
       expect(job.remote_filename).toContain("plate-2");
       await expect(send).toHaveCount(0);
+    } finally {
+      await page.request.delete(`/api/v1/printers/${printerId}`);
+      await page.request.delete(`/api/v1/models/${modelId}`);
+    }
+  });
+
+  test("queues the exact sliced plate again from completed Jobs history", async ({ page }) => {
+    const name = `e2e-queue-again-${Date.now()}`;
+    const upload = await page.request.post("/api/v1/ingest/model", {
+      multipart: {
+        file: { name: `${name}.gcode.3mf`, mimeType: "model/3mf", buffer: slicedArchive(name) },
+        model_name: name,
+      },
+    });
+    expect(upload.status()).toBe(202);
+    const { job_id: ingestJobId } = await upload.json();
+    await expect
+      .poll(
+        async () => (await (await page.request.get(`/api/v1/jobs/${ingestJobId}`)).json()).state,
+      )
+      .toBe("completed");
+    const { model_id: modelId, file_id: fileId } = await (
+      await page.request.get(`/api/v1/jobs/${ingestJobId}`)
+    ).json();
+
+    const addedPrinter = await page.request.post("/api/v1/printers", {
+      data: {
+        name: `${name}-printer`,
+        provider: "moonraker",
+        moonraker_url: `http://127.0.0.1:${process.env.PLAYWRIGHT_MOCK_PRINTER_PORT ?? "7530"}`,
+      },
+    });
+    expect(addedPrinter.status()).toBe(201);
+    const { id: printerId } = await addedPrinter.json();
+
+    try {
+      const first = await page.request.post("/api/v1/fleet/queue", {
+        data: { file_id: fileId, plate_index: 2, strategy: "manual", printer_id: printerId },
+      });
+      expect(first.status()).toBe(201);
+      const job: PrintJobRead = await first.json();
+      const jobsPath = `/api/v1/printers/${printerId}/jobs`;
+      const readJobs = async (): Promise<PrintJobRead[]> => {
+        const response = await page.request.get(jobsPath);
+        expect(response.ok()).toBe(true);
+        return response.json();
+      };
+      await expect
+        .poll(async () => (await readJobs()).find(({ id }) => id === job.id)?.state, {
+          timeout: 30_000,
+        })
+        .toBe("completed");
+
+      await page.goto(`/printers/${printerId}`);
+      await collapseNavigationSidebar(page);
+      await page.getByRole("tab", { name: "Jobs", exact: true }).click();
+      const history = page.getByRole("table", { name: "Print history" });
+      await history.getByRole("button", { name, exact: true }).click();
+      await page
+        .getByRole("complementary", { name: "Selected run" })
+        .getByRole("button", { name: "Queue again" })
+        .click();
+      const repeat = page.getByRole("dialog", { name: "Add to queue" });
+      await expect(repeat.getByText(`${name} · Revision 1`)).toBeVisible();
+      await expect(repeat.getByText("Sliced plate: 2")).toBeVisible();
+      await expect(repeat.getByText(`${name}-printer`, { exact: true })).toBeVisible();
+      await expect(repeat.getByRole("button", { name: "Save job" })).toBeEnabled();
+      expect(
+        (await readJobs()).filter((run) => run.file_id === fileId).map(({ id }) => id),
+      ).toEqual([job.id]);
+      await page.screenshot({ path: test.info().outputPath("queue-again.png") });
+
+      const queued = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/fleet/queue") && response.request().method() === "POST",
+      );
+      await repeat.getByRole("button", { name: "Save job" }).click();
+      const receipt = await queued;
+      expect(receipt.status()).toBe(201);
+      const duplicate: PrintJobRead = await receipt.json();
+      expect(duplicate.id).not.toBe(job.id);
+      expect(duplicate).toMatchObject({
+        model_id: modelId,
+        file_id: job.file_id,
+        plate_index: 2,
+        printer_id: printerId,
+      });
+      await expect(repeat).toHaveCount(0);
+
+      await page.reload();
+      await page.getByRole("tab", { name: "Jobs", exact: true }).click();
+      for (const id of [job.id, duplicate.id]) {
+        await expect(history.getByText(new RegExp(`^Run #${id}(?: ·|$)`))).toBeVisible();
+      }
+      await expect
+        .poll(async () => (await readJobs()).find(({ id }) => id === duplicate.id)?.state, {
+          timeout: 30_000,
+        })
+        .toBe("completed");
+      expect((await readJobs()).find(({ id }) => id === job.id)?.state).toBe("completed");
     } finally {
       await page.request.delete(`/api/v1/printers/${printerId}`);
       await page.request.delete(`/api/v1/models/${modelId}`);

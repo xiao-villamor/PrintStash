@@ -50,6 +50,68 @@ def slots_by_key(status: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 class TestNormalizeStatus:
+    def test_normalizes_reported_layer_counts(self) -> None:
+        status = make_client()._normalize_status(
+            {"print": {"layer_num": "0", "total_layer_num": "120"}}
+        )
+
+        assert status == {
+            "print_stats": {"external_current_layer": 0, "external_total_layers": 120}
+        }
+
+    @pytest.mark.parametrize("value", [-1, 3.5, "invalid", True])
+    def test_ignores_invalid_layer_totals(self, value: Any) -> None:
+        status = make_client()._normalize_status(
+            {"print": {"layer_num": 8, "total_layer_num": value}}
+        )
+
+        assert status == {"print_stats": {"external_current_layer": 8}}
+
+    def test_normalizes_finite_heater_measurements(self) -> None:
+        status = make_client()._normalize_status(
+            {
+                "print": {
+                    "nozzle_temper": 22.5,
+                    "nozzle_target_temper": 0,
+                    "bed_temper": 23,
+                    "bed_target_temper": "60",
+                }
+            }
+        )
+
+        assert status == {
+            "extruder": {"temperature": 22.5, "target": 0},
+            "heater_bed": {"temperature": 23, "target": 60},
+        }
+
+    @pytest.mark.parametrize(
+        "invalid", [None, True, "nan", float("inf"), [], "invalid"]
+    )
+    def test_invalid_heater_fields_do_not_replace_valid_fields(
+        self, invalid: Any
+    ) -> None:
+        status = make_client()._normalize_status(
+            {"print": {"nozzle_temper": invalid, "nozzle_target_temper": 0}}
+        )
+
+        assert status == {"extruder": {"target": 0}}
+
+    @pytest.mark.parametrize(("reported", "fraction"), [("0", 0), ("6", 0.4), (15, 1)])
+    def test_normalizes_part_cooling_fan(self, reported: Any, fraction: float) -> None:
+        status = make_client()._normalize_status(
+            {"print": {"cooling_fan_speed": reported}}
+        )
+
+        assert status == {"fan": {"speed": fraction}}
+
+    @pytest.mark.parametrize("reported", [-1, 16, "nan", None])
+    def test_drops_unavailable_fan_measurements(self, reported: Any) -> None:
+        status = make_client()._normalize_status(
+            {"print": {"cooling_fan_speed": reported}}
+        )
+
+        assert status == {}
+
     def test_maps_the_reported_job_fields_into_the_envelope(self) -> None:
         status = make_client()._normalize_status(
             {

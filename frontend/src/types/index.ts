@@ -142,6 +142,7 @@ export type {
   DashboardGroup,
   PrinterSnapshot,
   PrinterStatusResponse,
+  FleetPrinterTelemetry,
   FleetSummary,
   QueueJobCreate,
   QueueJobUpdate,

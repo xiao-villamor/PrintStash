@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import datetime
+from math import isfinite
 from typing import Literal
 
 from printstash_core.gcode import declared_print_artifact_format
@@ -43,6 +45,7 @@ from app.modules.printing.printer_files import build_traceable_remote_filename
 from app.modules.printing.printer_provider import capabilities_for_provider
 from app.schemas.fleet import (
     BatchCreate,
+    FleetPrinterTelemetry,
     MaintenanceLogCreate,
     MaintenanceLogUpdate,
     MaintenanceWindowCreate,
@@ -1172,9 +1175,43 @@ def delete_maintenance_log(
     session.commit()
 
 
+def _observed_number(value: object) -> float | None:
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and isfinite(value)
+    ):
+        return float(value)
+    return None
+
+
+def _fleet_telemetry(
+    status: PrinterStatus, snapshot: Mapping[str, Mapping[str, object]] | None
+) -> FleetPrinterTelemetry | None:
+    if (
+        snapshot is None
+        or status is PrinterStatus.OFFLINE
+        or snapshot.get("webhooks", {}).get("state") == "shutdown"
+    ):
+        return None
+
+    nozzle = _observed_number(snapshot.get("extruder", {}).get("temperature"))
+    bed = _observed_number(snapshot.get("heater_bed", {}).get("temperature"))
+    fan = _observed_number(snapshot.get("fan", {}).get("speed"))
+    if fan is not None and not 0 <= fan <= 1:
+        fan = None
+    if nozzle is None and bed is None and fan is None:
+        return None
+    return FleetPrinterTelemetry(nozzle_c=nozzle, bed_c=bed, part_fan_speed=fan)
+
+
 def fleet_summary(
-    session: Session, printer_ids: set[int] | None = None
+    session: Session,
+    printer_ids: set[int] | None = None,
+    *,
+    snapshots: Mapping[int, Mapping[str, Mapping[str, object]]] | None = None,
 ) -> dict[str, object]:
+    cached_snapshots = snapshots if snapshots is not None else {}
     printer_stmt = select(Printer).where(live(Printer))
     job_stmt = select(PrintJob).where(live(PrintJob))
     window_stmt = select(PrinterMaintenanceWindow).where(live(PrinterMaintenanceWindow))
@@ -1229,6 +1266,17 @@ def fleet_summary(
     board: list[dict[str, object]] = []
     for printer in printers:
         printer_id = int(printer.id or 0)
+        snapshot = cached_snapshots.get(printer_id)
+        stats = snapshot.get("print_stats", {}) if snapshot is not None else {}
+        reported_filename = stats.get("filename")
+        running_filename = (
+            reported_filename
+            if printer.status in {PrinterStatus.PRINTING, PrinterStatus.PAUSED}
+            and stats.get("state") in ("printing", "paused", "running")
+            and isinstance(reported_filename, str)
+            and reported_filename.strip()
+            else None
+        )
         printer_jobs = [row for row in jobs if row.printer_id == printer_id]
         current = next(
             (row for row in printer_jobs if row.state in active_states), None
@@ -1265,6 +1313,9 @@ def fleet_summary(
                 and row.observed_at is not None
                 and printer.status not in {PrinterStatus.UNKNOWN, PrinterStatus.OFFLINE}
             )
+        ]
+        loaded_slots = [
+            row for row in effective_slots if row.state == MaterialSlotState.LOADED
         ]
         printer_tools = [row for row in tools if row.printer_id == printer_id]
         provider_tool_keys = {
@@ -1310,12 +1361,23 @@ def fleet_summary(
                         for value in (row.label, row.material_type, row.color_hex)
                         if value
                     )
-                    for row in effective_slots
-                    if row.state == MaterialSlotState.LOADED
+                    for row in loaded_slots
                 ],
+                "loaded_material_slots": [
+                    {
+                        "slot_key": row.slot_key,
+                        "label": row.label,
+                        "material_type": row.material_type,
+                        "color_hex": row.color_hex,
+                    }
+                    for row in loaded_slots
+                ],
+                "telemetry": _fleet_telemetry(printer.status, snapshot),
                 "nozzle_diameter_mm": known_nozzle,
                 "current_job_id": current.id if current else None,
-                "current_job_name": current.remote_filename if current else None,
+                "current_job_name": running_filename
+                if running_filename is not None
+                else (current.remote_filename if current else None),
                 "current_priority": current.priority if current else None,
                 "next_job_id": next_job.id if next_job else None,
                 "next_job_name": next_job.remote_filename if next_job else None,

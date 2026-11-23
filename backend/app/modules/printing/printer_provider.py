@@ -9,13 +9,23 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional, Protocol, cast, runtime_checkable
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Literal,
+    Optional,
+    Protocol,
+    cast,
+    runtime_checkable,
+)
 
 from printstash_core.printers import (
     BambuConfig,
     Capability,
     ElegooCentauriConfig,
     MoonrakerConfig,
+    MotionAxis,
     OctoPrintConfig,
     PrinterClient,
     PrinterConfig,
@@ -24,6 +34,7 @@ from printstash_core.printers import (
     ProviderId,
     ProviderRegistry,
     PrusaLinkConfig,
+    TuningControl,
 )
 from printstash_core.printers.catalog import PROVIDER_DEFINITIONS
 
@@ -297,10 +308,42 @@ class MoonrakerProvider(DelegatingProvider):
         result = body.get("result", [])
         return result if isinstance(result, list) else []
 
+    async def temperature_store(self) -> dict[str, Any]:
+        return await self._call("temperature_store")
+
+    async def bed_mesh_status(self) -> dict[str, Any]:
+        return await self._call("bed_mesh_status")
+
+    async def bed_measurement_supported(self) -> bool:
+        return await self._call("bed_measurement_supported")
+
+    async def measure_bed(self) -> dict[str, Any]:
+        return await self._machine_command("measure_bed")
+
     async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
         return await self._call(
             "upload", local_path, remote_filename, start_print=False
         )
+
+    async def home(self, axes: tuple[MotionAxis, ...]) -> dict[str, Any]:
+        return await self._machine_command("home", axes)
+
+    async def jog(self, axis: MotionAxis, distance: float) -> dict[str, Any]:
+        return await self._machine_command("jog", axis, distance)
+
+    async def extrude(self, distance: float) -> dict[str, Any]:
+        return await self._machine_command("extrude", distance)
+
+    async def tune(self, control: TuningControl, percent: float) -> dict[str, Any]:
+        return await self._machine_command("tune", control, percent)
+
+    async def _machine_command(
+        self,
+        method: Literal["home", "jog", "extrude", "tune", "measure_bed"],
+        *args: Any,
+    ) -> dict[str, Any]:
+        self._check("run_gcode")
+        return await self._call(method, *args)
 
 
 register(BambuLanProvider)

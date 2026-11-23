@@ -11,12 +11,27 @@ available builds. Anything marked beta here remains beta.
 ## Printer Providers
 
 - Moonraker/Klipper is the primary supported provider.
+- Printer Status shows up to five minutes of heater readings. Moonraker
+  history depends on its controller cache, which uses nominal sample timing.
+  The Bambu graph starts fresh on reload. Bambu heater and fan fields vary
+  by firmware, and Klipper's part-cooling fan is optional.
 - Moonraker support includes live status, upload/send, optional start, remote
   file inventory sync, remote file start, pause/resume/cancel, and job history.
+- Moonraker manual extrusion is available for the active primary extruder
+  once Klipper reports it can extrude. Hardware limits can reduce available
+  travel or extrusion below PrintStash's per-command limits. Klipper's
+  part-cooling control requires a configured `fan`. Operate the printer from
+  a single application during manual motion.
+- Moonraker's file manager defines visibility for its `config` root, including
+  entries exposed through device-side links. PrintStash filters to permitted
+  relative paths and existing text files, then applies Moonraker's access
+  permissions. Moonraker offers no atomic compare-and-swap or existing-file-only
+  upload, so a concurrent edit or removal from another client can race a save
+  after the revision check. Review the readback when an upload is unconfirmed.
 - Bambu LAN support is beta. It supports local status, upload of plain-text
   Vault G-code, explicit send-to-print, and pause/resume/cancel controls.
-- Bambu LAN remote-file inventory, deletion, raw G-code controls, and measured
-  filament consumption are not implemented.
+- Bambu LAN remote-file inventory, deletion, manual motion and tuning
+  controls, and measured filament consumption are not implemented.
 - Multipart Models reference existing Models as named pieces and alternatives.
   Quantities and [manufacturing builds](multipart-builds.md) track selected
   Revisions and confirmed physical output. Compatibility rules

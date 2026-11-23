@@ -314,7 +314,7 @@ export function useFleetQueue(options?: { refetchInterval?: number; historyLimit
   const historyLimit = options?.historyLimit ?? 20;
   return useQuery<PrintJobRead[]>({
     queryKey: [...queryKeys.fleetQueue, historyLimit],
-    queryFn: () => api.listFleetQueue(historyLimit),
+    queryFn: ({ signal }) => api.listFleetQueue(historyLimit, 0, { signal }),
     refetchInterval: options?.refetchInterval,
   });
 }
@@ -323,7 +323,7 @@ export function useFleetSummary(options?: { refetchInterval?: number }) {
   const api = useQueryApi();
   return useQuery<FleetSummary>({
     queryKey: queryKeys.fleetSummary,
-    queryFn: api.getFleetSummary,
+    queryFn: ({ signal }) => api.getFleetSummary({ signal }),
     refetchInterval: options?.refetchInterval,
   });
 }
