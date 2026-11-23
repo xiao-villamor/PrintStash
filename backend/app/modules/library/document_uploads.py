@@ -16,7 +16,14 @@ from sqlmodel import Session
 from app.core.config import settings
 from app.core.errors import ErrorKind, OperationError
 from app.core.time import utcnow
-from app.db.models import CollectionRole, Document, DocumentKind, MultipartModel, User
+from app.db.models import (
+    CollectionRole,
+    Document,
+    DocumentKind,
+    Model,
+    MultipartModel,
+    User,
+)
 from app.db.projections import content_changed
 from app.modules.identity import rbac
 from app.modules.storage.storage_backend.contracts import StorageCollisionError
@@ -62,10 +69,18 @@ def publish(
     name: str,
     collection_id: int | None,
     aggregate: MultipartModel | None = None,
+    model: Model | None = None,
     intent: UploadIntent | None = None,
 ) -> Document:
     """Create or recover one upload; original stream ownership remains with caller."""
-    rbac.require_collection_role(session, user, collection_id, CollectionRole.EDIT)
+    if model is not None:
+        if aggregate is not None or collection_id is not None or intent is not None:
+            raise ValueError("A Model Document has only one owner")
+        rbac.require_model_collection_role(
+            session, user, model.collection_id, CollectionRole.EDIT
+        )
+    else:
+        rbac.require_collection_role(session, user, collection_id, CollectionRole.EDIT)
     if aggregate is not None and aggregate.collection_id != collection_id:
         raise OperationError("multipart_guide_collection_mismatch")
     if size is not None and size > settings.max_upload_bytes:
@@ -95,6 +110,7 @@ def publish(
         kind=kind_for(filename),
         collection_id=collection_id,
         multipart_model_id=aggregate.id if aggregate is not None else None,
+        model_id=model.id if model is not None else None,
         created_by=user.id,
         updated_by=user.id,
     )

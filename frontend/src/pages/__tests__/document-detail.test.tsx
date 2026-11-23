@@ -40,6 +40,7 @@ function aDocument(over: Partial<DocumentRead> = {}): DocumentRead {
     collection: "parts",
     collection_id: 1,
     multipart_model_id: null,
+    model_id: null,
     filename: null,
     effective_role: "edit",
     updated_at: "2026-01-01T00:00:00Z",

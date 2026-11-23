@@ -896,7 +896,9 @@ function MultipartDetail({ id }: { id: number }) {
     setGuideBusy(true);
     setSaveError(null);
     try {
-      const guide = await uploadDocument(file, model.collection_id, undefined, model.id);
+      const guide = await uploadDocument(file, model.collection_id, undefined, {
+        multipartModelId: model.id,
+      });
       if (!isCurrent()) return;
       const add = (base: MultipartModelRead) => ({
         ...base,

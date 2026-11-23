@@ -37,6 +37,7 @@ function aDocument(over: Partial<DocumentListItem> = {}): DocumentListItem {
     collection: "parts",
     collection_id: 1,
     multipart_model_id: null,
+    model_id: null,
     filename: null,
     effective_role: "admin",
     updated_at: FROZEN_NOW,
@@ -135,6 +136,31 @@ describe("DocumentBrowser", () => {
       expect(screen.queryByText("No documents here yet.")).toBeNull();
       expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
     });
+  });
+
+  it("loads subsequent pages for a read-only Model", async () => {
+    const user = userEvent.setup();
+    const doc = aDocument({ model_id: 42, effective_role: "view" });
+    renderApp(<DocumentBrowser modelId={42} canCreate={false} />, {
+      routes: {
+        "GET /api/v1/documents?model_id=42&limit=101&offset=0": json(
+          Array.from({ length: 101 }, (_, id) => ({ ...doc, id, name: `Guide ${id}` })),
+        ),
+        "GET /api/v1/documents?model_id=42&limit=101&offset=100": json([
+          { ...doc, id: 100, name: "Guide 100" },
+        ]),
+      },
+    });
+
+    await screen.findByText("Guide 0");
+    expect(screen.queryByText("Guide 100")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Upload file" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete document" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Next$/ }));
+    expect(await screen.findByText("Guide 100")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Next$/ })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /^Previous$/ }));
+    expect(await screen.findByText("Guide 0")).toBeInTheDocument();
   });
 
   describe("read recovery", () => {

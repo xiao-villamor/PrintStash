@@ -147,6 +147,9 @@ def _model_candidate(session: Session, row: Model) -> _Candidate:
         .join(ModelProvenanceSource)
         .where(ModelProvenanceSource.model_id == row.id)
     ).one()
+    for document in session.exec(select(Document).where(Document.model_id == row.id)):
+        key_count += _document_key_count(document)
+        size_bytes += document.size_bytes or 0
     return _Candidate(
         kind="model",
         resource_id=int(row.id),
@@ -156,17 +159,21 @@ def _model_candidate(session: Session, row: Model) -> _Candidate:
     )
 
 
-def _document_candidate(row: Document) -> _Candidate:
+def _document_key_count(row: Document) -> int:
     images = {
         name
         for document_id, name in _DOCUMENT_IMAGE_RE.findall(row.body or "")
         if int(document_id) == row.id
     }
+    return int(bool(row.filename)) + len(images)
+
+
+def _document_candidate(row: Document) -> _Candidate:
     return _Candidate(
         kind="document",
         resource_id=int(row.id),
         deleted_at=row.deleted_at,  # type: ignore[arg-type]
-        key_count=int(bool(row.filename)) + len(images),
+        key_count=_document_key_count(row),
         size_bytes=0,
     )
 
@@ -219,7 +226,9 @@ def _candidate_pool(session: Session, cutoff: datetime) -> list[_Candidate]:
         select(Printer).where(trashed(Printer), Printer.deleted_at <= cutoff)
     ).all()
     candidates = [_model_candidate(session, row) for row in models]
-    candidates.extend(_document_candidate(row) for row in documents)
+    candidates.extend(
+        _document_candidate(row) for row in documents if row.model_id not in model_ids
+    )
     candidates.extend(
         _Candidate(
             kind="multipart_model",

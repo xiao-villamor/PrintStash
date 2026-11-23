@@ -1663,3 +1663,22 @@ class TestScheduledGcPublicationRecovery:
         db_session.refresh(preview)
         assert row.state is StorageObjectState.RETIRING
         assert preview.state is GcRunState.PREVIEW
+
+
+def test_model_gc_candidate_includes_document_storage_once(db_session: Session) -> None:
+    model = _expired_model(db_session, "model-with-document")
+    document = Document(
+        model_id=model.id,
+        name="Guide",
+        kind=DocumentKind.PDF,
+        filename="guide.pdf",
+        size_bytes=123,
+        deleted_at=model.deleted_at,
+    )
+    db_session.add(document)
+    db_session.commit()
+
+    candidates = gc_planner._candidate_pool(db_session, utcnow())
+    assert [
+        (row.kind, row.resource_id, row.key_count, row.size_bytes) for row in candidates
+    ] == [("model", model.id, 1, 123)]

@@ -762,11 +762,15 @@ class MultipartModelChoice(SQLModel, table=True):
 
 
 class Document(SQLModel, table=True):
-    """A standalone document item (manual / notes) living in a collection,
-    shown in the library alongside models. Markdown docs keep their content in
-    ``body`` (editable); binary docs (PDF/other) store ``filename`` + a blob."""
+    """A library Document or one owned by a Model. Binary files live in storage."""
 
     __tablename__ = "documents"
+    __table_args__ = (
+        CheckConstraint(
+            "model_id IS NULL OR (collection_id IS NULL AND multipart_model_id IS NULL)",
+            name="document_model_owns_scope",
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     edit_epoch: ClassVar[Mapped[str]]
@@ -787,6 +791,8 @@ class Document(SQLModel, table=True):
             index=True,
         ),
     )
+
+    model_id: Optional[int] = Field(default=None, foreign_key="models.id", index=True)
 
     body: Optional[str] = Field(default=None, sa_column=Column(Text))  # markdown
     filename: Optional[str] = Field(default=None, max_length=255)  # binary

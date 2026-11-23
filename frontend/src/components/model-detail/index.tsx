@@ -78,6 +78,7 @@ import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { TabBar } from "@/components/ui/tabs";
 import { AddGcodeRevisionModal } from "./add-revision-modal";
 import { SimilarityQueue } from "@/components/similarity-queue";
+import { DocumentBrowser } from "@/components/document-browser";
 import { FilesTab } from "./files-tab";
 import { ModelMetadataFields, type ModelMetaEditor } from "./model-metadata-fields";
 import {
@@ -401,6 +402,7 @@ function ModelDetailPresentation({
   );
   const printJobs = canViewPrinters ? (printJobQuery.data ?? []) : [];
   const activeTab =
+    (!auth.isAuthenticated && requestedTab === "documents") ||
     (!canViewPrinters && requestedTab === "history") ||
     (!canEditModel && requestedTab === "similar")
       ? "overview"
@@ -423,9 +425,11 @@ function ModelDetailPresentation({
     () =>
       TABS.filter(
         (tab) =>
-          (tab.key !== "history" || canViewPrinters) && (tab.key !== "similar" || canEditModel),
+          (tab.key !== "documents" || auth.isAuthenticated) &&
+          (tab.key !== "history" || canViewPrinters) &&
+          (tab.key !== "similar" || canEditModel),
       ),
-    [canViewPrinters, canEditModel],
+    [auth.isAuthenticated, canViewPrinters, canEditModel],
   );
 
   // Thumbnails and metadata arrive after upload, derived in the background.
@@ -1669,6 +1673,9 @@ function ModelDetailPresentation({
                   />
                 )}
 
+                {activeTab === "documents" && (
+                  <DocumentBrowser key={model.id} modelId={model.id} canCreate={canEditModel} />
+                )}
                 {activeTab === "files" && (
                   <>
                     <FilesTab

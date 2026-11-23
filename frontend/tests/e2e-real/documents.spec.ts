@@ -9,7 +9,7 @@
 import { readFile } from "node:fs/promises";
 import { devices } from "@playwright/test";
 import { test, expect, authBundleFor, authedContext, type Page } from "./helpers";
-import { createCollectionViaVault } from "./util";
+import { collapseNavigationSidebar, createCollectionViaVault, gcodeFor } from "./util";
 
 // Collection documents (new in 0.8.0): markdown editor, collection README, and
 // the pdf.js viewer. All real — every save/upload hits the backend DB + storage.
@@ -19,16 +19,12 @@ async function makeCollection(page: Page, name: string): Promise<void> {
   await createCollectionViaVault(page, name);
 }
 
-// Land on a collection's Documents tab with the collection actually *selected*.
-// The README "Add a description" button only renders once the collection row has
-// loaded, so it's our signal that `collectionId` is set before we create/upload
-// (otherwise the new doc would land at root, not in the collection).
+// Open Documents through the selected Collection's Library actions.
 async function openDocsTab(page: Page, col: string): Promise<void> {
   await page.goto(`/?c=${col}`);
-  await expect(
-    page.getByRole("button", { name: /Add a description for this collection/ }),
-  ).toBeVisible();
-  await page.getByRole("tab", { name: "Documents" }).click();
+  await expect(page.getByRole("heading", { name: col, exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Documents", exact: true }).click();
   await expect(page.getByText("No documents here yet.")).toBeVisible();
 }
 
@@ -151,13 +147,92 @@ test.describe("binary collection files", () => {
         expect(path).not.toBeNull();
         expect(await readFile(path!)).toEqual(bytes);
         await page.goto(`/?c=${col}&v=docs`);
-        await expect(page.locator(`a[href="${new URL(documentUrl).pathname}"]`)).toBeVisible();
+        await expect(
+          page.locator(`a[href="${new URL(documentUrl).pathname}"]`).first(),
+        ).toBeVisible();
       } finally {
         const id = documentUrl.split("/").at(-1);
         expect((await page.request.delete(`/api/v1/documents/${id}`)).ok()).toBeTruthy();
       }
     });
   }
+});
+
+test("attaches guides to one Model and opens them after reload", async ({ page }, info) => {
+  const name = `e2e-model-docs-${Date.now()}`;
+  const seeded = await page.request.post("/api/v1/ingest/orca", {
+    multipart: {
+      file: {
+        name: `${name}.gcode`,
+        mimeType: "text/plain",
+        buffer: Buffer.from(gcodeFor(name)),
+      },
+      model_name: name,
+    },
+  });
+  expect(seeded.status(), await seeded.text()).toBe(202);
+  const jobPath = `/api/v1/jobs/${(await seeded.json()).job_id}`;
+  await expect
+    .poll(async () => (await (await page.request.get(jobPath)).json()).state)
+    .toBe("completed");
+  const { model_id: modelId } = await (await page.request.get(jobPath)).json();
+  await page.goto(`/models/${modelId}`);
+  await collapseNavigationSidebar(page);
+  await page.getByRole("tab", { name: "Documents", exact: true }).click();
+  await expect(page.getByText("No documents here yet.")).toBeVisible();
+  await page.screenshot({ path: info.outputPath("model-documents-empty.png") });
+  const modelUrl = page.url();
+
+  const videoBytes = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]);
+  const photo = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aEioAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const pane = page.getByRole("tabpanel", { name: "Documents", exact: true });
+  for (const [name, mimeType, buffer] of [
+    ["assembly.pdf", "application/pdf", minimalPdf()],
+    ["reference.png", "image/png", photo],
+    ["build.mp4", "video/mp4", videoBytes],
+  ] as const) {
+    const selection = page.waitForEvent("filechooser");
+    await pane.getByRole("button", { name: "Upload file", exact: true }).click();
+    await (await selection).setFiles({ name, mimeType, buffer });
+    await expect(pane.getByRole("link", { name: new RegExp(name.split(".")[0]!) })).toBeVisible();
+  }
+
+  await page.reload();
+  await expect(pane.getByRole("link", { name: /assembly/ })).toBeVisible();
+  await page.screenshot({ path: info.outputPath("model-documents-populated.png") });
+  await pane.getByRole("link", { name: /assembly/ }).click();
+  await expect(page.getByText("1 / 1")).toBeVisible({ timeout: 30_000 });
+  const back = page
+    .locator(`a[href="/models/${modelId}?tab=documents"]`)
+    .filter({ hasText: "Back" });
+  await back.click();
+  await expect(page).toHaveURL(modelUrl);
+
+  await pane.getByRole("link", { name: /reference/ }).click();
+  const image = page.getByRole("img", { name: "reference", exact: true });
+  await expect(image).toBeVisible();
+  await expect(image).toHaveJSProperty("naturalWidth", 1);
+  await back.click();
+  await pane.getByRole("link", { name: /build/ }).click();
+  await expect(page.getByText("build.mp4 — use Download to open it.")).toBeVisible();
+  const downloading = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download", exact: true }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe("build.mp4");
+  expect(await readFile(await download.path())).toEqual(videoBytes);
+
+  await back.click();
+  await pane.getByRole("button", { name: "Delete document" }).first().click();
+  const confirmation = page.getByRole("dialog", { name: "Delete document?" });
+  await expect(confirmation.getByText(/"build" will be moved to trash/)).toBeVisible();
+  await confirmation.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(pane.getByRole("link", { name: /build/ })).toHaveCount(0);
+  await page.reload();
+  await expect(pane.getByRole("link", { name: /assembly/ })).toBeVisible();
+  await expect(pane.getByRole("link", { name: /build/ })).toHaveCount(0);
 });
 
 test.describe("PDF documents", () => {

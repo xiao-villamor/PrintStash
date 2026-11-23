@@ -795,6 +795,7 @@ describe("MultipartModelDetailPage", () => {
       collection: null,
       collection_id: null,
       multipart_model_id: 7,
+      model_id: null,
       filename: "assembly.pdf",
       effective_role: "admin" as const,
       updated_at: "2026-01-02T00:00:00Z",

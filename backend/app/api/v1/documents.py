@@ -1,9 +1,6 @@
-"""Standalone Document items (markdown / PDF / other) shown in the library
-alongside models. Markdown docs are edited in-app (``body``); binary docs store
-a blob served back through the storage backend.
+"""Library Documents and Model-owned Documents, stored and served privately.
 
-RBAC is inherited from the document's collection (root docs → superuser only),
-mirroring how models are scoped.
+Access follows the owning Collection or the Model's current Collection.
 """
 
 from __future__ import annotations
@@ -11,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
 from fastapi import (
     APIRouter,
@@ -26,7 +23,7 @@ from fastapi import (
 from fastapi import (
     File as FileParam,
 )
-from sqlmodel import Session, select
+from sqlmodel import Session, col, or_, select
 
 from app.api.artifact_responses import serve_stored_file
 from app.api.command_actor import CommandActor, command_session, require_command_writer
@@ -41,6 +38,7 @@ from app.db.models import (
     CollectionRole,
     Document,
     DocumentKind,
+    Model,
     MultipartModel,
     User,
 )
@@ -48,9 +46,10 @@ from app.db.projections import content_changed
 from app.db.scopes import live, trashed
 from app.db.session import get_session
 from app.modules.identity import rbac
-from app.modules.library import document_uploads, multipart_models
+from app.modules.library import document_access, document_uploads, multipart_models
 from app.modules.library.edit_preconditions import EditKind, etag
 from app.modules.library.edit_preconditions import claim as claim_edit
+from app.modules.library.model_views.access import accessible_live_model_ids_stmt
 from app.modules.library.trash import (
     StorageRiskConfirmationRequired,
     hard_delete_document,
@@ -96,19 +95,42 @@ def _collection_path(session: Session, collection_id: Optional[int]) -> Optional
     return col.path if col else None
 
 
-def _item(session: Session, user: User, doc: Document) -> DocumentListItem:
+def _item_for_scope(
+    doc: Document,
+    collection_id: int | None,
+    collection_path: str | None,
+    role: CollectionRole | None,
+) -> DocumentListItem:
     return DocumentListItem(
         edit_epoch=doc.edit_epoch,
         edit_version=doc.edit_version,
         id=doc.id,
         name=doc.name,
         kind=doc.kind,
-        collection=_collection_path(session, doc.collection_id),
-        collection_id=doc.collection_id,
+        collection=collection_path,
+        collection_id=collection_id,
         multipart_model_id=doc.multipart_model_id,
+        model_id=doc.model_id,
         filename=doc.filename,
-        effective_role=rbac.effective_collection_role(session, user, doc.collection_id),
+        effective_role=role,
         updated_at=doc.updated_at,
+    )
+
+
+def _live_model(session: Session, model_id: int) -> Model:
+    model = session.exec(select(Model).where(Model.id == model_id, live(Model))).first()
+    if model is None:
+        raise HTTPException(status_code=404, detail="model_not_found")
+    return model
+
+
+def _item(session: Session, user: User, doc: Document) -> DocumentListItem:
+    collection_id = document_access.collection_id(session, doc)
+    return _item_for_scope(
+        doc,
+        collection_id,
+        _collection_path(session, collection_id),
+        rbac.effective_collection_role(session, user, collection_id),
     )
 
 
@@ -125,7 +147,9 @@ def _require_doc(
     ).first()
     if doc is None:
         raise HTTPException(status_code=404, detail="document_not_found")
-    rbac.require_collection_role(session, user, doc.collection_id, minimum)
+    rbac.require_collection_role(
+        session, user, document_access.collection_id(session, doc), minimum
+    )
     return doc
 
 
@@ -159,6 +183,7 @@ def _guide_collection(
 @router.get("", response_model=List[DocumentListItem], summary="List documents")
 def list_documents(
     collection: Optional[str] = Query(None),
+    model_id: int | None = Query(None, gt=0),
     direct: bool = Query(False),
     q: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
@@ -167,6 +192,26 @@ def list_documents(
     session: Session = Depends(get_session),
 ) -> List[DocumentListItem]:
     stmt = select(Document).where(live(Document))
+    if q:
+        stmt = stmt.where(col(Document.name).ilike(f"%{q}%"))
+    stmt = stmt.order_by(col(Document.updated_at).desc(), col(Document.id).desc())
+    if model_id is not None:
+        if collection is not None or direct:
+            raise HTTPException(status_code=400, detail="document_scope_conflict")
+        model = _live_model(session, model_id)
+        role = rbac.require_model_collection_role(
+            session, current_user, model.collection_id, CollectionRole.VIEW
+        )
+        collection_path = _collection_path(session, model.collection_id)
+        docs = session.exec(
+            stmt.where(Document.model_id == model_id).offset(offset).limit(limit)
+        ).all()
+        return [
+            _item_for_scope(doc, model.collection_id, collection_path, role)
+            for doc in docs
+        ]
+
+    stmt = stmt.where(col(Document.model_id).is_(None))
 
     if collection:
         path = collection.strip().strip("/").lower()
@@ -186,12 +231,7 @@ def list_documents(
                 rbac.accessible_collection_ids_stmt(session, current_user)
             )
         )
-    if q:
-        stmt = stmt.where(Document.name.ilike(f"%{q}%"))  # type: ignore[union-attr]
-
-    docs = session.exec(
-        stmt.order_by(Document.updated_at.desc()).offset(offset).limit(limit)  # type: ignore[union-attr]
-    ).all()
+    docs = session.exec(stmt.offset(offset).limit(limit)).all()
     return [_item(session, current_user, d) for d in docs]
 
 
@@ -237,13 +277,20 @@ def list_document_trash(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> List[DocumentListItem]:
-    stmt = select(Document).where(trashed(Document))
+    standalone = col(Document.model_id).is_(None)
     if not current_user.is_superuser:
-        stmt = stmt.where(
-            Document.collection_id.in_(  # type: ignore[union-attr]
-                rbac.accessible_collection_ids_stmt(session, current_user)
-            )
+        standalone = standalone & col(Document.collection_id).in_(
+            rbac.accessible_collection_ids_stmt(session, current_user)
         )
+    stmt = select(Document).where(
+        trashed(Document),
+        or_(
+            standalone,
+            col(Document.model_id).in_(
+                accessible_live_model_ids_stmt(session, current_user)
+            ),
+        ),
+    )
     documents = session.exec(stmt.order_by(Document.deleted_at.desc())).all()  # type: ignore[union-attr]
     return [_item(session, current_user, document) for document in documents]
 
@@ -261,7 +308,10 @@ def restore_trashed_document(
     if document is None:
         raise HTTPException(status_code=404, detail="document_not_found")
     rbac.require_collection_role(
-        session, current_user, document.collection_id, CollectionRole.EDIT
+        session,
+        current_user,
+        document_access.collection_id(session, document),
+        CollectionRole.EDIT,
     )
     restore_document(session, document)
     session.commit()
@@ -319,12 +369,20 @@ def upload_document(
     name: Optional[str] = Form(None),
     collection_id: Optional[int] = Form(None),
     multipart_model_id: Optional[int] = Form(None),
+    model_id: Annotated[int | None, Form(gt=0)] = None,
     actor: CommandActor = Depends(require_command_writer),
 ) -> DocumentRead:
     with command_session(actor) as (session, current_user):
-        collection_id, aggregate = _guide_collection(
-            session, current_user, multipart_model_id, collection_id
-        )
+        model = None
+        aggregate = None
+        if model_id is not None:
+            if collection_id is not None or multipart_model_id is not None:
+                raise HTTPException(status_code=400, detail="document_scope_conflict")
+            model = _live_model(session, model_id)
+        else:
+            collection_id, aggregate = _guide_collection(
+                session, current_user, multipart_model_id, collection_id
+            )
         raw = file.filename or "document"
         doc = document_uploads.publish(
             session,
@@ -335,6 +393,7 @@ def upload_document(
             name=(name or Path(raw).stem or "Document").strip(),
             collection_id=collection_id,
             aggregate=aggregate,
+            model=model,
         )
         return _read(session, current_user, doc)
 

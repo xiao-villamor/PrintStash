@@ -45,6 +45,12 @@ by any number of Multipart Models and keeps its own Artifacts, preview, G-code
 Revisions and print history.
 _Avoid_: Part Option, source file option, revision
 
+**Model Document**:
+A Document owned by one Model for supporting material such as a PDF, image or
+video. It inherits the Model's current Collection access, is hidden while
+the Model is in Trash and is purged with the Model. Binary downloads preserve
+the original file bytes.
+
 **Multipart Guide**:
 A Document linked to one Multipart Model for assembly or printing guidance.
 Guides may be Markdown, PDF or raster images and remain visible in Documents.
