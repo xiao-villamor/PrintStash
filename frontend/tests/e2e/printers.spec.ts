@@ -17,7 +17,7 @@ import { collectPageProblems, useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("printer routes", () => {
-  test("constrains long saved revisions to the picker and queue form", async ({ page }) => {
+  test("fits a long saved revision through the queue selection flow", async ({ page }) => {
     const name = "ContinuousWorkshopModel".repeat(9);
     const label = "ContinuousRevisionLabel".repeat(5);
     await page.route("**/api/v1/models/page?**", async (route) => {

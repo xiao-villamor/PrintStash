@@ -313,7 +313,7 @@ describe("RevisionsTab", () => {
       expect(await screen.findAllByText(/part_0\.2mm\.gcode/)).not.toHaveLength(0);
     });
 
-    it("keeps the list compact and shows notes and optional details for the selected revision", async () => {
+    it("shows technical details on demand for the selected revision", async () => {
       const user = userEvent.setup();
       renderRevisions({
         revisions: [

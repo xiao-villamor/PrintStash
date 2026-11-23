@@ -125,7 +125,7 @@ test.describe("model detail route", () => {
     await expect(rename).toBeFocused();
   });
 
-  test("keeps long model and revision text within the available space", async ({ page }) => {
+  test("fits long text into the model details workflow at narrow widths", async ({ page }) => {
     const name = "Workshop bracket ".repeat(12).trim();
     const label = "ContinuousRevisionIdentifier".repeat(4);
     const notes = "ContinuousRevisionNote".repeat(6);
