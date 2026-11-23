@@ -135,7 +135,10 @@ From the PrintStash checkout run:
 Requires Bash, Python 3, local Docker with Compose v2 and Buildx Bake, and a
 clean sibling checkout of `printstash-tooling` at
 `58fad10265638e2801e403a74cf43eb06e53c689`. Set `FARM_TEST_TOOLING` to use
-another checkout location. The first build needs access to the image and
+another checkout location. For the frontend checks, use the repo’s Node version
+and pnpm. Prepare the host once with
+`cd frontend && pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium`.
+The first build needs access to the image and
 package registries. The running tests use disposable Docker networks, a random
 loopback app port and fresh storage. The fast Compose mocks above remain
 available independently. A private CI runner with access to the tooling checkout
@@ -166,6 +169,13 @@ runs through the bundled app, with the corresponding emulator as the observer.
 | `octoprint` | Pause from OctoPrint’s VIRTUAL printer and check that PrintStash status and history recognize its simultaneous printing and paused flags. |
 | `prusalink`, `prusa-mini`, `prusa-mk4s`, `prusa-core-one` | Identify the native model, register with Digest authentication, transfer a real PrusaSlicer binary G-code fixture without starting, verify its byte size on USB and in PrintStash, then delete it. |
 | `elegoo-centauri`, `elegoo-centauri-2` | Transfer G-code larger than one upload chunk over the respective native provider. Start it and verify the heater targets found only in the final chunk, then cancel through PrintStash. |
+
+The command includes the Files component tests and a desktop Chromium test
+for each selected model. The browser opens its Fleet card, sends a Revision from
+Files, and reopens Jobs after reload. PrusaLink models receive binary G-code.
+Klipper-family pages display the native X travel limit, and Bambu displays
+the configured AMS material. The observer checks the resulting filename on
+each native printer and verifies it stayed idle.
 
 The full run also creates a fresh two-printer project to test dispatch. It loads PLA in PrintStash’s Klipper
 manual inventory, changes a Bambu AMS tray on the emulator, waits for PrintStash

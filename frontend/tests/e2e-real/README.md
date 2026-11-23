@@ -319,3 +319,5 @@ workspace on the Moonraker emulator, persists routing and notes, and verifies
 Diagnostics and browser history at the desktop viewport.
 
 - `printer-config.spec.ts` uses the throwaway Moonraker config root to check nested navigation, dirty-draft guards, keyboard save, exact CRLF readback after reload, external-edit review, and read-only files. It switches to reported provider values with an unsaved draft and verifies the same draft can still be saved. It also verifies gutter alignment while paging and scrolling to the end of a long source file with horizontal overflow.
+
+- `farm-lab/printers.spec.ts` exercises Fleet → printer → Files → Jobs against the bundled app and independently provisioned native printers. Each browser upload is checked on the device. The [Farm Lab manual-testing guide](../../../deploy/manual-testing/README.md#opt-in-farm-lab-integration-tests) has the prerequisites, full command and single-printer selector.

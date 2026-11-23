@@ -28,6 +28,8 @@ printf 'PrintStash %s, Farm Lab %s\n' "$(git rev-parse HEAD)" "$pin"
 if [[ -n $(git status --porcelain) ]]; then echo "Building with local checkout changes."; fi
 "${docker[@]}" buildx bake -f docker-bake.hcl unified --set "unified.tags=$FARM_TEST_PRINTSTASH_IMAGE" --load
 status=0
+(cd frontend && pnpm exec vitest run src/components/__tests__/printer-detail.test.tsx \
+  -t 'offers the supported file workflow') || status=$?
 "$tooling/farm-lab/tests/printstash_http.sh" "${profiles[@]}" || status=$?
 if [[ $status == 130 || $status == 143 ]]; then exit "$status"; fi
 observer() {
@@ -37,4 +39,7 @@ observer() {
 observer profiles "${profiles[@]}" || status=$?
 if [[ $status == 130 || $status == 143 ]]; then exit "$status"; fi
 if (( ! single )); then observer mixed klipper bambu || status=$?; fi
+if [[ $status == 130 || $status == 143 ]]; then exit "$status"; fi
+PYTHONPATH="$tooling/farm-lab/tests" "${FARM_TEST_PYTHON:-python3}" -B \
+  "$root/deploy/manual-testing/bin/farm_browser.py" "${profiles[@]}" || status=$?
 exit "$status"

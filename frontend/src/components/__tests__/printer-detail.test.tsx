@@ -315,6 +315,57 @@ describe("PrinterDetailPage", () => {
   });
 
   describe("the tabs", () => {
+    it.each([
+      { name: "Virtual Klipper", provider: "moonraker", variant: null, inventory: true },
+      { name: "Bambu P1S", provider: "bambu_lan", variant: null, inventory: true },
+      { name: "OctoPrint Virtual Marlin", provider: "octoprint", variant: null, inventory: true },
+      { name: "Original MK4", provider: "prusalink", variant: null, inventory: true },
+      { name: "MINI+", provider: "prusalink", variant: null, inventory: true },
+      { name: "MK4S", provider: "prusalink", variant: null, inventory: true },
+      { name: "CORE One", provider: "prusalink", variant: null, inventory: true },
+      { name: "Neptune 4", provider: "moonraker", variant: "elegoo_neptune4", inventory: true },
+      {
+        name: "Neptune 4 Plus",
+        provider: "moonraker",
+        variant: "elegoo_neptune4",
+        inventory: true,
+      },
+      {
+        name: "Centauri Carbon",
+        provider: "elegoo_centauri",
+        variant: "elegoo_centauri_carbon",
+        inventory: false,
+      },
+      {
+        name: "Centauri Carbon 2",
+        provider: "elegoo_centauri",
+        variant: "elegoo_centauri_carbon_2",
+        inventory: false,
+      },
+    ] as const)(
+      "offers the supported file workflow on $name",
+      async ({ name, provider, variant, inventory }) => {
+        renderPrinter({
+          printer: aPrinter({
+            id: 4,
+            name,
+            provider,
+            provider_variant: variant,
+            capabilities: printerCapabilities({ can_upload: true, can_list_files: inventory }),
+          }),
+        });
+        expect(await screen.findByRole("heading", { name })).toBeVisible();
+        expect(screen.queryByRole("tab", { name: "Config" }) !== null).toBe(
+          provider === "moonraker",
+        );
+        await userEvent.click(screen.getByRole("tab", { name: "Files" }));
+        expect(await screen.findByRole("button", { name: "Upload from library" })).toBeEnabled();
+        expect(screen.queryByRole("button", { name: "Sync printer files" }) !== null).toBe(
+          inventory,
+        );
+      },
+    );
+
     it("shows the printer's files", async () => {
       const user = userEvent.setup();
       renderPrinter();
