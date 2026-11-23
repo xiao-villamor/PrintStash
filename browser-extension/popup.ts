@@ -1,3 +1,5 @@
+import { setPanelVaultNetwork, vaultFetch } from "./vault-fetch.ts";
+import { workerVaultNetwork } from "./vault-worker-transport.ts";
 import { defaultCaptureSelection, type CaptureSelection } from "./capture-selection.ts";
 import {
   canResumeCapture,
@@ -191,6 +193,15 @@ const sessionStore = (
 const importPreferences = capturePreferences(browser.storage);
 const panelMode = new URL(location.href).searchParams.get("panel") === "1";
 document.documentElement.toggleAttribute("data-panel", panelMode);
+if (panelMode) {
+  // A marketplace can upgrade all HTTP requests from its embedded documents.
+  // An extension worker loaded from its own script has a separate policy.
+  setPanelVaultNetwork(
+    workerVaultNetwork(
+      () => new Worker(new URL("./vault-network-worker.ts", import.meta.url), { type: "module" }),
+    ),
+  );
+}
 
 type Page = { id?: number; title?: string; url?: string };
 type Source = SourceProviderLabel | "Direct file" | null;
@@ -1290,7 +1301,7 @@ async function establishConnection(
   const signal = attempt.controller.signal;
   const fetchImpl: typeof fetch = async (input, options) => {
     signal.throwIfAborted();
-    const result = await fetch(input, { ...options, signal });
+    const result = await vaultFetch(input, { ...options, signal });
     signal.throwIfAborted();
     return result;
   };
