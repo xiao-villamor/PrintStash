@@ -118,6 +118,53 @@ def verify():
     return int(failed)
 
 
+def prepare_lifecycle():
+    """Prepare independently observable states for the two lifecycle browser tests."""
+    from devices import load_pool
+
+    devices = load_pool("/test-pool.json")
+    session = json.loads(FIXTURE.read_text())
+    app = lab.App()
+    app.headers["Authorization"] = "Bearer " + session["token"]
+    for printer in session["printers"]:
+        kind = printer["kind"]
+        if kind not in {"octoprint", "prusalink"}:
+            continue
+        device = devices[kind + "-spare-1"]
+        path = f"/printers/{printer['id']}"
+        name = "browser-lifecycle.gcode"
+        duration = 45 if kind == "octoprint" else 8
+        contents = b"G90\nG28\n" + b"G4 P1000\n" * duration + b"M400\n"
+        file_id = ingest(app, name, contents)
+        job = app.post(
+            path + "/send",
+            {
+                "file_id": file_id,
+                "remote_filename": name,
+                "start_print": True,
+            },
+        )
+        lab.wait_for(
+            device.status,
+            lambda s: s["state"] == "printing",
+            30,
+            kind + " native start",
+            lab.native_summary,
+        )
+        if kind == "octoprint":
+            device.control("pause", name)
+        else:
+            lab.wait_for(
+                device.status,
+                lambda s: s["state"] == "complete",
+                60,
+                kind + " native completion",
+                lab.native_summary,
+            )
+        printer["lifecycle"] = {"jobId": job["id"], "fileId": file_id, "filename": name}
+    FIXTURE.write_text(json.dumps(session))
+
+
 def run(kinds):
     docker = lab.docker_command()
     project = "farm-browser-" + secrets.token_hex(5)
@@ -207,17 +254,21 @@ def run(kinds):
                 "Expected disposable loopback port",
             )
             command("run", "--rm", "-T", "--no-deps", "observer", "_seed", *kinds)
-            result = subprocess.run(
-                ["pnpm", "run", "test:e2e:farm"],
-                check=False,
-                cwd=HERE.parents[2] / "frontend",
-                env={
-                    **os.environ,
-                    "FARM_BROWSER_URL": "http://" + address,
-                    "FARM_BROWSER_SESSION": str(session),
-                    "FARM_BROWSER_OUTPUT": str(directory / "results"),
-                },
-            )
+
+            def browser(spec):
+                return subprocess.run(
+                    ["pnpm", "run", "test:e2e:farm", spec],
+                    check=False,
+                    cwd=HERE.parents[2] / "frontend",
+                    env={
+                        **os.environ,
+                        "FARM_BROWSER_URL": "http://" + address,
+                        "FARM_BROWSER_SESSION": str(session),
+                        "FARM_BROWSER_OUTPUT": str(directory / "results"),
+                    },
+                )
+
+            result = browser("printers.spec.ts")
             native = subprocess.run(
                 [
                     *compose,
@@ -231,7 +282,12 @@ def run(kinds):
                 ],
                 check=False,
             )
-            return int(bool(result.returncode or native.returncode))
+            if result.returncode or native.returncode:
+                return 1
+            if {"octoprint", "prusalink"}.intersection(kinds):
+                command("run", "--rm", "-T", "--no-deps", "observer", "_lifecycle")
+                return browser("lifecycle.spec.ts").returncode
+            return 0
         finally:
             command(
                 "down",
@@ -247,6 +303,8 @@ def run(kinds):
 if __name__ == "__main__":
     if sys.argv[1] == "_seed":
         seed(sys.argv[2:])
+    elif sys.argv[1] == "_lifecycle":
+        prepare_lifecycle()
     elif sys.argv[1] == "_verify":
         sys.exit(verify())
     else:

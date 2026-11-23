@@ -30,13 +30,21 @@ class BambuLanProvider(BambuClient):
             mqtt_client_factory=mqtt_client_factory,
         )
 
-    @classmethod
-    def build(cls, printer: Printer) -> BambuLanProvider:
-        config = BambuConfig(
+    @staticmethod
+    def config_from_model(printer: Printer) -> BambuConfig:
+        return BambuConfig(
             host=printer.bambu_host or "",
             serial=printer.bambu_serial or "",
             access_code=printer.bambu_access_code or "",
         )
+
+    @classmethod
+    def from_config(cls, config: BambuConfig) -> BambuLanProvider:
+        return cls(config.host, config.serial, config.access_code)
+
+    @classmethod
+    def build(cls, printer: Printer) -> BambuLanProvider:
+        config = cls.config_from_model(printer)
         instance = cls.__new__(cls)
         BambuClient.__init__(instance, config)
         return instance

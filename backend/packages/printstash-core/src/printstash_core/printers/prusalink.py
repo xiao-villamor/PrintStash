@@ -271,7 +271,7 @@ class PrusaLinkClient:
             progress = float(progress_value or 0)
         except TypeError, ValueError:
             progress = 0.0
-        progress /= 100.0
+        progress = 1.0 if raw_state in {"finished", "complete"} else progress / 100.0
         raw_telemetry = printer.get("telemetry")
         telemetry: dict[str, Any] = (
             raw_telemetry if isinstance(raw_telemetry, dict) else {}

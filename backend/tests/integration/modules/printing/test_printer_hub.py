@@ -1120,6 +1120,40 @@ class TestPrinterHubSyncActiveJob:
         assert jobs[0].finished_at is not None
         assert jobs[1].state == PrintJobState.PRINTING  # new run
 
+    @pytest.mark.parametrize("disconnect", [False, True])
+    def test_unnamed_completion_requires_continuous_observation(
+        self, hub, db_session, disconnect
+    ):
+        pid, job = self._setup_job(db_session)
+        asyncio.run(hub._sync_active_job(pid, "printing", "sync.gcode", 0.4, {}))
+        if disconnect:
+            asyncio.run(hub._provider_offline(pid, "lost connection"))
+        for _ in range(2):
+            asyncio.run(hub._sync_active_job(pid, "complete", None, 1.0, {}))
+        db_session.refresh(job)
+        assert job.state == (
+            PrintJobState.PRINTING if disconnect else PrintJobState.COMPLETED
+        )
+        assert job.progress == (0.4 if disconnect else 1.0)
+        assert len(db_session.exec(select(PrintJob)).all()) == 1
+
+    def test_unnamed_stop_preserves_progress_from_paused_print(self, hub, db_session):
+        pid, job = self._setup_job(db_session)
+        asyncio.run(hub._sync_active_job(pid, "paused", "sync.gcode", 0.4, {}))
+        asyncio.run(hub._sync_active_job(pid, "cancelled", None, 0, {}))
+        db_session.refresh(job)
+        assert job.state == PrintJobState.CANCELLED
+        assert job.progress == 0.4
+
+    def test_anonymous_completion_cannot_claim_an_unobserved_start(
+        self, hub, db_session
+    ):
+        pid, job = self._setup_job(db_session)
+        asyncio.run(hub._sync_active_job(pid, "complete", None, 1.0, {}))
+        db_session.refresh(job)
+        assert job.state == PrintJobState.STARTED
+        assert job.finished_at is None
+
     def test_active_job_cache_is_used_on_repeat_tick(self, hub, db_session):
         """After the first tick, a same-filename tick hits the cache: the
         expensive filtered-select lookup runs at most once, not per tick."""

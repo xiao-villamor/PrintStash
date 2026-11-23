@@ -774,6 +774,12 @@ class TestStatusStateMapping:
         ("flags", "completion", "expected"),
         [
             pytest.param({"printing": True}, 12.0, "printing", id="printing"),
+            pytest.param(
+                {"printing": True, "paused": True},
+                40.0,
+                "paused",
+                id="paused-active-job",
+            ),
             pytest.param({"paused": True}, 40.0, "paused", id="paused"),
             pytest.param({"pausing": True}, 40.0, "paused", id="pausing"),
             pytest.param({"cancelling": True}, 40.0, "cancelled", id="cancelling"),

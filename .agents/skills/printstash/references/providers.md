@@ -6,23 +6,23 @@ explicit. Support levels and per-provider behavior/safety rules:
 
 ## Architecture
 
-All in `backend/app/modules/printing/`:
-
-- `printer_provider.py` — the seam: `Capability` enum,
-  `ProviderCapabilities`, `PrinterProviderClient` protocol, `BaseProvider`
-  (unimplemented methods raise `ProviderError` via capability checks), and the
-  `PROVIDERS` registry (subclasses self-register).
-- Per-provider modules: `moonraker.py`, `prusalink.py`, `octoprint.py`,
-  `elegoo_centauri.py` (+ Bambu inside `printer_provider.py`).
-- `printer_hub.py` — status fan-out / WS subscriber registry (RealtimeBus).
+- Wire clients, immutable configurations, capability definitions and the factory
+  registry live in `backend/packages/printstash-core/src/printstash_core/printers/`.
+  Translate native flags and units to the shared snapshot here.
+- The product adapters in `backend/app/modules/printing/printer_provider.py` and
+  `bambu_adapter.py` own `config_from_model` (ORM row to typed config) and
+  `from_config` (typed config to client). Register the adapter in `PROVIDERS`.
+  The composition root builds an instance-owned registry from those registrations.
+- `printer_hub.py` consumes normalized snapshots, broadcasts updates and reconciles
+  PrintJob history. A terminal snapshot without a filename may close only the
+  same live row observed running on the current connection.
 - Variants: printers sharing a protocol use a setup preset + variant, not a
   second implementation (Elegoo Neptune 4 → Moonraker provider,
   `provider_variant` drives model-name detection).
 
 ## Adding a provider — checklist
 
-Adding a provider means writing one class (module docstring in
-`printer_provider.py` is the how-to). Then:
+For a new wire protocol:
 
 - [ ] Declare the enum member in `db/models.py` `PrinterProvider` + credential
       columns → new Alembic migration (see

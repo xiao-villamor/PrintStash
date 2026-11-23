@@ -175,7 +175,9 @@ for each selected model. The browser opens its Fleet card, sends a Revision from
 Files, and reopens Jobs after reload. PrusaLink models receive binary G-code.
 Klipper-family pages display the native X travel limit, and Bambu displays
 the configured AMS material. The observer checks the resulting filename on
-each native printer and verifies it stayed idle.
+each native printer and verifies it stayed idle. Additional Chromium tests resume
+an externally paused OctoPrint job and reopen a finished PrusaLink run after
+starting a second print of the same file.
 
 The full run also creates a fresh two-printer project to test dispatch. It loads PLA in PrintStash’s Klipper
 manual inventory, changes a Bambu AMS tray on the emulator, waits for PrintStash

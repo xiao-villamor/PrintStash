@@ -20,7 +20,7 @@ from typing import Any, Callable, Dict
 from urllib.parse import unquote, urlparse
 
 from printstash_core.printers import ArtifactCaptureClient
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -413,6 +413,7 @@ class PrinterHub:
 
     async def _provider_offline(self, printer_id: int, error: str) -> None:
         self.snapshots.pop(printer_id, None)
+        self._last_job_sync_write.pop(printer_id, None)
         await self._mark_status(printer_id, PrinterStatus.OFFLINE, error=error)
         await self._broadcast(printer_id, {"type": "offline", "printer_id": printer_id})
 
@@ -742,13 +743,18 @@ class PrinterHub:
         progress: float,
         print_stats: Dict[str, Any],
     ) -> tuple[int, str] | None:
-        """Reflect Moonraker state onto the most-recent matching PrintJob row.
+        """Reflect the normalized provider state onto the matching PrintJob row.
 
         If no matching PrintJob exists and the printer is actively printing
         or paused, a placeholder row with source="external" is created so
         externally-initiated jobs are captured in the vault history.
         """
-        if not filename and ms_state not in _NO_ACTIVE_JOB_STATES:
+        if not filename and ms_state not in (
+            *_NO_ACTIVE_JOB_STATES,
+            "complete",
+            "cancelled",
+        ):
+            self._last_job_sync_write.pop(printer_id, None)
             return None
         now = time.monotonic()
         breaker = self._job_sync_breakers.get(printer_id)
@@ -795,6 +801,38 @@ class PrinterHub:
             return None
         finally:
             end_mutating_operation()
+
+    def _observed_terminal_job(
+        self,
+        session: Session,
+        printer_id: int,
+        ms_state: str,
+        print_stats: Dict[str, Any],
+    ) -> PrintJob | None:
+        # Some transports retire the job endpoint before publishing its
+        # outcome. Only the exact row observed running on this connection
+        # can receive an anonymous terminal report.
+        previous = self._last_job_sync_write.get(printer_id)
+        cached = self._active_job_cache.get(printer_id)
+        if (
+            ms_state not in ("complete", "cancelled")
+            or previous is None
+            or previous[1] not in ("printing", "paused")
+            or cached is None
+            or previous[0] != cached[0]
+            or _bambu_identity(print_stats)
+        ):
+            return None
+        return session.exec(
+            select(PrintJob).where(
+                PrintJob.id == cached[1],
+                PrintJob.printer_id == printer_id,
+                PrintJob.state.in_(_OBSERVED_ACTIVE_JOB_STATES),  # type: ignore[union-attr]
+                PrintJob.finished_at.is_(None),  # type: ignore[union-attr]
+                PrintJob.dedupe_absorbed_at.is_(None),  # type: ignore[union-attr]
+                live(PrintJob),
+            )
+        ).first()
 
     def _sync_active_job_db(
         self,
@@ -844,9 +882,16 @@ class PrinterHub:
                     session.commit()
                 self._active_job_cache.pop(printer_id, None)
                 return None
-            if not filename:
-                return None
             job = None
+            if not filename:
+                job = self._observed_terminal_job(
+                    session, printer_id, ms_state, print_stats
+                )
+                if job is None:
+                    return None
+                filename = job.remote_filename
+                if ms_state == "cancelled":
+                    progress = job.progress
             printer = session.get(Printer, printer_id)
             bambu_printer = (
                 printer is not None and printer.provider == PrinterProvider.BAMBU_LAN
@@ -865,7 +910,7 @@ class PrinterHub:
             )
             cached = self._active_job_cache.get(printer_id)
             incoming_identity = _bambu_identity(print_stats)
-            if cached is not None:
+            if job is None and cached is not None:
                 cached_job = session.get(PrintJob, cached[1])
                 # Keep identity continuity ahead of the printer's transient
                 # provider_job_id. Bambu commonly emits project-only and
