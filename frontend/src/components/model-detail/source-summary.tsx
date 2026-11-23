@@ -29,14 +29,9 @@ export function CaptureSourceSummary({ manifest }: { manifest: InboxManifest }) 
 export function ModelSourceSummary({ modelId }: { modelId: number }) {
   useUiLocale();
   const query = useQuery(provenanceOptions(modelId));
-  if (!query.data?.sources.length)
-    return (
-      <Link className="text-xs underline" href={`/models/${modelId}?tab=source`}>
-        {uiText("Source and license")}
-      </Link>
-    );
+  if (!query.data?.sources.length) return null;
   return (
-    <div className="mt-3 space-y-2 text-xs">
+    <div className="space-y-2 border-t border-border pt-4 text-sm leading-5">
       {query.data.sources.map((source) => {
         const author = source.fields.find((field) => field.field_name === "creator_name");
         const license =

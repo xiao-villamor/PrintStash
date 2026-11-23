@@ -16,8 +16,6 @@ function show(sourceUrl: string | null = null, canEdit = false, description: str
       canEdit={canEdit}
       onEdit={() => {}}
       onTags={() => {}}
-      onFiles={() => {}}
-      onRevisions={() => {}}
     />,
     {
       routes: {

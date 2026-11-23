@@ -355,11 +355,8 @@ test.describe("Existing Model review", () => {
             }
 
             // ── Inspect dialogs without saving, uploading, sharing or starting prints ──
-            await page.getByRole("button", { name: /^Source files \(\d+\)$/ }).click();
-            await expect(inspector).toBeFocused();
-            await tab("Overview");
-            await page.getByRole("button", { name: /^G-code revisions \(\d+\)$/ }).click();
-            await expect(inspector).toBeFocused();
+            await tab("Files");
+            await tab("Revisions");
             await page.getByRole("button", { name: "More model actions", exact: true }).click();
             await review.capture("model-actions-menu");
             await page.getByRole("menuitem", { name: "Edit details" }).click();

@@ -263,15 +263,6 @@ function ModelDetailPresentation({
     });
   }
   const [displayMode, setDisplayMode] = useState<ViewerDisplayMode>("solid");
-  const focusTab = useRef<TabKey | null>(null);
-  function focusInspector() {
-    detailLayout.current?.querySelector<HTMLElement>('[role="tabpanel"]')?.focus();
-  }
-  function openInspectorTab(tab: TabKey) {
-    if (activeTab === tab) focusInspector();
-    else focusTab.current = tab;
-    selectTab(tab);
-  }
   const detailLayout = useRef<HTMLDivElement>(null);
   const [detailLayoutWidth, setDetailLayoutWidth] = useState(() =>
     isBrowser() ? window.innerWidth - 93 : 1827,
@@ -420,8 +411,6 @@ function ModelDetailPresentation({
       detailLayout.current?.querySelector<HTMLButtonElement>("[data-compare-origin]")?.focus();
     }
     compareFocus.current = null;
-    if (focusTab.current === activeTab) focusInspector();
-    focusTab.current = null;
   }, [activeTab]);
   const detailTabBody = useContentReveal(activeTab, { scroll: "parent" });
   const visibleTabs = useMemo(
@@ -859,8 +848,6 @@ function ModelDetailPresentation({
     <ModelInformation
       model={model}
       sourceFile={meshFile ?? null}
-      onFiles={() => openInspectorTab("files")}
-      onRevisions={() => openInspectorTab("revisions")}
       canEdit={canEditModel}
       onEdit={() => enterEdit("details")}
       onTags={() => {

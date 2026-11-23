@@ -4,7 +4,7 @@ import { RelatedProfiles } from "./related-profiles";
 import { GeometryReport } from "./geometry-report";
 import { ModelSourceSummary } from "./source-summary";
 import { Fragment, useId, useLayoutEffect, useRef, useState } from "react";
-import { ExternalLink } from "lucide-react";
+import { ChevronRight, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { meshGeometryFacts, type useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { currentLocale, uiText } from "@/lib/locale";
@@ -19,26 +19,22 @@ export function ModelInformation({
   canEdit,
   onEdit,
   onTags,
-  onFiles,
-  onRevisions,
 }: {
   model: ModelRead;
   sourceFile: FileRead | null;
   canEdit: boolean;
   onEdit: () => void;
   onTags: () => void;
-  onFiles: () => void;
-  onRevisions: () => void;
 }) {
   useUiLocale();
   const sourceUrl = model.source_url ? safeHttpUrl(model.source_url) : null;
-  const gcodeCount = model.files.filter((file) => file.file_type === "gcode").length;
+  const collectionNames = model.collection_label ? model.collection_label.split("/") : null;
   return (
-    <section aria-label={uiText("About this model")}>
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-base font-semibold">{uiText("About this model")}</h2>
+    <section aria-label={uiText("About this model")} className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold">{uiText("About this model")}</h2>
         {canEdit && (
-          <Button size="sm" variant="ghost" onClick={onEdit}>
+          <Button size="sm" variant="outline" onClick={onEdit}>
             {uiText("Edit details")}
           </Button>
         )}
@@ -46,63 +42,82 @@ export function ModelInformation({
       {model.description && (
         <ModelDescription key={model.description} description={model.description} />
       )}
-      <dl className="model-information-facts">
+      <dl className="flex flex-wrap gap-x-10 gap-y-4 text-base [&_dt]:text-sm [&_dt]:font-medium [&_dt]:text-muted-foreground">
+        {collectionNames && (
+          <div className="min-w-0 basis-full space-y-1">
+            <dt>{uiText("Collection")}</dt>
+            <dd>
+              <ol
+                role="list"
+                aria-label={uiText("Collection")}
+                className="flex flex-wrap gap-x-1.5"
+              >
+                {collectionNames.map((name, index) => (
+                  <li
+                    key={`${index}:${name}`}
+                    className="flex min-w-0 max-w-full items-baseline gap-1.5 text-muted-foreground last:font-semibold last:text-foreground"
+                  >
+                    {index > 0 && (
+                      <ChevronRight
+                        aria-hidden="true"
+                        className="size-3 shrink-0 self-start mt-1.5"
+                      />
+                    )}
+                    <span className="min-w-0 wrap-anywhere">{name}</span>
+                  </li>
+                ))}
+              </ol>
+            </dd>
+          </div>
+        )}
+        <div className="min-w-0 space-y-1">
+          <dt>{uiText("Tags")}</dt>
+          <dd className="flex flex-wrap items-center gap-1.5">
+            {!canEdit && model.tags.length === 0 && uiText("None")}
+            {model.tags.map((tag) => (
+              <span
+                className="min-w-0 wrap-anywhere bg-muted px-2 py-1 text-sm text-muted-foreground"
+                key={tag}
+              >
+                {tag}
+              </span>
+            ))}
+            {canEdit && (
+              <Button
+                size="sm"
+                variant="outline"
+                aria-label={
+                  model.tags.length
+                    ? uiText("Edit tags for {value1}", { value1: model.name })
+                    : uiText("Add tags to {value1}", { value1: model.name })
+                }
+                onClick={onTags}
+              >
+                {model.tags.length ? uiText("Edit tags") : uiText("Add tags")}
+              </Button>
+            )}
+          </dd>
+        </div>
+        <div className="space-y-1">
+          <dt>{uiText("Created")}</dt>
+          <dd>{new Date(model.created_at).toLocaleDateString(currentLocale())}</dd>
+        </div>
         {sourceUrl && (
-          <>
+          <div className="space-y-1">
             <dt>{uiText("Source")}</dt>
             <dd>
               <a
                 href={sourceUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 text-foreground underline-offset-4 hover:underline"
+                className="inline-flex items-center gap-1.5 text-foreground underline-offset-4 hover:underline"
               >
-                <ExternalLink className="h-3 w-3" />
+                <ExternalLink className="size-3.5" aria-hidden="true" />
                 {uiText("Source model")}
               </a>
             </dd>
-          </>
+          </div>
         )}
-        {model.collection_label && (
-          <>
-            <dt>{uiText("Collection")}</dt>
-            <dd className="wrap-anywhere">{model.collection_label}</dd>
-          </>
-        )}
-        <dt>{uiText("Tags")}</dt>
-        <dd className="flex flex-wrap items-center gap-1">
-          {!canEdit && model.tags.length === 0 && uiText("None")}
-          {model.tags.map((tag) => (
-            <span className="bg-muted px-1.5 py-0.5 text-xs" key={tag}>
-              {tag}
-            </span>
-          ))}
-          {canEdit && (
-            <Button
-              size="xs"
-              variant="outline"
-              aria-label={
-                model.tags.length
-                  ? uiText("Edit tags for {value1}", { value1: model.name })
-                  : uiText("Add tags to {value1}", { value1: model.name })
-              }
-              onClick={onTags}
-            >
-              {model.tags.length ? uiText("Edit tags") : uiText("Add tags")}
-            </Button>
-          )}
-        </dd>
-        <dt>{uiText("Files")}</dt>
-        <dd className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <button type="button" className="detail-file-link" onClick={onFiles}>
-            {uiText("Source files")} ({model.files.length - gcodeCount})
-          </button>
-          <button type="button" className="detail-file-link" onClick={onRevisions}>
-            {uiText("G-code revisions")} ({gcodeCount})
-          </button>
-        </dd>
-        <dt>{uiText("Created")}</dt>
-        <dd>{new Date(model.created_at).toLocaleDateString(currentLocale())}</dd>
       </dl>
       <ModelSourceSummary modelId={model.id} />
       <RelatedProfiles modelId={model.id} />
@@ -170,7 +185,7 @@ function ModelDescription({ description }: { description: string }) {
     return () => observer.disconnect();
   }, [description]);
   return (
-    <div className="mt-2">
+    <div>
       <div
         id={id}
         ref={content}

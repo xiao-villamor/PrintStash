@@ -625,15 +625,18 @@ test.describe("model detail route", () => {
     test(`wraps the full nested collection path in model information at ${width}px`, async ({
       page,
     }) => {
-      const collectionLabel = "PrintStash/Organization/Gridfinity/" + "NestedCollection".repeat(20);
+      const leaf = "NestedCollection".repeat(20);
+      const pathNames = ["PrintStash", "Organization", "Gridfinity", leaf];
+      const collectionLabel = pathNames.join("/");
       await page.setViewportSize({ width, height: 900 });
       await page.route("**/api/v1/models/1", (route) =>
         route.fulfill({ json: aModel({ id: 1, collection_label: collectionLabel }) }),
       );
       await page.goto("/models/1");
       const sidebar = page.getByRole("region", { name: "About this model" });
-      const path = sidebar.getByText(collectionLabel, { exact: true });
-      await expect(path).toBeVisible();
+      const collection = sidebar.getByRole("list", { name: "Collection" });
+      await expect(collection.getByRole("listitem")).toHaveText(pathNames);
+      const path = collection.getByText(leaf, { exact: true });
       await path.scrollIntoViewIfNeeded();
 
       const bounds = await sidebar.evaluate((element) => ({
@@ -644,13 +647,28 @@ test.describe("model detail route", () => {
         content: element.scrollWidth,
         width: element.clientWidth,
         height: element.getBoundingClientRect().height,
+        fontSize: Number.parseFloat(getComputedStyle(element).fontSize),
         lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
       }));
       expect(bounds.content).toBeLessThanOrEqual(bounds.width + 1);
       expect(pathBounds.content).toBeLessThanOrEqual(pathBounds.width + 1);
+      expect(pathBounds.fontSize).toBeGreaterThanOrEqual(16);
       expect(pathBounds.height).toBeGreaterThan(pathBounds.lineHeight * 2);
     });
   }
+
+  test("keeps file navigation in the inspector tabs", async ({ page }) => {
+    await page.goto("/models/1");
+    const overview = page.getByRole("tabpanel", { name: "Overview" });
+    await expect(overview.getByRole("heading", { name: "About this model" })).toBeVisible();
+    await expect(
+      overview.getByRole("button", { name: /^(Source files|G-code revisions) \(/ }),
+    ).toHaveCount(0);
+    await page.getByRole("tab", { name: /^Files/ }).click();
+    await expect(page.getByRole("tabpanel", { name: "Files" })).toBeVisible();
+    await page.getByRole("tab", { name: /^Revisions/ }).click();
+    await expect(page.getByRole("tabpanel", { name: "Revisions" })).toBeVisible();
+  });
 
   test("recovers a failed Model read without reloading the route", async ({ page }) => {
     let available = false;

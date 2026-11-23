@@ -593,7 +593,12 @@ describe("ModelDetail", () => {
         model: aModel({ collection: "parts/brackets", collection_label: "Parts/Brackets" }),
       });
 
-      expect(await screen.findByText("Parts/Brackets")).toBeVisible();
+      const path = await screen.findByRole("list", { name: "Collection" });
+      expect(
+        within(path)
+          .getAllByRole("listitem")
+          .map((item) => item.textContent),
+      ).toEqual(["Parts", "Brackets"]);
       expect(
         requests().filter(
           (call) => new URL(call.url, "http://test").pathname === "/api/v1/collections",

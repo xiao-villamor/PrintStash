@@ -815,16 +815,6 @@
   animation: none;
   border-radius: 2px;
 }
-.detail-file-link {
-  color: var(--foreground);
-  text-decoration: underline;
-  text-decoration-color: var(--border-strong);
-  text-underline-offset: 0.2em;
-}
-.detail-file-link:hover,
-.detail-file-link:focus-visible {
-  text-decoration-color: currentColor;
-}
 .model-information-geometry dd {
   font-family: inherit;
   font-variant-numeric: tabular-nums;

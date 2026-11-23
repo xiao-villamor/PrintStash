@@ -11,6 +11,7 @@
 ### Changed
 
 - Model details are in Overview and mesh measurements and checks are in Source info, freeing the full preview pane for the viewer.
+- Model Overview uses larger text and a readable Collection path. File and Revision navigation stays in the inspector tabs.
 
 - The Revisions tab shows print results and time in the list. Notes and actions follow the selected Revision, with print setup and G-code file details available on demand.
 
