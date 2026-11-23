@@ -243,8 +243,11 @@ class TestDeriveMesh:
         system_temp.mkdir()
         monkeypatch.setattr(tempfile, "tempdir", str(system_temp))
         measure = CapacityResource.measure
+        measured_paths: set[Path] = set()
 
         def measure_capacity(resource: CapacityResource):
+            if resource.path is not None:
+                measured_paths.add(Path(resource.path))
             if resource.path == str(system_temp):
                 return 0, 8 * 1024**3
             return measure(resource)
@@ -268,8 +271,8 @@ class TestDeriveMesh:
         assert row.state == DerivativeState.READY
         assert row.storage_key and get_backend().exists(row.storage_key)
         assert scratch_paths
-        workspace = settings.data_root / "runtime" / "prepared" / "sources"
-        assert all(path.is_relative_to(workspace) for path in scratch_paths)
+        assert all(path.parent in measured_paths for path in scratch_paths)
+        assert all(not path.is_relative_to(system_temp) for path in scratch_paths)
         assert all(not path.exists() for path in scratch_paths)
 
     def test_required_capability_replaces_old_parser_receipts(
