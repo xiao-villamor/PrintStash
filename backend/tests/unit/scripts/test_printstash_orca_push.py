@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import mimetypes
 import sys
 from types import ModuleType
 from urllib.error import URLError
@@ -474,6 +475,27 @@ class TestMultipartFilename:
 
         assert b'filename="actual.gcode"' in body
         assert b"stale.gcode" not in body
+
+    @pytest.mark.parametrize("filename", ["part.gcode", "part.gcode.3mf"])
+    def test_builds_native_upload_without_system_mime_database(
+        self, orca_hook, tmp_path, monkeypatch, filename
+    ):
+        path = tmp_path / "temporary.pp"
+        path.write_bytes(b"G28\n")
+        mime_types = tmp_path / "mime.types"
+        mime_types.touch()
+
+        def deny_system_mime_database(*args, **kwargs):
+            raise PermissionError("Orca denied access to the system MIME database")
+
+        monkeypatch.setattr(mimetypes, "_db", None)
+        monkeypatch.setattr(mimetypes, "inited", False)
+        monkeypatch.setattr(mimetypes, "knownfiles", [str(mime_types)])
+        monkeypatch.setattr(mimetypes.MimeTypes, "read", deny_system_mime_database)
+
+        body, _ = orca_hook.build_multipart({}, path, filename=filename)
+
+        assert b"Content-Type: application/octet-stream\r\n\r\nG28\n" in body
 
     def test_escapes_multipart_filename(self, orca_hook, tmp_path):
         path = tmp_path / "temporary.pp"

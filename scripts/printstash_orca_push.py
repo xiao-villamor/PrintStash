@@ -413,8 +413,12 @@ def build_multipart(
     fields: dict, file_path: Path, *, filename: str | None = None
 ) -> tuple[bytes, str]:
     """Build a multipart/form-data body using stdlib only."""
+    # Native plugins run inside Orca's sandbox, where MIME lookup can require
+    # permission to read the system MIME database. Ingestion uses the filename.
+    mime = "application/octet-stream"
     if filename is None:
         filename = output_name(file_path, os.environ)
+        mime = mimetypes.guess_type(filename)[0] or mime
     # Preserve the multipart header when a slicer output name contains quotes.
     filename = filename.replace("\r", "%0D").replace("\n", "%0A").replace('"', "%22")
     boundary = f"----PrintStash{uuid.uuid4().hex}"
@@ -429,8 +433,6 @@ def build_multipart(
             f'Content-Disposition: form-data; name="{key}"{crlf}{crlf}{value}{crlf}'
         ).encode()
 
-    mime, _ = mimetypes.guess_type(filename)
-    mime = mime or "application/octet-stream"
     body += f"--{boundary}{crlf}".encode()
     body += (
         f'Content-Disposition: form-data; name="file"; filename="{filename}"{crlf}'
