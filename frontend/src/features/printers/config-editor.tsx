@@ -1,8 +1,8 @@
 "use client";
 
 import { useBlocker } from "@tanstack/react-router";
-import { FileCog, Folder, LockKeyhole, RefreshCcw } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { FileCog, Folder, FolderOpen, LockKeyhole, RefreshCcw } from "lucide-react";
+import { type CSSProperties, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -20,6 +20,7 @@ import { parseApiError } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
 import { uiText } from "@/lib/locale";
 import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
+import "./config-editor.css";
 
 const MOONRAKER_CONFIG_ROOT = "config";
 const CONFIG_ENCODING = "UTF-8";
@@ -57,19 +58,35 @@ function FileTree({
   select: (path: string) => void;
   disabled: boolean;
 }) {
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   return (
     <ul className="space-y-0.5">
       {[...tree.folders].map(([name, child]) => (
         <li key={name}>
-          <details open>
-            <summary className="cursor-pointer select-none break-all rounded-md px-2 py-1.5 text-sm hover:bg-muted">
-              <Folder aria-hidden className="mr-2 inline size-4 text-muted-foreground" />
-              {name}
-            </summary>
-            <div className="ml-3 border-l pl-2">
-              <FileTree tree={child} selected={selected} select={select} disabled={disabled} />
-            </div>
-          </details>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={!collapsed.has(name)}
+            className="w-full justify-start gap-2"
+            onClick={() =>
+              setCollapsed((previous) => {
+                const next = new Set(previous);
+                if (next.has(name)) next.delete(name);
+                else next.add(name);
+                return next;
+              })
+            }
+          >
+            {collapsed.has(name) ? (
+              <Folder aria-hidden className="size-4 shrink-0" />
+            ) : (
+              <FolderOpen aria-hidden className="size-4 shrink-0" />
+            )}
+            <span className="truncate">{name}</span>
+          </Button>
+          <div hidden={collapsed.has(name)} className="ml-3 border-l pl-2">
+            <FileTree tree={child} selected={selected} select={select} disabled={disabled} />
+          </div>
         </li>
       ))}
       {tree.files.map((file) => (
@@ -242,6 +259,9 @@ function ConfigFileWorkspace({
   const tree = useMemo(() => (files ? treeFromFiles(files) : null), [files]);
   const text = draft ? textareaConfigText(draft.text) : "";
   const lineCount = text.split("\n").length;
+  const editorStyle: CSSProperties & { "--printer-config-lines": number } = {
+    "--printer-config-lines": lineCount,
+  };
   const lineNumbers = useMemo(
     () => Array.from({ length: lineCount }, (_, i) => i + 1).join("\n"),
     [lineCount],
@@ -309,10 +329,10 @@ function ConfigFileWorkspace({
           {uiText("Refresh files")}
         </Button>
       </header>
-      <div className="grid min-w-0 md:grid-cols-[minmax(13rem,21%)_minmax(0,1fr)]">
+      <div className="printer-config-workspace">
         <nav
           aria-label={uiText("Configuration file browser")}
-          className="max-h-144 overflow-auto border-b bg-muted/25 p-3 md:border-r md:border-b-0"
+          className="printer-config-files bg-muted/25 p-3"
         >
           <p className="mb-2 px-2 font-mono text-xs font-semibold">{MOONRAKER_CONFIG_ROOT}</p>
           {listError && (
@@ -353,25 +373,29 @@ function ConfigFileWorkspace({
                         : uiText("Read-only")}
                 </p>
               </div>
-              <div className="flex h-56 min-w-0 overflow-hidden rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring">
-                <pre
+              <div
+                className="printer-config-editor border bg-background font-mono text-sm focus-within:ring-2 focus-within:ring-ring"
+                style={editorStyle}
+              >
+                <div
                   aria-hidden
-                  ref={gutter}
-                  className="shrink-0 select-none overflow-hidden border-r bg-muted/40 px-2 py-2 text-right font-mono text-sm leading-6 text-muted-foreground"
+                  className="printer-config-gutter select-none border-r bg-muted/40 text-muted-foreground"
                 >
-                  {lineNumbers}
-                </pre>
+                  <pre ref={gutter}>{lineNumbers}</pre>
+                </div>
                 <textarea
                   id={editorId}
                   aria-describedby={statusId}
-                  className="h-full w-full min-w-0 resize-none bg-transparent px-3 py-2 font-mono text-sm leading-6 outline-none"
+                  className="bg-transparent outline-none"
                   value={text}
                   wrap="off"
                   spellCheck={false}
                   autoCapitalize="off"
                   readOnly={!ready.file.writable || Boolean(busy)}
                   onScroll={(event) => {
-                    if (gutter.current) gutter.current.scrollTop = event.currentTarget.scrollTop;
+                    if (gutter.current) {
+                      gutter.current.style.transform = `translateY(${-event.currentTarget.scrollTop}px)`;
+                    }
                   }}
                   onChange={(event) =>
                     setDraft({
@@ -477,7 +501,7 @@ function ConfigFileWorkspace({
               </Button>
             </div>
           ) : selected !== null || defaultPending || (files === null && !listError) ? (
-            <Skeleton aria-label={uiText("Reading file…")} className="h-56" />
+            <Skeleton aria-label={uiText("Reading file…")} className="printer-config-loading" />
           ) : (
             <p className="py-8 text-center text-sm text-muted-foreground">
               {uiText("Choose a configuration file.")}

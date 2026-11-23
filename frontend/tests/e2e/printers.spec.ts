@@ -247,9 +247,12 @@ test.describe("printer workbench", () => {
     });
 
     const heatRequest = Promise.withResolvers<{ heater: string; target: number }>();
+    const heatCommands: { heater: string; target: number }[] = [];
     const acceptHeat = Promise.withResolvers<void>();
     await page.route("**/api/v1/printers/3/temperature", async (route) => {
-      heatRequest.resolve(route.request().postDataJSON());
+      const command = route.request().postDataJSON();
+      heatCommands.push(command);
+      heatRequest.resolve(command);
       await acceptHeat.promise;
       await route.fulfill({ json: { ok: true } });
     });
@@ -321,7 +324,7 @@ test.describe("printer workbench", () => {
     await expect(thermal.getByText("Target command sent for 215 °C")).toBeVisible();
     await expect(thermal.getByText("Target 211 °C")).toBeVisible();
     await expect(target).toBeFocused();
-    update({ extruder: { temperature: 209, target: 215 } });
+    update({ extruder: { temperature: 209, target: 215 }, heater_bed: { temperature: 60 } });
     await expect(thermal.getByText("Target 215 °C", { exact: true })).toBeVisible();
 
     await tuning.getByRole("spinbutton", { name: "Print speed target (%)" }).fill("115");
@@ -344,10 +347,30 @@ test.describe("printer workbench", () => {
     expect(problems).toEqual([]);
 
     await page.screenshot({ path: test.info().outputPath("klipper-workbench.png") });
+    update({ print_stats: { state: "standby" } });
+    const presets = thermal.getByRole("group", { name: "Material preset" });
+    const petg = presets.getByRole("radio", { name: "PETG 240 / 80 °C" });
+    await expect(petg).toBeEnabled();
+    await petg.click();
+    await expect(petg).toBeChecked();
+    expect(heatCommands).toEqual([{ heater: "extruder", target: 215 }]);
+    await thermal.getByRole("button", { name: "Preheat" }).click();
+    await expect
+      .poll(() => heatCommands)
+      .toEqual([
+        { heater: "extruder", target: 215 },
+        { heater: "extruder", target: 240 },
+        { heater: "bed", target: 80 },
+      ]);
+    await page.screenshot({ path: test.info().outputPath("klipper-presets.png") });
   });
 
   test("resolves a legacy Controls bookmark to the Bambu dashboard", async ({ page }) => {
     await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+    const problems = await collectPageProblems(page);
+    await page.addInitScript(() =>
+      localStorage.setItem("printstash.printer-card.show-image", "true"),
+    );
     const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
     await page.route("**/api/v1/printers/3", async (route) => {
       const response = await route.fetch();
@@ -382,6 +405,14 @@ test.describe("printer workbench", () => {
               color_hex: "#4169E1",
               stale: false,
             },
+            ...["loaded", "empty", "unknown"].map((state, index) => ({
+              slot_key: `ams:0:${index + 1}`,
+              source: "bambu_ams",
+              state,
+              material_type: state === "loaded" ? "PLA" : null,
+              color_hex: state === "loaded" ? "#F2C166" : null,
+              stale: false,
+            })),
           ],
         },
       }),
@@ -399,6 +430,80 @@ test.describe("printer workbench", () => {
       JSON.stringify({
         type: "snapshot",
         data: {
+          print_stats: { state: "standby" },
+          extruder: { temperature: 22, target: 0 },
+          heater_bed: { temperature: 22, target: 0 },
+          fan: { speed: 0 },
+        },
+      }),
+    );
+    const job = page.getByRole("region", { name: "Current job" });
+    const machine = page.getByRole("region", { name: "Machine" });
+    const portrait = machine.locator("img");
+    const idle = job.getByText("No active print");
+    const queue = job.getByRole("button", { name: "Add to queue", exact: true });
+    const history = page.getByRole("region", { name: "Print history" });
+    const thermal = page.getByRole("region", { name: "Temperatures" });
+    await expect(idle).toBeInViewport();
+    await expect(queue).toBeInViewport();
+    await expect(portrait).toBeInViewport();
+    await expect(
+      history.getByText("skadis_kitchen-roll_screw", { exact: true }).first(),
+    ).toBeInViewport();
+    await expect(history.getByText("Failed", { exact: true })).toBeVisible();
+    const fan = thermal.getByRole("region", { name: "Part cooling fan" });
+    const graph = thermal.getByRole("figure", { name: "Heater history" });
+    const hotendPlot = graph.getByRole("group", { name: "Hotend" });
+    const bedPlot = graph.getByRole("group", { name: "Bed" });
+    await expect(fan).toContainText("0%");
+    const rotor = fan.locator("svg");
+    await expect(rotor).toBeVisible();
+    await expect(rotor).toHaveCSS("transition-property", "none");
+    await expect(rotor).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+    await expect(thermal.getByText("22 °C", { exact: true })).toHaveCount(2);
+    await expect(graph.locator("circle, polyline")).toHaveCount(0);
+    const hotendBox = (await hotendPlot.boundingBox())!;
+    const bedBox = (await bedPlot.boundingBox())!;
+    expect(bedBox.y).toBeGreaterThan(hotendBox.y + hotendBox.height);
+    expect(bedBox.x).toBe(hotendBox.x);
+    expect(bedBox.width).toBe(hotendBox.width);
+    for (const [plot, box] of [
+      [hotendPlot, hotendBox],
+      [bedPlot, bedBox],
+    ] as const) {
+      const ticks = plot.locator("span").filter({ hasText: /^(40|20|0) °C$/ });
+      await expect(ticks).toHaveCount(3);
+      for (const tick of await ticks.all()) {
+        const bounds = (await tick.boundingBox())!;
+        expect(bounds.y).toBeGreaterThanOrEqual(box.y);
+        expect(bounds.y + bounds.height).toBeLessThanOrEqual(box.y + box.height);
+      }
+    }
+    socket.send(
+      JSON.stringify({
+        type: "update",
+        data: { extruder: { temperature: 22 }, heater_bed: { temperature: 22 } },
+      }),
+    );
+    await expect(hotendPlot.locator("polyline")).toHaveCount(1);
+    await expect(bedPlot.locator("polyline")).toHaveCount(1);
+    await expect(graph.locator("circle, [stroke-dasharray]")).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Config", exact: true })).toHaveCount(0);
+    const machineBox = (await machine.boundingBox())!;
+    const jobBox = (await job.boundingBox())!;
+    const idleBox = (await idle.boundingBox())!;
+    const queueBox = (await queue.boundingBox())!;
+    expect(machineBox.y).toBe(jobBox.y);
+    expect(machineBox.x + machineBox.width).toBeLessThanOrEqual(jobBox.x);
+    expect((await portrait.boundingBox())!.height).toBeGreaterThan(160);
+    expect(queueBox.x - (idleBox.x + idleBox.width)).toBeLessThan(32);
+    await expect(page.getByRole("region", { name: "AMS 0" }).getByRole("listitem")).toHaveCount(4);
+    await expect(page.getByRole("region", { name: "AMS 0" }).getByText("PETG")).toBeInViewport();
+    await page.screenshot({ path: test.info().outputPath("bambu-idle.png") });
+    socket.send(
+      JSON.stringify({
+        type: "update",
+        data: {
           print_stats: { state: "printing", filename: "bambu-part.gcode" },
           extruder: { temperature: 220, target: 220 },
           heater_bed: { temperature: 60, target: 60 },
@@ -412,16 +517,28 @@ test.describe("printer workbench", () => {
     );
     await expect(page.getByRole("region", { name: "AMS 0" }).getByText("PETG")).toBeInViewport();
     await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeEnabled();
-    const job = page.getByRole("region", { name: "Current job" });
+    await expect(job.getByText("bambu-part.gcode", { exact: true })).toBeVisible();
     await expect(job.getByText("Elapsed", { exact: true })).toHaveCount(0);
     await expect(job.getByText("Print time", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("figure", { name: "Heater history" })).toContainText("220 °C");
-    await expect(page.getByRole("region", { name: "Part cooling fan" })).toContainText("50%");
+    await expect(fan).toContainText("50%");
+    await expect(rotor).toHaveCSS(
+      "transform",
+      "matrix(-0.707107, 0.707107, -0.707107, -0.707107, 0, 0)",
+    );
     for (const panel of ["Toolhead", "Print tuning", "Bed surface"]) {
       await expect(page.getByRole("region", { name: panel })).toHaveCount(0);
     }
     await expect(page.getByRole("spinbutton", { name: "Hotend target" })).toHaveCount(0);
     await expect(page).toHaveURL(/\/printers\/3\?tab=controls$/);
     await page.screenshot({ path: test.info().outputPath("bambu-workbench-dark.png") });
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await expect(rotor).toHaveCSS("transition-property", /^transform(?:,|$)/);
+    await history.getByRole("link", { name: "Jobs", exact: true }).click();
+    await expect(page).toHaveURL(/\?tab=jobs$/);
+    await expect(page.getByRole("table", { name: "Print history" })).toContainText(
+      "skadis_kitchen-roll_screw",
+    );
+    expect(problems).toEqual([]);
   });
 });

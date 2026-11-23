@@ -5716,5 +5716,19 @@
   "Uploading file to printer…": "Cargando archivo a la impresora…",
   "Model edit access is required to upload this Revision.": "Se requiere permiso de edición del modelo para cargar esta revisión.",
   "This printer does not accept the selected file format.": "Esta impresora no admite el formato de archivo seleccionado.",
-  "No print start recorded": "No se registró el inicio de la impresión"
+  "No print start recorded": "No se registró el inicio de la impresión",
+  "Could not copy JSON.": "No se pudo copiar el JSON.",
+  "Plot hidden": "Gráfico oculto",
+  "Last observed {value1}": "Última lectura: {value1}",
+  "Configured values": "Valores configurados",
+  "Effective settings": "Ajustes efectivos",
+  "Reported status": "Estado notificado",
+  "Reported values": "Valores notificados",
+  "Configuration sections": "Secciones de configuración",
+  "Search configuration sections": "Buscar secciones de configuración",
+  "Search sections": "Buscar secciones",
+  "No matching sections.": "No hay secciones que coincidan.",
+  "No sections reported.": "No se notificaron secciones.",
+  "Server info": "Información del servidor",
+  "Printer info": "Información de la impresora"
 }

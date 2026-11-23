@@ -56,9 +56,9 @@ export function prependRecordedHeaters(
   const interval = samples.sample_interval_ms;
 
   function prepend(
-    observed: readonly HeaterSample[],
+    observed: HeaterHistory[keyof HeaterHistory],
     stored: readonly RecordedHeaterSample[],
-  ): readonly HeaterSample[] {
+  ): HeaterHistory[keyof HeaterHistory] {
     const end = Math.max(receivedAt, observed.at(-1)?.at ?? receivedAt);
     // Prefer the live series throughout any overlap, including uncertainty from
     // the request duration and Moonraker's untimestamped sampling phase.
@@ -72,7 +72,12 @@ export function prependRecordedHeaters(
     let connection = -1;
     for (const sample of stored) {
       const at = receivedAt - sample.age_ms;
-      if (sample.temperature === null || at < end - HEATER_WINDOW_MS || at >= cutoff) continue;
+      if (at < end - HEATER_WINDOW_MS || at >= cutoff) continue;
+      if (sample.temperature === null) {
+        connection -= 1;
+        previousAt = undefined;
+        continue;
+      }
       if (previousAt !== undefined && at - previousAt > interval) connection -= 1;
       historical.push({ at, degrees: sample.temperature, connection });
       previousAt = at;

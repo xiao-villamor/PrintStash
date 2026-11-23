@@ -36,7 +36,7 @@ import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import { queryClient } from "@/lib/query-client";
 import { writePrinterCardImagePreference } from "@/lib/printer-card-display";
 import { setEventSocketFactory, type EventSocket } from "@/lib/events";
-import type { PrinterRead, PrinterSnapshot } from "@/types";
+import type { MoonrakerConfigRead, PrinterRead, PrinterSnapshot } from "@/types";
 
 /**
  * jsdom has no WebSocket, and the live snapshot is the *only* source of the
@@ -89,6 +89,23 @@ const PRINTING = { print_stats: { state: "printing", print_duration: 60, total_d
 
 const EMPTY_HEATER_HISTORY = { sample_interval_ms: 1000, extruder: [], heater_bed: [] };
 
+const REPORTED_CONFIG = {
+  printer_id: 4,
+  klipper_config: {
+    configfile: {
+      config: {
+        extruder: { nozzle_diameter: "0.4" },
+        "gcode_macro START_PRINT": { gcode: "G28\n  G1 Z10", defaults: { offsets: [0, false] } },
+      },
+      settings: { extruder: { nozzle_diameter: 0.4 } },
+      save_config_pending: false,
+    },
+  },
+  moonraker_config: { config: { server: { port: "7125" } } },
+  server_info: { klippy_connected: true },
+  printer_info: { hostname: "voron" },
+} satisfies MoonrakerConfigRead;
+
 const READY = {
   webhooks: { state: "ready" },
   print_stats: { state: "standby" },
@@ -112,7 +129,7 @@ function renderPrinter(options: RenderAppOptions & { printer?: PrinterRead } = {
       "GET /api/v1/printers/4/files": json([]),
       "GET /api/v1/printers/4/status": json({ state: "ready" }),
       "GET /api/v1/printers/4/diagnostics": json(aPrinterDiagnostics()),
-      "GET /api/v1/printers/4/config": json({ config: "" }),
+      "GET /api/v1/printers/4/config": json(REPORTED_CONFIG),
       // The live socket is opened against a short-lived ticket, so the page
       // cannot reach a snapshot at all without this one.
       "POST /api/v1/printers/4/ws-ticket": json({ ticket: "t", expires_in: 60 }),
@@ -739,7 +756,13 @@ describe("PrinterDetailPage", () => {
       await screen.findByText("Voron");
 
       await pushSnapshot(READY);
-      await user.selectOptions(screen.getByRole("combobox", { name: "Material preset" }), "PETG");
+      await user.click(screen.getByRole("radio", { name: "PLA 200 / 60 °C" }));
+      await user.keyboard("{ArrowRight}");
+      expect(screen.getByRole("radio", { name: "PETG 240 / 80 °C" })).toBeChecked();
+      expect(screen.getByRole("radio", { name: "PLA 200 / 60 °C" })).not.toBeChecked();
+      expect(
+        requestsWithMethod("POST").filter((call) => call.url.endsWith("/temperature")),
+      ).toEqual([]);
       await user.click(screen.getByRole("button", { name: "Preheat" }));
 
       await waitFor(() =>
@@ -837,11 +860,15 @@ describe("PrinterDetailPage", () => {
 
     const chart = await screen.findByRole("figure", { name: "Heater history" });
     await waitFor(() => {
-      const lines = chart.querySelectorAll("polyline");
-      expect(lines).toHaveLength(2);
-      expect(lines[0]).not.toHaveAttribute("stroke-dasharray");
-      expect(lines[1]).toHaveAttribute("stroke-dasharray", "6 4");
-      expect(lines[0]).toHaveAttribute("points", lines[1].getAttribute("points"));
+      const hotend = within(chart).getByRole("group", { name: "Hotend" });
+      const bed = within(chart).getByRole("group", { name: "Bed" });
+      const hotendLine = hotend.querySelector("polyline");
+      const bedLine = bed.querySelector("polyline");
+      expect(hotendLine).toBeInTheDocument();
+      expect(bedLine).toBeInTheDocument();
+      expect(hotendLine).not.toHaveAttribute("stroke-dasharray");
+      expect(bedLine).not.toHaveAttribute("stroke-dasharray");
+      expect(hotendLine).toHaveAttribute("points", bedLine?.getAttribute("points"));
     });
 
     const bed = screen.getByRole("button", { name: "Plot Bed" });
@@ -872,6 +899,93 @@ describe("PrinterDetailPage", () => {
       ),
     ).toBeVisible();
     expect(history).toHaveTextContent("23 °C to 123 °C");
+  });
+
+  it("presents a single recorded reading as a number before there is a line", async () => {
+    renderPrinter({
+      routes: {
+        "GET /api/v1/printers/4/heater-history": json({
+          sample_interval_ms: 1000,
+          extruder: [{ age_ms: 3000, temperature: 123, target: 200 }],
+          heater_bed: [],
+        }),
+      },
+    });
+
+    const history = await screen.findByRole("figure", { name: "Heater history" });
+    expect(await within(history).findByText("Last observed 123 °C")).toBeVisible();
+    expect(history.querySelector("circle, polyline")).not.toBeInTheDocument();
+  });
+
+  describe("reported configuration", () => {
+    const fileRoutes = { "GET /api/v1/printers/4/config/files": json([]) };
+
+    it("does not fetch configuration for a Moonraker viewer", async () => {
+      const { requestsWithMethod } = renderPrinter({
+        at: "/?tab=config",
+        printer: aPrinter({ id: 4, access: printerAccess({ can_admin: false }) }),
+      });
+      expect(await screen.findByRole("figure", { name: "Heater history" })).toBeVisible();
+      expect(screen.queryByRole("tab", { name: "Config" })).not.toBeInTheDocument();
+      expect(requestsWithMethod("GET").some((call) => call.url.includes("/4/config"))).toBe(false);
+    });
+
+    it("searches real Klipper sections inside the configfile wrapper", async () => {
+      const user = userEvent.setup();
+      renderPrinter({ at: "/?tab=config", routes: fileRoutes });
+
+      await user.click(await screen.findByRole("tab", { name: "Reported configuration" }));
+      const reported = screen.getByRole("tabpanel", { name: "Reported configuration" });
+      const search = await within(reported).findByRole("searchbox");
+      await user.type(search, "does not exist");
+      expect(within(reported).getByText("No matching sections.")).toBeVisible();
+      await user.clear(search);
+      await user.type(search, "start_print");
+      const macro = within(reported).getByRole("button", { name: "gcode_macro START_PRINT" });
+      await user.click(macro);
+      expect(macro).toHaveAttribute("aria-current", "true");
+      const values = within(reported).getByRole("region", { name: "gcode_macro START_PRINT" });
+      expect(within(values).getByText("gcode", { exact: true })).toBeVisible();
+      expect(within(values).getByText(/G28/).textContent).toBe("G28\n  G1 Z10");
+      expect(within(values).getByText("offsets", { exact: true })).toBeVisible();
+      expect(within(values).getByText("0", { exact: true })).toBeVisible();
+      expect(within(values).getByText("false", { exact: true })).toBeVisible();
+    });
+
+    it("copies the complete source payload when the selected source changes", async () => {
+      const user = userEvent.setup();
+      renderPrinter({ at: "/?tab=config", routes: fileRoutes });
+      await user.click(await screen.findByRole("tab", { name: "Reported configuration" }));
+      await user.click(screen.getByRole("tab", { name: "Moonraker config" }));
+      expect(await screen.findByRole("region", { name: "server" })).toHaveTextContent("7125");
+      await user.click(screen.getByRole("button", { name: "Copy JSON" }));
+      expect(JSON.parse(await navigator.clipboard.readText())).toEqual(
+        REPORTED_CONFIG.moonraker_config,
+      );
+      await user.click(screen.getByRole("tab", { name: "Printer info" }));
+      expect(screen.getByRole("region", { name: "Reported values" })).toHaveTextContent("voron");
+    });
+
+    it("keeps provider errors in the reported view and retries there", async () => {
+      const user = userEvent.setup();
+      const gate = Promise.withResolvers<Response>();
+      const read = vi
+        .fn<() => Response | Promise<Response>>()
+        .mockReturnValueOnce(gate.promise)
+        .mockImplementation(() => json(REPORTED_CONFIG));
+      renderPrinter({
+        at: "/?tab=config",
+        routes: { ...fileRoutes, "GET /api/v1/printers/4/config": read },
+      });
+      await user.click(await screen.findByRole("tab", { name: "Reported configuration" }));
+      const reported = screen.getByRole("tabpanel", { name: "Reported configuration" });
+      expect(within(reported).getByRole("status")).toHaveTextContent("Loading config…");
+      expect(within(reported).getByRole("button", { name: "Copy JSON" })).toBeDisabled();
+      gate.resolve(json({ detail: "printer_unreachable" }, 502));
+      expect(await within(reported).findByRole("alert")).toBeVisible();
+      await user.click(within(reported).getByRole("button", { name: "Retry" }));
+      expect(await within(reported).findByRole("region", { name: "extruder" })).toBeVisible();
+    });
   });
 
   describe("operator controls", () => {
@@ -2022,6 +2136,89 @@ describe("PrinterDetailPage", () => {
       expect(await screen.findByText("PLA", { exact: true })).toBeVisible();
       expect(screen.getByLabelText("#4269E1")).toHaveStyle({ backgroundColor: "#4269E1" });
       expect(screen.queryByText("X", { exact: true })).not.toBeInTheDocument();
+    });
+
+    it("shows only the four latest finished runs for the Bambu printer", async () => {
+      const runs = [1, 5, 3, 2, 4].map((id) =>
+        aPrintJob({
+          id,
+          printer_id: 4,
+          remote_filename: `part-${id}.gcode`,
+          state: id === 5 ? "failed" : "completed",
+          finished_at: `2026-01-0${id}T01:00:00Z`,
+        }),
+      );
+      renderPrinter({
+        printer: aPrinter({ id: 4, provider: "bambu_lan" }),
+        routes: {
+          "GET /api/v1/printers/4/jobs": json([
+            ...runs,
+            aPrintJob({
+              id: 6,
+              printer_id: 5,
+              remote_filename: "other.gcode",
+              state: "completed",
+              finished_at: "2026-01-06T01:00:00Z",
+            }),
+            aPrintJob({
+              id: 7,
+              printer_id: 4,
+              remote_filename: "queued.gcode",
+            }),
+          ]),
+        },
+      });
+
+      const history = within(await screen.findByRole("region", { name: "Print history" }));
+      const rows = await history.findAllByRole("listitem");
+      expect(rows).toHaveLength(4);
+      for (const [index, id] of [5, 4, 3, 2].entries()) {
+        expect(rows[index]).toHaveTextContent(`part-${id}.gcode`);
+      }
+      expect(rows[0]).toHaveTextContent("Failed");
+    });
+
+    it("omits the Bambu history summary when the only run is active", async () => {
+      renderPrinter({
+        printer: aPrinter({ id: 4, provider: "bambu_lan" }),
+        routes: {
+          "GET /api/v1/printers/4/jobs": json([aPrintJob({ printer_id: 4, state: "printing" })]),
+        },
+      });
+      await pushSnapshot({ print_stats: { state: "printing", filename: "bracket.gcode" } });
+
+      const current = screen.getByRole("region", { name: "Current job" });
+      expect(within(current).getByText("bracket.gcode")).toBeVisible();
+      await waitFor(() =>
+        expect(screen.queryByRole("region", { name: "Print history" })).toBeNull(),
+      );
+      expect(screen.getByRole("tab", { name: "Jobs" })).toBeVisible();
+    });
+
+    it("keeps Bambu job history readable for viewers", async () => {
+      renderPrinter({
+        printer: aPrinter({
+          id: 4,
+          provider: "bambu_lan",
+          access: printerAccess({
+            role: "view",
+            can_print: false,
+            can_control: false,
+            can_admin: false,
+          }),
+        }),
+      });
+      await pushSnapshot({ print_stats: { state: "standby" } });
+
+      const current = within(screen.getByRole("region", { name: "Current job" }));
+      expect(current.getByText("No active print")).toBeVisible();
+      expect(current.queryByRole("button", { name: "Add to queue" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Printer settings" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Part cooling fan" })).not.toBeInTheDocument();
+
+      const history = within(screen.getByRole("region", { name: "Print history" }));
+      expect(history.getByRole("link", { name: "Jobs" })).toBeVisible();
+      expect(await history.findByText("No print jobs yet.")).toBeVisible();
     });
 
     it("lays out reported AMS trays by unit with the external spool apart", async () => {

@@ -298,6 +298,9 @@ class MoonrakerProvider(DelegatingProvider):
     def __init__(self, base_url: str, api_key: str | None = None) -> None:
         super().__init__(MoonrakerClient(base_url, api_key))
 
+    async def server_info(self) -> dict[str, Any]:
+        return await self._call("server_info")
+
     @classmethod
     def build(cls, printer: Printer) -> MoonrakerProvider:
         _require(printer, "moonraker_url")

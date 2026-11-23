@@ -1,0 +1,83 @@
+.printer-config-workspace {
+  --printer-config-source-height: clamp(18rem, 42dvh, 30rem);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.printer-config-files {
+  min-inline-size: 0;
+  max-block-size: 13rem;
+  overflow: auto;
+  border-block-end: 1px solid var(--border);
+}
+
+.printer-config-editor,
+.printer-config-loading {
+  block-size: var(--printer-config-source-height);
+}
+
+.printer-config-editor {
+  --printer-config-line-height: 1.5rem;
+  --printer-config-line-padding: 0.5rem;
+  block-size: clamp(
+    10.5rem,
+    calc(var(--printer-config-lines) * var(--printer-config-line-height) + 1rem + 2px),
+    var(--printer-config-source-height)
+  );
+  display: grid;
+  grid-template: minmax(0, 1fr) / max-content minmax(0, 1fr);
+  overflow: clip;
+}
+
+.printer-config-gutter {
+  overflow: clip;
+}
+
+/* The gutter follows the source offset even when its horizontal scrollbar
+   reduces the source scrollport and increases the maximum vertical offset. */
+.printer-config-editor :is(pre, textarea) {
+  margin: 0;
+  padding-block: var(--printer-config-line-padding);
+  font: inherit;
+  line-height: var(--printer-config-line-height);
+  white-space: pre;
+}
+
+.printer-config-gutter pre {
+  padding-inline: 0.75rem;
+  text-align: end;
+}
+
+.printer-config-editor textarea {
+  box-sizing: border-box;
+  field-sizing: fixed;
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: 0;
+  padding-inline: 0.75rem;
+  resize: none;
+  overflow: auto;
+}
+
+@media (min-width: 768px) {
+  .printer-config-workspace {
+    grid-template-columns: clamp(13rem, 21%, 24rem) minmax(0, 1fr);
+  }
+
+  .printer-config-files {
+    max-block-size: calc(var(--printer-config-source-height) + 6rem);
+    border-block-end: 0;
+    border-inline-end: 1px solid var(--border);
+  }
+}
+
+.printer-config-values {
+  max-block-size: var(--printer-config-source-height);
+  overflow: auto;
+}
+
+@media (min-width: 1024px) {
+  .printer-config-property {
+    grid-template-columns: minmax(8rem, 24%) minmax(0, 1fr);
+  }
+}

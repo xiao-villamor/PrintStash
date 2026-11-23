@@ -277,9 +277,8 @@ export function usePrinterResources(id: number, initialPrinter?: PrinterRead) {
     diagnosticsCheckedAt: diagnostics.dataUpdatedAt,
     diagnosticsError: canAdmin ? diagnostics.error : null,
     loadingConfig: config.isFetching,
-    error:
-      [detail, jobs, files, ...(canConfigure ? [config] : [])].find((query) => query.error)
-        ?.error ?? null,
+    configError: canConfigure ? config.error : null,
+    error: [detail, jobs, files].find((query) => query.error)?.error ?? null,
     refresh,
     refreshAll,
   };

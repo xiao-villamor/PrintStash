@@ -44,6 +44,15 @@ describe("printer telemetry", () => {
     ).toBe(initial);
   });
 
+  it.each([null, NaN, undefined])("breaks a line at an unavailable measurement (%s)", (value) => {
+    const initial = observeHeaters(emptyHeaterHistory, { extruder: { temperature: 22 } }, 10, 0);
+    const unknown = observeHeaters(initial, { extruder: { temperature: value } }, 20, 0, true);
+    const resumed = observeHeaters(unknown, { extruder: { temperature: 22 } }, 20, 0);
+    expect(
+      heaterSegments(resumed.extruder).map((segment) => segment.map((sample) => sample.at)),
+    ).toEqual([[10], [20]]);
+  });
+
   it("caps dense reports per heater", () => {
     let history = emptyHeaterHistory;
     for (let at = 0; at <= HEATER_SAMPLE_LIMIT; at++) {

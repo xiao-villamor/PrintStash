@@ -5716,5 +5716,19 @@
   "Uploading file to printer…": "Uploading file to printer…",
   "Model edit access is required to upload this Revision.": "Model edit access is required to upload this Revision.",
   "This printer does not accept the selected file format.": "This printer does not accept the selected file format.",
-  "No print start recorded": "No print start recorded"
+  "No print start recorded": "No print start recorded",
+  "Could not copy JSON.": "Could not copy JSON.",
+  "Plot hidden": "Plot hidden",
+  "Last observed {value1}": "Last observed {value1}",
+  "Configured values": "Configured values",
+  "Effective settings": "Effective settings",
+  "Reported status": "Reported status",
+  "Reported values": "Reported values",
+  "Configuration sections": "Configuration sections",
+  "Search configuration sections": "Search configuration sections",
+  "Search sections": "Search sections",
+  "No matching sections.": "No matching sections.",
+  "No sections reported.": "No sections reported.",
+  "Server info": "Server info",
+  "Printer info": "Printer info"
 }

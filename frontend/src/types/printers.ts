@@ -373,14 +373,14 @@ export interface PrinterSnapshot {
     file_position?: number;
     file_size?: number;
   };
-  extruder?: { temperature?: number; target?: number; can_extrude?: boolean };
+  extruder?: { temperature?: number | null; target?: number; can_extrude?: boolean };
   gcode_move?: {
     speed_factor?: number;
     extrude_factor?: number;
     absolute_coordinates?: boolean;
     absolute_extrude?: boolean;
   };
-  heater_bed?: { temperature?: number; target?: number };
+  heater_bed?: { temperature?: number | null; target?: number };
   fan?: { speed?: number | null };
   toolhead?: {
     position?: number[];

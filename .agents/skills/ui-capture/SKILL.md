@@ -128,6 +128,10 @@ find. Keep captures and observations in the task's private `reports/` folder.
    For a file editor, select a disposable file by its full path and check the
    request targets that file. Reopen the URL after reload and in a second tab
    to verify selection, unsaved drafts and concurrent saves.
+   Include a file longer than the visible editor. Compare the source and
+   gutter heights and line spacing at the top, midway down, and on the last
+   line. Scroll horizontally and switch to a short file. A saved value alone
+   cannot tell you whether an operator can read it.
    On a live control screen, perform one adjustment while watching the process
    it affects. Check that the command, its acknowledgement and the measured
    response are visible on the same screen. A heater target and the measured

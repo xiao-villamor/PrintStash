@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, Folder, Play, RefreshCcw, Trash2 } from "luc
 import { lazy, Suspense, useId, useMemo, useState, type ReactNode } from "react";
 
 import { PrintJobReproducibility } from "@/components/print-job-reproducibility";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import {
@@ -541,6 +541,83 @@ export function PrinterFiles({
             )}
           </p>
         </>
+      )}
+    </section>
+  );
+}
+
+export function PrinterRecentRuns({
+  printerId,
+  jobs,
+  inventory,
+  jobsHref,
+}: {
+  printerId: number;
+  jobs: readonly PrintJobRead[];
+  inventory: ReturnType<typeof printerArtifactInventory>;
+  jobsHref: string;
+}) {
+  useUiLocale();
+  const status = useReadStatus(printerKeys.jobs(printerId));
+  const recent = jobs
+    .flatMap((job) => {
+      if (job.printer_id !== printerId) return [];
+      if (job.state !== "completed" && job.state !== "failed" && job.state !== "cancelled")
+        return [];
+      const finished = parseApiInstant(job.finished_at);
+      return finished ? [{ job, finished }] : [];
+    })
+    .sort((left, right) => right.finished.getTime() - left.finished.getTime())
+    .slice(0, 4);
+  if (status === "ready" && recent.length === 0 && jobs.length > 0) return null;
+
+  return (
+    <section className="printer-desk-section" aria-label={uiText("Print history")}>
+      <div className="printer-desk-heading">
+        <h2>{uiText("Print history")}</h2>
+        <Link href={jobsHref} className={buttonVariants({ variant: "outline", size: "xs" })}>
+          {uiText("Jobs")}
+        </Link>
+      </div>
+      {recent.length > 0 && (
+        <ul className="divide-y divide-border">
+          {recent.map(({ job }) => {
+            const elapsed = duration(job);
+            return (
+              <li key={job.id} className="printer-recent-run">
+                <div className="min-w-0">
+                  <p className="break-words font-medium">
+                    {identifyPrintJob(job, inventory).title}
+                  </p>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {dateValue(job.finished_at, "short")}
+                    {elapsed !== null && ` · ${formatDuration(elapsed)}`}
+                  </div>
+                </div>
+                <div
+                  className={
+                    job.state === "completed"
+                      ? "text-success"
+                      : job.state === "failed"
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                  }
+                >
+                  <JobOutcome job={job} />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {(status === "error" || recent.length === 0) && (
+        <p className="py-1 text-xs text-muted-foreground">
+          {status === "error"
+            ? uiText("Could not load print history.")
+            : status === "loading"
+              ? uiText("Loading...")
+              : uiText("No print jobs yet.")}
+        </p>
       )}
     </section>
   );

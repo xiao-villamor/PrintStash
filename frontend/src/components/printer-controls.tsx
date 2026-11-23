@@ -4,7 +4,7 @@ import { PrinterFeedRows } from "@/components/printer-machine";
 import type { useMachineSetup } from "@/features/printers/materials";
 import { Link } from "@/lib/link";
 import { PartCoolingFan } from "@/components/printer-telemetry";
-import { Input, inputClasses } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { extrudePrinter, homePrinter, jogPrinter, tunePrinter } from "@/lib/api/printers";
 import {
   PREHEAT_PRESETS,
@@ -14,7 +14,6 @@ import {
 } from "@/features/printers/controls";
 import { finiteReading } from "@/features/printers/telemetry";
 import { formatNumber } from "@/lib/format";
-import { cn } from "@/lib/utils";
 import { uiMessage, uiText, type MessageDescriptor } from "@/lib/locale";
 import type { PrinterRead, PrinterSnapshot } from "@/types";
 import type { PrinterAxis, PrinterTuning } from "@/types/printers";
@@ -482,32 +481,38 @@ export function ThermalPresets({
   pending: boolean;
   receipt: PrinterCommandReceipt | undefined;
 }) {
-  const [preset, setPreset] = useState(PREHEAT_PRESETS[0].name);
-  const selected = PREHEAT_PRESETS.find((candidate) => candidate.name === preset);
+  const group = useId();
+  const [selected, setSelected] = useState(PREHEAT_PRESETS[0]);
 
   return (
-    <div className="space-y-1.5 border-t border-border pt-2">
+    <div className="space-y-1.5">
+      <fieldset disabled={disabled}>
+        <legend className="mb-1.5 text-xs font-medium">{uiText("Material preset")}</legend>
+        <div className="flex flex-wrap gap-1.5">
+          {PREHEAT_PRESETS.map((preset) => (
+            <label
+              key={preset.name}
+              className="relative inline-flex cursor-action has-[:disabled]:cursor-disabled"
+            >
+              <input
+                type="radio"
+                name={group}
+                checked={selected === preset}
+                onChange={() => setSelected(preset)}
+                className="peer absolute inset-0 z-10 m-0 size-full opacity-0"
+              />
+              <span className="inline-flex h-8 items-center gap-1.5 border border-border px-2 text-xs transition-colors duration-press hover:bg-muted peer-checked:bg-accent peer-checked:text-accent-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:opacity-50 motion-reduce:transition-none">
+                <span className="font-medium">{preset.name}</span>{" "}
+                <span className="font-mono tabular-nums">
+                  {preset.hotend} / {preset.bed} °C
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
       <div className="flex flex-wrap items-center gap-2">
-        <label className="flex flex-wrap items-center gap-2 text-xs">
-          {uiText("Material preset")}
-          <select
-            className={cn(inputClasses, "h-8 w-auto max-w-full")}
-            value={preset}
-            disabled={disabled}
-            onChange={(event) => setPreset(event.target.value)}
-          >
-            {PREHEAT_PRESETS.map(({ name, hotend, bed }) => (
-              <option key={name} value={name}>
-                {name} · {hotend} / {bed} °C
-              </option>
-            ))}
-          </select>
-        </label>
-        <Button
-          size="xs"
-          disabled={disabled || !selected}
-          onClick={() => selected && preheat(selected)}
-        >
+        <Button size="xs" disabled={disabled} onClick={() => preheat(selected)}>
           {uiText("Preheat")}
         </Button>
         <Button variant="outline" size="xs" disabled={disabled} onClick={cooldown}>

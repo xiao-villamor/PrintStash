@@ -318,4 +318,4 @@ the reported position, speed, and extrusion availability from real emulator tele
 workspace on the Moonraker emulator, persists routing and notes, and verifies
 Diagnostics and browser history at the desktop viewport.
 
-- `printer-config.spec.ts` uses the throwaway Moonraker config root to check nested navigation, dirty-draft guards, keyboard save, exact CRLF readback after reload, external-edit review, and read-only files.
+- `printer-config.spec.ts` uses the throwaway Moonraker config root to check nested navigation, dirty-draft guards, keyboard save, exact CRLF readback after reload, external-edit review, and read-only files. It switches to reported provider values with an unsaved draft and verifies the same draft can still be saved. It also verifies gutter alignment while paging and scrolling to the end of a long source file with horizontal overflow.

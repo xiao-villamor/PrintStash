@@ -201,22 +201,24 @@
   border-bottom: 1px solid var(--border);
 }
 
-.printer-workbench[data-layout="klipper"] .printer-workbench-column {
+.printer-workbench:is([data-layout="klipper"], [data-layout="bambu"]) .printer-workbench-column {
   gap: 0;
   border: 1px solid var(--border);
   background: var(--card);
 }
 
-.printer-workbench[data-layout="klipper"] .printer-desk-section {
+.printer-workbench:is([data-layout="klipper"], [data-layout="bambu"]) .printer-desk-section {
   border: 0;
   background: transparent;
 }
 
-.printer-workbench[data-layout="klipper"] .printer-desk-section + .printer-desk-section {
+.printer-workbench:is([data-layout="klipper"], [data-layout="bambu"])
+  .printer-desk-section
+  + .printer-desk-section {
   border-top: 1px solid var(--border);
 }
 
-.printer-workbench[data-layout="klipper"] .printer-desk-heading {
+.printer-workbench:is([data-layout="klipper"], [data-layout="bambu"]) .printer-desk-heading {
   min-height: 42px;
   background: color-mix(in srgb, var(--muted) 45%, var(--card));
 }
@@ -247,39 +249,22 @@
   border: 0;
 }
 
-.printer-heater-readings {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 20px;
-}
-
-.printer-heater-readings:has(.printer-heater-edit) {
+.printer-heater-lane,
+.printer-heater-plot {
   display: grid;
-  max-width: 500px;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 8px;
+  align-items: start;
 }
 
-.printer-heater-reading {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
-  column-gap: 12px;
-  align-items: baseline;
+.printer-heater-plot {
+  grid-template-columns: 3.75rem minmax(0, 1fr);
+  align-items: stretch;
 }
 
-.printer-heater-reading:not(:has(.printer-heater-edit)) {
-  min-width: 76px;
-  grid-template-columns: 1fr;
-}
-
-.printer-heater-reading > :not(.printer-heater-edit) {
-  grid-column: 1;
-}
-
-.printer-heater-edit {
-  grid-column: 2;
-  grid-row: 2 / span 2;
-  align-self: center;
+@media (min-width: 640px) {
+  .printer-heater-lane {
+    grid-template-columns: minmax(0, 9rem) minmax(0, 1fr);
+  }
 }
 
 @media (min-width: 1024px) {
@@ -304,5 +289,41 @@
 
   .printer-workbench[data-layout="overview"] {
     grid-template-columns: minmax(0, 1.18fr) minmax(0, 0.82fr);
+  }
+}
+
+.printer-workbench[data-layout="bambu"] .printer-machine-identity {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.printer-workbench[data-layout="bambu"] .printer-machine-portrait {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: clamp(10rem, 24vh, 16rem);
+  padding: 12px;
+}
+
+.printer-workbench[data-layout="bambu"] .printer-machine-portrait img {
+  min-height: 0;
+}
+
+.printer-workbench[data-layout="bambu"] .printer-current-work-row {
+  justify-content: flex-start;
+}
+
+.printer-recent-run {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(6rem, 25%);
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: 0.8125rem;
+}
+
+@media (min-width: 1024px) {
+  .printer-workbench[data-layout="bambu"] {
+    grid-template-columns: clamp(21rem, 28%, 27rem) minmax(0, 1fr);
   }
 }
