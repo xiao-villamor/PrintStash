@@ -1,5 +1,6 @@
 /** Real account commands render authoritative state and preserve one-time credential intent. */
 import { test, expect } from "./helpers";
+import { collapseNavigationSidebar } from "./util";
 import type { ApiKeyCreateResponse, ApiKeyRead, UserRead } from "../../src/types/auth";
 
 const API = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}`;
@@ -9,6 +10,7 @@ test.describe("account administration", () => {
     const stamp = Date.now();
     const username = `e2e-account-${stamp}`;
     await page.goto("/settings?section=access");
+    await collapseNavigationSidebar(page);
     await page.getByRole("button", { name: "Create user", exact: true }).click();
     await page.getByLabel("Username", { exact: true }).fill(username);
     await page.getByLabel("Initial password").fill("FakeInitialPassword123");
@@ -64,21 +66,43 @@ test.describe("account administration", () => {
     expect(users.find((user) => user.id === account.id)?.is_active).toBe(false);
 
     const keyName = `e2e-account-key-${stamp}`;
-    await page.getByLabel("Key name").fill(keyName);
+    const keyField = page.getByLabel("Key name");
+    const generate = page.getByRole("button", { name: "Generate", exact: true });
+    await keyField.fill(keyName);
+    const keyFieldBox = await keyField.boundingBox();
+    const generateBox = await generate.boundingBox();
+    if (keyFieldBox === null || generateBox === null) throw new Error("Key form is hidden");
+    expect(
+      Math.abs(keyFieldBox.y + keyFieldBox.height - generateBox.y - generateBox.height),
+    ).toBeLessThanOrEqual(1);
     const keyResponse = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === "/api/v1/auth/api-keys" &&
         response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: "Generate", exact: true }).click();
+    await generate.click();
     const minted: ApiKeyCreateResponse = await (await keyResponse).json();
-    await expect(page.getByTitle("Copy API key", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Generate", exact: true })).toBeDisabled();
+    const copy = page.getByRole("button", { name: "Copy API key", exact: true });
+    await expect(copy).toBeVisible();
+    await expect(generate).toBeDisabled();
+    const dismiss = page.getByRole("button", { name: "Dismiss this secret", exact: true });
+    const notice = page.getByText("Copy this key now. It will only be shown once.", {
+      exact: true,
+    });
+    const dismissBox = await dismiss.boundingBox();
+    const noticeBox = await notice.boundingBox();
+    if (dismissBox === null || noticeBox === null) throw new Error("Key receipt is hidden");
+    expect(
+      Math.abs(dismissBox.y + dismissBox.height / 2 - noticeBox.y - noticeBox.height / 2),
+    ).toBeLessThanOrEqual(1);
     const keyRow = page.getByRole("group", { name: `API key: ${keyName}`, exact: true });
     await expect(keyRow).toBeVisible();
-    await page.getByRole("button", { name: "Dismiss this secret", exact: true }).click();
-    await expect(page.getByTitle("Copy API key", { exact: true })).toHaveCount(0);
+    await dismiss.click();
+    await expect(copy).toHaveCount(0);
+    await expect(generate).toBeEnabled();
+    await page.reload();
     await expect(keyRow).toBeVisible();
+    await expect(copy).toHaveCount(0);
     const revokeResponse = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === `/api/v1/auth/api-keys/${minted.id}` &&
