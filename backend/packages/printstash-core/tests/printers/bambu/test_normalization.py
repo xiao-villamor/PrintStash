@@ -50,6 +50,42 @@ def slots_by_key(status: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 class TestNormalizeStatus:
+    def test_external_inputs_keep_identity_across_sparse_reports(self) -> None:
+        client = make_client()
+        client._normalize_status(
+            {"print": {"vt_tray": {"id": "254", "tray_type": "PLA"}}}
+        )
+        inputs = [
+            {"id": 255, "tray_type": "PLA", "tray_color": "123456FF"},
+            {"id": "254", "tray_type": "PETG", "tray_color": "654321FF"},
+        ]
+        slots = slots_by_key(client._normalize_status({"print": {"vir_slot": inputs}}))
+        assert set(slots) == {"external", "external:254"}
+        assert slots["external"]["color_hex"] == "#123456"
+        assert slots["external:254"]["material_type"] == "PETG"
+        assert slots["external:254"]["tool_key"] is None
+
+        update = {
+            "vir_slot": [None, {"id": "999"}, {"id": 254, "tray_color": "ABCDEF00"}]
+        }
+        updated = slots_by_key(client._normalize_status({"print": update}))
+        assert updated["external:254"]["material_type"] == "PETG"
+        assert updated["external:254"]["color_hex"] == "#ABCDEF"
+        empty = slots_by_key(
+            client._normalize_status(
+                {"print": {"vir_slot": [{"id": 254, "tray_type": ""}]}}
+            )
+        )
+        assert empty["external:254"]["state"] == "empty"
+        assert empty["external:254"]["color_hex"] is None
+        assert empty["external"]["material_type"] == "PLA"
+        assert slots["external:254"]["color_hex"] == "#654321"
+        legacy = slots_by_key(
+            client._normalize_status({"print": {"vt_tray": {"tray_type": "ABS"}}})
+        )
+        assert legacy["external"]["tool_key"] is None
+        assert legacy["external:254"]["state"] == "empty"
+
     def test_normalizes_reported_layer_counts(self) -> None:
         status = make_client()._normalize_status(
             {"print": {"layer_num": "0", "total_layer_num": "120"}}

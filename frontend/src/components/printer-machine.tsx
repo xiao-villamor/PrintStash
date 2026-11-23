@@ -120,7 +120,7 @@ export function MachineMaterials({
 }) {
   const ams = new Map<string, Array<{ tray: string; slot: MaterialSlotRead }>>();
   const other: MaterialSlotRead[] = [];
-  let external: MaterialSlotRead | undefined;
+  const external: MaterialSlotRead[] = [];
   for (const slot of setup.slots) {
     const match = slot.source === "bambu_ams" && /^ams:([^:]+):([^:]+)$/.exec(slot.slot_key);
     if (match) {
@@ -128,8 +128,11 @@ export function MachineMaterials({
       const bank = ams.get(unit) ?? [];
       bank.push({ tray, slot });
       ams.set(unit, bank);
-    } else if (slot.source === "bambu_ams" && slot.slot_key === "external") {
-      external = slot;
+    } else if (
+      slot.source === "bambu_ams" &&
+      (slot.slot_key === "external" || slot.slot_key === "external:254")
+    ) {
+      external.push(slot);
     } else {
       other.push(slot);
     }
@@ -172,9 +175,21 @@ export function MachineMaterials({
               </ul>
             </section>
           ))}
-          {external && (
+          {external.length > 0 && (
             <div className="border-t border-border pt-2">
-              <MaterialSlot slot={external} label={uiText("External spool")} />
+              {external.map((slot) => (
+                <MaterialSlot
+                  key={slot.slot_key}
+                  slot={slot}
+                  label={
+                    slot.slot_key === "external" && external.length === 1
+                      ? uiText("External spool")
+                      : uiText("External spool {value1}", {
+                          value1: slot.slot_key === "external" ? "255" : "254",
+                        })
+                  }
+                />
+              ))}
             </div>
           )}
           {other.length > 0 && (

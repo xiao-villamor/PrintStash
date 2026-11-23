@@ -5637,6 +5637,7 @@
   "AMS {value1}": "AMS {value1}",
   "Tray {value1}": "Tray {value1}",
   "External spool": "External spool",
+  "External spool {value1}": "External spool {value1}",
   "Sending command…": "Sending command…",
   "Pause command sent": "Pause command sent",
   "Resume command sent": "Resume command sent",

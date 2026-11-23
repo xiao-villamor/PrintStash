@@ -5637,6 +5637,7 @@
   "AMS {value1}": "AMS {value1}",
   "Tray {value1}": "Bandeja {value1}",
   "External spool": "Bobina externa",
+  "External spool {value1}": "Bobina externa {value1}",
   "Sending command…": "Enviando comando…",
   "Pause command sent": "Comando de pausa enviado",
   "Resume command sent": "Comando de reanudación enviado",

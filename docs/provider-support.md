@@ -28,7 +28,7 @@ as an advisory only.
 
 - Bambu LAN reports AMS trays, empty trays, the external spool feed, colors, and
   the installed nozzle when firmware includes it. Incremental MQTT reports are
-  merged with the last full state. Provider state becomes stale while offline.
+  merged with the last full state. Firmware that reports individually addressed external inputs can show feeds 254 and 255 separately. These readouts do not assign a feed to a nozzle or change print commands. Provider state becomes stale while offline.
 - Moonraker reports the single active Spoolman spool ID configured through its
   integration. PrintStash resolves material/color only when the same spool is
   available from PrintStash's configured Spoolman inventory. This state is

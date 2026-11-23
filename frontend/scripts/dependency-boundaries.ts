@@ -51,7 +51,7 @@ export const FEATURE_PUBLIC_MODULES = new Set([
   "src/features/setup/guide.ts",
   "src/features/work/queries.ts",
   "src/features/printers/artifact-identity.ts",
-  "src/features/printers/config-editor.tsx",
+  "src/features/printers/config-workspace.tsx",
   "src/features/printers/controls.ts",
   "src/features/printers/inspection.ts",
   "src/features/printers/queries.ts",

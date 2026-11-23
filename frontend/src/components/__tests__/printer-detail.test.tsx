@@ -2257,6 +2257,23 @@ describe("PrinterDetailPage", () => {
       expect(screen.getByText("External spool")).toBeVisible();
     });
 
+    it("identifies both reported external Bambu inputs", async () => {
+      const slots = ["external", "external:254"].map((slot_key) => ({
+        slot_key,
+        label: "External spool",
+        state: "loaded",
+        material_type: "PLA",
+        source: "bambu_ams",
+        stale: false,
+      }));
+      renderPrinter({
+        printer: aPrinter({ id: 4, provider: "bambu_lan" }),
+        routes: { "GET /api/v1/printers/4/material-state": json({ tools: [], slots }) },
+      });
+      expect(await screen.findByText("External spool 254")).toBeVisible();
+      expect(screen.getByText("External spool 255")).toBeVisible();
+    });
+
     it("clears live readings when the provider goes offline", async () => {
       renderPrinter();
       await pushSnapshot({ extruder: { temperature: 24.5 } });

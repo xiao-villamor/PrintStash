@@ -709,7 +709,16 @@ class BambuClient:
             "ams" in print_report or "vt_tray" in print_report
         ):
             for slot in self._normalize_ams_slots(print_report):
-                self._material_slots[str(slot["slot_key"])] = slot
+                key = str(slot["slot_key"])
+                if (
+                    key == "external"
+                    and self._material_slots.get(key, {}).get("tool_key", "tool0")
+                    is None
+                ):
+                    # A legacy main-spool report carries no new nozzle binding.
+                    slot.update(label="External spool 255", tool_key=None)
+                self._material_slots[key] = slot
+        self._update_external_inputs(print_report.get("vir_slot"))
         if self._material_slots:
             status["material_slots"] = list(self._material_slots.values())
         nozzle = print_report.get("nozzle_diameter")
@@ -726,6 +735,49 @@ class BambuClient:
                 }
             ]
         return status
+
+    def _update_external_inputs(self, inputs: object) -> None:
+        """Merge addressable external feeds without assigning them to a nozzle."""
+        if not isinstance(inputs, list):
+            return
+        for feed in inputs:
+            if not isinstance(feed, dict):
+                continue
+            address = str(feed.get("id"))
+            if address not in {"254", "255"}:
+                continue
+            # The main feed keeps its existing identity when firmware sends
+            # both the older vt_tray object and the addressable input list.
+            key = "external" if address == "255" else "external:254"
+            slot = dict(
+                self._material_slots.get(
+                    key,
+                    {
+                        "slot_key": key,
+                        "state": "unknown",
+                        "material_type": None,
+                        "color_hex": None,
+                    },
+                )
+            )
+            slot.update(label=f"External spool {address}", tool_key=None)
+            material = feed.get("tray_type")
+            if isinstance(material, str):
+                if material.strip() != slot["material_type"]:
+                    slot["color_hex"] = None
+                slot["material_type"] = material.strip() or None
+                slot["state"] = "loaded" if slot["material_type"] else "empty"
+                if slot["state"] == "empty":
+                    slot["color_hex"] = None
+            color = feed.get("tray_color")
+            if isinstance(color, str) and slot["state"] != "empty":
+                rgb = color[:6].upper()
+                slot["color_hex"] = (
+                    f"#{rgb}"
+                    if len(rgb) == 6 and all(c in "0123456789ABCDEF" for c in rgb)
+                    else None
+                )
+            self._material_slots[key] = slot
 
     @staticmethod
     def _normalize_ams_slots(print_report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -842,6 +894,7 @@ class BambuClient:
                         "print_error",
                         "ams",
                         "vt_tray",
+                        "vir_slot",
                     }.intersection(report["print"])
                 ),
             )
