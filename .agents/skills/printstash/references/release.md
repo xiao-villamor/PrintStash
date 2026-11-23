@@ -67,8 +67,9 @@ Keep release evidence and manual validation records private under `reports/`.
 
 - [ ] If a release-metadata PR was required, merge it to `main`; then update the
       local `main` and verify its HEAD contains the version triple and changelog.
-- [ ] Run `Deep CI` manually on that exact `main` commit after all metadata
-      changes have merged. Wait for a green result. The release workflow checks
+- [ ] Verify `Deep CI` on that exact `main` commit after all metadata changes
+      have merged. Start it only when the user explicitly requests Deep CI.
+      Wait for a green result. The release workflow checks
       both `CI` and `Deep CI` for the tag's exact SHA and will stop on an absent,
       failed or running result; it does not re-run the suites.
 - [ ] Tag that exact `main` commit:

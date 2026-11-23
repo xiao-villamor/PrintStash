@@ -227,6 +227,6 @@ pnpm exec vitest run <affected-test-paths>
 
 Select the files by the changed behavior using [running tests](../running-tests.md).
 PR CI runs `pnpm test` across the app and workspace packages; `Deep CI` runs
-`pnpm coverage` nightly and on demand;
+`pnpm coverage` on manual dispatch;
 use those full commands locally for release validation, an explicit request,
 or work on the suite or coverage floors.

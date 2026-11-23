@@ -1,8 +1,6 @@
 name: Deep CI
 
 on:
-  schedule:
-    - cron: "27 4 * * *"
   workflow_dispatch:
     inputs:
       startup_benchmark:
