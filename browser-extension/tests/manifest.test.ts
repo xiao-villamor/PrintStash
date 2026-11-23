@@ -1,6 +1,6 @@
 import { MARKETPLACE_ORIGINS } from "../source-providers.ts";
 /** The generated manifests preserve each browser's permissions and install metadata. */
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 describe("MV3 manifest contract", () => {
@@ -63,6 +63,8 @@ describe("MV3 manifest contract", () => {
       expect(manifest.web_accessible_resources[0].resources).toContain("popup.html");
       expect(manifest.permissions).not.toContain("cookies");
       await readFile(`.output/${target}/marketplace.js`);
+      const assets = await readdir(`.output/${target}/assets`);
+      expect(assets.some((name) => /^vault-network-worker-.*\.js$/.test(name))).toBe(true);
     },
   );
 });

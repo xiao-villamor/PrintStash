@@ -54,7 +54,7 @@ describe("Chrome Web Store ZIP", () => {
   it("limits the ZIP to production assets", () => {
     const unexpected = Object.keys(files).filter(
       (path) =>
-        !/^(?:manifest\.json|(?:background|marketplace)\.js|(?:popup|help)\.html|icon(?:-\d+\.png|\.svg)|chunks\/[\w-]+\.js|assets\/[\w-]+\.css)$/.test(
+        !/^(?:manifest\.json|(?:background|marketplace)\.js|(?:popup|help)\.html|icon(?:-\d+\.png|\.svg)|chunks\/[\w-]+\.js|assets\/(?:[\w-]+\.css|vault-network-worker-[\w-]+\.js))$/.test(
           path,
         ),
     );
