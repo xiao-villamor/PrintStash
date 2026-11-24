@@ -1294,7 +1294,7 @@ function ModelDetailPresentation({
                       title={uiText("Edit details")}
                       onClick={() => enterEdit()}
                     >
-                      <Pencil className="h-6 w-6 text-foreground" aria-hidden />
+                      <Pencil className="h-6 w-6 shrink-0 text-foreground" aria-hidden />
                     </Button>
                   )}
                   <Button
@@ -1785,14 +1785,19 @@ function ModelDetailPresentation({
                   />
                 )}
 
-                {(activeTab === "similar" || activeTab === "source") && (
+                {activeTab === "similar" && (
                   <Button size="sm" variant="outline" onClick={() => openSection("overview")}>
                     {uiText("Back to overview")}
                   </Button>
                 )}
                 {activeTab === "similar" && canEditModel && <SimilarityQueue modelId={model.id} />}
                 {activeTab === "source" && (
-                  <SourceTab modelName={model.name} modelId={model.id} canEdit={canEditModel} />
+                  <SourceTab
+                    modelName={model.name}
+                    modelId={model.id}
+                    canEdit={canEditModel}
+                    onBack={() => openSection("overview")}
+                  />
                 )}
 
                 {activeTab === "revisions" && canViewPrinters && printerFileQuery.isError && (

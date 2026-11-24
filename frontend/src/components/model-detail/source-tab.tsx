@@ -1,7 +1,7 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useRef, useState, type ReactNode } from "react";
-import { ExternalLink, Image } from "lucide-react";
+import { ChevronLeft, ExternalLink, Image } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
@@ -131,17 +131,17 @@ function SourceField({
   };
   return (
     <div
-      className={`grid gap-x-4 gap-y-2 py-4 @md/source:grid-cols-[minmax(6.25rem,.65fr)_minmax(0,2fr)] @md/source:items-start ${last ? "" : "border-b border-border"}`}
+      className={`grid gap-x-4 gap-y-1 py-3 @md/source:grid-cols-[minmax(6.25rem,.5fr)_minmax(0,2fr)] @md/source:items-start ${last ? "" : "border-b border-border"}`}
     >
       {!editing && feedback}
-      <div className="flex flex-col items-start gap-1">
-        <h3 className="text-sm font-medium text-foreground">{label}</h3>
-        <span className="text-sm text-muted-foreground">
-          {provenanceOriginLabel(field.effective_origin, i18n)}
-        </span>
-      </div>
+      <h3
+        className="text-sm font-normal text-muted-foreground"
+        title={provenanceOriginLabel(field.effective_origin, i18n)}
+      >
+        {label}
+      </h3>
       <div className="flex min-w-0 flex-col items-start gap-2">
-        <div className="w-full min-w-0 break-words whitespace-pre-wrap text-sm text-muted-foreground">
+        <div className="w-full min-w-0 break-words whitespace-pre-wrap text-sm text-foreground">
           {safeLink ? (
             <a
               href={safeLink}
@@ -475,28 +475,13 @@ function SourceCover({
   );
 }
 
-function SourceIdentityRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-  last?: boolean;
-}) {
-  useUiLocale();
-  return (
-    <div className="min-w-0 space-y-1">
-      <dt className="text-sm text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words text-sm text-foreground">{children}</dd>
-    </div>
-  );
-}
-
 export function SourceTab(props: {
   modelId: number;
   modelName?: string;
   canEdit: boolean;
   api?: SourceApi;
+  /** Returns to the Overview; shown beside Edit source when given. */
+  onBack?: () => void;
 }) {
   return <SourceTabContent key={props.modelId} {...props} />;
 }
@@ -506,11 +491,13 @@ function SourceTabContent({
   modelName,
   canEdit,
   api = sourceApi,
+  onBack,
 }: {
   modelId: number;
   modelName?: string;
   canEdit: boolean;
   api?: SourceApi;
+  onBack?: () => void;
 }) {
   useUiLocale();
   const i18n = useOptionalI18n();
@@ -587,16 +574,26 @@ function SourceTabContent({
               <Button onClick={editor.retryRead}>{uiText("Retry")}</Button>
             </div>
           )}
-          {canEditSource && data.sources.length > 0 && (
-            <div className="flex justify-end">
-              <Button
-                size="sm"
-                variant={editingSource ? "default" : "outline"}
-                aria-pressed={editingSource}
-                onClick={() => setEditingSource((value) => !value)}
-              >
-                {editingSource ? uiText("Done") : uiText("Edit source")}
-              </Button>
+          {(onBack || (canEditSource && data.sources.length > 0)) && (
+            <div className="flex items-center justify-between gap-2">
+              {onBack ? (
+                <Button size="sm" variant="ghost" className="-ms-2" onClick={onBack}>
+                  <ChevronLeft className="size-4 shrink-0" aria-hidden />
+                  {uiText("Overview")}
+                </Button>
+              ) : (
+                <span />
+              )}
+              {canEditSource && data.sources.length > 0 && (
+                <Button
+                  size="sm"
+                  variant={editingSource ? "default" : "outline"}
+                  aria-pressed={editingSource}
+                  onClick={() => setEditingSource((value) => !value)}
+                >
+                  {editingSource ? uiText("Done") : uiText("Edit source")}
+                </Button>
+              )}
             </div>
           )}
           {!fieldFeedback && feedback}
@@ -606,52 +603,40 @@ function SourceTabContent({
           {data.sources.map((source) => {
             const canonicalUrl = safeHttpUrl(source.canonical_url);
             const fieldCount = source.fields.length + (source.tags?.length ? 1 : 0);
+            const titleField = source.fields.find((item) => item.field_name === "title");
+            const creatorField = source.fields.find((item) => item.field_name === "creator_name");
             return (
               <article key={source.id} className="min-w-0">
                 <section aria-labelledby={`source-heading-${source.id}`}>
-                  <h2 id={`source-heading-${source.id}`} className="text-base font-semibold">
+                  <h2 id={`source-heading-${source.id}`} className="sr-only">
                     {uiText("Source information")}
                   </h2>
-                  <div className="space-y-3 border-b border-border py-4">
-                    <h3 className="text-lg font-semibold">
-                      {sourceProviderName(source.provider)}
-                      <span className="ml-2 text-sm font-normal normal-case text-muted-foreground">
-                        {t("source.capturedStatus")}
-                      </span>
-                    </h3>
+                  <div className="min-w-0 space-y-1 rounded-lg border border-border p-4">
+                    <p className="break-words text-base font-semibold [overflow-wrap:anywhere]">
+                      {titleField?.effective_value || sourceProviderName(source.provider)}
+                    </p>
                     <p className="break-words text-sm text-muted-foreground">
                       {canonicalUrl ? (
                         <a
                           href={canonicalUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex max-w-full items-start gap-1 text-foreground underline-offset-4 hover:underline"
+                          title={canonicalUrl}
+                          className="inline-flex max-w-full items-center gap-1 text-foreground underline-offset-4 hover:underline"
                         >
-                          <span className="min-w-0 [overflow-wrap:anywhere]">{canonicalUrl}</span>
-                          <ExternalLink className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                          <span className="min-w-0 [overflow-wrap:anywhere]">
+                            {sourceProviderName(source.provider)}
+                            {creatorField?.effective_value
+                              ? ` · ${creatorField.effective_value}`
+                              : ""}
+                          </span>
+                          <ExternalLink className="size-3.5 shrink-0" aria-hidden />
                           <span className="sr-only">{uiText("Opens in a new tab")}</span>
                         </a>
                       ) : (
                         source.canonical_url
                       )}
                     </p>
-                    <dl
-                      className="grid grid-cols-2 gap-4 @xl/source:grid-cols-4"
-                      data-testid="source-identity-panel"
-                    >
-                      <SourceIdentityRow label={t("source.sourceId")}>
-                        {source.source_item_id || t("source.notSuppliedGeneric")}
-                      </SourceIdentityRow>
-                      <SourceIdentityRow label={t("source.revision")}>
-                        {source.source_revision || t("source.notSuppliedGeneric")}
-                      </SourceIdentityRow>
-                      <SourceIdentityRow label={t("source.captured")}>
-                        {new Date(source.first_captured_at).toLocaleDateString(i18n?.locale)}
-                      </SourceIdentityRow>
-                      <SourceIdentityRow label={t("source.checked")} last>
-                        {new Date(source.last_checked_at).toLocaleDateString(i18n?.locale)}
-                      </SourceIdentityRow>
-                    </dl>
                   </div>
                 </section>
                 <SourceCover
@@ -694,6 +679,16 @@ function SourceTabContent({
                     </div>
                   </section>
                 )}
+                <p className="mt-3 text-sm text-muted-foreground" data-testid="source-identity-panel">
+                  {t("source.captured")}{" "}
+                  {new Date(source.first_captured_at).toLocaleDateString(i18n?.locale)} ·{" "}
+                  {t("source.checked")}{" "}
+                  {new Date(source.last_checked_at).toLocaleDateString(i18n?.locale)} ·{" "}
+                  {t("source.sourceId")} {source.source_item_id || t("source.notSuppliedGeneric")}
+                  {source.source_revision
+                    ? ` · ${t("source.revision")} ${source.source_revision}`
+                    : ""}
+                </p>
               </article>
             );
           })}
