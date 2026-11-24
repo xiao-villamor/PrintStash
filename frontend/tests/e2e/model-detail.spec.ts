@@ -1570,7 +1570,7 @@ test.describe("model detail route", () => {
     );
     await page.keyboard.press("Escape");
     await page.getByRole("tab", { name: "Overview", exact: true }).click();
-    const recommended = page.getByRole("button", { name: "View revision", exact: true });
+    const recommended = page.getByRole("button", { name: /^Rev \d+\b/ });
     await recommended.press("Enter");
     await expect(page.getByRole("tabpanel", { name: "Print" })).toBeFocused();
     await selectModelDetailTab(page, "Print settings");
@@ -1720,9 +1720,9 @@ test.describe("model detail route", () => {
     );
     await page.goto("/models/1");
     const overview = page.getByRole("tabpanel", { name: "Overview" });
-    await expect(
-      overview.getByRole("button", { name: "View revision", exact: true }),
-    ).toBeInViewport({ ratio: 0.95 });
+    await expect(overview.getByRole("button", { name: /^Rev \d+\b/ })).toBeInViewport({
+      ratio: 0.95,
+    });
     await expect(overview.getByRole("button", { name: "Add to queue", exact: true })).toHaveCount(
       0,
     );

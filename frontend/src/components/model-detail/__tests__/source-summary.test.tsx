@@ -1,6 +1,6 @@
 /** Captured source terms and local corrections stay distinct at decision points. */
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { json, renderApp } from "@/test-support/render";
 import { CaptureSourceSummary, ModelSourceSummary } from "../source-summary";
@@ -16,10 +16,11 @@ describe("SourceSummary", () => {
         }),
       },
     });
-    expect(screen.getByRole("link", { name: "View source details" })).toHaveAttribute(
-      "href",
-      "/models/1?tab=source",
-    );
+    expect(
+      within(screen.getByRole("heading", { name: "Source and license" })).getByRole("link", {
+        name: "Source and license",
+      }),
+    ).toHaveAttribute("href", "/models/1?tab=source");
     expect(screen.queryByText(/Captured license/)).not.toBeInTheDocument();
   });
 
@@ -91,9 +92,10 @@ describe("SourceSummary", () => {
     expect(screen.getByText("Captured license", { exact: true })).toBeVisible();
     expect(screen.getByText("Local correction")).toBeVisible();
     expect(screen.getByText("Your correction", { exact: true })).toBeVisible();
-    expect(screen.getByRole("link", { name: "View source details" })).toHaveAttribute(
-      "href",
-      "/models/1?tab=source",
-    );
+    expect(
+      within(screen.getByRole("heading", { name: "Source and license" })).getByRole("link", {
+        name: "Source and license",
+      }),
+    ).toHaveAttribute("href", "/models/1?tab=source");
   });
 });

@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Model details lead with the next print action, group revisions and production costs under Print, and keep source files, publication data, and recorded results in their own sections. Opening a source or profile preserves the return to the original library view.
+- Model details lead with the next print action, group revisions and production costs under Print, and keep source files, publication data, and recorded results in their own sections. Opening a source or profile preserves the return to the original library view. The overview uses a compact print summary, an inline source heading link, and a pencil control for tags.
 
 ### Added
 

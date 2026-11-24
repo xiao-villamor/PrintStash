@@ -5980,6 +5980,5 @@
   "View source files": "Ver archivos fuente",
   "Back to overview": "Volver al resumen",
   "modelDetail.platesSummary": "{value1} placas. Abre la revisión para ver sus estimaciones.",
-  "modelDetail.sourceDetails": "Ver detalles del origen",
   "modelDetail.noCapturedPublication": "No se guardaron detalles de la publicación."
 }

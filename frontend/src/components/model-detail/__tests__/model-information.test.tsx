@@ -74,6 +74,12 @@ describe("ModelInformation", () => {
     show(null, true);
     expect(screen.getByRole("button", { name: /^Add tags to / })).toBeInTheDocument();
   });
+
+  it("places the compact tag editor beside the assigned tags", () => {
+    renderApp(<ModelInformation model={aModel({ tags: ["PLA"] })} canEdit onTags={() => {}} />);
+    expect(screen.getByText("PLA")).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Edit tags for / })).toHaveTextContent(/^$/);
+  });
 });
 
 describe("ModelGeometry", () => {

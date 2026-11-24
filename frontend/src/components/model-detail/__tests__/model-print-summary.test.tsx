@@ -13,7 +13,6 @@ function renderSummary(overrides: Partial<ComponentProps<typeof ModelPrintSummar
       source={undefined}
       estimates={null}
       selectedPlate={null}
-      results={null}
       onReview={() => {}}
       onFiles={() => {}}
       {...overrides}
@@ -22,7 +21,7 @@ function renderSummary(overrides: Partial<ComponentProps<typeof ModelPrintSummar
 }
 
 describe("ModelPrintSummary", () => {
-  it("shows estimated values with the recommended revision and test status", async () => {
+  it("presents the recommended revision as the route to its print details", async () => {
     const user = userEvent.setup();
     const prepare = vi.fn<() => void>();
     const review = vi.fn<() => void>();
@@ -39,18 +38,16 @@ describe("ModelPrintSummary", () => {
           material_type: "PLA",
         }),
       }),
-      results: 0,
       onPrepare: prepare,
       onReview: review,
     });
     const summary = within(screen.getByRole("region", { name: "Print status" }));
     expect(summary.getByText("Rev 2 · Wall mount")).toBeVisible();
     expect(summary.getByText("Needs test")).toBeVisible();
-    expect(summary.getByText(/G-code estimate · PLA · 34m 56s · 13.7/)).toBeVisible();
-    expect(summary.getByText("Recommended revision")).toBeVisible();
-    expect(summary.getByText(/No recorded prints/)).toBeVisible();
+    expect(summary.getByText("PLA · 34m 56s · 13.7 g")).toBeVisible();
+    expect(summary.getByRole("img", { name: "Recommended revision" })).toBeVisible();
     await user.click(summary.getByRole("button", { name: "Prepare print" }));
-    await user.click(summary.getByRole("button", { name: "View revision" }));
+    await user.click(summary.getByRole("button", { name: "Rev 2 · Wall mount" }));
     expect(prepare).toHaveBeenCalledOnce();
     expect(review).toHaveBeenCalledOnce();
   });

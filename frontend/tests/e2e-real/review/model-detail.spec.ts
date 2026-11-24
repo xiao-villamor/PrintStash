@@ -125,9 +125,7 @@ test.describe("Existing Model review", () => {
                 await expect(
                   inspector.getByRole("heading", { name: "Model details" }),
                 ).toBeVisible();
-                await expect(
-                  inspector.getByRole("button", { name: "View revision", exact: true }),
-                ).toBeVisible();
+                await expect(inspector.getByRole("button", { name: /^Rev \d+\b/ })).toBeVisible();
                 await expect(
                   inspector.getByRole("button", { name: "Prepare print", exact: true }),
                 ).toBeVisible();

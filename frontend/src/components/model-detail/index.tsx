@@ -1590,11 +1590,6 @@ function ModelDetailPresentation({
                       selectedPlate={
                         overviewRevision?.id === inspectedGcode?.id ? dispatchPlate : null
                       }
-                      results={
-                        printJobQuery.isSuccess && overviewRevision
-                          ? printJobs.filter((job) => job.file_id === overviewRevision.id).length
-                          : null
-                      }
                       source={sliceableFile}
                       onReview={inspectRecommended}
                       onPrepare={canViewPrinters ? prepareRecommended : undefined}

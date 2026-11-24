@@ -1,18 +1,25 @@
 import { Button } from "@/components/ui/button";
 import { SlicerOpenButton } from "@/components/slicer-open-button";
-import { formatDuration, formatGrams } from "@/lib/format";
+import { ChevronRight, Star } from "lucide-react";
+import { formatPlateEstimate } from "./format-plate-estimate";
 import { uiText } from "@/lib/locale";
 import type { GcodePlates } from "@/lib/api/plates";
 import type { FileRead } from "@/types";
 import { PlateEstimates } from "./plate-estimates";
 import { revisionStatusLabel } from "./presentation";
 
+const REVISION_STATUS_DOT = {
+  known_good: "bg-success",
+  needs_test: "bg-warning",
+  failed: "bg-destructive",
+  archived: "bg-muted-foreground",
+};
+
 export function ModelPrintSummary({
   revision,
   source,
   estimates,
   selectedPlate,
-  results,
   onReview,
   onPrepare,
   onAddRevision,
@@ -22,7 +29,6 @@ export function ModelPrintSummary({
   source: FileRead | undefined;
   estimates: GcodePlates | null;
   selectedPlate: number | null;
-  results: number | null;
   onReview: () => void;
   onPrepare?: () => void;
   onAddRevision?: () => void;
@@ -37,69 +43,84 @@ export function ModelPrintSummary({
     !revision?.original_filename.toLowerCase().endsWith(".3mf") || estimates !== null;
 
   return (
-    <section
-      aria-label={title}
-      className="space-y-3 border border-border bg-surface-container-low p-4"
-    >
-      <h2 className="text-base font-semibold">{title}</h2>
+    <section aria-label={title} className="space-y-3">
+      <h2 className="sr-only">{title}</h2>
       {revision ? (
         <>
-          <div className="space-y-1">
-            <p className="wrap-anywhere text-lg font-semibold">
-              {uiText("Rev {value1}", {
-                value1: String(revision.gcode_revision_number ?? revision.version),
-              })}
-              {revision.revision_label && ` · ${revision.revision_label}`}
-            </p>
-            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-              <span className="border border-border bg-surface-container-lowest px-2 py-0.5 font-medium">
-                {revisionStatusLabel(revision.revision_status)}
-              </span>
-              {revision.is_recommended && (
-                <span className="text-muted-foreground">{uiText("Recommended revision")}</span>
-              )}
-              {results === 0 && (
-                <span className="text-muted-foreground">· {uiText("No recorded prints")}</span>
-              )}
-            </p>
-          </div>
-          {multiPlate ? (
-            <>
-              {material && (
-                <p className="text-sm text-muted-foreground">
-                  {uiText("Material")} · {material}
+          <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={onReview}
+                  title={uiText("modelDetail.viewRevision")}
+                  className="-ms-1.5 h-auto min-h-8 max-w-full justify-start gap-1 whitespace-normal px-1.5 py-1 text-start text-base font-semibold underline-offset-4 hover:underline"
+                >
+                  <span className="min-w-0 wrap-anywhere">
+                    {uiText("Rev {value1}", {
+                      value1: String(revision.gcode_revision_number ?? revision.version),
+                    })}
+                    {revision.revision_label && ` · ${revision.revision_label}`}
+                  </span>
+                  <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                </Button>
+                {revision.is_recommended && (
+                  <span
+                    role="img"
+                    aria-label={uiText("Recommended revision")}
+                    title={uiText("Recommended revision")}
+                    className="inline-flex items-center text-muted-foreground"
+                  >
+                    <Star className="size-3.5" aria-hidden />
+                  </span>
+                )}
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                  <span
+                    aria-hidden
+                    className={`size-1.5 shrink-0 rounded-full ${revision.revision_status ? REVISION_STATUS_DOT[revision.revision_status] : "bg-muted-foreground"}`}
+                  />
+                  {revisionStatusLabel(revision.revision_status)}
+                </span>
+              </div>
+              {multiPlate ? (
+                material && (
+                  <p className="text-sm text-muted-foreground">
+                    {uiText("Material")} · {material}
+                  </p>
+                )
+              ) : showEstimate && (duration != null || weight != null) ? (
+                <p className="text-sm tabular-nums text-muted-foreground">
+                  <span className="sr-only">{uiText("modelDetail.gcodeEstimate")} </span>
+                  {[
+                    material,
+                    duration != null ? formatPlateEstimate("estimated_time_s", duration) : null,
+                    weight != null ? formatPlateEstimate("filament_weight_g", weight) : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </p>
-              )}
-              {estimates.plates.length <= 2 ? (
-                <PlateEstimates data={estimates} selected={selectedPlate} showCost={false} />
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {uiText("modelDetail.platesSummary", { value1: String(estimates.plates.length) })}
-                </p>
-              )}
-            </>
-          ) : showEstimate && (duration != null || weight != null) ? (
-            <p className="text-sm text-muted-foreground">
-              {uiText("modelDetail.gcodeEstimate")} ·{" "}
-              {[
-                material,
-                duration != null ? formatDuration(duration) : null,
-                weight != null ? formatGrams(weight) : null,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-2">
-            {onPrepare && <Button onClick={onPrepare}>{uiText("modelDetail.preparePrint")}</Button>}
-            <Button variant={onPrepare ? "outline" : "default"} onClick={onReview}>
-              {uiText("modelDetail.viewRevision")}
-            </Button>
+              ) : null}
+            </div>
+            {onPrepare && (
+              <Button size="sm" onClick={onPrepare}>
+                {uiText("modelDetail.preparePrint")}
+              </Button>
+            )}
           </div>
+          {multiPlate &&
+            (estimates.plates.length <= 2 ? (
+              <PlateEstimates data={estimates} selected={selectedPlate} showCost={false} />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {uiText("modelDetail.platesSummary", { value1: String(estimates.plates.length) })}
+              </p>
+            ))}
         </>
       ) : (
         <>
-          <p className="text-lg font-semibold">{uiText("No G-code revision")}</p>
+          <p className="text-base font-semibold">{uiText("No G-code revision")}</p>
           {source ? (
             <p className="wrap-anywhere text-sm text-muted-foreground">
               {source.original_filename} · {source.file_type.toUpperCase()}

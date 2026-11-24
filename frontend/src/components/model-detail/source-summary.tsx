@@ -4,8 +4,7 @@ import { Link } from "@/lib/link";
 import { useLocation } from "@tanstack/react-router";
 import { useSearchParams } from "@/lib/navigation";
 import { currentLocale, uiText } from "@/lib/locale";
-import { ArrowRight, ExternalLink } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ChevronRight, ExternalLink } from "lucide-react";
 import { safeHttpUrl } from "./source-url";
 import { sourceProviderName } from "./presentation";
 import { useUiLocale } from "@/lib/i18n";
@@ -80,7 +79,20 @@ export function ModelSourceSummary({
 
   return (
     <section aria-label={uiText("Source and license")} className="min-w-0 space-y-3">
-      <h2 className="text-base font-semibold">{uiText("Source and license")}</h2>
+      <h2 className="text-base font-semibold">
+        <Link
+          href={`/models/${modelId}?${params}`}
+          state={location.state}
+          replace
+          className="group inline-flex min-h-7 items-center gap-1.5 rounded-sm underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        >
+          {uiText("Source and license")}
+          <ChevronRight
+            className="size-4 text-muted-foreground group-hover:text-foreground"
+            aria-hidden
+          />
+        </Link>
+      </h2>
       {sources.length === 0 && query.isSuccess && (
         <p className="text-sm text-muted-foreground">
           {uiText("modelDetail.noCapturedPublication")}
@@ -126,22 +138,17 @@ export function ModelSourceSummary({
           </div>
         );
       })}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/models/${modelId}?${params}`} state={location.state} replace>
-            {uiText("modelDetail.sourceDetails")}
-            <ArrowRight className="size-3.5" aria-hidden />
-          </Link>
-        </Button>
-        {showLegacyLink && (
-          <Button asChild variant="ghost" size="sm">
-            <a href={legacyUrl} target="_blank" rel="noreferrer">
-              {uiText("Source model")}
-              <ExternalLink className="size-3.5" aria-hidden />
-            </a>
-          </Button>
-        )}
-      </div>
+      {showLegacyLink && (
+        <a
+          href={legacyUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex min-h-7 items-center gap-1.5 rounded-sm text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        >
+          {uiText("Source model")}
+          <ExternalLink className="size-3.5" aria-hidden />
+        </a>
+      )}
     </section>
   );
 }

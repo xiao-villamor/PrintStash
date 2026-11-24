@@ -1,6 +1,6 @@
 import { GeometryReport } from "./geometry-report";
 import { Fragment } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { meshGeometryFacts, type useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { currentLocale, uiText } from "@/lib/locale";
@@ -74,8 +74,11 @@ export function ModelInformation({
             ))}
             {canEdit && (
               <Button
-                size="sm"
-                variant="outline"
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                title={model.tags.length ? uiText("Edit tags") : uiText("Add tag")}
+                className="h-7 w-8 border border-dotted border-muted-foreground/70 text-muted-foreground hover:border-foreground"
                 aria-label={
                   model.tags.length
                     ? uiText("Edit tags for {value1}", { value1: model.name })
@@ -83,7 +86,7 @@ export function ModelInformation({
                 }
                 onClick={onTags}
               >
-                {model.tags.length ? uiText("Edit tags") : uiText("Add tags")}
+                <Pencil className="size-3.5" aria-hidden />
               </Button>
             )}
           </dd>
