@@ -6,6 +6,7 @@
   bottom: 12px;
   width: var(--workbench-sidebar-width);
   border: 1px solid var(--border);
+  border-radius: var(--radius-popover);
   box-shadow: 0 16px 40px var(--dialog-shadow);
   background: var(--card);
   color: var(--foreground);
@@ -14,6 +15,7 @@
 }
 .library-inspector-scroll {
   height: 100%;
+  border-radius: inherit;
   overflow-y: auto;
   overflow-anchor: none;
 }
@@ -500,9 +502,6 @@ details.library-inspector-section > summary {
   border: 1px solid var(--input);
   border-radius: var(--radius);
   font: 500 12px/1 var(--font-mono);
-}
-.library-inspector-rev-chip svg {
-  color: var(--warning);
 }
 .library-inspector-workspace .library-inspector-print-summary {
   padding-block: 0 14px;

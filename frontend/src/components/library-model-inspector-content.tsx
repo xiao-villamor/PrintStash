@@ -2,15 +2,7 @@
 
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  ArrowUpRight,
-  Box,
-  ChevronRight,
-  Download,
-  Loader2,
-  MoreHorizontal,
-  Star,
-} from "lucide-react";
+import { ArrowUpRight, Box, ChevronRight, Download, Loader2, MoreHorizontal } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { modelPrinterFilesOptions, useModelDetail } from "@/features/library/model-detail";
 import { downloadAuthenticatedFile, getAssetUrl, getModel, updateModel } from "@/lib/api";
@@ -460,7 +452,6 @@ export function InspectorContent({
             ) : (
               <span className="library-inspector-rev-chip">
                 {revisionName(file)}
-                {file.is_recommended && <Star className="size-3 fill-current" aria-hidden />}
               </span>
             )}
           </div>
