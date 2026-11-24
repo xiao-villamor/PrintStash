@@ -81,11 +81,35 @@ Primary actions and selected controls are deliberately different:
 - Orange belongs to `warning` or explicitly tertiary/status content. It is not
   an action or selection color.
 
+### Action hierarchy
+
+The model detail design proposes these rules; `Button` and the tokens do not
+implement them yet. Treat them as the target when that surface is built.
+
+- One filled primary per surface, chosen by the next step rather than by
+  position. In the model detail Print block, `Prepare print` is primary until
+  a print is sent; after `Send now` or `Add to queue`, `Record result` becomes
+  primary and `Prepare print` becomes outline. Both keep the same size, so the
+  swap does not move the layout.
+- An object shows at most two outline actions. The rest go in a `DropdownMenu`
+  behind a `⋮` icon button labelled "More actions for …". A destructive item
+  comes last, after a separator, with its label in `destructive`.
+- Trailing glyphs carry meaning: a down chevron opens a menu, the external icon
+  leaves PrintStash, and a right chevron navigates within the page.
+- A disabled primary keeps its color at reduced opacity and states its reason
+  as text beside it.
+- A confirmation toast offers the next step as its action: `Record result ›`
+  after sending, `View activity ›` after recording.
+
 ### Radius, type, elevation
 
-- Standard control and panel radii derive from `--radius` (zero):
-  `rounded-sm|md|DEFAULT|lg`. Circular avatars, status dots and count badges
-  remain circular where their shape communicates their role.
+- `--radius` in `frontend/src/globals.css` is `0px`, so
+  `rounded-sm|md|DEFAULT|lg` resolve to square corners today. The model detail
+  design proposes 6px for buttons, inputs and segmented controls, and 8px for
+  menus, popovers and toasts. Adopt it by changing the token and the
+  primitives together, not with per-component `rounded-[…]` values. Circular
+  avatars, status dots and count badges remain circular where their shape
+  communicates their role.
 - Type ramp adds `text-2xs` (0.6875rem) and `text-3xs` (0.625rem) for the mono
   label style. No `text-[11px]`.
 - Layering uses the named scale: `z-dropdown` (50) for menus and popovers,
