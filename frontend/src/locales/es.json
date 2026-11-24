@@ -5902,5 +5902,7 @@
   "Costing": "Costes",
   "A pricing template with that name already exists.": "Ya existe una plantilla de precios con ese nombre.",
   "Production costing is available for STL and G-code files.": "Puedes estimar costes de producción para archivos STL y G-code.",
-  "This record changed before your changes were saved.": "Este registro cambió antes de que se guardaran tus cambios."
+  "This record changed before your changes were saved.": "Este registro cambió antes de que se guardaran tus cambios.",
+  "Completed prints": "Impresiones completadas",
+  "Production cost breakdown": "Desglose del coste de producción"
 }

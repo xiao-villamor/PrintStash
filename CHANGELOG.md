@@ -19,6 +19,8 @@
 
 ### Changed
 
+- Costing shows the final price and the production cost side by side, with proportional bars for each expense. Statistics groups period totals above the activity chart and brings the first visible ranking alongside it on wide displays.
+
 - The full image builds Apache OpenDAL 0.59.5 (Python binding 0.47.12) for S3, WebDAV and Google Drive Library sources and backup replicas. Image builds now fail if a supported remote storage service is missing from the OpenDAL build.
 
 - Right-click a collection card to recreate thumbnails for the models directly in that collection.

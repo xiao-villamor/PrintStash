@@ -5902,5 +5902,7 @@
   "Costing": "Costing",
   "A pricing template with that name already exists.": "A pricing template with that name already exists.",
   "Production costing is available for STL and G-code files.": "Production costing is available for STL and G-code files.",
-  "This record changed before your changes were saved.": "This record changed before your changes were saved."
+  "This record changed before your changes were saved.": "This record changed before your changes were saved.",
+  "Completed prints": "Completed prints",
+  "Production cost breakdown": "Production cost breakdown"
 }

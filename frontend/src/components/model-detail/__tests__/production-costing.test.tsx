@@ -9,6 +9,48 @@ import { json, renderApp } from "@/test-support/render";
 import type { ArtifactCostingRead } from "@/types/production-costing";
 
 describe("ProductionCosting", () => {
+  it("renders an empty production breakdown for a zero-cost estimate", async () => {
+    const receipt: ArtifactCostingRead = {
+      ...anEditingBase(),
+      currency: "USD",
+      estimate: {
+        currency: "USD",
+        pieces: 1,
+        print_minutes: 20,
+        materials: [{ name: "PLA", grams: 20, cost_per_kg: 0, spool_id: null }],
+        printer: null,
+        pricing: { margin_percent: 0, tax_percent: 0 },
+      },
+      costs: {
+        material: 0,
+        amortization: 0,
+        maintenance: 0,
+        electricity: 0,
+        extra: 0,
+        production: 0,
+        price_before_tax: 0,
+        tax: 0,
+        final_price: 0,
+      },
+    };
+    renderApp(
+      <ProductionCosting
+        modelId={1}
+        files={[aRevision()]}
+        initialFileId={1}
+        jobs={[]}
+        canEdit={false}
+        admin={false}
+      />,
+      { routes: { "GET /api/v1/files/1/production-cost": json(receipt) } },
+    );
+
+    const summary = await screen.findByRole("region", { name: "Cost per piece" });
+    const fills = summary.querySelectorAll("[aria-hidden] > [style]");
+    expect(fills).toHaveLength(5);
+    for (const fill of fills) expect(fill).toHaveStyle({ transform: "scaleX(0)" });
+  });
+
   it("keeps the draft after a concurrent estimate edit", async () => {
     const url = "/api/v1/files/2/production-cost";
     const base: ArtifactCostingRead = {

@@ -149,6 +149,7 @@ test.describe("production costing", () => {
 
     await form.getByRole("button", { name: "Save estimate" }).click();
     const cost = page.getByRole("region", { name: "Cost per piece" });
+    await expect(cost.getByRole("heading", { name: "Production cost breakdown" })).toBeVisible();
     await expect(cost.getByText("3.6438", { exact: true })).toBeVisible();
     await page.reload();
     await expect(cost.getByText("3.6438", { exact: true })).toBeVisible();

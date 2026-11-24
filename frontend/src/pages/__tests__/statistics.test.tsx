@@ -157,6 +157,16 @@ describe("StatisticsPage", () => {
     });
   });
 
+  it("shows sub-hour printer workload without rounding it to zero", async () => {
+    renderStatistics({
+      stats: statistics({
+        top_printers: [{ printer_id: 4, name: "Voron", print_count: 1, print_time_s: 900 }],
+      }),
+    });
+
+    expect(await screen.findByText("15m 0s")).toBeVisible();
+  });
+
   describe("the reporting period", () => {
     it("asks for thirty days by default", async () => {
       const { requests } = renderStatistics();

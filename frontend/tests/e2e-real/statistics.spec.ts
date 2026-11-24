@@ -1,28 +1,24 @@
 /*
- * Empty Statistics periods need an actionable next step without implying a
- * server failure. The real desktop flow changes the reporting period and
- * follows the in-page action to printer management.
+ * Overview and Rankings share the reporting period. The real desktop flow
+ * checks the persisted selection across tabs without depending on the vault's
+ * starting print history.
  */
 import { test, expect } from "./helpers";
+import { collapseNavigationSidebar } from "./util";
 
 test.describe("Statistics", () => {
-  test("continues from empty Statistics to printer management", async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 1000 });
+  test("keeps the reporting period when switching to Rankings", async ({ page }) => {
     await page.goto("/statistics");
-    await page.getByRole("button", { name: "All time", exact: true }).click();
-    await expect(
-      page.getByText("No completed prints in this period.", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByText(
-        "Statistics use completed print jobs. Review the selected period or manage your printers.",
-        { exact: true },
-      ),
-    ).toBeVisible();
+    await collapseNavigationSidebar(page);
 
-    await page.getByRole("link", { name: "Manage printers", exact: true }).click();
+    const period = page.getByRole("combobox", { name: "Period" });
+    const result = page.waitForResponse((response) =>
+      response.url().includes("/models/stats/prints?period=all"),
+    );
+    await period.selectOption("all");
+    expect((await result).ok()).toBe(true);
 
-    await expect(page).toHaveURL(/\/printers$/);
-    await expect(page.getByRole("heading", { name: "Printers", exact: true })).toBeVisible();
+    await page.getByRole("tab", { name: "Rankings" }).click();
+    await expect(period).toHaveValue("all");
   });
 });

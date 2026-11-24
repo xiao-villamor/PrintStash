@@ -106,51 +106,80 @@ function toEstimate(draft: Draft, rates: PricingRates | null): ProductionInputs 
   return { pieces, print_minutes: minutes, materials, printer: draft.printer, pricing: rates };
 }
 
-const costLabels = [
+const costComponents = [
   ["material", "Filament"],
   ["amortization", "Amortization"],
   ["maintenance", "Maintenance"],
   ["electricity", "Electricity"],
   ["extra", "Additional hourly costs"],
-  ["production", "Production cost"],
-  ["price_before_tax", "Price before tax"],
-  ["tax", "Tax"],
-  ["final_price", "Final price"],
 ] as const satisfies readonly [keyof PieceCosts, string][];
 
 function CostBreakdown({ row }: { row: ArtifactCostingRead }) {
   if (!row.estimate || !row.costs) return null;
   const { costs, estimate } = row;
   const currency = estimate.currency;
+  const amount = (value: number) =>
+    formatNumber(value, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  const componentTotal = costComponents.reduce((total, [key]) => total + costs[key], 0);
   return (
-    <section className="space-y-3 border bg-muted/30 p-4" aria-label={uiText("Cost per piece")}>
-      <h3 className="text-sm font-semibold">
-        {uiText("Cost per piece")} · {currency}
-      </h3>
-      <p className="text-xs text-muted-foreground">
-        {uiText("Pieces per print")}: {estimate.pieces} · {uiText("Print time (minutes)")}:{" "}
-        {formatNumber(estimate.print_minutes, { maximumFractionDigits: 2 })}
-        {estimate.printer && ` · ${estimate.printer.name}`}
-      </p>
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        {costLabels.map(([key, label]) => {
-          const total = key === "production" || key === "final_price";
-          return (
-            <div
-              key={key}
-              className={`col-span-2 flex justify-between gap-3 ${total ? "border-t pt-2 font-semibold" : ""}`}
-            >
-              <dt>{uiText(label)}</dt>
-              <dd className="text-right tabular-nums">
-                {formatNumber(costs[key], { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+    <section className="min-w-0 border bg-card" aria-label={uiText("Cost per piece")}>
+      <div className="space-y-3 border-b bg-muted/30 p-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="text-sm font-semibold">{uiText("Cost per piece")}</h3>
+          <span className="font-mono text-xs text-muted-foreground">{currency}</span>
+        </div>
+        <dl className="grid grid-cols-2 gap-3">
+          <div className="min-w-0">
+            <dt className="text-xs text-muted-foreground">{uiText("Final price")}</dt>
+            <dd className="break-words text-2xl font-semibold tabular-nums">
+              {amount(costs.final_price)}
+            </dd>
+          </div>
+          <div className="min-w-0 border-s ps-3">
+            <dt className="text-xs text-muted-foreground">{uiText("Production cost")}</dt>
+            <dd className="break-words text-2xl font-semibold tabular-nums">
+              {amount(costs.production)}
+            </dd>
+          </div>
+        </dl>
+        <p className="break-words text-xs text-muted-foreground">
+          {uiText("Pieces per print")}: {estimate.pieces} · {uiText("Print time (minutes)")}:{" "}
+          {formatNumber(estimate.print_minutes, { maximumFractionDigits: 2 })}
+          {estimate.printer && ` · ${estimate.printer.name}`}
+        </p>
+      </div>
+      <div className="space-y-3 p-4">
+        <h4 className="text-xs font-semibold">{uiText("Production cost breakdown")}</h4>
+        <dl className="grid grid-cols-[minmax(0,1fr)_minmax(2rem,1fr)_auto] items-center gap-x-3 gap-y-2 text-xs">
+          {costComponents.map(([key, label]) => (
+            <div key={key} className="col-span-3 grid grid-cols-subgrid items-center">
+              <dt className="break-words">{uiText(label)}</dt>
+              <dd className="col-span-2 grid grid-cols-subgrid items-center">
+                <span aria-hidden="true" className="h-1.5 overflow-hidden bg-muted">
+                  <span
+                    className="block h-full origin-left bg-chart-blue rtl:origin-right"
+                    style={{
+                      transform: `scaleX(${componentTotal === 0 ? 0 : costs[key] / componentTotal})`,
+                    }}
+                  />
+                </span>
+                <span className="text-end font-mono tabular-nums">{amount(costs[key])}</span>
               </dd>
             </div>
-          );
-        })}
-      </dl>
-      {!estimate.printer && (
-        <p className="text-xs text-muted-foreground">{uiText("Machine expenses are excluded.")}</p>
-      )}
+          ))}
+        </dl>
+        {!estimate.printer && (
+          <p className="text-xs text-muted-foreground">
+            {uiText("Machine expenses are excluded.")}
+          </p>
+        )}
+        <dl className="grid grid-cols-[1fr_auto] gap-2 border-t pt-3 text-xs">
+          <dt className="text-muted-foreground">{uiText("Price before tax")}</dt>
+          <dd className="text-end font-mono tabular-nums">{amount(costs.price_before_tax)}</dd>
+          <dt className="text-muted-foreground">{uiText("Tax")}</dt>
+          <dd className="text-end font-mono tabular-nums">{amount(costs.tax)}</dd>
+        </dl>
+      </div>
     </section>
   );
 }
