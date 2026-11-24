@@ -160,19 +160,18 @@ test.describe("model detail", () => {
     await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await page.getByRole("tab", { name: /Activity/ }).click();
-    await page.getByRole("button", { name: /Add Record/ }).click();
+    await page.getByRole("button", { name: "Add record", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Add print record" });
 
-    // Free-text printer name path: pick "Other (not listed)…" and type a name.
-    await page
-      .locator("select")
-      .filter({ has: page.getByRole("option", { name: /Other \(not listed\)/ }) })
-      .selectOption("__adhoc__");
-    await page.getByPlaceholder("e.g. Garage Prusa MK4").fill(printerName);
+    await dialog.getByRole("button", { name: "Printer", exact: true }).click();
+    await page.getByRole("button", { name: "Other (not listed)…", exact: true }).click();
+    await dialog.getByRole("textbox", { name: "Printer name" }).fill(printerName);
+    await expect(dialog.getByRole("radio", { name: "Completed", exact: true })).toBeChecked();
 
-    // The G-code revision defaults to the model's only revision; result defaults
-    // to Completed. Save and confirm the record renders.
-    await page.getByRole("button", { name: /^Save$/ }).click();
-    await expect(page.getByText(printerName)).toBeVisible();
+    await dialog.getByRole("button", { name: "Save record", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByText(printerName, { exact: false })).toBeVisible();
   });
 
   test("edit a model's tags: Cancel discards, Save persists", async ({ page }) => {
