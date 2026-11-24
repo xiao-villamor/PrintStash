@@ -5,10 +5,7 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { FormField } from "@/components/ui/form-field";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  productionCostOptions,
-  useProductionCostCommands,
-} from "@/features/library/production-costing";
+import { productionCostOptions, useProductionCostCommands } from "@/features/library/model-detail";
 import { parseApiError, userMessage } from "@/lib/errors";
 import { formatNumber } from "@/lib/format";
 import { uiText } from "@/lib/locale";

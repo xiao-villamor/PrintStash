@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { FormField } from "@/components/ui/form-field";
 import { Input, inputClasses } from "@/components/ui/input";
-import { pricingTemplatesOptions } from "@/features/library/production-costing";
+import { pricingTemplatesOptions } from "@/features/library/model-detail";
 import { pricingPageSize } from "@/lib/api/production-costing";
 import { uiText } from "@/lib/locale";
 import type { PricingRates, PricingTemplate } from "@/types/production-costing";
