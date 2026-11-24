@@ -1690,7 +1690,7 @@ function ModelDetailPresentation({
 
                 {activeTab === "costing" && (
                   <ProductionCosting
-                    key={model.id}
+                    key={`costing-${model.id}`}
                     modelId={model.id}
                     files={model.files.filter(
                       (file) => file.file_type === "stl" || file.file_type === "gcode",
@@ -1885,7 +1885,11 @@ function ModelDetailPresentation({
                 )}
                 {canViewPrinters && printJobQuery.data && (
                   <PrintHistorySection
-                    key={historyDraft ? `${historyDraft.fileId}-${historyDraft.state}` : model.id}
+                    key={
+                      historyDraft
+                        ? `history-${historyDraft.fileId}-${historyDraft.state}`
+                        : `history-${model.id}`
+                    }
                     showHistory={activeTab === "history"}
                     modelName={model.name}
                     initialEntry={historyDraft}
