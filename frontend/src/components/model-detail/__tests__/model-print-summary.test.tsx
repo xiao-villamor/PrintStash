@@ -1,5 +1,5 @@
 import { renderApp } from "@/test-support/render";
-import { aMetadata, aRevision } from "@/test-support/factories";
+import { aMetadata, aModelPrintJob, aRevision } from "@/test-support/factories";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -88,6 +88,18 @@ describe("ModelPrintSummary", () => {
     });
     expect(screen.getByRole("button", { name: "Record result" })).toHaveClass("bg-primary");
     expect(screen.getByRole("button", { name: "Prepare print" })).not.toHaveClass("bg-primary");
+  });
+
+  it("offers to mark a Needs test revision known good after a successful print", async () => {
+    const mark = vi.fn<() => void>();
+    const revision = aRevision({ revision_status: "needs_test" });
+    renderSummary({
+      revision,
+      jobs: [aModelPrintJob({ file_id: revision.id, state: "completed" })],
+      onMarkKnownGood: mark,
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Mark known good" }));
+    expect(mark).toHaveBeenCalledOnce();
   });
 
   it("offers the source file and Add revision on an unsliced model", async () => {

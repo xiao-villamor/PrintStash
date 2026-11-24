@@ -51,15 +51,14 @@ test.describe("project-profile", () => {
         expect(artifact).toBeDefined();
         await page.goto(`/models/${modelId}?artifact=${artifact.id}`);
         await selectModelDetailTab(page, /^Files/);
-        const details = page.getByText("File details", { exact: true });
-        await details.click();
         const profile = page.getByRole("region", { name: "3MF project settings" });
         await expect(profile.getByText(printer, { exact: true })).toBeVisible({ timeout: 60000 });
         await expect(page.getByText(/This file contains mesh geometry only/)).toHaveCount(0);
-        await expect(profile.getByText("10 min · 12.5 g")).toBeVisible();
+        await expect(profile.getByText("10m 0s · 12.5 g")).toHaveCount(0);
         await expect(profile.getByText(/Estimates are not measured print results/)).toBeVisible();
+        await selectModelDetailTab(page, "Print settings");
+        await expect(profile.getByText("10m 0s · 12.5 g")).toBeVisible();
         await page.reload();
-        await details.click();
         await expect(profile.getByText(printer, { exact: true })).toBeVisible();
         const original = await page.request.get(`/api/v1/files/${artifact.id}/download`);
         expect(

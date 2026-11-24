@@ -5,7 +5,15 @@ import { uiText } from "@/lib/locale";
 import { formatPlateEstimate } from "./format-plate-estimate";
 
 /** Saved project-wide settings; object overrides and actual print results remain separate. */
-export function ProjectProfile({ modelId, fileId }: { modelId: number; fileId: number }) {
+export function ProjectProfile({
+  modelId,
+  fileId,
+  showPlateEstimates = true,
+}: {
+  modelId: number;
+  fileId: number;
+  showPlateEstimates?: boolean;
+}) {
   useUiLocale();
   const query = useProjectProfile(modelId, fileId);
   const profile = query.data?.profile;
@@ -39,24 +47,28 @@ export function ProjectProfile({ modelId, fileId }: { modelId: number; fileId: n
             <dt>{uiText("Infill")}</dt>
             <dd>{number(profile.infill_percent, "%")}</dd>
           </dl>
-          <p className="mt-2 text-xs font-medium">{uiText("Estimate included in the file")}</p>
-          {profile.plates.length ? (
-            profile.plates.map((plate) => (
-              <dl key={plate.number} className="model-information-facts">
-                <dt>{uiText("Plate {value1}", { value1: String(plate.number) })}</dt>
-                <dd>
-                  {plate.estimated_seconds == null
-                    ? unknown
-                    : formatPlateEstimate("estimated_time_s", plate.estimated_seconds)}{" "}
-                  ·{" "}
-                  {plate.filament_grams == null
-                    ? unknown
-                    : formatPlateEstimate("filament_weight_g", plate.filament_grams)}
-                </dd>
-              </dl>
-            ))
-          ) : (
-            <p className="text-xs text-muted-foreground">{unknown}</p>
+          {showPlateEstimates && (
+            <>
+              <p className="mt-2 text-xs font-medium">{uiText("Estimate included in the file")}</p>
+              {profile.plates.length ? (
+                profile.plates.map((plate) => (
+                  <dl key={plate.number} className="model-information-facts">
+                    <dt>{uiText("Plate {value1}", { value1: String(plate.number) })}</dt>
+                    <dd>
+                      {plate.estimated_seconds == null
+                        ? unknown
+                        : formatPlateEstimate("estimated_time_s", plate.estimated_seconds)}{" "}
+                      ·{" "}
+                      {plate.filament_grams == null
+                        ? unknown
+                        : formatPlateEstimate("filament_weight_g", plate.filament_grams)}
+                    </dd>
+                  </dl>
+                ))
+              ) : (
+                <p className="text-xs text-muted-foreground">{unknown}</p>
+              )}
+            </>
           )}
           <p className="mt-2 text-xs text-muted-foreground">
             {uiText(

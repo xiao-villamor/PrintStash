@@ -10,13 +10,14 @@ import { CheckCircle2, FileBox, XCircle } from "lucide-react";
 
 import { createManualPrintJob, getModelPrintJobs, importPrintJobsFromPrinter } from "@/lib/api";
 import { usePrinters, useSpoolmanStatus, useSpools } from "@/lib/queries";
-import { formatCost, formatDuration, formatGrams, timeAgo } from "@/lib/format";
+import { formatCost, formatGrams, timeAgo } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { FileRead, ModelPrintJobRead } from "@/types";
 import { PrintJobReproducibility } from "@/components/print-job-reproducibility";
 import { PrintJobCost } from "@/components/print-job-cost";
 import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
 
+import { formatPlateEstimate } from "./format-plate-estimate";
 import { PRINT_JOB_PRESENTATION } from "./presentation";
 import { Modal } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
@@ -380,7 +381,8 @@ export function PrintHistorySection({
                   {estimatedFilament != null && (
                     <div className="text-sm">
                       <p>
-                        {uiText("Filament estimate")} · {formatGrams(estimatedFilament)}
+                        {uiText("Filament estimate")} ·{" "}
+                        {formatPlateEstimate("filament_weight_g", estimatedFilament)}
                       </p>
                       <p className="text-muted-foreground">{uiText("G-code estimate")}</p>
                     </div>
@@ -625,10 +627,10 @@ export function PrintHistorySection({
                       <p className="text-xs text-on-surface-variant">
                         <span>{uiText("measured")}</span>
                         {job.actual_duration_s != null
-                          ? ` · ${formatDuration(job.actual_duration_s)}`
+                          ? ` · ${formatPlateEstimate("estimated_time_s", job.actual_duration_s)}`
                           : ""}
                         {job.filament_used_g != null
-                          ? ` · ${formatGrams(job.filament_used_g)}`
+                          ? ` · ${formatPlateEstimate("filament_weight_g", job.filament_used_g)}`
                           : ""}
                         {job.filament_cost != null && job.production_cost == null
                           ? ` · ${formatCost(job.filament_cost)}`

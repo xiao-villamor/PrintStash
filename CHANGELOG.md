@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Model details lead with the next print action, group revisions and production costs under Print, and keep source files, publication data, and recorded results in their own sections. Opening a source or profile preserves the return to the original library view. The overview uses a compact print summary, an inline source heading link, and a pencil control for tags.
+- Model details lead with the next print action, group revisions and production costs under Print, and keep source files, publication data, and recorded results in their own sections. Opening a source or profile preserves the return to the original library view. Overview shows the current revision, the estimate source, and the next print action. Tags save from the inline picker, and Prepare print carries over the selected preview plate.
 
 ### Added
 
@@ -25,6 +25,8 @@
 - Cover and plate work refills in batches during imports. When a GPU is ready to render covers, discovery can start one large cover early in each batch.
 
 ### Changed
+
+- Controls use 6px corners, floating menus and dialogs use 8px corners, and cards and panels stay square.
 
 - Model preview places its controls inside the viewer and uses an icon button for screenshots.
 

@@ -1737,6 +1737,11 @@ function ModelDetailPresentation({
                         </Button>
                       ) : undefined
                     }
+                    sourceProject={
+                      !printSettingsFile && meshFile?.file_type === "3mf" ? (
+                        <ProjectProfile modelId={model.id} fileId={meshFile.id} />
+                      ) : undefined
+                    }
                     plateEstimates={slicedEstimates}
                     selectedSlicedPlate={selectedEstimatePlate}
                     headerActions={
@@ -1859,7 +1864,11 @@ function ModelDetailPresentation({
                         file.file_type === "3mf" || meshFile?.id === file.id ? (
                           <>
                             {file.file_type === "3mf" && (
-                              <ProjectProfile modelId={model.id} fileId={file.id} />
+                              <ProjectProfile
+                                modelId={model.id}
+                                fileId={file.id}
+                                showPlateEstimates={false}
+                              />
                             )}
                             {meshFile?.id === file.id && (
                               <ModelGeometry
