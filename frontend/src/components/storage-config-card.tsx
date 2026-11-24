@@ -624,6 +624,7 @@ export function StorageConfigCard({
           )}
         </div>
         <ConfirmModal
+          variant="default"
           open={enrollment !== null && !denied}
           onClose={() => {
             if (!enrolling) setEnrollment(null);

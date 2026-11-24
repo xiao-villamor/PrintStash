@@ -370,6 +370,7 @@ export function PrintersPage() {
                           row={fleetRows.get(printer.id)}
                           artworkPreference={artworkPreference}
                           onSettings={() => setSettingsTarget(printer)}
+                          onRemove={() => setDeleteTarget(printer)}
                         />
                       ))}
                     </div>
@@ -630,11 +631,13 @@ function FleetPrinterCard({
   row,
   artworkPreference,
   onSettings,
+  onRemove,
 }: {
   printer: PrinterRead;
   row: FleetPrinterRow | undefined;
   artworkPreference: PrinterArtworkPreference;
   onSettings: () => void;
+  onRemove: () => void;
 }) {
   const hold = routingHold(printer, row);
   const progress = row?.progress == null ? null : row.progress * 100;
@@ -787,9 +790,19 @@ function FleetPrinterCard({
           )}
         </div>
         {printer.access.can_admin && (
-          <Button variant="outline" size="xs" className="relative z-20" onClick={onSettings}>
-            {uiText("Settings")}
-          </Button>
+          <div className="relative z-20 flex shrink-0 items-center gap-1">
+            <Button variant="outline" size="xs" onClick={onSettings}>
+              {uiText("Settings")}
+            </Button>
+            <Button
+              variant="danger"
+              size="xs"
+              onClick={onRemove}
+              aria-label={uiText("Remove printer")}
+            >
+              {uiText("Remove")}
+            </Button>
+          </div>
         )}
       </div>
     </article>

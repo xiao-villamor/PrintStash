@@ -706,6 +706,7 @@ function BackgroundWorkView({
 
       <ConfirmModal
         open={pending !== null}
+        variant={pending?.kind === "regenerate" ? "default" : "destructive"}
         onClose={() => setPending(null)}
         onConfirm={confirmPending}
         busy={busy.has("confirm")}

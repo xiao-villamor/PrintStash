@@ -613,36 +613,51 @@ describe("PrintersPage", () => {
     });
 
     it("asks before removing", async () => {
-      // Removing a printer takes its access grants and its job history with it.
       renderPrintersPage({ printers: [makePrinter()] });
 
-      await userEvent.click(screen.getByRole("button", { name: "Settings" }));
-      await userEvent.click(await screen.findByRole("button", { name: /Remove/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Remove printer" }));
 
+      expect(screen.getByRole("dialog", { name: "Remove printer?" })).toBeInTheDocument();
       expect(requestsWithMethod("DELETE")).toHaveLength(0);
     });
 
-    it("names the printer it is about to remove", async () => {
+    it("keeps removal available from connection settings", async () => {
       renderPrintersPage({ printers: [makePrinter()] });
 
       await userEvent.click(screen.getByRole("button", { name: "Settings" }));
-      await userEvent.click(await screen.findByRole("button", { name: /Remove/ }));
+      const settings = screen.getByRole("dialog", { name: "Edit printer connection" });
+      await userEvent.click(
+        await within(settings).findByRole("button", { name: "Remove printer" }),
+      );
 
       expect(
         await screen.findByText('"Voron 2.4" will be removed from PrintStash.'),
       ).toBeInTheDocument();
     });
 
-    it("removes it once confirmed", async () => {
+    it("keeps the printer when removal is canceled", async () => {
       renderPrintersPage({ printers: [makePrinter()] });
-      await userEvent.click(screen.getByRole("button", { name: "Settings" }));
-      await userEvent.click(await screen.findByRole("button", { name: /Remove/ }));
-      const dialog = await screen.findByRole("dialog");
 
+      await userEvent.click(screen.getByRole("button", { name: "Remove printer" }));
+      const dialog = screen.getByRole("dialog", { name: "Remove printer?" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+      expect(screen.getByRole("link", { name: "Voron 2.4" })).toBeVisible();
+      expect(requestsWithMethod("DELETE")).toHaveLength(0);
+    });
+
+    it("removes the selected printer once confirmed", async () => {
+      renderPrintersPage({
+        printers: [makePrinter(), makePrinter({ id: 2, name: "Lab Klipper" })],
+      });
+      const card = screen.getByRole("link", { name: "Lab Klipper" }).closest("article");
+      await userEvent.click(within(card!).getByRole("button", { name: "Remove printer" }));
+      const dialog = await screen.findByRole("dialog", { name: "Remove printer?" });
+      expect(dialog).toHaveAccessibleDescription('"Lab Klipper" will be removed from PrintStash.');
       await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
 
       await waitFor(() => expect(requestsWithMethod("DELETE")).toHaveLength(1));
-      expect(requestsWithMethod("DELETE")[0]!.url).toBe("/api/v1/printers/1");
+      expect(requestsWithMethod("DELETE")[0]!.url).toBe("/api/v1/printers/2");
     });
 
     it("offers no removal to somebody who may not administer it", async () => {

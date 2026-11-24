@@ -559,7 +559,7 @@ describe("SettingsPanel", () => {
         },
       });
       await openPasswordReset();
-      await user.type(await screen.findByPlaceholderText("New password"), "Password123");
+      await user.type(await screen.findByLabelText("New password"), "Password123");
 
       await user.click(
         within(screen.getByRole("dialog", { name: "Reset password" })).getByRole("button", {
@@ -582,7 +582,7 @@ describe("SettingsPanel", () => {
       });
 
       await openPasswordReset();
-      await user.type(await screen.findByPlaceholderText("New password"), "short");
+      await user.type(await screen.findByLabelText("New password"), "short");
 
       expect(
         within(screen.getByRole("dialog", { name: "Reset password" })).getByRole("button", {
@@ -3759,7 +3759,7 @@ describe("Settings account draft lifetime", () => {
       },
     });
     await openPasswordReset();
-    const field = await screen.findByPlaceholderText("New password");
+    const field = await screen.findByLabelText("New password");
     fireEvent.change(field, { target: { value: "OldFakePassword123" } });
     await userEvent.click(
       within(screen.getByRole("dialog", { name: "Reset password" })).getByRole("button", {
@@ -3775,7 +3775,7 @@ describe("Settings account draft lifetime", () => {
       expect(screen.queryByRole("dialog", { name: "Reset password" })).not.toBeInTheDocument(),
     );
     await openPasswordReset();
-    expect(await screen.findByPlaceholderText("New password")).toHaveValue("NextFakePassword123");
+    expect(await screen.findByLabelText("New password")).toHaveValue("NextFakePassword123");
     expect(JSON.parse(app.requestsWithMethod("POST")[0].body).password).toBe("OldFakePassword123");
   });
   it("dismisses the one-time key receipt without revoking its key", async () => {

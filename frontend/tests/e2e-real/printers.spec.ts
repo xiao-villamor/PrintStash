@@ -42,6 +42,7 @@ test.describe("printers", () => {
   test("add and remove a printer", async ({ page }) => {
     const name = `e2e-printer-${Date.now()}`;
     await page.goto("/printers");
+    await collapseNavigationSidebar(page);
     await expect(page.getByRole("heading", { name: "Printers" })).toBeVisible();
 
     await page.getByRole("button", { name: "Add printer" }).click();
@@ -49,7 +50,7 @@ test.describe("printers", () => {
       .getByRole("dialog", { name: "Add printer", exact: true })
       .getByLabel("Name", { exact: true })
       .fill(name);
-    await page.getByPlaceholder("http://printer.local:7125").fill("http://127.0.0.1:7125");
+    await page.getByPlaceholder("http://printer.local:7125").fill("http://127.0.0.1:13");
     await page.getByRole("button", { name: "Add printer" }).last().click();
 
     const card = page.getByRole("link", { name: new RegExp(name) });
@@ -59,14 +60,29 @@ test.describe("printers", () => {
     await page.reload();
     await expect(page.getByRole("link", { name: new RegExp(name) })).toBeVisible();
 
-    // Remove through connection settings and the shared confirmation dialog.
-    await card.locator("xpath=ancestor::article").getByRole("button", { name: "Settings" }).click();
-    await page
-      .getByRole("dialog", { name: "Edit printer connection" })
+    await card
+      .locator("xpath=ancestor::article")
       .getByRole("button", { name: "Remove printer", exact: true })
       .click();
-    await page.getByRole("dialog").getByRole("button", { name: "Remove" }).click();
-    await expect(page.getByRole("link", { name: new RegExp(name) })).toHaveCount(0);
+    const confirmation = page.getByRole("dialog", { name: "Remove printer?" });
+    await expect(confirmation).toHaveAccessibleDescription(
+      `"${name}" will be removed from PrintStash.`,
+    );
+    const path = await card.getAttribute("href");
+    const removed = page.waitForResponse(
+      (reply) =>
+        new URL(reply.url()).pathname === `/api/v1${path}` && reply.request().method() === "DELETE",
+    );
+    await confirmation.getByRole("button", { name: "Remove", exact: true }).click();
+    expect((await removed).status()).toBe(204);
+    await expect(card).toHaveCount(0);
+    const refreshed = page.waitForResponse(
+      (reply) =>
+        new URL(reply.url()).pathname === "/api/v1/printers" && reply.request().method() === "GET",
+    );
+    await page.reload();
+    expect((await refreshed).ok()).toBe(true);
+    await expect(card).toHaveCount(0);
   });
 });
 

@@ -532,6 +532,7 @@ export function MaintenancePanel() {
         onClose={() => setRepairTarget(null)}
         onConfirm={() => void confirmRepair()}
         title={uiText("Repair this finding?")}
+        variant="default"
         description={uiText(
           "PrintStash will apply the targeted repair and record the action in the audit log. Original Artifact bytes are never replaced by thumbnail or metadata repairs.",
         )}

@@ -486,6 +486,16 @@ beside ordinary ones (neutral outline, label in `destructive`). The filled
 dialog. Buttons carry text, not decorative leading icons, and are never
 uppercase.
 
+Use `ConfirmModal` for a warning that asks the user to approve an action. The
+compact dialog puts the consequence below its question, with Cancel followed by
+the named action in the footer. Cancel receives keyboard focus and the dialog
+stays open while a submitted action is pending. Use the filled destructive
+button for removal, loss of work, or an explicit safety override. Use the
+primary button for confirmations that enable, enroll, restart, or review.
+Confirmations that need a field use the same dialog with the standard inputs.
+Warnings with multiple outcomes use the confirmation variant of `Modal` with
+their actions in the footer.
+
 **Settings** composes one more layer from `frontend/src/components/`:
 `settings-card.tsx` (`SettingsCard`, `SettingsGroupHead`, `SettingsSwitch`,
 `SettingsNotice`, `SettingsStatus`) and `settings-controls.ts`

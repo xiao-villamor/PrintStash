@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import { Button } from "./button";
 import { Modal } from "./modal";
 
@@ -14,6 +16,9 @@ export interface ConfirmModalProps {
   cancelLabel: string;
   confirmLabel: string;
   busy?: boolean;
+  variant?: "default" | "destructive";
+  confirmDisabled?: boolean;
+  children?: ReactNode;
 }
 
 export function ConfirmModal({
@@ -26,6 +31,9 @@ export function ConfirmModal({
   cancelLabel,
   confirmLabel,
   busy = false,
+  variant = "destructive",
+  confirmDisabled = false,
+  children,
 }: ConfirmModalProps) {
   return (
     <Modal
@@ -33,19 +41,33 @@ export function ConfirmModal({
       onClose={onClose}
       closeLabel={closeLabel}
       title={title}
-      className="max-w-120"
+      description={description}
+      variant="confirmation"
+      dismissible={!busy}
       footer={
         <>
-          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            disabled={busy}
+            data-autofocus={busy ? undefined : ""}
+          >
             {cancelLabel}
           </Button>
-          <Button type="button" variant="destructive" onClick={onConfirm} loading={busy}>
+          <Button
+            type="button"
+            variant={variant}
+            onClick={onConfirm}
+            loading={busy}
+            disabled={confirmDisabled}
+          >
             {confirmLabel}
           </Button>
         </>
       }
     >
-      <p className="wrap-anywhere text-sm leading-normal text-muted-foreground">{description}</p>
+      {children}
     </Modal>
   );
 }

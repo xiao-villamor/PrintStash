@@ -1250,6 +1250,7 @@ function AdminLibrarySourcesPanel({
             onClose={() => {
               if (busyId === null) setEnrollTarget(null);
             }}
+            variant="default"
             title={uiText("Enroll mounted source root?")}
             description={
               (enrollTarget

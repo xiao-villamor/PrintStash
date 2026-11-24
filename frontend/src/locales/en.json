@@ -662,6 +662,7 @@
   "Initial password": "Initial password",
   "New password": "New password",
   "Reset password": "Reset password",
+  "Set a new password for {value1}.": "Set a new password for {value1}.",
   "Revoke API key": "Revoke API key",
   "Copy API key": "Copy API key",
   "Copy OrcaSlicer post-processing command": "Copy OrcaSlicer post-processing command",

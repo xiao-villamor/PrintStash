@@ -57,6 +57,45 @@ describe("ConfirmModal", () => {
     expect(document.getElementById(labelledBy!)).toHaveTextContent("Remove model?");
   });
 
+  it("announces the consequence with the dialog", () => {
+    open();
+
+    expect(screen.getByRole("dialog")).toHaveAccessibleDescription("This cannot be undone.");
+  });
+
+  it("starts keyboard focus on the safe action", () => {
+    open();
+
+    expect(screen.getByRole("button", { name: "Keep model" })).toHaveFocus();
+  });
+
+  it("uses the destructive color pair for destruction", () => {
+    open();
+
+    expect(screen.getByRole("button", { name: "Remove model" })).toHaveClass(
+      "bg-destructive",
+      "text-destructive-foreground",
+    );
+  });
+
+  it("uses the primary color pair for an ordinary confirmation", () => {
+    open({ variant: "default", confirmLabel: "Enable" });
+
+    expect(screen.getByRole("button", { name: "Enable" })).toHaveClass(
+      "bg-primary",
+      "text-primary-foreground",
+    );
+  });
+
+  it("waits for a valid field before allowing confirmation", () => {
+    const handlers = open({ confirmDisabled: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove model" }));
+
+    expect(handlers.onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Keep model" })).toBeEnabled();
+  });
+
   it("dismisses without acting when the cancel button is pressed", () => {
     const handlers = open();
 
@@ -95,6 +134,20 @@ describe("ConfirmModal", () => {
     const handlers = open({ busy: true });
 
     fireEvent.click(screen.getByRole("button", { name: "Keep model" }));
+
+    expect(handlers.onClose).not.toHaveBeenCalled();
+  });
+
+  it("disables the close control while the request is in flight", () => {
+    open({ busy: true });
+
+    expect(screen.getByRole("button", { name: "Dismiss dialog" })).toBeDisabled();
+  });
+
+  it("keeps an in-flight confirmation open on Escape", () => {
+    const handlers = open({ busy: true });
+
+    fireEvent.keyDown(window, { key: "Escape" });
 
     expect(handlers.onClose).not.toHaveBeenCalled();
   });

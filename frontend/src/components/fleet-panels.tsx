@@ -459,20 +459,28 @@ export function FleetQueuePanel({
         />
         <Modal
           open={resolveTarget !== null}
-          onClose={() => {
-            if (busy !== resolveTarget?.id) setResolveTarget(null);
-          }}
+          variant="confirmation"
+          dismissible={resolveTarget === null || busy !== resolveTarget.id}
+          onClose={() => setResolveTarget(null)}
           title={uiText("Resolve stale job")}
-        >
-          {resolveTarget && (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                {uiText(
-                  "Use this only when the printer is no longer running {value1}. This updates PrintStash history; it does not send a command to the printer.",
-                  { value1: String(resolveTarget.remote_filename) },
-                )}
-              </p>
-              <div className="flex flex-wrap justify-end gap-2">
+          description={
+            resolveTarget &&
+            uiText(
+              "Use this only when the printer is no longer running {value1}. This updates PrintStash history; it does not send a command to the printer.",
+              { value1: String(resolveTarget.remote_filename) },
+            )
+          }
+          footer={
+            resolveTarget && (
+              <>
+                <Button
+                  variant="outline"
+                  disabled={busy === resolveTarget.id}
+                  data-autofocus={busy === resolveTarget.id ? undefined : ""}
+                  onClick={() => setResolveTarget(null)}
+                >
+                  {uiText("Cancel")}
+                </Button>
                 <Button
                   variant="outline"
                   disabled={busy === resolveTarget.id}
@@ -481,16 +489,15 @@ export function FleetQueuePanel({
                   {uiText("Mark cancelled")}
                 </Button>
                 <Button
-                  variant="destructive"
                   disabled={busy === resolveTarget.id}
                   onClick={() => void resolveAs("failed")}
                 >
                   {uiText("Mark failed")}
                 </Button>
-              </div>
-            </div>
-          )}
-        </Modal>
+              </>
+            )
+          }
+        />
         <Modal
           open={editTarget !== null && draft !== null}
           onClose={() => {

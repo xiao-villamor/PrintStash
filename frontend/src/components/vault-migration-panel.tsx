@@ -936,6 +936,9 @@ export function VaultMigrationPanel() {
         )}
         <ConfirmModal
           open={confirmation !== null && !denied}
+          variant={
+            confirmation === "source" || confirmation === "discard" ? "destructive" : "default"
+          }
           onClose={() => {
             if (!busy) setConfirmation(null);
           }}

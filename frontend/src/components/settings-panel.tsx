@@ -124,7 +124,7 @@ import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { TabBar } from "@/components/ui/tabs";
-import { inputClasses } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Localized } from "@/components/ui/localized";
 import { translateUiText } from "@/lib/locale";
@@ -2464,6 +2464,7 @@ export function SettingsPanel() {
       <div className="w-full space-y-6">
         <ConfirmModal
           open={restartConfirmOpen}
+          variant="default"
           onClose={() => {
             if (!restartBusy) setRestartConfirmOpen(false);
           }}
@@ -2528,6 +2529,7 @@ export function SettingsPanel() {
         />
         <ConfirmModal
           open={purgeExpiredOpen}
+          variant="default"
           onClose={() => setPurgeExpiredOpen(false)}
           onConfirm={createExpiredGcPreview}
           busy={trashBusy === "gc"}
@@ -2569,6 +2571,7 @@ export function SettingsPanel() {
         />
         <ConfirmModal
           open={adoptTarget !== null}
+          variant="default"
           onClose={() => {
             if (!adoptingBackup) setAdoptTarget(null);
           }}
@@ -2588,6 +2591,7 @@ export function SettingsPanel() {
         />
         <ConfirmModal
           open={adoptS3Target !== null}
+          variant="default"
           onClose={() => {
             if (!adoptingS3Backup) setAdoptS3Target(null);
           }}
@@ -2607,6 +2611,7 @@ export function SettingsPanel() {
         />
         <ConfirmModal
           open={adoptRemoteTarget !== null}
+          variant="default"
           onClose={() => {
             if (!adoptingRemoteBackup) setAdoptRemoteTarget(null);
           }}
@@ -2626,6 +2631,7 @@ export function SettingsPanel() {
         />
         <ConfirmModal
           open={printerImageWarningOpen}
+          variant="default"
           onClose={() => setPrinterImageWarningOpen(false)}
           onConfirm={() => {
             updatePrinterCardImagePreference(true);
@@ -3387,15 +3393,27 @@ export function SettingsPanel() {
                                   </button>
                                 </div>
                               </div>
-                              <Modal
+                              <ConfirmModal
                                 open={passwordTarget === row.id}
-                                onClose={() => {
-                                  if (usersBusy !== row.id) setPasswordTarget(null);
-                                }}
+                                onClose={() => setPasswordTarget(null)}
+                                onConfirm={() => void resetUserPassword(row.id)}
+                                variant="default"
+                                busy={usersBusy === row.id}
                                 title={uiText("Reset password")}
+                                description={uiText("Set a new password for {value1}.", {
+                                  value1: row.username,
+                                })}
+                                confirmLabel={uiText("Reset password")}
+                                confirmDisabled={
+                                  usersBusy !== null ||
+                                  usersQuery.isError ||
+                                  usersQuery.isPending ||
+                                  (passwordDrafts[row.id]?.trim().length ?? 0) < 8
+                                }
                               >
-                                <div className="grid gap-3">
-                                  <input
+                                <label className="grid gap-2 text-sm font-medium">
+                                  {uiText("New password")}
+                                  <Input
                                     value={passwordDrafts[row.id] ?? ""}
                                     onChange={(event) =>
                                       setPasswordDrafts((current) => ({
@@ -3403,26 +3421,11 @@ export function SettingsPanel() {
                                         [row.id]: event.target.value,
                                       }))
                                     }
-                                    className={INPUT}
                                     type="password"
-                                    placeholder={uiText("New password")}
-                                    aria-label={uiText("New password")}
+                                    autoComplete="new-password"
                                   />
-                                  <button
-                                    type="button"
-                                    onClick={() => resetUserPassword(row.id)}
-                                    disabled={
-                                      usersBusy !== null ||
-                                      usersQuery.isError ||
-                                      usersQuery.isPending ||
-                                      (passwordDrafts[row.id]?.trim().length ?? 0) < 8
-                                    }
-                                    className={BTN_SECONDARY}
-                                  >
-                                    {uiText("Reset password")}
-                                  </button>
-                                </div>
-                              </Modal>
+                                </label>
+                              </ConfirmModal>
                             </div>
                           ))
                         )}
