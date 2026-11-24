@@ -317,6 +317,38 @@ describe("loaded extension", () => {
     await browser.$("#tab-capture").click();
   });
 
+  it("renders only the configured launcher label", async () => {
+    await browser.$("#tab-settings").click();
+    for (const [variant, label] of [
+      ["icon", ""],
+      ["icon-and-label", "Import"],
+      ["edge-tab", ""],
+    ]) {
+      await browser.$(`label:has([name="launcher-variant"][value="${variant}"])`).click();
+      const preview = `#launcher-preview[data-variant="${variant}"] .launcher`;
+      await browser.$(preview).waitForExist();
+      const state = await browser.execute((selector) => {
+        const button = document.querySelector(selector)!;
+        return {
+          hasHoverLabel: button.textContent?.includes("Import to PrintStash"),
+          visibleText: Array.from(button.children)
+            .filter((child) => child.checkVisibility({ visibilityProperty: true }))
+            .map((child) => child.textContent)
+            .join(""),
+          tooltip: button.getAttribute("title"),
+          accessibleName: button.getAttribute("aria-label"),
+        };
+      }, preview);
+      assert.deepEqual(state, {
+        hasHoverLabel: false,
+        visibleText: label,
+        tooltip: null,
+        accessibleName: "Import to PrintStash",
+      });
+    }
+    await browser.$("#tab-capture").click();
+  });
+
   it("opens packaged help from the installed popup", async () => {
     const previousHandles = await browser.getWindowHandles();
 

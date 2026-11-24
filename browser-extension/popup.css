@@ -899,10 +899,6 @@ main:has(#view-settings:not([hidden])) {
   --launcher-size: 40px;
 }
 
-.launcher-preview .launcher .launcher-hint {
-  display: none;
-}
-
 .launcher-preview[data-variant="edge-tab"] .launcher {
   justify-self: end;
   margin-inline-end: -1px;

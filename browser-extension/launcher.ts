@@ -23,12 +23,7 @@ export function launcherButton(iconUrl: string) {
   label.textContent = "Import";
   label.setAttribute("aria-hidden", "true");
 
-  const hint = document.createElement("span");
-  hint.className = "launcher-hint";
-  hint.textContent = "Import to PrintStash";
-  hint.setAttribute("aria-hidden", "true");
-
-  button.append(mark, close, label, hint);
+  button.append(mark, close, label);
   return button;
 }
 
