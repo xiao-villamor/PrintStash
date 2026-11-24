@@ -24,6 +24,21 @@ async function openNewConnection() {
 }
 
 describe("RemoteStorageConnections", () => {
+  it("discards a new connection from Cancel", async () => {
+    const { requestsWithMethod } = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage-connections": json([]),
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+      },
+    });
+    const dialog = await openNewConnection();
+    await userEvent.type(within(dialog).getByLabelText("Connection name"), "Draft connection");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+
+    expect(requestsWithMethod("POST")).toHaveLength(0);
+  });
+
   it("explains disabled transport selection", async () => {
     const view = renderApp(<RemoteStorageConnections />, {
       routes: {

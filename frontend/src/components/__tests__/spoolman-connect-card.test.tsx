@@ -201,8 +201,8 @@ describe("SpoolmanConnectCard", () => {
       await userEvent.click(screen.getByRole("button", { name: "Use latest version" }));
       expect(await screen.findByDisplayValue("http://current.test")).toBeVisible();
       expect(
-        screen.getByRole("combobox", { name: /Write consumption back to Spoolman/ }),
-      ).toHaveValue("enabled");
+        screen.getByRole("switch", { name: /Write consumption back to Spoolman/ }),
+      ).toBeChecked();
       expect(screen.queryByDisplayValue("********")).not.toBeInTheDocument();
       expect(app.client.getQueryData(queryKeys.spoolmanStatus)).toMatchObject({ edit_version: 3 });
       expect(app.requestsWithMethod("PUT")).toHaveLength(1);
@@ -412,10 +412,7 @@ describe("SpoolmanConnectCard", () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderCard({ status: aStatus({ enabled: false }) });
 
-      await user.selectOptions(
-        await screen.findByRole("combobox", { name: /Enable Spoolman/ }),
-        "enabled",
-      );
+      await user.click(await screen.findByRole("switch", { name: /Enable Spoolman/ }));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
@@ -429,8 +426,8 @@ describe("SpoolmanConnectCard", () => {
       // except confuse the operator.
       renderCard({ status: aStatus({ enabled: false }) });
 
-      await screen.findByRole("combobox", { name: /Enable Spoolman/ });
-      expect(screen.queryByRole("combobox", { name: /Write consumption/ })).toBeNull();
+      await screen.findByRole("switch", { name: /Enable Spoolman/ });
+      expect(screen.queryByRole("switch", { name: /Write consumption/ })).toBeNull();
     });
 
     it("turns write-back on separately", async () => {
@@ -438,10 +435,7 @@ describe("SpoolmanConnectCard", () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderCard();
 
-      await user.selectOptions(
-        await screen.findByRole("combobox", { name: /Write consumption/ }),
-        "enabled",
-      );
+      await user.click(await screen.findByRole("switch", { name: /Write consumption/ }));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
@@ -491,7 +485,7 @@ describe("SpoolmanConnectCard", () => {
         seed: [[queryKeys.spools, [{ id: 7, filament_name: "PETG black", remaining_weight: 800 }]]],
       });
 
-      await screen.findByRole("combobox", { name: /Enable Spoolman/ });
+      await screen.findByRole("switch", { name: /Enable Spoolman/ });
       expect(screen.queryByText(/PETG black/)).toBeNull();
     });
   });

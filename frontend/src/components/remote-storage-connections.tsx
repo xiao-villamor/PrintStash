@@ -696,7 +696,49 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                 ? uiText("Edit {value1}", { value1: String(editing.name) })
                 : uiText("Add remote connection")
             }
+            dismissible={busy === null}
             className="max-w-3xl"
+            footer={
+              <>
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  disabled={busy !== null}
+                  onClick={resetForm}
+                >
+                  {uiText(editing ? "Cancel editing" : "Cancel")}
+                </Button>
+                {catalogueFailed && (
+                  <p className="mr-auto text-xs text-muted-foreground">
+                    {i18n?.t("storage.operationUnavailable") ??
+                      uiText("Storage information is unavailable. Reload to try again.")}
+                  </p>
+                )}
+                <Button
+                  size="sm"
+                  type="button"
+                  disabled={
+                    unavailable ||
+                    editUnavailable ||
+                    command.blocked ||
+                    loading ||
+                    catalogueFailed ||
+                    busy !== null ||
+                    selectedAvailability?.available === false ||
+                    !canCreateConnection()
+                  }
+                  onClick={() => void addConnection()}
+                >
+                  {busy === "create" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Plus className="h-4 w-4" aria-hidden />
+                  )}
+                  {editing ? uiText("Save changes") : uiText("Save connection")}
+                </Button>{" "}
+              </>
+            }
           >
             {connectionReview}
             <div className="space-y-5">
@@ -857,47 +899,6 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                   )}
                 </p>
               )}
-              <div className="flex justify-end gap-2">
-                {editing && (
-                  <Button
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                    disabled={busy !== null}
-                    onClick={resetForm}
-                  >
-                    {uiText("Cancel editing")}
-                  </Button>
-                )}
-                {catalogueFailed && (
-                  <p className="mr-auto text-xs text-muted-foreground">
-                    {i18n?.t("storage.operationUnavailable") ??
-                      uiText("Storage information is unavailable. Reload to try again.")}
-                  </p>
-                )}
-                <Button
-                  size="sm"
-                  type="button"
-                  disabled={
-                    unavailable ||
-                    editUnavailable ||
-                    command.blocked ||
-                    loading ||
-                    catalogueFailed ||
-                    busy !== null ||
-                    selectedAvailability?.available === false ||
-                    !canCreateConnection()
-                  }
-                  onClick={() => void addConnection()}
-                >
-                  {busy === "create" ? (
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  ) : (
-                    <Plus className="h-4 w-4" aria-hidden />
-                  )}
-                  {editing ? uiText("Save changes") : uiText("Save connection")}
-                </Button>
-              </div>
             </div>
           </Modal>
         )}

@@ -181,6 +181,10 @@
 
 ### Fixed
 
+- Desktop Search keeps the global header and filters visible while results scroll.
+- Statistics, printer settings, and notification forms use the shared selection controls. Notifications and Spoolman use the standard settings switches.
+- Remote storage, notification channel, and production estimate forms keep Cancel and their primary action in a consistent footer.
+
 - Statistics excludes the internal `__external__` model from rankings while keeping its jobs in the totals. All-time activity charts handle monthly data.
 
 - Background mesh thumbnail generation uses temporary space on the PrintStash data volume, so a full system temp directory no longer blocks it.

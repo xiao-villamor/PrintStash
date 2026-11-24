@@ -140,6 +140,9 @@
 .model-detail-content {
   padding: 16px 20px;
 }
+.model-detail-content:has(.production-estimate-form) {
+  scroll-padding-bottom: 5rem;
+}
 .detail-printer-status {
   display: flex;
   align-items: center;

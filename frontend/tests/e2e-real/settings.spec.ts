@@ -1379,10 +1379,9 @@ test.describe("settings", () => {
     // Enable notifications if they aren't already (channel UI is gated on it).
     // The toggle round-trips to the backend before flipping, so click + poll
     // rather than check(), which expects an immediate state change.
-    const enable = page.getByRole("checkbox", { name: /^Notifications Turn every channel/ });
-    const toggle = page.locator("label").filter({ has: enable });
+    const enable = page.getByRole("switch", { name: "Notifications" });
     if (!(await enable.isChecked())) {
-      await toggle.click();
+      await enable.click();
       await expect(enable).toBeChecked();
     }
 
@@ -1397,7 +1396,7 @@ test.describe("settings", () => {
     await expect(page.getByText(chName)).toHaveCount(0);
 
     // Leave notifications disabled again so the shared DB doesn't drift.
-    await toggle.click();
+    await enable.click();
     await expect(enable).not.toBeChecked();
   });
 

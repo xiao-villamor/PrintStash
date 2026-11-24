@@ -51,6 +51,32 @@ describe("ProductionCosting", () => {
     for (const fill of fills) expect(fill).toHaveStyle({ transform: "scaleX(0)" });
   });
 
+  it("restores focus to the estimate action after cancellation", async () => {
+    const receipt: ArtifactCostingRead = {
+      ...anEditingBase(),
+      currency: "USD",
+      estimate: null,
+      costs: null,
+    };
+    const view = renderApp(
+      <ProductionCosting
+        modelId={1}
+        files={[aRevision()]}
+        initialFileId={1}
+        jobs={[]}
+        canEdit
+        admin={false}
+      />,
+      { routes: { "GET /api/v1/files/1/production-cost": json(receipt) } },
+    );
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Create estimate" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("button", { name: "Create estimate" })).toHaveFocus();
+    expect(view.requestsWithMethod("PUT")).toHaveLength(0);
+  });
+
   it("keeps the draft after a concurrent estimate edit", async () => {
     const url = "/api/v1/files/2/production-cost";
     const base: ArtifactCostingRead = {

@@ -401,14 +401,36 @@ describe("StatisticsPage", () => {
       expect(screen.getByText("Known filament cost").parentElement).toHaveTextContent("6 of 12");
     });
 
-    it("offers the customisation menu", async () => {
+    it("names the customization dialog", async () => {
       const user = userEvent.setup();
       renderStatistics();
-      await screen.findByText("Statistics");
+      await user.click(await screen.findByRole("button", { name: "Customize" }));
 
-      await user.click(screen.getByRole("button", { name: /Customize/ }));
+      expect(
+        await screen.findByRole("dialog", { name: "Visible statistics panels" }),
+      ).toBeVisible();
+    });
 
-      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    it("focuses the first statistics checkbox when Customize opens", async () => {
+      const user = userEvent.setup();
+      renderStatistics();
+      (await screen.findByRole("button", { name: "Customize" })).focus();
+      await user.keyboard("{Enter}");
+
+      expect(await screen.findByRole("checkbox", { name: "Most printed models" })).toHaveFocus();
+    });
+
+    it("returns focus to Customize when dismissed with Escape", async () => {
+      const user = userEvent.setup();
+      renderStatistics();
+      const trigger = await screen.findByRole("button", { name: "Customize" });
+      trigger.focus();
+      await user.keyboard("{Enter}");
+      await screen.findByRole("dialog", { name: "Visible statistics panels" });
+      await user.keyboard("{Escape}");
+
+      expect(trigger).toHaveFocus();
+      expect(trigger).toHaveAttribute("aria-expanded", "false");
     });
 
     it("remembers a widget the user hid", async () => {

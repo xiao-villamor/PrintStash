@@ -4,7 +4,7 @@ import { formatNumber } from "@/lib/format";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "@/lib/link";
 import {
   Area,
@@ -25,6 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { TabBar } from "@/components/ui/tabs";
 import { inputClasses } from "@/components/ui/input";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
@@ -846,6 +847,9 @@ export default function StatisticsPage() {
   const [period, setPeriod] = useState<StatsPeriod>("30d");
   const [section, setSection] = useState<"overview" | "rankings">("overview");
   const [customizeOpen, setCustomizeOpen] = useState(false);
+  const focusFirstWidget = useCallback((button: HTMLButtonElement | null) => {
+    button?.focus({ preventScroll: true });
+  }, []);
   const [visibleWidgets, setVisibleWidgets] = useState<Set<WidgetId>>(loadVisibleWidgets);
   const { data, error, isLoading, isError, refetch } = usePrintStatistics(period);
   const denied = error instanceof ApiError && [401, 403, 404].includes(error.status);
@@ -878,6 +882,7 @@ export default function StatisticsPage() {
               open={customizeOpen}
               onOpenChange={setCustomizeOpen}
               role="dialog"
+              aria-label={uiText("Visible statistics panels")}
               trigger={
                 <Button
                   data-menu-trigger
@@ -896,16 +901,16 @@ export default function StatisticsPage() {
               <p className="px-2 pb-2 text-xs font-semibold">
                 {uiText("Visible statistics panels")}
               </p>
-              {WIDGETS.map((widget) => (
+              {WIDGETS.map((widget, index) => (
                 <label
                   key={widget.id}
                   className="flex cursor-action items-center gap-2 rounded px-2 py-2 text-sm hover:bg-popover-hover"
                 >
-                  <input
-                    type="checkbox"
+                  <Checkbox
+                    ref={customizeOpen && index === 0 ? focusFirstWidget : undefined}
                     checked={visibleWidgets.has(widget.id)}
                     onChange={() => toggleWidget(widget.id)}
-                    className="h-4 w-4 accent-primary"
+                    className="shrink-0"
                   />
                   {translateUiText(locale, widget.label)}
                 </label>

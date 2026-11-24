@@ -33,6 +33,39 @@ test.describe("search clarity", () => {
     }
   });
 
+  test("scrolls search results without moving the global header or filters", async ({ page }) => {
+    const items = Array.from({ length: 42 }, (_, index) =>
+      aSearchResult({
+        subject_id: index + 1,
+        name: `Model ${index + 1}`,
+        href: `/models/${index + 1}`,
+      }),
+    );
+    await page.route("**/api/v1/search/status", (route) =>
+      route.fulfill({ json: searchStatus({ enabled: true, semantic_ready: true }) }),
+    );
+    await page.route("**/api/v1/search?*", (route) =>
+      route.fulfill({ json: searchResponse({ items, outcome: "results" }) }),
+    );
+    await page.goto("/search?q=part");
+    const toggle = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const filters = page.getByRole("button", { name: "Add filter" });
+    const results = page.getByRole("list", { name: "Search results" });
+    const lastResult = results.getByRole("listitem").last();
+    await expect(results.getByRole("listitem")).toHaveCount(items.length);
+
+    const filtersTop = (await filters.boundingBox())?.y;
+    await expect(lastResult).not.toBeInViewport();
+    await lastResult.scrollIntoViewIfNeeded();
+
+    await expect(lastResult).toBeInViewport();
+    expect((await filters.boundingBox())?.y).toBe(filtersTop);
+    expect((await page.getByRole("banner").boundingBox())?.y).toBe(0);
+    expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(1080);
+  });
+
   test("keeps dense results in the full browsing surface", async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));

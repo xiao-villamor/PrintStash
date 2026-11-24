@@ -1474,6 +1474,35 @@ describe("PrinterDetailPage", () => {
       await screen.findByLabelText("Name");
     }
 
+    it.each([
+      ["Provider material sync", "provider_material_sync_enabled"],
+      ["Require operator release", "operator_release_required"],
+    ])("saves %s only when the operator submits settings", async (label, key) => {
+      const user = userEvent.setup();
+      const before = aPrinter({
+        id: 4,
+        provider_material_sync_enabled: false,
+        operator_release_required: false,
+      });
+      const { requestsWithMethod } = renderPrinter({
+        printer: before,
+        routes: { "PATCH /api/v1/printers/4": json({ ...before, [key]: true }) },
+      });
+      await openSettings(user);
+      const checkbox = screen.getByRole("checkbox", { name: new RegExp(label) });
+
+      await user.click(screen.getByText(label, { exact: true }));
+      expect(checkbox).toBeChecked();
+      expect(requestsWithMethod("PATCH")).toHaveLength(0);
+
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await waitFor(() =>
+        expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
+          [key]: true,
+        }),
+      );
+    });
+
     it("uses the local 3D printer artwork in Settings before model artwork is enabled", async () => {
       renderPrinter({
         at: "/?tab=settings",

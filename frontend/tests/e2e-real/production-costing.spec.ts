@@ -119,6 +119,8 @@ test.describe("production costing", () => {
     await page.goto(`${modelPath}?tab=costing`);
     await page.getByRole("button", { name: "Create estimate" }).click();
     const form = page.getByRole("form", { name: "Production estimate" });
+    const saveEstimate = form.getByRole("button", { name: "Save estimate" });
+    await expect(saveEstimate).toBeInViewport();
     const time = form.getByLabel("Print time (minutes)");
     const grams = form.getByLabel("Filament used (g)");
     await time.fill("20");
@@ -139,6 +141,7 @@ test.describe("production costing", () => {
     await form.getByLabel("Profit margin (%)").fill("20");
     await form.getByLabel("Tax (%)").fill("10");
     await form.getByLabel("New template name").fill(name);
+    await expect(saveEstimate).toBeInViewport();
     await form.getByRole("button", { name: "Save pricing template" }).click();
     await form.getByLabel("Pricing template", { exact: true }).selectOption({ label: name });
     await form.getByLabel("Profit margin (%)").fill("0");

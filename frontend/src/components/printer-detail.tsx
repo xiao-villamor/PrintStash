@@ -52,6 +52,7 @@ import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { formatDuration } from "@/lib/format";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { PageFailure } from "@/components/page-failure";
 import { PrinterConfigWorkspace } from "@/features/printers/config-workspace";
 import { FormField } from "@/components/ui/form-field";
@@ -1386,12 +1387,11 @@ export function PrinterSettings({
 
   const materialSyncField = (
     <label className="flex items-start gap-3">
-      <input
-        type="checkbox"
+      <Checkbox
         checked={providerMaterialSync}
-        onChange={(event) => setProviderMaterialSync(event.target.checked)}
+        onChange={setProviderMaterialSync}
         disabled={!canEdit || saving}
-        className="mt-0.5 h-4 w-4"
+        className="mt-0.5 shrink-0"
       />
       <span>
         <span
@@ -1725,12 +1725,11 @@ export function PrinterSettings({
             {compact && notesField}
             {compact && materialSyncField}
             <label className="flex items-start gap-3">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={operatorReleaseRequired}
-                onChange={(event) => setOperatorReleaseRequired(event.target.checked)}
+                onChange={setOperatorReleaseRequired}
                 disabled={!canEdit || saving}
-                className="mt-0.5 h-4 w-4"
+                className="mt-0.5 shrink-0"
               />
               <span>
                 <span

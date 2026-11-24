@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useCallback, useRef, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -252,6 +252,12 @@ function ArtifactEstimate({
   const query = useQuery(productionCostOptions(modelId, file.id));
   const commands = useProductionCostCommands(modelId, file.id);
   const [editing, setEditing] = useState<ArtifactCostingRead | null>(null);
+  const restoreEstimateFocus = useRef(false);
+  const estimateAction = useCallback((button: HTMLButtonElement | null) => {
+    if (!button || !restoreEstimateFocus.current) return;
+    restoreEstimateFocus.current = false;
+    button.focus();
+  }, []);
   const [clearBase, setClearBase] = useState<ArtifactCostingRead | null>(null);
   const [reviewRequired, setReviewRequired] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -341,7 +347,15 @@ function ArtifactEstimate({
       )}
       {canEdit && row && !editing && (
         <div className="flex flex-wrap gap-2">
-          <Button type="button" disabled={reviewRequired} onClick={() => setEditing(row)}>
+          <Button
+            ref={estimateAction}
+            type="button"
+            disabled={reviewRequired}
+            onClick={() => {
+              restoreEstimateFocus.current = true;
+              setEditing(row);
+            }}
+          >
             {uiText(row.estimate ? "Edit estimate" : "Create estimate")}
           </Button>
           {row.estimate && (
@@ -391,6 +405,9 @@ function EstimateForm({
   onCancel: () => void;
 }) {
   const [draft, setDraft] = useState(() => makeDraft(file, row));
+  const focusFirstField = useCallback((field: HTMLInputElement | null) => {
+    field?.focus();
+  }, []);
   const [nextKey, setNextKey] = useState(draft.materials.length);
   const currency = row.estimate?.currency ?? row.currency;
   const sameCurrency = currency === row.currency;
@@ -418,11 +435,16 @@ function EstimateForm({
   }
 
   return (
-    <form aria-label={uiText("Production estimate")} className="space-y-4" onSubmit={submit}>
+    <form
+      aria-label={uiText("Production estimate")}
+      className="production-estimate-form space-y-4"
+      onSubmit={submit}
+    >
       <fieldset disabled={commands.save.isPending} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <FormField label={uiText("Pieces per print")}>
             <Input
+              ref={focusFirstField}
               type="number"
               min={1}
               max={100000}
@@ -714,10 +736,7 @@ function EstimateForm({
           />
         </section>
       </fieldset>
-      <div className="flex flex-wrap gap-2">
-        <Button type="submit" loading={commands.save.isPending} disabled={!estimate || blocked}>
-          {uiText("Save estimate")}
-        </Button>
+      <div className="sticky bottom-0 z-dropdown flex flex-wrap justify-end gap-2 border-t border-border bg-card py-3">
         <Button
           type="button"
           variant="outline"
@@ -725,6 +744,9 @@ function EstimateForm({
           onClick={onCancel}
         >
           {uiText("Cancel")}
+        </Button>
+        <Button type="submit" loading={commands.save.isPending} disabled={!estimate || blocked}>
+          {uiText("Save estimate")}
         </Button>
       </div>
     </form>
