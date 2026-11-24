@@ -169,18 +169,15 @@
   color: inherit;
   opacity: 0.7;
 }
-/* Each dot carries the tone of its status badge, with the same soft halo. */
+/* Each dot carries the tone of its status badge. */
 .library-status-ready {
   background: var(--success);
-  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--success) 22%, transparent);
 }
 .library-status-test {
   background: var(--status-test-dot);
-  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--status-test-dot) 22%, transparent);
 }
 .library-status-failed {
   background: var(--destructive);
-  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--destructive) 22%, transparent);
 }
 .library-status-filters > button > span.rounded-full {
   margin-inline: 2px 1px;
