@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Download, Star } from "lucide-react";
+import { Download } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { modelPrinterFilesOptions, useModelPrintJobs } from "@/features/library/model-detail";
 import { useAuth } from "@/lib/auth-context";
@@ -147,12 +147,6 @@ export function ModelCardRevision({
               <strong title={file?.revision_label ?? model.recommended_revision_label ?? undefined}>
                 {revision}
               </strong>
-              {file?.is_recommended && (
-                <span className="library-card-recommended">
-                  <Star className="h-3 w-3 fill-current shrink-0" aria-hidden />
-                  <span className="sr-only">{uiText("Recommended")}</span>
-                </span>
-              )}
               <div className="library-card-revision-actions">
                 {file?.is_recommended && (
                   <Button

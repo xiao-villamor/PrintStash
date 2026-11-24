@@ -9,8 +9,8 @@
   max-width: 100%;
   padding: 0 9px 0 7px;
   border-radius: 9999px;
-  background: var(--muted);
-  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  color: color-mix(in srgb, var(--foreground) 82%, transparent);
   font-size: 0.75rem;
   font-weight: 500;
   line-height: 1;

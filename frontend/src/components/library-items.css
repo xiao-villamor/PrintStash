@@ -170,6 +170,7 @@
 .library-card-revision-line strong {
   flex-shrink: 0;
   white-space: nowrap;
+  color: var(--foreground);
   font: 600 13px/1.4 var(--font-mono);
 }
 .library-card-recommended,
