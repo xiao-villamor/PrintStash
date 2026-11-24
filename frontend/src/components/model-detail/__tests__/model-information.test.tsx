@@ -4,10 +4,9 @@ import { renderApp, json } from "@/test-support/render";
 import "@testing-library/jest-dom/vitest";
 import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ModelGeometry, ModelInformation } from "../model-information";
+import { ModelInformation } from "../model-information";
 import userEvent from "@testing-library/user-event";
-import { aMetadata, aModel, aRevision, aTag } from "@/test-support/factories";
-import type { FileRead } from "@/types";
+import { aModel, aTag } from "@/test-support/factories";
 
 function show(sourceUrl: string | null = null, canEdit = false, description: string | null = null) {
   return renderApp(
@@ -28,12 +27,6 @@ function show(sourceUrl: string | null = null, canEdit = false, description: str
       },
     },
   );
-}
-
-function showGeometry(sourceFile: FileRead | null) {
-  return renderApp(<ModelGeometry modelId={1} sourceFile={sourceFile} />, {
-    routes: { "GET /api/v1/files/1/derivatives": json([]) },
-  });
 }
 
 describe("ModelInformation", () => {
@@ -122,37 +115,5 @@ describe("ModelInformation", () => {
     );
     expect(screen.getByText("PLA")).toBeVisible();
     expect(screen.getByRole("button", { name: /^Edit tags for / })).toHaveTextContent(/^$/);
-  });
-});
-
-describe("ModelGeometry", () => {
-  it("labels the mesh geometry as the whole source", () => {
-    showGeometry(aRevision({ file_type: "stl" }));
-    expect(screen.getByRole("heading", { name: "Whole source geometry" })).toBeInTheDocument();
-  });
-  it("explains unavailable mesh measurements", () => {
-    showGeometry(aRevision({ file_type: "stl" }));
-    expect(screen.getByText("Measurement unavailable")).toBeVisible();
-  });
-  it("hides geometry when there is no mesh", () => {
-    showGeometry(null);
-    expect(screen.queryByRole("heading", { name: "Whole source geometry" })).toBeNull();
-  });
-  it("does not discard recorded zero geometry", () => {
-    showGeometry(
-      aRevision({
-        file_type: "stl",
-        metadata: aMetadata({
-          bbox_x_mm: 0,
-          bbox_y_mm: 12,
-          bbox_z_mm: 30,
-          volume_mm3: 0,
-          triangle_count: 0,
-        }),
-      }),
-    );
-    expect(screen.getByText("0 × 12 × 30 mm")).toBeInTheDocument();
-    expect(screen.getByText("0 cm³")).toBeInTheDocument();
-    expect(screen.queryByText("Not recorded")).not.toBeInTheDocument();
   });
 });

@@ -126,121 +126,154 @@ export function DocumentBrowser({
         className={
           modelId === undefined
             ? "mx-4 my-5 overflow-hidden border border-border bg-card sm:mx-6"
-            : "overflow-hidden border border-border bg-card"
+            : "min-w-0"
         }
       >
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-4 sm:px-5">
-          <div className="flex min-w-0 items-start gap-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted/70 text-muted-foreground">
-              <FileText className="h-4 w-4" aria-hidden />
-            </span>
-            <div>
-              <h2 id={headingId} className="text-sm font-semibold">
-                {modelId === undefined ? uiText("Documents") : uiText("Attachments")}
-              </h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {modelId === undefined
-                  ? uiText("Guides, notes and files in this collection.")
-                  : uiText("Guides, photos and videos for this Model.")}
-              </p>
-            </div>
-          </div>
-          {canCreate && (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                size="xs"
-                onClick={() => fileRef.current?.click()}
-                disabled={busy}
-                loading={busy}
-              >
-                {uploadLabel}
-              </Button>
-              {modelId === undefined && (
-                <Button size="xs" onClick={newMarkdown}>
-                  {uiText("New document")}
+        {modelId !== undefined ? (
+          <div className="flex min-h-7 items-center justify-between gap-3 px-1 pb-2">
+            <h2 id={headingId} className="text-sm font-medium text-muted-foreground">
+              {uiText("Attachments")} · {docs.length}
+              {hasNextPage ? "+" : ""}
+            </h2>
+            {canCreate && (
+              <>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={busy}
+                  loading={busy}
+                >
+                  {uploadLabel}
                 </Button>
-              )}
-              <input
-                ref={fileRef}
-                type="file"
-                aria-label={uploadLabel}
-                onChange={onFilePicked}
-                className="hidden"
-              />
-            </div>
-          )}
-        </div>
-
-        {documents.isError ? (
-          <div role="alert" className="p-5 text-sm text-destructive">
-            <p>{userMessage(documents.error)}</p>
-            <Button variant="outline" onClick={() => void documents.refetch()}>
-              {uiText("Retry")}
-            </Button>
-          </div>
-        ) : loading ? (
-          <div className="flex items-center justify-center py-16 text-muted-foreground">
-            <Loader2 className="w-5 h-5 animate-spin" />
-          </div>
-        ) : docs.length === 0 ? (
-          <div className="flex flex-col items-start gap-1 px-5 py-6 text-muted-foreground">
-            <FileText className="w-8 h-8 mb-2 opacity-40" />
-            <p className="text-sm">
-              {modelId === undefined
-                ? uiText("No documents here yet.")
-                : uiText("No attachments yet.")}
-            </p>
-            {canCreate && modelId === undefined && (
-              <p className="text-xs mt-1">
-                {uiText(
-                  "Create a markdown doc or upload any file, including spreadsheets and resin slices.",
-                )}
-              </p>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  aria-label={uploadLabel}
+                  onChange={onFilePicked}
+                  className="hidden"
+                />
+              </>
             )}
           </div>
         ) : (
-          <div className="divide-y divide-border">
-            {docs.map((doc) => (
-              <div key={doc.id} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
-                <Link
-                  href={`/documents/${doc.id}`}
-                  className="flex min-w-0 flex-1 basis-48 items-center gap-3 hover:text-primary"
-                >
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center bg-muted/70">
-                    <KindIcon kind={doc.kind} />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="break-words text-sm font-medium text-foreground">
-                      {doc.name}
-                    </div>
-                    <div className="mt-0.5 break-words text-xs text-muted-foreground">
-                      {(modelId !== undefined && doc.filename) || doc.kind}
-                      {" · "}
-                      {timeAgoShort(doc.updated_at)}
-                    </div>
-                  </div>
-                </Link>
-                <div className="flex shrink-0 items-center gap-3">
-                  <Button variant="outline" size="xs" asChild>
-                    <Link href={`/documents/${doc.id}`}>{uiText("Open")}</Link>
-                  </Button>
-                  {canEditItem(doc) && (
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      onClick={() => remove(doc)}
-                      title={uiText("Delete document")}
-                      className="text-destructive"
-                    >
-                      {uiText("Delete document")}
-                    </Button>
-                  )}
-                </div>
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-4 sm:px-5">
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted/70 text-muted-foreground">
+                <FileText className="h-4 w-4" aria-hidden />
+              </span>
+              <div>
+                <h2 id={headingId} className="text-sm font-semibold">
+                  {modelId === undefined ? uiText("Documents") : uiText("Attachments")}
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {modelId === undefined
+                    ? uiText("Guides, notes and files in this collection.")
+                    : uiText("Guides, photos and videos for this Model.")}
+                </p>
               </div>
-            ))}
+            </div>
+            {canCreate && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={busy}
+                  loading={busy}
+                >
+                  {uploadLabel}
+                </Button>
+                {modelId === undefined && (
+                  <Button size="xs" onClick={newMarkdown}>
+                    {uiText("New document")}
+                  </Button>
+                )}
+                <input
+                  ref={fileRef}
+                  type="file"
+                  aria-label={uploadLabel}
+                  onChange={onFilePicked}
+                  className="hidden"
+                />
+              </div>
+            )}
           </div>
         )}
+
+        <div className={modelId === undefined ? undefined : "border border-border bg-card"}>
+          {documents.isError ? (
+            <div role="alert" className="p-5 text-sm text-destructive">
+              <p>{userMessage(documents.error)}</p>
+              <Button variant="outline" onClick={() => void documents.refetch()}>
+                {uiText("Retry")}
+              </Button>
+            </div>
+          ) : loading ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground">
+              <Loader2 className="w-5 h-5 animate-spin" />
+            </div>
+          ) : docs.length === 0 ? (
+            <div className="flex flex-col items-start gap-1 px-5 py-6 text-muted-foreground">
+              {modelId === undefined && <FileText className="w-8 h-8 mb-2 opacity-40" />}
+              <p className="text-sm">
+                {modelId === undefined
+                  ? uiText("No documents here yet.")
+                  : uiText(
+                      "No attachments yet. Add assembly guides, photos of finished prints or videos.",
+                    )}
+              </p>
+              {canCreate && modelId === undefined && (
+                <p className="text-xs mt-1">
+                  {uiText(
+                    "Create a markdown doc or upload any file, including spreadsheets and resin slices.",
+                  )}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {docs.map((doc) => (
+                <div key={doc.id} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
+                  <Link
+                    href={`/documents/${doc.id}`}
+                    className="flex min-w-0 flex-1 basis-48 items-center gap-3 hover:text-primary"
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center bg-muted/70">
+                      <KindIcon kind={doc.kind} />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="break-words text-sm font-medium text-foreground">
+                        {doc.name}
+                      </div>
+                      <div className="mt-0.5 break-words text-xs text-muted-foreground">
+                        {(modelId !== undefined && doc.filename) || doc.kind}
+                        {" · "}
+                        {timeAgoShort(doc.updated_at)}
+                      </div>
+                    </div>
+                  </Link>
+                  <div className="flex shrink-0 items-center gap-3">
+                    <Button variant="outline" size="xs" asChild>
+                      <Link href={`/documents/${doc.id}`}>{uiText("Open")}</Link>
+                    </Button>
+                    {canEditItem(doc) && (
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        onClick={() => remove(doc)}
+                        title={uiText("Delete document")}
+                        className="text-destructive"
+                      >
+                        {uiText("Delete document")}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         {modelId !== undefined && (offset > 0 || hasNextPage) && (
           <div className="flex justify-end gap-2 border-t border-border p-4">
             <Button

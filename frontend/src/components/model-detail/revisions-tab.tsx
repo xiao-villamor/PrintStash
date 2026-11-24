@@ -5,10 +5,10 @@ import { RevisionStatusBadge } from "./model-print-summary";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
-import { MoreVertical, Trash2, Wifi } from "lucide-react";
+import { ChevronRight, MoreVertical, Trash2, Wifi } from "lucide-react";
 
 import {
   batchSetRevisionLabels,
@@ -18,7 +18,8 @@ import {
   replaceFileTags,
 } from "@/lib/api";
 import { useTags } from "@/lib/queries";
-import { formatBytes, formatMillimeters, timeAgo } from "@/lib/format";
+import { formatBytes, timeAgo } from "@/lib/format";
+import { useGcodePlates } from "@/lib/queries/file-plates";
 import { toast } from "@/lib/toast";
 import {
   FileRead,
@@ -43,6 +44,9 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { EntityTagsDialog } from "@/components/entity-tags-dialog";
+import { formatPlateEstimate } from "./format-plate-estimate";
+import { InspectorSection, PropertyList, PropertyRow, SoftCard } from "./inspector-section";
+import { summarizePrintEstimate } from "./print-estimate";
 import { isTypingTarget, keyboardOverlayOpen } from "@/lib/keyboard-commands";
 
 const NO_OUTCOMES: ArtifactOutcomeRead[] = [];
@@ -76,6 +80,150 @@ function RevisionResults({ fileId, jobs }: { fileId: number; jobs: ModelPrintJob
     </div>
   ) : (
     <span className="text-muted-foreground">{uiText("No recorded prints")}</span>
+  );
+}
+
+function isArchive3mf(file: FileRead) {
+  return file.original_filename.toLowerCase().endsWith(".3mf");
+}
+
+function MenuItem({
+  children,
+  onSelect,
+  disabled,
+  destructive = false,
+}: {
+  children: ReactNode;
+  onSelect: () => void;
+  disabled?: boolean;
+  destructive?: boolean;
+}) {
+  return (
+    <Button
+      role="menuitem"
+      size="sm"
+      variant="ghost"
+      className={`w-full justify-start ${destructive ? "text-destructive" : ""}`}
+      disabled={disabled}
+      onClick={onSelect}
+    >
+      {children}
+    </Button>
+  );
+}
+
+/** One revision in the list: identity, status and the facts that choose between revisions. */
+function RevisionListRow({
+  modelId,
+  file,
+  jobs,
+  selected,
+  onInspect,
+}: {
+  modelId: number;
+  file: FileRead;
+  jobs: ModelPrintJobRead[] | null;
+  selected: boolean;
+  onInspect: () => void;
+}) {
+  const estimates = useGcodePlates(modelId, isArchive3mf(file) ? file.id : null);
+  const summary = summarizePrintEstimate(file, estimates);
+  const time = summary.kind === "single" || summary.kind === "plates" ? summary.time : null;
+  const weight = summary.kind === "single" || summary.kind === "plates" ? summary.weight : null;
+  const prints = jobs?.filter((job) => job.file_id === file.id).length ?? null;
+  const meta = [
+    file.metadata?.material_type ?? null,
+    time != null ? formatPlateEstimate("estimated_time_s", time) : null,
+    weight != null ? formatPlateEstimate("filament_weight_g", weight) : null,
+    prints === null
+      ? null
+      : prints === 0
+        ? uiText("No prints")
+        : uiText("{count} prints", { count: prints }),
+    timeAgo(file.uploaded_at),
+  ].filter((part) => part !== null);
+  return (
+    <button
+      type="button"
+      data-revision-id={file.id}
+      aria-pressed={selected}
+      onClick={onInspect}
+      className={`flex min-w-0 flex-1 flex-col gap-1 border-s-2 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${selected ? "border-foreground bg-accent/60" : "border-transparent hover:bg-muted/50"}`}
+    >
+      <span className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+        <strong className="whitespace-nowrap font-semibold">
+          {uiText("Rev {value1}", { value1: String(file.gcode_revision_number ?? file.version) })}
+        </strong>
+        {file.revision_label && (
+          <span className="min-w-0 wrap-anywhere text-muted-foreground" title={file.revision_label}>
+            {file.revision_label}
+          </span>
+        )}
+        <RevisionStatusBadge status={file.revision_status} />
+        {file.is_recommended && (
+          <span className="text-muted-foreground">{uiText("Recommended")}</span>
+        )}
+      </span>
+      <span className="text-xs tabular-nums text-muted-foreground">{meta.join(" · ")}</span>
+    </button>
+  );
+}
+
+/** The inspected revision's estimate, with the origin the costing view repeats. */
+function EstimateRow({ modelId, file }: { modelId: number; file: FileRead }) {
+  const estimates = useGcodePlates(modelId, isArchive3mf(file) ? file.id : null);
+  const summary = summarizePrintEstimate(file, estimates);
+  const time = summary.kind === "single" || summary.kind === "plates" ? summary.time : null;
+  const weight = summary.kind === "single" || summary.kind === "plates" ? summary.weight : null;
+  const text = [
+    time != null ? formatPlateEstimate("estimated_time_s", time) : null,
+    weight != null ? formatPlateEstimate("filament_weight_g", weight) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const origin =
+    summary.kind === "single"
+      ? uiText("G-code estimate")
+      : summary.kind === "plates"
+        ? uiText("G-code estimate · sum of {count} plates", { count: summary.count })
+        : summary.kind === "partial-plates"
+          ? uiText("modelDetail.plateEstimatesIncomplete")
+          : null;
+  return (
+    <PropertyRow label={uiText("modelDetail.estimate")}>
+      <div className="min-w-0">
+        {text ? (
+          <span className="tabular-nums">{text}</span>
+        ) : (
+          <span className="text-muted-foreground">{uiText("Not in the file")}</span>
+        )}
+        {origin && <span className="block text-muted-foreground">{origin}</span>}
+      </div>
+    </PropertyRow>
+  );
+}
+
+/** A footer row that opens Print settings, naming plates when the revision has several. */
+function SettingsLink({
+  modelId,
+  file,
+  onSettings,
+}: {
+  modelId: number;
+  file: FileRead;
+  onSettings: () => void;
+}) {
+  const estimates = useGcodePlates(modelId, isArchive3mf(file) ? file.id : null);
+  const multi = (estimates?.plates.length ?? 0) > 1;
+  return (
+    <button
+      type="button"
+      onClick={onSettings}
+      className="flex w-full items-center justify-between gap-3 border-t border-border bg-muted/40 px-4 py-2.5 text-start text-sm font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    >
+      {multi ? uiText("Plate estimates and print setup") : uiText("Print setup")}
+      <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+    </button>
   );
 }
 
@@ -127,6 +275,10 @@ export function RevisionsTab({
   const selectedId = inspectedFileId ?? localInspectedId;
   const [comparing, setComparing] = useState(startComparing);
   const [actionsFileId, setActionsFileId] = useState<number | null>(null);
+  const [tagsDialog, setTagsDialog] = useState<{ fileId: number | null; opened: number }>({
+    fileId: null,
+    opened: 0,
+  });
   const compareTrigger = useRef<HTMLButtonElement>(null);
   const returningFromCompare = useRef(false);
   function closeCompare() {
@@ -357,138 +509,111 @@ export function RevisionsTab({
             }
           }}
         >
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-base font-semibold text-on-surface">
-              {uiText("G-code revisions")}{" "}
-              <span className="ml-1 text-xs font-normal text-muted-foreground">
-                {gcodeFiles.length}
-              </span>
-            </h2>
-            <div className="flex items-center gap-2">
-              {allFiles.length >= 2 && (
+          <InspectorSection
+            title={
+              <>
+                {uiText("G-code revisions")} · {gcodeFiles.length}
+              </>
+            }
+            actions={
+              <div className="flex items-center gap-1">
+                {allFiles.length >= 2 && (
+                  <Button
+                    ref={compareTrigger}
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => {
+                      setScope({ intent: comparisonMode, mode: initialMode });
+                      setComparing(true);
+                    }}
+                  >
+                    {gcodeFiles.length >= 2 ? uiText("Compare") : uiText("Compare files")}
+                  </Button>
+                )}
                 <Button
-                  ref={compareTrigger}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setScope({ intent: comparisonMode, mode: initialMode });
-                    setComparing(true);
-                  }}
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={onAddRevision}
+                  disabled={!auth.isAuthenticated || !canEdit}
+                  title={auth.blockReason ?? uiText("Add G-code revision")}
                 >
-                  {gcodeFiles.length >= 2 ? uiText("Compare revisions") : uiText("Compare files")}
+                  {uiText("Add revision")}
                 </Button>
-              )}
-              {gcodeFiles.length > 1 && (
+              </div>
+            }
+          >
+            {selecting && (
+              <div className="mb-3 flex flex-wrap items-center gap-2 border border-border bg-muted/40 p-2">
+                <span className="text-xs text-muted-foreground">
+                  {uiText("{value1} selected", { value1: String(selectedRevisionIds.size ?? "") })}
+                </span>
+                <Input
+                  value={batchLabel}
+                  onChange={(event) => setBatchLabel(event.target.value)}
+                  maxLength={128}
+                  placeholder={uiText("Label (blank clears)")}
+                  className="min-w-48 flex-1"
+                />
+                <Button
+                  type="button"
+                  size="xs"
+                  loading={batchBusy}
+                  disabled={selectedRevisionIds.size === 0}
+                  onClick={applyBatchLabel}
+                >
+                  {uiText("Apply label")}
+                </Button>
                 <Button
                   type="button"
                   variant="outline"
                   size="xs"
                   onClick={() => {
-                    setSelecting((value) => !value);
+                    setSelecting(false);
                     setSelectedRevisionIds(new Set());
                   }}
-                  disabled={!auth.isAuthenticated || !canEdit}
                 >
-                  {selecting ? uiText("Cancel selection") : uiText("Edit labels")}
+                  {uiText("Cancel selection")}
                 </Button>
-              )}
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                onClick={onAddRevision}
-                disabled={!auth.isAuthenticated || !canEdit}
-                title={auth.blockReason ?? uiText("Add G-code revision")}
-              >
-                {uiText("Add revision")}
-              </Button>
-            </div>
-          </div>
-          {selecting && (
-            <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-outline-variant bg-surface-container-low p-2">
-              <span className="font-mono text-xs text-on-surface-variant">
-                {uiText("{value1} selected", { value1: String(selectedRevisionIds.size ?? "") })}
-              </span>
-              <Input
-                value={batchLabel}
-                onChange={(event) => setBatchLabel(event.target.value)}
-                maxLength={128}
-                placeholder={uiText("Label (blank clears)")}
-                className="min-w-48 flex-1"
-              />
-              <Button
-                type="button"
-                size="xs"
-                loading={batchBusy}
-                disabled={selectedRevisionIds.size === 0}
-                onClick={applyBatchLabel}
-              >
-                {uiText("Apply label")}
-              </Button>
-            </div>
-          )}
-          {!comparing && gcodeFiles.length > 0 && (
-            <ul
-              aria-label={uiText("Revisions")}
-              className="divide-y divide-border border border-border"
-            >
-              {gcodeFiles.map((file) => (
-                <li key={file.id} className={file.id === selectedId ? "bg-muted" : undefined}>
-                  <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-                    {selecting && (
-                      <Checkbox
-                        checked={selectedRevisionIds.has(file.id)}
-                        onChange={(checked) =>
-                          setSelectedRevisionIds((current) => {
-                            const next = new Set(current);
-                            if (checked) next.add(file.id);
-                            else next.delete(file.id);
-                            return next;
-                          })
-                        }
-                        ariaLabel={uiText("Select revision {value1}", {
-                          value1: String(file.gcode_revision_number ?? file.version),
-                        })}
-                      />
-                    )}
-                    <button
-                      type="button"
-                      data-revision-id={file.id}
-                      className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 text-left text-sm"
-                      aria-pressed={file.id === selectedId}
-                      onClick={() => inspect(file.id)}
-                    >
-                      <strong className="whitespace-nowrap">
-                        {uiText("Rev {value1}", {
-                          value1: String(file.gcode_revision_number ?? file.version),
-                        })}
-                      </strong>
-                      {file.revision_label && (
-                        <span
-                          className="line-clamp-2 min-w-0 wrap-anywhere font-normal"
-                          title={file.revision_label}
-                        >
-                          {file.revision_label}
+              </div>
+            )}
+            {!comparing && gcodeFiles.length > 0 && (
+              <SoftCard>
+                <ul aria-label={uiText("Revisions")} className="divide-y divide-border">
+                  {gcodeFiles.map((file) => (
+                    <li key={file.id} className="flex items-center">
+                      {selecting && (
+                        <span className="ps-4">
+                          <Checkbox
+                            checked={selectedRevisionIds.has(file.id)}
+                            onChange={(checked) =>
+                              setSelectedRevisionIds((current) => {
+                                const next = new Set(current);
+                                if (checked) next.add(file.id);
+                                else next.delete(file.id);
+                                return next;
+                              })
+                            }
+                            ariaLabel={uiText("Select revision {value1}", {
+                              value1: String(file.gcode_revision_number ?? file.version),
+                            })}
+                          />
                         </span>
                       )}
-                    </button>
-                    <RevisionStatusBadge status={file.revision_status} />
-                    {file.is_recommended && (
-                      <span className="text-sm text-muted-foreground">{uiText("Recommended")}</span>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-baseline gap-x-3 px-3 pb-2 text-sm text-muted-foreground">
-                    {file.metadata?.material_type && <span>{file.metadata.material_type}</span>}
-                    <RevisionResults fileId={file.id} jobs={jobs} />
-                    <time className="whitespace-nowrap" dateTime={file.uploaded_at}>
-                      {timeAgo(file.uploaded_at)}
-                    </time>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="space-y-3">
+                      <RevisionListRow
+                        modelId={modelId}
+                        file={file}
+                        jobs={jobs}
+                        selected={file.id === selectedId}
+                        onInspect={() => inspect(file.id)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </SoftCard>
+            )}
+          </InspectorSection>
+          <div className="mt-5 space-y-3">
             {gcodeFiles.length === 0 && (
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>{uiText("No sliced G-code revisions yet.")}</p>
@@ -506,119 +631,38 @@ export function RevisionsTab({
                 .filter((file) => file.id === selectedId)
                 .map((f) => {
                   const isEditingRevision = editingRevisionId === f.id;
-                  const fileMeta = f.metadata;
                   const uploadedTo = printerFilesByFileId.get(f.id) ?? [];
+                  const revisionNumber = String(f.gcode_revision_number ?? f.version);
                   return (
-                    <div key={f.id} className="detail-inspected-revision space-y-4">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <h3
-                            data-revision-id={f.id}
-                            tabIndex={gcodeFiles.length === 1 ? 0 : undefined}
-                            className="flex min-w-0 flex-wrap items-baseline gap-2 text-base font-semibold"
-                          >
-                            <span className="whitespace-nowrap">
-                              {uiText("Rev {value1}", {
-                                value1: String(f.gcode_revision_number ?? f.version),
-                              })}
-                            </span>
-                            <RevisionStatusBadge status={f.revision_status} />
-                            {f.is_recommended && (
-                              <span className="whitespace-nowrap text-sm font-medium text-muted-foreground">
-                                {uiText("Recommended")}
-                              </span>
-                            )}
-                            {f.revision_label && (
-                              <span className="min-w-0 wrap-anywhere font-normal">
-                                {f.revision_label}
-                              </span>
-                            )}
-                          </h3>
+                    <InspectorSection
+                      key={f.id}
+                      title={
+                        <span
+                          data-revision-id={f.id}
+                          tabIndex={gcodeFiles.length === 1 ? 0 : undefined}
+                        >
+                          {uiText("Rev {value1}", { value1: revisionNumber })}
+                        </span>
+                      }
+                      actions={
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          aria-label={uiText("Edit revision")}
+                          disabled={!auth.isAuthenticated || !canEdit}
+                          onClick={() => startRevisionEdit(f)}
+                        >
+                          {uiText("Edit revision")}
+                        </Button>
+                      }
+                    >
+                      <SoftCard>
+                        <div className="flex flex-wrap items-center gap-2 px-4 py-3">
                           {onPreview && (
                             <Button size="sm" variant="outline" onClick={() => onPreview(f.id)}>
                               {uiText("Preview G-code")}
                             </Button>
                           )}
-                        </div>
-                        {f.revision_notes && (
-                          <p className="wrap-anywhere text-sm text-muted-foreground">
-                            {f.revision_notes}
-                          </p>
-                        )}
-                        <div className="flex flex-wrap items-center gap-2 text-sm">
-                          <RevisionResults fileId={f.id} jobs={jobs} />
-                          {onActivity && (
-                            <Button size="xs" variant="ghost" onClick={() => onActivity(f.id)}>
-                              {uiText("modelDetail.viewActivity")}
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                      <section
-                        aria-labelledby={`print-setup-${f.id}`}
-                        className="space-y-3 border-t border-border pt-3"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <h4 id={`print-setup-${f.id}`} className="text-sm font-semibold">
-                            {uiText("Print setup")}
-                          </h4>
-                          {onSettings && (
-                            <Button size="xs" variant="ghost" onClick={onSettings}>
-                              {uiText("Full print settings")}
-                            </Button>
-                          )}
-                        </div>
-                        <dl className="grid grid-cols-2 gap-3 @lg:grid-cols-4">
-                          {[
-                            [uiText("Printer profile"), fileMeta?.printer_model],
-                            [uiText("Material"), fileMeta?.material_type],
-                            [uiText("Layer height"), formatMillimeters(fileMeta?.layer_height_mm)],
-                            [uiText("Nozzle"), formatMillimeters(fileMeta?.nozzle_diameter_mm)],
-                          ].map(([label, value]) => (
-                            <div key={label}>
-                              <dt className="text-xs text-muted-foreground">{label}</dt>
-                              <dd className="wrap-anywhere text-sm font-medium">
-                                {value ?? uiText("Not recorded")}
-                              </dd>
-                            </div>
-                          ))}
-                        </dl>
-                      </section>
-                      <section
-                        aria-labelledby={`gcode-file-${f.id}`}
-                        className="space-y-2 border-t border-border pt-3"
-                      >
-                        <h4 id={`gcode-file-${f.id}`} className="text-sm font-semibold">
-                          {uiText("G-code file")}
-                        </h4>
-                        <p className="wrap-anywhere text-sm text-muted-foreground">
-                          {f.original_filename}
-                        </p>
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                          <span>
-                            {uiText("Added")} {timeAgo(f.uploaded_at)}
-                          </span>
-                          <span>{formatBytes(f.size_bytes)}</span>
-                          <HashValue
-                            sha={f.sha256}
-                            label={uiText("File SHA-256")}
-                            filename={f.original_filename}
-                          />
-                        </div>
-                        {uploadedTo.length > 0 && (
-                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                            {uploadedTo.map((row) => (
-                              <span
-                                key={`${row.printer_id}-${row.remote_filename}`}
-                                className="inline-flex items-center gap-1"
-                              >
-                                <Wifi className="h-3 w-3" aria-hidden />
-                                {row.printer_name}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        <div className="flex flex-wrap items-center gap-2">
                           <SlicerOpenButton
                             fileId={f.id}
                             fileType={
@@ -628,20 +672,186 @@ export function RevisionsTab({
                             }
                             size="sm"
                             showLabel
+                            outline
                           />
+                          <DropdownMenu
+                            open={actionsFileId === f.id}
+                            onOpenChange={(open) => setActionsFileId(open ? f.id : null)}
+                            portal
+                            align="end"
+                            className="ms-auto"
+                            trigger={
+                              <Button
+                                variant="outline"
+                                size="icon-sm"
+                                className="size-[34px]"
+                                data-menu-trigger
+                                aria-haspopup="menu"
+                                aria-expanded={actionsFileId === f.id}
+                                aria-label={uiText("More actions for Rev {value1}", {
+                                  value1: revisionNumber,
+                                })}
+                                onClick={() =>
+                                  setActionsFileId(actionsFileId === f.id ? null : f.id)
+                                }
+                              >
+                                <MoreVertical className="size-4" aria-hidden />
+                              </Button>
+                            }
+                            contentClassName="w-52 border border-border bg-popover p-1 shadow-lg"
+                          >
+                            <MenuItem
+                              onSelect={() => {
+                                setActionsFileId(null);
+                                void downloadAuthenticatedFile(
+                                  `/api/v1/files/${f.id}/download`,
+                                  f.original_filename,
+                                ).catch((error) => toast.error(error));
+                              }}
+                            >
+                              {uiText("Download G-code")}
+                            </MenuItem>
+                            {onLogPrint && (
+                              <MenuItem
+                                onSelect={() => {
+                                  setActionsFileId(null);
+                                  onLogPrint(f.id, "completed");
+                                }}
+                              >
+                                {uiText("modelDetail.recordResult")}
+                              </MenuItem>
+                            )}
+                            {!f.is_recommended && canEdit && (
+                              <MenuItem
+                                disabled={saving === f.id}
+                                onSelect={() => {
+                                  setActionsFileId(null);
+                                  void update(f, { is_recommended: true });
+                                }}
+                              >
+                                {uiText("Set as recommended")}
+                              </MenuItem>
+                            )}
+                            {canEdit && (
+                              <MenuItem
+                                onSelect={() => {
+                                  setActionsFileId(null);
+                                  setTagsDialog((current) => ({
+                                    fileId: f.id,
+                                    opened: current.opened + 1,
+                                  }));
+                                }}
+                              >
+                                {f.tags.length ? uiText("Edit tags") : uiText("Add tags")}
+                              </MenuItem>
+                            )}
+                            {gcodeFiles.length > 1 && (
+                              <MenuItem
+                                disabled={!auth.isAuthenticated || !canEdit}
+                                onSelect={() => {
+                                  setActionsFileId(null);
+                                  setSelecting(true);
+                                  setSelectedRevisionIds(new Set());
+                                }}
+                              >
+                                {uiText("Edit labels")}
+                              </MenuItem>
+                            )}
+                            <hr role="separator" className="my-1 border-border" />
+                            {canEdit && f.revision_status !== "archived" && (
+                              <MenuItem
+                                destructive
+                                disabled={saving === f.id}
+                                onSelect={() => {
+                                  setActionsFileId(null);
+                                  void update(f, { revision_status: "archived" });
+                                }}
+                              >
+                                {uiText("Archive revision")}
+                              </MenuItem>
+                            )}
+                            <MenuItem
+                              destructive
+                              disabled={!auth.isAuthenticated || !canEdit || saving === f.id}
+                              onSelect={() => {
+                                setActionsFileId(null);
+                                deleteRevision(f);
+                              }}
+                            >
+                              <Trash2 className="size-4" aria-hidden />
+                              {uiText("Move to trash")}
+                            </MenuItem>
+                          </DropdownMenu>
                         </div>
-                      </section>
-                      <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          aria-label={uiText("Edit revision")}
-                          disabled={!auth.isAuthenticated || !canEdit}
-                          onClick={() => startRevisionEdit(f)}
-                        >
-                          {uiText("Edit revision")}
-                        </Button>
+                        <PropertyList label={uiText("Revision facts")}>
+                          <EstimateRow modelId={modelId} file={f} />
+                          <PropertyRow label={uiText("Material")}>
+                            {f.metadata?.material_type ?? (
+                              <span className="text-muted-foreground">
+                                {uiText("Not in the file")}
+                              </span>
+                            )}
+                          </PropertyRow>
+                          <PropertyRow label={uiText("Printed")}>
+                            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                              <RevisionResults fileId={f.id} jobs={jobs} />
+                              {onActivity && (
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  className="h-auto p-0"
+                                  onClick={() => onActivity(f.id)}
+                                >
+                                  {uiText("modelDetail.viewActivity")}
+                                </Button>
+                              )}
+                            </div>
+                          </PropertyRow>
+                          {f.revision_notes && (
+                            <PropertyRow label={uiText("Notes")}>{f.revision_notes}</PropertyRow>
+                          )}
+                          <PropertyRow label={uiText("File")}>
+                            <div className="min-w-0 space-y-0.5">
+                              <p className="wrap-anywhere">{f.original_filename}</p>
+                              <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                                <span>
+                                  {f.file_type === "3mf" ||
+                                  f.original_filename.toLowerCase().endsWith(".3mf")
+                                    ? uiText("Sliced 3MF")
+                                    : uiText("G-code")}{" "}
+                                  · {formatBytes(f.size_bytes)}
+                                </span>
+                                <HashValue
+                                  sha={f.sha256}
+                                  label={uiText("File SHA-256")}
+                                  filename={f.original_filename}
+                                />
+                              </p>
+                            </div>
+                          </PropertyRow>
+                          {uploadedTo.length > 0 && (
+                            <PropertyRow label={uiText("On printers")}>
+                              {uploadedTo.map((row) => (
+                                <span
+                                  key={`${row.printer_id}-${row.remote_filename}`}
+                                  className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+                                >
+                                  <Wifi className="size-3" aria-hidden />
+                                  {row.printer_name}
+                                </span>
+                              ))}
+                            </PropertyRow>
+                          )}
+                        </PropertyList>
+                        {onSettings && (
+                          <SettingsLink modelId={modelId} file={f} onSettings={onSettings} />
+                        )}
+                      </SoftCard>
+                      {tagsDialog.fileId === f.id && (
                         <EntityTagsDialog
+                          key={`${f.id}-${tagsDialog.opened}`}
+                          initialOpen
+                          triggerMode="none"
                           entityLabel={f.original_filename}
                           tags={f.tags}
                           availableTags={availableTags}
@@ -651,105 +861,7 @@ export function RevisionsTab({
                           )}
                           onSave={(tags) => saveArtifactTags(f, tags)}
                         />
-                        <DropdownMenu
-                          open={actionsFileId === f.id}
-                          onOpenChange={(open) => setActionsFileId(open ? f.id : null)}
-                          portal
-                          className="ml-auto"
-                          trigger={
-                            <Button
-                              variant="ghost"
-                              size="xs"
-                              data-menu-trigger
-                              aria-haspopup="menu"
-                              aria-expanded={actionsFileId === f.id}
-                              onClick={() => setActionsFileId(actionsFileId === f.id ? null : f.id)}
-                            >
-                              <MoreVertical className="h-4 w-4" />
-                              <span className="sr-only">{uiText("nav.more")}</span>
-                            </Button>
-                          }
-                          contentClassName="w-48 rounded-md border border-border bg-popover p-1 shadow-lg"
-                        >
-                          <Button
-                            role="menuitem"
-                            size="sm"
-                            variant="ghost"
-                            className="w-full justify-start"
-                            onClick={() => {
-                              setActionsFileId(null);
-                              void downloadAuthenticatedFile(
-                                `/api/v1/files/${f.id}/download`,
-                                f.original_filename,
-                              ).catch((error) => toast.error(error));
-                            }}
-                          >
-                            {uiText("Download G-code")}
-                          </Button>
-                          {onLogPrint && (
-                            <Button
-                              role="menuitem"
-                              size="sm"
-                              variant="ghost"
-                              className="w-full justify-start"
-                              onClick={() => {
-                                setActionsFileId(null);
-                                onLogPrint(f.id, "completed");
-                              }}
-                            >
-                              {uiText("modelDetail.recordResult")}
-                            </Button>
-                          )}
-                          {!f.is_recommended && canEdit && (
-                            <Button
-                              role="menuitem"
-                              size="sm"
-                              variant="ghost"
-                              className="w-full justify-start"
-                              disabled={saving === f.id}
-                              onClick={() => {
-                                setActionsFileId(null);
-                                void update(f, { is_recommended: true });
-                              }}
-                            >
-                              {uiText("Set as recommended")}
-                            </Button>
-                          )}
-                          <hr role="separator" className="my-1 border-border" />
-                          {canEdit && f.revision_status !== "archived" && (
-                            <>
-                              <Button
-                                role="menuitem"
-                                size="sm"
-                                variant="ghost"
-                                className="w-full justify-start text-destructive"
-                                disabled={saving === f.id}
-                                onClick={() => {
-                                  setActionsFileId(null);
-                                  void update(f, { revision_status: "archived" });
-                                }}
-                              >
-                                {uiText("Archive revision")}
-                              </Button>
-                            </>
-                          )}
-                          <Button
-                            role="menuitem"
-                            size="sm"
-                            variant="ghost"
-                            className="w-full justify-start text-destructive"
-                            disabled={!auth.isAuthenticated || !canEdit || saving === f.id}
-                            onClick={() => {
-                              setActionsFileId(null);
-                              deleteRevision(f);
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            {uiText("Move to trash")}
-                          </Button>
-                        </DropdownMenu>
-                      </div>
-
+                      )}
                       {isEditingRevision && (
                         <Modal
                           open
@@ -830,7 +942,7 @@ export function RevisionsTab({
                           </div>
                         </Modal>
                       )}
-                    </div>
+                    </InspectorSection>
                   );
                 })}
           </div>

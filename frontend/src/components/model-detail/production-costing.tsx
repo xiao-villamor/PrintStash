@@ -1,8 +1,8 @@
-import { useCallback, useRef, useState, type FormEvent } from "react";
+import { useGcodePlates } from "@/lib/queries/file-plates";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
-import { FilamentSpool } from "@/components/ui/filament-spool";
 import { FormField } from "@/components/ui/form-field";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,6 +22,8 @@ import type {
   PricingRates,
   ProductionInputs,
 } from "@/types/production-costing";
+import { InspectorSection, SoftCard } from "./inspector-section";
+import { summarizePrintEstimate } from "./print-estimate";
 import { PricingTemplateControls } from "./pricing-template-controls";
 
 type PlateCostInput = {
@@ -53,7 +55,15 @@ function blankMaterial(key: number): MaterialDraft {
   return { key, name: "", grams: "", rate: "", spoolId: null };
 }
 
-function makeDraft(file: FileRead, row: ArtifactCostingRead, plate?: PlateCostInput): Draft {
+/** The estimate a new draft starts from when the file itself carries one. */
+type DefaultEstimate = { time: number | null; grams: number | null };
+
+function makeDraft(
+  file: FileRead,
+  row: ArtifactCostingRead,
+  plate: PlateCostInput | undefined,
+  fileEstimate: DefaultEstimate | null,
+): Draft {
   const saved = row.estimate;
   if (saved) {
     return {
@@ -72,8 +82,16 @@ function makeDraft(file: FileRead, row: ArtifactCostingRead, plate?: PlateCostIn
     };
   }
   const metadata = file.metadata;
-  const grams = plate ? plate.metadata.filament_weight_g : metadata?.filament_weight_g;
-  const time = plate ? plate.metadata.estimated_time_s : metadata?.estimated_time_s;
+  const grams = plate
+    ? plate.metadata.filament_weight_g
+    : fileEstimate
+      ? fileEstimate.grams
+      : metadata?.filament_weight_g;
+  const time = plate
+    ? plate.metadata.estimated_time_s
+    : fileEstimate
+      ? fileEstimate.time
+      : metadata?.estimated_time_s;
   return {
     pieces: "1",
     minutes: time == null ? "" : String(Math.round((time / 60) * 100) / 100),
@@ -124,74 +142,82 @@ const costComponents = [
   ["extra", "Additional hourly costs"],
 ] as const satisfies readonly [keyof PieceCosts, string][];
 
+/** The saved estimate's cost, row by row; costs are computed by the server on save. */
 function CostBreakdown({ row }: { row: ArtifactCostingRead }) {
-  if (!row.estimate || !row.costs) return null;
   const { costs, estimate } = row;
-  const currency = estimate.currency;
   const amount = (value: number) =>
     formatNumber(value, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-  const componentTotal = costComponents.reduce((total, [key]) => total + costs[key], 0);
+  const rows: { label: string; value: string; strong?: boolean; muted?: boolean }[] = [];
+  if (estimate && costs) {
+    const hasMachine = estimate.printer !== null;
+    rows.push({ label: uiText("Filament"), value: amount(costs.material) });
+    if (hasMachine) {
+      for (const [key, label] of costComponents.slice(1))
+        rows.push({ label: uiText(label), value: amount(costs[key]) });
+    } else {
+      rows.push({
+        label: uiText("Machine"),
+        value: uiText("Cost not configured"),
+        muted: true,
+      });
+    }
+    rows.push({
+      label: uiText("Production cost"),
+      value: hasMachine
+        ? amount(costs.production)
+        : `${amount(costs.production)} · ${uiText("partial")}`,
+      strong: true,
+    });
+    rows.push({
+      label: uiText("Profit margin (%)"),
+      value: `${formatNumber(estimate.pricing.margin_percent, { maximumFractionDigits: 2 })}%`,
+    });
+    rows.push({ label: uiText("Price before tax"), value: amount(costs.price_before_tax) });
+    rows.push({ label: uiText("Tax"), value: amount(costs.tax) });
+    rows.push({ label: uiText("Final price"), value: amount(costs.final_price), strong: true });
+  }
   return (
-    <section className="min-w-0 border bg-card" aria-label={uiText("Cost per piece")}>
-      <div className="space-y-3 border-b bg-muted/30 p-4">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="text-sm font-semibold">{uiText("Cost per piece")}</h3>
-          <span className="font-mono text-xs text-muted-foreground">{currency}</span>
-        </div>
-        <dl className="grid grid-cols-2 gap-3">
-          <div className="min-w-0">
-            <dt className="text-xs text-muted-foreground">{uiText("Final price")}</dt>
-            <dd className="break-words text-2xl font-semibold tabular-nums">
-              {amount(costs.final_price)}
-            </dd>
-          </div>
-          <div className="min-w-0 border-s ps-3">
-            <dt className="text-xs text-muted-foreground">{uiText("Production cost")}</dt>
-            <dd className="break-words text-2xl font-semibold tabular-nums">
-              {amount(costs.production)}
-            </dd>
-          </div>
-        </dl>
-        <p className="break-words text-xs text-muted-foreground">
-          {uiText("Pieces per print")}: {estimate.pieces} · {uiText("Print time (minutes)")}:{" "}
-          {formatNumber(estimate.print_minutes, { maximumFractionDigits: 2 })}
-          {estimate.printer && ` · ${estimate.printer.name}`}
-        </p>
-      </div>
-      <div className="space-y-3 p-4">
-        <h4 className="text-xs font-semibold">{uiText("Production cost breakdown")}</h4>
-        <dl className="grid grid-cols-[minmax(0,1fr)_minmax(2rem,1fr)_auto] items-center gap-x-3 gap-y-2 text-xs">
-          {costComponents.map(([key, label]) => (
-            <div key={key} className="col-span-3 grid grid-cols-subgrid items-center">
-              <dt className="break-words">{uiText(label)}</dt>
-              <dd className="col-span-2 grid grid-cols-subgrid items-center">
-                <span aria-hidden="true" className="h-1.5 overflow-hidden bg-muted">
-                  <span
-                    className="block h-full origin-left bg-chart-blue rtl:origin-right"
-                    style={{
-                      transform: `scaleX(${componentTotal === 0 ? 0 : costs[key] / componentTotal})`,
-                    }}
-                  />
-                </span>
-                <span className="text-end font-mono tabular-nums">{amount(costs[key])}</span>
-              </dd>
-            </div>
-          ))}
-        </dl>
-        {!estimate.printer && (
-          <p className="text-xs text-muted-foreground">
-            {uiText("Machine expenses are excluded.")}
+    <InspectorSection title={uiText("Production cost breakdown")}>
+      {estimate && costs ? (
+        <SoftCard>
+          <dl aria-label={uiText("Cost per piece")} className="divide-y divide-border">
+            {rows.map((item) => (
+              <div
+                key={item.label}
+                className={`grid grid-cols-[10rem_minmax(0,1fr)] gap-3 px-4 py-2.5 text-sm ${item.strong ? "font-semibold" : ""}`}
+              >
+                <dt className={item.strong ? "" : "text-muted-foreground"}>{item.label}</dt>
+                <dd
+                  className={`text-end tabular-nums ${item.muted ? "text-muted-foreground" : ""}`}
+                >
+                  {item.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <p className="px-4 py-2 text-xs text-muted-foreground">
+            {uiText("Amounts are per piece in {value1}.", { value1: estimate.currency })}
           </p>
-        )}
-        <dl className="grid grid-cols-[1fr_auto] gap-2 border-t pt-3 text-xs">
-          <dt className="text-muted-foreground">{uiText("Price before tax")}</dt>
-          <dd className="text-end font-mono tabular-nums">{amount(costs.price_before_tax)}</dd>
-          <dt className="text-muted-foreground">{uiText("Tax")}</dt>
-          <dd className="text-end font-mono tabular-nums">{amount(costs.tax)}</dd>
-        </dl>
-      </div>
-    </section>
+        </SoftCard>
+      ) : (
+        <p className="px-1 text-sm text-muted-foreground">
+          {uiText("No production estimate saved for this artifact.")}
+        </p>
+      )}
+      {estimate && !estimate.printer && (
+        <p className="px-1 text-sm text-muted-foreground">
+          {uiText("Machine expenses are excluded.")}{" "}
+          {uiText("Set operating costs in Profiles → Printers to include machine expenses.")}
+        </p>
+      )}
+    </InspectorSection>
   );
+}
+
+function revisionLabel(file: FileRead) {
+  return file.file_type === "gcode"
+    ? uiText("Rev {value1}", { value1: String(file.gcode_revision_number ?? file.version) })
+    : file.file_type.toUpperCase();
 }
 
 export function ProductionCosting({
@@ -240,30 +266,28 @@ export function ProductionCosting({
       </section>
     );
   return (
-    <div className="space-y-4">
-      <div className="space-y-1">
-        <h2 className="text-base font-semibold">{uiText("Costing")}</h2>
-        <p className="text-sm text-muted-foreground">{uiText("modelDetail.costFileScope")}</p>
-      </div>
-      <FormField label={uiText("File")}>
-        <select
-          className={inputClasses}
-          value={file.id}
-          onChange={(event) => setSelected(Number(event.target.value))}
-        >
-          {files.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.file_type === "gcode"
-                ? uiText("Rev {value1}", {
-                    value1: String(item.gcode_revision_number ?? item.version),
-                  })
-                : item.file_type.toUpperCase()}
-              {" · "}
-              {item.original_filename}
-            </option>
-          ))}
-        </select>
-      </FormField>
+    <div className="space-y-5">
+      {files.length > 1 && (
+        <div className="flex min-w-0 items-center gap-2.5">
+          <label htmlFor="costing-file" className="text-sm text-muted-foreground">
+            {uiText("File")}
+          </label>
+          <select
+            id="costing-file"
+            className={`${inputClasses} h-8 min-w-0 max-w-full flex-1`}
+            value={file.id}
+            onChange={(event) => setSelected(Number(event.target.value))}
+          >
+            {files.map((item) => (
+              <option key={item.id} value={item.id}>
+                {revisionLabel(item)}
+                {" · "}
+                {item.original_filename}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <ArtifactEstimate
         key={file.id}
         modelId={modelId}
@@ -294,13 +318,18 @@ function ArtifactEstimate({
 }) {
   const query = useQuery(productionCostOptions(modelId, file.id));
   const commands = useProductionCostCommands(modelId, file.id);
-  const [editing, setEditing] = useState<ArtifactCostingRead | null>(null);
-  const restoreEstimateFocus = useRef(false);
-  const estimateAction = useCallback((button: HTMLButtonElement | null) => {
-    if (!button || !restoreEstimateFocus.current) return;
-    restoreEstimateFocus.current = false;
-    button.focus();
-  }, []);
+  // A sliced archive's whole-file metadata is not an estimate; its plates are.
+  const plates = useGcodePlates(
+    modelId,
+    file.original_filename.toLowerCase().endsWith(".3mf") ? file.id : null,
+  );
+  const summary = summarizePrintEstimate(file, plates);
+  const fileEstimate: DefaultEstimate | null =
+    summary.kind === "single" || summary.kind === "plates"
+      ? { time: summary.time, grams: summary.weight }
+      : null;
+  // The form restarts from the server's row after every confirmed write.
+  const [formVersion, setFormVersion] = useState(0);
   const [clearBase, setClearBase] = useState<ArtifactCostingRead | null>(null);
   const [reviewRequired, setReviewRequired] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -309,8 +338,8 @@ function ArtifactEstimate({
     setMessage(null);
     try {
       await commands.save.mutateAsync({ estimate, base, session: getSessionVersion() });
-      setEditing(null);
       setClearBase(null);
+      setFormVersion((version) => version + 1);
       toast.success(
         uiText(estimate ? "Production estimate saved." : "Production estimate cleared."),
       );
@@ -327,92 +356,67 @@ function ArtifactEstimate({
     }
   }
 
-  if (query.isError && !editing)
+  if (query.isError)
     return (
       <p role="alert" className="text-sm text-destructive">
         {userMessage(query.error)}
       </p>
     );
   const row = query.data;
-  if (!row && !editing) return <Skeleton className="h-40" />;
+  if (!row) return <Skeleton className="h-40" />;
 
   return (
-    <div className="space-y-4">
-      {row && <CostBreakdown row={row} />}
-      {!row?.estimate && !editing && (
-        <p className="text-sm text-muted-foreground">
-          {uiText("No production estimate saved for this artifact.")}
-        </p>
-      )}
-      {message && (
-        <p role="alert" className="text-sm text-destructive">
-          {message}
-        </p>
-      )}
-      {reviewRequired && (
-        <div role="status" className="space-y-2 border p-3 text-sm">
-          <p>
-            {uiText("Review the current estimate before saving again. Your draft is preserved.")}
-          </p>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={query.isFetching}
-            onClick={async () => {
-              const current = await query.refetch();
-              if (current.isSuccess) {
-                setEditing((base) => (base ? current.data : null));
-                setMessage(null);
-                setReviewRequired(false);
-              }
-            }}
-          >
-            {uiText("Review current estimate")}
-          </Button>
-        </div>
-      )}
-      {canEdit && editing && (
+    <div className="space-y-5">
+      {canEdit ? (
         <EstimateForm
+          key={`${file.id}-${formVersion}-${fileEstimate === null ? "waiting" : "ready"}`}
           file={file}
           plate={plate}
-          row={editing}
+          fileEstimate={fileEstimate}
+          row={row}
           jobs={jobs}
           admin={admin}
           blocked={reviewRequired}
           commands={commands}
-          onSave={(estimate) => void persist(estimate, editing)}
-          onCancel={() => {
-            setEditing(null);
-            setMessage(null);
-            setReviewRequired(false);
-          }}
+          breakdown={<CostBreakdown row={row} />}
+          messages={
+            <>
+              {message && (
+                <p role="alert" className="text-sm text-destructive">
+                  {message}
+                </p>
+              )}
+              {reviewRequired && (
+                <div role="status" className="space-y-2 border p-3 text-sm">
+                  <p>
+                    {uiText(
+                      "Review the current estimate before saving again. Your draft is preserved.",
+                    )}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={query.isFetching}
+                    onClick={async () => {
+                      const current = await query.refetch();
+                      if (current.isSuccess) {
+                        setMessage(null);
+                        setReviewRequired(false);
+                      }
+                    }}
+                  >
+                    {uiText("Review current estimate")}
+                  </Button>
+                </div>
+              )}
+            </>
+          }
+          onClear={row.estimate ? () => setClearBase(row) : undefined}
+          onSave={(estimate) => void persist(estimate, row)}
         />
-      )}
-      {canEdit && row && !editing && (
-        <div className="flex flex-wrap gap-2">
-          <Button
-            ref={estimateAction}
-            type="button"
-            disabled={reviewRequired}
-            onClick={() => {
-              restoreEstimateFocus.current = true;
-              setEditing(row);
-            }}
-          >
-            {uiText(row.estimate ? "Edit estimate" : "Create estimate")}
-          </Button>
-          {row.estimate && (
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={reviewRequired}
-              onClick={() => setClearBase(row)}
-            >
-              {uiText("Clear estimate")}
-            </Button>
-          )}
-        </div>
+      ) : (
+        <CostBreakdown row={row} />
       )}
       <ConfirmModal
         open={canEdit && clearBase !== null}
@@ -432,30 +436,35 @@ function ArtifactEstimate({
 function EstimateForm({
   file,
   plate,
+  fileEstimate,
   row,
   jobs,
   admin,
   blocked,
   commands,
+  breakdown,
+  messages,
+  onClear,
   onSave,
-  onCancel,
 }: {
   file: FileRead;
   plate?: PlateCostInput;
+  fileEstimate: DefaultEstimate | null;
   row: ArtifactCostingRead;
   jobs: ModelPrintJobRead[];
   admin: boolean;
   blocked: boolean;
   commands: ReturnType<typeof useProductionCostCommands>;
+  breakdown: ReactNode;
+  messages: ReactNode;
+  onClear?: () => void;
   onSave: (estimate: ProductionInputs) => void;
-  onCancel: () => void;
 }) {
   const [estimatePlate] = useState(() => (row.estimate ? undefined : plate));
-  const [draft, setDraft] = useState(() => makeDraft(file, row, estimatePlate));
-  const focusFirstField = useCallback((field: HTMLInputElement | null) => {
-    field?.focus();
-  }, []);
+  const [draft, setDraft] = useState(() => makeDraft(file, row, estimatePlate, fileEstimate));
   const [nextKey, setNextKey] = useState(draft.materials.length);
+  // Where each material's rate came from, until the reader types over it.
+  const [rateOrigins, setRateOrigins] = useState<Record<number, string>>({});
   const currency = row.estimate?.currency ?? row.currency;
   const sameCurrency = currency === row.currency;
   const filamentProfiles = useQuery(filamentProfilesOptions()).data ?? [];
@@ -468,6 +477,20 @@ function EstimateForm({
   const duration = measured?.actual_duration_s;
   const rates = toRates(draft);
   const estimate = toEstimate(draft, rates);
+  const fromFile = !row.estimate;
+  const fileOrigin = estimatePlate
+    ? uiText("modelDetail.plateCostSource", {
+        value1: String(estimatePlate.number).padStart(2, "0"),
+      })
+    : fromFile && file.file_type === "gcode"
+      ? uiText("From the G-code")
+      : row.estimate
+        ? uiText("Saved estimate")
+        : null;
+  const costedPrinters = printerProfiles.filter((item) => item.expenses);
+  const matchedPrinter = draft.printer
+    ? costedPrinters.find((item) => item.name === draft.printer?.name)
+    : undefined;
 
   function updateMaterial(key: number, patch: Partial<MaterialDraft>) {
     setDraft((old) => ({
@@ -484,49 +507,18 @@ function EstimateForm({
   return (
     <form
       aria-label={uiText("Production estimate")}
-      className="production-estimate-form space-y-4"
+      className="production-estimate-form space-y-5"
       onSubmit={submit}
     >
-      <fieldset disabled={commands.save.isPending} className="space-y-4">
-        {!row.estimate && !estimatePlate && file.file_type === "gcode" && (
-          <p className="text-sm text-muted-foreground">{uiText("G-code estimate")}</p>
-        )}
-        {estimatePlate && (
-          <p className="text-sm text-muted-foreground">
-            {uiText("modelDetail.plateCostSource", {
-              value1: String(estimatePlate.number).padStart(2, "0"),
-            })}
-          </p>
-        )}
-        <div className="grid grid-cols-2 gap-3">
-          <FormField label={uiText("Pieces per print")}>
-            <Input
-              ref={focusFirstField}
-              type="number"
-              min={1}
-              max={100000}
-              value={draft.pieces}
-              required
-              onChange={(event) => setDraft({ ...draft, pieces: event.target.value })}
-            />
-          </FormField>
-          <FormField label={uiText("Print time (minutes)")}>
-            <Input
-              type="number"
-              min={0}
-              max={1000000}
-              step="any"
-              value={draft.minutes}
-              required
-              onChange={(event) => setDraft({ ...draft, minutes: event.target.value })}
-            />
-          </FormField>
-          {measured && duration != null && (
-            <div className="col-span-2">
+      <fieldset disabled={commands.save.isPending} className="space-y-5">
+        <InspectorSection
+          title={`${uiText("Production estimate")} · ${revisionLabel(file)}`}
+          actions={
+            measured && duration != null ? (
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
+                size="xs"
+                variant="ghost"
                 onClick={() => {
                   setDraft((old) => ({
                     ...old,
@@ -543,265 +535,321 @@ function EstimateForm({
               >
                 {uiText("Use latest print measurements")} · {measured.printer_name}
               </Button>
-            </div>
-          )}
-        </div>
-
-        <section className="space-y-3 border-t pt-3">
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <FilamentSpool className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            {uiText("Filament per print")}
-          </h3>
-          {!sameCurrency && (
-            <p className="text-xs text-muted-foreground">
-              {uiText("This estimate uses a different currency from the current vault presets.")}
-            </p>
-          )}
-          {draft.materials.map((line) => (
-            <fieldset key={line.key} className="space-y-3 border p-3">
-              {sameCurrency && (filamentProfiles.length > 0 || spools.length > 0) && (
-                <FormField label={uiText("Fill from filament preset or spool")}>
-                  <select
-                    className={inputClasses}
-                    value=""
-                    onChange={(event) => {
-                      const option = event.target.value;
-                      const spool = spools.find((item) => option === `spool-${item.id}`);
-                      const profile = filamentProfiles.find(
-                        (item) => option === `preset-${item.id}`,
-                      );
-                      if (spool) {
-                        updateMaterial(line.key, {
-                          name:
-                            [spool.vendor_name, spool.filament_name ?? spool.name, spool.material]
+            ) : undefined
+          }
+        >
+          <SoftCard className="divide-y-0">
+            <div className="grid grid-cols-2 items-start gap-3 p-4">
+              <FormField className="col-span-2" label={uiText("Cost profile")}>
+                <select
+                  className={inputClasses}
+                  value={
+                    matchedPrinter ? String(matchedPrinter.id) : draft.printer ? "current" : ""
+                  }
+                  disabled={!sameCurrency}
+                  onChange={(event) => {
+                    if (event.target.value === "") {
+                      setDraft({ ...draft, printer: null });
+                      return;
+                    }
+                    const profile = costedPrinters.find(
+                      (item) => item.id === Number(event.target.value),
+                    );
+                    if (profile?.expenses)
+                      setDraft({
+                        ...draft,
+                        printer: { name: profile.name, expenses: profile.expenses },
+                      });
+                  }}
+                >
+                  <option value="">
+                    {draft.printer
+                      ? uiText("Exclude machine expenses")
+                      : uiText("Choose a saved printer profile")}
+                  </option>
+                  {draft.printer && !matchedPrinter && (
+                    <option value="current">{draft.printer.name}</option>
+                  )}
+                  {costedPrinters.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+              <FormField
+                label={uiText("Estimated time per copy")}
+                hint={[uiText("Minutes"), fileOrigin].filter(Boolean).join(" · ")}
+              >
+                <Input
+                  type="number"
+                  min={0}
+                  max={1000000}
+                  step="any"
+                  value={draft.minutes}
+                  required
+                  onChange={(event) => setDraft({ ...draft, minutes: event.target.value })}
+                />
+              </FormField>
+              <FormField label={uiText("Pieces per print")}>
+                <Input
+                  type="number"
+                  min={1}
+                  max={100000}
+                  value={draft.pieces}
+                  required
+                  onChange={(event) => setDraft({ ...draft, pieces: event.target.value })}
+                />
+              </FormField>
+              {!sameCurrency && (
+                <p className="col-span-2 text-xs text-muted-foreground">
+                  {uiText(
+                    "This estimate uses a different currency from the current vault presets.",
+                  )}
+                </p>
+              )}
+              {draft.materials.map((line) => (
+                <fieldset
+                  key={line.key}
+                  className={
+                    draft.materials.length > 1
+                      ? "col-span-2 grid grid-cols-2 gap-3 border p-3"
+                      : "col-span-2 grid grid-cols-2 gap-3"
+                  }
+                >
+                  {sameCurrency && (filamentProfiles.length > 0 || spools.length > 0) && (
+                    <FormField
+                      className="col-span-2"
+                      label={uiText("Fill from filament preset or spool")}
+                    >
+                      <select
+                        className={inputClasses}
+                        value=""
+                        onChange={(event) => {
+                          const option = event.target.value;
+                          const spool = spools.find((item) => option === `spool-${item.id}`);
+                          const profile = filamentProfiles.find(
+                            (item) => option === `preset-${item.id}`,
+                          );
+                          if (spool) {
+                            updateMaterial(line.key, {
+                              name:
+                                [
+                                  spool.vendor_name,
+                                  spool.filament_name ?? spool.name,
+                                  spool.material,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ") || uiText("Filament"),
+                              rate: spool.cost_per_kg == null ? "" : String(spool.cost_per_kg),
+                              spoolId: spool.id,
+                            });
+                            setRateOrigins((old) => ({
+                              ...old,
+                              [line.key]: uiText("From Spoolman spool #{id}", { id: spool.id }),
+                            }));
+                          } else if (profile) {
+                            updateMaterial(line.key, {
+                              name: [profile.name, profile.material_type]
+                                .filter(Boolean)
+                                .join(" · "),
+                              rate: profile.cost_per_kg == null ? "" : String(profile.cost_per_kg),
+                              spoolId: null,
+                            });
+                            setRateOrigins((old) => ({
+                              ...old,
+                              [line.key]: uiText("From the {value1} preset", {
+                                value1: profile.name,
+                              }),
+                            }));
+                          }
+                        }}
+                      >
+                        <option value="">{uiText("Select a preset or spool")}</option>
+                        {filamentProfiles.map((item) => (
+                          <option key={`preset-${item.id}`} value={`preset-${item.id}`}>
+                            {item.name}
+                          </option>
+                        ))}
+                        {spools.map((item) => (
+                          <option key={`spool-${item.id}`} value={`spool-${item.id}`}>
+                            #{item.id} ·{" "}
+                            {[item.filament_name ?? item.name, item.material, item.location]
                               .filter(Boolean)
-                              .join(" ") || uiText("Filament"),
-                          rate: spool.cost_per_kg == null ? "" : String(spool.cost_per_kg),
-                          spoolId: spool.id,
+                              .join(" · ")}
+                          </option>
+                        ))}
+                      </select>
+                    </FormField>
+                  )}
+                  {line.spoolId !== null && (
+                    <div className="col-span-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span>{uiText("Spoolman #{id}", { id: line.spoolId })}</span>
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="ghost"
+                        onClick={() => updateMaterial(line.key, { spoolId: null })}
+                      >
+                        {uiText("Clear spool association")}
+                      </Button>
+                    </div>
+                  )}
+                  <FormField className="col-span-2" label={uiText("Material name")}>
+                    <Input
+                      maxLength={200}
+                      value={line.name}
+                      required
+                      onChange={(event) => updateMaterial(line.key, { name: event.target.value })}
+                    />
+                  </FormField>
+                  <FormField
+                    label={uiText("Filament per copy")}
+                    hint={[uiText("Grams"), fileOrigin].filter(Boolean).join(" · ")}
+                  >
+                    <Input
+                      type="number"
+                      min={0}
+                      max={1000000}
+                      step="any"
+                      value={line.grams}
+                      required
+                      onChange={(event) => updateMaterial(line.key, { grams: event.target.value })}
+                    />
+                  </FormField>
+                  <FormField
+                    label={`${uiText("Cost per kg")} (${currency})`}
+                    hint={rateOrigins[line.key]}
+                  >
+                    <Input
+                      type="number"
+                      min={0}
+                      max={1000000}
+                      step="any"
+                      value={line.rate}
+                      required
+                      onChange={(event) => {
+                        updateMaterial(line.key, { rate: event.target.value });
+                        setRateOrigins((old) => {
+                          const next = { ...old };
+                          delete next[line.key];
+                          return next;
                         });
-                      } else if (profile) {
-                        updateMaterial(line.key, {
-                          name: [profile.name, profile.material_type].filter(Boolean).join(" · "),
-                          rate: profile.cost_per_kg == null ? "" : String(profile.cost_per_kg),
-                          spoolId: null,
-                        });
+                      }}
+                    />
+                  </FormField>
+                  {draft.materials.length > 1 && (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      className="col-span-2 justify-self-start"
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          materials: draft.materials.filter((item) => item.key !== line.key),
+                        })
                       }
-                    }}
-                  >
-                    <option value="">{uiText("Select a preset or spool")}</option>
-                    {filamentProfiles.map((item) => (
-                      <option key={`preset-${item.id}`} value={`preset-${item.id}`}>
-                        {item.name}
-                      </option>
-                    ))}
-                    {spools.map((item) => (
-                      <option key={`spool-${item.id}`} value={`spool-${item.id}`}>
-                        #{item.id} ·{" "}
-                        {[item.filament_name ?? item.name, item.material, item.location]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </option>
-                    ))}
-                  </select>
-                </FormField>
-              )}
-              {line.spoolId !== null && (
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span>{uiText("Spoolman #{id}", { id: line.spoolId })}</span>
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="ghost"
-                    onClick={() => updateMaterial(line.key, { spoolId: null })}
-                  >
-                    {uiText("Clear spool association")}
-                  </Button>
-                </div>
-              )}
+                    >
+                      {uiText("Remove material")}
+                    </Button>
+                  )}
+                </fieldset>
+              ))}
+              <div className="col-span-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={draft.materials.length >= 32}
+                  onClick={() => {
+                    setDraft({ ...draft, materials: [...draft.materials, blankMaterial(nextKey)] });
+                    setNextKey(nextKey + 1);
+                  }}
+                >
+                  {uiText("Add material")}
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-3 border-t border-border p-4">
+              <h3 className="text-sm font-medium text-muted-foreground">{uiText("Pricing")}</h3>
               <div className="grid grid-cols-2 gap-3">
-                <FormField className="col-span-2" label={uiText("Material name")}>
-                  <Input
-                    maxLength={200}
-                    value={line.name}
-                    required
-                    onChange={(event) => updateMaterial(line.key, { name: event.target.value })}
-                  />
-                </FormField>
-                <FormField label={uiText("Filament used (g)")}>
+                <FormField
+                  label={uiText("Profit margin (%)")}
+                  hint={uiText("Profit as a share of the price before tax.")}
+                >
                   <Input
                     type="number"
                     min={0}
-                    max={1000000}
+                    max={99.99}
                     step="any"
-                    value={line.grams}
+                    value={draft.margin}
                     required
-                    onChange={(event) => updateMaterial(line.key, { grams: event.target.value })}
+                    onChange={(event) => setDraft({ ...draft, margin: event.target.value })}
                   />
                 </FormField>
-                <FormField label={`${uiText("Cost per kg")} (${currency})`}>
+                <FormField label={uiText("Tax (%)")}>
                   <Input
                     type="number"
                     min={0}
-                    max={1000000}
+                    max={100}
                     step="any"
-                    value={line.rate}
+                    value={draft.tax}
                     required
-                    onChange={(event) => updateMaterial(line.key, { rate: event.target.value })}
+                    onChange={(event) => setDraft({ ...draft, tax: event.target.value })}
                   />
                 </FormField>
               </div>
-              {draft.materials.length > 1 && (
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost"
-                  onClick={() =>
-                    setDraft({
-                      ...draft,
-                      materials: draft.materials.filter((item) => item.key !== line.key),
-                    })
-                  }
-                >
-                  {uiText("Remove material")}
-                </Button>
-              )}
-            </fieldset>
-          ))}
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={draft.materials.length >= 32}
-            onClick={() => {
-              setDraft({ ...draft, materials: [...draft.materials, blankMaterial(nextKey)] });
-              setNextKey(nextKey + 1);
-            }}
-          >
-            {uiText("Add material")}
-          </Button>
-        </section>
-
-        <section className="space-y-2 border-t pt-3">
-          <FormField label={uiText("Printer operating costs")}>
-            <select
-              className={inputClasses}
-              value=""
-              disabled={!sameCurrency}
-              onChange={(event) => {
-                const profile = printerProfiles.find(
-                  (item) => item.id === Number(event.target.value),
-                );
-                if (profile?.expenses)
+              <PricingTemplateControls
+                rates={rates}
+                admin={admin}
+                pending={commands.createTemplate.isPending || commands.deleteTemplate.isPending}
+                onApply={(value) =>
                   setDraft({
                     ...draft,
-                    printer: { name: profile.name, expenses: profile.expenses },
-                  });
-              }}
-            >
-              <option value="">{uiText("Select a printer preset")}</option>
-              {printerProfiles
-                .filter((item) => item.expenses)
-                .map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-            </select>
-          </FormField>
-          {draft.printer ? (
-            <div className="flex items-center justify-between gap-2 text-sm">
-              <p>{draft.printer.name}</p>
-              <Button
-                size="xs"
-                variant="ghost"
-                type="button"
-                onClick={() => setDraft({ ...draft, printer: null })}
-              >
-                {uiText("Exclude machine expenses")}
-              </Button>
+                    margin: String(value.margin_percent),
+                    tax: String(value.tax_percent),
+                  })
+                }
+                onSave={async (template) => {
+                  try {
+                    await commands.createTemplate.mutateAsync({
+                      template,
+                      session: getSessionVersion(),
+                    });
+                    toast.success(uiText("Pricing template saved."));
+                    return true;
+                  } catch (error) {
+                    toast.error(error);
+                    return false;
+                  }
+                }}
+                onDelete={async (id) => {
+                  try {
+                    await commands.deleteTemplate.mutateAsync({
+                      id,
+                      session: getSessionVersion(),
+                    });
+                    toast.success(uiText("Pricing template deleted."));
+                    return true;
+                  } catch (error) {
+                    toast.error(error);
+                    return false;
+                  }
+                }}
+              />
             </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              {uiText("Set operating costs in Profiles → Printers to include machine expenses.")}
-            </p>
-          )}
-        </section>
-
-        <section className="space-y-3 border-t pt-3">
-          <h3 className="text-sm font-semibold">{uiText("Pricing")}</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <FormField
-              label={uiText("Profit margin (%)")}
-              hint={uiText("Profit as a share of the price before tax.")}
-            >
-              <Input
-                type="number"
-                min={0}
-                max={99.99}
-                step="any"
-                value={draft.margin}
-                required
-                onChange={(event) => setDraft({ ...draft, margin: event.target.value })}
-              />
-            </FormField>
-            <FormField label={uiText("Tax (%)")}>
-              <Input
-                type="number"
-                min={0}
-                max={100}
-                step="any"
-                value={draft.tax}
-                required
-                onChange={(event) => setDraft({ ...draft, tax: event.target.value })}
-              />
-            </FormField>
-          </div>
-          <PricingTemplateControls
-            rates={rates}
-            admin={admin}
-            pending={commands.createTemplate.isPending || commands.deleteTemplate.isPending}
-            onApply={(value) =>
-              setDraft({
-                ...draft,
-                margin: String(value.margin_percent),
-                tax: String(value.tax_percent),
-              })
-            }
-            onSave={async (template) => {
-              try {
-                await commands.createTemplate.mutateAsync({
-                  template,
-                  session: getSessionVersion(),
-                });
-                toast.success(uiText("Pricing template saved."));
-                return true;
-              } catch (error) {
-                toast.error(error);
-                return false;
-              }
-            }}
-            onDelete={async (id) => {
-              try {
-                await commands.deleteTemplate.mutateAsync({ id, session: getSessionVersion() });
-                toast.success(uiText("Pricing template deleted."));
-                return true;
-              } catch (error) {
-                toast.error(error);
-                return false;
-              }
-            }}
-          />
-        </section>
+          </SoftCard>
+        </InspectorSection>
+        {breakdown}
+        {messages}
       </fieldset>
-      <div className="sticky bottom-0 z-dropdown flex flex-wrap justify-end gap-2 border-t border-border bg-card py-3">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={commands.save.isPending}
-          onClick={onCancel}
-        >
-          {uiText("Cancel")}
-        </Button>
+      <div className="flex flex-wrap justify-end gap-2">
+        {onClear && (
+          <Button type="button" variant="ghost" disabled={blocked} onClick={onClear}>
+            {uiText("Clear estimate")}
+          </Button>
+        )}
         <Button type="submit" loading={commands.save.isPending} disabled={!estimate || blocked}>
           {uiText("Save estimate")}
         </Button>

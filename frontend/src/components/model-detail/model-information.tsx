@@ -1,5 +1,3 @@
-import { GeometryReport } from "./geometry-report";
-import { Fragment } from "react";
 import { InspectorSection, PropertyList, PropertyRow, SoftCard } from "./inspector-section";
 import { useLocation } from "@tanstack/react-router";
 import { AlignLeft, CalendarDays, ChevronRight, Folder, Tag } from "lucide-react";
@@ -7,10 +5,9 @@ import { Link } from "@/lib/link";
 import type { EditingBase } from "@/types/editing";
 import { ModelTagsField } from "./model-tags-field";
 import { Button } from "@/components/ui/button";
-import { meshGeometryFacts, type useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { currentLocale, uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import type { FileRead, ModelRead, TagRead } from "@/types";
+import type { ModelRead, TagRead } from "@/types";
 import { ModelDescription } from "./model-description";
 
 /** Display segments for a collection path; a parent repeated by its child adds nothing. */
@@ -117,44 +114,5 @@ export function ModelInformation({
         </PropertyList>
       </SoftCard>
     </InspectorSection>
-  );
-}
-
-export function ModelGeometry({
-  modelId,
-  sourceFile,
-  measurement = "unavailable",
-}: {
-  modelId: number;
-  sourceFile: FileRead | null;
-  measurement?: ReturnType<typeof useMeshGeometryMeasurement>;
-}) {
-  useUiLocale();
-  if (!sourceFile) return null;
-  const geometry = meshGeometryFacts(sourceFile, measurement);
-  return (
-    <section
-      className="model-information-geometry border-b border-border pb-4"
-      aria-label={uiText("Whole source geometry")}
-    >
-      <h2 className="text-base font-semibold">{uiText("Whole source geometry")}</h2>
-      {geometry.emptyMessage ? (
-        <p className="mt-2 text-sm text-muted-foreground">{geometry.emptyMessage}</p>
-      ) : (
-        <dl className="model-information-facts">
-          {geometry.facts.map(([label, value]) => (
-            <Fragment key={label}>
-              <dt>{label}</dt>
-              <dd>{value}</dd>
-            </Fragment>
-          ))}
-        </dl>
-      )}
-      <GeometryReport
-        modelId={modelId}
-        fileId={sourceFile.file_type === "gcode" ? null : sourceFile.id}
-        volume={sourceFile.metadata?.volume_measurement ?? null}
-      />
-    </section>
   );
 }

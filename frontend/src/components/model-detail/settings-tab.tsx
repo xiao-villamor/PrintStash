@@ -17,6 +17,7 @@ import type { PrintSettingRow } from "./presentation";
 import { Localized } from "@/components/ui/localized";
 import type { GcodePlates } from "@/lib/api/plates";
 import { PlateEstimates } from "./plate-estimates";
+import { InspectorSection, PropertyList, PropertyRow, SoftCard } from "./inspector-section";
 import { formatPlateEstimate } from "./format-plate-estimate";
 
 interface SettingValue {
@@ -29,28 +30,19 @@ interface SettingGroup {
   rows: SettingValue[];
 }
 
-function Group({ group }: { group: SettingGroup }) {
-  const rows = group.rows.filter((row) => row.visible);
-  if (rows.length === 0) return null;
+function SettingRows({ group }: { group: SettingGroup }) {
   return (
-    <section className="space-y-2">
-      <h3 className="text-sm font-semibold">{uiText(group.titleKey)}</h3>
-      <dl className="text-sm">
-        {rows.map((row) => (
-          <div
-            key={row.labelKey}
-            className="grid grid-cols-[minmax(0,.9fr)_minmax(0,1.1fr)] items-baseline gap-4 border-b border-border px-2.5 py-2 odd:bg-muted/40"
-          >
-            <dt className="min-w-0 text-xs text-muted-foreground">{uiText(row.labelKey)}</dt>
-            <dd
-              className={`min-w-0 break-words tabular-nums ${row.value === null ? "text-muted-foreground" : "font-medium text-foreground"}`}
-            >
-              {row.value ?? uiText("Not recorded")}
-            </dd>
-          </div>
+    <>
+      {group.rows
+        .filter((row) => row.visible)
+        .map((row) => (
+          <PropertyRow key={row.labelKey} label={uiText(row.labelKey)}>
+            {row.value ?? (
+              <span className="text-muted-foreground">{uiText("Not in the file")}</span>
+            )}
+          </PropertyRow>
         ))}
-      </dl>
-    </section>
+    </>
   );
 }
 
@@ -60,24 +52,25 @@ export function SettingsTab({
   preferences,
   headerActions,
   revisionPicker,
-  actions,
   sourceProject,
   emptyAction,
   hasSlicedRevision = false,
   plateEstimates,
   selectedSlicedPlate = null,
+  fileName,
 }: {
   meta: MetadataRead | null | undefined;
   printSettingRows: PrintSettingRow[];
   preferences: MetadataPreferences;
   headerActions?: ReactNode;
   revisionPicker?: ReactNode;
-  actions?: ReactNode;
   sourceProject?: ReactNode;
   emptyAction?: ReactNode;
   hasSlicedRevision?: boolean;
   plateEstimates?: GcodePlates | null;
   selectedSlicedPlate?: number | null;
+  /** The inspected revision's file, listed as a setup row. */
+  fileName?: string;
 }) {
   useUiLocale();
   const slicer = slicerDisplayName(meta);
@@ -112,7 +105,6 @@ export function SettingsTab({
   const geometryOnly = hasMeshGeometry && !hasEmbeddedSlicerMetadata && !hasSlicedRevision;
   const showSourceProjectFirst =
     Boolean(sourceProject) && !hasEmbeddedSlicerMetadata && !hasSlicedRevision;
-  const multiPlate = (plateEstimates?.plates.length ?? 0) > 1;
   const resin = meta?.layer_count != null;
   const text = (value: string | null | undefined) =>
     value === null || value === undefined || value === "" ? null : value;
@@ -267,17 +259,42 @@ export function SettingsTab({
       </section>
     );
   }
+  // Time, filament and cost live in the plate table; resin volume has no plate
+  // column, so it stays a setup row rather than disappearing.
+  const resinVolume: SettingGroup = {
+    titleKey: "Estimates",
+    rows: left[2].rows.filter((row) => row.labelKey === "RESIN VOLUME"),
+  };
+  const setupGroups = [left[0], left[1], structure, resinVolume];
+  const wholeEstimate = {
+    estimated_time_s: meta?.estimated_time_s ?? null,
+    filament_weight_g: meta?.filament_weight_g ?? null,
+    filament_cost: meta?.filament_cost ?? null,
+  };
+  const hasEstimates =
+    (plateEstimates?.plates.length ?? 0) > 0 ||
+    wholeEstimate.estimated_time_s !== null ||
+    wholeEstimate.filament_weight_g !== null ||
+    wholeEstimate.filament_cost !== null;
+  const estimateData =
+    plateEstimates && plateEstimates.plates.length > 0
+      ? plateEstimates
+      : {
+          plates: [1],
+          identities: [],
+          plate_metadata: [{ number: 1, metadata: wholeEstimate }],
+        };
+  const plateCount = estimateData.plates.length;
   return (
     <Localized>
-      <section className="@container/settings space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-base font-semibold">{uiText("Print settings")}</h2>
-          {headerActions}
-        </div>
-        {revisionPicker}
-        {showSourceProjectFirst ? (
-          sourceProject
-        ) : geometryOnly ? (
+      <section className="@container/settings space-y-5" aria-label={uiText("Print settings")}>
+        {(revisionPicker || headerActions) && (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            {revisionPicker}
+            {headerActions}
+          </div>
+        )}
+        {showSourceProjectFirst ? null : geometryOnly ? (
           <p className="text-sm leading-relaxed text-muted-foreground">
             {uiText(
               "This file contains mesh geometry only. Printer, material, and slicer settings are not embedded. Add a sliced G-code or 3MF revision to capture them.",
@@ -294,40 +311,55 @@ export function SettingsTab({
                     )}
               </p>
             )}
-            <div className="grid gap-6 @2xl/settings:grid-cols-2">
-              <div className="space-y-5">
-                {left.map((group) =>
-                  group.titleKey === "Estimates" && multiPlate && plateEstimates ? (
-                    <PlateEstimates
-                      key={group.titleKey}
-                      data={plateEstimates}
-                      selected={selectedSlicedPlate}
-                      showTime={preferences.estimated_time}
-                      showWeight={preferences.filament_weight}
-                      showCost={preferences.filament_cost}
-                    />
-                  ) : (
-                    <Group key={group.titleKey} group={group} />
-                  ),
-                )}
-              </div>
-              <Group group={structure} />
-            </div>
+            {hasEmbeddedSlicerMetadata && hasEstimates && (
+              <InspectorSection
+                title={
+                  plateCount > 1
+                    ? `${uiText("Plate estimates")} · ${uiText("G-code estimate · sum of {count} plates", { count: plateCount })}`
+                    : `${uiText("Plate estimates")} · ${uiText("G-code estimate")}`
+                }
+              >
+                <PlateEstimates
+                  data={estimateData}
+                  selected={selectedSlicedPlate}
+                  showTime={preferences.estimated_time}
+                  showWeight={preferences.filament_weight && !resin}
+                  showCost={preferences.filament_cost && !resin}
+                />
+              </InspectorSection>
+            )}
+            {hasEmbeddedSlicerMetadata && (
+              <InspectorSection title={uiText("Print setup · read from the G-code")}>
+                <SoftCard>
+                  <PropertyList label={uiText("Print setup")}>
+                    {setupGroups.map((group) => (
+                      <SettingRows key={group.titleKey} group={group} />
+                    ))}
+                    <PropertyRow label={uiText("Plates")}>{String(plateCount)}</PropertyRow>
+                    {fileName && <PropertyRow label={uiText("File")}>{fileName}</PropertyRow>}
+                    {preferences.slicer_info && (
+                      <PropertyRow label={uiText("Sliced with")}>
+                        {slicer ?? (
+                          <span className="text-muted-foreground">{uiText("Not recorded")}</span>
+                        )}
+                      </PropertyRow>
+                    )}
+                  </PropertyList>
+                </SoftCard>
+              </InspectorSection>
+            )}
           </>
         )}
-        <Group group={geometry} />
-        {preferences.slicer_info && !showSourceProjectFirst && (
-          <p className="text-xs text-muted-foreground">
-            {uiText("Sliced with ")}
-            {slicer ? (
-              <strong className="font-medium text-foreground">{slicer}</strong>
-            ) : (
-              uiText("Not recorded")
-            )}
-          </p>
+        {geometry.rows.some((row) => row.visible) && (
+          <InspectorSection title={uiText(geometry.titleKey)}>
+            <SoftCard>
+              <PropertyList>
+                <SettingRows group={geometry} />
+              </PropertyList>
+            </SoftCard>
+          </InspectorSection>
         )}
-        {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
-        {!showSourceProjectFirst && sourceProject}
+        {sourceProject}
       </section>
     </Localized>
   );

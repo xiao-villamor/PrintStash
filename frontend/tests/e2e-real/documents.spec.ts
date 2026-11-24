@@ -180,7 +180,7 @@ test.describe("Model attachments", () => {
     await page.goto(`/models/${modelId}`);
     await collapseNavigationSidebar(page);
     await page.getByRole("tab", { name: /^Files(?: \d+)?$/ }).click();
-    await expect(page.getByText("No attachments yet.")).toBeVisible();
+    await expect(page.getByText(/No attachments yet\./)).toBeVisible();
     await page.screenshot({ path: info.outputPath("model-files-empty.png") });
     const modelUrl = page.url();
 

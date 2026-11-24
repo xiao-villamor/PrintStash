@@ -55,12 +55,15 @@ export function SlicerOpenButton({
   size = "md",
   showLabel = false,
   primary = false,
+  outline = false,
 }: {
   fileId: number;
   fileType: string;
   size?: "sm" | "md";
   showLabel?: boolean;
   primary?: boolean;
+  /** A bordered secondary button, for the action hierarchy's second tier. */
+  outline?: boolean;
 }) {
   useUiLocale();
   const [open, setOpen] = useState(false);
@@ -125,9 +128,11 @@ export function SlicerOpenButton({
       role="menu"
       aria-label={uiText("Open in slicer")}
       trigger={
-        primary ? (
+        primary || outline ? (
           <Button
             type="button"
+            variant={outline ? "outline" : "default"}
+            size={outline && size === "sm" ? "sm" : undefined}
             aria-haspopup="menu"
             aria-expanded={open}
             onClick={() => setOpen((value) => !value)}

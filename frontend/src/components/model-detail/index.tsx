@@ -18,7 +18,8 @@ import { ApiError } from "@/lib/errors";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { Modal } from "@/components/ui/modal";
 import { InlineTitleEditor } from "@/components/inline-title-editor";
-import { ModelGeometry, ModelInformation } from "./model-information";
+import { GeometryFacts } from "./geometry-facts";
+import { ModelInformation } from "./model-information";
 import { ModelSourceSummary } from "./source-summary";
 import { RelatedProfiles } from "./related-profiles";
 import { useRelatedProfiles } from "./use-related-profiles";
@@ -58,14 +59,7 @@ import type {
 } from "@/components/stl-viewer";
 import { useToolpathSources } from "@/lib/toolpath-preview";
 import type { ViewerMode } from "@/components/model-detail/viewer-toolbar";
-import { SlicerOpenButton } from "@/components/slicer-open-button";
-import {
-  downloadAuthenticatedFile,
-  deleteModel,
-  getAssetUrl,
-  getModel,
-  updateModel,
-} from "@/lib/api";
+import { deleteModel, getAssetUrl, getModel, updateModel } from "@/lib/api";
 import { usePrinters, useTags } from "@/lib/queries";
 import { readMetadataPreferences } from "@/lib/metadata-preferences";
 import { toast } from "@/lib/toast";
@@ -1738,10 +1732,15 @@ function ModelDetailPresentation({
                       ) : undefined
                     }
                     sourceProject={
-                      !printSettingsFile && meshFile?.file_type === "3mf" ? (
-                        <ProjectProfile modelId={model.id} fileId={meshFile.id} />
+                      meshFile?.file_type === "3mf" ? (
+                        <ProjectProfile
+                          modelId={model.id}
+                          fileId={meshFile.id}
+                          showPlateEstimates={!printSettingsFile}
+                        />
                       ) : undefined
                     }
+                    fileName={inspectedGcode?.original_filename}
                     plateEstimates={slicedEstimates}
                     selectedSlicedPlate={selectedEstimatePlate}
                     headerActions={
@@ -1754,32 +1753,6 @@ function ModelDetailPresentation({
                         >
                           {uiText("Compare")}
                         </Button>
-                      ) : undefined
-                    }
-                    actions={
-                      inspectedGcode ? (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <SlicerOpenButton
-                            fileId={inspectedGcode.id}
-                            fileType={
-                              inspectedGcode.original_filename.toLowerCase().endsWith(".bgcode")
-                                ? "bgcode"
-                                : inspectedGcode.file_type
-                            }
-                            showLabel
-                          />
-                          <Button
-                            variant="outline"
-                            onClick={() =>
-                              void downloadAuthenticatedFile(
-                                `/api/v1/files/${inspectedGcode.id}/download`,
-                                inspectedGcode.original_filename,
-                              ).catch((error) => toast.error(error))
-                            }
-                          >
-                            {uiText("Download")}
-                          </Button>
-                        </div>
                       ) : undefined
                     }
                     revisionPicker={
@@ -1860,25 +1833,19 @@ function ModelDetailPresentation({
                       onCompare={
                         sourceFiles.length >= 2 ? () => openComparison("files") : undefined
                       }
-                      fileDetails={(file) =>
-                        file.file_type === "3mf" || meshFile?.id === file.id ? (
-                          <>
-                            {file.file_type === "3mf" && (
-                              <ProjectProfile
-                                modelId={model.id}
-                                fileId={file.id}
-                                showPlateEstimates={false}
-                              />
-                            )}
-                            {meshFile?.id === file.id && (
-                              <ModelGeometry
-                                modelId={model.id}
-                                sourceFile={file}
-                                measurement={geometryMeasurement}
-                              />
-                            )}
-                          </>
+                      fileFacts={(file) =>
+                        meshFile?.id === file.id ? (
+                          <GeometryFacts
+                            modelId={model.id}
+                            sourceFile={file}
+                            measurement={geometryMeasurement}
+                          />
                         ) : null
+                      }
+                      sourcePlateCount={
+                        meshFile && plates.length > 1
+                          ? { fileId: meshFile.id, count: plates.length }
+                          : null
                       }
                       sourceFiles={sourceFiles}
                       previewFailure={
@@ -1894,6 +1861,11 @@ function ModelDetailPresentation({
                     />
                     <RelatedProfiles
                       modelId={model.id}
+                      revisionNumber={
+                        overviewRevision
+                          ? (overviewRevision.gcode_revision_number ?? overviewRevision.version)
+                          : undefined
+                      }
                       revisionEstimate={
                         revisionEstimate && "time" in revisionEstimate
                           ? revisionEstimate

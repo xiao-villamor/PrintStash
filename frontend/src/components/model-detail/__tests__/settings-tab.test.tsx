@@ -75,7 +75,7 @@ describe("SettingsTab", () => {
 });
 
 function setting(label: string) {
-  const row = screen.getByText(label).parentElement;
+  const row = screen.getByText(label).closest("div");
   if (!row) throw new Error("A setting must belong to its definition row");
   return within(row);
 }
@@ -116,7 +116,7 @@ describe("SettingsTab sliced revision", () => {
       />,
     );
     expect(
-      within(screen.getByRole("region", { name: "Plate 02" })).getByText("13.03 g"),
+      within(screen.getByRole("row", { name: "Plate 02" })).getByText("13.03 g"),
     ).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Estimates" })).not.toBeInTheDocument();
   });
@@ -189,10 +189,12 @@ describe("SettingsTab recorded values", () => {
   it("groups settings into the reference sections", () => {
     renderSettings(aMetadata({ printer_model: "Workshop printer" }));
 
-    expect(screen.getByRole("heading", { name: "Printer & material" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Temperatures" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Estimates" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Layers & structure" })).toBeVisible();
+    // Estimates live in the plate table; every other setting is one setup list.
+    expect(
+      screen.getByRole("heading", { name: "Print setup · read from the G-code" }),
+    ).toBeVisible();
+    expect(setting("Printer profile").getByText("Workshop printer")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Temperatures" })).not.toBeInTheDocument();
   });
   it("preserves recorded zero settings", () => {
     renderSettings(
@@ -205,9 +207,10 @@ describe("SettingsTab recorded values", () => {
     );
 
     expect(setting("Layer height").getByText("0mm")).toBeVisible();
-    expect(setting("Estimated time").getByText("0s")).toBeVisible();
-    expect(setting("Filament weight").getByText("0 g")).toBeVisible();
-    expect(setting("Filament cost").getByText("0.00")).toBeVisible();
+    const plate = within(screen.getByRole("row", { name: "Plate 01" }));
+    expect(plate.getByText("0s")).toBeVisible();
+    expect(plate.getByText("0 g")).toBeVisible();
+    expect(plate.getByText("0.00")).toBeVisible();
   });
   it("retains recorded zero walls", () => {
     renderSettings(aMetadata({ wall_loops: 0 }));
@@ -215,9 +218,9 @@ describe("SettingsTab recorded values", () => {
     expect(setting("Walls").getByText("0")).toBeVisible();
   });
   it("distinguishes absent walls from recorded zero", () => {
-    renderSettings(aMetadata());
+    renderSettings(aMetadata({ printer_model: "Workshop printer" }));
 
-    expect(setting("Walls").getByText("Not recorded")).toBeVisible();
+    expect(setting("Walls").getByText("Not in the file")).toBeVisible();
   });
   it("retains a recorded false support setting", () => {
     renderSettings(aMetadata({ support_material: false }));

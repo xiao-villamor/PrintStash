@@ -45,13 +45,12 @@ describe("ProductionCosting", () => {
       { routes: { "GET /api/v1/files/1/production-cost": json(receipt) } },
     );
 
-    const summary = await screen.findByRole("region", { name: "Cost per piece" });
-    const fills = summary.querySelectorAll("[aria-hidden] > [style]");
-    expect(fills).toHaveLength(5);
-    for (const fill of fills) expect(fill).toHaveStyle({ transform: "scaleX(0)" });
+    const summary = within(await screen.findByLabelText("Cost per piece"));
+    expect(summary.getByText("Final price")).toBeVisible();
+    expect(summary.queryByText(/NaN/)).not.toBeInTheDocument();
   });
 
-  it("restores focus to the estimate action after cancellation", async () => {
+  it("offers the estimate form at once without saving anything", async () => {
     const receipt: ArtifactCostingRead = {
       ...anEditingBase(),
       currency: "USD",
@@ -69,11 +68,10 @@ describe("ProductionCosting", () => {
       />,
       { routes: { "GET /api/v1/files/1/production-cost": json(receipt) } },
     );
-    const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Create estimate" }));
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-    expect(screen.getByRole("button", { name: "Create estimate" })).toHaveFocus();
+    const form = within(await screen.findByRole("form", { name: "Production estimate" }));
+    expect(form.getByRole("button", { name: "Save estimate" })).toBeVisible();
+    expect(screen.getByText("No production estimate saved for this artifact.")).toBeVisible();
     expect(view.requestsWithMethod("PUT")).toHaveLength(0);
   });
 
@@ -106,11 +104,10 @@ describe("ProductionCosting", () => {
     );
 
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Create estimate" }));
-    const form = within(screen.getByRole("form", { name: "Production estimate" }));
-    await user.type(form.getByLabelText("Print time (minutes)"), "30");
+    const form = within(await screen.findByRole("form", { name: "Production estimate" }));
+    await user.type(form.getByLabelText("Estimated time per copy"), "30");
     await user.type(form.getByLabelText("Material name"), "PETG");
-    await user.type(form.getByLabelText("Filament used (g)"), "10");
+    await user.type(form.getByLabelText("Filament per copy"), "10");
     await user.type(form.getByLabelText("Cost per kg (USD)"), "20");
     const save = form.getByRole("button", { name: "Save estimate" });
     await user.click(save);

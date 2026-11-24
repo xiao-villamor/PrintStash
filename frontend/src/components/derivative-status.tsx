@@ -14,7 +14,7 @@ import { Link } from "@/lib/link";
  * shown as pending rather than hidden.
  */
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, ChevronRight, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { listDerivatives, retryDerivative } from "@/lib/api";
@@ -28,6 +28,7 @@ import { useUiLocale } from "@/lib/i18n";
 import { uiText } from "@/lib/locale";
 import { stlPreviewMessage, type StlPreviewFailure } from "@/lib/use-stl-preview";
 import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 import type { DerivativeRead, DerivativeState } from "@/types";
 
 export interface DerivativeStatusApi {
@@ -64,13 +65,19 @@ export function DerivativeStatus({
   canRetry,
   previewFailure = null,
   showReady = false,
+  plateCount = null,
+  className,
   api = DERIVATIVE_API,
 }: {
   modelId: number;
   fileId: number;
   canRetry: boolean;
   previewFailure?: StlPreviewFailure | null;
+  /** Show the settled preview state as a processing row, not only work in flight. */
   showReady?: boolean;
+  /** Plates detected in the file, when the page already knows them. */
+  plateCount?: number | null;
+  className?: string;
   api?: DerivativeStatusApi;
 }) {
   useUiLocale();
@@ -130,7 +137,7 @@ export function DerivativeStatus({
     return null;
 
   return (
-    <ul className="min-w-0 space-y-2">
+    <ul className={cn("min-w-0 space-y-2", className)}>
       {showPreviewFailure && (
         <li role="status" className="flex items-start gap-1.5 text-2xs">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-warning" aria-hidden />
@@ -141,20 +148,45 @@ export function DerivativeStatus({
         </li>
       )}
       {ready && !previewDisabled && (
-        <li className="text-sm text-muted-foreground">{uiText("Preview ready")}</li>
+        <li className="flex items-start gap-2.5 text-sm">
+          <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-success" />
+          <span className="min-w-0 flex-1 leading-5">
+            {uiText("Preview and plates ready")}
+            <span className="block text-muted-foreground">
+              {plateCount !== null && plateCount > 1
+                ? uiText("{count} plates detected · thumbnails and dimensions available", {
+                    count: plateCount,
+                  })
+                : uiText("Thumbnail and dimensions available")}
+            </span>
+          </span>
+        </li>
       )}
-      {disabled && (
-        <li role="status" className="text-2xs text-on-surface-variant">
-          {uiText(
-            showReady && previewDisabled
-              ? "3D preview processing is disabled"
-              : "Processing disabled",
-          )}
-          {showReady && previewDisabled && canRetry && (
-            <Link href="/settings?section=work" className="ms-2 text-sm underline">
-              {uiText("Processing settings")} ›
+      {showReady && previewDisabled && (
+        <li role="status" className="flex items-start gap-2.5 text-sm">
+          <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-muted-foreground" />
+          <span className="min-w-0 flex-1 leading-5">
+            {uiText("3D preview processing is disabled")}
+            <span className="block text-muted-foreground">
+              {uiText(
+                "No server thumbnail, plate detection or dimensions for this file. The browser preview still works.",
+              )}
+            </span>
+          </span>
+          {canRetry && (
+            <Link
+              href="/settings?section=work"
+              className="inline-flex h-8 shrink-0 items-center gap-1 px-2 text-sm text-foreground hover:underline"
+            >
+              {uiText("Processing settings")}
+              <ChevronRight className="size-3.5 text-muted-foreground" aria-hidden />
             </Link>
           )}
+        </li>
+      )}
+      {disabled && !(showReady && previewDisabled) && (
+        <li role="status" className="text-2xs text-on-surface-variant">
+          {uiText("Processing disabled")}
         </li>
       )}
       {preparing.length > 0 && (
