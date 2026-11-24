@@ -5831,6 +5831,7 @@
   "Server info": "Server info",
   "Printer info": "Printer info",
   "Calculate from spool price": "Calculate from spool price",
+  "Spoolman #{id}": "Spoolman #{id}",
   "Spool price": "Spool price",
   "Net filament weight (g)": "Net filament weight (g)",
   "Exclude the empty spool.": "Exclude the empty spool.",

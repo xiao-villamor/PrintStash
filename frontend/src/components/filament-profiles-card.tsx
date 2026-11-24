@@ -216,7 +216,7 @@ function PresetReviewPanel({
               {row.expenses &&
                 expenseFields.map(({ key, label }) => (
                   <div key={key} className="contents">
-                    <dt>{uiText(label)}</dt>
+                    <dt>{label}</dt>
                     <dd>{row.expenses?.[key]}</dd>
                   </div>
                 ))}

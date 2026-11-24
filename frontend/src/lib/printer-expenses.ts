@@ -2,12 +2,48 @@ import { uiText } from "@/lib/locale";
 import type { PrinterExpenses } from "@/types/production-costing";
 
 export const expenseFields = [
-  { key: "acquisition_cost", label: "Purchase cost", money: true },
-  { key: "lifetime_hours", label: "Expected lifetime (print hours)", money: false },
-  { key: "lifetime_maintenance", label: "Maintenance over lifetime", money: true },
-  { key: "power_watts", label: "Average power (W)", money: false },
-  { key: "electricity_per_kwh", label: "Electricity per kWh", money: true },
-  { key: "extra_per_hour", label: "Additional cost per print hour", money: true },
+  {
+    key: "acquisition_cost",
+    get label() {
+      return uiText("Purchase cost");
+    },
+    money: true,
+  },
+  {
+    key: "lifetime_hours",
+    get label() {
+      return uiText("Expected lifetime (print hours)");
+    },
+    money: false,
+  },
+  {
+    key: "lifetime_maintenance",
+    get label() {
+      return uiText("Maintenance over lifetime");
+    },
+    money: true,
+  },
+  {
+    key: "power_watts",
+    get label() {
+      return uiText("Average power (W)");
+    },
+    money: false,
+  },
+  {
+    key: "electricity_per_kwh",
+    get label() {
+      return uiText("Electricity per kWh");
+    },
+    money: true,
+  },
+  {
+    key: "extra_per_hour",
+    get label() {
+      return uiText("Additional cost per print hour");
+    },
+    money: true,
+  },
 ] as const;
 
 export type ExpenseDraft = { [Key in keyof PrinterExpenses]: string };

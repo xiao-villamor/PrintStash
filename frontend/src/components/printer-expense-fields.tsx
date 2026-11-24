@@ -30,10 +30,7 @@ export function PrinterExpenseFields({
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         {expenseFields.map(({ key, label, money }) => (
-          <FormField
-            key={key}
-            label={money && currency ? `${uiText(label)} (${currency})` : uiText(label)}
-          >
+          <FormField key={key} label={money && currency ? `${label} (${currency})` : label}>
             <Input
               type="number"
               min={key === "lifetime_hours" ? 1 : 0}

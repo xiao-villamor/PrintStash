@@ -498,7 +498,7 @@ function EstimateForm({
               )}
               {line.spoolId !== null && (
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span>Spoolman #{line.spoolId}</span>
+                  <span>{uiText("Spoolman #{id}", { id: line.spoolId })}</span>
                   <Button
                     type="button"
                     size="xs"

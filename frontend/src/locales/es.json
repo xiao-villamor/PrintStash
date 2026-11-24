@@ -5831,6 +5831,7 @@
   "Server info": "Información del servidor",
   "Printer info": "Información de la impresora",
   "Calculate from spool price": "Calcular a partir del precio de la bobina",
+  "Spoolman #{id}": "Spoolman #{id}",
   "Spool price": "Precio de la bobina",
   "Net filament weight (g)": "Peso neto de filamento (g)",
   "Exclude the empty spool.": "Excluye el peso de la bobina vacía.",
