@@ -110,6 +110,30 @@ describe("Natural-language search filters", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("print_duration_max_s=7200");
     expect(app.requestsWithMethod("POST")).toHaveLength(1);
   });
+  it("applies print history from the grouped Filters dialog", async () => {
+    const user = userEvent.setup();
+    setup({ at: "/search?q=bracket" });
+    await user.click(await screen.findByRole("button", { name: "Filters" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Filter" }), "history");
+    await user.type(screen.getByRole("spinbutton", { name: /Actual duration </ }), "120");
+    expect(screen.getByTestId("location")).not.toHaveTextContent("print_duration_max_s");
+    await user.click(screen.getByRole("button", { name: "Apply filters" }));
+
+    expect(screen.getByTestId("location")).toHaveTextContent("print_duration_max_s=120");
+  });
+
+  it("discards unapplied changes on Cancel", async () => {
+    const user = userEvent.setup();
+    setup({ at: "/search?q=bracket" });
+    const trigger = await screen.findByRole("button", { name: "Filters" });
+    await user.click(trigger);
+    await user.type(screen.getByRole("textbox", { name: "Filter value" }), "test-tag");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByTestId("location")).not.toHaveTextContent("tag=");
+    expect(trigger).toHaveFocus();
+  });
+
   it.each([false, true])(
     "keeps opt-out searches local when availability is %s",
     async (available) => {
@@ -171,6 +195,6 @@ describe("Natural-language search filters", () => {
     setup({ locale: "es" });
     await waitForParsedSearch();
     expect(await screen.findByRole("button", { name: "Quitar Impresión correcta" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Historial de impresión" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Filtros" })).toBeVisible();
   });
 });

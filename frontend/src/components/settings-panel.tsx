@@ -1,5 +1,10 @@
 "use client";
 import { WorkbenchSidebarContent } from "@/components/collections-pane";
+import {
+  SETTINGS_SECTION_LABELS,
+  settingsSection,
+  type SettingsSection,
+} from "@/lib/settings-sections";
 import { useCollectionsPane } from "@/lib/collections-pane-context";
 
 import { useContentReveal } from "@/lib/use-content-reveal";
@@ -219,49 +224,29 @@ import type {
   UserUpdate,
 } from "@/types";
 
-type SettingsSection =
-  | "overview"
-  | "access"
-  | "storage"
-  | "backup"
-  | "remote-storage"
-  | "imports"
-  | "maintenance"
-  | "work"
-  | "ai-search"
-  | "libraries"
-  | "notifications"
-  | "sso"
-  | "spoolman"
-  | "design"
-  | "previews"
-  | "gpu"
-  | "trash"
-  | "about";
-
 const SETTINGS_SECTIONS: {
   id: SettingsSection;
   labelKey: MessageKey;
   icon: typeof Server;
 }[] = [
-  { id: "overview", labelKey: "settings.overview", icon: Server },
-  { id: "access", labelKey: "settings.access", icon: Users },
-  { id: "storage", labelKey: "settings.storage", icon: HardDrive },
-  { id: "backup", labelKey: "settings.backup", icon: Database },
-  { id: "remote-storage", labelKey: "settings.remoteStorage", icon: Cloud },
-  { id: "imports", labelKey: "settings.imports", icon: Download },
-  { id: "ai-search", labelKey: "aiSearch.settingsTitle", icon: Search },
-  { id: "maintenance", labelKey: "settings.maintenance", icon: HeartPulse },
-  { id: "work", labelKey: "settings.backgroundWork", icon: Activity },
-  { id: "libraries", labelKey: "settings.libraries", icon: FolderSync },
-  { id: "notifications", labelKey: "settings.notifications", icon: Bell },
-  { id: "sso", labelKey: "settings.sso", icon: ShieldCheck },
-  { id: "spoolman", labelKey: "settings.spoolman", icon: FilamentSpool },
-  { id: "design", labelKey: "settings.design", icon: Palette },
-  { id: "previews", labelKey: "settings.previews", icon: Images },
-  { id: "gpu", labelKey: "settings.gpu", icon: Gpu },
-  { id: "trash", labelKey: "settings.trash", icon: Trash2 },
-  { id: "about", labelKey: "settings.about", icon: Info },
+  { id: "overview", labelKey: SETTINGS_SECTION_LABELS["overview"], icon: Server },
+  { id: "access", labelKey: SETTINGS_SECTION_LABELS["access"], icon: Users },
+  { id: "storage", labelKey: SETTINGS_SECTION_LABELS["storage"], icon: HardDrive },
+  { id: "backup", labelKey: SETTINGS_SECTION_LABELS["backup"], icon: Database },
+  { id: "remote-storage", labelKey: SETTINGS_SECTION_LABELS["remote-storage"], icon: Cloud },
+  { id: "imports", labelKey: SETTINGS_SECTION_LABELS["imports"], icon: Download },
+  { id: "ai-search", labelKey: SETTINGS_SECTION_LABELS["ai-search"], icon: Search },
+  { id: "maintenance", labelKey: SETTINGS_SECTION_LABELS["maintenance"], icon: HeartPulse },
+  { id: "work", labelKey: SETTINGS_SECTION_LABELS["work"], icon: Activity },
+  { id: "libraries", labelKey: SETTINGS_SECTION_LABELS["libraries"], icon: FolderSync },
+  { id: "notifications", labelKey: SETTINGS_SECTION_LABELS["notifications"], icon: Bell },
+  { id: "sso", labelKey: SETTINGS_SECTION_LABELS["sso"], icon: ShieldCheck },
+  { id: "spoolman", labelKey: SETTINGS_SECTION_LABELS["spoolman"], icon: FilamentSpool },
+  { id: "design", labelKey: SETTINGS_SECTION_LABELS["design"], icon: Palette },
+  { id: "previews", labelKey: SETTINGS_SECTION_LABELS["previews"], icon: Images },
+  { id: "gpu", labelKey: SETTINGS_SECTION_LABELS["gpu"], icon: Gpu },
+  { id: "trash", labelKey: SETTINGS_SECTION_LABELS["trash"], icon: Trash2 },
+  { id: "about", labelKey: SETTINGS_SECTION_LABELS["about"], icon: Info },
 ];
 
 const SETTINGS_GROUPS: { labelKey: MessageKey; ids: SettingsSection[] }[] = [
@@ -295,15 +280,6 @@ const SETTINGS_SUBTITLES = {
   trash: "settings.subtitle.trash",
   about: "settings.subtitle.about",
 } satisfies Record<SettingsSection, MessageKey>;
-
-/** True when the `?section=` value names one of the sections we ship. */
-function isSettingsSection(value: string | null): value is SettingsSection {
-  return SETTINGS_SECTIONS.some((section) => section.id === value);
-}
-
-function settingsSection(value: string | null): SettingsSection {
-  return isSettingsSection(value) ? value : "overview";
-}
 
 /**
  * Resolve a `<select>` value back to the literal union it came from. The DOM hands
@@ -2645,20 +2621,17 @@ export function SettingsPanel() {
         />
 
         <PageHeader
-          title={trashPage ? t("settings.trash") : t("settings.title")}
+          title={t(
+            activeSection === "overview"
+              ? "settings.title"
+              : SETTINGS_SECTION_LABELS[activeSection],
+          )}
           description={
-            trashPage ? (
-              uiText("Review trashed items by name before restoring or permanently removing them.")
-            ) : (
-              <>
-                {t(
-                  SETTINGS_SECTIONS.find((section) => section.id === activeSection)?.labelKey ??
-                    "settings.overview",
-                )}
-                {" · "}
-                {t(SETTINGS_SUBTITLES[activeSection])}
-              </>
-            )
+            trashPage
+              ? uiText(
+                  "Review trashed items by name before restoring or permanently removing them.",
+                )
+              : t(SETTINGS_SUBTITLES[activeSection])
           }
           actions={
             trashPage ? (

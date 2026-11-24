@@ -737,7 +737,11 @@ export interface WorkOverview {
   lanes: WorkLane[];
   definitions: WorkDefinition[];
   executors: WorkExecutor[];
-  failed_jobs: JobStatus[];
+  failed_jobs: Array<
+    JobStatus & {
+      artifact?: { model_id: number; model_name: string; filename: string } | null;
+    }
+  >;
   failed_derivatives: number;
 }
 

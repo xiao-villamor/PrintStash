@@ -142,6 +142,38 @@ class TestOverview:
         assert [job["job_id"] for job in body["failed_jobs"]] == [failed.id]
         assert "owner_user_id" not in body["failed_jobs"][0]
 
+    def test_resolves_artifact_context_for_a_legacy_failure(
+        self, client: TestClient, admin: User, make_model, make_file, make_job
+    ) -> None:
+        model = make_model(name="Prototype holder")
+        artifact = make_file(model, filename="holder.stl")
+        failed = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            subject=f"file/{artifact.id}",
+            state=JobState.FAILED,
+        )
+
+        body = client.get("/api/v1/admin/work", headers=_headers(admin)).json()
+
+        assert body["failed_jobs"][0]["job_id"] == failed.id
+        assert body["failed_jobs"][0]["artifact"] == {
+            "model_id": model.id,
+            "model_name": "Prototype holder",
+            "filename": "holder.stl",
+        }
+
+    def test_retains_a_failure_when_its_artifact_no_longer_exists(
+        self, client: TestClient, admin: User, make_job
+    ) -> None:
+        failed = make_job(
+            kind=JobKind.DERIVATIVES_MESH, subject="file/99999", state=JobState.FAILED
+        )
+
+        body = client.get("/api/v1/admin/work", headers=_headers(admin)).json()
+
+        assert body["failed_jobs"][0]["job_id"] == failed.id
+        assert body["failed_jobs"][0]["artifact"] is None
+
     def test_counts_failed_derivatives(
         self, client: TestClient, admin: User, make_model, make_file, make_derivative
     ) -> None:

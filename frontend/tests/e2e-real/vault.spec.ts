@@ -42,7 +42,7 @@ test.describe("vault", () => {
     await expect(heading).toBeVisible();
     await expect(page.getByRole("button", { name: "Filters", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Sort models", exact: true })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Sort models", exact: true })).toBeVisible();
     const more = page.getByRole("main").getByRole("button", { name: "More", exact: true });
     await expect(more).toBeVisible();
     if (process.env.PRINTSTASH_CAPTURE_UI) {

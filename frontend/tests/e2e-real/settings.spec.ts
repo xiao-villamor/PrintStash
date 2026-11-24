@@ -293,7 +293,7 @@ test.describe("settings", () => {
       await page.setViewportSize(viewport);
       await page.evaluate(() => document.documentElement.classList.add("dark"));
       await page.getByRole("tab", { name: "Location", exact: true }).click();
-      await page.getByRole("heading", { name: "Settings", level: 1 }).scrollIntoViewIfNeeded();
+      await page.getByRole("heading", { name: "Storage", level: 1 }).scrollIntoViewIfNeeded();
       await page.screenshot({
         path: testInfo.outputPath(`storage-top-${width}.png`),
         fullPage: true,

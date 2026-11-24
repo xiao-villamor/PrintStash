@@ -102,6 +102,49 @@ afterEach(() => {
 });
 
 describe("BackgroundWorkPanel", () => {
+  it("identifies a failed model artifact", async () => {
+    const overview = busyOverview();
+    renderPanel(
+      stubApi({
+        ...overview,
+        failed_jobs: [
+          {
+            ...overview.failed_jobs[0],
+            artifact: { model_id: 35, model_name: "Bracket", filename: "bracket.stl" },
+          },
+        ],
+      }),
+    );
+
+    expect(await screen.findByRole("link", { name: "Bracket" })).toHaveAttribute(
+      "href",
+      "/models/35?tab=files",
+    );
+    expect(screen.getByText("bracket.stl")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Retry Bracket · bracket.stl" })).toBeVisible();
+  });
+
+  it("reveals older failures on request", async () => {
+    const overview = busyOverview();
+    const user = userEvent.setup();
+    renderPanel(
+      stubApi({
+        ...overview,
+        failed_jobs: Array.from({ length: 6 }, (_, index) =>
+          aJob({
+            job_id: `failed-${index}`,
+            label: `Mesh failure ${index}`,
+            state: "failed",
+          }),
+        ),
+      }),
+    );
+    const more = await screen.findByRole("button", { name: "Show more failures" });
+    expect(screen.queryByText("Mesh failure 5")).not.toBeInTheDocument();
+    await user.click(more);
+    expect(screen.getByText("Mesh failure 5")).toBeVisible();
+  });
+
   it("shows each active job's progress", async () => {
     const job = aJob({
       job_id: "preview-1",
@@ -437,7 +480,7 @@ describe("BackgroundWorkPanel", () => {
       const api = stubApi(busyOverview());
       renderPanel(api);
 
-      await user.click(await screen.findByRole("button", { name: "Retry" }));
+      await user.click(await screen.findByRole("button", { name: "Retry Mesh derivatives" }));
 
       await waitFor(() =>
         expect(api.retry).toHaveBeenCalledWith(
@@ -798,7 +841,7 @@ describe("work lifetime", () => {
         .mockRejectedValue(new ApiError(403, "forbidden", "forbidden")),
     });
     renderPanel(api);
-    await user.click(await screen.findByRole("button", { name: "Retry" }));
+    await user.click(await screen.findByRole("button", { name: "Retry Mesh derivatives" }));
     await waitFor(() => expect(api.retry).toHaveBeenCalledTimes(1));
     expect(screen.getByText(/Preview or metadata failures across the library: 3/)).toBeVisible();
   });

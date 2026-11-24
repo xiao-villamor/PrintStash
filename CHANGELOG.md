@@ -181,6 +181,10 @@
 
 ### Fixed
 
+- Search groups filters and print history in one draft with an explicit Apply action. Library and Search use the same native sort control.
+- Settings shows the active section in the fixed navigation bar while its content scrolls.
+- Background work identifies the Model and Artifact behind recent derivative failures, including older jobs, and shows when each attempt failed.
+
 - Desktop Search keeps the global header and filters visible while results scroll.
 - Statistics, printer settings, and notification forms use the shared selection controls. Notifications and Spoolman use the standard settings switches.
 - Remote storage, notification channel, and production estimate forms keep Cancel and their primary action in a consistent footer.

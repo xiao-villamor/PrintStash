@@ -205,18 +205,6 @@
 .library-display-controls {
   width: max-content;
 }
-.library-model-toolbar [aria-label="Sort models"] {
-  justify-content: flex-start;
-  font-weight: 500;
-  color: var(--secondary);
-}
-.library-model-toolbar [aria-label="Sort models"] > span {
-  text-align: left;
-}
-.library-model-toolbar select {
-  appearance: none;
-}
-
 .library-collection-title {
   position: relative;
   min-height: 30px;
@@ -380,11 +368,7 @@
       flex: 1 1 160px;
     }
     [data-inspector-open] .library-model-toolbar .library-toolbar-printer {
-      width: 32px;
-      padding-inline: 0;
-    }
-    [data-inspector-open] .library-model-toolbar .library-toolbar-printer > :not(:first-child) {
-      display: none;
+      width: 96px;
     }
     [data-inspector-open] .library-model-toolbar .library-status-filters > button {
       padding-inline: 6px;
@@ -408,12 +392,7 @@
   }
   @container library (720px <= width < 960px) {
     [data-inspector-open] .library-model-toolbar .library-toolbar-sort {
-      width: 32px;
-      justify-content: center;
-      padding-inline: 0;
-    }
-    [data-inspector-open] .library-model-toolbar .library-toolbar-sort > :not(:first-child) {
-      display: none;
+      width: 96px;
     }
   }
 }

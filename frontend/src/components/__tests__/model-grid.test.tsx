@@ -290,7 +290,7 @@ function HistoryProbe() {
  * for real by `tests/e2e/vault.spec.ts`, where CSS is applied.
  */
 function sortButton() {
-  return screen.getAllByRole("button", { name: "Sort models" }).at(-1)!;
+  return screen.getAllByRole("combobox", { name: "Sort models" }).at(-1)!;
 }
 
 function uploadButton() {
@@ -1567,8 +1567,7 @@ describe("ModelBrowser", () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })], historyProbe: true });
       await within(screen.getByRole("main")).findByText("Benchy");
 
-      await user.click(sortButton());
-      await user.click(screen.getAllByRole("menuitemradio", { name: "Name A–Z" }).at(-1)!);
+      await user.selectOptions(sortButton(), "name-asc");
 
       expect(screen.getByTestId("vault-location")).toHaveTextContent("sort=name-asc");
     });
@@ -1589,7 +1588,7 @@ describe("ModelBrowser", () => {
         "aria-pressed",
         "true",
       );
-      expect(sortButton()).toHaveTextContent("Newest");
+      expect(sortButton()).toHaveValue("date-desc");
     });
 
     it("remembers a sort choice", async () => {
@@ -1598,9 +1597,7 @@ describe("ModelBrowser", () => {
       await within(screen.getByRole("main")).findByText("Benchy");
 
       const sort = sortButton();
-      await user.click(sort);
-      // Each bar owns its own menu, so scope the choice to the one just opened.
-      await user.click(screen.getAllByRole("menuitemradio", { name: "Name A–Z" }).at(-1)!);
+      await user.selectOptions(sort, "name-asc");
 
       expect(window.localStorage.getItem("ps-vault-sort")).toBe("name-asc");
     });
@@ -1609,8 +1606,7 @@ describe("ModelBrowser", () => {
       const user = userEvent.setup();
       const app = renderVault({ at: "/?q=benchy", models: [aModelListItem({ name: "Benchy" })] });
       await within(screen.getByRole("main")).findByText("Benchy");
-      await user.click(sortButton());
-      await user.click(screen.getAllByRole("menuitemradio", { name: "Relevance" }).at(-1)!);
+      await user.selectOptions(sortButton(), "relevance");
       expect(window.localStorage.getItem("ps-vault-sort")).toBe("relevance");
       await waitFor(() =>
         expect(
@@ -1630,7 +1626,7 @@ describe("ModelBrowser", () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
 
       await within(screen.getByRole("main")).findByText("Benchy");
-      expect(sortButton()).toHaveTextContent("Newest");
+      expect(sortButton()).toHaveValue("date-desc");
     });
   });
 

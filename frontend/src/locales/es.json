@@ -5953,5 +5953,13 @@
   "Hourly cost breakdown": "Desglose del coste por hora",
   "Depreciation": "Amortización",
   "Other costs": "Otros costes",
-  "Assigned printers": "Impresoras asignadas"
+  "Assigned printers": "Impresoras asignadas",
+  "Filter": "Filtro",
+  "Filter value": "Valor del filtro",
+  "Search filters apply when you select Apply filters.": "Los filtros de búsqueda se aplican al pulsar Aplicar filtros.",
+  "Failed {when}": "Falló el {when}",
+  "Show more failures": "Mostrar más fallos",
+  "Show fewer failures": "Mostrar menos fallos",
+  "Work type": "Tipo de trabajo",
+  "Retry {name}": "Reintentar {name}"
 }

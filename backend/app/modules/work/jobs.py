@@ -26,16 +26,19 @@ from app.core.time import ensure_utc, utcnow
 from app.db.affected import affected
 from app.db.models import (
     ACTIVE_JOB_STATES,
+    File,
     IngestionScratchWindow,
     Job,
     JobKind,
     JobState,
+    Model,
     StagingLease,
     WorkPriority,
 )
+from app.db.scopes import live
 from app.db.session import get_session_factory
 from app.db.transactions import begin_write
-from app.schemas.jobs import JobFailedItem, JobStatus
+from app.schemas.jobs import JobFailedItem, JobStatus, WorkFailure, WorkFailureArtifact
 
 from .contracts import JobOutcome
 
@@ -800,29 +803,65 @@ class JobStore:
 
     def failed(
         self, *, limit: int = 50, excluded_kinds: Sequence[JobKind] = ()
-    ) -> list[JobStatus]:
+    ) -> list[WorkFailure]:
+        from app.modules.derivatives.kinds import is_derivative
+        from app.modules.derivatives.source import file_id_of
+        from app.modules.ingestion.staging_views import attach_summaries
+
         with get_session_factory().scoped_session() as session:
-            rows = session.exec(
+            query = (
                 select(Job)
                 .where(
                     Job.state == JobState.FAILED, col(Job.kind).not_in(excluded_kinds)
                 )
                 .order_by(col(Job.updated_at).desc())
                 .limit(limit)
-            ).all()
-            from app.modules.ingestion.staging_views import attach_summaries
-
-            statuses = [status_of(row) for row in rows]
-            selected = (
-                select(Job.id)
-                .where(
-                    Job.state == JobState.FAILED, col(Job.kind).not_in(excluded_kinds)
-                )
-                .order_by(col(Job.updated_at).desc())
-                .limit(limit)
             )
-            attach_summaries(session, statuses, selected)
-            return statuses
+            rows = session.exec(query).all()
+            statuses = [status_of(row) for row in rows]
+            attach_summaries(
+                session,
+                statuses,
+                select(Job.id).where(col(Job.id).in_([row.id for row in rows])),
+            )
+            targets: dict[str, int] = {}
+            for row in rows:
+                if not is_derivative(row.kind):
+                    continue
+                try:
+                    targets[row.id] = file_id_of(row.subject_key)
+                except ValueError:
+                    # Failed legacy or malformed intents still belong in the list.
+                    continue
+            artifacts = (
+                {
+                    file_id: WorkFailureArtifact(
+                        model_id=model_id, model_name=model_name, filename=filename
+                    )
+                    for file_id, model_id, model_name, filename in session.exec(
+                        select(
+                            File.id, File.model_id, Model.name, File.original_filename
+                        )
+                        .join(Model, col(Model.id) == col(File.model_id))
+                        .where(
+                            live(File),
+                            live(Model),
+                            col(File.id).in_(set(targets.values())),
+                        )
+                    )
+                }
+                if targets
+                else {}
+            )
+            return [
+                WorkFailure(
+                    **status.model_dump(),
+                    artifact=artifacts.get(file_id)
+                    if (file_id := targets.get(status.job_id)) is not None
+                    else None,
+                )
+                for status in statuses
+            ]
 
     def counts_by_definition(self) -> dict[JobKind, dict[JobState, int]]:
         with get_session_factory().scoped_session() as session:

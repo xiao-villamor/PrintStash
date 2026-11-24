@@ -47,6 +47,22 @@ const accessibleGpu = {
 };
 
 test.describe("settings route", () => {
+  test("keeps the active settings section visible at the bottom of the overview", async ({
+    page,
+  }) => {
+    await page.goto("/settings?section=overview");
+    const toggle = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    await page.getByRole("heading", { name: "Data export" }).scrollIntoViewIfNeeded();
+
+    const crumbs = page.getByRole("navigation", { name: "Breadcrumbs" });
+    await expect(crumbs.locator("[aria-current=page]")).toHaveText("Overview");
+    await expect(crumbs).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(1080);
+  });
+
   test("selects Settings values from the shared menu", async ({ page }) => {
     await page.goto("/settings?section=design");
     const theme = page.getByRole("combobox", { name: "Theme", exact: true });

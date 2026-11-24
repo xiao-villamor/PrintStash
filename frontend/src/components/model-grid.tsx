@@ -1,5 +1,6 @@
 "use client";
 
+import { FILTER_SELECT } from "@/lib/filter-input";
 import { LibraryStatusFilters } from "@/components/library-status-filters";
 import { CollectionHeaderTags } from "@/components/collection-header-tags";
 import "./library-header.css";
@@ -170,7 +171,6 @@ import {
   ChevronRight,
   Plus,
   Star,
-  ArrowUpDown,
   Rows3,
   History,
   Check,
@@ -447,139 +447,6 @@ function CollectionStrip({
         overview || expanded ? 0 : extra,
       )}
     </>
-  );
-}
-
-interface SortMenuProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  sortKey: SortKey;
-  onSelect: (sortKey: SortKey) => void;
-  labelFor: (value: string) => string;
-  triggerSize: MenuTriggerSize;
-  triggerVariant?: MenuTriggerVariant;
-  triggerRole?: "menuitem";
-  triggerClassName?: string;
-  wrapperClassName?: string;
-}
-
-function SortMenu({
-  open,
-  onOpenChange,
-  sortKey,
-  onSelect,
-  labelFor,
-  triggerSize,
-  triggerVariant = "outline",
-  triggerRole,
-  triggerClassName,
-  wrapperClassName,
-}: SortMenuProps) {
-  useUiLocale();
-  return (
-    <DropdownMenu
-      open={open}
-      onOpenChange={onOpenChange}
-      align="end"
-      className={wrapperClassName}
-      trigger={
-        <Button
-          type="button"
-          variant={triggerVariant}
-          size={triggerSize}
-          role={triggerRole}
-          data-menu-trigger
-          aria-haspopup="menu"
-          aria-expanded={open}
-          aria-label={labelFor("Sort models")}
-          onClick={() => onOpenChange(!open)}
-          className={cn(triggerClassName)}
-        >
-          <ArrowUpDown className="h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">
-            {labelFor(SORT_OPTIONS.find((option) => option.value === sortKey)?.label ?? "Newest")}
-          </span>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        </Button>
-      }
-      contentClassName="w-52 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-    >
-      {SORT_OPTIONS.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          role="menuitemradio"
-          aria-checked={sortKey === option.value}
-          onClick={() => {
-            onSelect(option.value);
-            onOpenChange(false);
-          }}
-          className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sortKey === option.value ? "bg-accent text-accent-foreground" : ""}`}
-        >
-          <span className="flex-1">{labelFor(option.label)}</span>
-          {sortKey === option.value && <Check className="h-3.5 w-3.5" />}
-        </button>
-      ))}
-    </DropdownMenu>
-  );
-}
-
-interface PrinterMenuProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  value: string;
-  options: { value: string; label: string }[];
-  onSelect: (value: string) => void;
-  onIntent: () => void;
-}
-
-/** Same menu as Sort, so both toolbar choices open the same way (below, end-aligned). */
-function PrinterMenu({ open, onOpenChange, value, options, onSelect, onIntent }: PrinterMenuProps) {
-  useUiLocale();
-  const current = options.find((option) => option.value === value) ?? options[0];
-  return (
-    <DropdownMenu
-      open={open}
-      onOpenChange={onOpenChange}
-      align="end"
-      trigger={
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          data-menu-trigger
-          aria-haspopup="menu"
-          aria-expanded={open}
-          aria-label={uiText("Printer")}
-          onFocus={onIntent}
-          onPointerDown={onIntent}
-          onClick={() => onOpenChange(!open)}
-          className="library-toolbar-printer h-8 w-36 max-w-full"
-        >
-          <Printer3D className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="min-w-0 flex-1 truncate text-left">{current?.label}</span>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        </Button>
-      }
-      contentClassName="w-52 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-    >
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          role="menuitemradio"
-          aria-checked={value === option.value}
-          onClick={() => {
-            onSelect(option.value);
-            onOpenChange(false);
-          }}
-          className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${value === option.value ? "bg-accent text-accent-foreground" : ""}`}
-        >
-          <span className="min-w-0 flex-1 truncate">{option.label}</span>
-          {value === option.value && <Check className="h-3.5 w-3.5" />}
-        </button>
-      ))}
-    </DropdownMenu>
   );
 }
 
@@ -895,9 +762,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     )
       localStorage.setItem(LIBRARY_VIEW_KEY, "all");
   }, [initialLibraryPreferences.view]);
-  const [sortOpen, setSortOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
-  const [printerMenuOpen, setPrinterMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const toolbarMenuOpener = useRef<HTMLElement | null>(null);
   const filtersOpener = useRef<HTMLButtonElement>(null);
@@ -3409,29 +3274,31 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             {filterControl("shrink-0")}
             {canViewPrinters && (
               <div className="min-w-0 max-w-full">
-                <PrinterMenu
-                  open={printerMenuOpen}
-                  onOpenChange={setPrinterMenuOpen}
+                <select
+                  aria-label={uiText("Printer")}
+                  className={cn(FILTER_SELECT, "library-toolbar-printer w-36 max-w-full")}
                   value={
                     selectedPrinterId !== null
                       ? String(selectedPrinterId)
                       : (selectedPrinterPresence ?? "")
                   }
-                  options={[
-                    { value: "", label: uiText("Any printer") },
-                    { value: "any", label: uiText("On a printer") },
-                    { value: "none", label: uiText("Vault only") },
-                    ...printers.map((printer) => ({
-                      value: String(printer.id),
-                      label: printer.name,
-                    })),
-                  ]}
-                  onIntent={() => startup.request("filters")}
-                  onSelect={(value) => {
+                  onFocus={() => startup.request("filters")}
+                  onPointerDown={() => startup.request("filters")}
+                  onChange={(event) => {
+                    const value = event.target.value;
                     if (value === "any" || value === "none") setSelectedPrinterPresence(value);
                     else setSelectedPrinterId(value ? Number(value) : null);
                   }}
-                />
+                >
+                  <option value="">{uiText("Any printer")}</option>
+                  <option value="any">{uiText("On a printer")}</option>
+                  <option value="none">{uiText("Vault only")}</option>
+                  {printers.map((printer) => (
+                    <option key={printer.id} value={printer.id}>
+                      {printer.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
           </div>
@@ -3448,16 +3315,21 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               />
             )}
             {libraryActions}
-            <SortMenu
-              open={sortOpen}
-              onOpenChange={setSortOpen}
-              sortKey={sortKey}
-              onSelect={selectSort}
-              labelFor={ui}
-              triggerSize="xs"
-              triggerClassName="library-toolbar-sort h-8 w-32 max-w-full"
-              wrapperClassName="min-w-0 max-w-full"
-            />
+            <select
+              aria-label={uiText("Sort models")}
+              className={cn(FILTER_SELECT, "library-toolbar-sort w-32 max-w-full")}
+              value={sortKey}
+              onChange={(event) => {
+                const option = SORT_OPTIONS.find((item) => item.value === event.target.value);
+                if (option) selectSort(option.value);
+              }}
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {ui(option.label)}
+                </option>
+              ))}
+            </select>
             <div className="flex items-center bg-muted/50">
               {(["grid", "list"] as const).map((mode) => (
                 <Button

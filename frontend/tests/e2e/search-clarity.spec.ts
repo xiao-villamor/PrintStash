@@ -33,6 +33,17 @@ test.describe("search clarity", () => {
     }
   });
 
+  test("keeps print-history changes in a draft until Apply filters", async ({ page }) => {
+    await page.goto("/search?q=part");
+    await page.getByRole("button", { name: "Filters", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Filters" });
+    await dialog.getByRole("combobox", { name: "Filter", exact: true }).selectOption("history");
+    await dialog.getByRole("spinbutton", { name: /Actual duration </ }).fill("120");
+    await expect(page).not.toHaveURL(/print_duration_max_s/);
+    await dialog.getByRole("button", { name: "Apply filters" }).click();
+    await expect(page).toHaveURL(/print_duration_max_s=120/);
+  });
+
   test("scrolls search results without moving the global header or filters", async ({ page }) => {
     const items = Array.from({ length: 42 }, (_, index) =>
       aSearchResult({
@@ -51,7 +62,7 @@ test.describe("search clarity", () => {
     const toggle = page.getByRole("button", { name: "Toggle sidebar" });
     if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    const filters = page.getByRole("button", { name: "Add filter" });
+    const filters = page.getByRole("button", { name: "Filters" });
     const results = page.getByRole("list", { name: "Search results" });
     const lastResult = results.getByRole("listitem").last();
     await expect(results.getByRole("listitem")).toHaveCount(items.length);

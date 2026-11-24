@@ -48,6 +48,8 @@ import { currentLocale, knownUiText, uiText } from "@/lib/locale";
 import { toast } from "@/lib/toast";
 import type { DerivativeKind, JobStatus, WorkDefinition, WorkLane } from "@/types";
 
+const COLLAPSED_FAILURE_COUNT = 5;
+
 function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat(currentLocale(), {
     dateStyle: "medium",
@@ -237,6 +239,7 @@ function BackgroundWorkView({
   const { overview, jobsState, error: readError, loading, refresh } = work;
   const error = readError ? userMessage(readError) : null;
   const mutation = useWorkMutation(api);
+  const [showAllFailures, setShowAllFailures] = useState(false);
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Pending | null>(null);
   const [activeView, setActiveView] = useState<"types" | "workers">("types");
@@ -494,31 +497,80 @@ function BackgroundWorkView({
               {uiText("No recent failures.")}
             </p>
           ) : (
-            <ul className="divide-y divide-border border-b">
-              {overview.failed_jobs.map((job) => (
-                <li
-                  key={job.job_id}
-                  className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:px-5"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{job.label ?? job.kind}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {getErrorMessage(job.error ?? "unknown")}
-                    </p>
-                  </div>
-                  {job.retryable && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      loading={busy.has(`retry:${job.job_id}`)}
-                      onClick={() => retry(job)}
+            <div className="border-b">
+              <ul className="divide-y divide-border">
+                {(showAllFailures
+                  ? overview.failed_jobs
+                  : overview.failed_jobs.slice(0, COLLAPSED_FAILURE_COUNT)
+                ).map((job) => {
+                  const definition = overview.definitions.find((entry) => entry.name === job.kind);
+                  const jobName = knownUiText(job.label ?? definition?.label ?? job.kind);
+                  const retryName = job.artifact
+                    ? `${job.artifact.model_name} · ${job.artifact.filename}`
+                    : (job.current_item ?? jobName);
+                  const failedAt = job.finished_at ?? job.updated_at;
+                  return (
+                    <li
+                      key={job.job_id}
+                      className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:px-5"
                     >
-                      {uiText("Retry")}
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
+                      <div className="min-w-0 flex-1">
+                        {job.artifact ? (
+                          <>
+                            <Link
+                              href={`/models/${job.artifact.model_id}?tab=files`}
+                              className="break-words text-sm font-medium hover:underline"
+                            >
+                              {job.artifact.model_name}
+                            </Link>
+                            <p className="break-words text-xs text-muted-foreground">
+                              {job.artifact.filename}
+                            </p>
+                          </>
+                        ) : (
+                          <p className="break-words text-sm font-medium">
+                            {job.current_item ?? jobName}
+                          </p>
+                        )}
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {getErrorMessage(job.error ?? "unknown")}
+                        </p>
+                        <time dateTime={failedAt} className="text-xs text-muted-foreground">
+                          {uiText("Failed {when}", { when: formatDateTime(failedAt) })}
+                        </time>
+                        <details className="mt-1 text-xs text-muted-foreground">
+                          <summary className="cursor-action">{uiText("Work type")}</summary>
+                          <p className="mt-1 font-mono">{job.kind}</p>
+                        </details>
+                      </div>
+                      {job.retryable && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          aria-label={uiText("Retry {name}", { name: retryName })}
+                          loading={busy.has(`retry:${job.job_id}`)}
+                          onClick={() => retry(job)}
+                        >
+                          {uiText("Retry")}
+                        </Button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              {overview.failed_jobs.length > COLLAPSED_FAILURE_COUNT && (
+                <div className="px-4 py-2 sm:px-5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    aria-expanded={showAllFailures}
+                    onClick={() => setShowAllFailures((shown) => !shown)}
+                  >
+                    {uiText(showAllFailures ? "Show fewer failures" : "Show more failures")}
+                  </Button>
+                </div>
+              )}
+            </div>
           )}
 
           <details ref={advancedRef} className="group">

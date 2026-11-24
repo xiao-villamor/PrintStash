@@ -5953,5 +5953,13 @@
   "Hourly cost breakdown": "Hourly cost breakdown",
   "Depreciation": "Depreciation",
   "Other costs": "Other costs",
-  "Assigned printers": "Assigned printers"
+  "Assigned printers": "Assigned printers",
+  "Filter": "Filter",
+  "Filter value": "Filter value",
+  "Search filters apply when you select Apply filters.": "Search filters apply when you select Apply filters.",
+  "Failed {when}": "Failed {when}",
+  "Show more failures": "Show more failures",
+  "Show fewer failures": "Show fewer failures",
+  "Work type": "Work type",
+  "Retry {name}": "Retry {name}"
 }
