@@ -33,6 +33,8 @@ from app.modules.backups.backup_destination import (
 from app.modules.storage.storage_backend.local import LocalStorageBackend
 from app.modules.storage.storage_identity import StorageTargetIdentity
 from app.modules.storage.storage_ownership import provider_ref_for_backend
+from app.modules.storage.transports import transport as registered_transport
+from app.modules.storage.transports.base import TransportKind
 
 
 class RetryRefused(RuntimeError):
@@ -67,6 +69,15 @@ class RemoteBinding:
 Binding = LocalBinding | S3Binding | RemoteBinding
 
 
+def _secrets_select_account(transport: str) -> bool:
+    """Whether credentials, not configuration, choose this target's account."""
+    try:
+        kind = TransportKind(transport)
+    except ValueError:
+        return False
+    return registered_transport(kind).secrets_select_account
+
+
 def binding_for(result: BackupDestinationResult) -> Binding:
     """Resolve current credentials, then require the saved exact target/locator."""
 
@@ -78,7 +89,7 @@ def binding_for(result: BackupDestinationResult) -> Binding:
     ):
         raise RetryRefused("backup_retry_target_unverified")
     expected = StorageTargetIdentity.model_validate_json(result.target_identity_json)
-    if expected.transport == "gdrive" and not expected.account:
+    if not expected.account and _secrets_select_account(expected.transport):
         raise RetryRefused("backup_retry_target_unverified")
     if result.kind == "local":
         backend = LocalStorageBackend()

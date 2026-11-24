@@ -35,6 +35,7 @@ from app.modules.storage.storage_providers import (
     TransportKind,
     resolve_transport,
 )
+from app.modules.storage.transports import transport as registered_transport
 from app.schemas.setup import SetupStorageCheck, SetupStorageRequest
 
 logger = get_logger(__name__)
@@ -149,13 +150,17 @@ def prepare(
         # only inside an owner-authorized first-run flow; normal startup and
         # health checks remain read-only and fail closed when an enrolled root
         # disappears.
-        if provision and transport is not None and transport.kind is TransportKind.SFTP:
+        if (
+            provision
+            and transport is not None
+            and registered_transport(transport.kind).provisions_root
+        ):
             try:
                 from app.modules.storage.storage_opendal import OpenDALStorageBackend
 
                 OpenDALStorageBackend(transport).provision_root()
             except Exception as exc:
-                logger.warning("setup: unable to provision SFTP root", exc_info=True)
+                logger.warning("setup: unable to provision remote root", exc_info=True)
                 raise OperationError("sftp_root_not_provisionable") from exc
     storage_backend = (
         "local"

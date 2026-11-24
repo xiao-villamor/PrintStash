@@ -9,6 +9,11 @@ import {
 import { SettingsNotice, SettingsStatus, SettingsGroupHead } from "@/components/settings-card";
 import { Switch } from "@/components/ui/switch";
 import { describeSourceLocation } from "@/lib/library-source-location";
+import {
+  REMOTE_STORAGE_KINDS,
+  isLibrarySourceKind,
+  remoteStorageKindPresentation,
+} from "@/lib/storage-transports";
 import { Link } from "@/lib/link";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
@@ -270,16 +275,6 @@ function formatDate(value: string | null | undefined): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
-}
-
-function isLibrarySourceKind(value: string): value is LibrarySourceKind {
-  return (
-    value === "mounted" ||
-    value === "s3" ||
-    value === "webdav" ||
-    value === "sftp" ||
-    value === "gdrive"
-  );
 }
 
 /** Existing injection supplies the same full DTO contracts as production readers/writers. */
@@ -1096,10 +1091,11 @@ function AdminLibrarySourcesPanel({
                       }}
                     >
                       <option value="mounted">{uiText("Mounted folder (SMB/NFS/local)")}</option>
-                      <option value="s3">{uiText("S3 / compatible")}</option>
-                      <option value="webdav">{uiText("WebDAV / Nextcloud")}</option>
-                      <option value="sftp">SFTP</option>
-                      <option value="gdrive">{uiText("Google Drive")}</option>
+                      {REMOTE_STORAGE_KINDS.map((kind) => (
+                        <option key={kind} value={kind}>
+                          {remoteStorageKindPresentation(kind).sourceLabel()}
+                        </option>
+                      ))}
                     </select>
                   </label>
                   {sourceKind === "mounted" ? (

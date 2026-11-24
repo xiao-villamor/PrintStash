@@ -29,34 +29,42 @@ class UseAvailability(BaseModel):
 def _compiled_service(transport: str) -> bool:
     import opendal
 
-    options = {
-        "s3": {
-            "bucket": "availability",
-            "region": "us-east-1",
-            "disable_config_load": "true",
-            "disable_ec2_metadata": "true",
-        },
-        "webdav": {"endpoint": "https://availability.invalid"},
-        "gdrive": {"access_token": "availability-only"},
-    }
+    from app.modules.storage.transports import transport as registered_transport
+    from app.modules.storage.transports.base import OpenDALService, TransportKind
+
+    runtime = registered_transport(TransportKind(transport)).remote_runtime
+    if not isinstance(runtime, OpenDALService):
+        raise ValueError(f"{transport} is not an OpenDAL transport")
     try:
         # Construction tests the compiled service; it performs no endpoint IO.
-        opendal.Operator(transport, **options[transport])
+        opendal.Operator(runtime.scheme, **runtime.probe_options)
     except opendal.exceptions.Unsupported:
         return False
     return True
 
 
 def use_availability(transport: str, use: str) -> UseAvailability:
-    supported = not (transport == "gdrive" and use == "vault")
-    native = transport == "local" or (transport == "s3" and use == "vault")
-    dependency = (
-        native
-        or find_spec("asyncssh" if transport == "sftp" else "opendal") is not None
+    from app.modules.storage.transports import transport as registered_transport
+    from app.modules.storage.transports.base import (
+        AsyncSSHRuntime,
+        BuiltinRuntime,
+        StorageUse,
+        TransportKind,
     )
-    compiled = bool(
-        dependency and (native or transport == "sftp" or _compiled_service(transport))
-    )
+
+    registered = registered_transport(TransportKind(transport))
+    runtime = registered.runtime_for(StorageUse(use))
+    supported = runtime is not None
+    # An unsupported use is still reported against the runtime its other
+    # roles need, so the catalogue can say why it is unavailable.
+    effective = runtime if runtime is not None else registered.remote_runtime
+    if isinstance(effective, BuiltinRuntime):
+        dependency = compiled = True
+    elif isinstance(effective, AsyncSSHRuntime):
+        dependency = compiled = find_spec(effective.module) is not None
+    else:
+        dependency = find_spec("opendal") is not None
+        compiled = dependency and _compiled_service(transport)
     reason = (
         "storage_use_unsupported"
         if not supported

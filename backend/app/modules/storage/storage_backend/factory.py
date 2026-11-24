@@ -7,6 +7,7 @@ from app.modules.storage.storage_providers import (
     TransportKind,
     resolve_transport,
 )
+from app.modules.storage.transports import transport
 
 from .contracts import StorageBackend
 from .local import LocalStorageBackend
@@ -27,7 +28,7 @@ def build_configured_backend(config: StorageProviderConfig) -> StorageBackend:
         )
     if spec.kind == TransportKind.S3:
         return S3StorageBackend(transport=spec, check_bucket=False)
-    if spec.kind in {TransportKind.WEBDAV, TransportKind.SFTP}:
+    if transport(spec.kind).vault_runtime is not None:
         from app.modules.storage.storage_opendal import OpenDALStorageBackend
 
         return OpenDALStorageBackend(spec)

@@ -34,6 +34,7 @@ from app.modules.storage.storage_backend.contracts import StorageConfigurationEr
 from app.modules.storage.storage_connections import (
     StorageConnectionConfigError,
     connection_target_signature,
+    connection_transport,
     serialize_connection_config,
 )
 from app.modules.storage.storage_operations import (
@@ -263,9 +264,12 @@ def update_connection(
             # An invalid historical profile cannot prove that an edit retains its
             # target. It can still be repaired when no dependent data exists.
             changed = True
-        if row.kind == LibrarySourceKind.GDRIVE and secrets != old_secrets:
-            # Refresh credentials can select another account. Until Drive account
-            # identity is proven, an existing dependency prevents that ambiguity.
+        if connection_transport(row.kind).secrets_select_account and (
+            secrets != old_secrets
+        ):
+            # Refresh credentials can select another account. Until the
+            # account identity is proven, an existing dependency prevents that
+            # ambiguity.
             changed = True
         if changed and _has_target_dependencies(row, session):
             raise HTTPException(

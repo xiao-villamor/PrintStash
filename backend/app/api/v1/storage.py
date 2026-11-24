@@ -13,7 +13,7 @@ from app.core.time import utcnow
 from app.db.models import StorageFailureDomainDeclaration, User
 from app.db.session import get_session, get_session_factory
 from app.modules.storage.capacity import CapacityManager
-from app.modules.storage.storage_identity import identity_evidence
+from app.modules.storage.storage_identity import identity_evidence, provider_domain
 from app.modules.storage.storage_inventory import InventoryReport, StorageInventory
 from app.modules.storage.storage_providers import StorageProvider, provider_catalogue
 
@@ -78,7 +78,7 @@ def declare_failure_domain(
     )
     if target is None:
         raise HTTPException(409, detail="storage_target_changed")
-    if target.provider_domain:
+    if provider_domain(target):
         raise HTTPException(409, detail="storage_failure_domain_provider_defined")
     declaration = session.get(StorageFailureDomainDeclaration, target_ref)
     if declaration is None:

@@ -39,6 +39,7 @@ from app.modules.storage.storage_receipts import (
     owned_receipt,
     provider_ref_for_backend,
 )
+from app.modules.storage.transports import remote_transports
 
 __all__ = ["UnsafeStorageDeleteError", "provider_ref_for_backend"]
 
@@ -923,7 +924,12 @@ def _orphan_policy_error(
         "webdav",
         "nextcloud",
         "sftp",
-    } or transport in {"s3", "webdav", "sftp"}
+    } or transport in {
+        # Every Vault-capable network transport records a provider identity.
+        remote.kind.value
+        for remote in remote_transports()
+        if remote.vault_runtime is not None
+    }
     if row.provider_ref != expected and not (row.provider_ref is None and not bound):
         return (
             "storage_provider_identity_missing"

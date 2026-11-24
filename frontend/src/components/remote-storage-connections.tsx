@@ -50,9 +50,9 @@ import type {
 import { toast } from "@/lib/toast";
 import { useI18n } from "@/lib/i18n";
 import { storageOperationMessage } from "@/lib/storage-operations";
+import { isRemoteStorageKind, remoteStorageKindPresentation } from "@/lib/storage-transports";
 import { cn } from "@/lib/utils";
 import type {
-  LibrarySourceKind,
   ProviderCategory,
   StorageConnection,
   StorageConnectionPurpose,
@@ -60,9 +60,6 @@ import type {
   StorageProviderConfigValues,
 } from "@/types";
 
-type RemoteKind = Exclude<LibrarySourceKind, "mounted">;
-
-const REMOTE_KINDS: readonly RemoteKind[] = ["s3", "webdav", "sftp", "gdrive"];
 const PURPOSES: readonly StorageConnectionPurpose[] = ["library", "backup", "both"];
 const REMOTE_CATEGORIES = [
   {
@@ -103,10 +100,6 @@ const SELECT = cn(
   inputClasses,
   "bg-surface-container-lowest text-on-surface focus-visible:ring-ring",
 );
-
-function isRemoteKind(value: string): value is RemoteKind {
-  return REMOTE_KINDS.some((kind) => kind === value);
-}
 
 function isPurpose(value: string): value is StorageConnectionPurpose {
   return PURPOSES.some((purpose) => purpose === value);
@@ -197,7 +190,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
 
   const selected = providers.find((provider) => provider.id === providerId);
   const remoteProviders = providers.filter((provider) =>
-    isRemoteKind(provider.transport ?? provider.id),
+    isRemoteStorageKind(provider.transport ?? provider.id),
   );
   const categoryProviders = remoteProviders.filter((provider) => provider.category === category);
   const use = purpose === "backup" ? "backup" : "library";
@@ -295,7 +288,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
     )
       return;
     const transport = selected.transport ?? selected.id;
-    if (!isRemoteKind(transport)) return;
+    if (!isRemoteStorageKind(transport)) return;
     const session = getSessionVersion();
     const captured = generation.current;
     const body: StorageConnectionCreate = {
@@ -557,7 +550,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                           {connection.name}
                         </p>
                         <Badge variant="outline">{connection.kind.toUpperCase()}</Badge>
-                        {connection.kind === "gdrive" && (
+                        {remoteStorageKindPresentation(connection.kind).beta && (
                           <Badge variant="secondary">{uiText("Beta")}</Badge>
                         )}
                         <Badge variant={connection.enabled ? "secondary" : "outline"}>
