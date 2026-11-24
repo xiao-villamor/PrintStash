@@ -607,6 +607,16 @@ describe("PrinterCard", () => {
 
 describe("PrintersPage", () => {
   describe("removing a printer", () => {
+    async function selectAction(name: string, action: "Settings" | "Remove printer") {
+      const label = `Actions for ${name}`;
+      await userEvent.click(screen.getByRole("button", { name: label }));
+      await userEvent.click(
+        within(await screen.findByRole("menu", { name: label })).getByRole("menuitem", {
+          name: action,
+        }),
+      );
+    }
+
     beforeAll(async () => {
       // Resolve the editor's lazy module before querying its controls.
       await import("@/components/printer-detail");
@@ -615,7 +625,7 @@ describe("PrintersPage", () => {
     it("asks before removing", async () => {
       renderPrintersPage({ printers: [makePrinter()] });
 
-      await userEvent.click(screen.getByRole("button", { name: "Remove printer" }));
+      await selectAction("Voron 2.4", "Remove printer");
 
       expect(screen.getByRole("dialog", { name: "Remove printer?" })).toBeInTheDocument();
       expect(requestsWithMethod("DELETE")).toHaveLength(0);
@@ -624,7 +634,7 @@ describe("PrintersPage", () => {
     it("keeps removal available from connection settings", async () => {
       renderPrintersPage({ printers: [makePrinter()] });
 
-      await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+      await selectAction("Voron 2.4", "Settings");
       const settings = screen.getByRole("dialog", { name: "Edit printer connection" });
       await userEvent.click(
         await within(settings).findByRole("button", { name: "Remove printer" }),
@@ -638,11 +648,12 @@ describe("PrintersPage", () => {
     it("keeps the printer when removal is canceled", async () => {
       renderPrintersPage({ printers: [makePrinter()] });
 
-      await userEvent.click(screen.getByRole("button", { name: "Remove printer" }));
+      await selectAction("Voron 2.4", "Remove printer");
       const dialog = screen.getByRole("dialog", { name: "Remove printer?" });
       await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
       expect(screen.getByRole("link", { name: "Voron 2.4" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Actions for Voron 2.4" })).toHaveFocus();
       expect(requestsWithMethod("DELETE")).toHaveLength(0);
     });
 
@@ -650,8 +661,7 @@ describe("PrintersPage", () => {
       renderPrintersPage({
         printers: [makePrinter(), makePrinter({ id: 2, name: "Lab Klipper" })],
       });
-      const card = screen.getByRole("link", { name: "Lab Klipper" }).closest("article");
-      await userEvent.click(within(card!).getByRole("button", { name: "Remove printer" }));
+      await selectAction("Lab Klipper", "Remove printer");
       const dialog = await screen.findByRole("dialog", { name: "Remove printer?" });
       expect(dialog).toHaveAccessibleDescription('"Lab Klipper" will be removed from PrintStash.');
       await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
@@ -676,8 +686,9 @@ describe("PrintersPage", () => {
         ],
       });
 
-      expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Actions for Voron 2.4" }),
+      ).not.toBeInTheDocument();
       expect(requestsWithMethod("DELETE")).toEqual([]);
     });
   });

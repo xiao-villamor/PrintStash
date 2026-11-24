@@ -73,8 +73,8 @@ describe("ConfirmModal", () => {
     open();
 
     expect(screen.getByRole("button", { name: "Remove model" })).toHaveClass(
-      "bg-destructive",
-      "text-destructive-foreground",
+      "bg-destructive-action",
+      "text-destructive-action-foreground",
     );
   });
 

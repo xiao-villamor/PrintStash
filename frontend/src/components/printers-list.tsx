@@ -33,6 +33,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { FormField } from "@/components/ui/form-field";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
@@ -55,7 +56,7 @@ import {
 import { printerArtwork } from "@/lib/orca-printer-images";
 import { formatNumber, parseApiInstant } from "@/lib/format";
 import { PrinterProgress } from "@/components/printer-telemetry";
-import { ArrowUpRight, Fan, ListOrdered, Plus, RefreshCw, Pencil } from "lucide-react";
+import { ArrowUpRight, ChevronDown, Fan, ListOrdered, Plus, RefreshCw, Pencil } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
 import type { PrintJobState } from "@/types";
@@ -639,6 +640,14 @@ function FleetPrinterCard({
   onSettings: () => void;
   onRemove: () => void;
 }) {
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsTrigger = useRef<HTMLButtonElement>(null);
+  const actionsLabel = uiText("Actions for {value1}", { value1: printer.name });
+  function chooseAction(action: () => void) {
+    setActionsOpen(false);
+    actionsTrigger.current?.focus();
+    action();
+  }
   const hold = routingHold(printer, row);
   const progress = row?.progress == null ? null : row.progress * 100;
   // Older servers publish only the display label for each loaded slot.
@@ -790,19 +799,52 @@ function FleetPrinterCard({
           )}
         </div>
         {printer.access.can_admin && (
-          <div className="relative z-20 flex shrink-0 items-center gap-1">
-            <Button variant="outline" size="xs" onClick={onSettings}>
+          <DropdownMenu
+            open={actionsOpen}
+            onOpenChange={setActionsOpen}
+            aria-label={actionsLabel}
+            className="z-20 shrink-0"
+            contentClassName="min-w-40 border border-border-strong bg-popover p-1 text-popover-foreground shadow-dialog"
+            portal
+            trigger={
+              <Button
+                ref={actionsTrigger}
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="aria-expanded:bg-accent aria-expanded:text-accent-foreground"
+                data-menu-trigger
+                aria-label={actionsLabel}
+                aria-haspopup="menu"
+                aria-expanded={actionsOpen}
+                onClick={() => setActionsOpen((open) => !open)}
+              >
+                {uiText("Actions")}
+                <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden />
+              </Button>
+            }
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              role="menuitem"
+              className="w-full justify-start hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:ring-inset focus-visible:ring-offset-0"
+              onClick={() => chooseAction(onSettings)}
+            >
               {uiText("Settings")}
             </Button>
             <Button
-              variant="danger"
+              type="button"
+              variant="ghost"
               size="xs"
-              onClick={onRemove}
-              aria-label={uiText("Remove printer")}
+              role="menuitem"
+              className="w-full justify-start text-destructive hover:bg-popover-hover hover:text-destructive focus-visible:bg-popover-hover focus-visible:ring-inset focus-visible:ring-offset-0"
+              onClick={() => chooseAction(onRemove)}
             >
-              {uiText("Remove")}
+              {uiText("Remove printer")}
             </Button>
-          </div>
+          </DropdownMenu>
         )}
       </div>
     </article>

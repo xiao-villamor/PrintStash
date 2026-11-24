@@ -276,7 +276,8 @@ test.describe("printer routes", () => {
     await expect(page).toHaveURL(/\/printers\/3$/);
 
     await page.goBack();
-    await card.getByRole("button", { name: "Settings", exact: true }).click();
+    await card.getByRole("button", { name: "Actions for ender", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
     const settings = page.getByRole("dialog", { name: "Edit printer connection" });
     await expect(settings).toBeVisible();
     await expect(page).toHaveURL(/\/printers$/);

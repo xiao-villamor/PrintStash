@@ -12,7 +12,8 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary-hover",
-        destructive: "bg-destructive text-destructive-foreground hover:opacity-90",
+        destructive:
+          "border border-destructive bg-destructive-action text-destructive-action-foreground hover:bg-destructive-action-hover",
         /** An irreversible action offered beside ordinary ones: the neutral
          *  outline of `outline` with only the label in the destructive token. */
         danger: "border border-border bg-card text-destructive hover:bg-muted",

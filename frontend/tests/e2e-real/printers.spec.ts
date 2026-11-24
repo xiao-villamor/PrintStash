@@ -6,7 +6,28 @@
  * amount of control-endpoint coverage matters.
  */
 import { test, expect, authBundleFor, ADMIN } from "./helpers";
+import type { Locator } from "@playwright/test";
 import { collapseNavigationSidebar } from "./util";
+
+function buttonTextContrast(button: Locator) {
+  return button.evaluate((element) => {
+    const context = document.createElement("canvas").getContext("2d");
+    if (!context) throw new Error("Cannot measure button colors without a canvas");
+    const luminance = (color: string) => {
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      const [red, green, blue] = Array.from(context.getImageData(0, 0, 1, 1).data, (value) => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return red * 0.2126 + green * 0.7152 + blue * 0.0722;
+    };
+    const style = getComputedStyle(element);
+    const text = luminance(style.color);
+    const fill = luminance(style.backgroundColor);
+    return (Math.max(text, fill) + 0.05) / (Math.min(text, fill) + 0.05);
+  });
+}
 
 // Adds a real Moonraker printer record (it will sit offline — no hardware — but
 // the create/list/remove path is fully exercised against the backend).
@@ -41,6 +62,7 @@ test.describe("printers", () => {
 
   test("add and remove a printer", async ({ page }) => {
     const name = `e2e-printer-${Date.now()}`;
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
     await page.goto("/printers");
     await collapseNavigationSidebar(page);
     await expect(page.getByRole("heading", { name: "Printers" })).toBeVisible();
@@ -62,18 +84,31 @@ test.describe("printers", () => {
 
     await card
       .locator("xpath=ancestor::article")
-      .getByRole("button", { name: "Remove printer", exact: true })
+      .getByRole("button", { name: `Actions for ${name}`, exact: true })
+      .press("Enter");
+    await page
+      .getByRole("menu", { name: `Actions for ${name}`, exact: true })
+      .getByRole("menuitem", { name: "Remove printer", exact: true })
       .click();
     const confirmation = page.getByRole("dialog", { name: "Remove printer?" });
     await expect(confirmation).toHaveAccessibleDescription(
       `"${name}" will be removed from PrintStash.`,
     );
+    const confirm = confirmation.getByRole("button", { name: "Remove", exact: true });
+    await expect(confirm).toHaveCSS("color", "rgb(255, 255, 255)");
+    expect(await buttonTextContrast(confirm)).toBeGreaterThanOrEqual(7);
+    const restingFill = await confirm.evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    );
+    await confirm.hover();
+    await expect(confirm).not.toHaveCSS("background-color", restingFill);
+    expect(await buttonTextContrast(confirm)).toBeGreaterThanOrEqual(7);
     const path = await card.getAttribute("href");
     const removed = page.waitForResponse(
       (reply) =>
         new URL(reply.url()).pathname === `/api/v1${path}` && reply.request().method() === "DELETE",
     );
-    await confirmation.getByRole("button", { name: "Remove", exact: true }).click();
+    await confirm.click();
     expect((await removed).status()).toBe(204);
     await expect(card).toHaveCount(0);
     const refreshed = page.waitForResponse(

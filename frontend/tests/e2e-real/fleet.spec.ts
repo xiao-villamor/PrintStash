@@ -83,11 +83,8 @@ test.describe("fleet queue", () => {
     // Cleanup: remove the printer so it doesn't linger as "offline" in later runs
     // once this webServer instance's port is inevitably reused.
     await page.getByRole("tab", { name: "Fleet" }).click();
-    await card.getByRole("button", { name: "Settings" }).click();
-    await page
-      .getByRole("dialog", { name: "Edit printer connection" })
-      .getByRole("button", { name: "Remove printer", exact: true })
-      .click();
+    await card.getByRole("button", { name: `Actions for ${printerName}` }).click();
+    await page.getByRole("menuitem", { name: "Remove printer", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Remove" }).click();
     await expect(page.getByRole("link", { name: new RegExp(printerName) })).toHaveCount(0);
   });
@@ -193,11 +190,8 @@ test.describe("fleet queue", () => {
     const card = page
       .getByRole("article")
       .filter({ has: page.getByRole("link", { name: printerName, exact: true }) });
-    await card.getByRole("button", { name: "Settings" }).click();
-    await page
-      .getByRole("dialog", { name: "Edit printer connection" })
-      .getByRole("button", { name: "Remove printer", exact: true })
-      .click();
+    await card.getByRole("button", { name: `Actions for ${printerName}` }).click();
+    await page.getByRole("menuitem", { name: "Remove printer", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Remove", exact: true }).click();
     await expect(card).toHaveCount(0);
     expect((await page.request.delete(`/api/v1${modelPath}`)).ok()).toBe(true);

@@ -44,7 +44,8 @@ theme swap so colors remain consistent throughout the application.
 | `muted` / `muted-foreground` | Recessed fills, secondary text |
 | `primary` / `primary-foreground` | Primary action only. `primary-hover` for hover, `primary-soft` for focus/selection rings |
 | `accent` / `accent-foreground` | Neutral hover/selected controls; use together without a colored border or ring |
-| `destructive` / `destructive-foreground` | Delete and other irreversible actions |
+| `destructive` / `destructive-foreground` | Error text, danger outlines and status badges |
+| `destructive-action` / `destructive-action-foreground` | Filled destructive confirmation with a deep red background and white text |
 | `success`, `warning` | Status only — never as decoration |
 | `border`, `input`, `ring` | Edges and focus rings |
 | `surface-*`, `on-surface*`, `outline*` | The elevation scale, for multi-layer panels |
@@ -129,6 +130,10 @@ page title elsewhere. `PageHeader` provides it. The two detail views whose
 title carries inline metadata (printer detail's provider/beta badges, model
 detail) render their own `<h1>` instead of composing `PageHeader`; that is the
 only sanctioned exception, and it does not license a third heading style.
+
+Fleet cards reserve one labeled Actions menu for Settings and Remove printer.
+The menu sits beside the connection details and names its printer for assistive
+technology.
 
 ### Framed work surfaces
 
@@ -492,6 +497,9 @@ the named action in the footer. Cancel receives keyboard focus and the dialog
 stays open while a submitted action is pending. Use the filled destructive
 button for removal, loss of work, or an explicit safety override. Use the
 primary button for confirmations that enable, enroll, restart, or review.
+Check the label, border and focus indicator in both themes. The filled
+destructive action keeps its white label when hovered, and Cancel uses the
+same visible border token as a field.
 Confirmations that need a field use the same dialog with the standard inputs.
 Warnings with multiple outcomes use the confirmation variant of `Modal` with
 their actions in the footer.

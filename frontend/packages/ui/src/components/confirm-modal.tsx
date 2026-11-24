@@ -49,6 +49,7 @@ export function ConfirmModal({
           <Button
             type="button"
             variant="outline"
+            className="border-input"
             onClick={onClose}
             disabled={busy}
             data-autofocus={busy ? undefined : ""}

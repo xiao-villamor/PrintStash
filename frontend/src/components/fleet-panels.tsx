@@ -475,6 +475,7 @@ export function FleetQueuePanel({
               <>
                 <Button
                   variant="outline"
+                  className="border-input"
                   disabled={busy === resolveTarget.id}
                   data-autofocus={busy === resolveTarget.id ? undefined : ""}
                   onClick={() => setResolveTarget(null)}

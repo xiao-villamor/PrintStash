@@ -22,7 +22,7 @@
 
 ### Changed
 
-- Remove a printer directly from its fleet card. Warning dialogs share a compact layout, accessible consequence text, and consistent confirmation buttons.
+- Open printer settings or remove a printer from its fleet card’s Actions menu. Warning dialogs share a compact layout, accessible consequence text, and high-contrast destructive actions.
 
 - Printers and Model print controls share a 3D printer icon with a nozzle and build plate.
 - Filament presets, Model costing, and Spoolman settings use a filament spool icon.

@@ -22,6 +22,9 @@
     --accent-foreground: #101828;
     --destructive: #b42318;
     --destructive-foreground: #ffffff;
+    --destructive-action: #a11c27;
+    --destructive-action-foreground: #ffffff;
+    --destructive-action-hover: #861726;
     --border: #e4e7ec;
     --border-strong: #cdd3db;
     --overlay-scrim: rgb(16 24 40 / 0.28);
@@ -61,6 +64,7 @@
     --accent-foreground: #edf1f7;
     --destructive: #f87171;
     --destructive-foreground: #450a0a;
+    --destructive-action-hover: #a62431;
     --border: #232a35;
     --border-strong: #36404e;
     --overlay-scrim: rgb(0 0 0 / 0.45);

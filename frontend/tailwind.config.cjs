@@ -36,6 +36,11 @@ const config = {
         destructive: {
           DEFAULT: "var(--destructive)",
           foreground: "var(--destructive-foreground)",
+          action: {
+            DEFAULT: "var(--destructive-action)",
+            foreground: "var(--destructive-action-foreground)",
+            hover: "var(--destructive-action-hover)",
+          },
         },
         muted: {
           DEFAULT: "var(--muted)",
