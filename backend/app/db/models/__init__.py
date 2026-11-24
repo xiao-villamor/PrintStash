@@ -220,6 +220,7 @@ from .printing import (
 from .printing import (
     MultipartBuildPart as MultipartBuildPart,
 )
+from .printing import PricingTemplate as PricingTemplate
 from .printing import (
     PrintBatch as PrintBatch,
 )

@@ -109,6 +109,7 @@ const printerProfile: PrinterProfileRead = {
   printer_model: null,
   slicer_name: null,
   nozzle_diameter_mm: null,
+  expenses: null,
   notes: null,
   usage_count: 0,
   created_at: TIMESTAMP,

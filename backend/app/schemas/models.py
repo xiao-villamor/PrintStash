@@ -19,6 +19,7 @@ from app.schemas.printers import (
     PrintJobReportedMetadataRead,
     PrintJobReproducibilityRead,
 )
+from app.schemas.production_costing import PrinterExpenses
 
 
 class MetadataRead(BaseModel):
@@ -789,6 +790,7 @@ class PrinterProfileBase(BaseModel):
     slicer_name: Optional[str] = Field(default=None, max_length=64)
     nozzle_diameter_mm: Optional[float] = Field(default=None, ge=0)
     notes: Optional[str] = Field(default=None, max_length=4096)
+    expenses: PrinterExpenses | None = None
 
 
 class PrinterProfileCreate(PrinterProfileBase):
@@ -803,6 +805,7 @@ class PrinterProfileUpdate(BaseModel):
     slicer_name: Optional[str] = Field(default=None, max_length=64)
     nozzle_diameter_mm: Optional[float] = Field(default=None, ge=0)
     notes: Optional[str] = Field(default=None, max_length=4096)
+    expenses: PrinterExpenses | None = None
 
 
 class PrinterProfileRead(PrinterProfileBase, EditingBase):

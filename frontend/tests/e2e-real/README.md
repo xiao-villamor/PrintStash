@@ -288,6 +288,7 @@ sends no further setup probe.
 - `printers.spec.ts`: two settings editors detect a stale save, retain the losing
   draft and explicitly save revised changes without replacing untouched settings.
 
+- `production-costing.spec.ts`: normalizes filament spool pricing, configures printer expenses, uses Moonraker print measurements, and verifies saved per-piece estimates and reusable pricing rates.
 - `profiles.spec.ts`: two editors per preset kind recover a conditional conflict
   while preserving the other editor’s notes, verified after reload.
 

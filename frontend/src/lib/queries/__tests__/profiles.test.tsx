@@ -36,6 +36,7 @@ const printer: PrinterProfileRead = {
   printer_model: "Voron",
   slicer_name: null,
   nozzle_diameter_mm: 0.4,
+  expenses: null,
   notes: null,
   usage_count: 0,
   created_at: FROZEN_NOW,

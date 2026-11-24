@@ -5,6 +5,7 @@ from typing import ClassVar, Optional
 from uuid import uuid4
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -88,9 +89,32 @@ class PrinterProfile(SQLModel, table=True):
     slicer_name: Optional[str] = Field(default=None, max_length=64, index=True)
     nozzle_diameter_mm: Optional[float] = None
     notes: Optional[str] = None
+    expenses: Optional[dict[str, float]] = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
+    )
 
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class PricingTemplate(SQLModel, table=True):
+    __tablename__ = "pricing_templates"
+    __table_args__ = (
+        CheckConstraint(
+            "margin_percent >= 0 AND margin_percent <= 99.99",
+            name="margin_percent_range",
+        ),
+        CheckConstraint(
+            "tax_percent >= 0 AND tax_percent <= 100", name="tax_percent_range"
+        ),
+    )
+
+    id: str = Field(
+        default_factory=lambda: uuid4().hex, primary_key=True, max_length=32
+    )
+    name: str = Field(unique=True, max_length=200)
+    margin_percent: float
+    tax_percent: float
 
 
 for _profile in (FilamentProfile, PrinterProfile):

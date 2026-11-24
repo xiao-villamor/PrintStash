@@ -1,3 +1,4 @@
+import type { PrinterExpenses } from "./production-costing";
 import type { ModelPreviews } from "./previews";
 import type { EditingBase } from "./editing";
 import type { PreviewLook } from "./config";
@@ -1134,6 +1135,7 @@ export interface PrinterProfileRead extends EditingBase {
   usage_count: number;
   created_at: string;
   updated_at: string;
+  expenses: PrinterExpenses | null;
 }
 
 export interface PrinterProfileCreate {
@@ -1142,6 +1144,7 @@ export interface PrinterProfileCreate {
   slicer_name?: string | null;
   nozzle_diameter_mm?: number | null;
   notes?: string | null;
+  expenses?: PrinterExpenses | null;
 }
 
 export interface PrinterProfileUpdate {
@@ -1150,6 +1153,7 @@ export interface PrinterProfileUpdate {
   slicer_name?: string | null;
   nozzle_diameter_mm?: number | null;
   notes?: string | null;
+  expenses?: PrinterExpenses | null;
 }
 
 export interface TagRead {

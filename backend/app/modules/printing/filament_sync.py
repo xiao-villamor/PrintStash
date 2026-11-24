@@ -19,6 +19,7 @@ Mapping (Spoolman ``filament`` → ``FilamentProfile``):
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any, Optional
 
 from sqlmodel import Session, select
@@ -48,13 +49,29 @@ class SyncResult:
         }
 
 
-def cost_per_kg_from_filament(filament: dict[str, Any]) -> Optional[float]:
-    """Derive $/kg from Spoolman's per-spool ``price`` and net ``weight`` (g)."""
-    price = filament.get("price")
-    weight = filament.get("weight")
-    if not price or not weight or weight <= 0:
+def _cost_per_kg(price: Any, weight: Any) -> float | None:
+    if not isinstance(price, (int, float)) or not isinstance(weight, (int, float)):
         return None
-    return round(float(price) / (float(weight) / 1000.0), 4)
+    if not isfinite(price) or not isfinite(weight) or price < 0 or weight <= 0:
+        return None
+    result = price / weight * 1000
+    return round(result, 4) if isfinite(result) else None
+
+
+def cost_per_kg_from_filament(filament: dict[str, Any]) -> float | None:
+    """Normalize the price of a full roll using its nominal net weight."""
+    return _cost_per_kg(filament.get("price"), filament.get("weight"))
+
+
+def cost_per_kg_from_spool(
+    spool: dict[str, Any], filament: dict[str, Any]
+) -> float | None:
+    """Use the actual purchase price when the spool provides one."""
+    price = spool.get("price")
+    if price is None:
+        return cost_per_kg_from_filament(filament)
+    weight = spool.get("initial_weight")
+    return _cost_per_kg(price, filament.get("weight") if weight is None else weight)
 
 
 def _norm(value: Optional[str]) -> str:

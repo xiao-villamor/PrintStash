@@ -85,6 +85,7 @@ class SpoolRead(BaseModel):
     vendor_name: Optional[str] = None
     material: Optional[str] = None
     color_hex: Optional[str] = None
+    cost_per_kg: Optional[float] = None
     remaining_weight: Optional[float] = None
     used_weight: Optional[float] = None
     archived: bool = False
@@ -112,6 +113,7 @@ def _spool_from_spoolman(raw: Dict[str, Any]) -> SpoolRead:
         vendor_name=vendor.get("name"),
         material=filament.get("material"),
         color_hex=filament.get("color_hex"),
+        cost_per_kg=filament_sync.cost_per_kg_from_spool(raw, filament),
         remaining_weight=raw.get("remaining_weight"),
         used_weight=raw.get("used_weight"),
         archived=bool(raw.get("archived", False)),

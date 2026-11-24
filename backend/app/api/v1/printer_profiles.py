@@ -80,6 +80,7 @@ def create_printer_profile(
         slicer_name=_clean(payload.slicer_name),
         nozzle_diameter_mm=payload.nozzle_diameter_mm,
         notes=_clean(payload.notes),
+        expenses=payload.expenses.model_dump(mode="json") if payload.expenses else None,
     )
     session.add(profile)
     session.commit()
@@ -128,6 +129,11 @@ def update_printer_profile(
         profile.nozzle_diameter_mm = payload.nozzle_diameter_mm
     if "notes" in fields_set:
         profile.notes = _clean(payload.notes)
+
+    if "expenses" in fields_set:
+        profile.expenses = (
+            payload.expenses.model_dump(mode="json") if payload.expenses else None
+        )
 
     profile.updated_at = utcnow()
     session.add(profile)

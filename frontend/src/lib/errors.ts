@@ -105,6 +105,10 @@ export function parseApiError(cause: unknown): ApiError {
 
 /** Human-readable error messages keyed by server detail codes. */
 const ERROR_MESSAGES = {
+  pricing_template_name_exists: "A pricing template with that name already exists.",
+  artifact_costing_unsupported: "Production costing is available for STL and G-code files.",
+  edit_conflict: "This record changed before your changes were saved.",
+
   // Auth
   invalid_api_key_or_token: "Authentication failed. Sign in again.",
   storage_connection_target_in_use:

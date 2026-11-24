@@ -69,6 +69,7 @@ read the [upgrade notes](#project-status--roadmap) first.
   and queue copies across printer groups. Actions depend on the integration.
 - **Materials and history:** Filament profiles, print outcomes, time and cost
   tracking, plus optional [Spoolman](https://github.com/Donkie/Spoolman) integration.
+- **Production costing:** Save per-piece estimates for STL and G-code files using filament or spool prices, print time, and printer operating costs. Reuse margin and tax templates across Models.
 - **Backups and access:** Verified backups, file audits, trash recovery, library
   export, user permissions, API keys, and OIDC/SSO.
   **Library source originals need separate backups.**

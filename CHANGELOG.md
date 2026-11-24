@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+
+- Model costing saves per-piece production estimates for STL and G-code Artifacts. Use filament presets or individual Spoolman spools, enter print time or copy it from measured print history, and include printer amortization, maintenance, electricity, and other hourly costs. Apply reusable profit margin and tax templates to calculate a price.
+- Filament presets can calculate cost per kilogram from a spool's purchase price and net filament weight. Printer presets can store operating costs for reuse in estimates.
+
 ### Security
 
 - Updated image decoding and outbound TLS dependencies, along with Python and uv in the backend image.

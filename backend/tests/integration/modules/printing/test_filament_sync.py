@@ -124,3 +124,19 @@ class TestGramAccuracy:
         thick = mm_to_grams(1000.0, "pla", diameter_mm=2.85)
         assert thick is not None and thin is not None
         assert thick > thin
+
+
+@pytest.mark.parametrize(
+    "spool,filament,expected",
+    [
+        ({"price": 10, "initial_weight": 250}, {"price": 15, "weight": 1000}, 40),
+        ({"price": 10}, {"price": 15, "weight": 500}, 20),
+        ({"initial_weight": 250}, {"price": 15, "weight": 1000}, 15),
+        ({"price": 0, "initial_weight": 250}, {"price": 15, "weight": 1000}, 0),
+        ({"price": 10}, {"weight": 0}, None),
+    ],
+)
+def test_spool_rate_uses_purchase_price_for_its_net_weight(spool, filament, expected):
+    from app.modules.printing.filament_sync import cost_per_kg_from_spool
+
+    assert cost_per_kg_from_spool(spool, filament) == expected

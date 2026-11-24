@@ -378,6 +378,8 @@ class TestListSpools:
             return [
                 {
                     "id": 7,
+                    "price": 15.0,
+                    "initial_weight": 750.0,
                     "remaining_weight": 500.0,
                     "used_weight": 250.0,
                     "archived": False,
@@ -404,6 +406,7 @@ class TestListSpools:
         assert body[0]["filament_name"] == "PLA Red"
         assert body[0]["vendor_name"] == "Acme"
         assert body[0]["location"] == "CANVAS-1"
+        assert body[0]["cost_per_kg"] == 20.0
 
     def test_list_spools_degrades_on_spoolman_error(
         self, client: TestClient, auth_headers, monkeypatch

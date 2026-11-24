@@ -59,6 +59,7 @@ function aPrinterProfile(over: Partial<PrinterProfileRead> = {}): PrinterProfile
     printer_model: "Voron 2.4",
     slicer_name: null,
     nozzle_diameter_mm: 0.4,
+    expenses: null,
     notes: null,
     usage_count: 0,
     created_at: FROZEN_NOW,

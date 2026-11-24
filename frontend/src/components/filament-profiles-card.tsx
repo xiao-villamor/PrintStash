@@ -26,6 +26,16 @@ import { useAuth } from "@/lib/auth-context";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { Check, Layers, Loader2, Plus, Printer, RefreshCw, Trash2, X, Pencil } from "lucide-react";
+import { FilamentSpoolPrice } from "@/components/filament-spool-price";
+import {
+  expenseDraft,
+  expenseFields,
+  expenseProblem,
+  expensesChanged,
+  parseExpenses,
+  type ExpenseDraft,
+} from "@/lib/printer-expenses";
+import { PrinterExpenseFields } from "@/components/printer-expense-fields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -56,6 +66,7 @@ type PrinterEdit = {
   name: string;
   model: string;
   nozzle: string;
+  expenses: ExpenseDraft;
   notes: string;
 };
 
@@ -86,7 +97,7 @@ function parseOptionalNumber(value: string): number | null {
 }
 
 function formatCost(value: number | null): string {
-  return value == null ? "" : String(Number(value.toFixed(2)));
+  return value == null ? "" : String(value);
 }
 
 function formatNozzle(value: number | null): string {
@@ -108,6 +119,7 @@ function printerEdit(profile: PrinterProfileRead): PrinterEdit {
     name: profile.name,
     model: profile.printer_model ?? "",
     nozzle: formatNozzle(profile.nozzle_diameter_mm),
+    expenses: expenseDraft(profile.expenses),
     notes: profile.notes ?? "",
   };
 }
@@ -129,6 +141,7 @@ function printerDirty(profile: PrinterProfileRead, edit: PrinterEdit): boolean {
     base.name !== edit.name ||
     base.model !== edit.model ||
     base.nozzle !== edit.nozzle ||
+    expensesChanged(base.expenses, edit.expenses) ||
     base.notes !== edit.notes
   );
 }
@@ -200,6 +213,13 @@ function PresetReviewPanel({
               <dd>{row.printer_model}</dd>
               <dt>{uiText("Nozzle")}</dt>
               <dd>{row.nozzle_diameter_mm}</dd>
+              {row.expenses &&
+                expenseFields.map(({ key, label }) => (
+                  <div key={key} className="contents">
+                    <dt>{uiText(label)}</dt>
+                    <dd>{row.expenses?.[key]}</dd>
+                  </div>
+                ))}
             </>
           )}
           <dt>{uiText("Notes")}</dt>
@@ -316,7 +336,8 @@ function ProfileRow({
       onBlur={(event) => {
         if (
           event.relatedTarget instanceof Node &&
-          detailsRef.current?.contains(event.relatedTarget)
+          (detailsRef.current?.contains(event.relatedTarget) ||
+            event.target.closest("[data-overlay-open]")?.contains(event.relatedTarget))
         )
           return;
         onBlur(event);
@@ -435,7 +456,7 @@ export function FilamentProfilesCard() {
   const [newPrinterModel, setNewPrinterModel] = useState("");
   const [newPrinterNozzle, setNewPrinterNozzle] = useState("");
   const [newPrinterNotes, setNewPrinterNotes] = useState("");
-  const config = useVaultConfig({ enabled: !!user?.is_superuser && showAddFilament, retry: false });
+  const config = useVaultConfig({ enabled: !!user?.is_superuser, retry: false });
   const currency = user?.is_superuser && !config.isError ? (config.data?.currency ?? null) : null;
   let currencyName = currency;
   if (currency) {
@@ -815,6 +836,8 @@ export function FilamentProfilesCard() {
       toast.error(uiText("Invalid nozzle diameter"));
       return;
     }
+    const expenses = parseExpenses(edit.expenses);
+    if (expenseProblem(expenses)) return;
     const key = `p${profile.id}`;
     cancelSavedFeedback(key);
     setRowStatus((s) => ({ ...s, [key]: "saving" }));
@@ -822,6 +845,7 @@ export function FilamentProfilesCard() {
     if (edit.name !== initial.name) payload.name = edit.name.trim();
     if (edit.model !== initial.model) payload.printer_model = edit.model.trim() || null;
     if (edit.nozzle !== initial.nozzle) payload.nozzle_diameter_mm = parsedNozzle;
+    if (expensesChanged(initial.expenses, edit.expenses)) payload.expenses = expenses;
     if (edit.notes !== initial.notes) payload.notes = edit.notes.trim() || null;
     const session = getSessionVersion();
     try {
@@ -1087,6 +1111,11 @@ export function FilamentProfilesCard() {
                         aria-describedby={`${helpId}-filament-cost`}
                       />
                     </FormField>
+                    <FilamentSpoolPrice
+                      currency={currency}
+                      disabled={commands.createFilament.isPending}
+                      onApply={setNewCost}
+                    />
                   </div>
                   <FormField
                     label={uiText("Notes")}
@@ -1207,7 +1236,14 @@ export function FilamentProfilesCard() {
                                   placeholder={uiText("Brand")}
                                 />
                               </FormField>
-                              <FormField className="lg:col-span-2" label={uiText("Cost / kg")}>
+                              <FormField
+                                className="lg:col-span-2"
+                                label={
+                                  currency
+                                    ? `${uiText("Cost / kg")} (${currency})`
+                                    : uiText("Cost / kg")
+                                }
+                              >
                                 <Input
                                   value={edit.cost}
                                   onChange={(e) =>
@@ -1236,6 +1272,13 @@ export function FilamentProfilesCard() {
                                   </span>
                                 )}
                               </FormField>
+                              {!linked && (
+                                <FilamentSpoolPrice
+                                  currency={currency}
+                                  disabled={locked}
+                                  onApply={(cost) => updateFilamentEdit(profile.id, { cost })}
+                                />
+                              )}
                               <FormField className="col-span-full min-w-0" label={uiText("Notes")}>
                                 <textarea
                                   value={edit.notes}
@@ -1560,6 +1603,14 @@ export function FilamentProfilesCard() {
                                   className={inputClasses}
                                 />
                               </FormField>
+                              <PrinterExpenseFields
+                                currency={currency}
+                                draft={edit.expenses}
+                                disabled={
+                                  !auth.isAuthenticated || rowStatus[`p${profile.id}`] === "saving"
+                                }
+                                onChange={(expenses) => updatePrinterEdit(profile.id, { expenses })}
+                              />
                               <div className="col-span-full flex items-center gap-2">
                                 <RowStatus state={rowStatus[`p${profile.id}`]} />
                                 <Button

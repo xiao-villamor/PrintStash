@@ -100,6 +100,7 @@ import {
   plateLabel,
 } from "./presentation";
 import { PrintHistorySection } from "./print-history-section";
+import { ProductionCosting } from "./production-costing";
 import { RevisionsTab } from "./revisions-tab";
 import { SendToButtons } from "./send-to-buttons";
 import { ShareDialog } from "./share-dialog";
@@ -1683,6 +1684,20 @@ function ModelDetailPresentation({
                       setTagDialogSession((value) => value + 1);
                       setTagDialogOpen(true);
                     }}
+                  />
+                )}
+
+                {activeTab === "costing" && (
+                  <ProductionCosting
+                    key={model.id}
+                    modelId={model.id}
+                    files={model.files.filter(
+                      (file) => file.file_type === "stl" || file.file_type === "gcode",
+                    )}
+                    initialFileId={inspectedGcode?.id ?? meshFile?.id ?? null}
+                    jobs={printJobs}
+                    canEdit={canEditModel && auth.isAuthenticated}
+                    admin={canViewPrinters}
                   />
                 )}
 

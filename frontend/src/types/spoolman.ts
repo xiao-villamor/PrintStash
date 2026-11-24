@@ -37,6 +37,7 @@ export interface SpoolRead {
   vendor_name: string | null;
   material: string | null;
   color_hex: string | null;
+  cost_per_kg: number | null;
   remaining_weight: number | null;
   used_weight: number | null;
   archived: boolean;
