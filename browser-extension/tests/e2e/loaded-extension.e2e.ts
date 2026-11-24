@@ -35,6 +35,7 @@ interface LoadedExtensionElement {
 
 interface LoadedExtensionBrowser {
   $(selector: string): LoadedExtensionElement;
+  addInitScript(script: () => void): Promise<{ remove(): Promise<void> }>;
   keys(value: string): Promise<void>;
   webExtensionInstall(parameters: {
     extensionData: { type: "path"; path: string };
@@ -217,6 +218,51 @@ describe("loaded extension", () => {
     }
   });
 
+  it("shows import as the only view in the embedded panel", async () => {
+    const views = await browser.execute(async () => {
+      const frame = document.createElement("iframe");
+      frame.src = new URL("?panel=1", location.href).href;
+      const loaded = new Promise<void>((resolve) =>
+        frame.addEventListener("load", () => resolve(), { once: true }),
+      );
+      document.body.append(frame);
+      try {
+        await loaded;
+        const panel = frame.contentDocument!;
+        const status = panel.querySelector("#connection-status")!;
+        if (status.getAttribute("data-state") === "checking") {
+          await new Promise<void>((resolve) => {
+            const observer = new MutationObserver(() => {
+              if (status.getAttribute("data-state") === "checking") return;
+              observer.disconnect();
+              resolve();
+            });
+            observer.observe(status, { attributeFilter: ["data-state"] });
+          });
+        }
+        return {
+          toolbar: Array.from(document.querySelectorAll('[role="tab"]'), (tab) =>
+            tab.textContent?.trim(),
+          ),
+          panelTabs: panel.querySelectorAll('[role="tab"]').length,
+          panelViews: Array.from(
+            panel.querySelectorAll(".popup-view:not([hidden])"),
+            (view) => view.id,
+          ),
+          setupVisible: panel.querySelector("#connection-panel")?.checkVisibility(),
+        };
+      } finally {
+        frame.remove();
+      }
+    });
+    assert.deepEqual(views, {
+      toolbar: ["Capture", "History", "Settings"],
+      panelTabs: 0,
+      panelViews: ["view-capture"],
+      setupVisible: true,
+    });
+  });
+
   it("switches credential fields using the keyboard", async () => {
     await browser.waitUntil(
       async () => (await browser.$("#connection-title").getText()) === "Not connected",
@@ -294,6 +340,134 @@ describe("loaded extension", () => {
   });
 
   if (process.env.PRINTSTASH_EXTENSION_BROWSER_NAME !== "firefox") {
+    it("sends only the images selected during marketplace review", async () => {
+      const writes: { gallery: { name: string }[] }[] = [];
+      const server = createServer(async (request, response) => {
+        const path = request.url?.split("?")[0];
+        response.setHeader("Content-Type", "application/json");
+        if (path === "/api/v1/health") {
+          response.end(
+            JSON.stringify({ status: "ok", name: "PrintStash", capture_import_intent: true }),
+          );
+        } else if (path?.endsWith("/capture-capabilities")) {
+          response.end(
+            JSON.stringify({
+              owner_user_id: 9,
+              import_intent: true,
+              resumable_slots: true,
+              resumable_gallery: true,
+            }),
+          );
+        } else if (path?.endsWith("/capture-source-status")) {
+          response.end(
+            JSON.stringify(
+              writes.length
+                ? [{ id: 90, state: "completed", completion: "complete", resulting_model_id: 91 }]
+                : [],
+            ),
+          );
+        } else if (path?.endsWith("/capture-sessions")) {
+          const chunks: Buffer[] = [];
+          for await (const chunk of request) chunks.push(chunk);
+          writes.push(JSON.parse(Buffer.concat(chunks).toString()));
+          response.end(
+            JSON.stringify({ item: { id: 90, state: "completed" }, slots: [], recoverable: false }),
+          );
+        } else if (path?.endsWith("/capture-status")) {
+          response.end(
+            JSON.stringify({ state: "completed", completion: "complete", resulting_model_id: 91 }),
+          );
+        } else {
+          response.writeHead(404).end("{}");
+        }
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      assert.ok(address && typeof address !== "string");
+      const vault = `http://127.0.0.1:${address.port}`;
+      const popupUrl = await browser.execute(async (base) => {
+        await chrome.storage.local.set({ vault: base, deviceCredential: "gallery-test-device" });
+        return new URL("popup.html", location.href).href;
+      }, vault);
+      // Only the marketplace responses are synthetic. The installed popup
+      // makes the real capture HTTP request and reloads the stored receipt.
+      const fixture = await browser.addInitScript(() => {
+        if (location.protocol !== "chrome-extension:" || location.pathname !== "/popup.html")
+          return;
+        const tab = {
+          id: 42,
+          title: "Adjustable enclosure",
+          url: "https://www.thingiverse.com/thing:12345/files",
+        };
+        Object.assign(chrome.tabs, { query: async () => [tab] });
+        Object.assign(chrome.permissions!, { contains: async () => true });
+        Object.assign(chrome.scripting!, {
+          executeScript: async ({ args = [] }: { args?: unknown[] }) => {
+            const [params] = args;
+            if (params === "thingiverse") {
+              return [
+                {
+                  result: [1, 2, 3].map(
+                    (index) => `https://cdn.thingiverse.com/image-${index}.png`,
+                  ),
+                },
+              ];
+            }
+            if (params && typeof params === "object" && "sourceItemId" in params) {
+              return [
+                {
+                  result: {
+                    ok: true,
+                    files: [
+                      {
+                        id: "101",
+                        filename: "enclosure.stl",
+                        fileType: "stl",
+                        url: "https://www.thingiverse.com/download:101",
+                      },
+                    ],
+                  },
+                },
+              ];
+            }
+            return [{ result: { pageTitle: tab.title, jsonLd: [] } }];
+          },
+        });
+      });
+      try {
+        await browser.url(popupUrl);
+        await browser.waitUntil(
+          async () => (await browser.$("#capture").getText()) === "Review files and images",
+        );
+        await browser.$("#capture").click();
+        const secondImage = browser.$(".gallery-option:nth-child(2) input");
+        await secondImage.waitForExist();
+        assert.deepEqual(writes, []);
+        await secondImage.click();
+        await browser.$(".gallery-cover select").click();
+        await browser.keys("End");
+        await browser.keys("Enter");
+        await browser.$("#capture").click();
+        await browser.waitUntil(
+          async () => (await browser.$("#open-inbox").getText()) === "Open in PrintStash",
+        );
+        assert.deepEqual(
+          writes.map(({ gallery }) => gallery.map(({ name }) => name)),
+          [["source-image-3", "source-image-1"]],
+        );
+        await browser.url(popupUrl);
+        await browser.waitUntil(
+          async () => (await browser.$("#status-title-text").getText()) === "Already in PrintStash",
+        );
+      } finally {
+        await fixture.remove();
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    });
+
     it("cancels native connection verification before publication", async () => {
       let heldResponse: ServerResponse | undefined;
       let requestClosed = false;

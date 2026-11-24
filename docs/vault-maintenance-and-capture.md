@@ -46,7 +46,8 @@ rechecks the connection when opened, and removes that credential and the Vault
 host permission on disconnect. Existing username/API-key setups remain a legacy
 migration path; new setups should use pairing.
 
-On a model page, open PrintStash and choose **Import**. PrintStash queues the
+On a model page, open PrintStash and choose **Review files and images**. Select
+what you want to keep, then choose **Import**. PrintStash queues the
 import and the extension shows **Open in PrintStash** when it finishes. Pending
 Imports retains the receipt. If a capture needs a file or destination decision,
 the extension opens the review flow. Turn on **Review before importing** in
@@ -56,8 +57,9 @@ An existing capture offers **Open** before you send the same source again.
 PrintStash selects a sole file or package, a profile named by the page, or the
 publication’s model files. Use **Change** to pick different files. If the page
 lists competing packages without a clear default, choose one before importing.
-Publication images are included by default. Select a thumbnail to set the
-cover, or use **Don’t include images** to omit the gallery.
+Detected publication images are selected by default. Toggle individual photos
+or choose **Deselect all** for a files-only import. Choose **Gallery cover** from
+the images you keep.
 Connecting with **Allow supported marketplaces** on grants the server and every
 supported marketplace in one Chrome prompt; imports then never ask. With it
 off, the first import from a marketplace asks once, at the click, for all of
@@ -94,8 +96,9 @@ concurrency. Capture code does not log provider payloads or credentials.
 Choose **Enable panel on this site** in the extension's **Capture** tab to turn
 on the launcher for a supported marketplace. **Settings** lets you select the
 launcher's style and corner or hide it globally or just for the current site.
-Use toolbar **Settings** to show it again. The **History** tab lists previous
-captures of the current publication.
+Use toolbar **Settings** to show it again. The toolbar's **History** tab lists
+previous captures of the current publication. The floating panel opens directly
+to the import flow.
 
 Hiding the panel keeps the transfer running; reloading the page requires recovery. With a compatible
 server, reselecting the same files recovers verified uploads until their staging
