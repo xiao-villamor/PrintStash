@@ -1230,7 +1230,7 @@ export function FleetMaintenancePanel({
                   setMode("log");
                 }}
               >
-                {uiText("Add log entry")}
+                {uiText("Log service")}
               </Button>
             </div>,
             actionsHost,

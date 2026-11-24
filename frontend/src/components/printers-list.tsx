@@ -219,7 +219,7 @@ export function PrintersPage() {
               <>
                 <Button
                   variant="outline"
-                  size="xs"
+                  size="sm"
                   onClick={() => {
                     void printersQuery.refetch();
                     void summaryQuery.refetch();
@@ -230,7 +230,7 @@ export function PrintersPage() {
                   {uiText("Refresh")}
                 </Button>
                 <Button
-                  size="xs"
+                  size="sm"
                   onClick={() => {
                     if (activeView === "queue") {
                       setAddJobOpen(true);

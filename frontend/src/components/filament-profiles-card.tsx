@@ -993,7 +993,7 @@ export function FilamentProfilesCard() {
         <Button
           type="button"
           variant="outline"
-          size="xs"
+          size="sm"
           onClick={handleSyncSpoolman}
           loading={syncing}
           disabled={!auth.isAuthenticated || activeDenied || !spoolmanEnabled}
@@ -1005,7 +1005,7 @@ export function FilamentProfilesCard() {
       <Button
         ref={newPresetButton}
         type="button"
-        size="xs"
+        size="sm"
         disabled={!auth.isAuthenticated || activeDenied}
         aria-expanded={activeTab === "filaments" ? showAddFilament : showAddPrinter}
         onClick={() => {
@@ -1020,9 +1020,7 @@ export function FilamentProfilesCard() {
         <Plus className="h-3.5 w-3.5" />
         {translateUiText(
           locale,
-          activeTab === "filaments"
-            ? uiText("New filament profile")
-            : uiText("New printer profile"),
+          activeTab === "filaments" ? uiText("New filament preset") : uiText("New printer preset"),
         )}
       </Button>
     </div>
@@ -1030,7 +1028,7 @@ export function FilamentProfilesCard() {
 
   return (
     <Localized>
-      <div className="mx-auto max-w-6xl space-y-5">
+      <div className="space-y-5">
         <PageHeader
           title={translateUiText(locale, "Profiles")}
           description={translateUiText(locale, "profiles.description")}
@@ -1145,7 +1143,7 @@ export function FilamentProfilesCard() {
                       loading={commands.createFilament.isPending}
                       disabled={!newName.trim()}
                     >
-                      {uiText("Add profile")}
+                      {uiText("Add preset")}
                     </Button>
                   </>
                 }
@@ -1511,7 +1509,7 @@ export function FilamentProfilesCard() {
                       loading={commands.createPrinter.isPending}
                       disabled={!newPrinterName.trim()}
                     >
-                      {uiText("Add profile")}
+                      {uiText("Add preset")}
                     </Button>
                   </>
                 }

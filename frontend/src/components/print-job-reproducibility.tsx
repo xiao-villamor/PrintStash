@@ -151,7 +151,7 @@ export function PrintJobReproducibility({
         </div>
         <span
           className={cn(
-            "shrink-0 rounded border px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider",
+            "shrink-0 rounded border px-1.5 py-0.5 text-xs font-medium",
             copy.className,
           )}
           data-testid="reproducibility-level"

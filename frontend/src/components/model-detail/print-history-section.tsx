@@ -194,12 +194,7 @@ export function PrintHistorySection({
                 )
               : undefined
           }
-          className={
-            mode === "manual"
-              ? "absolute inset-y-0 right-0 h-dvh max-h-none max-w-[680px] rounded-none"
-              : "max-w-160"
-          }
-          bodyClassName={mode === "manual" ? "flex-1" : undefined}
+          dismissible={!submitting && !importing}
           footer={
             <>
               <Button
@@ -207,7 +202,7 @@ export function PrintHistorySection({
                 disabled={submitting || importing}
                 onClick={() => setShowAdd(false)}
               >
-                {mode === "manual" ? uiText("Cancel") : uiText("Close")}
+                {uiText("Cancel")}
               </Button>
               {mode === "manual" ? (
                 <Button

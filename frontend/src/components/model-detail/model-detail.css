@@ -542,20 +542,6 @@
   grid-column: 1;
   display: block;
 }
-.detail-history-evidence > div:first-child p,
-.detail-history-evidence [data-testid="reproducibility-level"] {
-  font-family: inherit;
-  font-size: inherit;
-}
-.detail-history-evidence [data-testid="reproducibility-level"] {
-  display: block;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--muted-foreground);
-  text-transform: none;
-  letter-spacing: normal;
-}
 .detail-history-evidence > dl {
   grid-column: 1 / -1;
 }

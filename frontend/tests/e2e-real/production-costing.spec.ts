@@ -23,7 +23,7 @@ test.describe("production costing", () => {
     await page.goto("/");
     await collapseNavigationSidebar(page);
     await page.goto("/profiles");
-    await page.getByRole("button", { name: "New filament profile" }).click();
+    await page.getByRole("button", { name: "New filament preset" }).click();
     const create = page.getByRole("form", { name: "Create filament preset" });
     await create.getByLabel("Name", { exact: true }).fill(`PLA ${stamp}`);
     await create.getByLabel(/Spool price/).fill("10");
@@ -38,7 +38,7 @@ test.describe("production costing", () => {
     );
     await page
       .getByRole("dialog", { name: "New filament preset" })
-      .getByRole("button", { name: "Add profile" })
+      .getByRole("button", { name: "Add preset" })
       .click();
     const filamentReceipt = await filamentWrite;
     expect(filamentReceipt.status()).toBe(201);
@@ -53,10 +53,10 @@ test.describe("production costing", () => {
     await page.reload();
     await page.getByRole("tab", { name: /Printers/ }).click();
     await page
-      .getByRole("region", { name: `Profile: ${name}`, exact: true })
+      .getByRole("region", { name: `Preset: ${name}`, exact: true })
       .getByRole("button")
       .click();
-    await page.getByRole("button", { name: `Edit profile ${name}` }).click();
+    await page.getByRole("button", { name: `Edit preset ${name}` }).click();
     const editor = page.getByRole("dialog", { name: "Edit printer preset" });
     await editor.getByLabel(/Purchase cost/).fill("500");
     await editor.getByLabel("Expected lifetime (print hours)").fill("1000");

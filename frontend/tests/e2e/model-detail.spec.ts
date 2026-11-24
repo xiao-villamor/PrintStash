@@ -1226,6 +1226,35 @@ test.describe("model detail route", () => {
     expect(useDescriptionBox!.y).toBeGreaterThan(descriptionBox!.y + descriptionBox!.height);
   });
 
+  test("print history centers both dialogs and restores focus to their actions", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/models/1");
+    await selectModelDetailTab(page, /History/);
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+
+    const viewport = page.viewportSize()!;
+    for (const [action, title] of [
+      ["Add record", "Add print record"],
+      ["Import from printer", "Import from printer"],
+    ]) {
+      const opener = page.getByRole("button", { name: action, exact: true });
+      await opener.click();
+      const dialog = page.getByRole("dialog", { name: title });
+      await expect(dialog).toBeVisible();
+      const box = (await dialog.boundingBox())!;
+      expect(box.x + box.width / 2).toBeCloseTo(viewport.width / 2, 0);
+      expect(box.y + box.height / 2).toBeCloseTo(viewport.height / 2, 0);
+      await expect(dialog.getByRole("button", { name: "Cancel" })).toBeInViewport();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toHaveCount(0);
+      await expect(opener).toBeFocused();
+    }
+  });
+
   test("print history explains exact, partial, and basic evidence with safe download", async ({
     page,
   }) => {
@@ -1237,6 +1266,11 @@ test.describe("model detail route", () => {
     await expect(
       evidence.getByTestId("reproducibility-level").filter({ hasText: "Exactly reproducible" }),
     ).toHaveCount(1);
+    const exactBadge = evidence
+      .getByTestId("reproducibility-level")
+      .filter({ hasText: "Exactly reproducible" });
+    await expect(exactBadge).toHaveCSS("text-transform", "none");
+    await expect(exactBadge).toHaveCSS("border-top-width", "1px");
     await expect(
       evidence.getByTestId("reproducibility-level").filter({ hasText: "Partially reproducible" }),
     ).toHaveCount(1);

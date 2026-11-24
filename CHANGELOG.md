@@ -22,6 +22,8 @@
 
 ### Changed
 
+- Print History uses centered dialogs for manual records and printer imports. Printer Jobs and Model History use the same reproducibility badges. Profiles aligns with other pages, and the maintenance log action has the same label in the fleet and on a printer.
+
 - The Add to queue compatibility option uses the shared checkbox with a clear checkmark, keyboard focus, and a clickable label.
 
 - Edit connections and remove printers from the Manage printers tab. Warning dialogs share a compact layout, accessible consequence text, and high-contrast destructive actions.
