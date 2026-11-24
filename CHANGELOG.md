@@ -125,6 +125,8 @@
 
 ### Added
 
+- **Native OrcaSlicer 2.5 plugin.** Install a wheel and configure PrintStash inside Orca to upload exported G-code without an external post-processing command. The settings screen follows Orca's theme, distinguishes global settings from preset overrides, and groups optional revision defaults. The plugin preserves source-model matching and retry deduplication, leaves G-code unchanged, and lets export continue when PrintStash is unavailable. Available printer, filament and process settings are captured from exported G-code in Profiles. The API keys panel aligns Generate with the key name field and shows a simpler receipt with Copy API key.
+
 - Attach guides, photos and videos to individual Models under Files → Attachments. Preview PDFs and images, and download videos and other files. Documents follow the Model when it moves Collections or goes to Trash. Multipart Guides also accept MP4 and MOV.
 
 - **Moonraker configuration editor.** Printer administrators can browse, edit, and verify saves to existing configuration files. The editor keeps local drafts when a conflict needs review.

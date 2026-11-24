@@ -121,7 +121,7 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Modal } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/ui/page-header";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { TabBar } from "@/components/ui/tabs";
 import { inputClasses } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -355,7 +355,6 @@ function isModelPurge(operation: TrashOperation | null): operation is TrashRowKe
 // Shared button styles — keep settings actions visually uniform and theme-aware.
 const BTN_PRIMARY = SETTINGS_BUTTON_PRIMARY;
 const BTN_SECONDARY = SETTINGS_BUTTON;
-const BTN_ICON = buttonVariants({ variant: "outline", size: "icon-sm" });
 // Destructive actions keep the neutral outline; only the label carries the
 // destructive token, like Remove and Revoke elsewhere in Settings.
 const BTN_DANGER = SETTINGS_BUTTON_DANGER;
@@ -445,10 +444,6 @@ function restoreSourceDescription(backup: BackupMeta, t: ReturnType<typeof useI1
 
 function shortOpaque(value: string | null | undefined): string {
   return value ? `${value.slice(0, 16)}…` : uiText("unavailable");
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function storageHealthFrom(health: HealthResponse | null): StorageHealthRead | null {
@@ -1414,29 +1409,6 @@ export function SettingsPanel() {
     try {
       await copyText(newApiKey);
       if (accountCurrent(session)) toast.success(uiText("API key copied."));
-    } catch {
-      if (accountCurrent(session))
-        toast.error(uiText("Copy failed. Select the text and copy it manually."));
-    }
-  }
-
-  async function copyOrcaCommand() {
-    if (!newApiKey || !user) return;
-    const baseUrl = window.location.origin;
-    const command = [
-      "/usr/bin/python3",
-      "/path/to/printstash_orca_push.py",
-      "--url",
-      shellQuote(baseUrl),
-      "--username",
-      shellQuote(user.username),
-      "--api-key",
-      shellQuote(newApiKey),
-    ].join(" ");
-    const session = getSessionVersion();
-    try {
-      await copyText(command);
-      if (accountCurrent(session)) toast.success(uiText("OrcaSlicer command copied."));
     } catch {
       if (accountCurrent(session))
         toast.error(uiText("Copy failed. Select the text and copy it manually."));
@@ -3913,7 +3885,7 @@ export function SettingsPanel() {
                           )}
                         </div>
 
-                        <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
                           <label className="block space-y-1">
                             <span className="block text-[13px] font-medium text-foreground">
                               {uiText("Key name")}
@@ -3943,34 +3915,29 @@ export function SettingsPanel() {
                         </div>
 
                         {newApiKey && (
-                          <div className="border border-primary/40 bg-primary/10 rounded p-3 space-y-2">
-                            <p className="text-xs text-muted-foreground">
-                              {uiText("Copy this key now. It will only be shown once.")}
-                            </p>
-                            <Button size="sm" variant="ghost" onClick={dismissReceipt}>
-                              {t("settings.accountDismissSecret")}
-                            </Button>
+                          <div className="space-y-2 rounded border border-primary/40 bg-primary/10 p-3">
+                            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                              <p className="text-xs text-muted-foreground">
+                                {uiText("Copy this key now. It will only be shown once.")}
+                              </p>
+                              <Button size="sm" variant="ghost" onClick={dismissReceipt}>
+                                {t("settings.accountDismissSecret")}
+                              </Button>
+                            </div>
                             <div className="flex items-center gap-2">
-                              <code className="flex-1 min-w-0 overflow-x-auto whitespace-nowrap rounded bg-muted px-3 py-2 text-xs text-foreground">
+                              <code className="min-w-0 flex-1 select-text break-all rounded bg-muted px-3 py-2 text-xs text-foreground">
                                 {newApiKey}
                               </code>
-                              <button
+                              <Button
                                 type="button"
+                                size="sm"
+                                variant="outline"
                                 onClick={copyApiKey}
-                                className={BTN_ICON}
                                 title={uiText("Copy API key")}
                               >
-                                <Copy className="h-4 w-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={copyOrcaCommand}
-                                className={BTN_SECONDARY}
-                                title={uiText("Copy OrcaSlicer post-processing command")}
-                              >
                                 <Copy className="h-3.5 w-3.5" />
-                                {uiText("Orca command")}
-                              </button>
+                                {uiText("Copy API key")}
+                              </Button>
                             </div>
                           </div>
                         )}
@@ -4030,11 +3997,7 @@ export function SettingsPanel() {
                           <p className="text-xs text-muted-foreground leading-relaxed">
                             {uiText("Use your username with this API key on")}{" "}
                             <code className="font-mono">/api/v1/auth/login</code>
-                            {uiText(
-                              ". The hook exchanges it for a JWT Bearer token, then uploads with the normal",
-                            )}{" "}
-                            <code className="font-mono">{uiText("Authorization")}</code>
-                            {uiText(" header.")}
+                            {uiText(". Send the returned JWT in the Authorization header.")}
                           </p>
                         </div>
                       </>

@@ -94,6 +94,18 @@ jobs:
         run: uv run deptry app/
       - if: matrix.suite == 'unit'
         run: uv run pyright
+      - name: Build and verify the OrcaSlicer plugin
+        if: matrix.suite == 'unit'
+        run: |
+          uv build --wheel --out-dir ../dist/orca-plugin ../integrations/orcaslicer
+          uv run --no-project --python 3.12 python ../integrations/orcaslicer/test_wheel.py ../dist/orca-plugin/*.whl
+      - name: Upload OrcaSlicer plugin
+        if: matrix.suite == 'unit'
+        uses: actions/upload-artifact@v4
+        with:
+          name: printstash-orca-plugin
+          path: dist/orca-plugin/*.whl
+          if-no-files-found: error
       - name: Prepare PID namespace qualification
         if: matrix.suite == 'integration-platform'
         run: |
@@ -211,6 +223,8 @@ jobs:
       - name: Install Chromium
         working-directory: frontend
         run: pnpm exec playwright install --with-deps chromium
+      - name: Verify OrcaSlicer settings UI
+        run: node --test integrations/orcaslicer/test_settings.cjs
       - name: Verify native mesh renderer contracts
         working-directory: frontend
         run: pnpm test:mesh

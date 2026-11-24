@@ -860,25 +860,29 @@ describe("SettingsPanel", () => {
       expect(await screen.findByTitle("Copy API key")).toBeInTheDocument();
     });
 
-    it.each([
-      { title: "Copy API key", expected: MINTED_KEY.api_key, success: "API key copied." },
-      {
-        title: "Copy OrcaSlicer post-processing command",
-        expected: "--api-key",
-        success: "OrcaSlicer command copied.",
-      },
-    ])("copies with $title", async ({ title, expected, success }) => {
+    it("offers only the key in the one-time copy controls", async () => {
       const user = userEvent.setup();
       renderSettings({
         at: "/settings?section=access",
         routes: { "POST /api/v1/auth/api-keys": json(MINTED_KEY) },
       });
-      await screen.findByLabelText("Key name");
-      await user.click(screen.getByRole("button", { name: "Generate" }));
-      await user.click(await screen.findByTitle(title));
-      expect(await navigator.clipboard.readText()).toContain(expected);
-      expect(await navigator.clipboard.readText()).toContain(MINTED_KEY.api_key);
-      expect(await screen.findByText(success)).toBeVisible();
+      await user.click(await screen.findByRole("button", { name: "Generate" }));
+
+      expect(await screen.findByRole("button", { name: "Copy API key" })).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Orca command" })).not.toBeInTheDocument();
+    });
+
+    it("copies the exact API key", async () => {
+      const user = userEvent.setup();
+      renderSettings({
+        at: "/settings?section=access",
+        routes: { "POST /api/v1/auth/api-keys": json(MINTED_KEY) },
+      });
+      await user.click(await screen.findByRole("button", { name: "Generate" }));
+      await user.click(await screen.findByRole("button", { name: "Copy API key" }));
+
+      expect(await navigator.clipboard.readText()).toBe(MINTED_KEY.api_key);
+      expect(await screen.findByText("API key copied.")).toBeVisible();
     });
 
     it("reports clipboard failure without confirming a copy", async () => {

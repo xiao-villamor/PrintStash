@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "printstash-orca-plugin"
+version = "0.1.0"
+description = "Upload exported G-code to PrintStash from OrcaSlicer 2.5"
+requires-python = ">=3.12"
+authors = [{name = "PrintStash contributors"}]
+license = "AGPL-3.0-only"
+dependencies = []
+
+[project.urls]
+Source = "https://github.com/xiao-villamor/PrintStash"
+Documentation = "https://github.com/xiao-villamor/PrintStash/blob/main/docs/orcaslicer.md"
+
+[tool.hatch.build.targets.wheel]
+only-include = []
+
+# Both entry points use the same transport and native-context parser. The wheel
+# is self-contained; installing it does not require a PrintStash checkout.
+[tool.hatch.build.targets.wheel.force-include]
+"../../scripts/printstash_orca_plugin.py" = "printstash_orca_plugin.py"
+"../../scripts/printstash_orca_push.py" = "printstash_orca_push.py"
+"../../LICENSE" = "printstash_orca_plugin.LICENSE"

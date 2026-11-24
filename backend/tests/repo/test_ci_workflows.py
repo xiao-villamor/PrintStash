@@ -91,6 +91,34 @@ class TestBrowserRunners:
 
 
 class TestQuickGate:
+    def test_qualifies_orca_settings_in_browser_gate(self) -> None:
+        steps = _workflow("ci.yml")["jobs"]["browser-smoke"]["steps"]
+        step = next(
+            step
+            for step in steps
+            if step.get("name") == "Verify OrcaSlicer settings UI"
+        )
+
+        assert step["run"] == "node --test integrations/orcaslicer/test_settings.cjs"
+
+    def test_builds_native_orca_artifact(self) -> None:
+        steps = _workflow("ci.yml")["jobs"]["backend"]["steps"]
+        build = next(
+            step
+            for step in steps
+            if step.get("name") == "Build and verify the OrcaSlicer plugin"
+        )
+        artifact = next(
+            step for step in steps if step.get("name") == "Upload OrcaSlicer plugin"
+        )
+
+        assert build["if"] == artifact["if"] == "matrix.suite == 'unit'"
+        assert "uv build --wheel" in build["run"]
+        assert "--python 3.12" in build["run"]
+        assert "test_wheel.py" in build["run"]
+        assert artifact["with"]["path"] == "dist/orca-plugin/*.whl"
+        assert artifact["with"]["if-no-files-found"] == "error"
+
     def test_qualifies_viewer_pilot_in_browser_gate(self) -> None:
         job = _workflow("ci.yml")["jobs"]["browser-smoke"]
         step = next(
