@@ -115,9 +115,6 @@
   margin-inline: 20px;
   border-bottom-color: var(--border-strong);
 }
-.model-detail-tab-list {
-  column-gap: clamp(0.625rem, 2.5cqw, 1.5rem);
-}
 .model-detail-tab-label {
   display: inline-flex;
   align-items: center;
@@ -494,7 +491,7 @@
 .model-detail-tabs [role="tab"] {
   line-height: 1.4;
 }
-/* Immediate press feedback and a local selection mark, without lateral travel. */
+/* Immediate press feedback; the filled segment marks the selection. */
 .model-detail-tabs [role="tab"] {
   transform-origin: center;
   transition:
@@ -506,22 +503,6 @@
   transform: scale(var(--scale-detail-enter));
   transition-duration: 0s;
 }
-.model-detail-tabs [role="tab"]::after {
-  content: "";
-  position: absolute;
-  inset-inline: 0;
-  bottom: 0;
-  height: 2px;
-  background: var(--foreground);
-  visibility: hidden;
-  transform: scaleX(0.65);
-  transform-origin: center;
-  transition: transform var(--duration-fast) var(--ease-out);
-}
-.model-detail-tabs [data-active="true"]::after {
-  visibility: visible;
-  transform: scaleX(1);
-}
 .model-detail-tab-body {
   transform-origin: center top;
 }
@@ -532,10 +513,6 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .model-detail-tabs [role="tab"]:active {
-    transform: none;
-  }
-  .model-detail-tabs [role="tab"]::after {
-    transition: none;
     transform: none;
   }
 }

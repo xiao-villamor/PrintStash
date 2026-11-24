@@ -1568,7 +1568,7 @@ function ModelDetailPresentation({
               <span className="absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-border transition-colors duration-press group-hover:bg-primary group-focus-visible:bg-primary" />
             </div>
 
-            <div className="model-detail-tabs shrink-0 overflow-x-auto border-b">
+            <div className="model-detail-tabs shrink-0 overflow-x-auto border-b py-2">
               <TabBar
                 tabs={tabItems}
                 active={activePrimary}
@@ -1577,9 +1577,9 @@ function ModelDetailPresentation({
                   selectTab(tab);
                 }}
                 showIndicator={false}
-                className="model-detail-tab-list"
-                tabClassName="model-detail-tab-label relative h-10 px-0 py-0 text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                activeTabClassName="text-foreground"
+                className="model-detail-tab-list w-fit gap-0.5 rounded-lg border border-border bg-card p-0.75"
+                tabClassName="model-detail-tab-label relative h-7.5 rounded-md px-2.5 py-0 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                activeTabClassName="bg-foreground/12 text-foreground"
               />
             </div>
             {activePrimary === "revisions" && (
