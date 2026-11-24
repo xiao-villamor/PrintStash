@@ -1,36 +1,21 @@
-/* One status badge for library cards and the model inspector: plain text on a
-   fine border, with a small dot in the status tone. Colour appears only in the
-   dot, and the word always travels with it. */
+/* One status badge for library cards and the model inspector: a quiet neutral
+   pill with a small outline icon, no colour. Only a failure takes the
+   destructive tone, so the exception stands out. */
 .revision-status-badge {
-  --badge-tone: var(--muted-foreground);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   height: 22px;
   max-width: 100%;
-  padding: 0 8px 0 7px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--foreground);
+  padding: 0 9px 0 7px;
+  border-radius: 9999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
   font-size: 0.75rem;
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
 }
-.revision-status-badge::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  flex-shrink: 0;
-  border-radius: 9999px;
-  background: var(--badge-tone);
-}
-.revision-status-badge[data-revision-status="needs_test"] {
-  --badge-tone: var(--status-test-dot);
-}
-.revision-status-badge[data-revision-status="known_good"] {
-  --badge-tone: var(--success);
-}
 .revision-status-badge[data-revision-status="failed"] {
-  --badge-tone: var(--destructive);
+  color: var(--destructive);
 }

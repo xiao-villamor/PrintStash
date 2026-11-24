@@ -169,12 +169,12 @@
   color: inherit;
   opacity: 0.7;
 }
-/* Each dot carries the tone of its status badge. */
+/* Dots stay neutral like the badge; only a failure is coloured. */
 .library-status-ready {
-  background: var(--success);
+  background: var(--muted-foreground);
 }
 .library-status-test {
-  background: var(--status-test-dot);
+  background: var(--muted-foreground);
 }
 .library-status-failed {
   background: var(--destructive);
