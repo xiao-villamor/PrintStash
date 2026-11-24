@@ -14,6 +14,7 @@ import { formatCost, formatDuration, formatGrams, timeAgo } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { FileRead, ModelPrintJobRead } from "@/types";
 import { PrintJobReproducibility } from "@/components/print-job-reproducibility";
+import { PrintJobCost } from "@/components/print-job-cost";
 import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
 
 import { PRINT_JOB_PRESENTATION } from "./presentation";
@@ -521,9 +522,12 @@ export function PrintHistorySection({
                         ? ` · ${formatDuration(job.actual_duration_s)}`
                         : ""}
                       {job.filament_used_g != null ? ` · ${formatGrams(job.filament_used_g)}` : ""}
-                      {job.filament_cost != null ? ` · ${formatCost(job.filament_cost)}` : ""}
+                      {job.filament_cost != null && job.production_cost == null
+                        ? ` · ${formatCost(job.filament_cost)}`
+                        : ""}
                     </p>
                   )}
+                  {job.production_cost && <PrintJobCost cost={job.production_cost} />}
                   {job.spool_name && (
                     <p className="text-xs text-on-surface-variant">
                       {uiText("spool · {value1}", { value1: String(job.spool_name ?? "") })}

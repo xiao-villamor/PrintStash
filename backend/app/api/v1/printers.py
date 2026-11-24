@@ -41,6 +41,7 @@ from app.db.models import (
     Printer,
     PrinterFile,
     PrinterPermission,
+    PrinterProfile,
     PrinterProvider,
     PrinterRole,
     PrintJob,
@@ -52,7 +53,7 @@ from app.db.session import get_session
 from app.modules.identity import printer_rbac, rbac, ws_tickets
 from app.modules.identity.auth import get_user_by_id, verify_access_token
 from app.modules.media.sliced_gcode import is_sliced_filename
-from app.modules.printing import dispatch, materials, printer_edits
+from app.modules.printing import dispatch, materials, printer_edits, production_costing
 from app.modules.printing.printer_files import (
     list_printer_files,
     sync_printer_files,
@@ -222,6 +223,7 @@ def _to_read(p: Printer, role: PrinterRole = PrinterRole.ADMIN) -> PrinterRead:
         has_octoprint_api_key=bool(p.octoprint_api_key) if can_admin else False,
         model_name=p.model_name,
         detected_model=p.detected_model,
+        cost_profile_id=p.cost_profile_id,
         capabilities=PrinterCapabilities(**caps.as_api_dict()),
         access={
             "role": role,
@@ -617,6 +619,13 @@ async def create_printer(
     session: Session = Depends(get_session),
     hub: PrinterHub = Depends(get_hub),
 ) -> PrinterRead:
+    if payload.cost_profile_id is not None:
+        get_or_404(
+            session,
+            PrinterProfile,
+            payload.cost_profile_id,
+            "printer_profile_not_found",
+        )
     p = Printer(
         name=payload.name.strip(),
         provider=payload.provider,
@@ -641,6 +650,7 @@ async def create_printer(
         group=payload.group.strip() if payload.group else None,
         provider_material_sync_enabled=payload.provider_material_sync_enabled,
         operator_release_required=payload.operator_release_required,
+        cost_profile_id=payload.cost_profile_id,
     )
     _validate_provider_config(p)
     p.detected_model = detect_printer_model(p)
@@ -720,6 +730,15 @@ async def update_printer(
         p.provider_material_sync_enabled = payload.provider_material_sync_enabled
     if payload.operator_release_required is not None:
         p.operator_release_required = payload.operator_release_required
+    if "cost_profile_id" in payload.model_fields_set:
+        if payload.cost_profile_id is not None:
+            get_or_404(
+                session,
+                PrinterProfile,
+                payload.cost_profile_id,
+                "printer_profile_not_found",
+            )
+        p.cost_profile_id = payload.cost_profile_id
     _validate_provider_config(p)
     p.detected_model = detect_printer_model(p)
     p.updated_at = utcnow()
@@ -729,7 +748,8 @@ async def update_printer(
     # Capture this write while its lock is held, before another editor can save.
     receipt = _to_read(p)
     session.commit()
-    await hub.restart_printer(printer_id)
+    if payload.model_fields_set != {"cost_profile_id"}:
+        await hub.restart_printer(printer_id)
     return receipt
 
 
@@ -1008,6 +1028,7 @@ async def start_printer_file(
         source=source,
         started_at=utcnow(),
     )
+    production_costing.launch_job_cost(session, p, job, file_row)
     session.add(job)
     session.commit()
     session.refresh(job)
@@ -1029,6 +1050,7 @@ async def start_printer_file(
         job.error = _provider_action_code(exc)
         job.finished_at = utcnow()
         job.updated_at = utcnow()
+        job.production_cost = None
         session.add(job)
         session.commit()
         raise HTTPException(status_code=502, detail=_provider_action_code(exc)) from exc
@@ -1038,6 +1060,7 @@ async def start_printer_file(
         job.error = "provider_error"
         job.finished_at = utcnow()
         job.updated_at = utcnow()
+        job.production_cost = None
         session.add(job)
         session.commit()
         raise HTTPException(status_code=502, detail="provider_error") from exc
@@ -1101,6 +1124,7 @@ async def _printer_control(
             job.state = PrintJobState.CANCELLED
             job.finished_at = now
             job.updated_at = now
+            production_costing.finish_job_cost(job)
             session.add(job)
         if active_jobs:
             session.commit()

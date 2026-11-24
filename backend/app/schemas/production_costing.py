@@ -90,3 +90,19 @@ class ArtifactCostingRead(EditingBase):
     currency: str
     estimate: ProductionEstimate | None
     costs: PieceCosts | None
+
+
+class JobCostRates(BaseModel):
+    currency: str
+    machine_per_hour: float
+    material_per_kg: float | None
+    slicer_seconds: int | None
+    slicer_grams: float | None
+
+
+class JobProductionCost(BaseModel):
+    currency: str
+    material: float | None
+    machine: float | None
+    total: float
+    estimated: bool

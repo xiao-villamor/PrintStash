@@ -1406,6 +1406,7 @@ def get_model_print_jobs(
             error=job.error,
             filament_used_g=job.filament_used_g,
             actual_duration_s=job.actual_duration_s,
+            production_cost=job.production_cost,  # type: ignore[arg-type]
             filament_cost=models_costing.filament_cost_for_job(
                 profiles, md, job.filament_used_g, job.spool_filament_id
             ),

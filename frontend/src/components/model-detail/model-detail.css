@@ -242,8 +242,8 @@
 .detail-printer-summary [data-status="printing"] i {
   background: var(--warning);
 }
-.detail-printer-summary [data-status="error"] i {
-  background: var(--destructive);
+.detail-printer-summary [data-status="ready"] i {
+  background: var(--success);
 }
 @media (max-width: 1099px) {
   .model-detail-layout {

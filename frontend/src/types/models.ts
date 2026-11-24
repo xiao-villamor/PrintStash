@@ -1,4 +1,4 @@
-import type { PrinterExpenses } from "./production-costing";
+import type { JobProductionCost, PrinterExpenses } from "./production-costing";
 import type { ModelPreviews } from "./previews";
 import type { EditingBase } from "./editing";
 import type { PreviewLook } from "./config";
@@ -211,6 +211,7 @@ export interface ModelPrintJobRead {
   filament_used_g: number | null;
   actual_duration_s: number | null;
   filament_cost: number | null;
+  production_cost?: JobProductionCost | null;
   spool_id: number | null;
   spool_name: string | null;
   started_at: string | null;

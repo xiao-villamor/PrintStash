@@ -19,7 +19,7 @@ from app.schemas.printers import (
     PrintJobReportedMetadataRead,
     PrintJobReproducibilityRead,
 )
-from app.schemas.production_costing import PrinterExpenses
+from app.schemas.production_costing import JobProductionCost, PrinterExpenses
 
 
 class MetadataRead(BaseModel):
@@ -238,6 +238,7 @@ class ModelPrintJobRead(BaseModel):
     filament_used_g: Optional[float] = None
     actual_duration_s: Optional[int] = None
     filament_cost: Optional[float] = None
+    production_cost: JobProductionCost | None = None
     spool_id: Optional[int] = None
     spool_name: Optional[str] = None
     started_at: Optional[datetime] = None

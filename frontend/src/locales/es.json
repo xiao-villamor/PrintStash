@@ -5922,5 +5922,18 @@
   "{known} of {total}": "{known} de {total}",
   "Visible statistics panels": "Paneles de estadísticas visibles",
   "Unassigned / manual": "Sin asignar / manual",
-  "Material and time totals use completed jobs. Review the selected period or manage your printers.": "Los totales de material y tiempo usan los trabajos completados. Revisa el periodo seleccionado o gestiona tus impresoras."
+  "Material and time totals use completed jobs. Review the selected period or manage your printers.": "Los totales de material y tiempo usan los trabajos completados. Revisa el periodo seleccionado o gestiona tus impresoras.",
+  "Print costing": "Coste de impresión",
+  "Cost profile": "Perfil de costes",
+  "No cost profile": "Sin perfil de costes",
+  "Profile without expenses": "Perfil sin gastos configurados",
+  "Could not load printer profiles.": "No se pudieron cargar los perfiles de impresora.",
+  "Add expenses to a printer profile to use it here.": "Añade gastos a un perfil de impresora para usarlo aquí.",
+  "{count} ready": "{count} listas",
+  "{count} in use": "{count} en uso",
+  "{count} unavailable": "{count} no disponibles",
+  "Estimated partial cost": "Coste parcial estimado",
+  "Partial cost": "Coste parcial",
+  "Estimated print cost": "Coste estimado de impresión",
+  "Print cost": "Coste de impresión"
 }

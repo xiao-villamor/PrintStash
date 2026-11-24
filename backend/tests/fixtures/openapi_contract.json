@@ -9578,6 +9578,53 @@
         "title": "JobPriority",
         "type": "string"
       },
+      "JobProductionCost": {
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "estimated": {
+            "title": "Estimated",
+            "type": "boolean"
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
+          },
+          "total": {
+            "title": "Total",
+            "type": "number"
+          }
+        },
+        "required": [
+          "currency",
+          "material",
+          "machine",
+          "total",
+          "estimated"
+        ],
+        "title": "JobProductionCost",
+        "type": "object"
+      },
       "JobStagingSummary": {
         "properties": {
           "discard_available": {
@@ -13321,6 +13368,16 @@
           "printer_name": {
             "title": "Printer Name",
             "type": "string"
+          },
+          "production_cost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobProductionCost"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "remote_filename": {
             "title": "Remote Filename",
@@ -17076,6 +17133,17 @@
       },
       "PrintJobRead": {
         "properties": {
+          "actual_duration_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Duration S"
+          },
           "artifact_capture_error": {
             "anyOf": [
               {
@@ -17410,6 +17478,16 @@
           "priority": {
             "$ref": "#/components/schemas/JobPriority",
             "default": "normal"
+          },
+          "production_cost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobProductionCost"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "progress": {
             "title": "Progress",
@@ -18180,6 +18258,18 @@
               }
             ],
             "title": "Bambu Serial"
+          },
+          "cost_profile_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Profile Id"
           },
           "elegoo_centauri_access_code": {
             "anyOf": [
@@ -19141,6 +19231,17 @@
           "capabilities": {
             "$ref": "#/components/schemas/PrinterCapabilities"
           },
+          "cost_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Profile Id"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -19607,6 +19708,18 @@
               }
             ],
             "title": "Bambu Serial"
+          },
+          "cost_profile_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Profile Id"
           },
           "elegoo_centauri_access_code": {
             "anyOf": [

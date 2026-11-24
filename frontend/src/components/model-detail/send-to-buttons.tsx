@@ -472,6 +472,12 @@ export function SendToButtons({
   // ponytail: single-file check only — a multi-plate build evaluated as one set
   // needs a batch-send feature that doesn't exist yet (#64 follow-up).
   const requiredWeightG = selectedFileDetails?.metadata?.filament_weight_g ?? null;
+  const ready = compact ? printers.filter((printer) => printer.status === "ready").length : 0;
+  const busy = compact
+    ? printers.filter((printer) => printer.status === "printing" || printer.status === "paused")
+        .length
+    : 0;
+  const unavailable = printers.length - ready - busy;
   const spoolCoverageWarning = selectedSpool
     ? requiredWeightG == null
       ? uiText(
@@ -514,12 +520,24 @@ export function SendToButtons({
               ) : printers.length === 0 ? (
                 <span>{uiText("No printers")}</span>
               ) : (
-                printers.map((printer) => (
-                  <span key={printer.id} data-status={printer.status}>
+                <>
+                  <span data-status={ready > 0 ? "ready" : undefined}>
                     <i aria-hidden="true" />
-                    {printer.name} <span>{knownUiText(printer.status)}</span>
+                    {uiText("{count} ready", { count: ready })}
                   </span>
-                ))
+                  {busy > 0 && (
+                    <span data-status="printing">
+                      <i aria-hidden="true" />
+                      {uiText("{count} in use", { count: busy })}
+                    </span>
+                  )}
+                  {unavailable > 0 && (
+                    <span>
+                      <i aria-hidden="true" />
+                      {uiText("{count} unavailable", { count: unavailable })}
+                    </span>
+                  )}
+                </>
               )}
             </div>
           ) : (

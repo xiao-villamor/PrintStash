@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Folder, Play, RefreshCcw, Trash2 } from "luc
 import { lazy, Suspense, useId, useMemo, useState, type ReactNode } from "react";
 
 import { PrintJobReproducibility } from "@/components/print-job-reproducibility";
+import { PrintJobCost } from "@/components/print-job-cost";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
@@ -83,6 +84,7 @@ function dateValue(value: string | null, presentation: "short" | "full" = "full"
 }
 
 function duration(job: PrintJobRead) {
+  if (job.actual_duration_s != null) return job.actual_duration_s;
   const start = parseApiInstant(job.started_at);
   const end = parseApiInstant(job.finished_at);
   if (!start || !end) return null;
@@ -615,6 +617,7 @@ export function PrinterRecentRuns({
                     {dateValue(job.finished_at, "short")}
                     {elapsed !== null && ` · ${formatDuration(elapsed)}`}
                   </div>
+                  {job.production_cost && <PrintJobCost cost={job.production_cost} />}
                 </div>
                 <div
                   className={
@@ -746,6 +749,7 @@ export function PrinterJobHistory({
                       {uiText("Run #{value1}", { value1: String(job.id) })}
                       {(original ?? artifact) !== title ? ` · ${original ?? artifact}` : ""}
                     </p>
+                    {job.production_cost && <PrintJobCost cost={job.production_cost} />}
                   </td>
                   <td
                     id={`${id}-outcome-${job.id}`}

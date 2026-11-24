@@ -128,6 +128,26 @@ afterEach(() => {
 });
 
 describe("PrintHistorySection", () => {
+  it("labels a partial stopped-run cost in its original currency", async () => {
+    renderHistory({
+      jobs: [
+        aPrintJob({
+          state: "cancelled",
+          production_cost: {
+            currency: "EUR",
+            total: 0.25,
+            material: null,
+            machine: 0.25,
+            estimated: true,
+          },
+        }),
+      ],
+    });
+
+    expect(await screen.findByText("Estimated partial cost · €0.25")).toBeVisible();
+    expect(screen.getByText("Machine · €0.25")).toBeVisible();
+  });
+
   describe("listing prints", () => {
     it("lists the prints already recorded", async () => {
       renderHistory();

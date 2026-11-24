@@ -5922,5 +5922,18 @@
   "{known} of {total}": "{known} of {total}",
   "Visible statistics panels": "Visible statistics panels",
   "Unassigned / manual": "Unassigned / manual",
-  "Material and time totals use completed jobs. Review the selected period or manage your printers.": "Material and time totals use completed jobs. Review the selected period or manage your printers."
+  "Material and time totals use completed jobs. Review the selected period or manage your printers.": "Material and time totals use completed jobs. Review the selected period or manage your printers.",
+  "Print costing": "Print costing",
+  "Cost profile": "Cost profile",
+  "No cost profile": "No cost profile",
+  "Profile without expenses": "Profile without expenses",
+  "Could not load printer profiles.": "Could not load printer profiles.",
+  "Add expenses to a printer profile to use it here.": "Add expenses to a printer profile to use it here.",
+  "{count} ready": "{count} ready",
+  "{count} in use": "{count} in use",
+  "{count} unavailable": "{count} unavailable",
+  "Estimated partial cost": "Estimated partial cost",
+  "Partial cost": "Partial cost",
+  "Estimated print cost": "Estimated print cost",
+  "Print cost": "Print cost"
 }

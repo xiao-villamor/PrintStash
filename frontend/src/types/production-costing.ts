@@ -55,3 +55,11 @@ export interface ArtifactCostingRead extends EditingBase {
   estimate: ProductionEstimate | null;
   costs: PieceCosts | null;
 }
+
+export interface JobProductionCost {
+  currency: string;
+  material: number | null;
+  machine: number | null;
+  total: number;
+  estimated: boolean;
+}

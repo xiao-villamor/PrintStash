@@ -1,8 +1,12 @@
 """Costing adds expenses before dividing by yield and applying pricing rates."""
 
+from datetime import timedelta
+
 import pytest
 
-from app.modules.printing.production_costing import piece_costs
+from app.core.time import utcnow
+from app.db.models import PrintJob, PrintJobState
+from app.modules.printing.production_costing import finish_job_cost, piece_costs
 from app.schemas.production_costing import (
     CostedMaterial,
     CostedPrinter,
@@ -62,3 +66,56 @@ class TestPieceCosts:
         )
 
         assert piece_costs(estimate).final_price == expected
+
+
+class TestStoppedRunCost:
+    def test_estimates_only_the_observed_fraction_of_material(self):
+        start = utcnow()
+        job = PrintJob(
+            file_id=1,
+            model_id=1,
+            remote_filename="hook.gcode",
+            state=PrintJobState.FAILED,
+            started_at=start,
+            finished_at=start + timedelta(minutes=30),
+            progress=0.25,
+            production_rates={
+                "currency": "EUR",
+                "machine_per_hour": 2,
+                "material_per_kg": 20,
+                "slicer_seconds": 7200,
+                "slicer_grams": 200,
+            },
+        )
+        finish_job_cost(job)
+        assert job.production_cost == {
+            "currency": "EUR",
+            "material": 1,
+            "machine": 1,
+            "total": 2,
+            "estimated": True,
+        }
+
+    def test_omits_the_material_cost_when_stop_usage_is_unknown(self):
+        job = PrintJob(
+            file_id=1,
+            model_id=1,
+            remote_filename="hook.gcode",
+            state=PrintJobState.CANCELLED,
+            actual_duration_s=900,
+            production_rates={
+                "currency": "EUR",
+                "machine_per_hour": 2,
+                "material_per_kg": 20,
+                "slicer_seconds": 7200,
+                "slicer_grams": 200,
+            },
+        )
+        finish_job_cost(job)
+        assert job.production_cost == {
+            "currency": "EUR",
+            "material": None,
+            "machine": 0.5,
+            "total": 0.5,
+            "estimated": False,
+        }

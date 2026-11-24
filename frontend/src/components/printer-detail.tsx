@@ -1,12 +1,14 @@
 "use client";
 
 import { createPortal } from "react-dom";
+import { useQuery } from "@tanstack/react-query";
 
 import { usePrinterSettingsCommand } from "@/features/printers/settings-edit";
 import { PrinterSettingsReview } from "@/features/printers/settings-review";
 
 import { knownUiText, uiMessage, uiText, type MessageDescriptor } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
+import { printerProfilesOptions } from "@/lib/queries/profiles";
 import { useUiLocale } from "@/lib/i18n";
 
 import {
@@ -1240,6 +1242,9 @@ export function PrinterSettings({
   const [modelName, setModelName] = useState(printer.model_name ?? "");
   const [group, setGroup] = useState(printer.group ?? "");
   const [notes, setNotes] = useState(printer.notes ?? "");
+  const [costProfile, setCostProfile] = useState(printer.cost_profile_id ?? null);
+  const profiles = useQuery({ ...printerProfilesOptions(), enabled: canEdit });
+  const costProfiles = profiles.data?.filter((profile) => profile.expenses != null) ?? [];
   const [address, setAddress] = useState(providerAddress(printer));
   const [serial, setSerial] = useState(printer.bambu_serial ?? "");
   const [username, setUsername] = useState(printer.prusalink_username ?? "");
@@ -1256,6 +1261,7 @@ export function PrinterSettings({
     modelName !== (printer.model_name ?? "") ||
     group !== (printer.group ?? "") ||
     notes !== (printer.notes ?? "") ||
+    costProfile !== (printer.cost_profile_id ?? null) ||
     address !== providerAddress(printer) ||
     serial !== (printer.bambu_serial ?? "") ||
     username !== (printer.prusalink_username ?? "") ||
@@ -1296,6 +1302,7 @@ export function PrinterSettings({
     setModelName(snapshot.model_name ?? "");
     setGroup(snapshot.group ?? "");
     setNotes(snapshot.notes ?? "");
+    setCostProfile(snapshot.cost_profile_id ?? null);
     setAddress(providerAddress(snapshot));
     setSerial(snapshot.bambu_serial ?? "");
     setUsername(snapshot.prusalink_username ?? "");
@@ -1318,6 +1325,7 @@ export function PrinterSettings({
     if (modelName !== (printer.model_name ?? "")) payload.model_name = modelName;
     if (group !== (printer.group ?? "")) payload.group = group;
     if (notes !== (printer.notes ?? "")) payload.notes = notes;
+    if (costProfile !== (printer.cost_profile_id ?? null)) payload.cost_profile_id = costProfile;
     if (providerMaterialSync !== printer.provider_material_sync_enabled)
       payload.provider_material_sync_enabled = providerMaterialSync;
     if (operatorReleaseRequired !== printer.operator_release_required)
@@ -1617,6 +1625,45 @@ export function PrinterSettings({
               materialSyncField}
           </PrinterSettingsSection>
           {compact && notesField}
+          {canEdit && (
+            <PrinterSettingsSection compact={compact} title={uiText("Print costing")}>
+              <Field label={uiText("Cost profile")}>
+                <select
+                  className={inputClasses}
+                  value={costProfile ?? ""}
+                  disabled={saving || profiles.isPending || profiles.isError}
+                  onChange={(event) =>
+                    setCostProfile(event.target.value ? Number(event.target.value) : null)
+                  }
+                >
+                  <option value="">{uiText("No cost profile")}</option>
+                  {costProfile != null &&
+                    !costProfiles.some((profile) => profile.id === costProfile) && (
+                      <option value={costProfile}>
+                        {profiles.isSuccess
+                          ? uiText("Profile without expenses")
+                          : uiText("Checking…")}
+                      </option>
+                    )}
+                  {costProfiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {profiles.isError && (
+                <p role="alert" className="text-xs text-muted-foreground">
+                  {uiText("Could not load printer profiles.")}
+                </p>
+              )}
+              {profiles.isSuccess && costProfiles.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {uiText("Add expenses to a printer profile to use it here.")}
+                </p>
+              )}
+            </PrinterSettingsSection>
+          )}
           <PrinterSettingsSection
             compact={compact}
             title={uiText("Scheduling & release")}

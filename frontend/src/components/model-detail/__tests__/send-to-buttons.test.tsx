@@ -269,6 +269,29 @@ beforeEach(() => {
   });
 });
 
+describe("Printer status summary", () => {
+  it("summarizes unavailable printers without listing machine names", () => {
+    renderPanel({
+      open: false,
+      printers: [
+        aPrinter({ id: 91, name: "Workshop offline", status: "offline" }),
+        aPrinter({ id: 92, name: "Workshop error", status: "error" }),
+        aPrinter({ id: 93, name: "Workshop ready", status: "ready" }),
+        aPrinter({ id: 94, name: "Workshop paused", status: "paused" }),
+      ],
+    });
+
+    expect(screen.getByText("1 ready")).toBeVisible();
+    expect(screen.getByText("1 in use")).toBeVisible();
+    expect(screen.getByText("2 unavailable")).toBeVisible();
+    expect(screen.queryByText("Workshop offline")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Manage printers" })).toHaveAttribute(
+      "href",
+      "/printers",
+    );
+  });
+});
+
 describe("SendToQueue", () => {
   it("preserves the inspector's explicit printer through confirmation", async () => {
     const chosen = aPrinter({ id: 9, name: "Chosen printer" });

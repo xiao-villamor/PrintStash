@@ -180,4 +180,76 @@ test.describe("production costing", () => {
       (await page.request.delete(`${api}/printer-profiles/${preset.id}`, { headers })).ok(),
     ).toBe(true);
   });
+  test("records a stopped print using the assigned cost profile", async ({ page }, testInfo) => {
+    const name = `connected-cost-${Date.now()}`;
+    const moonraker = `http://127.0.0.1:${process.env.PLAYWRIGHT_MOCK_PRINTER_PORT ?? 7530}`;
+    const profileResponse = await page.request.post("/api/v1/printer-profiles", {
+      data: {
+        name,
+        expenses: {
+          acquisition_cost: 500,
+          lifetime_hours: 1000,
+          lifetime_maintenance: 100,
+          power_watts: 200,
+          electricity_per_kwh: 0.25,
+          extra_per_hour: 1,
+        },
+      },
+    });
+    expect(profileResponse.ok()).toBe(true);
+    const profile: { id: number } = await profileResponse.json();
+    const printerResponse = await page.request.post("/api/v1/printers", {
+      data: { name, moonraker_url: moonraker, provider: "moonraker" },
+    });
+    expect(printerResponse.ok()).toBe(true);
+    const printer: { id: number } = await printerResponse.json();
+    const printerPath = `/printers/${printer.id}`;
+    const api = `/api/v1${printerPath}`;
+    let modelPath: string | undefined;
+    try {
+      await page.goto(`${printerPath}?tab=settings`);
+      await collapseNavigationSidebar(page);
+      const picker = page.getByRole("combobox", { name: "Cost profile" });
+      await picker.selectOption(String(profile.id));
+      await page.getByRole("button", { name: "Save changes", exact: true }).click();
+      await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+      await page.reload();
+      await expect(picker).toBeEnabled();
+      await expect(picker).toHaveValue(String(profile.id));
+      await page.screenshot({ path: testInfo.outputPath("assigned-cost-profile.png") });
+
+      await uploadModel(page, name);
+      await openModelPage(page, name);
+      modelPath = new URL(page.url()).pathname;
+      const printerStatus = page.locator(".detail-printer-status");
+      await expect(printerStatus.getByText(/\d+ ready/)).toBeVisible();
+      await printerStatus.screenshot({ path: testInfo.outputPath("printer-status-summary.png") });
+      const detail = await page.request.get(`/api/v1${modelPath}`);
+      const { files } = await detail.json();
+      const started = await page.request.post(`${api}/send`, {
+        data: { file_id: files[0].id, start_print: true },
+      });
+      expect(started.ok(), await started.text()).toBe(true);
+      const job = await started.json();
+      expect(job.production_cost).toMatchObject({ estimated: true, machine: 0.8305 });
+      expect((await page.request.post(`${moonraker}/printer/print/pause`)).ok()).toBe(true);
+      expect((await page.request.post(`${api}/cancel`)).ok()).toBe(true);
+      await expect
+        .poll(async () => {
+          const history = await (await page.request.get(`${api}/jobs`)).json();
+          return history.find((row: { id: number }) => row.id === job.id)?.state;
+        })
+        .toBe("cancelled");
+
+      await page.goto(`${printerPath}?tab=jobs`);
+      const row = page.getByRole("row").filter({ hasText: `Run #${job.id}` });
+      await expect(row).toContainText("Cancelled");
+      await expect(row).toContainText(/partial cost/i);
+      await page.screenshot({ path: testInfo.outputPath("stopped-print-cost.png") });
+    } finally {
+      if (modelPath) await page.request.delete(`/api/v1${modelPath}`);
+      await page.request.delete(api);
+      await page.request.delete(`/api/v1/printer-profiles/${profile.id}`);
+    }
+  });
 });

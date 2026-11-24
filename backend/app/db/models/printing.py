@@ -185,6 +185,9 @@ class Printer(SQLModel, table=True):
     # precedence is model_name, falling back to detected_model.
     model_name: Optional[str] = Field(default=None, max_length=128)
     detected_model: Optional[str] = Field(default=None, max_length=128)
+    cost_profile_id: int | None = Field(
+        default=None, foreign_key="printer_profiles.id", ondelete="SET NULL", index=True
+    )
     notes: Optional[str] = None
     group: Optional[str] = Field(default=None, max_length=128, index=True)
     is_default: bool = Field(
@@ -453,6 +456,12 @@ class PrintJob(SQLModel, table=True):
     # COMPLETED; backfilled for pre-existing rows by migration 175be54ef975.
     cost: Optional[float] = None
     filament_g_effective: Optional[float] = None
+    production_rates: dict | None = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
+    )
+    production_cost: dict | None = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
+    )
 
     # Spoolman spool this print consumed, selected when starting/logging the
     # job. A soft reference (Spoolman owns the spool table) — not an FK. The
