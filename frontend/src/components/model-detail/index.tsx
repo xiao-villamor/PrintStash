@@ -1061,7 +1061,7 @@ function ModelDetailPresentation({
           onClose={() => {
             if (!saving) cancelEdit();
           }}
-          title={uiText(addingSource ? "modelDetail.addSourceLink" : "Edit Model details")}
+          title={uiText(addingSource ? "Add source" : "Edit Model details")}
           className={
             addingSource
               ? undefined
@@ -1108,15 +1108,23 @@ function ModelDetailPresentation({
             )}
 
             {addingSource ? (
-              <label className="block space-y-1.5 text-sm font-medium">
-                {uiText("Source URL")}
-                <Input
-                  type="url"
-                  value={editSourceUrl}
-                  onChange={(event) => setEditSourceUrl(event.target.value)}
-                  disabled={saving}
-                />
-              </label>
+              <div className="space-y-1.5">
+                <label className="block space-y-1.5 text-sm font-medium">
+                  {uiText("Source link")}
+                  <Input
+                    type="url"
+                    value={editSourceUrl}
+                    placeholder="https://www.printables.com/model/…"
+                    onChange={(event) => setEditSourceUrl(event.target.value)}
+                    disabled={saving}
+                  />
+                </label>
+                <p className="text-sm text-muted-foreground">
+                  {uiText(
+                    "PrintStash reads the title, creator and license from the page. Nothing in this Model changes until you save.",
+                  )}
+                </p>
+              </div>
             ) : (
               <>
                 <label className="block space-y-1.5 text-sm font-medium">
@@ -1793,7 +1801,6 @@ function ModelDetailPresentation({
                 {activeTab === "similar" && canEditModel && <SimilarityQueue modelId={model.id} />}
                 {activeTab === "source" && (
                   <SourceTab
-                    modelName={model.name}
                     modelId={model.id}
                     canEdit={canEditModel}
                     onBack={() => openSection("overview")}
