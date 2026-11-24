@@ -449,7 +449,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
       <section
         role="region"
         aria-label={uiText("Remote storage")}
-        className="overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-sm"
+        className="overflow-hidden rounded-none border border-border bg-card text-card-foreground shadow-sm"
       >
         <SettingsGroupHead
           icon={Cloud}

@@ -16,7 +16,7 @@ export function MakerWorldConnectCard() {
   useUiLocale();
   return (
     <Localized>
-      <div className="overflow-hidden rounded border border-border bg-card">
+      <div className="overflow-hidden rounded-none border border-border bg-card">
         <SettingsGroupHead
           icon={Download}
           level={3}

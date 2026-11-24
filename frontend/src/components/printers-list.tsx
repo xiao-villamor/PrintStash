@@ -345,7 +345,10 @@ export function PrintersPage() {
               {loading ? (
                 <div className="grid animate-panel-in grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {Array.from({ length: 3 }).map((_, i) => (
-                    <div key={i} className="bg-card border border-border rounded p-5 space-y-3">
+                    <div
+                      key={i}
+                      className="bg-card border border-border rounded-none p-5 space-y-3"
+                    >
                       <Skeleton className="h-5 w-32" />
                       <Skeleton className="h-4 w-48" />
                       <Skeleton className="h-4 w-24" />

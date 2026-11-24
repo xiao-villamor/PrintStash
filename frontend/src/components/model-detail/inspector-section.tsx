@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
+import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { FileRead } from "@/types";
 import { revisionStatusLabel } from "./presentation";
@@ -34,14 +35,14 @@ export function InspectorSection({
 /** A soft surface whose rows are divided by hairlines. */
 export function SoftCard({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div
+    <Card
       className={cn(
-        "min-w-0 divide-y divide-border overflow-hidden rounded-lg border border-border bg-card",
+        "min-w-0 divide-y divide-border overflow-hidden border border-border bg-card",
         className,
       )}
     >
       {children}
-    </div>
+    </Card>
   );
 }
 

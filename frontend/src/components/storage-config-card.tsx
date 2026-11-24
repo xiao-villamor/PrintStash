@@ -246,7 +246,7 @@ export function StorageConfigCard({
   if (loading) {
     return (
       <Localized>
-        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+        <div className="overflow-hidden rounded-none border border-border bg-card shadow-sm">
           <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border">
             <h3 className="text-sm font-semibold text-foreground">
               {t("settings.currentStorage")}
@@ -323,7 +323,7 @@ export function StorageConfigCard({
 
   return (
     <Localized>
-      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+      <div className="overflow-hidden rounded-none border border-border bg-card shadow-sm">
         <SettingsGroupHead
           icon={Folder}
           level={3}

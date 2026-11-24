@@ -244,7 +244,7 @@ export function ProviderConnectionsPanel({
       <fieldset disabled={busy !== null || Boolean(loadError)} className="min-w-0">
         <section
           aria-labelledby="provider-connections-title"
-          className="overflow-hidden rounded border border-border bg-card"
+          className="overflow-hidden rounded-none border border-border bg-card"
         >
           <SettingsGroupHead
             icon={CloudUpload}
@@ -366,7 +366,7 @@ export function ProviderConnectionsPanel({
 
         <section
           aria-labelledby="paired-browsers-title"
-          className="overflow-hidden rounded border border-border bg-card"
+          className="overflow-hidden rounded-none border border-border bg-card"
         >
           <SettingsGroupHead
             icon={ExternalLink}

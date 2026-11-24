@@ -402,6 +402,22 @@ describe("RevisionsTab", () => {
     });
   });
 
+  it.each([
+    ["Archive revision", { revision_status: "archived" }],
+    ["Set as recommended", { is_recommended: true }],
+  ])("applies %s to the selected revision", async (action, patch) => {
+    const user = userEvent.setup();
+    const view = renderRevisions({
+      routes: { "PATCH /api/v1/models/1/files/20/revision": json(aModel()) },
+    });
+
+    await user.click(screen.getByRole("button", { name: "More" }));
+    await user.click(screen.getByRole("menuitem", { name: action }));
+
+    await waitFor(() => expect(view.onModel).toHaveBeenCalledOnce());
+    expect(JSON.parse(view.requestsWithMethod("PATCH")[0].body ?? "{}")).toEqual(patch);
+  });
+
   describe("deleting a revision", () => {
     it("asks before deleting", async () => {
       // A revision is bytes nobody can re-slice from memory.
