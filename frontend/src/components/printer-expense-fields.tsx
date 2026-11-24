@@ -12,11 +12,13 @@ export function PrinterExpenseFields({
   draft,
   currency,
   disabled,
+  focus = false,
   onChange,
 }: {
   draft: ExpenseDraft;
   currency: string | null;
   disabled: boolean;
+  focus?: boolean;
   onChange: (draft: ExpenseDraft) => void;
 }) {
   const problem = expenseProblem(parseExpenses(draft));
@@ -33,6 +35,7 @@ export function PrinterExpenseFields({
           <FormField key={key} label={money && currency ? `${label} (${currency})` : label}>
             <Input
               type="number"
+              data-autofocus={focus && key === "acquisition_cost" ? true : undefined}
               min={key === "lifetime_hours" ? 1 : 0}
               max={1000000}
               step="any"

@@ -157,7 +157,7 @@
     "other": "{count} models in subcollections"
   },
   "library.breadcrumb.ancestors": "Parent collections",
-  "profiles.description": "Manage filament and printer profiles with slicer settings observed in your G-code.",
+  "profiles.description": "Browse slicer presets and set the material and machine costs used for your prints.",
   "profiles.searchSettings": "Find a setting or value",
   "profiles.valuesHelp": "Original slicer parameter names and values. Multiple values retain the slicer's filament or extruder order; missing settings are not inferred.",
   "profiles.noSettings": "No matching settings were captured in this group.",
@@ -5935,5 +5935,22 @@
   "Estimated partial cost": "Estimated partial cost",
   "Partial cost": "Partial cost",
   "Estimated print cost": "Estimated print cost",
-  "Print cost": "Print cost"
+  "Print cost": "Print cost",
+  "Changes save when you close this editor.": "Changes save when you close this editor.",
+  "Cost not configured": "Cost not configured",
+  "Set operating costs": "Set operating costs",
+  "Machine cost per print hour": "Machine cost per print hour",
+  "Operating costs configured": "Operating costs configured",
+  "Operating costs missing": "Operating costs missing",
+  "Create a printer profile to assign it here.": "Create a printer profile to assign it here.",
+  "This profile supplies machine costs for new prints.": "This profile supplies machine costs for new prints.",
+  "Add operating costs to this profile to start tracking machine costs.": "Add operating costs to this profile to start tracking machine costs.",
+  "Choose a saved printer profile for machine cost tracking.": "Choose a saved printer profile for machine cost tracking.",
+  "Manage profiles": "Manage profiles",
+  "Save machine settings and operating costs to reuse when assigning a printer profile.": "Save machine settings and operating costs to reuse when assigning a printer profile.",
+  "Profile no longer available": "Profile no longer available",
+  "Hourly cost breakdown": "Hourly cost breakdown",
+  "Depreciation": "Depreciation",
+  "Other costs": "Other costs",
+  "Assigned printers": "Assigned printers"
 }

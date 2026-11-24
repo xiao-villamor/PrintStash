@@ -8,7 +8,7 @@ import { PrinterSettingsReview } from "@/features/printers/settings-review";
 
 import { knownUiText, uiMessage, uiText, type MessageDescriptor } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
-import { printerProfilesOptions } from "@/lib/queries/profiles";
+import { printerProfilesOptions, subscribeToPrinterProfileChanges } from "@/lib/queries/profiles";
 import { useUiLocale } from "@/lib/i18n";
 
 import {
@@ -1243,8 +1243,23 @@ export function PrinterSettings({
   const [group, setGroup] = useState(printer.group ?? "");
   const [notes, setNotes] = useState(printer.notes ?? "");
   const [costProfile, setCostProfile] = useState(printer.cost_profile_id ?? null);
-  const profiles = useQuery({ ...printerProfilesOptions(), enabled: canEdit });
-  const costProfiles = profiles.data?.filter((profile) => profile.expenses != null) ?? [];
+  const profiles = useQuery({
+    ...printerProfilesOptions(),
+    enabled: canEdit,
+    refetchOnWindowFocus: "always",
+  });
+  const refreshProfiles = profiles.refetch;
+  useEffect(() => {
+    if (!canEdit) return;
+    return subscribeToPrinterProfileChanges(() => void refreshProfiles());
+  }, [canEdit, refreshProfiles]);
+  const catalog = profiles.data ?? [];
+  const pricedProfiles = catalog.filter((profile) => profile.expenses != null);
+  const unpricedProfiles = catalog.filter((profile) => profile.expenses == null);
+  const assignedProfile = catalog.find((profile) => profile.id === costProfile);
+  const profilesHref = assignedProfile
+    ? `/profiles?tab=printers&profile=${assignedProfile.id}`
+    : "/profiles?tab=printers";
   const [address, setAddress] = useState(providerAddress(printer));
   const [serial, setSerial] = useState(printer.bambu_serial ?? "");
   const [username, setUsername] = useState(printer.prusalink_username ?? "");
@@ -1479,7 +1494,7 @@ export function PrinterSettings({
           id={modalActions?.formId}
           ref={form}
           onSubmit={save}
-          className={compact ? "space-y-5" : "min-w-0 divide-y divide-border"}
+          className={compact ? "divide-y divide-border" : "min-w-0 divide-y divide-border"}
         >
           {!compact && (
             <header className="printer-settings-actions">
@@ -1489,7 +1504,7 @@ export function PrinterSettings({
               </span>
             </header>
           )}
-          <PrinterSettingsSection compact={compact} title={uiText("Identity & routing")}>
+          <PrinterSettingsSection compact={compact} columns title={uiText("Identity & routing")}>
             <Field label={uiText("Name")}>
               <Input
                 value={name}
@@ -1498,11 +1513,6 @@ export function PrinterSettings({
                 disabled={!canEdit || saving}
               />
             </Field>
-            {compact && (
-              <Field label={uiText("Integration")}>
-                <Input value={providerLabel(printer)} readOnly />
-              </Field>
-            )}
             <Field
               label={uiText("Model")}
               hint={uiText("Pick a known model or type your own")}
@@ -1537,8 +1547,84 @@ export function PrinterSettings({
               />
             </Field>
           </PrinterSettingsSection>
+          {canEdit && (
+            <PrinterSettingsSection compact={compact} title={uiText("Print costing")}>
+              <div className="col-span-full grid items-start gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <div className="min-w-0 space-y-2">
+                  <Field label={uiText("Cost profile")}>
+                    <select
+                      className={inputClasses}
+                      value={costProfile ?? ""}
+                      disabled={saving || profiles.isPending || profiles.isError}
+                      aria-describedby={`${hintId}-cost-profile`}
+                      onChange={(event) =>
+                        setCostProfile(event.target.value ? Number(event.target.value) : null)
+                      }
+                    >
+                      <option value="">{uiText("No cost profile")}</option>
+                      {costProfile != null && !assignedProfile && (
+                        <option value={costProfile}>
+                          {profiles.isSuccess
+                            ? uiText("Profile no longer available")
+                            : uiText("Checking…")}
+                        </option>
+                      )}
+                      {pricedProfiles.length > 0 && (
+                        <optgroup label={uiText("Operating costs configured")}>
+                          {pricedProfiles.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                              {profile.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {unpricedProfiles.length > 0 && (
+                        <optgroup label={uiText("Operating costs missing")}>
+                          {unpricedProfiles.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                              {profile.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </Field>
+                  <p
+                    id={`${hintId}-cost-profile`}
+                    role={profiles.isError ? "alert" : undefined}
+                    className="max-w-prose text-xs text-muted-foreground"
+                  >
+                    {profiles.isError
+                      ? uiText("Could not load printer profiles.")
+                      : profiles.isPending
+                        ? uiText("Checking…")
+                        : catalog.length === 0
+                          ? uiText("Create a printer profile to assign it here.")
+                          : assignedProfile?.expenses
+                            ? uiText("This profile supplies machine costs for new prints.")
+                            : assignedProfile
+                              ? uiText(
+                                  "Add operating costs to this profile to start tracking machine costs.",
+                                )
+                              : uiText("Choose a saved printer profile for machine cost tracking.")}
+                  </p>
+                </div>
+                <Button
+                  asChild
+                  size="sm"
+                  variant="outline"
+                  className="h-9 justify-self-start sm:mt-6"
+                >
+                  <Link href={profilesHref} target="_blank" rel="noreferrer">
+                    {uiText("Manage profiles")}
+                  </Link>
+                </Button>
+              </div>
+            </PrinterSettingsSection>
+          )}
           <PrinterSettingsSection
             compact={compact}
+            columns
             title={uiText("Connection")}
             description={providerLabel(printer)}
             action={
@@ -1624,46 +1710,6 @@ export function PrinterSettings({
                 printer.capabilities.can_report_material_state) &&
               materialSyncField}
           </PrinterSettingsSection>
-          {compact && notesField}
-          {canEdit && (
-            <PrinterSettingsSection compact={compact} title={uiText("Print costing")}>
-              <Field label={uiText("Cost profile")}>
-                <select
-                  className={inputClasses}
-                  value={costProfile ?? ""}
-                  disabled={saving || profiles.isPending || profiles.isError}
-                  onChange={(event) =>
-                    setCostProfile(event.target.value ? Number(event.target.value) : null)
-                  }
-                >
-                  <option value="">{uiText("No cost profile")}</option>
-                  {costProfile != null &&
-                    !costProfiles.some((profile) => profile.id === costProfile) && (
-                      <option value={costProfile}>
-                        {profiles.isSuccess
-                          ? uiText("Profile without expenses")
-                          : uiText("Checking…")}
-                      </option>
-                    )}
-                  {costProfiles.map((profile) => (
-                    <option key={profile.id} value={profile.id}>
-                      {profile.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              {profiles.isError && (
-                <p role="alert" className="text-xs text-muted-foreground">
-                  {uiText("Could not load printer profiles.")}
-                </p>
-              )}
-              {profiles.isSuccess && costProfiles.length === 0 && (
-                <p className="text-xs text-muted-foreground">
-                  {uiText("Add expenses to a printer profile to use it here.")}
-                </p>
-              )}
-            </PrinterSettingsSection>
-          )}
           <PrinterSettingsSection
             compact={compact}
             title={uiText("Scheduling & release")}
@@ -1676,6 +1722,7 @@ export function PrinterSettings({
               )
             }
           >
+            {compact && notesField}
             {compact && materialSyncField}
             <label className="flex items-start gap-3">
               <input
@@ -1746,27 +1793,39 @@ export function PrinterSettings({
 
 function PrinterSettingsSection({
   compact,
+  columns,
   title,
   description,
   action,
   children,
 }: {
   compact: boolean;
+  columns?: boolean;
   title: string;
   description?: string;
   action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <section className={compact ? "space-y-4" : "printer-desk-section"}>
-      {(!compact || description) && (
-        <div className={compact ? "space-y-1" : "printer-desk-heading"}>
-          <h2 className="text-sm font-semibold">{title}</h2>
-          {action ||
-            (description && <span className="text-xs text-muted-foreground">{description}</span>)}
-        </div>
-      )}
-      <div className={compact ? "space-y-4" : "printer-settings-fields"}>{children}</div>
+    <section className={compact ? "space-y-3 py-4 first:pt-0 last:pb-0" : "printer-desk-section"}>
+      <div
+        className={
+          compact ? "flex flex-wrap items-baseline justify-between gap-2" : "printer-desk-heading"
+        }
+      >
+        <h2 className="text-sm font-semibold">{title}</h2>
+        {action ||
+          (description && <span className="text-xs text-muted-foreground">{description}</span>)}
+      </div>
+      <div
+        className={
+          compact
+            ? cn("grid gap-x-4 gap-y-3", columns && "sm:grid-cols-2")
+            : "printer-settings-fields"
+        }
+      >
+        {children}
+      </div>
     </section>
   );
 }

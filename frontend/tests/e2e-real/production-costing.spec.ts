@@ -252,4 +252,86 @@ test.describe("production costing", () => {
       await page.request.delete(`/api/v1/printer-profiles/${profile.id}`);
     }
   });
+  test("assigns an existing profile with missing operating costs", async ({ page }, testInfo) => {
+    const name = `Workshop P1S ${Date.now()}`;
+    const createProfile = await page.request.post("/api/v1/printer-profiles", {
+      data: { name, printer_model: "Bambu Lab P1S", nozzle_diameter_mm: 0.4 },
+    });
+    expect(createProfile.ok()).toBe(true);
+    const profile: { id: number } = await createProfile.json();
+    const createPrinter = await page.request.post("/api/v1/printers", {
+      data: {
+        name,
+        model_name: "Bambu Lab P1S",
+        moonraker_url: `http://127.0.0.1:${process.env.PLAYWRIGHT_MOCK_PRINTER_PORT ?? 7530}`,
+      },
+    });
+    expect(createPrinter.ok()).toBe(true);
+    const printer: { id: number } = await createPrinter.json();
+    let opened: typeof page | undefined;
+
+    try {
+      await page.emulateMedia({ colorScheme: "dark" });
+      await page.goto("/printers");
+      await collapseNavigationSidebar(page);
+      const card = page.getByRole("link", { name: new RegExp(name) });
+      const settings = card
+        .locator("xpath=ancestor::article")
+        .getByRole("button", { name: "Settings" });
+      await settings.click();
+      const dialog = page.getByRole("dialog", { name: "Edit printer connection" });
+      const picker = dialog.getByRole("combobox", { name: "Cost profile" });
+      await picker.selectOption(String(profile.id));
+      await expect(
+        dialog.getByText("Add operating costs to this profile to start tracking machine costs."),
+      ).toBeVisible();
+      await dialog.screenshot({ path: testInfo.outputPath("printer-settings-before-costs.png") });
+      await dialog.getByRole("button", { name: "Save changes" }).click();
+      await expect(dialog).toBeHidden();
+      const receipt = await page.request.get(`/api/v1/printers/${printer.id}`);
+      expect((await receipt.json()).cost_profile_id).toBe(profile.id);
+
+      await settings.click();
+      await expect(picker).toHaveValue(String(profile.id));
+      const catalogTab = page.waitForEvent("popup");
+      await dialog.getByRole("link", { name: "Manage profiles" }).click();
+      opened = await catalogTab;
+      await opened.emulateMedia({ colorScheme: "dark" });
+      await collapseNavigationSidebar(opened);
+      const details = opened
+        .getByRole("complementary")
+        .filter({ has: opened.getByRole("heading", { name }) });
+      await expect(details.getByText("Cost not configured")).toBeVisible();
+      await expect(
+        details.getByRole("region", { name: "Assigned printers" }).getByRole("link", { name }),
+      ).toHaveAttribute("href", `/printers/${printer.id}?tab=settings`);
+      await details.getByRole("button", { name: "Set operating costs" }).click();
+      const editor = opened.getByRole("dialog", { name: "Edit printer preset" });
+      const purchase = editor.getByLabel(/Purchase cost/);
+      await expect(purchase).toBeFocused();
+      await purchase.fill("500");
+      await editor.getByLabel("Expected lifetime (print hours)").fill("1000");
+      await editor.getByRole("button", { name: "Close", exact: true }).click();
+      await expect(details.getByRole("status", { name: "Machine cost per print hour" })).toHaveText(
+        "$0.50",
+      );
+      await opened.reload();
+      await expect(details.getByRole("status", { name: "Machine cost per print hour" })).toHaveText(
+        "$0.50",
+      );
+      await opened.screenshot({ path: testInfo.outputPath("profiles-after.png") });
+      await opened.close();
+      opened = undefined;
+
+      await page.bringToFront();
+      await expect(
+        dialog.getByText("This profile supplies machine costs for new prints."),
+      ).toBeVisible();
+      await dialog.screenshot({ path: testInfo.outputPath("printer-settings-after.png") });
+    } finally {
+      await opened?.close();
+      await page.request.delete(`/api/v1/printers/${printer.id}`);
+      await page.request.delete(`/api/v1/printer-profiles/${profile.id}`);
+    }
+  });
 });

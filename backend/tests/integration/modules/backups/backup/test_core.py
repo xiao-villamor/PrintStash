@@ -3180,7 +3180,11 @@ class TestStageRestoreArchive:
         # Build a genuine pre-v2 archive shape from explicit released fields.
         # This deliberately does not rewrite a current manifest: v0.12.1 had
         # no provider/namespace/hash metadata in its file entries.
-        database_bytes = backup_env.db_file.read_bytes()
+        # Use the archive's SQLite snapshot, which also contains committed WAL data.
+        with tarfile.open(archive, mode="r:gz") as current:
+            database_member = current.extractfile("db.sqlite3")
+            assert database_member is not None
+            database_bytes = database_member.read()
         member = "files/legacy/legacy.stl"
         manifest = {
             "version": "1",

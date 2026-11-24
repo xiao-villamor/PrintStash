@@ -48,6 +48,15 @@ export const expenseFields = [
 
 export type ExpenseDraft = { [Key in keyof PrinterExpenses]: string };
 
+export function machineCostBreakdown(expenses: PrinterExpenses) {
+  return {
+    depreciation: expenses.acquisition_cost / expenses.lifetime_hours,
+    maintenance: expenses.lifetime_maintenance / expenses.lifetime_hours,
+    electricity: (expenses.power_watts / 1000) * expenses.electricity_per_kwh,
+    additional: expenses.extra_per_hour,
+  };
+}
+
 export function expenseDraft(expenses: PrinterExpenses | null) {
   return {
     acquisition_cost: expenses ? String(expenses.acquisition_cost) : "",

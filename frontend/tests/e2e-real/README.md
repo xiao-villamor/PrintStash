@@ -144,6 +144,7 @@ and consistency judgments. This command does not install or execute Impeccable.
 
 `production-costing.spec.ts` saves a connected printer's cost profile, launches
 a managed print against Moonraker, and checks the stopped run's cost in history.
+It also assigns an unpriced profile and opens that preset to configure operating costs.
 
 `statistics.spec.ts` switches the reporting period across tabs and verifies a saved
 panel choice after recording a failed print on a manually named printer.

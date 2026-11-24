@@ -2,6 +2,9 @@
 
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
+import { formatNumber } from "@/lib/format";
+import { useSearchParams } from "@/lib/navigation";
+import { Link } from "@/lib/link";
 
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -17,11 +20,12 @@ import { captureEditingBase } from "@/lib/api/editing";
 import {
   FilamentProfileRead,
   PrinterProfileRead,
+  PrinterProfileCreate,
   FilamentProfileUpdate,
   PrinterProfileUpdate,
 } from "@/types";
 
-import { useSpoolmanStatus, useVaultConfig } from "@/lib/queries";
+import { usePrinters, useSpoolmanStatus, useVaultConfig } from "@/lib/queries";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
@@ -33,12 +37,12 @@ import {
   expenseProblem,
   expensesChanged,
   parseExpenses,
+  machineCostBreakdown,
   type ExpenseDraft,
 } from "@/lib/printer-expenses";
 import { PrinterExpenseFields } from "@/components/printer-expense-fields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Modal } from "@/components/ui/modal";
 import { PageHeader } from "@/components/ui/page-header";
@@ -255,6 +259,10 @@ function ProfileRow({
   summary,
   editor,
   feedback,
+  icon: Icon,
+  facts,
+  rate,
+  notes,
   onBlur,
   onClose,
   onSelect,
@@ -267,8 +275,17 @@ function ProfileRow({
 }: {
   name: string;
   summary: string;
-  editor: React.ReactNode;
+  editor: (focusCosts: boolean) => React.ReactNode;
   feedback: React.ReactNode;
+  icon: typeof Printer | typeof Layers;
+  facts: [string, string | null][];
+  rate: {
+    label: string;
+    value: string | null;
+    canConfigure: boolean;
+    breakdown?: [string, string | null][];
+  };
+  notes: string | null;
   onBlur: React.FocusEventHandler<HTMLDivElement>;
   onClose: () => void;
   onSelect: () => void;
@@ -276,53 +293,101 @@ function ProfileRow({
   deleteLabel?: string;
   editTitle: string;
   selected: boolean;
-  detailsHost: HTMLDivElement | null;
+  detailsHost: HTMLElement | null;
   children: React.ReactNode;
 }) {
-  const [editing, setEditing] = useState(false);
+  const [editorMode, setEditorMode] = useState<"profile" | "costs" | null>(null);
+  const editing = editorMode !== null;
   const detailsRef = useRef<HTMLDivElement>(null);
   function toggleDetails() {
     if (!selected) onSelect();
   }
   const details = selected ? (
-    <div ref={detailsRef} className="min-w-0 space-y-4 px-4 pb-4 sm:px-5">
-      <div className="absolute right-5 top-4 flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="xs"
-          aria-label={uiText(editing ? "profiles.closeEditor" : "profiles.editProfile", { name })}
-          aria-expanded={editing}
-          onClick={() => {
-            if (editing) onClose();
-            setEditing(!editing);
-          }}
-        >
-          {editing ? (
-            <X className="h-3.5 w-3.5" aria-hidden />
-          ) : (
-            <Pencil className="h-3.5 w-3.5" aria-hidden />
+    <div ref={detailsRef} className="min-w-0 space-y-5 p-5 sm:p-6">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <div className="grid size-10 shrink-0 place-items-center bg-primary-soft text-foreground">
+            <Icon className="size-5" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="break-words text-xl font-semibold tracking-tight">{name}</h3>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label={uiText(editing ? "profiles.closeEditor" : "profiles.editProfile", { name })}
+            aria-expanded={editing}
+            onClick={() => {
+              if (editing) onClose();
+              setEditorMode(editing ? null : "profile");
+            }}
+          >
+            {editing ? (
+              <X className="size-3.5" aria-hidden />
+            ) : (
+              <Pencil className="size-3.5" aria-hidden />
+            )}
+            {uiText(editing ? "profiles.closeEditorLabel" : "Edit")}
+          </Button>
+          {onDelete && (
+            <Button variant="ghost" size="sm" onClick={onDelete} aria-label={deleteLabel}>
+              {uiText("Delete")}
+            </Button>
           )}
-          {uiText(editing ? "profiles.closeEditorLabel" : "Edit")}
-        </Button>
-        {onDelete && (
-          <Button variant="ghost" size="xs" onClick={onDelete} aria-label={deleteLabel}>
-            {uiText("Delete")}
+        </div>
+      </header>
+      <section
+        aria-label={rate.label}
+        className="flex flex-wrap items-center justify-between gap-3 border border-border bg-muted/40 px-4 py-3"
+      >
+        <div className="min-w-0">
+          <h4 className="text-xs font-medium text-muted-foreground">{rate.label}</h4>
+          {rate.value == null ? (
+            <p className="mt-1 text-sm font-semibold">{uiText("Cost not configured")}</p>
+          ) : (
+            <output
+              aria-label={rate.label}
+              className="mt-1 block text-2xl font-semibold tracking-tight tabular-nums"
+            >
+              {rate.value}
+            </output>
+          )}
+        </div>
+        {rate.value == null && rate.canConfigure && (
+          <Button variant="outline" size="sm" onClick={() => setEditorMode("costs")}>
+            {uiText("Set operating costs")}
           </Button>
         )}
-      </div>
+        {rate.breakdown && (
+          <dl
+            className="grid w-full grid-cols-2 gap-3 border-t border-border pt-3 sm:grid-cols-4"
+            aria-label={uiText("Hourly cost breakdown")}
+          >
+            {rate.breakdown.map(([label, amount]) => (
+              <div key={label} className="min-w-0 space-y-1">
+                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dd className="break-words text-sm font-medium tabular-nums">{amount}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </section>
+      <ProfileFacts facts={facts} notes={notes} />
       <Modal
         open={editing}
         onClose={() => {
           onClose();
-          setEditing(false);
+          setEditorMode(null);
         }}
         title={editTitle}
       >
         <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-6">
           <p className="col-span-full text-xs text-muted-foreground">
-            {uiText("Changes save automatically when leaving a row.")}
+            {uiText("Changes save when you close this editor.")}
           </p>
-          {editor}
+          {editor(editorMode === "costs")}
         </div>
         {feedback}
       </Modal>
@@ -345,14 +410,14 @@ function ProfileRow({
       role="region"
       aria-label={uiText("profiles.profileRow", { name })}
     >
-      <div className={`m-3 ${selected ? "bg-muted" : ""}`}>
+      <div className={selected ? "bg-accent text-accent-foreground" : "hover:bg-muted"}>
         <button
           type="button"
           onClick={toggleDetails}
           aria-pressed={selected}
-          className="w-full min-w-0 px-3 py-3 text-left"
+          className="w-full min-w-0 px-3 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
-          <h3 className="break-words text-sm font-semibold">{name}</h3>
+          <span className="block break-words text-sm font-semibold">{name}</span>
           {summary && <p className="mt-1 break-words text-xs text-muted-foreground">{summary}</p>}
         </button>
       </div>
@@ -361,20 +426,41 @@ function ProfileRow({
   );
 }
 
-function ProfileSummary({ name, facts }: { name: string; facts: [string, string | null][] }) {
+function ProfileFacts({
+  facts,
+  notes,
+}: {
+  facts: [string, string | null][];
+  notes: string | null;
+}) {
+  const populated = facts.filter(([, value]) => value);
+  if (populated.length === 0 && !notes) return null;
   return (
-    <div className="space-y-4 p-4 sm:p-5">
-      <strong className="block break-words pr-36 text-base">{name}</strong>
-      <dl className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2 xl:grid-cols-4">
-        {facts.map(([label, value]) => (
-          <div key={label} className="min-w-0">
-            <dt className="text-xs text-muted-foreground">{label}</dt>
-            <dd className="mt-1 whitespace-pre-wrap break-words text-sm">{value || "—"}</dd>
-          </div>
-        ))}
-      </dl>
-    </div>
+    <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+      {populated.map(([label, value]) => (
+        <div key={label} className="min-w-0">
+          <dt className="text-xs text-muted-foreground">{label}</dt>
+          <dd className="mt-1 break-words text-sm">{value}</dd>
+        </div>
+      ))}
+      {notes && (
+        <div className="col-span-full min-w-0">
+          <dt className="text-xs text-muted-foreground">{uiText("Notes")}</dt>
+          <dd className="mt-1 whitespace-pre-wrap break-words text-sm">{notes}</dd>
+        </div>
+      )}
+    </dl>
   );
+}
+
+function formatProfileRate(value: number | null, currency: string | null): string | null {
+  if (value === null) return null;
+  const options: Intl.NumberFormatOptions = { maximumFractionDigits: 4 };
+  if (currency) {
+    options.style = "currency";
+    options.currency = currency;
+  }
+  return formatNumber(value, options);
 }
 
 export function FilamentProfilesCard() {
@@ -385,9 +471,13 @@ export function FilamentProfilesCard() {
   const auth = useRequireAuth();
   const { locale, t } = useI18n();
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"filaments" | "printers">("filaments");
+  const params = useSearchParams();
+  const [activeTab, setActiveTab] = useState<"filaments" | "printers">(
+    params.get("tab") === "printers" ? "printers" : "filaments",
+  );
   const filamentQuery = useQuery({ ...filamentProfilesOptions(), enabled: auth.isAuthenticated });
   const printerQuery = useQuery({ ...printerProfilesOptions(), enabled: auth.isAuthenticated });
+  const fleetQuery = usePrinters({ enabled: auth.isAuthenticated && activeTab === "printers" });
   const commands = useProfileCommands();
   const filamentDenied =
     filamentQuery.error instanceof ApiError && [401, 403, 404].includes(filamentQuery.error.status);
@@ -395,13 +485,19 @@ export function FilamentProfilesCard() {
     printerQuery.error instanceof ApiError && [401, 403, 404].includes(printerQuery.error.status);
   const filaments = filamentDenied ? [] : (filamentQuery.data ?? []);
   const printers = printerDenied ? [] : (printerQuery.data ?? []);
-  const [detailsHost, setDetailsHost] = useState<HTMLDivElement | null>(null);
+  const [detailsHost, setDetailsHost] = useState<HTMLElement | null>(null);
   const [selectedFilamentId, setSelectedFilamentId] = useState<number | null>(null);
-  const [selectedPrinterId, setSelectedPrinterId] = useState<number | null>(null);
+  const [selectedPrinterId, setSelectedPrinterId] = useState<number | null>(() => {
+    const id = Number(params.get("profile"));
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+  });
   const selectedFilament =
     filaments.find((profile) => profile.id === selectedFilamentId) ?? filaments[0];
   const selectedPrinter =
     printers.find((profile) => profile.id === selectedPrinterId) ?? printers[0];
+  const assigned = selectedPrinter
+    ? fleetQuery.data?.filter((printer) => printer.cost_profile_id === selectedPrinter.id)
+    : undefined;
   const activeDenied = activeTab === "filaments" ? filamentDenied : printerDenied;
   const activeQuery = activeTab === "filaments" ? filamentQuery : printerQuery;
   const loading = activeQuery.isPending;
@@ -456,6 +552,7 @@ export function FilamentProfilesCard() {
   const [newPrinterModel, setNewPrinterModel] = useState("");
   const [newPrinterNozzle, setNewPrinterNozzle] = useState("");
   const [newPrinterNotes, setNewPrinterNotes] = useState("");
+  const [newPrinterExpenses, setNewPrinterExpenses] = useState(() => expenseDraft(null));
   const config = useVaultConfig({ enabled: !!user?.is_superuser, retry: false });
   const currency = user?.is_superuser && !config.isError ? (config.data?.currency ?? null) : null;
   let currencyName = currency;
@@ -481,6 +578,7 @@ export function FilamentProfilesCard() {
     setNewPrinterModel("");
     setNewPrinterNozzle("");
     setNewPrinterNotes("");
+    setNewPrinterExpenses(expenseDraft(null));
     setShowAddPrinter(false);
   }
 
@@ -763,19 +861,25 @@ export function FilamentProfilesCard() {
       toast.error(uiText("Invalid nozzle diameter"));
       return;
     }
+    const expenses = parseExpenses(newPrinterExpenses);
+    const problem = expenseProblem(expenses);
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
+    const payload: PrinterProfileCreate = {
+      name: trimmedName,
+      printer_model: newPrinterModel.trim() || null,
+      nozzle_diameter_mm: parsedNozzle,
+      notes: newPrinterNotes.trim() || null,
+    };
+    if (expenses) payload.expenses = expenses;
     const session = getSessionVersion();
     try {
-      await commands.createPrinter.mutateAsync({
-        session,
-        payload: {
-          name: trimmedName,
-          printer_model: newPrinterModel.trim() || null,
-          nozzle_diameter_mm: parsedNozzle,
-          notes: newPrinterNotes.trim() || null,
-        },
-      });
+      const created = await commands.createPrinter.mutateAsync({ session, payload });
       if (getSessionVersion() !== session) return;
       setError(null);
+      setSelectedPrinterId(created.id);
       resetNewPrinter();
       toast.success(uiText('Printer preset "{value1}" saved', { value1: String(trimmedName) }));
     } catch (e) {
@@ -924,7 +1028,7 @@ export function FilamentProfilesCard() {
 
   return (
     <Localized>
-      <div className="space-y-4">
+      <div className="mx-auto max-w-6xl space-y-5">
         <PageHeader
           title={translateUiText(locale, "Profiles")}
           description={translateUiText(locale, "profiles.description")}
@@ -968,8 +1072,8 @@ export function FilamentProfilesCard() {
           </div>
         )}
 
-        <Card className="overflow-hidden">
-          <div className="border-b border-border px-5">
+        <div className="space-y-3">
+          <div className="border border-border bg-card px-4">
             <TabBar
               tabs={[
                 {
@@ -1147,8 +1251,8 @@ export function FilamentProfilesCard() {
                   className="py-12"
                 />
               ) : (
-                <div className="grid min-w-0 md:grid-cols-[minmax(220px,27%)_minmax(0,1fr)]">
-                  <div className="border-b border-border md:border-b-0 md:border-r">
+                <div className="grid min-w-0 items-start gap-3 md:grid-cols-[minmax(15rem,1fr)_minmax(0,2fr)]">
+                  <div className="space-y-1 border border-border bg-card p-2">
                     {filaments.map((profile) => {
                       const review = filamentReviews[profile.id];
                       const edit = filamentEdits[profile.id] ?? filamentEdit(profile);
@@ -1159,6 +1263,17 @@ export function FilamentProfilesCard() {
                         <ProfileRow
                           key={`filament/${profile.id}`}
                           name={profile.name}
+                          icon={Layers}
+                          facts={[
+                            [uiText("Material"), profile.material_type],
+                            [uiText("Brand"), profile.material_brand],
+                          ]}
+                          notes={profile.notes}
+                          rate={{
+                            label: uiText("Cost per kg"),
+                            value: formatProfileRate(profile.cost_per_kg, currency),
+                            canConfigure: false,
+                          }}
                           summary={[
                             profile.material_type,
                             profile.material_brand,
@@ -1194,7 +1309,7 @@ export function FilamentProfilesCard() {
                           editTitle={uiText("Edit filament preset")}
                           selected={profile.id === selectedFilament?.id}
                           detailsHost={detailsHost}
-                          editor={
+                          editor={() => (
                             <>
                               <FormField className="min-w-0 sm:col-span-2" label={uiText("Name")}>
                                 <Input
@@ -1327,7 +1442,7 @@ export function FilamentProfilesCard() {
                                 )}
                               </div>
                             </>
-                          }
+                          )}
                           feedback={
                             review && (
                               <PresetReviewPanel
@@ -1352,34 +1467,12 @@ export function FilamentProfilesCard() {
                             )
                           }
                         >
-                          <ProfileSettingsDetails
-                            kind="filament"
-                            profile={profile}
-                            initiallyExpanded
-                          />
+                          <ProfileSettingsDetails kind="filament" profile={profile} />
                         </ProfileRow>
                       );
                     })}
                   </div>
-                  <aside className="relative min-w-0">
-                    {selectedFilament && (
-                      <ProfileSummary
-                        name={selectedFilament.name}
-                        facts={[
-                          [uiText("Material"), selectedFilament.material_type],
-                          [uiText("Brand"), selectedFilament.material_brand],
-                          [
-                            uiText("Cost per kg"),
-                            selectedFilament.cost_per_kg === null
-                              ? null
-                              : formatCost(selectedFilament.cost_per_kg),
-                          ],
-                          [uiText("Notes"), selectedFilament.notes],
-                        ]}
-                      />
-                    )}
-                    <div ref={setDetailsHost} />
-                  </aside>
+                  <aside className="min-w-0 border border-border bg-card" ref={setDetailsHost} />
                 </div>
               )}
             </section>
@@ -1478,6 +1571,12 @@ export function FilamentProfilesCard() {
                       aria-describedby={`${helpId}-printer-notes`}
                     />
                   </FormField>
+                  <PrinterExpenseFields
+                    currency={currency}
+                    draft={newPrinterExpenses}
+                    disabled={commands.createPrinter.isPending}
+                    onChange={setNewPrinterExpenses}
+                  />
                 </form>
               </Modal>
 
@@ -1495,15 +1594,59 @@ export function FilamentProfilesCard() {
                   className="py-12"
                 />
               ) : (
-                <div className="grid min-w-0 md:grid-cols-[minmax(220px,27%)_minmax(0,1fr)]">
-                  <div className="border-b border-border md:border-b-0 md:border-r">
+                <div className="grid min-w-0 items-start gap-3 md:grid-cols-[minmax(15rem,1fr)_minmax(0,2fr)]">
+                  <div className="space-y-1 border border-border bg-card p-2">
                     {printers.map((profile) => {
                       const review = printerReviews[profile.id];
                       const edit = printerEdits[profile.id] ?? printerEdit(profile);
+                      const rates = profile.expenses
+                        ? machineCostBreakdown(profile.expenses)
+                        : null;
                       return (
                         <ProfileRow
                           key={`printer/${profile.id}`}
                           name={profile.name}
+                          icon={Printer}
+                          facts={[
+                            [uiText("Printer model"), profile.printer_model],
+                            [
+                              uiText("Nozzle"),
+                              profile.nozzle_diameter_mm === null
+                                ? null
+                                : `${formatNozzle(profile.nozzle_diameter_mm)} mm`,
+                            ],
+                          ]}
+                          notes={profile.notes}
+                          rate={{
+                            label: uiText("Machine cost per print hour"),
+                            value: formatProfileRate(
+                              rates
+                                ? Object.values(rates).reduce((total, rate) => total + rate, 0)
+                                : null,
+                              currency,
+                            ),
+                            breakdown: rates
+                              ? [
+                                  [
+                                    uiText("Depreciation"),
+                                    formatProfileRate(rates.depreciation, currency),
+                                  ],
+                                  [
+                                    uiText("Maintenance"),
+                                    formatProfileRate(rates.maintenance, currency),
+                                  ],
+                                  [
+                                    uiText("Electricity"),
+                                    formatProfileRate(rates.electricity, currency),
+                                  ],
+                                  [
+                                    uiText("Other costs"),
+                                    formatProfileRate(rates.additional, currency),
+                                  ],
+                                ]
+                              : undefined,
+                            canConfigure: auth.isAuthenticated,
+                          }}
                           summary={[
                             profile.printer_model,
                             profile.nozzle_diameter_mm == null
@@ -1536,7 +1679,7 @@ export function FilamentProfilesCard() {
                           editTitle={uiText("Edit printer preset")}
                           selected={profile.id === selectedPrinter?.id}
                           detailsHost={detailsHost}
-                          editor={
+                          editor={(focusCosts) => (
                             <>
                               <FormField className="min-w-0 sm:col-span-2" label={uiText("Name")}>
                                 <Input
@@ -1605,6 +1748,7 @@ export function FilamentProfilesCard() {
                               </FormField>
                               <PrinterExpenseFields
                                 currency={currency}
+                                focus={focusCosts}
                                 draft={edit.expenses}
                                 disabled={
                                   !auth.isAuthenticated || rowStatus[`p${profile.id}`] === "saving"
@@ -1639,7 +1783,7 @@ export function FilamentProfilesCard() {
                                 </Button>
                               </div>
                             </>
-                          }
+                          )}
                           feedback={
                             review && (
                               <PresetReviewPanel
@@ -1663,38 +1807,45 @@ export function FilamentProfilesCard() {
                             )
                           }
                         >
-                          <ProfileSettingsDetails
-                            kind="printer"
-                            profile={profile}
-                            initiallyExpanded
-                          />
+                          {assigned && (
+                            <section
+                              className="space-y-2 border-t border-border pt-4"
+                              aria-label={uiText("Assigned printers")}
+                            >
+                              <h4 className="text-sm font-semibold">
+                                {uiText("Assigned printers")}
+                              </h4>
+                              {assigned.length > 0 ? (
+                                <ul className="space-y-2 text-sm">
+                                  {assigned.map((printer) => (
+                                    <li key={printer.id}>
+                                      <Link
+                                        href={`/printers/${printer.id}?tab=settings`}
+                                        className="break-words text-foreground underline underline-offset-4"
+                                      >
+                                        {printer.name}
+                                      </Link>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <Button asChild size="sm" variant="outline">
+                                  <Link href="/printers">{uiText("Manage printers")}</Link>
+                                </Button>
+                              )}
+                            </section>
+                          )}
+                          <ProfileSettingsDetails kind="printer" profile={profile} />
                         </ProfileRow>
                       );
                     })}
                   </div>
-                  <aside className="relative min-w-0">
-                    {selectedPrinter && (
-                      <ProfileSummary
-                        name={selectedPrinter.name}
-                        facts={[
-                          [uiText("Printer model"), selectedPrinter.printer_model],
-                          [
-                            uiText("Nozzle"),
-                            selectedPrinter.nozzle_diameter_mm === null
-                              ? null
-                              : `${formatNozzle(selectedPrinter.nozzle_diameter_mm)} mm`,
-                          ],
-                          [uiText("Notes"), selectedPrinter.notes],
-                        ]}
-                      />
-                    )}
-                    <div ref={setDetailsHost} />
-                  </aside>
+                  <aside className="min-w-0 border border-border bg-card" ref={setDetailsHost} />
                 </div>
               )}
             </section>
           )}
-        </Card>
+        </div>
       </div>
     </Localized>
   );

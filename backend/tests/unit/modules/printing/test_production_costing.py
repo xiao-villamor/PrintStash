@@ -5,7 +5,7 @@ from datetime import timedelta
 import pytest
 
 from app.core.time import utcnow
-from app.db.models import PrintJob, PrintJobState
+from app.db.models import PrintJobState
 from app.modules.printing.production_costing import finish_job_cost, piece_costs
 from app.schemas.production_costing import (
     CostedMaterial,
@@ -14,6 +14,7 @@ from app.schemas.production_costing import (
     PrinterExpenses,
     ProductionEstimate,
 )
+from tests.factories import print_job_config
 
 
 class TestPieceCosts:
@@ -71,7 +72,7 @@ class TestPieceCosts:
 class TestStoppedRunCost:
     def test_estimates_only_the_observed_fraction_of_material(self):
         start = utcnow()
-        job = PrintJob(
+        job = print_job_config(
             file_id=1,
             model_id=1,
             remote_filename="hook.gcode",
@@ -97,7 +98,7 @@ class TestStoppedRunCost:
         }
 
     def test_omits_the_material_cost_when_stop_usage_is_unknown(self):
-        job = PrintJob(
+        job = print_job_config(
             file_id=1,
             model_id=1,
             remote_filename="hook.gcode",

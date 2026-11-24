@@ -410,7 +410,7 @@ export function PrintersPage() {
             open={settingsTarget !== null}
             onClose={() => setSettingsTarget(null)}
             title={uiText("Edit printer connection")}
-            description={uiText("Connect your printer using its local integration.")}
+            description={settingsTarget?.name}
             footer={<div ref={setSettingsFooter} className="contents" />}
           >
             {settingsTarget && (

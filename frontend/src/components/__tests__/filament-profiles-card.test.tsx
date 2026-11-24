@@ -372,7 +372,8 @@ describe("FilamentProfilesCard", () => {
         seed: [[queryKeys.vaultConfig, aVaultConfig({ currency: "EUR" })]],
       });
       await userEvent.click(screen.getByRole("button", { name: "New filament profile" }));
-      expect(screen.getByLabelText("Cost per kg")).toHaveAccessibleDescription(
+      const dialog = screen.getByRole("dialog", { name: "New filament preset" });
+      expect(within(dialog).getByLabelText("Cost per kg")).toHaveAccessibleDescription(
         "Enter zero or a positive amount.",
       );
       expect(
@@ -1401,6 +1402,35 @@ describe("FilamentProfilesCard", () => {
   });
 
   describe("creating a printer preset", () => {
+    it("saves operating expenses during initial creation", async () => {
+      const user = userEvent.setup();
+      const app = await renderCard({
+        at: "/profiles?tab=printers",
+        expand: false,
+        routes: {
+          "POST /api/v1/printer-profiles": json(aPrinterProfile({ id: 2, name: "Workshop" }), 201),
+        },
+      });
+      await user.click(screen.getByRole("button", { name: "New printer profile" }));
+      const dialog = screen.getByRole("dialog", { name: "New printer preset" });
+      await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "Workshop");
+      fireEvent.change(within(dialog).getByLabelText(/Purchase cost/), {
+        target: { value: "500" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Expected lifetime (print hours)"), {
+        target: { value: "1000" },
+      });
+      await user.click(within(dialog).getByRole("button", { name: "Add profile" }));
+      await waitFor(() => {
+        const request = app
+          .requestsWithMethod("POST")
+          .find((entry) => entry.url.includes("printer-profiles"));
+        expect(JSON.parse(request?.body ?? "{}")).toMatchObject({
+          expenses: { acquisition_cost: 500, lifetime_hours: 1000 },
+        });
+      });
+    });
+
     it("POSTs the preset the user described", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = await renderCard({
@@ -1548,7 +1578,10 @@ describe("Integrated profile settings", () => {
   it("offers settings within the existing tabs", async () => {
     const user = userEvent.setup();
     await renderCard();
-    expect(await screen.findByRole("button", { name: "Hide slicer settings" })).toBeVisible();
+    const settings = await screen.findByRole("button", { name: "Slicer settings and variants" });
+    expect(settings).toHaveAttribute("aria-expanded", "false");
+    await user.click(settings);
+    expect(settings).toHaveAttribute("aria-expanded", "true");
     expect(screen.queryByRole("tab", { name: "Detected settings" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: /Printers/ }));
     await openProfileRows();
@@ -1672,6 +1705,41 @@ describe("Profile selection", () => {
 });
 
 describe("Profile consultation and editing", () => {
+  it("opens a linked printer profile from its URL", async () => {
+    await renderCard({
+      at: "/profiles?tab=printers&profile=2",
+      expand: false,
+      printers: [aPrinterProfile(), aPrinterProfile({ id: 2, name: "Bambu P1S" })],
+    });
+    const details = await screen.findByRole("complementary");
+    expect(within(details).getByRole("heading", { name: "Bambu P1S" })).toBeVisible();
+    expect(within(details).getByText("Cost not configured")).toBeVisible();
+  });
+
+  it("shows the configured machine rate in the selected profile", async () => {
+    await renderCard({
+      expand: false,
+      at: "/profiles?tab=printers",
+      printers: [
+        aPrinterProfile({
+          expenses: {
+            acquisition_cost: 500,
+            lifetime_hours: 1000,
+            lifetime_maintenance: 100,
+            power_watts: 200,
+            electricity_per_kwh: 0.25,
+            extra_per_hour: 1,
+          },
+        }),
+      ],
+    });
+    const details = await screen.findByRole("complementary");
+    expect(within(details).getByText("Machine cost per print hour")).toBeVisible();
+    expect(within(details).getByText(/1\.65/)).toBeVisible();
+    const electricity = within(details).getByText("Electricity").parentElement;
+    expect(electricity).toHaveTextContent("0.05");
+  });
+
   it("isolates selection by preset kind", async () => {
     await renderCard({ expand: false });
     await userEvent.click(screen.getByRole("tab", { name: /Printers/ }));

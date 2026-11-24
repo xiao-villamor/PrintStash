@@ -1455,6 +1455,18 @@ describe("PrinterDetailPage", () => {
   });
 
   describe("the printer's settings", () => {
+    it("links to the printer catalog when no presets exist", async () => {
+      const user = userEvent.setup();
+      renderPrinter({ routes: { "GET /api/v1/printer-profiles": json([]) } });
+      await user.click(await screen.findByRole("tab", { name: "Settings" }));
+
+      expect(await screen.findByText("Create a printer profile to assign it here.")).toBeVisible();
+      expect(screen.getByRole("link", { name: "Manage profiles" })).toHaveAttribute(
+        "href",
+        "/profiles?tab=printers",
+      );
+    });
+
     /** Open the Settings tab, which only an admin is shown. */
     async function openSettings(user: ReturnType<typeof userEvent.setup>) {
       await screen.findByText("Voron");

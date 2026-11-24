@@ -39,6 +39,25 @@ harness and the relevant browser flow before reporting the change complete.
 
 ## Prototype fidelity
 
+For a redesign, write down the operator's next decision before moving controls.
+Use Mobbin when reference research is requested or the current interface has no
+good precedent. Record the structural choices in the references and translate
+them into the PrintStash components and tokens in `DESIGN.md`.
+
+Use the Impeccable layout and clarify passes when requested, then check the
+render for hierarchy, spacing, keyboard focus, long labels, and read and write
+states. A detector can catch mechanical issues. The actual browser walkthrough
+checks whether a person can finish the task. Use the existing UI capture
+workflow for the walkthrough.
+
+In catalog and settings flows, place the selected record's name and actions
+together. Keep the value that drives the next decision prominent and put
+infrequent technical detail behind a disclosure. When a selectable record
+lacks setup data, name the missing input alongside the choice and link to the
+place that can resolve it.
+Let a short catalog list end with its last record. Use the inspector's space
+for data that explains the main value or connects the record to its real usage.
+
 When implementing a supplied prototype or correcting a visual mismatch:
 
 1. Read the current source HTML, CSS, event handlers and assets for the exact
