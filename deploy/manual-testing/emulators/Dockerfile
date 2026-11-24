@@ -1,6 +1,6 @@
 # Build the checked-in provider testkit once; optional emulator services then
 # run without pip/npm downloads at container startup.
-FROM python:3.14.8-slim-trixie
+FROM python:3.14.10-slim-trixie
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

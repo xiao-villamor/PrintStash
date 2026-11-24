@@ -42,12 +42,12 @@ THREE_MF_GEOMETRY_RECIPE = 15
 # 21 selects embedded covers by default and records picture availability.
 THREE_MF_THUMBNAIL_RECIPE = 29
 THREE_MF_VIEWER_STL_RECIPE = 5
-# STEP is tessellated at 0.05 mm linear deflection.
-STEP_GEOMETRY_RECIPE = 13
+# STEP is tessellated with OCCT 8 at 0.05 mm linear deflection.
+STEP_GEOMETRY_RECIPE = 14
 # Keep this above the shared thumbnail recipe so a shared row cannot satisfy
 # the STEP-specific producer, even after a shared recipe bump.
-STEP_THUMBNAIL_RECIPE = 25
-STEP_VIEWER_STL_RECIPE = 4
+STEP_THUMBNAIL_RECIPE = 26
+STEP_VIEWER_STL_RECIPE = 5
 GCODE_METADATA_RECIPE = 11
 GCODE_THUMBNAIL_RECIPE = 8
 TOOLPATH_RECIPE = 1
