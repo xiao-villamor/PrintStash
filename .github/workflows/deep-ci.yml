@@ -39,7 +39,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.14.8"
+          python-version: "3.14.10"
       - name: Install corpus factories
         working-directory: backend
         run: uv sync --extra dev --extra full --frozen
@@ -98,7 +98,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.14.8"
+          python-version: "3.14.10"
       - name: Install full native dependencies
         working-directory: backend
         run: uv sync --extra dev --extra full --frozen
@@ -131,7 +131,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.14.8"]
+        python: ["3.14.10"]
         resolution: ["lowest-direct", "highest"]
     defaults:
       run:
@@ -287,7 +287,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.14.8"
+          python-version: "3.14.10"
       - name: Install backend dependencies
         run: uv sync --extra dev --extra full --frozen
       - name: Prepare PID namespace qualification
@@ -328,7 +328,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.14.8"
+          python-version: "3.14.10"
       - name: Install backend dependencies
         run: uv sync --extra dev --extra full --frozen
       - name: Download every successful shard
@@ -395,7 +395,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.14.8"
+          python-version: "3.14.10"
 
       - name: Install backend dependencies
         run: uv sync --extra dev --extra full --frozen
@@ -500,7 +500,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.14.8"
+          python-version: "3.14.10"
       - name: Install backend
         working-directory: backend
         run: uv sync --extra dev --extra full --frozen
@@ -595,7 +595,7 @@ jobs:
       - name: Set up Python for capture boundary
         uses: actions/setup-python@v6
         with:
-          python-version: "3.14.8"
+          python-version: "3.14.10"
 
       - name: Install backend dependencies for capture boundary
         working-directory: backend
@@ -723,7 +723,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.14.8"
+          python-version: "3.14.10"
       - name: Install real backend and fixture dependencies
         working-directory: backend
         run: uv sync --extra dev --extra full --frozen

@@ -10,7 +10,7 @@ dependencies = [
     "anyio>=4.15.1,<5",
     "boto3>=1.43,<2",
     "botocore>=1.43,<2",
-    "croniter>=6.2,<7",
+    "croniter>=7,<8",
     "fastapi>=0.141,<1",
     # SQLAlchemy needs greenlet for every asyncio path, but declares it only for
     # platform_machine in (AMD64, WIN32, aarch64, amd64, ppc64le, win32, x86_64).
@@ -25,11 +25,11 @@ dependencies = [
     # are read by the XML reader.
     "lib3mf==2.5.0; platform_machine == 'x86_64'",
     "networkx>=3.6,<4",
-    "numpy>=2.5.3,<3",
+    "numpy>=2.5.5,<3",
     "orjson>=3.11,<4",
-    "pillow>=12.3.0,<13",
+    "pillow>=13.0.0,<14",
     "prometheus-client>=0.26,<1",
-    "pydantic>=2.13,<3",
+    "pydantic>=2.14.4,<3",
     "pydantic-settings>=2.15,<3",
     "pwdlib[argon2,bcrypt]>=0.3,<1",
     "PyJWT>=2.13,<3",
@@ -41,7 +41,7 @@ dependencies = [
     # values: adopting it needs a TIMESTAMPTZ migration, not a version bump.
     "sqlmodel>=0.0.39,<0.0.45",
     "starlette>=1.6,<2",
-    "trimesh>=5.1.1,<6",
+    "trimesh>=5.2.2,<6",
     # Rhino .3dm meshes; ships amd64 and arm64 Linux wheels.
     "rhino3dm>=8.35,<9",
     # FBX through assimp; the scene's unit and axes are read separately.
@@ -64,16 +64,16 @@ async-db = [
 step = [
     # OpenCASCADE tessellation; 0.1.1 ships amd64 and arm64 Linux wheels.
     "cascadio>=0.1.1,<0.2",
-    "cadquery-ocp-novtk==7.9.3.1.1",
+    "cadquery-ocp-novtk==8.0.1.1.0",
 ]
 full = [
     "sqlite-vec==0.1.9",
     "onnx>=1.22,<2",
-    "onnxruntime>=1.30,<2",
+    "onnxruntime>=1.32,<2",
     "tokenizers>=0.23,<0.24",
     "asyncssh>=2.21,<3",
     "cascadio>=0.1.1,<0.2",
-    "cadquery-ocp-novtk==7.9.3.1.1",
+    "cadquery-ocp-novtk==8.0.1.1.0",
     "opendal==0.47.10",
 ]
 storage-opendal = [
@@ -117,21 +117,21 @@ dev = [
 ai = [
     "sqlite-vec==0.1.9",
     "onnx>=1.22,<2",
-    "onnxruntime>=1.30,<2",
+    "onnxruntime>=1.32,<2",
     "tokenizers>=0.23,<0.24",
 ]
 gpu-render = [
-    "wgpu>=0.32,<0.33",
+    "wgpu>=0.33,<0.34",
 ]
 gpu = [
     "onnx>=1.22,<2",
     "tokenizers>=0.23,<0.24",
-    "wgpu>=0.32,<0.33",
-    "onnxruntime>=1.30,<2",
-    "onnxruntime-ep-webgpu>=0.4,<0.5",
+    "wgpu>=0.33,<0.34",
+    "onnxruntime>=1.32,<2",
+    "onnxruntime-ep-webgpu>=0.6,<0.7",
 ]
 webgpu-pilot = [
-    "wgpu==0.32.0",
+    "wgpu==0.33.0",
 ]
 gpu-pilot = [
     "glcontext>=3.0.0,<4",

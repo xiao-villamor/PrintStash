@@ -17,16 +17,16 @@ from packaging.requirements import Requirement
 
 from tests.paths import REPO_ROOT
 
-CURRENT_PYTHON = "3.14.8"
+CURRENT_PYTHON = "3.14.10"
 PROJECT_PATHS = (
     "backend/pyproject.toml",
     "backend/packages/printstash-core/pyproject.toml",
 )
 MESH_VERSIONS = {
-    "numpy": "2.5.3",
+    "numpy": "2.5.5",
     "scipy": "1.18.1",
-    "trimesh": "5.1.1",
-    "pillow": "12.3.0",
+    "trimesh": "5.2.2",
+    "pillow": "13.0.0",
     "lxml": "6.1.3",
 }
 
@@ -207,12 +207,12 @@ class TestPythonRuntime:
     def test_pins_current_optional_webgpu_library(self) -> None:
         metadata = _toml(PROJECT_PATHS[0])
         assert metadata["project"]["optional-dependencies"]["webgpu-pilot"] == [
-            "wgpu==0.32.0"
+            "wgpu==0.33.0"
         ]
         packages = [
             p for p in _toml("backend/uv.lock")["package"] if p["name"] == "wgpu"
         ]
-        assert [p["version"] for p in packages] == ["0.32.0"]
+        assert [p["version"] for p in packages] == ["0.33.0"]
         assert (
             "webgpu-pilot"
             in metadata["tool"]["deptry"]["optional_dependencies_dev_groups"]

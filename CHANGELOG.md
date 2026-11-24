@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Security
+
+- Updated image decoding and outbound TLS dependencies, along with Python and uv in the backend image.
+
 ### Performance
 
 - Search indexing can start while the final cover thumbnails are still rendering after an import. Cover generation also does less database work per thumbnail.
