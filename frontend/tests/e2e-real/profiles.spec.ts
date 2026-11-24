@@ -56,19 +56,22 @@ test.describe("profiles", () => {
       });
       const opener = page.getByRole("button", { name: `New ${kind} preset`, exact: true });
       await opener.click();
-      const form = page.getByRole("form", { name: `Create ${kind} preset` });
+      const dialog = page.getByRole("dialog", { name: `New ${kind} preset` });
+      const form = dialog.getByRole("form", { name: `Create ${kind} preset` });
+      const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+      const submit = dialog.getByRole("button", { name: "Add preset", exact: true });
       for (const field of await form.getByRole("textbox").all()) await field.fill("12");
 
-      await form.getByRole("button", { name: "Cancel", exact: true }).click();
+      await cancel.click();
 
       await expect(form).toHaveCount(0);
       await expect(opener).toBeFocused();
       await opener.press("Enter");
       for (const field of await form.getByRole("textbox").all())
         await expect(field).toHaveValue("");
-      await expect(form.getByRole("button", { name: "Add preset", exact: true })).toBeDisabled();
+      await expect(submit).toBeDisabled();
       expect(writes).toEqual([]);
-      await form.getByRole("button", { name: "Cancel", exact: true }).click();
+      await cancel.click();
     });
   }
 
