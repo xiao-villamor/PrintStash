@@ -1,6 +1,6 @@
 # Research image: no API or production Job selects the candidate.
 FROM ghcr.io/astral-sh/uv:0.12.24 AS uv
-FROM python:3.14.8-slim
+FROM python:3.14.10-slim
 COPY --from=uv /uv /usr/local/bin/uv
 RUN apt-get update && apt-get install -y --no-install-recommends     libvulkan1 mesa-vulkan-drivers libegl1 libgles2     && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/printstash/backend

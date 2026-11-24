@@ -92,7 +92,7 @@ derivative recipe; SQLite remains the default and existing data stays in place.
 Source installations of the application and shared core require Python 3.14 or
 newer. Recreate the backend virtual environment with Python 3.14 and run
 `uv sync --all-groups` before restarting API and worker processes. Development,
-CI and official images use Python 3.14.8; image installations need no host Python
+CI and official images use Python 3.14.10; image installations need no host Python
 upgrade. Earlier Python runtimes are no longer supported.
 
 <a id="unreleased-derivative-scheduling"></a>

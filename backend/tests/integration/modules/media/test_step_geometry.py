@@ -122,6 +122,13 @@ class TestStepGeometry:
 
 
 class TestNativeTessellation:
+    def test_records_occt_8_recipe(self, ocp_box):
+        from app.modules.media.step_geometry import tessellate
+
+        _, _, brep = tessellate(ocp_box, triangle_limit=100)
+
+        assert brep["recipe"]["version"] == "ocp-8.0.1-mm-v1"
+
     def test_exports_outward_wound_solid(self, ocp_box):
         import trimesh
 

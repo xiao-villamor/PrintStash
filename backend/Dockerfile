@@ -37,7 +37,7 @@ RUN curl -fsSL \
 FROM scratch AS opendal-wheel
 COPY --from=opendal-builder /wheels /
 
-FROM python:3.14.8-slim-trixie AS bgcode-builder
+FROM python:3.14.10-slim-trixie AS bgcode-builder
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git cmake g++ make libboost-dev libboost-nowide-dev zlib1g-dev \
  && rm -rf /var/lib/apt/lists/*
@@ -47,7 +47,7 @@ RUN sh /tmp/build-bgcode.sh
 FROM scratch AS bgcode-binary
 COPY --from=bgcode-builder /opt/libbgcode/bin/bgcode /bgcode
 
-FROM python:3.14.8-slim-trixie AS base
+FROM python:3.14.10-slim-trixie AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -56,7 +56,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY --from=ghcr.io/astral-sh/uv:0.12.1@sha256:cf4eedcaa81655197f625739489effcbe71b61ceb1506f332c3facae5deceded /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d /uv /usr/local/bin/uv
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \

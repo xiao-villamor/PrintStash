@@ -245,8 +245,8 @@ class TestBackendDockerfile:
 
         assert "ghcr.io/astral-sh/uv:latest" not in dockerfile
         assert (
-            "ghcr.io/astral-sh/uv:0.12.1@"
-            "sha256:cf4eedcaa81655197f625739489effcbe71b61ceb1506f332c3facae5deceded"
+            "ghcr.io/astral-sh/uv:0.13.9@"
+            "sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d"
             in dockerfile
         )
 
