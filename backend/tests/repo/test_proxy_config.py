@@ -264,8 +264,10 @@ class TestBackendDockerfile:
     def test_full_image_builds_every_advertised_opendal_transport(self) -> None:
         dockerfile = (_root() / "backend" / "Dockerfile").read_text()
 
-        feature_line = next(
-            line for line in dockerfile.splitlines() if "--features" in line
+        services_line = next(
+            line
+            for line in dockerfile.splitlines()
+            if line.startswith("ARG OPENDAL_SERVICES=")
         )
         for feature in (
             "services-memory",
@@ -273,10 +275,12 @@ class TestBackendDockerfile:
             "services-s3",
             "services-gdrive",
         ):
-            assert feature in feature_line
-        assert 'opendal.Operator("gdrive"' in dockerfile
-        assert "import asyncssh" in dockerfile
-        assert "services-sftp" not in feature_line
+            assert feature in services_line
+        # Every registered OpenDAL service is constructed at build time.
+        assert "-m app.modules.storage.transports.compiled" in dockerfile
+        # SFTP stays on AsyncSSH, never OpenDAL's SFTP service.
+        assert "import opendal, asyncssh" in dockerfile
+        assert "services-sftp" not in services_line
 
     def test_runtime_images_use_unprivileged_users(self) -> None:
         """Neither runtime container may still be root when it serves traffic.

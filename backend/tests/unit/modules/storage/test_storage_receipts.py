@@ -1,4 +1,4 @@
-"""Remote provider refs stay byte-identical across the transport registry.
+"""``provider_ref_for_backend`` keeps remote provider refs byte-identical.
 
 A provider ref is persisted with every owned object and backup receipt. Each
 transport now computes its own locator fields, so these values (recorded
@@ -90,14 +90,17 @@ RECORDED = {
 }
 
 
-@pytest.mark.parametrize("name", sorted(CONFIGS))
-def test_keeps_the_recorded_provider_ref(name: str) -> None:
-    spec = resolve_transport(parse_provider_config(CONFIGS[name]))
-    operator = mock.MagicMock()
-    operator.capability.return_value = SimpleNamespace(read=True, write=True, list=True)
-    remote = remote_io_for(spec, operator=operator)
+class TestProviderRefForBackend:
+    @pytest.mark.parametrize("name", sorted(CONFIGS))
+    def test_keeps_the_recorded_provider_ref(self, name: str) -> None:
+        spec = resolve_transport(parse_provider_config(CONFIGS[name]))
+        operator = mock.MagicMock()
+        operator.capability.return_value = SimpleNamespace(
+            read=True, write=True, list=True
+        )
+        remote = remote_io_for(spec, operator=operator)
 
-    assert (
-        provider_ref_for_backend(remote, namespace=remote.source_namespace)
-        == RECORDED[name]
-    )
+        assert (
+            provider_ref_for_backend(remote, namespace=remote.source_namespace)
+            == RECORDED[name]
+        )
