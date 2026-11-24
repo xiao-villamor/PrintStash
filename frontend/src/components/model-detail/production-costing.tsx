@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { FilamentSpool } from "@/components/ui/filament-spool";
 import { FormField } from "@/components/ui/form-field";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -468,7 +469,10 @@ function EstimateForm({
         </div>
 
         <section className="space-y-3 border-t pt-3">
-          <h3 className="text-sm font-semibold">{uiText("Filament per print")}</h3>
+          <h3 className="flex items-center gap-2 text-sm font-semibold">
+            <FilamentSpool className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            {uiText("Filament per print")}
+          </h3>
           {!sameCurrency && (
             <p className="text-xs text-muted-foreground">
               {uiText("This estimate uses a different currency from the current vault presets.")}

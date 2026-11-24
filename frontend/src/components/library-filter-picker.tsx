@@ -16,10 +16,10 @@ import {
   Search,
   Star,
   Tags,
-  Printer,
   X,
   type LucideIcon,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -70,7 +70,7 @@ const ICONS = {
   storage: HardDrive,
   has_similar_candidates: Copy,
   tags: Tags,
-  printer: Printer,
+  printer: Printer3D,
   favorites: Star,
   uploaded: Calendar,
   history: History,

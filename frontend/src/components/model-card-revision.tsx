@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Download, Printer, Star } from "lucide-react";
+import { Download, Star } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import { LibraryItemLink } from "@/features/library/navigation";
 import type { LibraryEntry } from "@/features/library/navigation-state";
 import { modelPrinterFilesOptions, useModelPrintJobs } from "@/features/library/model-detail";
@@ -185,7 +186,7 @@ export function ModelCardRevision({
                     aria-label={`${uiText("Print")} ${revision}`}
                     title={canPrint ? uiText("Print") : uiText("Access restricted")}
                   >
-                    <Printer aria-hidden />
+                    <Printer3D aria-hidden />
                   </Button>
                 )}
                 {file && (

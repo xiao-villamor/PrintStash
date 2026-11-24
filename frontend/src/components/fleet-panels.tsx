@@ -11,7 +11,6 @@ import {
   FileBox,
   Layers3,
   ListOrdered,
-  Printer,
   Plus,
   GitFork,
   Network,
@@ -24,6 +23,7 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 
 import {
   deleteFleetJob,
@@ -986,7 +986,7 @@ function QueueSection({
         </div>
       </div>
       <div className="queue-register-destination">
-        <Printer size={15} />
+        <Printer3D size={15} />
         <div>
           <strong>
             {job.printer_id

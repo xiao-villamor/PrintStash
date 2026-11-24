@@ -6,13 +6,13 @@ import {
   Inbox,
   Keyboard,
   LogIn,
-  Printer,
   Search,
   Settings,
   SlidersHorizontal,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import { useId, useState, useSyncExternalStore } from "react";
 
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
@@ -52,7 +52,7 @@ const mainItems: NavItem[] = [
 ];
 
 const utilityItems: NavItem[] = [
-  { id: "printers", href: "/printers", labelKey: "nav.printers", icon: Printer, adminOnly: true },
+  { id: "printers", href: "/printers", labelKey: "nav.printers", icon: Printer3D, adminOnly: true },
   { id: "profiles", href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
   { id: "settings", href: "/settings", labelKey: "nav.settings", icon: Settings },
   {

@@ -22,6 +22,9 @@
 
 ### Changed
 
+- Printers and Model print controls share a 3D printer icon with a nozzle and build plate.
+- Filament presets, Model costing, and Spoolman settings use a filament spool icon.
+
 - Profiles shows material cost, a breakdown of the hourly machine rate, and the printers assigned to the selected preset. Printer settings show existing presets with their cost setup status and link to the selected profile.
 
 - Costing shows the final price and the production cost side by side, with proportional bars for each expense. Statistics groups period totals above the activity chart and brings the first visible ranking alongside it on wide displays.

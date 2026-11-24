@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Printer3D } from "@/components/ui/printer-3d";
 import { Link } from "@/lib/link";
 import { uiText } from "@/lib/locale";
 
@@ -15,6 +16,7 @@ export function RevisionDeliveryActions({
     <>
       {!printerless && (
         <Button size={size} onClick={() => onSend("send")}>
+          <Printer3D className="size-4" aria-hidden />
           {uiText("Send to printer")}
         </Button>
       )}
@@ -27,7 +29,10 @@ export function RevisionDeliveryActions({
       </Button>
       {printerless && (
         <Button asChild size={size} variant="outline">
-          <Link href="/printers">{uiText("Manage printers")}</Link>
+          <Link href="/printers">
+            <Printer3D className="size-4" aria-hidden />
+            {uiText("Manage printers")}
+          </Link>
         </Button>
       )}
     </>

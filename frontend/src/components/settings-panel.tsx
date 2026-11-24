@@ -104,7 +104,6 @@ import {
   Copy,
   Loader2,
   Palette,
-  Printer,
   Puzzle,
   ShieldCheck,
   RefreshCw,
@@ -117,6 +116,8 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
+import { FilamentSpool } from "@/components/ui/filament-spool";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Modal } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
@@ -255,7 +256,7 @@ const SETTINGS_SECTIONS: {
   { id: "libraries", labelKey: "settings.libraries", icon: FolderSync },
   { id: "notifications", labelKey: "settings.notifications", icon: Bell },
   { id: "sso", labelKey: "settings.sso", icon: ShieldCheck },
-  { id: "spoolman", labelKey: "settings.spoolman", icon: Boxes },
+  { id: "spoolman", labelKey: "settings.spoolman", icon: FilamentSpool },
   { id: "design", labelKey: "settings.design", icon: Palette },
   { id: "previews", labelKey: "settings.previews", icon: Images },
   { id: "gpu", labelKey: "settings.gpu", icon: Gpu },
@@ -1941,7 +1942,7 @@ export function SettingsPanel() {
       },
       value: stats ? `${stats.printer_count}` : "...",
       desc: "Configured devices",
-      icon: Printer,
+      icon: Printer3D,
     },
   ];
 
@@ -3629,7 +3630,7 @@ export function SettingsPanel() {
 
                 {user?.is_superuser && (
                   <SettingsCard
-                    icon={Printer}
+                    icon={Printer3D}
                     title={uiText("Printer access")}
                     description={uiText(
                       "Grant access per printer. Roles build from view to print, machine control, and administration.",
@@ -5040,7 +5041,7 @@ export function SettingsPanel() {
                 </SettingsCard>
 
                 <SettingsCard
-                  icon={Printer}
+                  icon={Printer3D}
                   title={uiText("Printer cards")}
                   description={uiText(
                     "Choose whether printer cards include a visual. Plain cards remain more compact and information-dense.",
@@ -5088,7 +5089,7 @@ export function SettingsPanel() {
 
                 {/* Print tracking behaviour */}
                 <SettingsCard
-                  icon={Printer}
+                  icon={Printer3D}
                   title={uiText("Print tracking")}
                   description={uiText(
                     "Automatically promote a revision to known-good after its first successful print. A manual failed/archived verdict is never overridden.",

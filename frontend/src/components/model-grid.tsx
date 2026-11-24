@@ -166,7 +166,6 @@ import {
   List,
   FileText,
   X,
-  Printer,
   Folder,
   ChevronRight,
   Plus,
@@ -184,6 +183,7 @@ import {
   FolderTree,
   Boxes,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import {
   listCollectionChildren,
   searchCollections,
@@ -556,7 +556,7 @@ function PrinterMenu({ open, onOpenChange, value, options, onSelect, onIntent }:
           onClick={() => onOpenChange(!open)}
           className="library-toolbar-printer h-8 w-36 max-w-full"
         >
-          <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <Printer3D className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
           <span className="min-w-0 flex-1 truncate text-left">{current?.label}</span>
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </Button>
@@ -4981,7 +4981,7 @@ function ModelListRow({
                   key={p.printer_id}
                   className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1 py-px font-mono text-3xs uppercase tracking-wider text-emerald-600"
                 >
-                  <Printer className="h-3 w-3" />
+                  <Printer3D className="h-3 w-3" />
                   {p.printer_name}
                 </span>
               ))}

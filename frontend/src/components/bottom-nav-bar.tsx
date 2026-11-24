@@ -6,11 +6,11 @@ import {
   FolderClosed,
   Inbox,
   MoreHorizontal,
-  Printer,
   Search,
   SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { WorkspaceMenu } from "@/components/workspace-menu";
 import { usePathname, useRouter } from "@/lib/navigation";
@@ -36,7 +36,7 @@ export function BottomNavBar() {
     { href: "/search", labelKey: "Search", icon: Search },
     { href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
     user?.is_superuser
-      ? { href: "/printers", labelKey: "nav.printers", icon: Printer }
+      ? { href: "/printers", labelKey: "nav.printers", icon: Printer3D }
       : { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
   ];
   const moreActive = [

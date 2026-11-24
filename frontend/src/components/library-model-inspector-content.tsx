@@ -2,17 +2,8 @@
 
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Box,
-  Check,
-  ChevronRight,
-  Download,
-  Loader2,
-  MoreHorizontal,
-  Printer,
-  Star,
-  X,
-} from "lucide-react";
+import { Box, Check, ChevronRight, Download, Loader2, MoreHorizontal, Star, X } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import {
   modelPrinterFilesOptions,
   useModelDetail,
@@ -696,7 +687,7 @@ export function InspectorContent({
                   <div className="library-inspector-delivery" data-library-revision-actions>
                     {canSend && (
                       <Button size="sm" onClick={() => setSendOpen(true)}>
-                        <Printer className="size-4 shrink-0" aria-hidden />
+                        <Printer3D className="size-4 shrink-0" aria-hidden />
                         {uiText("Send to printer")}
                       </Button>
                     )}

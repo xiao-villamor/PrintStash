@@ -12,7 +12,8 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "@/lib/link";
-import { ExternalLink, Loader2, Printer as PrinterIcon, Send, WifiOff } from "lucide-react";
+import { ExternalLink, Loader2, Send, WifiOff } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 
 import {
   checkFleetCompatibility,
@@ -604,7 +605,7 @@ export function SendToButtons({
               </p>
               <Button asChild size="sm" className="mt-1 w-full">
                 <Link href="/printers">
-                  <PrinterIcon className="h-4 w-4" />
+                  <Printer3D className="h-4 w-4" />
                   {uiText(" Configure printer")}
                 </Link>
               </Button>

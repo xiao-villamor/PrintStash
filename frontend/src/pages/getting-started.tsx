@@ -8,9 +8,9 @@ import {
   Clock3,
   FolderOpen,
   Loader2,
-  Printer,
   Upload,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import { Link } from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import { useAuth } from "@/lib/auth-context";
@@ -353,7 +353,7 @@ export default function GettingStartedPage() {
                   className="flex items-center gap-3 py-3 text-foreground hover:text-primary"
                   href="/printers"
                 >
-                  <Printer className="h-4 w-4 text-muted-foreground" aria-hidden />
+                  <Printer3D className="h-4 w-4 text-muted-foreground" aria-hidden />
                   <span className="flex-1">{t("setup.printer")}</span>
                   <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden />
                 </Link>

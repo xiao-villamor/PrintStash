@@ -33,7 +33,9 @@ test.describe("model library", () => {
       await card.getByRole("button", { name: "Download Rev 1", exact: true }).click();
       expect((await download).suggestedFilename()).toContain(name);
       await card.hover();
-      await card.getByRole("button", { name: "Print Rev 1", exact: true }).click();
+      const print = card.getByRole("button", { name: "Print Rev 1", exact: true });
+      await expect(print.locator("svg")).toHaveClass(/\blucide-printer-3d\b/);
+      await print.click();
       await expect(
         page.getByRole("dialog", { name: "Send Rev 1 to printer", exact: true }),
       ).toBeVisible();

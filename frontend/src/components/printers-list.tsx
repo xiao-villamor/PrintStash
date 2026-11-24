@@ -55,15 +55,8 @@ import {
 import { printerArtwork } from "@/lib/orca-printer-images";
 import { formatNumber, parseApiInstant } from "@/lib/format";
 import { PrinterProgress } from "@/components/printer-telemetry";
-import {
-  ArrowUpRight,
-  Fan,
-  ListOrdered,
-  Plus,
-  RefreshCw,
-  Pencil,
-  Printer as PrinterIcon,
-} from "lucide-react";
+import { ArrowUpRight, Fan, ListOrdered, Plus, RefreshCw, Pencil } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
 import type { PrintJobState } from "@/types";
 
@@ -348,7 +341,7 @@ export function PrintersPage() {
                 </div>
               ) : printers.length === 0 ? (
                 <EmptyState
-                  icon={PrinterIcon}
+                  icon={Printer3D}
                   title={uiText("No printers configured yet.")}
                   action={
                     user?.is_superuser ? (
@@ -364,7 +357,7 @@ export function PrintersPage() {
                 <div className="grid min-w-0 grid-cols-1 items-start gap-4 @5xl/fleet:grid-cols-[minmax(0,1fr)_minmax(17rem,24%)]">
                   {visiblePrinters.length === 0 ? (
                     <EmptyState
-                      icon={PrinterIcon}
+                      icon={Printer3D}
                       title={uiText("No matching printers")}
                       className="border border-border bg-card"
                     />

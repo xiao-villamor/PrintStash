@@ -10,7 +10,8 @@ import {
   type RevisionSelection,
 } from "@/features/printers/saved-revision";
 import { SavedRevisionPicker } from "@/components/saved-revision-picker";
-import { Check, FileBox, GitBranch, Layers3, Printer, ShieldCheck, Star } from "lucide-react";
+import { Check, FileBox, GitBranch, Layers3, ShieldCheck, Star } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import { providerLabel } from "@/lib/printer-providers";
 import { knownUiText } from "@/lib/locale";
 import "./fleet-queue-workspace.css";
@@ -396,7 +397,7 @@ function AddJobForm({
                   <div className="queue-options">
                     {(["manual", "default", "least_busy"] as const).map((value) => {
                       const Icon =
-                        value === "manual" ? Printer : value === "default" ? Star : GitBranch;
+                        value === "manual" ? Printer3D : value === "default" ? Star : GitBranch;
                       const label =
                         value === "manual"
                           ? uiText("Choose printer")
@@ -459,7 +460,7 @@ function AddJobForm({
                           }}
                         />
                         <span>
-                          <Printer size={17} />
+                          <Printer3D size={17} />
                           <span>
                             <b>{printer.name}</b>
                             <small>{providerLabel(printer)}</small>
@@ -520,7 +521,7 @@ function AddJobForm({
               <b>{chosen.data && file ? chosen.data.name : uiText("Select a saved Revision")}</b>
               {file && <small>{revisionLabel(file)}</small>}
             </div>
-            <Printer size={15} />
+            <Printer3D size={15} />
             <div>
               <small>{uiText("Destination")}</small>
               <b>{fixedPrinter?.name ?? destination}</b>

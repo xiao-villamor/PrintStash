@@ -29,7 +29,9 @@ import { usePrinters, useSpoolmanStatus, useVaultConfig } from "@/lib/queries";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { Check, Layers, Loader2, Plus, Printer, RefreshCw, Trash2, X, Pencil } from "lucide-react";
+import { Check, Loader2, Plus, RefreshCw, Trash2, X, Pencil, type LucideIcon } from "lucide-react";
+import { FilamentSpool } from "@/components/ui/filament-spool";
+import { Printer3D } from "@/components/ui/printer-3d";
 import { FilamentSpoolPrice } from "@/components/filament-spool-price";
 import {
   expenseDraft,
@@ -277,7 +279,7 @@ function ProfileRow({
   summary: string;
   editor: (focusCosts: boolean) => React.ReactNode;
   feedback: React.ReactNode;
-  icon: typeof Printer | typeof Layers;
+  icon: LucideIcon;
   facts: [string, string | null][];
   rate: {
     label: string;
@@ -1245,7 +1247,7 @@ export function FilamentProfilesCard() {
                 </div>
               ) : filamentQuery.isError && !filamentQuery.data ? null : filaments.length === 0 ? (
                 <EmptyState
-                  icon={Layers}
+                  icon={FilamentSpool}
                   title={uiText("No filament presets")}
                   description={uiText("Create one to track materials, brands, and costs.")}
                   className="py-12"
@@ -1263,7 +1265,7 @@ export function FilamentProfilesCard() {
                         <ProfileRow
                           key={`filament/${profile.id}`}
                           name={profile.name}
-                          icon={Layers}
+                          icon={FilamentSpool}
                           facts={[
                             [uiText("Material"), profile.material_type],
                             [uiText("Brand"), profile.material_brand],
@@ -1588,7 +1590,7 @@ export function FilamentProfilesCard() {
                 </div>
               ) : printerQuery.isError && !printerQuery.data ? null : printers.length === 0 ? (
                 <EmptyState
-                  icon={Printer}
+                  icon={Printer3D}
                   title={uiText("No printer presets")}
                   description={uiText("Create one to reuse machine and nozzle settings.")}
                   className="py-12"
@@ -1606,7 +1608,7 @@ export function FilamentProfilesCard() {
                         <ProfileRow
                           key={`printer/${profile.id}`}
                           name={profile.name}
-                          icon={Printer}
+                          icon={Printer3D}
                           facts={[
                             [uiText("Printer model"), profile.printer_model],
                             [

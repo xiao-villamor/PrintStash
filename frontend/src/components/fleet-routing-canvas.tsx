@@ -23,8 +23,8 @@ import {
   Layers3,
   Minus,
   Plus,
-  Printer,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import { Button } from "@/components/ui/button";
 import { knownUiText, uiText } from "@/lib/locale";
 import { Link } from "@/lib/link";
@@ -54,7 +54,7 @@ type Station = Node<
   "station"
 >;
 
-const icons = { job: FileBox, rule: GitBranch, printer: Printer, inlet: Layers3 };
+const icons = { job: FileBox, rule: GitBranch, printer: Printer3D, inlet: Layers3 };
 const nodeTypes = { station: StationNode };
 const fitOptions = { padding: 0.17, maxZoom: 1.2 };
 const pageSize = 3;
@@ -278,7 +278,7 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
     if (job && printer) onEdit(job, printer);
   }
   const overview = !selectedJob && !selectedPrinter;
-  const InspectorIcon = selectedPrinter ? Printer : selectedJob ? FileBox : CircuitBoard;
+  const InspectorIcon = selectedPrinter ? Printer3D : selectedJob ? FileBox : CircuitBoard;
   return (
     <div className="routing-workspace">
       <div className="routing-grid">
@@ -471,7 +471,7 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
                     type="button"
                     onClick={() => setSelected("printer-" + row.printer_id)}
                   >
-                    <Printer size={16} />
+                    <Printer3D size={16} />
                     <span>
                       <strong>{row.name}</strong>
                       <small>{machineState(row)}</small>

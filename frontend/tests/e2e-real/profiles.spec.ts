@@ -7,6 +7,7 @@
  */
 import { type Locator } from "@playwright/test";
 import { test, expect, authBundleFor, ADMIN } from "./helpers";
+import { collapseNavigationSidebar } from "./util";
 
 // Resolve the unique name to the server-ID label in one DOM read. Retaining
 // an ordinal locator would follow a different row if the refreshed list sorts.
@@ -74,6 +75,7 @@ test.describe("profiles", () => {
   test("create, edit, and delete a filament preset", async ({ page }) => {
     const name = `e2e-pla-${Date.now()}`;
     await page.goto("/profiles");
+    await collapseNavigationSidebar(page);
 
     const section = page.locator("section", { hasText: "Filament presets" });
     await page.getByRole("button", { name: /New filament/ }).click();
@@ -81,12 +83,23 @@ test.describe("profiles", () => {
     await createForm.getByLabel("Name").fill(name);
     await createForm.getByLabel("Material").fill("PLA");
     await createForm.getByLabel("Cost per kg").fill("25");
-    await createForm.getByRole("button", { name: "Add profile" }).click();
+    await page
+      .getByRole("dialog", { name: "New filament preset" })
+      .getByRole("button", { name: "Add profile" })
+      .click();
 
+    await section
+      .getByRole("region", { name: `Profile: ${name}`, exact: true })
+      .getByRole("button")
+      .click();
+    const profileHeading = page.getByRole("heading", { name, exact: true });
+    await expect(
+      profileHeading.locator("xpath=ancestor::header").locator("svg").first(),
+    ).toHaveClass(/\blucide-filament-spool\b/);
     const nameInput = await inputByValue(section, /^Filament preset name/, name);
     await expect(nameInput).toBeVisible();
 
-    // Edit cost; auto-saves on row blur (real PATCH).
+    // Closing the editor saves the new cost.
     await rowOf(nameInput)
       .getByLabel(/Filament cost per kg/)
       .fill("42");
@@ -95,7 +108,10 @@ test.describe("profiles", () => {
         (r) =>
           /\/api\/v1\/filament-profiles\/\d+/.test(r.url()) && r.request().method() === "PATCH",
       ),
-      page.getByRole("dialog", { name: "Edit filament preset" }).getByRole("heading").click(), // blur the row
+      page
+        .getByRole("dialog", { name: "Edit filament preset" })
+        .getByRole("button", { name: "Close", exact: true })
+        .click(),
     ]);
 
     // Cost persisted.
@@ -104,9 +120,11 @@ test.describe("profiles", () => {
     await expect(rowOf(reloaded).getByLabel(/Filament cost per kg/)).toHaveValue("42");
 
     // Delete it.
-    await rowOf(reloaded)
-      .getByRole("button", { name: `Delete filament preset ${name}` })
+    await page
+      .getByRole("dialog", { name: "Edit filament preset" })
+      .getByRole("button", { name: "Close", exact: true })
       .click();
+    await page.getByRole("button", { name: `Delete filament preset ${name}` }).click();
     await page
       .getByRole("dialog", { name: "Delete filament preset?" })
       .getByRole("button", { name: "Delete preset" })
