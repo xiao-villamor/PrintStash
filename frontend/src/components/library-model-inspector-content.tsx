@@ -453,7 +453,7 @@ export function InspectorContent({
                 {revisions.map((item) => (
                   <option key={item.id} value={item.id}>
                     {revisionName(item)}
-                    {item.is_recommended ? ` · ★ ${uiText("Recommended")}` : ""}
+                    {item.is_recommended ? ` · ${uiText("Recommended")}` : ""}
                   </option>
                 ))}
               </select>
