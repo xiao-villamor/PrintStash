@@ -2,7 +2,17 @@
 
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Box, Check, ChevronRight, Download, Loader2, MoreHorizontal, Star, X } from "lucide-react";
+import {
+  ArrowUpRight,
+  Box,
+  Check,
+  ChevronRight,
+  Download,
+  Loader2,
+  MoreHorizontal,
+  Star,
+  X,
+} from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import {
   modelPrinterFilesOptions,
@@ -23,7 +33,14 @@ import { usePrinters } from "@/lib/queries";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useToolpathSources } from "@/lib/toolpath-preview";
-import { formatBytes, formatDuration, formatGrams, formatNumber, timeAgo } from "@/lib/format";
+import {
+  formatBytes,
+  formatCalendarDate,
+  formatDuration,
+  formatGrams,
+  formatNumber,
+  timeAgo,
+} from "@/lib/format";
 import { ApiError, userMessage } from "@/lib/errors";
 import { isTypingTarget, keyboardOverlayOpen } from "@/lib/keyboard-commands";
 import { toast } from "@/lib/toast";
@@ -209,7 +226,7 @@ export function InspectorContent({
   const jobs = (history.isError ? [] : (history.data ?? [])).filter(
     (job) => job.file_id === file?.id,
   );
-  const printFacts = file ? revisionFacts(file.metadata) : "";
+  const printStats = file ? revisionStats(file.metadata) : [];
   const canLog = canEdit && administrator && !!file && !!printer && !busy;
   const selectedFormat = file?.original_filename.toLowerCase().endsWith(".bgcode")
     ? "bgcode_binary"
@@ -655,8 +672,15 @@ export function InspectorContent({
                       </Button>
                     )}
                   </div>
-                  {printFacts && (
-                    <p className="library-inspector-caption wrap-anywhere">{printFacts}</p>
+                  {printStats.length > 0 && (
+                    <dl className="library-inspector-stats">
+                      {printStats.map(([label, value]) => (
+                        <div key={label}>
+                          <dt>{label}</dt>
+                          <dd>{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
                   )}
                   {file.metadata?.printer_model && (
                     <p className="library-inspector-caption wrap-anywhere">
@@ -1029,6 +1053,37 @@ export function InspectorContent({
           </p>
         )}
       </section>
+      <dl className="library-inspector-properties library-inspector-origin divide-y divide-border">
+        {(model.collection_label ?? model.collection) && (
+          <div>
+            <dt>{uiText("Collection")}</dt>
+            <dd>{model.collection_label ?? model.collection}</dd>
+          </div>
+        )}
+        <div>
+          <dt>{uiText("Created")}</dt>
+          <dd>
+            <time dateTime={model.created_at}>{formatCalendarDate(model.created_at)}</time>
+          </dd>
+        </div>
+        {model.source_url && (
+          <div>
+            <dt>{uiText("Source")}</dt>
+            <dd>
+              <a
+                href={model.source_url}
+                target="_blank"
+                rel="noreferrer noopener"
+                title={model.source_url}
+                className="inline-flex max-w-full items-center gap-1 text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span className="min-w-0 truncate">{sourceHost(model.source_url)}</span>
+                <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+              </a>
+            </dd>
+          </div>
+        )}
+      </dl>
       {sourceFile && (
         <details className="library-inspector-section">
           <summary className="library-inspector-section-heading">
@@ -1218,18 +1273,31 @@ function InspectorDescription({ description }: { description: string }) {
   );
 }
 
+/** The link's host, which is what a person recognises; an unparsable link is shown whole. */
+function sourceHost(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
 function revisionName(file: FileRead) {
   return `${uiText("Rev {value1}", { value1: String(file.gcode_revision_number ?? file.version) })}${file.revision_label ? ` · ${file.revision_label}` : ""}`;
 }
-function revisionFacts(meta: MetadataRead | null) {
-  return [
-    meta?.material_type,
-    meta?.estimated_time_s != null ? formatDuration(meta.estimated_time_s) : null,
-    meta?.filament_weight_g != null ? formatGrams(meta.filament_weight_g) : null,
-    meta?.layer_height_mm != null ? `${formatNumber(meta.layer_height_mm)} mm` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+function revisionStats(meta: MetadataRead | null): [string, string][] {
+  const stats: [string, string | null][] = [
+    [
+      uiText("Time"),
+      meta?.estimated_time_s != null ? formatDuration(meta.estimated_time_s) : null,
+    ],
+    [uiText("Weight"), meta?.filament_weight_g != null ? formatGrams(meta.filament_weight_g) : null],
+    [
+      uiText("Layer"),
+      meta?.layer_height_mm != null ? `${formatNumber(meta.layer_height_mm)} mm` : null,
+    ],
+    [uiText("Material"), meta?.material_type ?? null],
+  ];
+  return stats.filter((entry): entry is [string, string] => entry[1] !== null);
 }
 function settingFacts(meta: MetadataRead | null): [string, string, boolean?][] {
   return [

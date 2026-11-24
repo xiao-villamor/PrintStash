@@ -35,7 +35,7 @@ const NATIVE_RENDER_LIMIT = 120;
  * was to its new cell in lockstep with the pane (see `PaneMotion`), so the
  * reflow is one continuous motion instead of a pop when the pane rests.
  */
-const CARD_WIDTH = 230;
+const CARD_WIDTH = 280;
 const COMPACT_CARD_WIDTH = 280;
 const SINGLE_COLUMN_MAX = 400;
 

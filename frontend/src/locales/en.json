@@ -1382,6 +1382,7 @@
   "Keep the recommended local paths, or connect S3-compatible object storage.": "Keep the recommended local paths, or connect S3-compatible object storage.",
   "Klipper config": "Klipper config",
   "Layer": "Layer",
+  "Weight": "Weight",
   "Leave blank to keep current value": "Leave blank to keep current value",
   "Leave empty for AWS S3": "Leave empty for AWS S3",
   "Linked": "Linked",

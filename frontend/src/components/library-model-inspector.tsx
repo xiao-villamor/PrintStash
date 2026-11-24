@@ -22,6 +22,7 @@ import {
   useInspectorMotion,
 } from "./use-inspector-motion";
 import { Button } from "@/components/ui/button";
+import { RevisionStatusBadge } from "@/components/revision-status-badge";
 import "./library-model-inspector.css";
 
 const InspectorContent = lazyImport(() =>
@@ -76,9 +77,9 @@ export function LibraryModelInspector({
   const previewSize = useInspectorPreviewHeight(scroll);
   const [downloading, setDownloading] = useState(false);
   const revisions = cardRevisions(detail.data);
+  const recommended = revisions.find((file) => file.is_recommended) ?? revisions[0];
   const downloadFile =
-    revisions.find((file) => file.is_recommended) ??
-    revisions[0] ??
+    recommended ??
     detail.data?.files.find((file) => file.file_type !== "gcode") ??
     detail.data?.files[0];
   const drag = useRef<{
@@ -184,6 +185,12 @@ export function LibraryModelInspector({
           <h2 ref={title} tabIndex={-1} title={detail.data?.name}>
             {detail.data ? displayModelName(detail.data.name) : uiText("Model details")}
           </h2>
+          {recommended?.revision_status && (
+            <RevisionStatusBadge
+              status={recommended.revision_status}
+              label={recommended.revision_label}
+            />
+          )}
           <Button
             variant="ghost"
             size="icon-sm"

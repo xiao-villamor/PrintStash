@@ -246,19 +246,6 @@
     padding-right: 68px;
   }
 }
-.library-card-status {
-  position: absolute;
-  right: 6px;
-  top: 6px;
-  max-width: calc(100% - 56px);
-}
-.library-card-status > span {
-  height: 20px;
-  padding: 0 2px;
-  gap: 5px;
-  font-weight: 500;
-  background: transparent;
-}
 .library-model-card:has(.library-preview[data-image-kind="photo"])
   > div
   > [role="checkbox"]:not([aria-checked="true"]),
@@ -267,13 +254,6 @@
   > div
   > [role="checkbox"]:not([aria-checked="true"]) {
   border-color: var(--muted-foreground);
-}
-.library-preview[data-image-kind="photo"] .library-card-status > span,
-.dark .library-preview[data-image-kind="slicer_render"] .library-card-status > span {
-  padding-inline: 6px;
-  background: var(--card);
-  color: var(--card-foreground);
-  border: 1px solid var(--border);
 }
 @media (prefers-reduced-motion: reduce) {
   .library-card-revision-actions {
@@ -328,12 +308,6 @@
 
 .library-card-summary-container .library-card-facts > span + span::before {
   margin-left: 6px;
-}
-.library-card-status > span {
-  color: var(--secondary);
-}
-.library-card-status [data-revision-status="needs_test"] > span:first-child {
-  background: var(--status-test-dot);
 }
 
 .library-model-card {
@@ -427,5 +401,39 @@
 @media (prefers-reduced-motion: reduce) {
   .library-tree-spotlight::after {
     animation: none;
+  }
+}
+
+/* Status badge, revision and actions share one line; data and date share the next. */
+.library-card-revision-line {
+  gap: 8px;
+}
+.library-card-send {
+  color: var(--primary);
+}
+.library-card-data-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 17px;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font: 400 12px/1.4 var(--font-mono);
+}
+.library-card-data-row > .library-card-facts {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.library-card-data-row > time {
+  flex-shrink: 0;
+}
+/* Material joins the data line only when the card is wide enough to keep it whole. */
+.library-card-material {
+  display: none;
+}
+@container (min-width: 320px) {
+  .library-card-material {
+    display: inline;
   }
 }

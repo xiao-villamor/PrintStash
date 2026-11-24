@@ -106,46 +106,6 @@ const METRIC_CONFIG = {
   },
 } satisfies Record<CardMetricId, { abbr: string; getValue: (model: ModelListItem) => string }>;
 
-function RevisionBadge({
-  status,
-  label,
-}: {
-  status: FileRevisionStatus | null | undefined;
-  label?: string | null;
-}) {
-  useUiLocale();
-  if (!status)
-    return (
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-        {uiText("library.noRevisionStatus")}
-      </span>
-    );
-  const cfg = REVISION_CONFIG[status];
-  const accessibleLabel = label
-    ? uiText("Revision status: {status}; label: {label}", { status: cfg.label, label })
-    : uiText("Revision status: {status}", { status: cfg.label });
-  return (
-    <span
-      data-revision-status={status}
-      aria-label={accessibleLabel}
-      title={accessibleLabel}
-      className="inline-flex max-w-full items-center gap-1 text-xs text-foreground"
-    >
-      <span
-        className={`h-1.5 w-1.5 shrink-0 rounded-full ${status === "needs_test" ? "bg-warning" : status === "failed" ? "bg-destructive" : "bg-muted-foreground/60"}`}
-        aria-hidden
-      />
-      <span>
-        {status === "known_good"
-          ? uiText("Ready")
-          : status === "needs_test"
-            ? uiText("Needs test")
-            : cfg.label}
-      </span>
-    </span>
-  );
-}
-
 function MetricCell({ id, model }: { id: CardMetricId; model: ModelListItem }) {
   useUiLocale();
   const cfg = METRIC_CONFIG[id];
@@ -331,17 +291,7 @@ function ModelCardInner({
                 state={preview}
                 admission={previewAdmission}
                 favorites={favorites}
-              >
-                {/* The footer already says "No G-code yet"; the corner only speaks for a known status. */}
-                {!favorites && cornerStatus && (
-                  <div className="library-card-status">
-                    <RevisionBadge
-                      status={cornerStatus}
-                      label={revision?.revision_label ?? model.recommended_revision_label}
-                    />
-                  </div>
-                )}
-              </ModelPreviewFrame>
+              />
 
               {favorites ? (
                 <div className="library-card-content flex flex-1 flex-col">
@@ -431,7 +381,8 @@ function ModelCardInner({
                 model={model}
                 detail={detail}
                 admitted={admitted}
-                origin={origin}
+                status={cornerStatus}
+                statusLabel={revision?.revision_label ?? model.recommended_revision_label}
                 dimensions={dimensions}
                 collectionLabel={collectionLabel ?? null}
               >
@@ -440,7 +391,7 @@ function ModelCardInner({
                     <MetricCell key={id} id={id} model={model} />
                   ))}
                   {ps?.material_type && !metrics.includes("material") && (
-                    <span>{ps.material_type}</span>
+                    <span className="library-card-material">{ps.material_type}</span>
                   )}
                   {!ps && <span className="text-muted-foreground">{uiText("Not recorded")}</span>}
                 </div>

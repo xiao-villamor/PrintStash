@@ -1,0 +1,37 @@
+/* One status badge for library cards and the model inspector: a tinted
+   surface, a fine border and a dot with a soft halo. The tone comes from the
+   semantic status tokens; the word always travels with the colour. */
+.revision-status-badge {
+  --badge-tone: var(--muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  max-width: 100%;
+  padding: 0 9px 0 8px;
+  border: 1px solid color-mix(in srgb, var(--badge-tone) 32%, transparent);
+  background: color-mix(in srgb, var(--badge-tone) 12%, transparent);
+  color: color-mix(in srgb, var(--badge-tone) 55%, var(--foreground));
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+.revision-status-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: var(--badge-tone);
+  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--badge-tone) 20%, transparent);
+}
+.revision-status-badge[data-revision-status="needs_test"] {
+  --badge-tone: var(--status-test-dot);
+}
+.revision-status-badge[data-revision-status="known_good"] {
+  --badge-tone: var(--success);
+}
+.revision-status-badge[data-revision-status="failed"] {
+  --badge-tone: var(--destructive);
+}

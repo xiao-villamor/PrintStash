@@ -1382,6 +1382,7 @@
   "Keep the recommended local paths, or connect S3-compatible object storage.": "Mantén las rutas locales recomendadas o conecta almacenamiento de objetos compatible con S3.",
   "Klipper config": "Configuración de Klipper",
   "Layer": "Capa",
+  "Weight": "Peso",
   "Leave blank to keep current value": "Déjalo vacío para conservar el valor actual",
   "Leave empty for AWS S3": "Déjalo vacío para AWS S3",
   "Linked": "Vinculado",

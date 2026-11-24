@@ -399,3 +399,30 @@
 .library-inspector-section .library-inspector-properties dd {
   font-size: 12px;
 }
+
+/* The recommended revision's key figures, labelled, in one row. */
+.library-inspector-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 8px 12px;
+  margin: 4px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.library-inspector-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.library-inspector-stats dt {
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.library-inspector-stats dd {
+  margin: 0;
+  font: 500 13px/1.2 var(--font-mono);
+  overflow-wrap: anywhere;
+}

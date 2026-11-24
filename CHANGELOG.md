@@ -6,6 +6,10 @@
 
 - Model details lead with the next print action, group revisions and production costs under Print, and keep source files, publication data, and recorded results in their own sections. Opening a source or profile preserves the return to the original library view. Overview shows the current revision, the estimate source, and the next print action. Tags save from the inline picker, and Prepare print carries over the selected preview plate.
 
+### Changed
+
+- Library cards are 280 px wide and show the revision status as one badge beside the revision, with time, weight and layer height on one line. The model panel shows the same badge in its header, labelled key figures for the recommended revision, and the collection, creation date and source link under the description.
+
 ### Added
 
 - Assign a printer cost profile to a connected printer. Prints launched from PrintStash show an estimated production cost, then record the cost of the completed, failed, or stopped run using available measurements. History identifies estimates and partial costs.
