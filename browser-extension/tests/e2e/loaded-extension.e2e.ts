@@ -442,7 +442,7 @@ describe("loaded extension", () => {
         await browser.$("#capture").click();
         const secondImage = browser.$(".gallery-option:nth-child(2) input");
         await secondImage.waitForExist();
-        assert.deepEqual(writes, []);
+        assert.equal(writes.length, 0);
         await secondImage.click();
         await browser.$(".gallery-cover select").click();
         await browser.keys("End");
