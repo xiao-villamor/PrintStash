@@ -43,9 +43,9 @@ Use the [PrintStash design skill](../../printstash-design/SKILL.md) for design
 work and visual feedback.
 
 For a redesign, write down the operator's next decision before moving controls.
-Use Mobbin when reference research is requested or the current interface has no
-good precedent. Record the structural choices in the references and translate
-them into the PrintStash components and tokens in `DESIGN.md`.
+Use the Mobbin MCP only when the user explicitly asks to use Mobbin for the
+current task. Translate relevant reference patterns into the PrintStash
+components and tokens in `DESIGN.md`.
 
 Use the Impeccable layout and clarify passes when requested, then check the
 render for hierarchy, spacing, keyboard focus, long labels, and read and write

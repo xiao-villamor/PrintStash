@@ -1,6 +1,6 @@
 ---
 name: printstash-design
-description: Refine existing PrintStash screens and interactions using Impeccable, Apple Human Interface Guidelines, and Mobbin references. Use for UI design, feedback on a rendered screen, and visual or accessibility reviews.
+description: Refine existing PrintStash screens and interactions using Impeccable and Apple Human Interface Guidelines. Use for UI design, feedback on a rendered screen, and visual or accessibility reviews. Use the Mobbin MCP only when explicitly requested.
 ---
 
 # PrintStash design review
@@ -11,7 +11,7 @@ Use [DESIGN.md](../../../DESIGN.md) for PrintStash typography, tokens, component
 
 1. Open the actual screen with realistic data. Record the operator's task, the exact point where the current design gets in the way, and the functions the change must preserve. Capture the state the user identified, including an open menu or dialog if relevant.
 2. Use the installed Impeccable skill. Run its context command for the target and apply its layout and clarify passes. Use polish and the mechanical detector for the final review where available. Keep the existing product identity for a scoped correction.
-3. Use Mobbin for comparable screens and task flows. Read its best-practices and targeted redesign guidance, then inspect the reference images. Record the structural choices that help the operator and link the screens that show them. Build with PrintStash's own visual language and assets. Never copy a reference screen.
+3. Use the Mobbin MCP only when the user explicitly asks to use Mobbin for the current task. For ordinary design work, use the existing PrintStash patterns, supplied references, Impeccable, and Apple HIG. When Mobbin is requested, read its best-practices and targeted redesign guidance, inspect the images, and cite the applicable patterns. Adapt references to PrintStash's visual language and assets. Never copy a reference screen.
 4. Use Apple HIG for familiar interaction behavior, clear labels, and the placement of secondary or destructive actions. Read the relevant guidance, such as [Buttons](https://developer.apple.com/design/human-interface-guidelines/buttons), [Menus](https://developer.apple.com/design/human-interface-guidelines/menus), or [Alerts](https://developer.apple.com/design/human-interface-guidelines/alerts). Adapt the behavior to PrintStash's web interface.
 
 If a tool is unavailable, record the failure and continue with the available evidence. Distinguish a design decision from a reference observation.

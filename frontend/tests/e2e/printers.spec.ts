@@ -17,6 +17,34 @@ import { collectPageProblems, useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("printer routes", () => {
+  for (const theme of ["dark", "light"] as const) {
+    test(`shows a readable compatibility checkbox in ${theme} mode`, async ({ page }) => {
+      await page.addInitScript((mode) => localStorage.setItem("printstash.theme", mode), theme);
+      await page.goto("/printers?tab=queue");
+      const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+      if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+      await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+      await page.getByRole("button", { name: "Add to queue", exact: true }).first().click();
+      const dialog = page.getByRole("dialog", { name: "Add to queue" });
+      const label = "Allow material or nozzle mismatch";
+      const checkbox = dialog.getByRole("checkbox", { name: label });
+      const details = dialog.getByRole("complementary", { name: "Dispatch details" });
+      await expect(checkbox).toBeVisible();
+      await expect(checkbox).not.toBeChecked();
+      await expect(checkbox).toHaveCSS("width", "20px");
+      await expect(checkbox).toHaveCSS("height", "20px");
+
+      await dialog.getByText(label, { exact: true }).click();
+      await expect(checkbox).toBeChecked();
+      await expect(details.getByText("Allow mismatch", { exact: true })).toBeVisible();
+
+      await checkbox.press("Space");
+      await expect(checkbox).toBeFocused();
+      await expect(checkbox).not.toBeChecked();
+      await expect(details.getByText("Require compatible material")).toBeVisible();
+    });
+  }
+
   test("fits a long saved revision through the queue selection flow", async ({ page }) => {
     const name = "ContinuousWorkshopModel".repeat(9);
     const label = "ContinuousRevisionLabel".repeat(5);

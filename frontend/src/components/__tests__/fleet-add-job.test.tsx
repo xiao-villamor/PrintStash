@@ -304,6 +304,19 @@ describe("Fleet Add to queue", () => {
     ).toBe("allow_mismatch");
   });
 
+  it("disables the compatibility checkbox while saving the job", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const app = setup({ "POST /api/v1/fleet/queue": () => pending.promise });
+    await selectRevision();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save job" }));
+
+    const checkbox = screen.getByRole("checkbox", { name: "Allow material or nozzle mismatch" });
+    expect(checkbox).toBeDisabled();
+    await act(async () => pending.resolve(json(aPrintJob({ id: 9, file_id: 7, printer_id: 8 }))));
+    await waitFor(() => expect(app.onClose).toHaveBeenCalledOnce());
+  });
+
   it("retires a delayed compatibility check with its session", async () => {
     const pending = Promise.withResolvers<Response>();
     const app = setup({ "POST /api/v1/fleet/compatibility": () => pending.promise });

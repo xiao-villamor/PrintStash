@@ -133,6 +133,7 @@ test.describe("fleet queue", () => {
     const picker = page.getByRole("dialog", { name: "Revision", exact: true });
     await picker.getByRole("button", { name: modelName }).click();
     await picker.getByRole("button", { name: /Revision 1/ }).click();
+    await addJob.getByText("Allow material or nozzle mismatch", { exact: true }).click();
     const enqueue = page.waitForResponse(
       (response) =>
         response.url().endsWith("/api/v1/fleet/queue") && response.request().method() === "POST",
@@ -162,6 +163,11 @@ test.describe("fleet queue", () => {
       });
     await expect(completed.getByRole("button", { name: modelName, exact: true })).toBeVisible();
     await expect(completed).toContainText("Completed");
+    const persisted = await page.request.get(`/api/v1/printers/${printerId}/jobs?limit=50`);
+    expect(persisted.ok()).toBe(true);
+    expect(await persisted.json()).toContainEqual(
+      expect.objectContaining({ id: job.id, compatibility_policy: "allow_mismatch" }),
+    );
 
     // ── Use the native Queue and Maintenance pickers with the keyboard ──
     await page.goto("/printers");

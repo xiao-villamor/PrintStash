@@ -281,8 +281,7 @@
   opacity: 1;
   color: var(--primary);
 }
-.queue-group-filter,
-.queue-material-policy {
+.queue-group-filter {
   display: flex;
   gap: 8px;
   align-items: center;
@@ -291,9 +290,6 @@
 .queue-group-filter select {
   margin-left: auto;
   max-width: 65%;
-}
-.queue-material-policy input {
-  accent-color: var(--primary);
 }
 .queue-ticket {
   background: var(--muted);

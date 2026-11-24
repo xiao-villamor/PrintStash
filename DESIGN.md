@@ -481,8 +481,13 @@ these calls at zero.
 | `Drawer` | The above, sliding from an edge, interruptible mid-flight |
 | `DropdownMenu` | Origin-aware scale/fade, outside-`pointerdown` dismiss, Escape refocuses trigger, arrow-key roving |
 | `TabBar` | ARIA `tablist`, arrow-key nav, sliding indicator |
-| `Switch` | The one binary toggle: square 36×20 track, On/Off written as text |
-| `Input`, `Checkbox`, `Badge`, `Spinner`, `EmptyState`, `Card`, `Skeleton` | Token-correct defaults |
+| `Switch` | Settings toggle with a square 36×20 track and written On/Off states |
+| `Checkbox` | Form options and selection with an outlined square, a checkmark on a neutral fill when selected, and a visible keyboard ring |
+| `Input`, `Badge`, `Spinner`, `EmptyState`, `Card`, `Skeleton` | Token-correct defaults |
+
+Use the shared `Checkbox` for form options in dialogs. Include the visible
+text in its label so the full row is clickable. Verify the box, checkmark, and
+keyboard focus in both themes.
 
 `Button` variants: `default` is the one filled primary action of a group,
 `outline` every other action, and `danger` an irreversible action offered

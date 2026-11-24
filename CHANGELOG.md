@@ -22,6 +22,8 @@
 
 ### Changed
 
+- The Add to queue compatibility option uses the shared checkbox with a clear checkmark, keyboard focus, and a clickable label.
+
 - Edit connections and remove printers from the Manage printers tab. Warning dialogs share a compact layout, accessible consequence text, and high-contrast destructive actions.
 
 - Printers and Model print controls share a 3D printer icon with a nozzle and build plate.

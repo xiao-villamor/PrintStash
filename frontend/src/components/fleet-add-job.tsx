@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   useSavedRevision,
   revisionLabel,
@@ -497,16 +498,16 @@ function AddJobForm({
               ))}
             </div>
           </fieldset>
-          <label className="queue-material-policy">
-            <input
-              type="checkbox"
+          <label className="flex min-h-9 cursor-action select-none items-center gap-3 self-start border border-border bg-muted/30 px-3 py-2 text-sm font-medium hover:bg-muted has-[:disabled]:pointer-events-none has-[:disabled]:text-muted-foreground">
+            <Checkbox
+              className="shrink-0"
               checked={policy === "allow_mismatch"}
-              onChange={(e) => {
-                setPolicy(e.target.checked ? "allow_mismatch" : "safe");
+              onChange={(checked) => {
+                setPolicy(checked ? "allow_mismatch" : "safe");
                 setError(null);
               }}
             />
-            {uiText("Allow material or nozzle mismatch")}
+            <span>{uiText("Allow material or nozzle mismatch")}</span>
           </label>
         </fieldset>
         <aside className="queue-ticket" aria-label={uiText("Dispatch details")}>
