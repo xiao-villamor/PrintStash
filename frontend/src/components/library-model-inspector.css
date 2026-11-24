@@ -426,3 +426,40 @@
   font: 500 13px/1.2 var(--font-mono);
   overflow-wrap: anywhere;
 }
+
+/* Groups share the control radius: the preview, the revision block, the origin
+   facts and the collapsible sections each read as one rounded surface. */
+.library-inspector-preview {
+  overflow: hidden;
+  border-radius: var(--radius);
+}
+.library-inspector-workspace {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.library-inspector-origin,
+details.library-inspector-section {
+  margin-top: 10px;
+  padding-block: 0;
+  padding-inline: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+details.library-inspector-section > summary {
+  min-height: 42px;
+  cursor: pointer;
+}
+.library-inspector-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.library-inspector-tabs button[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
