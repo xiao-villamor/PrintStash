@@ -24,8 +24,6 @@ test("saves an Artifact estimate with measured inputs and reusable rates", async
   await page.getByRole("button", { name: "New filament profile" }).click();
   const create = page.getByRole("form", { name: "Create filament preset" });
   await create.getByLabel("Name", { exact: true }).fill(`PLA ${stamp}`);
-  const fromSpool = create.getByText("Calculate from spool price");
-  await fromSpool.click();
   await create.getByLabel(/Spool price/).fill("10");
   await create.getByLabel("Net filament weight (g)").fill("0");
   await expect(create.getByRole("button", { name: "Use calculated cost per kg" })).toBeDisabled();

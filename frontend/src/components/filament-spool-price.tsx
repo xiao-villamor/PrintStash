@@ -20,8 +20,8 @@ export function FilamentSpoolPrice({
     price.trim() && weight.trim() && Number(weight) > 0 && Number.isFinite(cost) && cost >= 0;
 
   return (
-    <details className="col-span-full space-y-3 border-y py-3">
-      <summary className="text-sm font-medium">{uiText("Calculate from spool price")}</summary>
+    <fieldset className="col-span-full space-y-3 border-y py-3">
+      <legend className="pr-2 text-sm font-medium">{uiText("Calculate from spool price")}</legend>
       <div className="grid gap-3 sm:grid-cols-2">
         <FormField
           label={currency ? `${uiText("Spool price")} (${currency})` : uiText("Spool price")}
@@ -59,6 +59,6 @@ export function FilamentSpoolPrice({
           {uiText("Use calculated cost per kg")}
         </Button>
       </div>
-    </details>
+    </fieldset>
   );
 }
