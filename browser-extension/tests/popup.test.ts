@@ -3209,127 +3209,142 @@ describe("popup browser adapters", () => {
     expect(element("#status").textContent).not.toContain("code:");
   });
 
-  it.each(["import", "change"] as const)(
-    "uses the only available MakerWorld profile on %s",
-    async (action) => {
-      await fakeBrowser.storage.local.set(pairedDevice);
-      fakeBrowser.tabs.query = vi.fn().mockResolvedValue([
+  it.each([
+    { selection: "a subset in cover order", expected: ["source-image-3", "source-image-1"] },
+    { selection: "no images", expected: [] },
+    { selection: "a replacement cover", expected: ["source-image-1", "source-image-2"] },
+    {
+      selection: "all images after restoring",
+      expected: ["source-image-1", "source-image-2", "source-image-3"],
+    },
+    { selection: "an unavailable gallery", expected: [] },
+  ])("confirms the only MakerWorld package with $selection", async ({ selection, expected }) => {
+    await fakeBrowser.storage.local.set(pairedDevice);
+    fakeBrowser.tabs.query = vi.fn().mockResolvedValue([
+      {
+        id: 42,
+        title: "Torch planter",
+        url: "https://makerworld.com/en/models/52226#profileId-58047",
+      },
+    ]);
+    fakeBrowser.scripting.executeScript = vi
+      .fn()
+      .mockResolvedValueOnce([{ result: null }])
+      .mockResolvedValueOnce([{ result: { pageTitle: "Torch planter", jsonLd: [] } }])
+      .mockResolvedValueOnce([
         {
-          id: 42,
-          title: "Torch planter",
-          url: "https://makerworld.com/en/models/52226#profileId-58047",
-        },
-      ]);
-      fakeBrowser.scripting.executeScript = vi
-        .fn()
-        .mockResolvedValueOnce([{ result: null }])
-        .mockResolvedValueOnce([{ result: { pageTitle: "Torch planter", jsonLd: [] } }])
-        .mockResolvedValueOnce([
-          {
-            result: {
-              ok: true,
-              metadata: {
-                fixtureVersion: "makerworld-design-service-v1",
-                sourceItemId: "52226",
-                source: { title: "Torch planter" },
-                files: [{ id: "58047", filename: "planter.3mf", fileType: "other" }],
-              },
+          result: {
+            ok: true,
+            metadata: {
+              fixtureVersion: "makerworld-design-service-v1",
+              sourceItemId: "52226",
+              source: { title: "Torch planter" },
+              files: [{ id: "58047", filename: "planter.3mf", fileType: "other" }],
             },
           },
-        ])
-        .mockResolvedValueOnce([
-          {
-            result: [
-              "https://makerworld.bblmw.com/one.png",
-              "https://makerworld.bblmw.com/two.png",
-            ],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          result:
+            selection === "an unavailable gallery"
+              ? Array.from({ length: 130 }, (_, i) => `https://makerworld.bblmw.com/${i}.png`)
+              : ["one", "two", "three"].map((name) => `https://makerworld.bblmw.com/${name}.png`),
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          result: {
+            ok: true,
+            links: [{ id: "58047", url: "https://makerworld.bblmw.com/planter.3mf" }],
           },
-        ])
-        .mockResolvedValueOnce([
-          {
-            result:
-              action === "import"
-                ? { ok: false, code: "auth_required" }
-                : {
-                    ok: true,
-                    links: [{ id: "58047", url: "https://makerworld.bblmw.com/planter.3mf" }],
-                  },
-          },
-        ]);
-      const requests: string[] = [];
-      const fetchImpl = vi.fn(async (input: RequestInfo | URL, options: RequestInit = {}) => {
-        const path = new URL(String(input)).pathname;
-        if (path.endsWith("/health"))
-          return response({ status: "ok", name: "PrintStash", capture_import_intent: true });
-        if (path.endsWith("/capture-capabilities"))
-          return response({
-            owner_user_id: 9,
-            import_intent: true,
-            resumable_slots: true,
-            resumable_gallery: true,
-          });
-        if (path.endsWith("/capture-source-status")) return response([]);
-        if (path.endsWith("/capture-sessions")) {
-          requests.push(stringBody(options));
-          return response({ item: { id: 90, state: "completed" }, slots: [], recoverable: false });
-        }
-        if (path.endsWith("/capture-status"))
-          return response({
-            state: "completed",
-            completion: "complete",
-            resulting_model_id: 91,
-            collection_name: "Torch planter",
-          });
-        throw new Error("Unexpected capture write");
-      });
-      vi.stubGlobal("fetch", fetchImpl);
-      await import("../popup.ts");
-      await vi.waitFor(() => expect(button("#capture").disabled).toBe(false));
-
-      button(action === "import" ? "#capture" : "#change-files").click();
-      await vi.waitFor(() => expect(element("#file-count").textContent).toBe("Files: 1 package"));
-      expect(document.querySelector<HTMLInputElement>("#candidate-list input")?.checked).toBe(true);
-      if (action === "change") {
-        expect(element("#candidate-panel").hidden).toBe(false);
-        button("#change-files").click();
+        },
+      ]);
+    const requests: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, options: RequestInit = {}) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/health"))
+        return response({ status: "ok", name: "PrintStash", capture_import_intent: true });
+      if (path.endsWith("/capture-capabilities"))
+        return response({
+          owner_user_id: 9,
+          import_intent: true,
+          resumable_slots: true,
+          resumable_gallery: true,
+        });
+      if (path.endsWith("/capture-source-status")) return response([]);
+      if (path.endsWith("/capture-sessions")) {
+        requests.push(stringBody(options));
+        return response({ item: { id: 90, state: "completed" }, slots: [], recoverable: false });
       }
-      expect(element("#candidate-panel").hidden).toBe(true);
-      expect(element(".publication-gallery legend").textContent).toBe("2 images · cover: image 1");
-      expect(document.querySelectorAll(".gallery-strip img")).toHaveLength(2);
-      button('.gallery-strip button[aria-label="Use image 2 as cover"]').click();
-      expect(element(".publication-gallery legend").textContent).toBe("2 images · cover: image 2");
-      expect(
-        button('.gallery-strip button[aria-label="Use image 2 as cover"]').getAttribute(
-          "aria-pressed",
-        ),
-      ).toBe("true");
-      requiredElement(".gallery-toggle input", HTMLInputElement).click();
-      expect(element(".gallery-strip").hidden).toBe(true);
+      if (path.endsWith("/capture-status"))
+        return response({
+          state: "completed",
+          completion: "complete",
+          resulting_model_id: 91,
+          collection_name: "Torch planter",
+        });
+      throw new Error("Unexpected capture write");
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(button("#capture").disabled).toBe(false));
 
-      if (action === "import") {
-        expect(element("#status-message").textContent).toBe(
-          "Sign in to MakerWorld in this browser, then try again",
-        );
-        expect(requests).toEqual([]);
+    expect(button("#capture").textContent).toBe("Review files and images");
+    button("#capture").click();
+    await vi.waitFor(() => expect(button("#capture").textContent).toBe("Import"));
+    expect(requests).toEqual([]);
+    expect(element("#file-count").textContent).toBe("Files: 1 package");
+    button("#change-files").click();
+    expect(element("#candidate-panel").hidden).toBe(false);
+    expect(document.querySelector<HTMLInputElement>("#candidate-list input")?.checked).toBe(true);
+    button("#change-files").click();
+    expect(element("#candidate-panel").hidden).toBe(true);
+
+    if (selection === "an unavailable gallery") {
+      expect(element(".publication-gallery legend").textContent).toBe("Gallery unavailable");
+    } else {
+      const images = [...document.querySelectorAll<HTMLInputElement>(".gallery-grid input")];
+      const cover = requiredElement(".gallery-cover select", HTMLSelectElement);
+      const bulk = button(".publication-gallery button");
+      expect(images.map((input) => input.checked)).toEqual([true, true, true]);
+      expect(cover.selectedOptions[0]?.textContent).toBe("Image 1");
+      if (selection === "a subset in cover order") {
+        cover.selectedIndex = 2;
+        images[1].click();
+        expect([...cover.options].map((option) => option.textContent)).toEqual([
+          "Image 1",
+          "Image 3",
+        ]);
+        expect(cover.selectedOptions[0]?.textContent).toBe("Image 3");
+      } else if (selection === "a replacement cover") {
+        cover.selectedIndex = 2;
+        images[2].click();
+        expect(cover.selectedOptions[0]?.textContent).toBe("Image 1");
       } else {
-        requiredElement(".gallery-toggle input", HTMLInputElement).click();
-        button("#capture").click();
-        await vi.waitFor(() =>
-          expect(button("#open-inbox").textContent).toBe("Open in PrintStash"),
-        );
-        expect(requests.map((body) => JSON.parse(body))).toEqual([
-          expect.objectContaining({
-            on_ready: "import",
-            files: [expect.objectContaining({ id: "58047" })],
-            gallery: [
-              expect.objectContaining({ name: "source-image-2" }),
-              expect.objectContaining({ name: "source-image-1" }),
-            ],
-          }),
-        ]);
+        bulk.click();
+        expect(images.map((input) => input.checked)).toEqual([false, false, false]);
+        expect(element(".gallery-cover").hidden).toBe(true);
+        if (selection === "all images after restoring") {
+          bulk.click();
+          expect(images.map((input) => input.checked)).toEqual([true, true, true]);
+        }
       }
-    },
-  );
+    }
+
+    button("#capture").click();
+    await vi.waitFor(() => expect(button("#open-inbox").textContent).toBe("Open in PrintStash"));
+    expect(requests.map((body) => JSON.parse(body))).toEqual([
+      expect.objectContaining({
+        on_ready: "import",
+        files: [expect.objectContaining({ id: "58047" })],
+        ...(expected.length
+          ? { gallery: expected.map((name) => expect.objectContaining({ name })) }
+          : {}),
+      }),
+    ]);
+    if (!expected.length) expect(JSON.parse(requests[0])).not.toHaveProperty("gallery");
+  });
 
   it("explains MakerWorld sign-in without creating an import", async () => {
     await fakeBrowser.storage.local.set({

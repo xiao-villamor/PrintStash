@@ -15,6 +15,7 @@ import {
   downloadSourceImage,
   type SourceGalleryImage,
 } from "./source-gallery.ts";
+import { galleryPicker } from "./gallery-picker.ts";
 import { captureTransferFetch, progressLabel, type ByteProgress } from "./transfer-progress.ts";
 import { collectionCombobox } from "./collection-combobox.ts";
 import {
@@ -310,27 +311,36 @@ const apiSettingsButton = requiredElement("#open-api-settings", HTMLButtonElemen
 
 runtimeMarker.textContent = `Version ${browser.runtime.getManifest().version}`;
 
-const tabs = popupTabs(
-  {
-    capture: requiredElement("#tab-capture", HTMLButtonElement),
-    history: requiredElement("#tab-history", HTMLButtonElement),
-    settings: requiredElement("#tab-settings", HTMLButtonElement),
-  },
-  {
-    capture: requiredElement("#view-capture", HTMLElement),
-    history: requiredElement("#view-history", HTMLElement),
-    settings: requiredElement("#view-settings", HTMLElement),
-  },
-  (tab, persist) => {
-    activeTab = tab;
-    if (persist) {
-      tabTouched = true;
-      void browser.storage.set({ popupTab: tab }).catch(() => {});
-    }
-    renderTabContent();
-    if (tab === "history") void refreshCaptureHistory();
-  },
-);
+const captureView = requiredElement("#view-capture", HTMLElement);
+const tabs = panelMode
+  ? null
+  : popupTabs(
+      {
+        capture: requiredElement("#tab-capture", HTMLButtonElement),
+        history: requiredElement("#tab-history", HTMLButtonElement),
+        settings: requiredElement("#tab-settings", HTMLButtonElement),
+      },
+      {
+        capture: captureView,
+        history: requiredElement("#view-history", HTMLElement),
+        settings: requiredElement("#view-settings", HTMLElement),
+      },
+      (tab, persist) => {
+        activeTab = tab;
+        if (persist) {
+          tabTouched = true;
+          void browser.storage.set({ popupTab: tab }).catch(() => {});
+        }
+        renderTabContent();
+        if (tab === "history") void refreshCaptureHistory();
+      },
+    );
+
+if (panelMode) {
+  requiredElement(".popup-tabs", HTMLDivElement).remove();
+  captureView.removeAttribute("role");
+  captureView.removeAttribute("aria-labelledby");
+}
 
 let activeTab: PopupTab = "capture";
 let tabTouched = false;
@@ -371,11 +381,7 @@ let pendingMakerWorldCapture: BrowserCaptureMessage | null = null;
 let pendingThingiverseCapture: BrowserCaptureMessage | null = null;
 let pendingMarketplaceCapture: BrowserCaptureMessage | null = null;
 let pendingThingiverseLinks = new Map<string, string>();
-let pendingGallery: SourceGalleryImage[] = [];
-let galleryUnavailable = false;
-let gallerySelection: HTMLFieldSetElement | null = null;
-let galleryCoverId: string | null = null;
-let includeGallery = true;
+let gallerySelection: ReturnType<typeof galleryPicker> | null = null;
 type ManualCapture =
   | { kind: "publication"; draft: BrowserCaptureMessage }
   | { kind: "direct"; url: string };
@@ -649,12 +655,8 @@ function clearInboxAction() {
 }
 
 function clearCandidateSelection() {
-  pendingGallery = [];
-  galleryUnavailable = false;
-  gallerySelection?.remove();
+  gallerySelection?.element.remove();
   gallerySelection = null;
-  galleryCoverId = null;
-  includeGallery = true;
   fileCount.textContent = "Files";
   setFilePickerVisible(false);
   selectionMessage.hidden = true;
@@ -833,71 +835,10 @@ function setFilePickerVisible(visible: boolean) {
   changeFiles.textContent = visible ? "Done" : "Change";
 }
 
-function renderGallery() {
-  gallerySelection?.remove();
-  if (!pendingGallery.length && !galleryUnavailable) return;
-  gallerySelection = document.createElement("fieldset");
-  gallerySelection.className = "publication-gallery";
-  const legend = document.createElement("legend");
-  gallerySelection.append(legend);
-  if (!pendingGallery.length) {
-    legend.textContent = "Gallery unavailable";
-    candidatePanel.after(gallerySelection);
-    return;
-  }
-  const [defaultCover] = pendingGallery;
-  galleryCoverId = defaultCover.id;
-  const strip = document.createElement("div");
-  strip.className = "gallery-strip";
-  strip.setAttribute("role", "group");
-  strip.setAttribute("aria-label", "Choose a cover image");
-  const toggleLabel = document.createElement("label");
-  toggleLabel.className = "gallery-toggle";
-  const toggle = document.createElement("input");
-  toggle.type = "checkbox";
-  toggleLabel.append(toggle, "Don’t include images");
-  function updateCover() {
-    const cover = pendingGallery.findIndex((image) => image.id === galleryCoverId);
-    const count = pendingGallery.length;
-    legend.textContent = includeGallery
-      ? `${count} ${count === 1 ? "image" : "images"} · cover: image ${cover + 1}`
-      : "Gallery excluded";
-    strip.hidden = !includeGallery;
-    for (const button of strip.querySelectorAll("button")) {
-      button.setAttribute("aria-pressed", String(button.dataset.imageId === galleryCoverId));
-    }
-  }
-  toggle.addEventListener("change", () => {
-    includeGallery = !toggle.checked;
-    updateCover();
-  });
-  for (const [index, image] of pendingGallery.entries()) {
-    const button = document.createElement("button");
-    const label = `Use image ${index + 1} as cover`;
-    button.type = "button";
-    button.dataset.imageId = image.id;
-    button.setAttribute("aria-label", label);
-    button.title = label;
-    const thumbnail = document.createElement("img");
-    thumbnail.alt = "";
-    thumbnail.loading = "lazy";
-    thumbnail.referrerPolicy = "no-referrer";
-    thumbnail.src = image.url;
-    button.append(thumbnail);
-    button.addEventListener("click", () => {
-      galleryCoverId = image.id;
-      updateCover();
-    });
-    strip.append(button);
-  }
-  gallerySelection.append(strip, toggleLabel);
-  candidatePanel.after(gallerySelection);
-  updateCover();
-}
-
 function renderCandidateSelection(
   capture: BrowserCaptureMessage,
   defaults: CaptureSelection,
+  images: SourceGalleryImage[] | null,
   showPicker: boolean,
 ) {
   pendingMarketplaceCapture = null;
@@ -958,7 +899,10 @@ function renderCandidateSelection(
   selectionMessage.hidden = defaults.kind !== "ambiguous";
   if (defaults.kind === "ambiguous") selectionMessage.textContent = defaults.message;
   setFilePickerVisible(showPicker || defaults.kind !== "selected");
-  renderGallery();
+  if (images === null || images.length > 0) {
+    gallerySelection = galleryPicker(images);
+    candidatePanel.after(gallerySelection.element);
+  }
   captureButton.textContent = "Confirm and upload selected files";
   renderImportAvailability();
 }
@@ -977,12 +921,6 @@ function selectedCandidates(capture: BrowserCaptureMessage) {
     (input) => Number(input.dataset.candidateIndex),
   );
   return indexes.flatMap((index) => capture.candidates[index] ?? []);
-}
-
-function selectedGallery() {
-  if (!includeGallery) return [];
-  const cover = pendingGallery.find((image) => image.id === galleryCoverId);
-  return cover ? [cover, ...pendingGallery.filter((image) => image.id !== cover.id)] : [];
 }
 
 function setButtonBusy(button: HTMLButtonElement, busy: boolean, busyLabel = "Working…") {
@@ -1113,14 +1051,11 @@ function renderImportAvailability() {
   const count = draft ? selectedCandidates(draft).length : 0;
   const packageSource = activeSource === "MakerWorld" || activeSource === "Creality Cloud";
   const unit = packageSource ? "package" : "file";
-  fileSummary.hidden =
-    !canCapture ||
-    Boolean(pendingManualCapture) ||
-    !(draft || (importIntentSupported && isRichProvider(activeSource)));
+  fileSummary.hidden = !canCapture || !draft;
   fileCount.textContent = draft ? `Files: ${count} ${unit}${count === 1 ? "" : "s"}` : "Files";
   changeFiles.disabled = importBusy || checkingImportContext;
   candidatePanel.disabled = importBusy;
-  if (gallerySelection) gallerySelection.disabled = importBusy;
+  if (gallerySelection) gallerySelection.element.disabled = importBusy;
   if (count > 0) selectionMessage.hidden = true;
   captureButton.disabled =
     importBusy ||
@@ -1138,11 +1073,13 @@ function renderImportAvailability() {
       ? "Upload selected file"
       : resumingImport
         ? "Resume import"
-        : reviewBeforeImporting.checked
-          ? "Send to Pending Imports"
-          : count > 1
-            ? `Import ${count} files`
-            : "Import";
+        : !draft && isRichProvider(activeSource)
+          ? "Review files and images"
+          : reviewBeforeImporting.checked
+            ? "Send to Pending Imports"
+            : count > 1
+              ? `Import ${count} files`
+              : "Import";
   }
   importHint.hidden = !importBusy && (!pendingManualCapture || needsDirectFile);
   if (importBusy) {
@@ -1161,7 +1098,7 @@ function renderTabContent() {
   const target = showSetupInCapture ? captureSetup : settingsConnection;
   if (connectionPanel.parentElement !== target) target.append(connectionPanel);
   connectionOverview.hidden = !showOverview;
-  editButton.hidden = !showOverview || activeTab === "settings";
+  editButton.hidden = panelMode || !showOverview || activeTab === "settings";
   captureEditorHint.hidden = !editingConnection;
   if (showOverview && connectedConfig) {
     settingsServer.textContent = connectedConfig.vault;
@@ -1434,7 +1371,7 @@ async function establishConnection(
     disconnectButton.hidden = true;
     fillConnectionForm(normalized);
     renderConnection("connected", { config: normalized, profile: verifiedConnection.user });
-    if (wasEditing) tabs.select(tabBeforeEdit);
+    if (wasEditing) tabs?.select(tabBeforeEdit);
     const captureAuthorization = accessToken ?? normalized.deviceCredential;
     if (importIntentSupported && captureAuthorization)
       void primeImportContext(normalized, captureAuthorization);
@@ -2272,7 +2209,7 @@ function openConnectionEditor() {
   cancelButton.hidden = false;
   disconnectButton.hidden = false;
   connectButton.textContent = connectionActionLabel();
-  tabs.select("settings");
+  tabs?.select("settings");
   showStatus();
   vaultInput.focus();
 }
@@ -2292,7 +2229,7 @@ cancelButton.addEventListener("click", () => {
     config: connectedConfig ?? undefined,
     profile: connectedProfile,
   });
-  tabs.select(tabBeforeEdit);
+  tabs?.select(tabBeforeEdit);
   showStatus();
 });
 
@@ -2379,23 +2316,19 @@ async function rememberCaptureDefaults(config: Config, tags: string[]) {
     .catch(() => {});
 }
 
-captureButton.addEventListener("click", () => void runCapture("import"));
+captureButton.addEventListener("click", () => void runCapture());
 changeFiles.addEventListener("click", () => {
-  if (pendingDraft()) {
-    const open = candidatePanel.hidden === true;
-    setFilePickerVisible(open);
-    if (open) candidatePanel.querySelector("input")?.focus();
-  } else {
-    void runCapture("choose");
-  }
+  const open = candidatePanel.hidden === true;
+  setFilePickerVisible(open);
+  if (open) candidatePanel.querySelector("input")?.focus();
 });
 
-async function runCapture(mode: "import" | "choose") {
+async function runCapture() {
   if (!connectedConfig || connectionState !== "connected") {
     showStatus("Connect PrintStash before importing.", "error");
     return;
   }
-  if (importBusy || checkingImportContext || (mode === "import" && captureButton.disabled)) return;
+  if (importBusy || checkingImportContext || captureButton.disabled) return;
   if (!coverError.hidden) {
     coverInput.focus();
     return;
@@ -2409,9 +2342,10 @@ async function runCapture(mode: "import" | "choose") {
   collection.close();
   const capture = captureOperations.begin(config, authorization);
   const runStage = vaultStage(capture);
-  let focusCandidates = false;
+  let focusReview = false;
   importBusy = true;
-  setButtonBusy(captureButton, true, "Sending…");
+  const discovering = isRichProvider(activeSource) && !pendingDraft() && !pendingManualCapture;
+  setButtonBusy(captureButton, true, discovering ? "Finding files and images…" : "Sending…");
   renderImportAvailability();
   showStatus();
   try {
@@ -2497,7 +2431,7 @@ async function runCapture(mode: "import" | "choose") {
       return;
     }
     async function uploadSelection(draft: BrowserCaptureMessage) {
-      const selectedImages = selectedGallery();
+      const selectedImages = gallerySelection?.selectedImages() ?? [];
       const imageOrigins = [
         ...new Set(selectedImages.map((image) => `${new URL(image.url).origin}/*`)),
       ];
@@ -2739,13 +2673,12 @@ async function runCapture(mode: "import" | "choose") {
     }
     if (captureRoute === "candidate_confirmation") {
       if (!visibleCapture) throw new Error("The active tab has no normalized capture source.");
-      pendingGallery = [];
-      galleryUnavailable = false;
+      let images: SourceGalleryImage[] | null = [];
       if (activePage?.id) {
         const tabId = activePage.id;
         try {
           if (visibleCapture.source.provider === "printables") {
-            pendingGallery = await capture.run((signal) =>
+            images = await capture.run((signal) =>
               readPrintablesGallery(visibleCapture.source.canonical_url, signal),
             );
           } else {
@@ -2757,29 +2690,25 @@ async function runCapture(mode: "import" | "choose") {
                 args: [visibleCapture.source.provider],
               }),
             );
-            pendingGallery = await sourceGallery(
+            images = await sourceGallery(
               visibleCapture.source.canonical_url,
               results[0]?.result ?? [],
             );
           }
         } catch {
           capture.assertCurrent();
-          galleryUnavailable = true;
+          images = null;
         }
         capture.assertCurrent();
       }
       if (!activePage?.url) throw new Error("The active tab has no capture URL.");
       const defaults = defaultCaptureSelection(visibleCapture, activePage.url);
       runCaptureSyncStage(
-        () => renderCandidateSelection(visibleCapture, defaults, mode === "choose" || !onReady),
+        () => renderCandidateSelection(visibleCapture, defaults, images, !onReady),
         "capture_candidate_render_failed",
         "The provider files could not be shown. Choose a downloaded file to attach it in Pending Imports.",
       );
-      if (mode === "import" && onReady && defaults.kind === "selected") {
-        await uploadSelection(visibleCapture);
-      } else if (mode === "choose" || defaults.kind === "ambiguous") {
-        focusCandidates = true;
-      }
+      focusReview = true;
       return;
     }
     const pageUrl = activePage?.url;
@@ -2895,7 +2824,12 @@ async function runCapture(mode: "import" | "choose") {
         captureButton.textContent = "Upload selected file";
       }
       renderImportAvailability();
-      if (focusCandidates) candidatePanel.querySelector("input")?.focus();
+      if (focusReview) {
+        const firstChoice = candidatePanel.hidden
+          ? gallerySelection?.element.querySelector("input")
+          : candidatePanel.querySelector("input");
+        (firstChoice ?? captureButton).focus();
+      }
     }
   }
 }
@@ -3134,7 +3068,7 @@ async function initialize() {
   renderActivePage();
   measurePanelHeight(activePage);
   if (activePage) void resolvePageTitle(activePage);
-  if (!tabTouched) {
+  if (tabs && !tabTouched) {
     const saved = POPUP_TABS.find((tab) => tab === stored.popupTab);
     tabs.select(activeSource ? "capture" : (saved ?? "capture"));
   }

@@ -46,9 +46,12 @@ for the store's privacy-policy URL; the site also provides a Spanish version.
 ### Capture panel and recovery
 
 On an individual MakerWorld, Printables, Thingiverse, MyMiniFactory, Cults,
-Thangs, Creality Cloud or MakerOnline publication, use **Enable panel on this site** in the popup to grant that site's permission. When **Allow supported marketplaces** was on while connecting, the panel is already enabled everywhere. The panel shows file
-choices and your previous captures of the publication. That history is not a
-comparison of file bytes. Hide and reopen the panel without stopping a transfer.
+Thangs, Creality Cloud or MakerOnline publication, use **Enable panel on this
+site** in the popup to grant that site's permission. **Allow supported
+marketplaces** enables the panel on every supported site during setup. The
+panel shows file and image choices. Open the toolbar popup for History and Settings. History
+lists previous captures of the publication. Hide and reopen the panel without
+stopping a transfer.
 Reloading or closing the tab interrupts browser work: return to the same page,
 select the same files, and confirm to recover verified uploads before staging
 expires. Recovery is per file, not per byte; expired staging requires downloading
@@ -65,10 +68,12 @@ resulting Model's source without changing model bytes. If a reload interrupted i
 upload, reselect the same cover; verified model uploads are retained. Cover bytes
 and collection labels are not saved in extension storage.
 
-The publication gallery lists the detected images with all selected initially. Deselect
-images before confirming to choose a smaller set. Up to 64 JPEG, PNG, WebP or GIF
-images can be retained, at 15 MiB per image; GIFs become a still image of the first
-frame. The first selected image supplies the default card cover. Cards and Model
+Choose **Review files and images** to load the marketplace selection before
+sending anything. All detected photos start selected. Toggle individual thumbnails
+or use **Deselect all** to import files only. Use **Gallery cover** to choose
+which selected image appears first. Up to 64 JPEG, PNG, WebP or GIF
+images can be retained, at 15 MiB per image. GIFs become a still image of the first
+frame. The first selected image is the default cover. Cards and Model
 previews retain the rest of the gallery, and **Edit cover** can select another
 image without discarding the others. An existing chosen cover is preserved.
 

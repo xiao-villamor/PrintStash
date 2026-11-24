@@ -70,49 +70,60 @@ html[data-panel] .popup:has(#view-capture:not([hidden])) {
   gap: var(--space-8);
 }
 
-.gallery-strip {
-  display: flex;
-  gap: var(--space-4);
-  overflow-x: auto;
-  padding: var(--space-4);
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--gallery-thumbnail-width), 1fr));
+  gap: var(--space-8);
+  margin-block: var(--space-4) var(--space-8);
 }
 
-.gallery-strip button {
-  flex: 0 0 var(--gallery-thumbnail-size);
-  block-size: var(--gallery-thumbnail-size);
+.gallery-option {
+  gap: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--muted);
-  padding: 1px;
-  cursor: pointer;
+  background: var(--card);
 }
 
-.gallery-strip button[aria-pressed="true"] {
+.gallery-option:has(input:checked) {
+  border-color: var(--ring);
+}
+
+.gallery-option:has(input:focus-visible) {
   outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
-.gallery-strip img {
+.gallery-option img {
   display: block;
   inline-size: 100%;
-  block-size: 100%;
-  border-radius: calc(var(--radius) - 2px);
+  aspect-ratio: 1;
+  border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+  background: var(--muted);
   object-fit: cover;
 }
 
-.gallery-toggle {
+.gallery-caption {
   display: flex;
   align-items: center;
-  gap: var(--space-8);
-  min-height: var(--control-height);
-  cursor: pointer;
+  gap: var(--space-4);
+  padding: var(--space-4);
 }
 
-.gallery-toggle input {
+.gallery-caption input {
   min-height: 0;
   inline-size: auto;
   flex: none;
   margin: 0;
   accent-color: var(--primary);
+}
+
+.gallery-cover {
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+}
+
+.gallery-cover select {
+  min-width: 0;
 }
 
 main {
@@ -137,7 +148,7 @@ a {
   text-underline-offset: var(--space-4);
 }
 
-:where(a, button, input):focus-visible {
+:where(a, button, input, select):focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
@@ -421,6 +432,7 @@ label {
 
 input,
 button,
+select,
 label.file-picker-button {
   min-height: var(--control-height);
   border: 1px solid var(--border);
@@ -885,10 +897,6 @@ main:has(#view-settings:not([hidden])) {
   place-items: center;
   overflow: clip;
   --launcher-size: 40px;
-}
-
-.launcher-preview .launcher .launcher-hint {
-  display: none;
 }
 
 .launcher-preview[data-variant="edge-tab"] .launcher {
