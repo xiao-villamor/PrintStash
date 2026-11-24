@@ -201,7 +201,7 @@ export function DocumentBrowser({
           </div>
         )}
 
-        <div className={modelId === undefined ? undefined : "border border-border bg-card"}>
+        <div className={modelId === undefined ? undefined : "overflow-hidden rounded-lg border border-border bg-card"}>
           {documents.isError ? (
             <div role="alert" className="p-5 text-sm text-destructive">
               <p>{userMessage(documents.error)}</p>

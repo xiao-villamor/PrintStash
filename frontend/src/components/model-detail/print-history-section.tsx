@@ -603,7 +603,7 @@ export function PrintHistorySection({
         </Modal>
 
         {showHistory && (
-          <div className="mt-2 border border-border bg-card">
+          <div className="mt-2 overflow-hidden rounded-lg border border-border bg-card">
             {visibleJobs.length === 0 ? (
               <div className="space-y-2.5 px-3.5 py-4 text-sm/5">
                 <p>

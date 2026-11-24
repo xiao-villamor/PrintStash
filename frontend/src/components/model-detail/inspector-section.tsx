@@ -37,7 +37,7 @@ export function SoftCard({ children, className }: { children: ReactNode; classNa
   return (
     <Card
       className={cn(
-        "min-w-0 divide-y divide-border overflow-hidden border border-border bg-card",
+        "min-w-0 divide-y divide-border overflow-hidden rounded-lg border border-border bg-card",
         className,
       )}
     >

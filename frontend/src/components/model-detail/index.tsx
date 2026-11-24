@@ -1296,13 +1296,14 @@ function ModelDetailPresentation({
                   </Button>
                   {canEditModel && auth.isAuthenticated && !editing && (
                     <Button
-                      variant="outline"
-                      size="icon"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="model-detail-favorite"
                       aria-label={uiText("Edit details")}
                       title={uiText("Edit details")}
                       onClick={() => enterEdit()}
                     >
-                      <Pencil className="h-6 w-6 shrink-0 text-foreground" aria-hidden />
+                      <Pencil className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
                     </Button>
                   )}
                   <Button
@@ -1382,7 +1383,7 @@ function ModelDetailPresentation({
             <div
               role="region"
               aria-label={uiText("Preview")}
-              className="model-detail-preview relative min-h-80 overflow-hidden border border-outline-variant bg-surface-container-low"
+              className="model-detail-preview relative min-h-80 overflow-hidden rounded-lg border border-outline-variant bg-surface-container-low"
             >
               <div className="detail-preview-canvas relative flex min-h-80 w-full items-center justify-center md:min-h-0">
                 {viewerMode === "gcode" && hasToolpathPreview ? (
@@ -1564,7 +1565,7 @@ function ModelDetailPresentation({
           <div
             data-testid="model-detail-sidebar"
             style={{ "--detail-sidebar-width": `${detailSidebarWidth}px` }}
-            className="model-detail-inspector relative flex min-h-0 w-full shrink-0 flex-col border border-outline-variant bg-surface-container-lowest md:[width:var(--detail-sidebar-width)]"
+            className="model-detail-inspector relative flex min-h-0 w-full shrink-0 flex-col rounded-lg border border-outline-variant bg-surface-container-lowest md:[width:var(--detail-sidebar-width)]"
           >
             <div
               role="separator"
