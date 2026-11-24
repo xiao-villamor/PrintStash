@@ -2,7 +2,15 @@
 
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, Box, ChevronRight, Download, Loader2, MoreHorizontal } from "lucide-react";
+import {
+  ArrowUpRight,
+  Box,
+  ChevronRight,
+  Download,
+  Loader2,
+  MoreHorizontal,
+  Star,
+} from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { modelPrinterFilesOptions, useModelDetail } from "@/features/library/model-detail";
 import { downloadAuthenticatedFile, getAssetUrl, getModel, updateModel } from "@/lib/api";
@@ -431,40 +439,43 @@ export function InspectorContent({
       )}
       {file && (
         <section aria-label={uiText("Print this revision")} className="library-inspector-workspace">
-          {file.is_recommended && (
-            <h3 className="library-inspector-eyebrow">{uiText("Recommended print")}</h3>
-          )}
+          <div className="library-inspector-block-head">
+            <h3 className="library-inspector-eyebrow">
+              {file.is_recommended ? uiText("Recommended print") : uiText("Revision")}
+            </h3>
+            {revisions.length > 1 ? (
+              <select
+                value={file.id}
+                aria-label={uiText("Choose G-code revision")}
+                title={revisionName(file)}
+                onChange={(event) => setSelectedId(Number(event.target.value))}
+              >
+                {revisions.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {revisionName(item)}
+                    {item.is_recommended ? ` · ★ ${uiText("Recommended")}` : ""}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="library-inspector-rev-chip">
+                {revisionName(file)}
+                {file.is_recommended && <Star className="size-3 fill-current" aria-hidden />}
+              </span>
+            )}
+          </div>
           <div className="library-inspector-print-summary">
-            <div className="library-inspector-revision">
-              {revisions.length > 1 ? (
-                <select
-                  value={file.id}
-                  aria-label={uiText("Choose G-code revision")}
-                  title={revisionName(file)}
-                  onChange={(event) => setSelectedId(Number(event.target.value))}
-                >
-                  {revisions.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {revisionName(item)}
-                      {item.is_recommended ? ` · ★ ${uiText("Recommended")}` : ""}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <h4>{revisionName(file)}</h4>
-              )}
-              {!file.is_recommended && canEdit && (
-                <Button
-                  className={sectionAction}
-                  variant="ghost"
-                  size="xs"
-                  disabled={revision.saving !== null}
-                  onClick={() => void revision.update(file, { is_recommended: true })}
-                >
-                  {uiText("Recommend")}
-                </Button>
-              )}
-            </div>
+            {!file.is_recommended && canEdit && (
+              <Button
+                className={sectionAction}
+                variant="ghost"
+                size="xs"
+                disabled={revision.saving !== null}
+                onClick={() => void revision.update(file, { is_recommended: true })}
+              >
+                {uiText("Recommend")}
+              </Button>
+            )}
             {printStats.length > 0 && (
               <dl className="library-inspector-stats">
                 {printStats.map(([label, value]) => (
@@ -500,19 +511,28 @@ export function InspectorContent({
             )}
             <div className="library-inspector-delivery" data-library-revision-actions>
               {canSend && (
-                <Button size="sm" onClick={() => setSendOpen(true)}>
+                <Button size="sm" className="flex-1" onClick={() => setSendOpen(true)}>
                   <Printer3D className="size-4 shrink-0" aria-hidden />
                   {uiText("Send to printer")}
                 </Button>
               )}
-              <Button
-                size="sm"
-                variant={canSend ? "ghost" : "default"}
-                onClick={() => download(file)}
-              >
-                <Download className="size-4 shrink-0" aria-hidden />
-                {uiText("Download G-code")}
-              </Button>
+              {canSend ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-[34px] px-0"
+                  aria-label={uiText("Download G-code")}
+                  title={uiText("Download G-code")}
+                  onClick={() => download(file)}
+                >
+                  <Download className="size-4 shrink-0" aria-hidden />
+                </Button>
+              ) : (
+                <Button size="sm" className="flex-1" onClick={() => download(file)}>
+                  <Download className="size-4 shrink-0" aria-hidden />
+                  {uiText("Download G-code")}
+                </Button>
+              )}
             </div>
           </div>
         </section>

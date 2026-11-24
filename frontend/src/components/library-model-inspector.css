@@ -471,3 +471,51 @@ details.library-inspector-section > summary {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+
+/* The block's head: its label on the left, the revision on the right. */
+.library-inspector-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.library-inspector-block-head .library-inspector-eyebrow {
+  margin: 0;
+}
+.library-inspector-block-head select {
+  width: auto;
+  max-width: 60%;
+  height: 28px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+.library-inspector-rev-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
+  font: 500 12px/1 var(--font-mono);
+}
+.library-inspector-rev-chip svg {
+  color: var(--warning);
+}
+.library-inspector-workspace .library-inspector-print-summary {
+  padding-block: 0 14px;
+}
+.library-inspector-workspace .library-inspector-stats {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.library-inspector-workspace .library-inspector-delivery {
+  flex-wrap: nowrap;
+  margin-top: 4px;
+}
+.library-inspector-workspace .library-inspector-delivery button {
+  white-space: nowrap;
+}
