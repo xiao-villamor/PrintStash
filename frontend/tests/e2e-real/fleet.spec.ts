@@ -56,7 +56,7 @@ test.describe("fleet queue", () => {
       .getByRole("tabpanel", { name: /^Revisions/ })
       .getByRole("button", { name: "Add to queue", exact: true })
       .click();
-    const dialog = page.getByRole("dialog", { name: "Queue Rev 1", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Add to queue", exact: true });
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Add to queue", exact: true }).click();
     await expect(dialog).toHaveCount(0);
@@ -138,7 +138,7 @@ test.describe("fleet queue", () => {
       (response) =>
         response.url().endsWith("/api/v1/fleet/queue") && response.request().method() === "POST",
     );
-    await addJob.getByRole("button", { name: "Save job" }).click();
+    await addJob.getByRole("button", { name: "Add to queue" }).click();
     const receipt = await enqueue;
     expect(receipt.ok()).toBe(true);
     const job = await receipt.json();

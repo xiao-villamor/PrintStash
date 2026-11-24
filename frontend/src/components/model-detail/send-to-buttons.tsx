@@ -12,7 +12,7 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "@/lib/link";
-import { ExternalLink, Loader2, Send, WifiOff } from "lucide-react";
+import { ExternalLink, ListPlus, Loader2, Send, WifiOff } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 
 import {
@@ -38,15 +38,24 @@ import {
 import { formatPlateEstimate } from "./format-plate-estimate";
 import { revisionStatusLabel } from "./presentation";
 import { ChoiceField } from "./choice-field";
+import { revisionLabel } from "@/features/printers/saved-revision";
+import {
+  PrintConfirmationField,
+  QueueCompatibilityField,
+  QueueDialogActions,
+  QueueDispatchDetails,
+  QueuePriorityField,
+  QueueRevisionPanel,
+  QueueRoutingField,
+  QueueTargetGroupField,
+} from "@/components/queue-composer";
+import { OptionPicker } from "@/components/ui/option-picker";
 import { providerLabel } from "@/lib/printer-providers";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Localized } from "@/components/ui/localized";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
-
-const selectClassName =
-  "h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-disabled disabled:opacity-50";
 
 function printArtifactFormat(filename: string): "gcode_text" | "bgcode_binary" {
   return filename.toLowerCase().endsWith(".bgcode") ? "bgcode_binary" : "gcode_text";
@@ -172,7 +181,10 @@ export function SendToButtons({
     ? platesQuery.data?.plate_metadata?.find((plate) => plate.number === plateIndex)?.metadata
     : selectedFileDetails?.metadata;
   const [priority, setPriority] = useState<JobPriority>("normal");
+  const [queueAllowMismatch, setQueueAllowMismatch] = useState(false);
   const [targetGroup, setTargetGroup] = useState("");
+  const [queuePrinterId, setQueuePrinterId] = useState<number | null>(null);
+  const deliveryModeName = useId();
   const [compatibility, setCompatibility] = useState<CompatibilityRead | null>(null);
   const [confirmMismatch, setConfirmMismatch] = useState(false);
   useEffect(() => {
@@ -235,6 +247,7 @@ export function SendToButtons({
   useEffect(() => {
     if (!showSend) {
       appliedPrinterIntent.current = null;
+      setQueueAllowMismatch(false);
       return;
     }
     if (
@@ -263,23 +276,30 @@ export function SendToButtons({
       !row.missing_since,
   );
 
-  function togglePrinter(id: number) {
-    if (deliveryMode === "queue") {
-      setSelectedPrinterIds([id]);
-      return;
-    }
-    setSelectedPrinterIds((current) =>
-      current.includes(id) ? current.filter((currentId) => currentId !== id) : [...current, id],
-    );
-  }
+  const groups = Array.from(
+    new Set(
+      printers
+        .filter((printer) => printer.access.can_print)
+        .flatMap((printer) => (printer.group ? [printer.group] : [])),
+    ),
+  ).sort();
+  const queuePrinters = availablePrinters.filter(
+    (printer) => !targetGroup || printer.group === targetGroup,
+  );
+  const requestedQueuePrinterId = queuePrinterId ?? preselectPrinterId ?? selectedPrinters[0]?.id;
+  const queuePrinter =
+    queuePrinters.find((printer) => printer.id === requestedQueuePrinterId) ??
+    (queuePrinterId === null && preselectPrinterId === undefined ? queuePrinters[0] : undefined);
 
   async function send(allowMismatch = false) {
     const session = getSessionVersion();
     if (!selectedFile || !plateReady || (deliveryMode === "queue" && !validQuantity)) return;
     const targetPrinterIds =
-      deliveryMode === "send" || routingStrategy === "manual"
+      deliveryMode === "send"
         ? selectedPrinters.map((printer) => printer.id)
-        : [];
+        : routingStrategy === "manual" && queuePrinter
+          ? [queuePrinter.id]
+          : [];
     if (!allowMismatch && targetPrinterIds.length > 0) {
       try {
         const report = await commands.checkFleetCompatibility(selectedFile, targetPrinterIds);
@@ -299,7 +319,7 @@ export function SendToButtons({
       }
     }
     if (deliveryMode === "queue") {
-      if (routingStrategy === "manual" && selectedPrinters.length === 0) return;
+      if (routingStrategy === "manual" && !queuePrinter) return;
       const spool =
         selectedSpoolId !== ""
           ? spools.find((candidate) => candidate.id === selectedSpoolId)
@@ -311,7 +331,7 @@ export function SendToButtons({
           file_id: selectedFile,
           plate_index: sliced ? plateIndex : undefined,
           strategy: routingStrategy,
-          printer_id: routingStrategy === "manual" ? selectedPrinters[0]?.id : undefined,
+          printer_id: routingStrategy === "manual" ? queuePrinter?.id : undefined,
           spool_id: selectedSpoolId === "" ? null : selectedSpoolId,
           spool_name: spool
             ? spool.filament_name ||
@@ -496,6 +516,14 @@ export function SendToButtons({
           : null
     : null;
 
+  const queuing = deliveryMode === "queue";
+  const queueDestination =
+    routingStrategy === "manual"
+      ? (queuePrinter?.name ?? uiText("Choose printer"))
+      : routingStrategy === "default"
+        ? uiText("Default printer")
+        : uiText("Least busy");
+
   return (
     <Localized>
       <>
@@ -648,457 +676,473 @@ export function SendToButtons({
             if (!sending) setShowSend(false);
           }}
           title={
-            selectedFileDetails
-              ? uiText(
-                  deliveryMode === "queue" ? "Queue Rev {value1}" : "Send Rev {value1} to printer",
-                  {
+            queuing
+              ? uiText("Add to queue")
+              : selectedFileDetails
+                ? uiText("Send Rev {value1} to printer", {
                     value1: String(
                       selectedFileDetails.gcode_revision_number ?? selectedFileDetails.version,
                     ),
-                  },
-                )
-              : uiText(deliveryMode === "queue" ? "Add to queue" : "Send to printer")
+                  })
+                : uiText("Send to printer")
           }
-          description={fileContext && <span className="wrap-anywhere">{fileContext}</span>}
+          description={
+            fileContext ? <span className="wrap-anywhere">{fileContext}</span> : undefined
+          }
+          dismissible={!sending}
           footer={
-            <>
-              <Button variant="outline" onClick={() => setShowSend(false)} disabled={sending}>
-                {uiText("Cancel")}
-              </Button>
-              <Button
-                onClick={() => void send()}
-                loading={sending}
-                disabled={
-                  !selectedFile ||
-                  !plateReady ||
-                  (deliveryMode === "send"
-                    ? selectedPrinters.length === 0 || (startPrint && !selectedPrintersCanStart)
-                    : !validQuantity ||
-                      (routingStrategy === "manual" && selectedPrinters.length === 0))
+            queuing ? (
+              <QueueDialogActions
+                busy={sending}
+                canSubmit={
+                  !!selectedFile &&
+                  plateReady &&
+                  validQuantity &&
+                  (routingStrategy !== "manual" || !!queuePrinter)
                 }
-              >
-                {!sending && <Send className="h-4 w-4" />}
-                {sending
-                  ? deliveryMode === "queue"
-                    ? uiText("Queuing…")
-                    : uiText("Sending…")
-                  : deliveryMode === "queue"
-                    ? uiText("Add to queue")
+                onClose={() => setShowSend(false)}
+                submit={{ onClick: () => void send(queueAllowMismatch) }}
+              />
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowSend(false)}
+                  disabled={sending}
+                >
+                  {uiText("Cancel")}
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => void send()}
+                  loading={sending}
+                  disabled={
+                    !selectedFile ||
+                    !plateReady ||
+                    selectedPrinters.length === 0 ||
+                    (startPrint && !selectedPrintersCanStart)
+                  }
+                >
+                  {!sending && <Send className="h-4 w-4" />}
+                  {sending
+                    ? uiText("Sending…")
                     : startPrint
                       ? uiText("Send & start print")
                       : uiText("Send to printer")}
-              </Button>
-            </>
+                </Button>
+              </>
+            )
           }
-          className="flex max-h-[calc(100dvh-2rem)] w-full max-w-5xl flex-col overflow-hidden"
+          className="print-task-dialog max-w-240"
+          bodyClassName="queue-compose-body flex-1 p-0"
         >
-          <div
-            data-testid="send-dialog-scroll-region"
-            className="min-h-0 flex-1 space-y-5 overflow-y-auto px-1"
-          >
-            <div className="detail-delivery-mode border-b border-border pb-4">
-              <ChoiceField<"send" | "queue">
-                label={uiText("Action")}
-                value={deliveryMode}
-                inline
-                disabled={sending}
-                options={[
-                  { value: "send", label: uiText("Send now") },
-                  { value: "queue", label: uiText("Add to queue") },
-                ]}
-                onChange={(mode) => {
-                  setDeliveryMode(mode);
-                  if (mode === "queue") {
-                    setStartPrint(false);
-                    if (!user?.is_superuser) setRoutingStrategy("manual");
-                  }
-                }}
-              />
-            </div>
-            <div className="detail-delivery-layout">
-              <div className="min-w-0 space-y-5">
-                <div className="space-y-4">
-                  <ChoiceField
-                    label={uiText("G-code revision")}
-                    disabled={sending}
-                    value={selectedFile}
-                    onChange={(fileId) => {
-                      setSelectedFile(fileId);
-                      setPlateSelection(null);
-                    }}
-                    options={gcodeFiles.map((file) => ({
-                      value: file.id,
-                      label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}${file.revision_label ? ` · ${file.revision_label}` : ""}${file.is_recommended ? uiText(" · Recommended") : ""}`,
-                      description:
-                        [
-                          file.metadata?.material_type,
-                          file.metadata?.layer_height_mm != null
-                            ? `${file.metadata.layer_height_mm} mm`
-                            : null,
-                          file.metadata?.nozzle_diameter_mm != null
-                            ? `${file.metadata.nozzle_diameter_mm} mm ${uiText("Nozzle")}`
-                            : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ") || file.original_filename,
-                    }))}
-                  />
-                  {sliced && (
-                    <div className="space-y-2">
-                      {platesQuery.isError ? (
-                        <div role="alert">
-                          <p>{uiText("Couldn’t load sliced plates")}</p>
-                          <Button variant="outline" onClick={() => void platesQuery.refetch()}>
-                            {uiText("Retry")}
-                          </Button>
-                        </div>
-                      ) : platesQuery.isPending ? (
-                        <p role="status">{uiText("Loading sliced plates…")}</p>
-                      ) : plates.length === 0 ? (
-                        <p role="alert">
-                          {uiText(
-                            "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.",
-                          )}
-                        </p>
-                      ) : (
-                        <ChoiceField
-                          label={uiText("Sliced plate")}
-                          value={plateIndex}
-                          disabled={sending}
-                          options={plates.map((index) => {
-                            const number = uiText("Plate {value1}", {
-                              value1: String(index).padStart(2, "0"),
-                            });
-                            const name = platesQuery.data?.identities?.find(
-                              (plate) => plate.number === index,
-                            )?.name;
-                            const metadata = platesQuery.data?.plate_metadata?.find(
-                              (plate) => plate.number === index,
-                            )?.metadata;
-                            const facts = [
-                              metadata?.estimated_time_s == null
-                                ? null
-                                : formatPlateEstimate(
-                                    "estimated_time_s",
-                                    metadata.estimated_time_s,
-                                  ),
-                              metadata?.filament_weight_g == null
-                                ? null
-                                : formatPlateEstimate(
-                                    "filament_weight_g",
-                                    metadata.filament_weight_g,
-                                  ),
-                            ].filter(Boolean);
-                            return {
-                              value: index,
-                              label: name ? `${number} · ${name}` : number,
-                              description: facts.join(" · "),
-                            };
-                          })}
-                          onChange={(index) => setPlateSelection({ fileId: selectedFile, index })}
-                        />
-                      )}
+          <div data-testid="send-dialog-scroll-region" className="flex min-h-full min-w-0 flex-col">
+            <fieldset
+              className="sticky top-0 z-10 shrink-0 border-b border-border bg-card px-6 py-3"
+              disabled={sending}
+            >
+              <legend className="sr-only">{uiText("Action")}</legend>
+              <div className="inline-flex max-w-full flex-wrap gap-1 border border-border bg-muted p-1">
+                {(
+                  [
+                    { value: "send", label: uiText("Send now"), Icon: Send },
+                    { value: "queue", label: uiText("Add to queue"), Icon: ListPlus },
+                  ] as const
+                ).map(({ value, label, Icon }) => (
+                  <label key={value} className="relative">
+                    <input
+                      type="radio"
+                      name={deliveryModeName}
+                      checked={deliveryMode === value}
+                      className="peer absolute inset-0 m-0 size-full cursor-action opacity-0"
+                      onChange={(event) => {
+                        const scrollBody =
+                          event.currentTarget.closest<HTMLDivElement>(".queue-compose-body");
+                        if (scrollBody) scrollBody.scrollTop = 0;
+                        setDeliveryMode(value);
+                        if (value === "queue") {
+                          setStartPrint(false);
+                          if (!user?.is_superuser) setRoutingStrategy("manual");
+                        }
+                      }}
+                    />
+                    <span className="flex min-h-8 items-center gap-2 px-3 text-sm font-medium text-muted-foreground peer-checked:bg-accent peer-checked:text-accent-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-inset peer-focus-visible:ring-ring">
+                      <Icon size={15} aria-hidden />
+                      {label}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <div className={queuing ? "queue-compose flex-1" : "flex-1 p-6"}>
+              <div className={queuing ? "queue-compose-fields" : "detail-delivery-layout"}>
+                <div className="min-w-0 space-y-5">
+                  <div className="space-y-4">
+                    <QueueRevisionPanel>
+                      <OptionPicker
+                        label={uiText("Revision")}
+                        searchPlaceholder={uiText("Search revisions")}
+                        disabled={sending}
+                        value={selectedFile}
+                        onChange={(fileId) => {
+                          setSelectedFile(fileId);
+                          setPlateSelection(null);
+                        }}
+                        options={gcodeFiles.map((file) => ({
+                          value: file.id,
+                          label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}${file.revision_label ? ` · ${file.revision_label}` : ""}${file.is_recommended ? uiText(" · Recommended") : ""}`,
+                          description:
+                            [
+                              file.original_filename,
+                              file.metadata?.material_type,
+                              file.metadata?.layer_height_mm != null
+                                ? `${file.metadata.layer_height_mm} mm`
+                                : null,
+                              file.metadata?.nozzle_diameter_mm != null
+                                ? `${file.metadata.nozzle_diameter_mm} mm ${uiText("Nozzle")}`
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ") || file.original_filename,
+                        }))}
+                      />
+                    </QueueRevisionPanel>
+                    {sliced && (
+                      <div className="space-y-2">
+                        {platesQuery.isError ? (
+                          <div role="alert">
+                            <p>{uiText("Couldn’t load sliced plates")}</p>
+                            <Button variant="outline" onClick={() => void platesQuery.refetch()}>
+                              {uiText("Retry")}
+                            </Button>
+                          </div>
+                        ) : platesQuery.isPending ? (
+                          <p role="status">{uiText("Loading sliced plates…")}</p>
+                        ) : plates.length === 0 ? (
+                          <p role="alert">
+                            {uiText(
+                              "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.",
+                            )}
+                          </p>
+                        ) : (
+                          <ChoiceField
+                            label={uiText("Sliced plate")}
+                            value={plateIndex}
+                            disabled={sending}
+                            options={plates.map((index) => {
+                              const number = uiText("Plate {value1}", {
+                                value1: String(index).padStart(2, "0"),
+                              });
+                              const name = platesQuery.data?.identities?.find(
+                                (plate) => plate.number === index,
+                              )?.name;
+                              const metadata = platesQuery.data?.plate_metadata?.find(
+                                (plate) => plate.number === index,
+                              )?.metadata;
+                              const facts = [
+                                metadata?.estimated_time_s == null
+                                  ? null
+                                  : formatPlateEstimate(
+                                      "estimated_time_s",
+                                      metadata.estimated_time_s,
+                                    ),
+                                metadata?.filament_weight_g == null
+                                  ? null
+                                  : formatPlateEstimate(
+                                      "filament_weight_g",
+                                      metadata.filament_weight_g,
+                                    ),
+                              ].filter(Boolean);
+                              return {
+                                value: index,
+                                label: name ? `${number} · ${name}` : number,
+                                description: facts.join(" · "),
+                              };
+                            })}
+                            onChange={(index) => setPlateSelection({ fileId: selectedFile, index })}
+                          />
+                        )}
+                      </div>
+                    )}
+                    {spoolmanEnabled && spools.length > 0 && (
+                      <ChoiceField<number | "">
+                        label={uiText("Spool")}
+                        inline
+                        value={selectedSpoolId}
+                        onChange={setSelectedSpoolId}
+                        options={[
+                          { value: "", label: uiText("No spool") },
+                          ...spools.map((spool) => ({
+                            value: spool.id,
+                            label:
+                              spool.filament_name ||
+                              spool.name ||
+                              uiText("Spool {value1}", { value1: String(spool.id) }),
+                            description: [
+                              spool.vendor_name,
+                              spool.location,
+                              spool.remaining_weight != null
+                                ? uiText(" ({value1} left)", {
+                                    value1: formatGrams(spool.remaining_weight),
+                                  })
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · "),
+                          })),
+                        ]}
+                      />
+                    )}
+                  </div>
+
+                  {spoolCoverageWarning && (
+                    <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+                      {spoolCoverageWarning}
                     </div>
                   )}
-                  {deliveryMode === "queue" && selectedFileDetails && (
-                    <dl
-                      aria-label={uiText("Queue details")}
-                      className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-3 text-sm"
-                    >
-                      <div className="col-span-2">
-                        <dt className="text-xs text-muted-foreground">
-                          {uiText("Revision test status")}
-                        </dt>
-                        <dd>{revisionStatusLabel(selectedFileDetails.revision_status)}</dd>
+                </div>
+                <div className="min-w-0 space-y-5">
+                  {deliveryMode === "queue" && (
+                    <div className="grid gap-4">
+                      {user?.is_superuser && (
+                        <QueueRoutingField
+                          value={routingStrategy}
+                          onChange={setRoutingStrategy}
+                          disabled={sending}
+                        />
+                      )}
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="min-w-0 space-y-1">
+                          <label
+                            htmlFor={`${copiesErrorId}-input`}
+                            className="block text-sm font-medium"
+                          >
+                            {uiText("Copies")}
+                          </label>
+                          <Input
+                            id={`${copiesErrorId}-input`}
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={copies}
+                            aria-invalid={!validQuantity}
+                            aria-describedby={!validQuantity ? copiesErrorId : undefined}
+                            onChange={(event) => setCopies(event.target.value)}
+                          />
+                          {!validQuantity && (
+                            <span id={copiesErrorId} className="block text-xs text-destructive">
+                              {uiText("Enter a whole number of copies, at least 1.")}
+                            </span>
+                          )}
+                        </div>
+                        <QueueTargetGroupField
+                          groups={groups}
+                          value={targetGroup}
+                          onChange={(value) => {
+                            setTargetGroup(value);
+                            setQueuePrinterId(null);
+                          }}
+                          disabled={sending}
+                        />
                       </div>
-                      {(!sliced || plateIndex !== null) && (
-                        <>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              {uiText("Estimated time per copy")}
-                            </dt>
+                      {routingStrategy === "manual" && (
+                        <OptionPicker
+                          label={uiText("Destination")}
+                          searchPlaceholder={uiText("Search printers")}
+                          placeholder={uiText("Choose printer")}
+                          value={queuePrinter?.id ?? null}
+                          options={queuePrinters.map((printer) => ({
+                            value: printer.id,
+                            label: printer.name,
+                            description: providerLabel(printer),
+                          }))}
+                          onChange={setQueuePrinterId}
+                          disabled={sending}
+                        />
+                      )}
+                      <QueuePriorityField
+                        value={priority}
+                        onChange={setPriority}
+                        disabled={sending}
+                      />
+                      <QueueCompatibilityField
+                        checked={queueAllowMismatch}
+                        onChange={setQueueAllowMismatch}
+                        disabled={sending}
+                      />
+                    </div>
+                  )}
+
+                  {deliveryMode === "send" && printers.length > 0 && (
+                    <div className="space-y-3">
+                      <OptionPicker
+                        multiple
+                        label={uiText("Destination")}
+                        placeholder={uiText("Choose printers")}
+                        searchPlaceholder={uiText("Search printers")}
+                        value={selectedPrinterIds}
+                        onChange={setSelectedPrinterIds}
+                        disabled={sending}
+                        options={printers.map((printer) => {
+                          const allowed = availablePrinters.some(
+                            (candidate) => candidate.id === printer.id,
+                          );
+                          const capability = !printer.access.can_print
+                            ? uiText("No print access")
+                            : !printer.capabilities.can_upload
+                              ? uiText("Upload unsupported")
+                              : !allowed
+                                ? uiText("Format unsupported")
+                                : printer.capabilities.can_start
+                                  ? uiText("Upload + start")
+                                  : uiText("Upload only");
+                          const verdict = compatibility?.printers.find(
+                            (row) => row.printer_id === printer.id,
+                          )?.verdict;
+                          return {
+                            value: printer.id,
+                            label: printer.name,
+                            description: [
+                              providerLabel(printer),
+                              knownUiText(printer.status),
+                              capability,
+                              verdict ? knownUiText(verdict) : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · "),
+                            disabled: !allowed,
+                          };
+                        })}
+                      />
+                      {selectedPrinters.length > 0 && (
+                        <ul className="max-h-32 divide-y divide-border overflow-y-auto">
+                          {selectedPrinters.map((printer) => (
+                            <li
+                              key={printer.id}
+                              className="flex min-w-0 items-center justify-between gap-2 py-2 text-sm"
+                            >
+                              <span className="min-w-0 wrap-anywhere">{printer.name}</span>
+                              <Link
+                                href={`/printers/${printer.id}`}
+                                className="shrink-0 text-xs text-muted-foreground hover:underline"
+                              >
+                                {uiText("Printer details")}
+                              </Link>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        {uiText(
+                          "Loaded material and nozzle come from recorded printer state. This is not a G-code safety check, and unknown state does not block sending.",
+                        )}
+                      </p>
+                    </div>
+                  )}
+
+                  {printersLoading && <p role="status">{uiText("Loading printers…")}</p>}
+                  {printersQuery.isSuccess && availablePrinters.length === 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+                      {uiText(
+                        deliveryMode === "queue" && routingStrategy !== "manual"
+                          ? "This job can wait in the queue for an eligible printer."
+                          : printers.length === 0
+                            ? "No printers configured"
+                            : "None of the configured printers can receive this file.",
+                      )}
+                      {printers.length === 0 &&
+                        (deliveryMode === "send" || routingStrategy === "manual") && (
+                          <Button asChild variant="outline" size="sm">
+                            <Link
+                              href="/printers"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={uiText("Opens in a new tab")}
+                            >
+                              {uiText("Manage printers")}
+                              <ExternalLink aria-hidden="true" className="size-3.5" />
+                            </Link>
+                          </Button>
+                        )}
+                    </div>
+                  )}
+                  {deliveryMode === "send" && (
+                    <PrintConfirmationField
+                      label={uiText("Start after upload")}
+                      ariaLabel={uiText("Start print immediately")}
+                      checked={startPrint}
+                      onChange={setStartPrint}
+                      disabled={!selectedPrinters.length || !selectedPrintersCanStart || sending}
+                    >
+                      <span className="block text-xs leading-relaxed text-muted-foreground">
+                        {uiText(
+                          "Off by default. When enabled, selected printers begin printing after upload.",
+                        )}
+                      </span>
+                      {!selectedPrintersCanStart && selectedPrinters.length > 0 && (
+                        <span className="block text-xs text-warning">
+                          {uiText("Remove upload-only printers to enable this option.")}
+                        </span>
+                      )}
+                    </PrintConfirmationField>
+                  )}
+
+                  {selectedUploads.length > 0 && (
+                    <div className="border-t border-border pt-3 text-xs text-muted-foreground">
+                      {uiText("Already uploaded to {value1}.", {
+                        value1: String(
+                          selectedUploads
+                            .map((upload) => `${upload.printer_name} as ${upload.remote_filename}`)
+                            .join(", ") ?? "",
+                        ),
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+              {queuing && (
+                <QueueDispatchDetails
+                  model={selectedFileDetails ? fileContext : undefined}
+                  revision={selectedFileDetails ? revisionLabel(selectedFileDetails) : undefined}
+                  destination={queueDestination}
+                  destinationStatus={
+                    routingStrategy === "manual" && queuePrinter
+                      ? queuePrinter.drain_mode
+                        ? uiText("Draining")
+                        : knownUiText(queuePrinter.status)
+                      : undefined
+                  }
+                  priority={priority}
+                  policy={queueAllowMismatch ? "allow_mismatch" : "safe"}
+                  plate={sliced ? plateIndex : null}
+                  copies={validQuantity ? quantity : undefined}
+                >
+                  <div>
+                    {selectedFileDetails && (
+                      <dl aria-label={uiText("Queue details")}>
+                        <dt>{uiText("Revision test status")}</dt>
+                        <dd>{revisionStatusLabel(selectedFileDetails.revision_status)}</dd>
+                        {(!sliced || plateIndex !== null) && (
+                          <>
+                            <dt>{uiText("Estimated time per copy")}</dt>
                             <dd className="tabular-nums">
                               {formatPlateEstimate("estimated_time_s", estimate?.estimated_time_s)}
                             </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              {uiText("Filament per copy")}
-                            </dt>
+                            <dt>{uiText("Filament per copy")}</dt>
                             <dd className="tabular-nums">
                               {formatPlateEstimate(
                                 "filament_weight_g",
                                 estimate?.filament_weight_g,
                               )}
                             </dd>
-                          </div>
-                        </>
-                      )}
-                    </dl>
-                  )}
-                  {spoolmanEnabled && spools.length > 0 && (
-                    <ChoiceField<number | "">
-                      label={uiText("Spool")}
-                      inline
-                      value={selectedSpoolId}
-                      onChange={setSelectedSpoolId}
-                      options={[
-                        { value: "", label: uiText("No spool") },
-                        ...spools.map((spool) => ({
-                          value: spool.id,
-                          label:
-                            spool.filament_name ||
-                            spool.name ||
-                            uiText("Spool {value1}", { value1: String(spool.id) }),
-                          description: [
-                            spool.vendor_name,
-                            spool.location,
-                            spool.remaining_weight != null
-                              ? uiText(" ({value1} left)", {
-                                  value1: formatGrams(spool.remaining_weight),
-                                })
-                              : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" · "),
-                        })),
-                      ]}
-                    />
-                  )}
-                </div>
-
-                {spoolCoverageWarning && (
-                  <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-                    {spoolCoverageWarning}
-                  </div>
-                )}
-              </div>
-              <div className="min-w-0 space-y-5">
-                {deliveryMode === "queue" && (
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <ChoiceField<RoutingStrategy>
-                      label={uiText("Routing")}
-                      value={routingStrategy}
-                      options={[
-                        ...(user?.is_superuser
-                          ? [
-                              {
-                                value: "least_busy" as const,
-                                label: uiText("Least busy eligible printer"),
-                              },
-                              { value: "default" as const, label: uiText("Default printer") },
-                            ]
-                          : []),
-                        { value: "manual", label: uiText("Choose printer") },
-                      ]}
-                      onChange={setRoutingStrategy}
-                    />
-                    <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                      {uiText("Copies")}
-                      <input
-                        className={selectClassName}
-                        type="number"
-                        min={1}
-                        step={1}
-                        value={copies}
-                        aria-label={uiText("Copies")}
-                        aria-invalid={!validQuantity}
-                        aria-describedby={!validQuantity ? copiesErrorId : undefined}
-                        onChange={(event) => setCopies(event.target.value)}
-                      />
-                      {!validQuantity && (
-                        <span id={copiesErrorId} className="block text-xs text-destructive">
-                          {uiText("Enter a whole number of copies, at least 1.")}
-                        </span>
-                      )}
-                    </label>
-                    <ChoiceField<JobPriority>
-                      label={uiText("Priority")}
-                      value={priority}
-                      options={[
-                        { value: "low", label: uiText("Low") },
-                        { value: "normal", label: uiText("Normal") },
-                        { value: "rush", label: uiText("Rush") },
-                      ]}
-                      onChange={setPriority}
-                      inline
-                    />
-                    <label className="block space-y-1.5 text-sm font-medium text-foreground">
-                      {uiText("Printer group")}
-                      <input
-                        className={selectClassName}
-                        value={targetGroup}
-                        onChange={(event) => setTargetGroup(event.target.value)}
-                        placeholder={uiText("Any group")}
-                      />
-                    </label>
-                  </div>
-                )}
-
-                {(deliveryMode === "send" || routingStrategy === "manual") &&
-                  availablePrinters.length > 0 && (
-                    <fieldset className="space-y-2">
-                      <legend className="mb-2 text-sm font-medium text-foreground">
-                        {uiText("Choose printers")}
-                      </legend>
-                      <div className="divide-y divide-border">
-                        {printers.map((printer) => {
-                          const formatSupported =
-                            printer.capabilities.accepted_print_formats.includes(
-                              selectedFileFormat,
-                            );
-                          const disabled =
-                            !printer.access.can_print ||
-                            !printer.capabilities.can_upload ||
-                            !formatSupported;
-                          const selected = selectedPrinterIds.includes(printer.id);
-                          const offline =
-                            printer.status === "offline" || printer.status === "unknown";
-                          return (
-                            <div
-                              key={printer.id}
-                              onClick={() => {
-                                if (!disabled && !sending) togglePrinter(printer.id);
-                              }}
-                              className={`flex min-w-0 items-start gap-3 py-4 ${disabled ? "cursor-disabled opacity-60" : "cursor-action"}`}
-                            >
-                              <Checkbox
-                                checked={selected}
-                                onChange={() => togglePrinter(printer.id)}
-                                disabled={disabled || sending}
-                                ariaLabel={uiText("Select {value1}", {
-                                  value1: String(printer.name),
-                                })}
-                              />
-                              <span className="min-w-0 flex-1">
-                                <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                                  <span className="min-w-0 wrap-anywhere text-sm font-medium text-foreground">
-                                    {printer.name}
-                                  </span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {knownUiText(printer.status)}
-                                  </span>
-                                </span>
-                                <span className="mt-1 flex flex-wrap gap-1">
-                                  <span
-                                    className={
-                                      offline
-                                        ? "text-xs text-muted-foreground"
-                                        : "text-xs text-foreground"
-                                    }
-                                  >
-                                    {providerLabel(printer)} ·
-                                  </span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {!printer.access.can_print
-                                      ? uiText("No print access")
-                                      : !printer.capabilities.can_upload
-                                        ? uiText("Upload unsupported")
-                                        : !formatSupported
-                                          ? uiText("Format unsupported")
-                                          : printer.capabilities.can_start
-                                            ? uiText("Upload + start")
-                                            : uiText("Upload only")}
-                                  </span>
-                                </span>
-                              </span>
-                              <span className="flex shrink-0 flex-col items-end gap-2 text-xs text-muted-foreground">
-                                {compatibility?.printers.find(
-                                  (row) => row.printer_id === printer.id,
-                                )?.verdict && (
-                                  <span>
-                                    {knownUiText(
-                                      compatibility.printers.find(
-                                        (row) => row.printer_id === printer.id,
-                                      )!.verdict,
-                                    )}
-                                  </span>
-                                )}
-                                <Link
-                                  href={`/printers/${printer.id}`}
-                                  onClick={(event) => event.stopPropagation()}
-                                  className={buttonVariants({ variant: "ghost", size: "xs" })}
-                                >
-                                  {uiText("Printer details")}
-                                </Link>
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <p className="pt-2 text-[13px] leading-relaxed text-muted-foreground">
-                        {uiText(
-                          "Loaded material and nozzle come from recorded printer state. This is not a G-code safety check, and unknown state does not block sending.",
+                          </>
                         )}
-                      </p>
-                    </fieldset>
-                  )}
-
-                {printersLoading && <p role="status">{uiText("Loading printers…")}</p>}
-                {printersQuery.isSuccess && availablePrinters.length === 0 && (
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-                    {uiText(
-                      deliveryMode === "queue" && routingStrategy !== "manual"
-                        ? "This job can wait in the queue for an eligible printer."
-                        : printers.length === 0
-                          ? "No printers configured"
-                          : "None of the configured printers can receive this file.",
+                      </dl>
                     )}
-                    {printers.length === 0 &&
-                      (deliveryMode === "send" || routingStrategy === "manual") && (
-                        <Button asChild variant="outline" size="sm">
-                          <Link
-                            href="/printers"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={uiText("Opens in a new tab")}
-                          >
-                            {uiText("Manage printers")}
-                            <ExternalLink aria-hidden="true" className="size-3.5" />
-                          </Link>
-                        </Button>
-                      )}
                   </div>
-                )}
-                {deliveryMode === "send" && (
-                  <label className="flex items-start gap-3 border-t border-border pt-4">
-                    <Checkbox
-                      checked={startPrint}
-                      onChange={setStartPrint}
-                      disabled={!selectedPrinters.length || !selectedPrintersCanStart || sending}
-                      ariaLabel={uiText("Start print immediately")}
-                      className="mt-0.5"
-                    />
-                    <span>
-                      <span className="block text-sm font-medium text-foreground">
-                        {uiText("Start after upload")}
-                      </span>
-                      <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-                        {uiText(
-                          "Off by default. When enabled, selected printers begin printing after upload.",
-                        )}
-                      </span>
-                      {!selectedPrintersCanStart && selectedPrinters.length > 0 && (
-                        <span className="mt-1 block text-xs text-warning">
-                          {uiText("Remove upload-only printers to enable this option.")}
-                        </span>
-                      )}
-                    </span>
-                  </label>
-                )}
-
-                {selectedUploads.length > 0 && (
-                  <div className="border-t border-border pt-3 text-xs text-muted-foreground">
-                    {uiText("Already uploaded to {value1}.", {
-                      value1: String(
-                        selectedUploads
-                          .map((upload) => `${upload.printer_name} as ${upload.remote_filename}`)
-                          .join(", ") ?? "",
-                      ),
-                    })}
-                  </div>
-                )}
-              </div>
+                </QueueDispatchDetails>
+              )}
             </div>
             {displayError && (
               <div

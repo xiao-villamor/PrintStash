@@ -120,8 +120,8 @@ async function openForm(user: ReturnType<typeof userEvent.setup>) {
 }
 
 async function chooseVoron(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole("button", { name: "Printer", exact: true }));
-  await user.click(await screen.findByRole("option", { name: "Voron", exact: true }));
+  await user.click(await screen.findByRole("button", { name: /^Printer$/ }));
+  await user.click(await screen.findByRole("option", { name: /^Voron$/ }));
 }
 
 beforeEach(() => {

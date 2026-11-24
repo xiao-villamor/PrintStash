@@ -61,7 +61,6 @@ import type {
   ViewerControls,
   ViewerCameraPreset,
   STLPreviewFeedback,
-  ViewerDisplayMode,
 } from "@/components/stl-viewer";
 import { useToolpathSources } from "@/lib/toolpath-preview";
 import type { ViewerMode } from "@/components/model-detail/viewer-toolbar";
@@ -275,7 +274,6 @@ function ModelDetailPresentation({
       state: location.state,
     });
   }
-  const [displayMode, setDisplayMode] = useState<ViewerDisplayMode>("solid");
   const detailLayout = useRef<HTMLDivElement>(null);
   const [detailLayoutWidth, setDetailLayoutWidth] = useState(() =>
     isBrowser() ? window.innerWidth - 93 : 1827,
@@ -319,7 +317,7 @@ function ModelDetailPresentation({
       setPreviewExpanded((expanded) => !expanded);
       if (event.target instanceof HTMLElement && event.target.closest(".model-detail-inspector")) {
         requestAnimationFrame(() =>
-          detailLayout.current?.querySelector<HTMLButtonElement>("[data-preview-expand]")?.focus(),
+          detailLayout.current?.querySelector<HTMLElement>("[data-preview-controls]")?.focus(),
         );
       }
     }
@@ -332,7 +330,7 @@ function ModelDetailPresentation({
       if (event.key !== "Escape" || event.defaultPrevented || keyboardOverlayOpen()) return;
       event.preventDefault();
       setPreviewExpanded(false);
-      detailLayout.current?.querySelector<HTMLButtonElement>("[data-preview-expand]")?.focus();
+      detailLayout.current?.querySelector<HTMLElement>("[data-preview-controls]")?.focus();
     }
     window.addEventListener("keydown", collapse, true);
     return () => window.removeEventListener("keydown", collapse, true);
@@ -1397,7 +1395,6 @@ function ModelDetailPresentation({
                       onReadyChange={setViewerReady}
                       onOrbit={clearCameraPreset}
                       onFailureChange={setPreviewFeedback}
-                      displayMode={displayMode}
                       showGrid={showGrid}
                       screenshotName={
                         shownPlate
@@ -1494,8 +1491,6 @@ function ModelDetailPresentation({
                   <ViewerToolbar
                     camera={cameraPreset}
                     setCamera={setCameraPreset}
-                    displayMode={displayMode}
-                    setDisplayMode={setDisplayMode}
                     showGrid={showGrid}
                     setShowGrid={setShowGrid}
                     controls={viewerMode === "gcode" ? toolpathControls : viewerControls}
@@ -1512,8 +1507,6 @@ function ModelDetailPresentation({
                           ? `${meshFile.original_filename} · ${uiText("Plate {value1}", { value1: plateLabel(shownPlate) })}`
                           : meshFile?.original_filename
                     }
-                    expanded={previewExpanded}
-                    onExpand={() => setPreviewExpanded((value) => !value)}
                     showDimensions={showDimensions}
                     onDimensions={setShowDimensions}
                   />

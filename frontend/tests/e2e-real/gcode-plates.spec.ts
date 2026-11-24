@@ -156,7 +156,7 @@ test.describe("Sliced G-code plates", () => {
           .getByRole("region", { name: "About this model", exact: true })
           .boundingBox();
         expect(information!.x).toBeGreaterThanOrEqual(previewBox!.x + previewBox!.width);
-        await page.getByRole("button", { name: "Expand", exact: true }).click();
+        await page.keyboard.press("Control+Alt+b");
         await expect(page.getByRole("heading", { name: "About this model" })).toBeHidden();
         expect(await clippedControls(panel)).toEqual([]);
         expect(await coveredControls(panel)).toEqual([]);
@@ -166,7 +166,7 @@ test.describe("Sliced G-code plates", () => {
           fullPage: true,
         });
 
-        await page.getByRole("button", { name: "Collapse preview", exact: true }).click();
+        await page.keyboard.press("Escape");
         await expect(page.getByRole("heading", { name: "About this model" })).toBeVisible();
         await selectModelDetailTab(page, "Source info");
         await expect(panel.getByRole("tab", { name: "View", exact: true })).toHaveAttribute(
@@ -250,7 +250,7 @@ test.describe("Sliced G-code plates", () => {
         "false",
       );
       await expect(page.getByRole("button", { name: "Solid", exact: true })).toHaveCount(0);
-      await page.getByRole("button", { name: "Expand", exact: true }).scrollIntoViewIfNeeded();
+      await page.getByRole("button", { name: "Screenshot", exact: true }).scrollIntoViewIfNeeded();
       await page.screenshot({ path: test.info().outputPath("dense-sidebar.png") });
 
       await panel.getByRole("tab", { name: "Layers", exact: true }).click();
@@ -402,7 +402,7 @@ test.describe("Sliced G-code plates", () => {
       await expect(repeat.getByText(`${name} · Revision 1`)).toBeVisible();
       await expect(repeat.getByText("Sliced plate: 2")).toBeVisible();
       await expect(repeat.getByText(`${name}-printer`, { exact: true })).toBeVisible();
-      await expect(repeat.getByRole("button", { name: "Save job" })).toBeEnabled();
+      await expect(repeat.getByRole("button", { name: "Add to queue" })).toBeEnabled();
       expect(
         (await readJobs()).filter((run) => run.file_id === fileId).map(({ id }) => id),
       ).toEqual([job.id]);
@@ -412,7 +412,7 @@ test.describe("Sliced G-code plates", () => {
         (response) =>
           response.url().endsWith("/api/v1/fleet/queue") && response.request().method() === "POST",
       );
-      await repeat.getByRole("button", { name: "Save job" }).click();
+      await repeat.getByRole("button", { name: "Add to queue" }).click();
       const receipt = await queued;
       expect(receipt.status()).toBe(201);
       const duplicate: PrintJobRead = await receipt.json();

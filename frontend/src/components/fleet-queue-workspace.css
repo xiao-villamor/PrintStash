@@ -144,6 +144,12 @@
 .queue-register-empty button {
   margin-left: auto;
 }
+.print-task-dialog {
+  height: min(62rem, calc(100dvh - 2rem));
+}
+.queue-compose-body {
+  scrollbar-gutter: stable;
+}
 .queue-compose {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 32%);
@@ -158,6 +164,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 20px;
+  align-content: start;
 }
 .queue-compose-group {
   min-width: 0;
@@ -204,16 +211,6 @@
 .queue-ticket small {
   font-size: 12px;
   color: var(--muted-foreground);
-}
-.queue-group-filter {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-size: 13px;
-}
-.queue-group-filter select {
-  margin-left: auto;
-  max-width: 65%;
 }
 .queue-ticket {
   background: var(--muted);

@@ -444,7 +444,9 @@ test.describe("Existing Model review", () => {
             await plateOption(slicedPlates.plates[1]).check();
             await review.capture("send-plate-selected");
             await send.getByRole("radio", { name: "Add to queue", exact: true }).check();
-            await expect(send.getByRole("heading", { name: /^Queue Rev / })).toBeVisible();
+            await expect(
+              send.getByRole("heading", { name: "Add to queue", exact: true }),
+            ).toBeVisible();
             await review.capture("queue-plate-selected");
             await dismiss();
             await tab("History");
@@ -535,28 +537,22 @@ test.describe("Existing Model review", () => {
                 .click();
               await expect(preview.getByText(/^Selected plate mesh bounds:/)).toBeVisible();
               await review.capture(`mesh-plate-${plate.number}`);
-              await preview.getByRole("button", { name: "Expand", exact: true }).click();
+              await page.keyboard.press("Control+Alt+b");
               await assertDockAlignment();
               await review.capture(`mesh-plate-${plate.number}-expanded`);
-              await preview.getByRole("button", { name: "Collapse preview", exact: true }).click();
+              await page.keyboard.press("Escape");
               await preview.getByRole("button", { name: "Fit to view", exact: true }).click();
             }
-            const display = preview.getByRole("combobox", { name: "Display" });
-            for (const mode of ["xray", "wireframe", "solid"]) {
-              await display.selectOption(mode);
-              await expect(display).toHaveValue(mode);
-            }
+            await expect(preview.getByRole("combobox", { name: "Display" })).toHaveCount(0);
             for (const camera of ["Top", "Front", "Isometric"]) {
               await preview.getByRole("button", { name: camera, exact: true }).click();
             }
-            await preview.getByRole("button", { name: "Expand", exact: true }).click();
+            await page.keyboard.press("Control+Alt+b");
             await assertDockAlignment();
             const expandedSourcePlateBox = await plates.boundingBox();
             await review.capture("mesh-expanded");
             await page.keyboard.press("Escape");
-            await expect(
-              preview.getByRole("button", { name: "Expand", exact: true }),
-            ).toBeFocused();
+            await expect(preview.locator("[data-preview-controls]")).toBeFocused();
             await expect(page.getByTestId("model-detail-sidebar")).toBeVisible();
             await waitForPreview();
             // Shared overlays and camera presets retain their state and location across modes.
@@ -720,11 +716,11 @@ test.describe("Existing Model review", () => {
               await layer.press("Enter");
               await expect(layer).toHaveValue(middle);
               await review.capture(`toolpath-plate-${plate}-middle`);
-              await preview.getByRole("button", { name: "Expand", exact: true }).click();
+              await page.keyboard.press("Control+Alt+b");
               await assertDockAlignment();
               await expect(layer).toHaveValue(middle);
               await review.capture(`toolpath-plate-${plate}-expanded`);
-              await preview.getByRole("button", { name: "Collapse preview", exact: true }).click();
+              await page.keyboard.press("Escape");
             }
             await controls.getByRole("tab", { name: "View", exact: true }).click();
             if (sliced!.metadata?.printer_model === "Bambu Lab P1S") {
@@ -749,14 +745,14 @@ test.describe("Existing Model review", () => {
             ).toHaveAttribute("aria-pressed", "true");
             for (const action of ["Zoom in", "Zoom out", "Fit to view"])
               await preview.getByRole("button", { name: action, exact: true }).click();
-            await preview.getByRole("button", { name: "Expand", exact: true }).click();
+            await page.keyboard.press("Control+Alt+b");
             await assertDockAlignment();
             await assertPlatePlacement(expandedSourcePlateBox);
             await review.capture("toolpath-expanded-view");
             await controls.getByRole("tab", { name: "Layers", exact: true }).click();
             await assertPlateCardsFit();
             await review.capture("toolpath-expanded-layers");
-            await preview.getByRole("button", { name: "Collapse preview", exact: true }).click();
+            await page.keyboard.press("Escape");
             await preview.getByRole("button", { name: "3D model", exact: true }).click();
             await waitForPreview();
             await expect(grid).toHaveAttribute("aria-pressed", gridState!);

@@ -22,7 +22,9 @@
 
 ### Changed
 
-- Print history separates the model and printer from the recorded result. The queue dialog gives dispatch details more room. Print forms and printer material presets share visible radio controls.
+- Model preview places its controls inside the viewer and uses an icon button for screenshots.
+
+- Print history separates the model and printer from the recorded result. Queue dialogs opened from a model or printer share dispatch details, searchable selectors, and the add action. Print forms and printer material presets share visible radio controls.
 
 - Print History uses centered dialogs for manual records and printer imports. Printer Jobs and Model History use the same reproducibility badges. Profiles aligns with other pages, and the maintenance log action has the same label in the fleet and on a printer.
 

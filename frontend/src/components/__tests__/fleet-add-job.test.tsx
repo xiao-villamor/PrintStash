@@ -68,7 +68,7 @@ async function selectRevision() {
   await userEvent.click(screen.getByRole("button", { name: "Revision" }));
   await userEvent.click(await screen.findByRole("button", { name: "Bracket" }));
   await userEvent.click(await screen.findByRole("button", { name: /Revision 1/ }));
-  await waitFor(() => expect(screen.getByRole("button", { name: "Save job" })).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole("button", { name: "Add to queue" })).toBeEnabled());
 }
 beforeEach(() => localStorage.clear());
 
@@ -99,7 +99,7 @@ describe("Fleet Add to queue", () => {
     await userEvent.click(screen.getByRole("button", { name: "Revision" }));
     await userEvent.click(await screen.findByRole("button", { name: "Bracket" }));
     await userEvent.click(await screen.findByRole("button", { name: /Revision 1/ }));
-    const save = screen.getByRole("button", { name: "Save job" });
+    const save = screen.getByRole("button", { name: "Add to queue" });
     expect(save).toBeDisabled();
     await userEvent.click(await screen.findByRole("radio", { name: "Plate 2" }));
     await userEvent.click(save);
@@ -130,7 +130,7 @@ describe("Fleet Add to queue", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Load more" }));
     await userEvent.click(await screen.findByRole("button", { name: "Bracket" }));
     await userEvent.click(await screen.findByRole("button", { name: /Revision 1/ }));
-    expect(screen.getByRole("button", { name: "Save job" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Add to queue" })).toBeEnabled();
     const request = app
       .requests()
       .find((request) => request.method === "GET" && request.url.includes("cursor=next"));
@@ -147,7 +147,7 @@ describe("Fleet Add to queue", () => {
     await userEvent.click(screen.getByRole("button", { name: "Revision" }));
     await userEvent.click(await screen.findByRole("button", { name: "Bracket" }));
     await userEvent.click(await screen.findByRole("button", { name: /Revision 1/ }));
-    expect(screen.getByRole("button", { name: "Save job" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add to queue" })).toBeDisabled();
     expect(screen.queryByRole("option", { name: "Workshop" })).not.toBeInTheDocument();
   });
 
@@ -155,7 +155,7 @@ describe("Fleet Add to queue", () => {
     const app = setup();
     await selectRevision();
     await userEvent.click(screen.getByRole("radio", { name: "Least busy" }));
-    await userEvent.click(screen.getByRole("button", { name: "Save job" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
     await waitFor(() => expect(app.onClose).toHaveBeenCalledOnce());
     const command = app
       .requestsWithMethod("POST")
@@ -177,7 +177,7 @@ describe("Fleet Add to queue", () => {
     );
     await selectRevision();
     expect(screen.queryByRole("combobox", { name: "Routing" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Save job" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
     await waitFor(() => expect(app.onClose).toHaveBeenCalledOnce());
 
     const command = app.requestsWithMethod("POST").find(({ url }) => url.endsWith("/fleet/queue"));
@@ -208,14 +208,14 @@ describe("Fleet Add to queue", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This Revision cannot be queued on this printer.",
     );
-    expect(screen.getByRole("button", { name: "Save job" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add to queue" })).toBeDisabled();
   });
 
   it("guards a double gesture while compatibility is pending", async () => {
     const pending = Promise.withResolvers<Response>();
     const app = setup({ "POST /api/v1/fleet/compatibility": () => pending.promise });
     await selectRevision();
-    await userEvent.dblClick(screen.getByRole("button", { name: "Save job" }));
+    await userEvent.dblClick(screen.getByRole("button", { name: "Add to queue" }));
     expect(
       app
         .requestsWithMethod("POST")
@@ -234,7 +234,7 @@ describe("Fleet Add to queue", () => {
     ]);
     app.client.setQueryData(queryKeys.fleetQueue, []);
     await selectRevision();
-    await userEvent.click(screen.getByRole("button", { name: "Save job" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
     await waitFor(() => expect(app.onClose).toHaveBeenCalledOnce());
     const command = app
       .requestsWithMethod("POST")
@@ -260,7 +260,7 @@ describe("Fleet Add to queue", () => {
     await selectRevision();
     expect(screen.queryByRole("option", { name: "Least busy" })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Default printer" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Save job" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
     await waitFor(() => expect(app.onClose).toHaveBeenCalledOnce());
     expect(
       JSON.parse(
@@ -273,7 +273,7 @@ describe("Fleet Add to queue", () => {
   it("blocks an absent compatibility assessment for the requested target", async () => {
     const app = setup({ "POST /api/v1/fleet/compatibility": json({ ...report(), printers: [] }) });
     await selectRevision();
-    await userEvent.click(screen.getByRole("button", { name: "Save job" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This request could not be completed. Try again.",
     );
@@ -286,7 +286,7 @@ describe("Fleet Add to queue", () => {
   it("records a material override only after the explicit policy choice", async () => {
     const app = setup({ "POST /api/v1/fleet/compatibility": json(report("mismatch")) });
     await selectRevision();
-    await userEvent.click(screen.getByRole("button", { name: "Save job" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
     await screen.findByRole("alert");
     expect(
       app.requestsWithMethod("POST").some((request) => request.url.endsWith("/fleet/queue")),
@@ -294,7 +294,7 @@ describe("Fleet Add to queue", () => {
     await userEvent.click(
       screen.getByRole("checkbox", { name: "Allow material or nozzle mismatch" }),
     );
-    await userEvent.click(screen.getByRole("button", { name: "Save job" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
     await waitFor(() => expect(app.onClose).toHaveBeenCalledOnce());
     expect(
       JSON.parse(
@@ -309,7 +309,7 @@ describe("Fleet Add to queue", () => {
     const app = setup({ "POST /api/v1/fleet/queue": () => pending.promise });
     await selectRevision();
 
-    await userEvent.click(screen.getByRole("button", { name: "Save job" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
 
     const checkbox = screen.getByRole("checkbox", { name: "Allow material or nozzle mismatch" });
     expect(checkbox).toBeDisabled();
@@ -321,7 +321,7 @@ describe("Fleet Add to queue", () => {
     const pending = Promise.withResolvers<Response>();
     const app = setup({ "POST /api/v1/fleet/compatibility": () => pending.promise });
     await selectRevision();
-    await userEvent.click(screen.getByRole("button", { name: "Save job" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
     await act(async () => clearLogin());
     await act(async () => pending.resolve(json(report())));
     expect(
@@ -335,7 +335,7 @@ describe("Fleet Add to queue", () => {
     await userEvent.click(screen.getByRole("button", { name: "Revision" }));
     await userEvent.click(await screen.findByRole("button", { name: "Bracket" }));
     await userEvent.click(await screen.findByRole("button", { name: /Revision 1/ }));
-    expect(screen.getByRole("button", { name: "Save job" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add to queue" })).toBeDisabled();
     expect(screen.queryByRole("option", { name: "Workshop" })).not.toBeInTheDocument();
   });
 });

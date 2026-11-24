@@ -11,12 +11,184 @@
  */
 import { expect, test, type WebSocketRoute } from "@playwright/test";
 import type { PrinterSnapshot } from "@/types";
+import { aPrinter } from "../../src/test-support/factories";
 
 import { collectPageProblems, useMockApi } from "./_setup";
 
 useMockApi();
 
 test.describe("printer routes", () => {
+  test("keeps destination choices readable and independent when switching send modes", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.route("**/api/v1/printers", async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: [
+          ...(await response.json()),
+          aPrinter({ id: 77, name: "Workshop printer", group: "Workshop" }),
+        ],
+      });
+    });
+    await page.route("**/api/v1/models/1", async (route) => {
+      const response = await route.fetch();
+      const model = await response.json();
+      const revision = model.files.find(
+        (file: { file_type: string }) => file.file_type === "gcode",
+      );
+      revision.original_filename = "workshop-case.gcode.3mf";
+      await route.fulfill({ response, json: model });
+    });
+    await page.route("**/api/v1/files/*/gcode-plates", (route) =>
+      route.fulfill({
+        json: {
+          plates: [1, 2],
+          identities: [
+            { number: 1, name: "Enclosure base", object_count: 1 },
+            { number: 2, name: "Enclosure lid and mounting clips", object_count: 3 },
+          ],
+          plate_metadata: [
+            {
+              number: 1,
+              metadata: { estimated_time_s: 6480, filament_weight_g: 97.4, filament_cost: null },
+            },
+            {
+              number: 2,
+              metadata: { estimated_time_s: 2820, filament_weight_g: 38.2, filament_cost: null },
+            },
+          ],
+        },
+      }),
+    );
+    await page.goto("/models/1?tab=revisions");
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    await page.getByRole("button", { name: "Send to printer", exact: true }).first().click();
+    const direct = page.getByRole("dialog", { name: /^Send Rev/ });
+    await direct.getByRole("radio", { name: /^Plate 02/ }).check();
+    const firstFrame = (await direct.boundingBox())!;
+    const firstFooter = (await direct.getByRole("button", { name: "Cancel" }).boundingBox())!;
+    const mode = direct.getByRole("radio", { name: "Add to queue", exact: true });
+    const firstSwitch = (await mode.boundingBox())!;
+    const start = direct.getByRole("checkbox", { name: "Start print immediately" });
+    await expect(start).toHaveCSS("width", "20px");
+    await expect(start).toHaveCSS("height", "20px");
+    const directDestination = direct.getByRole("button", { name: "Destination", exact: true });
+    await directDestination.click();
+    const picker = page.getByRole("dialog", { name: "Destination", exact: true });
+    const search = picker.getByRole("combobox", { name: "Search" });
+    await expect(search).toBeFocused();
+    const searchBox = (await search.boundingBox())!;
+    const pickerBox = (await picker.boundingBox())!;
+    expect(searchBox.x - pickerBox.x).toBeGreaterThanOrEqual(8);
+    await search.fill("Workshop");
+    const workshop = picker.getByRole("option", { name: /^Workshop printer/ });
+    await workshop.click();
+    await expect(workshop).toHaveAttribute("aria-selected", "true");
+    await picker.getByRole("button", { name: "Done", exact: true }).click();
+    const directSelection = await directDestination.innerText();
+    expect(directSelection).toContain("Workshop printer");
+    expect(
+      await direct
+        .locator(".queue-compose-body")
+        .evaluate((body) => body.scrollHeight - body.clientHeight),
+    ).toBeLessThanOrEqual(1);
+
+    await mode.click();
+    const queue = page.getByRole("dialog", { name: "Add to queue", exact: true });
+    expect(await queue.boundingBox()).toEqual(firstFrame);
+    const queueFooter = (await queue.getByRole("button", { name: "Cancel" }).boundingBox())!;
+    expect(queueFooter.y).toBeCloseTo(firstFooter.y, 0);
+    const queueSwitch = (await queue
+      .getByRole("radio", { name: "Add to queue", exact: true })
+      .boundingBox())!;
+    expect(queueSwitch.y).toBeCloseTo(firstSwitch.y, 0);
+    const compatibility = queue.getByRole("checkbox", {
+      name: "Allow material or nozzle mismatch",
+    });
+    await expect(compatibility).toHaveCSS("width", "20px");
+    await expect(compatibility).toHaveCSS("height", "20px");
+    const group = queue.getByRole("combobox", { name: "Target group", exact: true });
+    await group.selectOption("Workshop");
+    await group.focus();
+    const groupLabel = (await queue.getByText("Target group", { exact: true }).boundingBox())!;
+    expect(groupLabel.y + groupLabel.height).toBeLessThan((await group.boundingBox())!.y);
+    await queue.getByRole("radio", { name: "Choose printer", exact: true }).click();
+    const queuedDestination = queue.getByRole("button", { name: "Destination", exact: true });
+    await queuedDestination.click();
+    await expect(picker.getByRole("option")).toHaveCount(1);
+    await workshop.click();
+    await expect(picker).toHaveCount(0);
+    await expect(queuedDestination).toContainText("Workshop printer");
+    await expect(queuedDestination).toBeFocused();
+    await expect(queue.getByRole("radio", { name: /^Plate 02/ })).toBeChecked();
+    expect(
+      await queue
+        .locator(".queue-compose-body")
+        .evaluate((body) => body.scrollHeight - body.clientHeight),
+    ).toBeLessThanOrEqual(1);
+
+    await queue.getByRole("radio", { name: "Send now", exact: true }).click();
+    await expect(directDestination).toHaveText(directSelection);
+  });
+
+  test("shares the queue layout and destination controls across entry points", async ({ page }) => {
+    await page.route("**/api/v1/printers", async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: [...(await response.json()), aPrinter({ id: 77, name: "Workshop printer" })],
+      });
+    });
+    const widths: number[] = [];
+    for (const route of ["/models/1?tab=revisions", "/printers?tab=queue"]) {
+      await page.goto(route);
+      const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+      if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+      await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+      await page.getByRole("button", { name: "Add to queue", exact: true }).first().click();
+      const dialog = page.getByRole("dialog", { name: "Add to queue", exact: true });
+      const details = dialog.getByRole("complementary", { name: "Dispatch details" });
+      await expect(details).toBeVisible();
+      widths.push((await dialog.boundingBox())!.width);
+      await dialog.getByRole("radio", { name: "Choose printer", exact: true }).check();
+      await dialog.getByRole("button", { name: "Destination", exact: true }).click();
+      await page
+        .getByRole("dialog", { name: "Destination", exact: true })
+        .getByRole("option", { name: /^Workshop printer\b/ })
+        .click();
+      await expect(details.getByText("Workshop printer", { exact: true })).toBeVisible();
+      await dialog.getByRole("radio", { name: "Rush", exact: true }).check();
+      await expect(details.getByText("Rush", { exact: true })).toBeVisible();
+      const mismatch = dialog.getByRole("checkbox", {
+        name: "Allow material or nozzle mismatch",
+      });
+      await mismatch.click();
+      await expect(details.getByText("Allow mismatch", { exact: true })).toBeVisible();
+      const submit = dialog.getByRole("button", { name: "Add to queue", exact: true });
+      await expect(submit).toBeInViewport();
+      if (route.startsWith("/models")) {
+        const receipt = page.waitForRequest(
+          (request) => request.method() === "POST" && request.url().endsWith("/api/v1/fleet/queue"),
+        );
+        await submit.click();
+        expect((await receipt).postDataJSON()).toMatchObject({
+          strategy: "manual",
+          printer_id: 77,
+          priority: "rush",
+          compatibility_policy: "allow_mismatch",
+        });
+      } else {
+        await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      }
+      await expect(dialog).toHaveCount(0);
+    }
+    expect(widths).toEqual([960, 960]);
+  });
+
   test("shows the same visible radio control in print history and the queue", async ({ page }) => {
     const scenarios = [
       ["/models/1?tab=history", "Add record", "Result", "Completed", "Failed"],
@@ -122,7 +294,7 @@ test.describe("printer routes", () => {
         }),
       )
       .toBeLessThanOrEqual(1);
-    await expect(dialog.getByRole("button", { name: "Save job" })).toBeInViewport();
+    await expect(dialog.getByRole("button", { name: "Add to queue" })).toBeInViewport();
   });
 
   test("printer list route loads configured printers through the frontend proxy", async ({

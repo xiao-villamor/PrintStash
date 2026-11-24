@@ -267,6 +267,7 @@ export function PrintHistorySection({
                   <div className="space-y-4">
                     <OptionPicker
                       label={uiText("Printer")}
+                      searchPlaceholder={uiText("Search printers")}
                       value={selectedPrinterId}
                       placeholder={uiText("Choose printer")}
                       options={printers.map((printer) => ({
@@ -288,10 +289,11 @@ export function PrintHistorySection({
                     />
                     <OptionPicker
                       label={uiText("G-code Revision")}
+                      searchPlaceholder={uiText("Search revisions")}
                       value={selectedFileId}
                       options={gcodeFiles.map((file) => ({
                         value: file.id,
-                        label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}`,
+                        label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}${file.revision_label ? ` · ${file.revision_label}` : ""}`,
                         description: file.original_filename,
                       }))}
                       onChange={setSelectedFileId}
@@ -435,6 +437,7 @@ export function PrintHistorySection({
                 ) : (
                   <OptionPicker
                     label={uiText("Printer")}
+                    searchPlaceholder={uiText("Search printers")}
                     placeholder={uiText("Choose printer")}
                     value={selectedPrinterId}
                     options={importPrinters.map((printer) => ({

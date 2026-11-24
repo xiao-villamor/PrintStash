@@ -989,7 +989,7 @@ test.describe("model detail route", () => {
           return hit === element || element.contains(hit);
         }),
       ).toBe(true);
-      await expect(panel.getByRole("button", { name: "Solid", exact: true })).toBeDisabled();
+      await expect(panel.getByRole("combobox", { name: "Display", exact: true })).toHaveCount(0);
       await expect(panel.getByRole("button", { name: "Fit to view", exact: true })).toBeDisabled();
       await expect(panel.getByRole("button", { name: "Zoom in", exact: true })).toBeDisabled();
       expect(
@@ -1008,6 +1008,24 @@ test.describe("model detail route", () => {
       await panel.screenshot({ path: test.info().outputPath(`failed-preview-${width}.png`) });
     });
   }
+
+  test("floats the screenshot icon inside the preview canvas", async ({ page }) => {
+    await page.goto("/models/1");
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    const panel = page.getByRole("region", { name: "Preview", exact: true });
+    const screenshot = panel.getByRole("button", { name: "Screenshot", exact: true });
+    await expect(screenshot).toBeVisible();
+    await expect(screenshot).toHaveText("");
+    await expect(panel.getByRole("button", { name: "Expand", exact: true })).toHaveCount(0);
+    await expect(panel.getByRole("combobox", { name: "Display" })).toHaveCount(0);
+
+    const viewport = (await panel.locator(".detail-preview-canvas").boundingBox())!;
+    const controls = (await panel.locator(".detail-viewer-commandbar").boundingBox())!;
+    expect(controls.y).toBeGreaterThanOrEqual(viewport.y);
+    expect(controls.y + controls.height).toBeLessThan(viewport.y + viewport.height);
+  });
 
   test("shows mesh overlays only for a ready 3D preview", async ({ page }) => {
     await page.route("**/api/v1/models/1", (route) =>
@@ -1162,8 +1180,8 @@ test.describe("model detail route", () => {
     await expect(
       page
         .getByRole("dialog", { name: "Send Rev 1 to printer" })
-        .getByRole("checkbox", { name: "Select ender" }),
-    ).toBeChecked();
+        .getByRole("button", { name: "Destination", exact: true }),
+    ).toContainText("ender");
     await expect(page.getByText("This page could not be found")).toHaveCount(0);
 
     const html = await page.content();
@@ -1426,14 +1444,16 @@ test.describe("model detail route", () => {
     await page.getByRole("button", { name: "Send to printer" }).last().click();
     const dialog = page.getByRole("dialog", { name: "Send Rev 1 to printer" });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByRole("checkbox", { name: "Select ender" })).toBeChecked();
-    await expect(dialog.getByRole("group", { name: "G-code revision", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Destination", exact: true })).toContainText(
+      "ender",
+    );
+    await expect(dialog.getByRole("button", { name: "Revision", exact: true })).toBeVisible();
     await expect(dialog.getByRole("checkbox", { name: "Start print immediately" })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Send to printer" })).toBeEnabled();
     const scrollRegion = dialog.getByTestId("send-dialog-scroll-region");
     const [scrollBox, revisionBox] = await Promise.all([
       scrollRegion.boundingBox(),
-      dialog.getByRole("group", { name: "G-code revision", exact: true }).boundingBox(),
+      dialog.getByRole("button", { name: "Revision", exact: true }).boundingBox(),
     ]);
     expect(scrollBox).not.toBeNull();
     expect(revisionBox).not.toBeNull();
@@ -1509,11 +1529,9 @@ test.describe("model detail route", () => {
     await page.getByRole("button", { name: "Send to printer", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Send Rev 2 to printer", exact: true });
     await expect(dialog).toBeVisible();
-    await expect(
-      dialog
-        .getByRole("group", { name: "G-code revision", exact: true })
-        .getByRole("radio", { name: /^Rev 2/ }),
-    ).toBeChecked();
+    await expect(dialog.getByRole("button", { name: "Revision", exact: true })).toContainText(
+      /Rev 2/,
+    );
     await page.keyboard.press("Escape");
     await page.getByRole("tab", { name: "Overview", exact: true }).click();
     const recommended = page.getByRole("button", { name: /Recommended revision.*Rev 1/ });
