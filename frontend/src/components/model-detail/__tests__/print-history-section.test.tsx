@@ -119,6 +119,11 @@ async function openForm(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: "Add record" }));
 }
 
+async function chooseVoron(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: "Printer", exact: true }));
+  await user.click(await screen.findByRole("option", { name: "Voron", exact: true }));
+}
+
 beforeEach(() => {
   window.localStorage.clear();
 });
@@ -188,7 +193,7 @@ describe("PrintHistorySection", () => {
         routes: { "POST /api/v1/models/1/print-jobs": json(aPrintJob({ id: 31 })) },
       });
       await openForm(user);
-      await user.click(screen.getByRole("radio", { name: "Voron" }));
+      await chooseVoron(user);
 
       await user.click(screen.getByRole("button", { name: "Save record" }));
 
@@ -207,7 +212,7 @@ describe("PrintHistorySection", () => {
         routes: { "POST /api/v1/models/1/print-jobs": json(aPrintJob({ id: 31 })) },
       });
       await openForm(user);
-      await user.click(screen.getByRole("radio", { name: "Voron" }));
+      await chooseVoron(user);
 
       await user.click(screen.getByRole("button", { name: "Save record" }));
 
@@ -233,7 +238,7 @@ describe("PrintHistorySection", () => {
           ),
         },
       });
-      await user.click(await screen.findByRole("radio", { name: "Voron" }));
+      await chooseVoron(user);
       await user.type(screen.getByRole("textbox", { name: "Error (opt.)" }), "Corner lifted");
 
       await user.keyboard("{Control>}{Enter}{/Control}");
@@ -274,7 +279,7 @@ describe("PrintHistorySection", () => {
         },
       });
       await user.click(screen.getByRole("button", { name: "Import from printer" }));
-      await user.click(await screen.findByRole("radio", { name: "Voron" }));
+      await chooseVoron(user);
 
       await user.click(screen.getByRole("button", { name: /Fetch & Import/i }));
 
@@ -312,7 +317,7 @@ describe("PrintHistorySection", () => {
         routes: { "POST /api/v1/models/1/print-jobs/import-printer/4": json([]) },
       });
       await user.click(screen.getByRole("button", { name: "Import from printer" }));
-      await user.click(await screen.findByRole("radio", { name: "Voron" }));
+      await chooseVoron(user);
 
       await user.click(screen.getByRole("button", { name: /Fetch & Import/i }));
 

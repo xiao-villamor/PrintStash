@@ -146,8 +146,10 @@ export function PrintJobReproducibility({
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
-          <p className="font-mono text-2xs font-semibold text-foreground">{artifactName}</p>
-          <p className="font-mono text-3xs text-muted-foreground">{copy.description}</p>
+          <p className="wrap-anywhere font-mono text-xs font-medium text-foreground">
+            {artifactName}
+          </p>
+          <p className="text-xs text-muted-foreground">{copy.description}</p>
         </div>
         <span
           className={cn(

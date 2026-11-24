@@ -174,37 +174,11 @@
   display: flex;
   flex-wrap: wrap;
 }
-.detail-visible-choices > label {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  background: var(--card);
-  font-size: 0.8125rem;
-}
-.detail-visible-choices > label[data-selected="true"] {
-  background: var(--accent);
-  border-color: var(--primary);
-}
-.detail-visible-choices input {
-  flex: none;
-  margin-top: 3px;
-  accent-color: var(--primary);
-}
-.detail-visible-choices label > span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
 .detail-visible-choices small {
   display: block;
   margin-top: 3px;
   color: var(--muted-foreground);
   font-size: 0.75rem;
-}
-.detail-visible-choices label:has(input:disabled) {
-  opacity: 0.5;
 }
 .detail-delivery-layout {
   display: grid;
@@ -573,10 +547,6 @@
   font-size: 13px;
   color: var(--muted-foreground);
 }
-.detail-delivery-mode .detail-visible-choices > label {
-  padding: 6px 8px;
-}
-
 .model-detail-heading {
   min-height: 62px;
 }

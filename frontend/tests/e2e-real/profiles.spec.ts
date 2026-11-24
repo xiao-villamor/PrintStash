@@ -60,6 +60,7 @@ test.describe("profiles", () => {
       const form = dialog.getByRole("form", { name: `Create ${kind} preset` });
       const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
       const submit = dialog.getByRole("button", { name: "Add preset", exact: true });
+      await expect(form).toBeVisible();
       for (const field of await form.getByRole("textbox").all()) await field.fill("12");
 
       await cancel.click();
@@ -67,6 +68,7 @@ test.describe("profiles", () => {
       await expect(form).toHaveCount(0);
       await expect(opener).toBeFocused();
       await opener.press("Enter");
+      await expect(form).toBeVisible();
       for (const field of await form.getByRole("textbox").all())
         await expect(field).toHaveValue("");
       await expect(submit).toBeDisabled();
@@ -148,10 +150,11 @@ test.describe("profiles", () => {
       if (await editor.count())
         await editor.getByRole("button", { name: "Close", exact: true }).click();
       await page.getByRole("button", { name: /New filament/ }).click();
-      const form = page.getByRole("form", { name: "Create filament preset" });
+      const create = page.getByRole("dialog", { name: "New filament preset" });
+      const form = create.getByRole("form", { name: "Create filament preset" });
       await form.getByLabel("Name").fill(value);
       await form.getByLabel("Cost per kg").fill("25");
-      await form.getByRole("button", { name: "Add preset" }).click();
+      await create.getByRole("button", { name: "Add preset" }).click();
       return inputByValue(section, /^Filament preset name/, value);
     };
     const first = await add(name);
@@ -165,15 +168,16 @@ test.describe("profiles", () => {
     await expect(cost).toHaveAttribute("aria-invalid", "true");
     await expect(page.getByRole("dialog").getByText("Cost must be 0 or more.")).toBeVisible();
     await cost.fill("42");
+    const edit = page.getByRole("dialog", { name: "Edit filament preset" });
     await Promise.all([
       page.waitForResponse(
         (response) =>
           /\/api\/v1\/filament-profiles\/\d+/.test(response.url()) &&
           response.request().method() === "PATCH",
       ),
-      page.getByRole("dialog", { name: "Edit filament preset" }).getByRole("heading").click(),
+      edit.getByRole("button", { name: "Close", exact: true }).click(),
     ]);
-    await expect(cost).toBeEnabled();
+    await expect(edit).toHaveCount(0);
     await page.reload();
     const persisted = await inputByValue(section, /^Filament preset name/, name);
     await expect(rowOf(persisted).getByLabel(/Filament cost per kg/)).toHaveValue("42");
@@ -197,10 +201,11 @@ test.describe("profiles", () => {
     await page.getByRole("tab", { name: /Printers/ }).click();
     const section = page.locator("section", { hasText: "Printer presets" });
     await page.getByRole("button", { name: /New printer/ }).click();
-    const createForm = page.getByRole("form", { name: "Create printer preset" });
+    const create = page.getByRole("dialog", { name: "New printer preset" });
+    const createForm = create.getByRole("form", { name: "Create printer preset" });
     await createForm.getByLabel("Name").fill(name);
     await createForm.getByLabel("Printer model").fill("Voron 2.4");
-    await createForm.getByRole("button", { name: "Add preset" }).click();
+    await create.getByRole("button", { name: "Add preset" }).click();
 
     const nameInput = await inputByValue(section, /^Printer preset name/, name);
     await expect(nameInput).toBeVisible();

@@ -17,6 +17,33 @@ import { collectPageProblems, useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("printer routes", () => {
+  test("shows the same visible radio control in print history and the queue", async ({ page }) => {
+    const scenarios = [
+      ["/models/1?tab=history", "Add record", "Result", "Completed", "Failed"],
+      ["/printers?tab=queue", "Add to queue", "Priority", "Normal", "Rush"],
+    ];
+    for (const [route, action, group, initial, next] of scenarios) {
+      await page.goto(route);
+      const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+      if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+      await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+      await page.getByRole("button", { name: action, exact: true }).first().click();
+      const options = page.getByRole("dialog").getByRole("group", { name: group, exact: true });
+      const radio = options.getByRole("radio", { name: initial, exact: true });
+      await expect(radio).toBeChecked();
+      await expect(radio).toHaveCSS("opacity", "1");
+      await expect(radio).toHaveCSS("width", "16px");
+      await expect(radio.locator("xpath=..")).toHaveCSS("border-top-width", "0px");
+      await radio.focus();
+      await page.keyboard.press("ArrowRight");
+      const selected = options.getByRole("radio", { name: next, exact: true });
+      await expect(selected).toBeChecked();
+      await expect(selected).toBeFocused();
+      await expect(radio).not.toBeChecked();
+      await page.keyboard.press("Escape");
+    }
+  });
+
   for (const theme of ["dark", "light"] as const) {
     test(`shows a readable compatibility checkbox in ${theme} mode`, async ({ page }) => {
       await page.addInitScript((mode) => localStorage.setItem("printstash.theme", mode), theme);
@@ -61,6 +88,15 @@ test.describe("printer routes", () => {
       const model = await response.json();
       model.name = name;
       model.files[1].revision_label = label;
+      model.files.push(
+        ...Array.from({ length: 11 }, (_, index) => ({
+          ...model.files[1],
+          id: 100 + index,
+          gcode_revision_number: 2 + index,
+          revision_label: null,
+          original_filename: `other-part-${index + 1}.gcode`,
+        })),
+      );
       await route.fulfill({ response, json: model });
     });
     await page.setViewportSize({ width: 800, height: 650 });
@@ -69,6 +105,7 @@ test.describe("printer routes", () => {
     await page.getByText("Browse saved Revisions", { exact: true }).click();
     const picker = page.getByRole("dialog", { name: "Revision", exact: true });
     await picker.getByRole("button", { name, exact: true }).click();
+    await picker.getByRole("searchbox", { name: "Search revisions" }).fill(label);
     const revision = picker.getByRole("button", { name: new RegExp(label) });
     await expect(revision).toBeVisible();
     await expect

@@ -3,6 +3,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { OptionPicker } from "@/components/ui/option-picker";
+import { RadioOption } from "@/components/ui/radio-option";
 import {
   useSavedRevision,
   revisionLabel,
@@ -11,7 +13,7 @@ import {
   type RevisionSelection,
 } from "@/features/printers/saved-revision";
 import { SavedRevisionPicker } from "@/components/saved-revision-picker";
-import { Check, FileBox, GitBranch, Layers3, ShieldCheck, Star } from "lucide-react";
+import { FileBox, GitBranch, Layers3, ShieldCheck, Star } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { providerLabel } from "@/lib/printer-providers";
 import { knownUiText } from "@/lib/locale";
@@ -273,8 +275,9 @@ function AddJobForm({
       open
       onClose={close}
       title={uiText("Add to queue")}
-      className="queue-compose-dialog"
-      bodyClassName="queue-compose-body"
+      dismissible={!busy}
+      className="max-w-220"
+      bodyClassName="queue-compose-body p-0"
       footer={
         <>
           <Button type="button" variant="outline" size="sm" disabled={busy} onClick={close}>
@@ -299,7 +302,7 @@ function AddJobForm({
       >
         <fieldset disabled={busy} className="queue-compose-fields">
           <div className="queue-revision-choice">
-            <FileBox size={23} />
+            <FileBox size={20} aria-hidden />
             <div>
               {repeatRevision ? (
                 <div className="grid gap-2">
@@ -376,15 +379,14 @@ function AddJobForm({
               ) : (
                 <div className="queue-options queue-plates">
                   {plates.data.plates.map((plate) => (
-                    <label key={plate}>
-                      <input
-                        type="radio"
-                        name="queue-plate"
-                        checked={chosenPlate === plate}
-                        onChange={() => setChosenPlate(plate)}
-                      />
-                      <span>{uiText("Plate {plate}", { plate })}</span>
-                    </label>
+                    <RadioOption
+                      key={plate}
+                      name="queue-plate"
+                      checked={chosenPlate === plate}
+                      onChange={() => setChosenPlate(plate)}
+                    >
+                      {uiText("Plate {plate}", { plate })}
+                    </RadioOption>
                   ))}
                 </div>
               )}
@@ -406,21 +408,20 @@ function AddJobForm({
                             ? uiText("Default printer")
                             : uiText("Least busy");
                       return (
-                        <label key={value}>
-                          <input
-                            type="radio"
-                            name="queue-routing"
-                            checked={strategy === value}
-                            onChange={() => {
-                              setStrategy(value);
-                              setError(null);
-                            }}
-                          />
-                          <span>
-                            <Icon size={15} />
+                        <RadioOption
+                          key={value}
+                          name="queue-routing"
+                          checked={strategy === value}
+                          onChange={() => {
+                            setStrategy(value);
+                            setError(null);
+                          }}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <Icon size={15} className="shrink-0" />
                             {label}
                           </span>
-                        </label>
+                        </RadioOption>
                       );
                     })}
                   </div>
@@ -446,59 +447,43 @@ function AddJobForm({
                 </label>
               )}
               {effectiveStrategy === "manual" && (
-                <fieldset className="queue-compose-group">
-                  <legend>{uiText("Destination")}</legend>
-                  <div className="queue-printer-choices">
-                    {targets.map((printer) => (
-                      <label key={printer.id}>
-                        <input
-                          type="radio"
-                          name="queue-destination"
-                          checked={target?.id === printer.id}
-                          onChange={() => {
-                            setPrinterId(printer.id);
-                            setError(null);
-                          }}
-                        />
-                        <span>
-                          <Printer3D size={17} />
-                          <span>
-                            <b>{printer.name}</b>
-                            <small>{providerLabel(printer)}</small>
-                          </span>
-                          <Check size={15} />
-                        </span>
-                      </label>
-                    ))}
-                    {!targets.length && <p>{uiText("No compatible printers")}</p>}
-                  </div>
-                </fieldset>
+                <OptionPicker
+                  label={uiText("Destination")}
+                  placeholder={uiText(targets.length ? "Choose printer" : "No compatible printers")}
+                  value={target?.id ?? null}
+                  options={targets.map((printer) => ({
+                    value: printer.id,
+                    label: printer.name,
+                    description: providerLabel(printer),
+                  }))}
+                  onChange={(value) => {
+                    setPrinterId(value);
+                    setError(null);
+                  }}
+                />
               )}
             </>
           )}
           <fieldset className="queue-compose-group">
             <legend>{uiText("Priority")}</legend>
-            <div className="queue-options queue-priority">
+            <div className="queue-options">
               {(["low", "normal", "rush"] as const).map((value) => (
-                <label key={value}>
-                  <input
-                    type="radio"
-                    name="queue-priority"
-                    checked={priority === value}
-                    onChange={() => setPriority(value)}
-                  />
-                  <span>
-                    {value === "low"
-                      ? uiText("Low")
-                      : value === "normal"
-                        ? uiText("Normal")
-                        : uiText("Rush")}
-                  </span>
-                </label>
+                <RadioOption
+                  key={value}
+                  name="queue-priority"
+                  checked={priority === value}
+                  onChange={() => setPriority(value)}
+                >
+                  {value === "low"
+                    ? uiText("Low")
+                    : value === "normal"
+                      ? uiText("Normal")
+                      : uiText("Rush")}
+                </RadioOption>
               ))}
             </div>
           </fieldset>
-          <label className="flex min-h-9 cursor-action select-none items-center gap-3 self-start border border-border bg-muted/30 px-3 py-2 text-sm font-medium hover:bg-muted has-[:disabled]:pointer-events-none has-[:disabled]:text-muted-foreground">
+          <label className="flex min-h-9 cursor-action select-none items-center gap-3 self-start border-t border-border px-2.5 py-3 text-sm font-medium hover:bg-muted has-[:disabled]:pointer-events-none has-[:disabled]:text-muted-foreground">
             <Checkbox
               className="shrink-0"
               checked={policy === "allow_mismatch"}

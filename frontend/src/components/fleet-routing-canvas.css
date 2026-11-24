@@ -392,6 +392,9 @@
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--card);
-  font-size: 10px;
+  font-size: 12px;
   pointer-events: none;
+}
+.routing-stage .react-flow__attribution {
+  font-size: 11px;
 }

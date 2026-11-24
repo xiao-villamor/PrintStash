@@ -5,6 +5,7 @@ import type { useMachineSetup } from "@/features/printers/materials";
 import { Link } from "@/lib/link";
 import { PartCoolingFan } from "@/components/printer-telemetry";
 import { Input } from "@/components/ui/input";
+import { RadioOption } from "@/components/ui/radio-option";
 import { extrudePrinter, homePrinter, jogPrinter, tunePrinter } from "@/lib/api/printers";
 import {
   PREHEAT_PRESETS,
@@ -490,24 +491,17 @@ export function ThermalPresets({
         <legend className="mb-1.5 text-xs font-medium">{uiText("Material preset")}</legend>
         <div className="flex flex-wrap gap-1.5">
           {PREHEAT_PRESETS.map((preset) => (
-            <label
+            <RadioOption
               key={preset.name}
-              className="relative inline-flex cursor-action has-[:disabled]:cursor-disabled"
+              name={group}
+              checked={selected === preset}
+              onChange={() => setSelected(preset)}
             >
-              <input
-                type="radio"
-                name={group}
-                checked={selected === preset}
-                onChange={() => setSelected(preset)}
-                className="peer absolute inset-0 z-10 m-0 size-full opacity-0"
-              />
-              <span className="inline-flex h-8 items-center gap-1.5 border border-border px-2 text-xs transition-colors duration-press hover:bg-muted peer-checked:bg-accent peer-checked:text-accent-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:opacity-50 motion-reduce:transition-none">
-                <span className="font-medium">{preset.name}</span>{" "}
-                <span className="font-mono tabular-nums">
-                  {preset.hotend} / {preset.bed} °C
-                </span>
+              <span className="font-medium">{preset.name}</span>{" "}
+              <span className="font-mono tabular-nums">
+                {preset.hotend} / {preset.bed} °C
               </span>
-            </label>
+            </RadioOption>
           ))}
         </div>
       </fieldset>

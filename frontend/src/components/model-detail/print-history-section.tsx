@@ -6,7 +6,7 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useId, useState } from "react";
-import { CheckCircle2, XCircle } from "lucide-react";
+import { CheckCircle2, ClipboardList, FileBox, XCircle } from "lucide-react";
 
 import { createManualPrintJob, getModelPrintJobs, importPrintJobsFromPrinter } from "@/lib/api";
 import { usePrinters, useSpoolmanStatus, useSpools } from "@/lib/queries";
@@ -20,6 +20,8 @@ import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
 import { PRINT_JOB_PRESENTATION } from "./presentation";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { OptionPicker } from "@/components/ui/option-picker";
 import { ChoiceField } from "./choice-field";
 import { Localized } from "@/components/ui/localized";
 
@@ -195,10 +197,13 @@ export function PrintHistorySection({
               : undefined
           }
           dismissible={!submitting && !importing}
+          className={mode === "manual" ? "max-w-220" : undefined}
+          bodyClassName={mode === "manual" ? "p-0" : undefined}
           footer={
             <>
               <Button
                 variant="outline"
+                size="sm"
                 disabled={submitting || importing}
                 onClick={() => setShowAdd(false)}
               >
@@ -206,6 +211,7 @@ export function PrintHistorySection({
               </Button>
               {mode === "manual" ? (
                 <Button
+                  size="sm"
                   onClick={submitManual}
                   loading={submitting}
                   disabled={!manualPrinterReady || !selectedFileId}
@@ -213,7 +219,12 @@ export function PrintHistorySection({
                   {uiText("Save record")}
                 </Button>
               ) : (
-                <Button onClick={runAutoImport} loading={importing} disabled={!selectedPrinterId}>
+                <Button
+                  size="sm"
+                  onClick={runAutoImport}
+                  loading={importing}
+                  disabled={!selectedPrinterId}
+                >
                   {uiText("Fetch & Import")}
                 </Button>
               )}
@@ -239,158 +250,158 @@ export function PrintHistorySection({
             }}
           >
             {mode === "manual" ? (
-              <div className="space-y-4">
-                {modelName && (
-                  <dl className="grid grid-cols-[1fr_2fr] gap-x-4 gap-y-2 bg-plate p-4 text-[13px]">
-                    <dt className="text-muted-foreground">{uiText("Model")}</dt>
-                    <dd>{modelName}</dd>
-                    <dt className="text-muted-foreground">{uiText("Revision")}</dt>
-                    <dd>
-                      {selectedFileId != null
-                        ? `${uiText("Rev ")}${gcodeFiles.find((file) => file.id === selectedFileId)?.gcode_revision_number ?? gcodeFiles.find((file) => file.id === selectedFileId)?.version ?? "—"}`
-                        : "—"}
-                    </dd>
-                  </dl>
-                )}
-                <h3 className="text-sm font-semibold">{uiText("Print context")}</h3>
-                <div className="space-y-4">
-                  <ChoiceField<number | "other">
-                    label={uiText("Printer")}
-                    inline
-                    value={adhocPrinter ? "other" : selectedPrinterId}
-                    options={[
-                      ...printers.map((printer) => ({ value: printer.id, label: printer.name })),
-                      { value: "other", label: uiText("Other (not listed)…") },
-                    ]}
-                    onChange={(value) => {
-                      setAdhocPrinter(value === "other");
-                      setSelectedPrinterId(value === "other" ? null : value);
-                    }}
-                  />
-                  <ChoiceField
-                    label={uiText("G-code Revision")}
-                    inline
-                    value={selectedFileId}
-                    options={gcodeFiles.map((file) => ({
-                      value: file.id,
-                      label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}`,
-                      description: file.original_filename,
-                    }))}
-                    onChange={setSelectedFileId}
-                  />
-                </div>
-                {adhocPrinter && (
-                  <div>
-                    <label
-                      className="block text-xs font-medium text-on-surface-variant mb-1"
-                      htmlFor={`${formId}-3`}
-                    >
-                      {uiText("Printer name")}
-                    </label>
-                    <input
-                      id={`${formId}-3`}
-                      value={adhocPrinterName}
-                      onChange={(e) => setAdhocPrinterName(e.target.value)}
-                      maxLength={128}
-                      placeholder={uiText("e.g. Garage Prusa MK4")}
-                      className="min-w-0 w-full h-10 bg-card text-foreground text-sm border border-input rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                )}
-                {spoolmanEnabled && spools.length > 0 && (
-                  <ChoiceField<number | "none">
-                    label={uiText("Spool (opt.)")}
-                    inline
-                    value={selectedSpoolId ?? "none"}
-                    onChange={(value) => setSelectedSpoolId(value === "none" ? null : value)}
-                    options={[
-                      { value: "none", label: uiText("No spool") },
-                      ...spools.map((spool) => ({
-                        value: spool.id,
-                        label:
-                          spool.filament_name ||
-                          spool.name ||
-                          uiText("Spool {value1}", { value1: String(spool.id) }),
-                        description: [
-                          spool.vendor_name,
-                          spool.remaining_weight != null
-                            ? uiText(" ({value1} left)", {
-                                value1: formatGrams(spool.remaining_weight),
-                              })
-                            : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · "),
-                      })),
-                    ]}
-                  />
-                )}
-                <h3 className="border-t border-border pt-5 text-sm font-semibold">
-                  {uiText("Observed outcome")}
-                </h3>
-                <ChoiceField
-                  label={uiText("Result")}
-                  value={jobState}
-                  options={[
-                    { value: "completed", label: uiText("Completed") },
-                    { value: "failed", label: uiText("Failed") },
-                    { value: "cancelled", label: uiText("Cancelled") },
-                  ]}
-                  onChange={setJobState}
-                  inline
-                />
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <div>
-                    <label
-                      className="block text-xs font-medium text-on-surface-variant mb-1"
-                      htmlFor={`${formId}-6`}
-                    >
-                      {uiText("Started (opt.)")}
-                    </label>
-                    <input
-                      id={`${formId}-6`}
-                      type="datetime-local"
-                      value={startedAt}
-                      onChange={(e) => setStartedAt(e.target.value)}
-                      className="min-w-0 w-full h-10 bg-card text-foreground text-sm border border-input rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                  <div>
-                    <label
-                      className="block text-xs font-medium text-on-surface-variant mb-1"
-                      htmlFor={`${formId}-7`}
-                    >
-                      {uiText("Finished (opt.)")}
-                    </label>
-                    <input
-                      id={`${formId}-7`}
-                      type="datetime-local"
-                      value={finishedAt}
-                      onChange={(e) => setFinishedAt(e.target.value)}
-                      className="min-w-0 w-full h-10 bg-card text-foreground text-sm border border-input rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                </div>
-                {(jobState === "failed" || jobState === "cancelled") && (
-                  <div>
-                    <label
-                      className="block text-xs font-medium text-on-surface-variant mb-1"
-                      htmlFor={`${formId}-8`}
-                    >
-                      {uiText("Error (opt.)")}
-                    </label>
-                    <input
-                      id={`${formId}-8`}
-                      ref={(node) => {
-                        if (initialEntry?.state === "failed") node?.setAttribute("autofocus", "");
+              <div className="grid md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+                <section className="min-w-0 space-y-5 p-6" aria-labelledby={`${formId}-context`}>
+                  <h3 id={`${formId}-context`} className="text-sm font-semibold">
+                    {uiText("Print context")}
+                  </h3>
+                  {modelName && (
+                    <div className="flex min-w-0 items-start gap-3 border border-border bg-plate p-3">
+                      <FileBox size={18} className="mt-0.5 shrink-0 text-primary" aria-hidden />
+                      <div className="min-w-0">
+                        <p className="text-xs text-muted-foreground">{uiText("Model")}</p>
+                        <p className="wrap-anywhere text-sm font-medium">{modelName}</p>
+                      </div>
+                    </div>
+                  )}
+                  <div className="space-y-4">
+                    <OptionPicker
+                      label={uiText("Printer")}
+                      value={selectedPrinterId}
+                      placeholder={uiText("Choose printer")}
+                      options={printers.map((printer) => ({
+                        value: printer.id,
+                        label: printer.name,
+                      }))}
+                      onChange={(printerId) => {
+                        setAdhocPrinter(false);
+                        setSelectedPrinterId(printerId);
                       }}
-                      value={jobError}
-                      onChange={(e) => setJobError(e.target.value)}
-                      placeholder={uiText("Describe what went wrong…")}
-                      className="min-w-0 w-full h-10 bg-card text-foreground text-sm border border-input rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                      other={{
+                        label: uiText("Other (not listed)…"),
+                        selected: adhocPrinter,
+                        onSelect: () => {
+                          setAdhocPrinter(true);
+                          setSelectedPrinterId(null);
+                        },
+                      }}
+                    />
+                    <OptionPicker
+                      label={uiText("G-code Revision")}
+                      value={selectedFileId}
+                      options={gcodeFiles.map((file) => ({
+                        value: file.id,
+                        label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}`,
+                        description: file.original_filename,
+                      }))}
+                      onChange={setSelectedFileId}
                     />
                   </div>
-                )}
+                  {adhocPrinter && (
+                    <div>
+                      <label className="mb-1 block text-sm font-medium" htmlFor={`${formId}-3`}>
+                        {uiText("Printer name")}
+                      </label>
+                      <Input
+                        id={`${formId}-3`}
+                        value={adhocPrinterName}
+                        onChange={(e) => setAdhocPrinterName(e.target.value)}
+                        maxLength={128}
+                        placeholder={uiText("e.g. Garage Prusa MK4")}
+                      />
+                    </div>
+                  )}
+                  {spoolmanEnabled && spools.length > 0 && (
+                    <OptionPicker<number | "none">
+                      label={uiText("Spool (opt.)")}
+                      value={selectedSpoolId ?? "none"}
+                      onChange={(value) => setSelectedSpoolId(value === "none" ? null : value)}
+                      options={[
+                        { value: "none", label: uiText("No spool") },
+                        ...spools.map((spool) => ({
+                          value: spool.id,
+                          label:
+                            spool.filament_name ||
+                            spool.name ||
+                            uiText("Spool {value1}", { value1: String(spool.id) }),
+                          description: [
+                            spool.vendor_name,
+                            spool.remaining_weight != null
+                              ? uiText(" ({value1} left)", {
+                                  value1: formatGrams(spool.remaining_weight),
+                                })
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · "),
+                        })),
+                      ]}
+                    />
+                  )}
+                </section>
+                <section
+                  className="min-w-0 space-y-5 border-t border-border bg-muted p-6 md:border-l md:border-t-0"
+                  aria-labelledby={`${formId}-outcome`}
+                >
+                  <h3
+                    id={`${formId}-outcome`}
+                    className="flex items-center gap-2 text-sm font-semibold"
+                  >
+                    <ClipboardList size={16} className="text-primary" aria-hidden />
+                    {uiText("Observed outcome")}
+                  </h3>
+                  <ChoiceField
+                    label={uiText("Result")}
+                    value={jobState}
+                    options={[
+                      { value: "completed", label: uiText("Completed") },
+                      { value: "failed", label: uiText("Failed") },
+                      { value: "cancelled", label: uiText("Cancelled") },
+                    ]}
+                    onChange={setJobState}
+                    inline
+                  />
+                  <div className="grid gap-3">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium" htmlFor={`${formId}-6`}>
+                        {uiText("Started (opt.)")}
+                      </label>
+                      <Input
+                        id={`${formId}-6`}
+                        type="datetime-local"
+                        value={startedAt}
+                        onChange={(e) => setStartedAt(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium" htmlFor={`${formId}-7`}>
+                        {uiText("Finished (opt.)")}
+                      </label>
+                      <Input
+                        id={`${formId}-7`}
+                        type="datetime-local"
+                        value={finishedAt}
+                        onChange={(e) => setFinishedAt(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  {(jobState === "failed" || jobState === "cancelled") && (
+                    <div>
+                      <label className="mb-1 block text-sm font-medium" htmlFor={`${formId}-8`}>
+                        {uiText("Error (opt.)")}
+                      </label>
+                      <Input
+                        id={`${formId}-8`}
+                        ref={(node) => {
+                          if (initialEntry?.state === "failed") node?.setAttribute("autofocus", "");
+                        }}
+                        value={jobError}
+                        onChange={(e) => setJobError(e.target.value)}
+                        placeholder={uiText("Describe what went wrong…")}
+                      />
+                    </div>
+                  )}
+                </section>
               </div>
             ) : (
               <div className="space-y-2">
@@ -422,8 +433,9 @@ export function PrintHistorySection({
                     </Button>
                   </div>
                 ) : (
-                  <ChoiceField
+                  <OptionPicker
                     label={uiText("Printer")}
+                    placeholder={uiText("Choose printer")}
                     value={selectedPrinterId}
                     options={importPrinters.map((printer) => ({
                       value: printer.id,

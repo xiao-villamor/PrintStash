@@ -1896,6 +1896,13 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     sendJson(res, { sample_interval_ms: 1000, extruder: [], heater_bed: [] });
     return;
   }
+  if (
+    req.method === "GET" &&
+    (url.pathname === "/api/v1/printers/3/console" || url.pathname === "/api/v1/printers/3/macros")
+  ) {
+    sendJson(res, []);
+    return;
+  }
   if (url.pathname === "/api/v1/printers/3/bed-mesh/measurement" && req.method === "GET") {
     sendJson(res, { supported: false });
     return;

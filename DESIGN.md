@@ -73,6 +73,11 @@ Primary actions and selected controls are deliberately different:
 - Do not add a colored border or ring to a filled selected control. Its neutral
   fill is the state indicator; outlines are reserved for keyboard focus via
   `focus-visible:ring-ring`.
+- Use the shared `RadioOption` for visible single-choice groups in print
+  forms. It provides a visible circular indicator and native arrow-key
+  navigation.
+- Use `OptionPicker` for data-driven lists that can grow, such as printers
+  and revisions. Keep the search and scrollable choices inside the menu.
 - Orange belongs to `warning` or explicitly tertiary/status content. It is not
   an action or selection color.
 

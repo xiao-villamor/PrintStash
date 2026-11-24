@@ -45,6 +45,7 @@ export function SavedRevisionPicker({
   const models = useModelList(filters, 24, "date-desc", pickerOpen);
   const rows = models.data?.pages.flatMap((page) => page.items) ?? [];
   const [browsedModel, setBrowsedModel] = useState<ModelListItem | null>(null);
+  const [revisionQuery, setRevisionQuery] = useState("");
   const browsed = useQuery({
     ...modelDetailOptions(browsedModel?.id ?? null),
     enabled: pickerOpen && browsedModel !== null,
@@ -52,6 +53,12 @@ export function SavedRevisionPicker({
   const revisions = browsed.isError
     ? []
     : (browsed.data?.files.filter((file) => file.file_type === "gcode") ?? []);
+  const revisionTerm = revisionQuery.trim().toLocaleLowerCase();
+  const matchingRevisions = revisions.filter((revision) =>
+    `${revisionLabel(revision)} ${revision.original_filename}`
+      .toLocaleLowerCase()
+      .includes(revisionTerm),
+  );
   return (
     <div className="grid grid-cols-1 gap-2">
       <label className="text-[13px]" htmlFor={revisionId}>
@@ -94,8 +101,14 @@ export function SavedRevisionPicker({
         }
       >
         {browsedModel ? (
-          <div className="max-h-[60vh] overflow-y-auto p-3">
-            <Button type="button" variant="ghost" size="xs" onClick={() => setBrowsedModel(null)}>
+          <div className="flex max-h-[60vh] min-w-0 flex-col p-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="self-start"
+              onClick={() => setBrowsedModel(null)}
+            >
               <ChevronLeft className="h-3.5 w-3.5" />
               {uiText("Models")}
             </Button>
@@ -119,28 +132,45 @@ export function SavedRevisionPicker({
                 </Button>
               </div>
             ) : revisions.length ? (
-              <div className="divide-y divide-border">
-                {revisions.map((revision) => (
-                  <button
-                    key={revision.id}
-                    type="button"
-                    className="block w-full wrap-anywhere px-2 py-3 text-left text-sm hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => {
-                      onChoose({ modelId: browsedModel.id, fileId: revision.id });
-                      setBrowsedModel(null);
-                      onOpenChange(false);
-                    }}
-                  >
-                    <span className="font-medium">
-                      {revisionLabel(revision)}
-                      {revision.is_recommended ? ` ★ ${uiText("Recommended")}` : ""}
-                    </span>
-                    <span className="mt-1 block break-words text-xs text-muted-foreground">
-                      {revision.original_filename}
-                    </span>
-                  </button>
-                ))}
-              </div>
+              <>
+                {revisions.length > 1 && (
+                  <Input
+                    type="search"
+                    className="mb-2 shrink-0"
+                    value={revisionQuery}
+                    onChange={(event) => setRevisionQuery(event.target.value)}
+                    placeholder={uiText("Search revisions")}
+                    aria-label={uiText("Search revisions")}
+                  />
+                )}
+                <div className="min-h-0 divide-y divide-border overflow-y-auto">
+                  {matchingRevisions.map((revision) => (
+                    <button
+                      key={revision.id}
+                      type="button"
+                      className="block w-full wrap-anywhere px-2 py-3 text-left text-sm hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => {
+                        onChoose({ modelId: browsedModel.id, fileId: revision.id });
+                        setBrowsedModel(null);
+                        onOpenChange(false);
+                      }}
+                    >
+                      <span className="font-medium">
+                        {revisionLabel(revision)}
+                        {revision.is_recommended ? ` ★ ${uiText("Recommended")}` : ""}
+                      </span>
+                      <span className="mt-1 block break-words text-xs text-muted-foreground">
+                        {revision.original_filename}
+                      </span>
+                    </button>
+                  ))}
+                  {matchingRevisions.length === 0 && (
+                    <p role="status" className="px-2 py-3 text-sm text-muted-foreground">
+                      {uiText("No matching options.")}
+                    </p>
+                  )}
+                </div>
+              </>
             ) : (
               <p className="py-4 text-sm text-muted-foreground">
                 {uiText("No G-code revision yet")}
@@ -182,7 +212,10 @@ export function SavedRevisionPicker({
                     key={model.id}
                     type="button"
                     disabled={models.isPlaceholderData}
-                    onClick={() => setBrowsedModel(model)}
+                    onClick={() => {
+                      setRevisionQuery("");
+                      setBrowsedModel(model);
+                    }}
                     className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                   >
                     <span className="min-w-0 break-words">{model.name}</span>

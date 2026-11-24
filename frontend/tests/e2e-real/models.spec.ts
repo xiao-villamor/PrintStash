@@ -7,12 +7,52 @@
  * Deletion being recoverable is the promise the trash makes, and this is where it is kept.
  */
 import { test, expect } from "./helpers";
-import { clickModelAction, modelCard, openModelPage, uploadModel } from "./util";
+import {
+  clickModelAction,
+  collapseNavigationSidebar,
+  modelCard,
+  openModelPage,
+  uploadModel,
+} from "./util";
 import { settleLibraryRead } from "../e2e/_library";
+import { selectModelDetailTab } from "../model-detail-navigation";
 
 // Full lifecycle on the REAL backend: upload G-code → real ingestion creates the
 // model → edit it → soft-delete to trash → restore → purge forever.
 test.describe("model library", () => {
+  test("persists a failed print record with an unlisted printer", async ({ page }) => {
+    const name = `e2e-print-record-${Date.now()}`;
+    const printer = `Workshop ${name}`;
+    await uploadModel(page, name);
+    await collapseNavigationSidebar(page);
+    await openModelPage(page, name);
+    const modelPath = new URL(page.url()).pathname;
+
+    try {
+      await selectModelDetailTab(page, /History/);
+      await page.getByRole("button", { name: "Add record", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Add print record" });
+      await dialog.getByRole("button", { name: "Printer", exact: true }).click();
+      await page.getByRole("button", { name: "Other (not listed)…", exact: true }).click();
+      await dialog.getByRole("textbox", { name: "Printer name" }).fill(printer);
+      await dialog.getByRole("radio", { name: "Failed", exact: true }).check();
+      await dialog.getByRole("textbox", { name: "Error (opt.)" }).fill("Lifted corner");
+      const saved = page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`${modelPath}/print-jobs`) &&
+          response.request().method() === "POST",
+      );
+      await dialog.getByRole("button", { name: "Save record", exact: true }).click();
+      expect((await saved).ok()).toBe(true);
+      await expect(dialog).toHaveCount(0);
+      await page.reload();
+      await expect(page.getByText(printer, { exact: false })).toBeVisible();
+      await expect(page.getByText("Lifted corner", { exact: true })).toBeVisible();
+    } finally {
+      expect((await page.request.delete(`/api/v1${modelPath}`)).ok()).toBe(true);
+    }
+  });
+
   test(
     "@critical upload, edit, trash, restore, and purge a model",
     { tag: "@pr-smoke" },
