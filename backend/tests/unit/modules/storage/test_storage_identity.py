@@ -5,6 +5,7 @@ import pytest
 from app.modules.storage.storage_identity import (
     StorageTargetIdentity,
     normalized_endpoint,
+    provider_domain,
     s3_target,
     shares_storage,
     target_for_transport,
@@ -67,7 +68,7 @@ class TestTargetIdentity:
     def test_provider_domain_requires_a_recognized_endpoint(
         self, endpoint: str, domain: str | None
     ) -> None:
-        assert s3_target(endpoint=endpoint, bucket="backup").provider_domain == domain
+        assert provider_domain(s3_target(endpoint=endpoint, bucket="backup")) == domain
 
     def test_different_buckets_on_one_server_share_storage(self) -> None:
         first = s3_target(endpoint="https://nas.example.test:9000", bucket="vault")
@@ -147,5 +148,5 @@ class TestTargetIdentity:
         target = target_for_transport(kind, options)
 
         assert target is not None and target.transport == kind
-        assert target.provider_domain == domain
+        assert provider_domain(target) == domain
         assert "archive" not in target.model_dump_json()

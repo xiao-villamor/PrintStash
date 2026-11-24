@@ -103,9 +103,17 @@ def _compose_storage_backend(
         if settings.storage_provider_error:
             raise RuntimeError(settings.storage_provider_error)
         from app.modules.storage.storage_providers import provider_transport
+        from app.modules.storage.transports import transport as registered
+        from app.modules.storage.transports.base import (
+            BuiltinRuntime,
+            TransportKind,
+        )
 
         transport = provider_transport(str(settings.storage_backend))
-        if transport in {"webdav", "sftp"}:
+        vault_runtime = registered(TransportKind(transport)).vault_runtime
+        # Built-in Vaults (local, native S3) have their own adapters; every
+        # other Vault-capable transport is a guarded remote adapter.
+        if vault_runtime is not None and not isinstance(vault_runtime, BuiltinRuntime):
             from app.modules.storage.storage_opendal import OpenDALStorageBackend
             from app.modules.storage.storage_providers import (
                 parse_provider_config,

@@ -2,8 +2,13 @@ ARG PRINTSTASH_VARIANT=full
 
 FROM rust:1.91-slim-bookworm AS opendal-builder
 
-ARG OPENDAL_SOURCE_VERSION=0.58.2
-ARG OPENDAL_SOURCE_SHA256=476b0358ddc2a644dd4448552331af0d814279b0c1aaf5da755510b34645a764
+# OpenDAL core v0.59.5 publishes Python distribution 0.47.12, the version
+# pinned in pyproject.toml. OPENDAL_SERVICES lists exactly the OpenDAL services
+# registered in app/modules/storage/transports; tests/repo/test_storage_image.py
+# keeps all three in step.
+ARG OPENDAL_SOURCE_VERSION=0.59.5
+ARG OPENDAL_SOURCE_SHA256=dd543a506488098ac698266a8dba0f6b33f6455d73383e0496094771ba0af4ab
+ARG OPENDAL_SERVICES=services-memory,services-s3,services-webdav,services-gdrive
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -14,9 +19,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # SFTP uses AsyncSSH; native amd64/arm64 image recovery proves this path.
-# OpenDAL v0.58.2 publishes Python distribution 0.47.6. Build that exact
-# release with the advertised S3, WebDAV and Google Drive service features
-# enabled, independently of the features selected in upstream wheels.
+# Build the exact OpenDAL release with only the registered service features,
+# independently of the features selected in upstream wheels.
 RUN curl -fsSL \
       "https://github.com/apache/opendal/archive/refs/tags/v${OPENDAL_SOURCE_VERSION}.tar.gz" \
       -o /tmp/opendal.tar.gz \
@@ -27,7 +31,7 @@ RUN curl -fsSL \
  && /tmp/maturin/bin/pip install --no-cache-dir 'maturin==1.9.6' \
  && cd /src/bindings/python \
  && /tmp/maturin/bin/maturin build --release --no-default-features \
-      --features pyo3/extension-module,abi3,services-memory,services-s3,services-webdav,services-gdrive \
+      --features "pyo3/extension-module,abi3,${OPENDAL_SERVICES}" \
       --out /wheels
 
 FROM scratch AS opendal-wheel
@@ -79,6 +83,7 @@ RUN uv sync --frozen --no-dev --no-editable \
  && rm -rf "$UV_CACHE_DIR"
 
 FROM dependencies-common AS dependencies-full
+ARG OPENDAL_PYTHON_VERSION=0.47.12
 COPY --from=opendal-builder /wheels /tmp/opendal-wheels
 # One image serves every host. The GPU runtime (wgpu, ONNX Runtime's WebGPU
 # provider and the Vulkan/Mesa userspace) is always installed and does nothing
@@ -93,8 +98,8 @@ RUN apt-get update \
  && uv sync --frozen --no-dev --no-editable --extra full --extra gpu --no-install-workspace
 COPY --chmod=0644 packages/printstash-core/src ./packages/printstash-core/src
 RUN uv sync --frozen --no-dev --no-editable --extra full --extra gpu \
- && uv pip install --reinstall /tmp/opendal-wheels/opendal-0.47.6-*.whl \
- && .venv/bin/python -c 'import opendal; opendal.Operator("s3", bucket="build-check", region="us-east-1", access_key_id="build-check", secret_access_key="build-check", disable_config_load="true", disable_ec2_metadata="true"); opendal.Operator("webdav", endpoint="https://example.invalid", root="/"); opendal.Operator("gdrive", root="/", client_id="build-check", client_secret="build-check", refresh_token="build-check"); import asyncssh, wgpu, onnxruntime, OCP.BRep, OCP.STEPControl' \
+ && uv pip install --reinstall "/tmp/opendal-wheels/opendal-${OPENDAL_PYTHON_VERSION}-"*.whl \
+ && .venv/bin/python -c 'import opendal, asyncssh, wgpu, onnxruntime, OCP.BRep, OCP.STEPControl' \
  && rm -rf /tmp/opendal-wheels \
  && uv cache clean \
  && rm -rf "$UV_CACHE_DIR"
@@ -127,6 +132,13 @@ ENV VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS=${PRINTSTASH_DBOS_NOTIFICATIONS}
 # Fresh guarded parsers share code bytes, never interpreter or parser state.
 # Runtime bytecode writes are disabled, so compile application sources at build.
 RUN .venv/bin/python -m compileall -q app
+# The full image must construct every registered OpenDAL service from its
+# compiled wheel; the registry, not this file, names those services.
+RUN case "$PRINTSTASH_VARIANT" in \
+      full) .venv/bin/python -m app.modules.storage.transports.compiled ;; \
+      lite) ;; \
+      *) echo "PRINTSTASH_VARIANT must be full or lite" >&2; exit 1 ;; \
+    esac
 COPY --chown=printstash:printstash --chmod=0644 alembic.ini ./alembic.ini
 COPY --chown=printstash:printstash alembic ./alembic
 COPY docker-entrypoint.sh ./docker-entrypoint.sh

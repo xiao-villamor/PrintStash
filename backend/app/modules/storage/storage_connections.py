@@ -7,14 +7,12 @@ from typing import Mapping
 
 from app.db.models import LibrarySourceKind, StorageConnection
 from app.modules.storage.storage_providers import (
-    GoogleDriveProviderConfig,
-    S3ProviderConfig,
-    SFTPProviderConfig,
     StorageProviderConfig,
-    WebDAVProviderConfig,
     resolve_transport,
     split_provider_config,
 )
+from app.modules.storage.transports import remote_transport
+from app.modules.storage.transports.base import RemoteTransport, TransportKind
 
 
 class StorageConnectionConfigError(ValueError):
@@ -31,32 +29,25 @@ def _json_object(value: str) -> dict[str, object]:
     return {str(key): item for key, item in parsed.items()}
 
 
+def connection_transport(kind: LibrarySourceKind) -> RemoteTransport:
+    """The remote transport a connection row of ``kind`` uses."""
+    if kind is LibrarySourceKind.MOUNTED:
+        raise StorageConnectionConfigError("storage_connection_invalid")
+    return remote_transport(TransportKind(kind.value))
+
+
 def parse_connection_config(
     kind: LibrarySourceKind,
     configuration: Mapping[str, object],
     secrets: Mapping[str, str],
 ) -> StorageProviderConfig:
+    registered = connection_transport(kind)
     merged: dict[str, object] = {**configuration, **secrets}
+    provider = merged.pop("provider", registered.default_provider)
     try:
-        if kind == LibrarySourceKind.S3:
-            return S3ProviderConfig.model_validate(
-                {"provider": merged.pop("provider", "s3"), **merged}
-            )
-        if kind == LibrarySourceKind.WEBDAV:
-            return WebDAVProviderConfig.model_validate(
-                {"provider": merged.pop("provider", "webdav"), **merged}
-            )
-        if kind == LibrarySourceKind.SFTP:
-            return SFTPProviderConfig.model_validate(
-                {"provider": merged.pop("provider", "sftp"), **merged}
-            )
-        if kind == LibrarySourceKind.GDRIVE:
-            return GoogleDriveProviderConfig.model_validate(
-                {"provider": "gdrive", **merged}
-            )
+        return registered.config_model.model_validate({"provider": provider, **merged})
     except ValueError as exc:
         raise StorageConnectionConfigError("storage_connection_invalid") from exc
-    raise StorageConnectionConfigError("storage_connection_invalid")
 
 
 def serialize_connection_config(

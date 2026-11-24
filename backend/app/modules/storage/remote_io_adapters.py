@@ -33,11 +33,16 @@ from app.modules.storage.storage_backend.contracts import (
     StorageConfigurationError,
     StorageObjectInfo,
 )
-from app.modules.storage.storage_identity import (
-    StorageTargetIdentity,
-    target_for_transport,
+from app.modules.storage.storage_identity import StorageTargetIdentity
+from app.modules.storage.transports import remote_transport
+from app.modules.storage.transports.base import (
+    AsyncSSHRuntime,
+    CreateStrategy,
+    ListingStrategy,
+    RemoteTransport,
+    TransportKind,
+    TransportSpec,
 )
-from app.modules.storage.storage_providers import TransportKind, TransportSpec
 
 _Result = TypeVar("_Result")
 
@@ -46,13 +51,10 @@ class _RemoteAdapter:
     """Shared key and transport mechanics, independent of managed Vault storage."""
 
     def __init__(self, spec: TransportSpec, *, operator=None) -> None:
-        if spec.kind not in {
-            TransportKind.S3,
-            TransportKind.WEBDAV,
-            TransportKind.SFTP,
-            TransportKind.GDRIVE,
-        }:
-            raise StorageConfigurationError("unsupported remote transport")
+        try:
+            self._transport: RemoteTransport = remote_transport(spec.kind)
+        except ValueError as exc:
+            raise StorageConfigurationError("unsupported remote transport") from exc
         self._spec = spec
         self.backend_name = spec.provider
         self.provider_id = spec.provider
@@ -69,7 +71,7 @@ class _RemoteAdapter:
     def _io_operator(self):
         timeout = operation_timeout()
         layer = getattr(self._operator, "layer", None)
-        if layer is None or self._spec.kind is TransportKind.SFTP:
+        if layer is None or self._transport.opendal_service is None:
             return self._operator
         import opendal
 
@@ -85,7 +87,7 @@ class _RemoteAdapter:
 
     @property
     def storage_target(self) -> StorageTargetIdentity | None:
-        return target_for_transport(self._spec.kind.value, self._spec.options)
+        return self._transport.target(self._spec.options)
 
     def _key(self, suffix: str) -> str:
         return f"{self._namespace}/{suffix.lstrip('/')}"
@@ -200,9 +202,10 @@ class _RemoteAdapter:
         if self._read_only:
             raise StorageConfigurationError("remote_storage_read_only")
         destination = self._relative(key)
+        strategy = self._transport.create_strategy
         try:
             if (
-                self._spec.kind is TransportKind.WEBDAV
+                strategy is CreateStrategy.WEBDAV_MOVE
                 and self._webdav_endpoint.startswith(("http://", "https://"))
             ):
                 temporary = f".printstash-tmp-{uuid.uuid4().hex}"
@@ -234,15 +237,15 @@ class _RemoteAdapter:
                         self._operator.delete(temporary)
                     except Exception:
                         pass
-            elif self._spec.kind is TransportKind.SFTP:
+            elif strategy is CreateStrategy.EXCLUSIVE_OPEN:
                 # AsyncSSH maps ``x`` to O_EXCL on the server.  This is the
                 # SFTP equivalent of WebDAV's If-None-Match: * and closes the
                 # check-then-write race.
                 if not hasattr(self._operator, "write_exclusive"):
                     raise StorageConfigurationError("sftp_exclusive_create_unavailable")
                 self._operator.write_exclusive(destination, source)
-            elif self._spec.kind is TransportKind.GDRIVE:
-                # OpenDAL's Google Drive service uses a OneShotWriter: a second
+            elif strategy is CreateStrategy.CHECKED_ONE_SHOT:
+                # A OneShotWriter (OpenDAL's Google Drive service): a second
                 # ``writer.write`` fails even though the first chunk was
                 # accepted. Stage to a temporary file, then hand the binding
                 # one contiguous buffer without loading a large backup into
@@ -264,7 +267,7 @@ class _RemoteAdapter:
                             mapped.close()
                     else:
                         self._operator.write(destination, b"")
-            elif self._spec.kind is TransportKind.S3:
+            elif strategy is CreateStrategy.CONDITIONAL_WRITE:
                 capabilities = self._operator.capability()
                 create_only = bool(
                     getattr(capabilities, "write_with_if_not_exists", False)
@@ -375,17 +378,15 @@ class _RemoteAdapter:
     @property
     def operations(self) -> RemoteCapabilities:
         raw = self.operator_capabilities
-        conditional = self._spec.kind is TransportKind.WEBDAV or bool(
-            getattr(raw, "write_with_if_not_exists", False)
+        conditional = self._transport.conditional_create(
+            bool(getattr(raw, "write_with_if_not_exists", False))
         )
         return RemoteCapabilities(
             read=bool(getattr(raw, "read", False)),
             write=bool(getattr(raw, "write", False)),
             list=bool(getattr(raw, "list", False)),
-            conditional_create=conditional
-            and self._spec.kind is not TransportKind.GDRIVE,
-            atomic_visibility=conditional
-            and self._spec.kind in {TransportKind.S3, TransportKind.WEBDAV},
+            conditional_create=conditional,
+            atomic_visibility=conditional and self._transport.atomic_publication,
             versioned_delete=bool(getattr(raw, "delete_with_version", False)),
         )
 
@@ -462,7 +463,7 @@ class _RemoteAdapter:
         def observations():
             listing = None
             try:
-                if self._spec.kind is TransportKind.WEBDAV:
+                if self._transport.listing is ListingStrategy.WEBDAV_PROPFIND:
                     with self._webdav_listing(directory) as entries:
                         for entry in entries:
                             if entry.key != directory:
@@ -482,7 +483,10 @@ class _RemoteAdapter:
                         continue
                     metadata = entry.metadata
                     modified_at = getattr(metadata, "last_modified", None)
-                    if self._spec.kind is TransportKind.S3 and modified_at is not None:
+                    if (
+                        self._transport.listed_mtime_whole_seconds
+                        and modified_at is not None
+                    ):
                         # S3 list XML can include fractions, but HEAD's HTTP date
                         # has whole-second precision. Keep both observations in
                         # that common precision; ETag/version still fence reads.
@@ -573,12 +577,19 @@ class _IdentityDeletion:
         self.remote._delete_versioned(key, version_id)
 
 
+def _uses_asyncssh(kind: TransportKind) -> bool:
+    try:
+        return isinstance(remote_transport(kind).remote_runtime, AsyncSSHRuntime)
+    except ValueError as exc:
+        raise StorageConfigurationError("unsupported remote transport") from exc
+
+
 class OpenDALRemoteIO(_RemoteAdapter):
     """OpenDAL remote bytes; no implicit managed-storage contract."""
 
     def __init__(self, spec: TransportSpec, *, operator=None) -> None:
-        if spec.kind is TransportKind.SFTP:
-            raise StorageConfigurationError("sftp_requires_asyncssh")
+        if _uses_asyncssh(spec.kind):
+            raise StorageConfigurationError(f"{spec.kind.value}_requires_asyncssh")
         super().__init__(spec, operator=operator)
 
 
@@ -586,13 +597,13 @@ class AsyncSSHRemoteIO(_RemoteAdapter):
     """Incremental SFTP operations with explicit host verification."""
 
     def __init__(self, spec: TransportSpec, *, operator=None) -> None:
-        if spec.kind is not TransportKind.SFTP:
+        if not _uses_asyncssh(spec.kind):
             raise StorageConfigurationError("asyncssh_requires_sftp")
         super().__init__(spec, operator=operator)
 
 
 def remote_io_for(spec: TransportSpec, *, operator=None) -> RemoteIO:
-    adapter = AsyncSSHRemoteIO if spec.kind is TransportKind.SFTP else OpenDALRemoteIO
+    adapter = AsyncSSHRemoteIO if _uses_asyncssh(spec.kind) else OpenDALRemoteIO
     return adapter(spec, operator=operator)
 
 
@@ -606,7 +617,7 @@ def opendal_available() -> bool:
 
 
 def opendal_transport_available(kind: TransportKind) -> bool:
-    if kind is TransportKind.SFTP:
+    if _uses_asyncssh(kind):
         try:
             import asyncssh  # noqa: F401
         except ImportError:
@@ -635,68 +646,29 @@ def _is_not_found(exc: Exception) -> bool:
 
 
 def _operator_for(spec: TransportSpec) -> Any:
-    options = spec.options
-    if spec.kind is TransportKind.S3:
-        try:
-            import opendal
-        except ImportError as exc:
-            raise StorageConfigurationError("Requires the full image") from exc
-        kwargs = {
-            "bucket": str(options["bucket"]),
-            "root": str(options["root"]),
-            "access_key_id": str(options["access_key"]),
-            "secret_access_key": str(options["secret_key"]),
-            "disable_config_load": "true",
-            "disable_ec2_metadata": "true",
-        }
-        addressing_style = str(options.get("addressing_style") or "auto")
-        if addressing_style != "auto":
-            kwargs["enable_virtual_host_style"] = str(
-                addressing_style == "virtual"
-            ).lower()
-        endpoint = str(options.get("endpoint_url") or "")
-        if endpoint:
-            kwargs["endpoint"] = endpoint
-        # The pinned Python binding requires an explicit signing region. R2's
-        # literal "auto" is a valid region, not a request for network discovery.
-        kwargs["region"] = str(options.get("region") or "auto")
-        return opendal.Operator("s3", **kwargs)
-    if spec.kind is TransportKind.WEBDAV:
-        try:
-            import opendal
-        except ImportError as exc:
-            raise StorageConfigurationError("Requires the full image") from exc
-        return opendal.Operator(
-            "webdav",
-            endpoint=str(options["endpoint_url"]),
-            root=str(options["root"]),
-            username=str(options["username"]),
-            password=str(options["password"]),
-        )
-    if spec.kind is TransportKind.GDRIVE:
-        try:
-            import opendal
-        except ImportError as exc:
-            raise StorageConfigurationError("Requires the full image") from exc
-        try:
-            return opendal.Operator(
-                "gdrive",
-                root=str(options["root"]),
-                client_id=str(options["client_id"]),
-                client_secret=str(options["client_secret"]),
-                refresh_token=str(options["refresh_token"]),
-            )
-        except opendal.exceptions.Unsupported as exc:
-            raise StorageConfigurationError("gdrive_transport_unavailable") from exc
-    if spec.kind is TransportKind.SFTP:
+    try:
+        registered = remote_transport(spec.kind)
+    except ValueError as exc:
+        raise StorageConfigurationError("unsupported remote transport") from exc
+    if isinstance(registered.remote_runtime, AsyncSSHRuntime):
         # The OpenDAL SFTP service only accepts a strategy (and uses the
         # process-wide OpenSSH catalogue), while PrintStash accepts a mounted
         # file or explicit known-host entry.  AsyncSSH gives both auth modes
         # the same explicit verification contract and exclusive-create seam.
-        if not str(options.get("host_key") or "").strip():
+        if not str(spec.options.get("host_key") or "").strip():
             raise StorageConfigurationError("sftp_host_key_required")
-        return _AsyncSSHSFTPOperator(options)
-    raise StorageConfigurationError("unsupported remote transport")
+        return _AsyncSSHSFTPOperator(spec.options)
+    try:
+        import opendal
+    except ImportError as exc:
+        raise StorageConfigurationError("Requires the full image") from exc
+    service = registered.remote_runtime
+    try:
+        return opendal.Operator(service.scheme, **registered.operator_options(spec))
+    except opendal.exceptions.Unsupported as exc:
+        raise StorageConfigurationError(
+            f"{spec.kind.value}_transport_unavailable"
+        ) from exc
 
 
 @dataclass(frozen=True)

@@ -10,6 +10,8 @@
 
 ### Changed
 
+- The full image builds Apache OpenDAL 0.59.5 (Python binding 0.47.12) for S3, WebDAV and Google Drive Library sources and backup replicas. Image builds now fail if a supported remote storage service is missing from the OpenDAL build.
+
 - Right-click a collection card to recreate thumbnails for the models directly in that collection.
 
 - Model details are in Overview and mesh measurements and checks are in Source info, freeing the full preview pane for the viewer.

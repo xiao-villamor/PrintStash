@@ -16,7 +16,7 @@ from app.modules.storage.storage_backend.contracts import (
     StorageCollisionError,
     StorageConfigurationError,
 )
-from app.modules.storage.storage_providers import TransportKind, TransportSpec
+from app.modules.storage.transports.base import CreateStrategy, TransportSpec
 from app.runtime.maintenance import guarded_storage_destruction
 
 
@@ -83,13 +83,14 @@ class OpenDALStorageBackend(_RemoteAdapter, StorageBackend):
     def move(self, src_key: str, dest_key: str) -> None:
         source = self._relative(src_key)
         destination = self._relative(dest_key)
-        if self._spec.kind is TransportKind.WEBDAV and self._webdav_endpoint.startswith(
+        strategy = self._transport.create_strategy
+        if strategy is CreateStrategy.WEBDAV_MOVE and self._webdav_endpoint.startswith(
             ("http://", "https://")
         ):
             self._webdav_ensure_parent(destination)
             self._webdav_move_create_only(source, destination)
             return
-        if self._spec.kind is TransportKind.SFTP:
+        if strategy is CreateStrategy.EXCLUSIVE_OPEN:
             # SFTP rename is allowed to replace a destination.  The existence
             # check below would be a TOCTOU window, so do not expose it as a
             # create-only move until the server provides a no-replace rename.
@@ -211,7 +212,7 @@ class OpenDALStorageBackend(_RemoteAdapter, StorageBackend):
         silently replaced by an empty directory.  The first-run setup wizard is
         the sole caller of this mutating seam.
         """
-        if self._spec.kind is not TransportKind.SFTP:
+        if not self._transport.provisions_root:
             raise StorageConfigurationError("remote_root_provisioning_unsupported")
         provision = getattr(self._operator, "provision_root", None)
         if provision is None:
@@ -224,13 +225,14 @@ class OpenDALStorageBackend(_RemoteAdapter, StorageBackend):
         del keys
         probe = f".printstash-probe/{uuid.uuid4().hex}"
         try:
-            if self._spec.kind is TransportKind.SFTP:
+            strategy = self._transport.create_strategy
+            if strategy is CreateStrategy.EXCLUSIVE_OPEN:
                 from io import BytesIO
 
                 if not hasattr(self._operator, "write_exclusive"):
                     raise StorageConfigurationError("sftp_exclusive_create_unavailable")
                 self._operator.write_exclusive(probe, BytesIO())
-            elif self._spec.kind is TransportKind.WEBDAV:
+            elif strategy is CreateStrategy.WEBDAV_MOVE:
                 from io import BytesIO
 
                 self.create_stream(BytesIO(), self._key(probe))

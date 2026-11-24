@@ -1,4 +1,4 @@
-"""Versioned target identity and conservative failure-domain evidence.
+"""Conservative failure-domain evidence for storage target identities.
 
 Locator hashes remain unchanged. Neither a role, a namespace prefix, a profile,
 nor different credentials establish independent storage.
@@ -6,139 +6,49 @@ nor different credentials establish independent storage.
 
 from __future__ import annotations
 
-import hashlib
 import ipaddress
 import json
 import re
-from typing import Literal
-from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import BaseModel, ConfigDict
+from app.modules.storage.target_identity import (
+    StorageTargetIdentity,
+    locator_endpoint,
+    normalized_endpoint,
+)
+from app.modules.storage.transports import transport
+from app.modules.storage.transports.base import TransportKind
+from app.modules.storage.transports.s3 import s3_target
+
+__all__ = [
+    "StorageTargetIdentity",
+    "identity_evidence",
+    "independent_evidence",
+    "locator_endpoint",
+    "normalized_endpoint",
+    "provider_domain",
+    "s3_target",
+    "shares_storage",
+    "target_for_transport",
+]
 
 
-class StorageTargetIdentity(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    version: Literal[1] = 1
-    transport: str
-    endpoint: str
-    container: str = ""
-    account: str = ""
-
-    @property
-    def target_ref(self) -> str:
-        payload = json.dumps(self.model_dump(), sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(payload.encode()).hexdigest()
-
-    @property
-    def host(self) -> str:
-        return (urlsplit(self.endpoint).hostname or "").lower().rstrip(".")
-
-    @property
-    def provider_domain(self) -> str | None:
-        if self.transport == "local":
-            return f"installation:{self.endpoint}"
-        if self.transport == "gdrive":
-            return "provider:google"
-        if self.transport != "s3":
-            return None
-        host = self.host
-        if host in {"s3.amazonaws.com", "s3.amazonaws.com.cn"}:
-            return "provider:aws"
-        if re.fullmatch(r"s3[.-][a-z0-9.-]+\.amazonaws\.com(?:\.cn)?", host):
-            return "provider:aws"
-        if re.fullmatch(r"s3\.[a-z0-9-]+\.backblazeb2\.com", host):
-            return "provider:backblaze"
-        if re.fullmatch(r"s3(?:\.[a-z0-9-]+)?\.wasabisys\.com", host):
-            return "provider:wasabi"
-        if re.fullmatch(r"[a-z0-9-]+\.r2\.cloudflarestorage\.com", host):
-            return "provider:cloudflare"
+def provider_domain(target: StorageTargetIdentity) -> str | None:
+    """A provider-wide failure domain shared by every target the provider hosts."""
+    try:
+        kind = TransportKind(target.transport)
+    except ValueError:
+        # Persisted identities may name a transport this build no longer
+        # registers; it shares no provider-wide failure domain.
         return None
-
-
-def normalized_endpoint(value: str) -> str:
-    parts = urlsplit(value.strip())
-    if (
-        not parts.hostname
-        or parts.username
-        or parts.password
-        or parts.query
-        or parts.fragment
-    ):
-        raise ValueError("storage_target_endpoint_invalid")
-    scheme = parts.scheme.lower()
-    if scheme not in {"http", "https", "sftp"}:
-        raise ValueError("storage_target_endpoint_invalid")
-    host = parts.hostname.lower().rstrip(".")
-    if ":" in host:
-        host = f"[{host}]"
-    port = parts.port
-    if port and port != {"http": 80, "https": 443, "sftp": 22}[scheme]:
-        host = f"{host}:{port}"
-    return urlunsplit((scheme, host, parts.path.rstrip("/"), "", ""))
-
-
-def s3_target(*, endpoint: str, bucket: str) -> StorageTargetIdentity:
-    endpoint = normalized_endpoint(endpoint or "https://s3.amazonaws.com")
-    parts = urlsplit(endpoint)
-    host = parts.hostname or ""
-    # Only recognize AWS's documented virtual-host endpoint. A custom server
-    # named "bucket.example.test" must retain its host identity when another
-    # bucket on that same server is considered as a backup witness.
-    if (
-        bucket
-        and host.startswith(f"{bucket}.")
-        and (
-            StorageTargetIdentity(
-                transport="s3", endpoint=f"https://{host[len(bucket) + 1 :]}"
-            ).provider_domain
-            == "provider:aws"
-        )
-    ):
-        host = host[len(bucket) + 1 :]
-        endpoint = urlunsplit(
-            (
-                parts.scheme,
-                host + (f":{parts.port}" if parts.port else ""),
-                parts.path,
-                "",
-                "",
-            )
-        )
-    target = StorageTargetIdentity(transport="s3", endpoint=endpoint, container=bucket)
-    if target.provider_domain == "provider:aws":
-        endpoint = (
-            "https://s3.amazonaws.com.cn"
-            if host.endswith(".cn")
-            else "https://s3.amazonaws.com"
-        )
-        return target.model_copy(update={"endpoint": endpoint})
-    return target
+    return transport(kind).provider_domain(target)
 
 
 def target_for_transport(kind: str, options: dict) -> StorageTargetIdentity | None:
-    if kind == "s3":
-        return s3_target(
-            endpoint=str(options.get("endpoint_url") or ""),
-            bucket=str(options["bucket"]),
-        )
-    if kind == "webdav":
-        return StorageTargetIdentity(
-            transport=kind, endpoint=normalized_endpoint(str(options["endpoint_url"]))
-        )
-    if kind == "sftp":
-        host = str(options["host"])
-        if ":" in host and not host.startswith("["):
-            host = f"[{host}]"
-        endpoint = normalized_endpoint(f"sftp://{host}:{options.get('port', 22)}")
-        return StorageTargetIdentity(transport=kind, endpoint=endpoint)
-    if kind == "gdrive":
-        # Credentials are not a durable account identity. Conservatively group
-        # all Drive targets until the authenticated account can be established.
-        return StorageTargetIdentity(
-            transport=kind, endpoint="https://www.googleapis.com"
-        )
-    return None
+    try:
+        registered = transport(TransportKind(kind))
+    except ValueError:
+        return None
+    return registered.target(options)
 
 
 def shares_storage(first: StorageTargetIdentity, second: StorageTargetIdentity) -> bool:
@@ -146,7 +56,7 @@ def shares_storage(first: StorageTargetIdentity, second: StorageTargetIdentity) 
         return True
     if first.host and first.host == second.host:
         return True
-    if first.provider_domain and first.provider_domain == second.provider_domain:
+    if provider_domain(first) and provider_domain(first) == provider_domain(second):
         return True
     return (first.transport == "local" and _is_loopback(second.host)) or (
         second.transport == "local" and _is_loopback(first.host)
@@ -172,7 +82,7 @@ def identity_evidence(target: StorageTargetIdentity | None) -> dict | None:
     from app.db.models import StorageFailureDomainDeclaration
     from app.db.session import get_session_factory
 
-    domain = target.provider_domain
+    domain = provider_domain(target)
     revision = None
     if domain is None:
         with get_session_factory().scoped_session() as session:
@@ -183,7 +93,7 @@ def identity_evidence(target: StorageTargetIdentity | None) -> dict | None:
                 return None
             try:
                 declared_target = json.loads(declaration.target_identity)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 return None
             if (
                 declared_target != target.model_dump()

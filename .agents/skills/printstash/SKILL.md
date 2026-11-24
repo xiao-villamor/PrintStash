@@ -56,6 +56,7 @@ and changelog instead of reconstructing their contents.
 | Frontend / UI change | [references/frontend.md](references/frontend.md) |
 | Pending Imports, URL capture, provenance, provider connections, or browser extension | [references/capture.md](references/capture.md) plus backend/frontend reference(s) for the layers changed |
 | Printer providers (new or changed) | [references/providers.md](references/providers.md) |
+| Storage transports: new remote storage service, OpenDAL bump, provider catalogue | [references/storage-transports.md](references/storage-transports.md) |
 | Implement work from a named private plan | The named file in `reports/`; read only its shared constraints and the relevant work card |
 | "What's next" / roadmap planning | `reports/14-implementation-plan-to-1.0.0.md` when present (needed section only), otherwise `docs/roadmap.md` + `CHANGELOG.md` |
 
