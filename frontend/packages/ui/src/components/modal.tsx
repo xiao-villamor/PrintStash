@@ -73,6 +73,8 @@ export interface ModalProps {
   children?: ReactNode;
   className?: string;
   description?: ReactNode;
+  /** Controls shown in the header row, between the title and the close button. */
+  headerExtra?: ReactNode;
   footer?: ReactNode;
   bodyClassName?: string;
   variant?: "default" | "confirmation";
@@ -88,6 +90,7 @@ export function Modal({
   children,
   className,
   description,
+  headerExtra,
   footer,
   bodyClassName,
   variant = "default",
@@ -152,6 +155,7 @@ export function Modal({
               </div>
             )}
           </div>
+          {headerExtra}
           {closeButton}
         </div>
       ) : (

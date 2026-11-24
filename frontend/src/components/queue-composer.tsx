@@ -14,7 +14,6 @@ const priorityLabels = { low: "Low", normal: "Normal", rush: "Rush" } as const;
 export function QueueRevisionPanel({ children }: { children: ReactNode }) {
   return (
     <div className="queue-revision-choice">
-      <FileBox size={20} aria-hidden />
       <div>{children}</div>
     </div>
   );

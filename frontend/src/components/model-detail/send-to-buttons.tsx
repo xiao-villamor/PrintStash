@@ -12,7 +12,7 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "@/lib/link";
-import { ExternalLink, Loader2, Send, WifiOff } from "lucide-react";
+import { ExternalLink, Info, Loader2, Send, WifiOff } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 
 import {
@@ -753,11 +753,54 @@ export function SendToButtons({
             ) : undefined
           }
           dismissible={!sending}
+          headerExtra={
+            <fieldset
+              className="shrink-0"
+              disabled={sending}
+            >
+              <legend className="sr-only">{uiText("Action")}</legend>
+              <div className="inline-flex max-w-full flex-wrap gap-1 rounded-md border border-border bg-muted p-1">
+                {(
+                  [
+                    { value: "send", label: uiText("Send now") },
+                    { value: "queue", label: uiText("Add to queue") },
+                  ] as const
+                ).map(({ value, label }) => (
+                  <label key={value} className="relative">
+                    <input
+                      type="radio"
+                      name={deliveryModeName}
+                      checked={deliveryMode === value}
+                      className="peer absolute inset-0 m-0 size-full cursor-action opacity-0"
+                      onChange={(event) => {
+                        const scrollBody = event.currentTarget
+                          .closest<HTMLElement>("[role=dialog]")
+                          ?.querySelector<HTMLDivElement>(".queue-compose-body");
+                        if (scrollBody) scrollBody.scrollTop = 0;
+                        setDeliveryMode(value);
+                        if (value === "queue") {
+                          setStartPrint(false);
+                          if (!user?.is_superuser) setRoutingStrategy("manual");
+                        }
+                      }}
+                    />
+                    <span className="flex min-h-8 items-center gap-2 px-3 text-sm font-medium text-muted-foreground peer-checked:bg-accent peer-checked:text-accent-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-inset peer-focus-visible:ring-ring">
+                      {label}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          }
           footer={
             queuing ? (
               <>
                 {blockedReason && (
-                  <p id={blockedReasonId} className="me-auto text-sm text-muted-foreground">
+                  <p
+                    id={blockedReasonId}
+                    className="me-auto flex items-center gap-2 text-sm text-muted-foreground"
+                  >
+                    <Info className="size-4 shrink-0" aria-hidden />
                     {blockedReason}
                   </p>
                 )}
@@ -771,7 +814,11 @@ export function SendToButtons({
             ) : (
               <>
                 {blockedReason && (
-                  <p id={blockedReasonId} className="me-auto text-sm text-muted-foreground">
+                  <p
+                    id={blockedReasonId}
+                    className="me-auto flex items-center gap-2 text-sm text-muted-foreground"
+                  >
+                    <Info className="size-4 shrink-0" aria-hidden />
                     {blockedReason}
                   </p>
                 )}
@@ -803,45 +850,10 @@ export function SendToButtons({
           bodyClassName="queue-compose-body flex-1 p-0"
         >
           <div data-testid="send-dialog-scroll-region" className="flex min-h-full min-w-0 flex-col">
-            <fieldset
-              className="sticky top-0 z-10 shrink-0 border-b border-border bg-card px-6 py-3"
-              disabled={sending}
-            >
-              <legend className="sr-only">{uiText("Action")}</legend>
-              <div className="inline-flex max-w-full flex-wrap gap-1 rounded-md border border-border bg-muted p-1">
-                {(
-                  [
-                    { value: "send", label: uiText("Send now") },
-                    { value: "queue", label: uiText("Add to queue") },
-                  ] as const
-                ).map(({ value, label }) => (
-                  <label key={value} className="relative">
-                    <input
-                      type="radio"
-                      name={deliveryModeName}
-                      checked={deliveryMode === value}
-                      className="peer absolute inset-0 m-0 size-full cursor-action opacity-0"
-                      onChange={(event) => {
-                        const scrollBody =
-                          event.currentTarget.closest<HTMLDivElement>(".queue-compose-body");
-                        if (scrollBody) scrollBody.scrollTop = 0;
-                        setDeliveryMode(value);
-                        if (value === "queue") {
-                          setStartPrint(false);
-                          if (!user?.is_superuser) setRoutingStrategy("manual");
-                        }
-                      }}
-                    />
-                    <span className="flex min-h-8 items-center gap-2 px-3 text-sm font-medium text-muted-foreground peer-checked:bg-accent peer-checked:text-accent-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-inset peer-focus-visible:ring-ring">
-                      {label}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
             <div className={queuing ? "queue-compose flex-1" : "flex-1 p-6"}>
               <div className={queuing ? "queue-compose-fields" : "detail-delivery-layout"}>
                 <div className="min-w-0 space-y-5">
+                  <h3 className="prepare-group-heading">{uiText("What to print")}</h3>
                   <div className="space-y-4">
                     <QueueRevisionPanel>
                       <OptionPicker
@@ -987,6 +999,7 @@ export function SendToButtons({
                   )}
                 </div>
                 <div className="min-w-0 space-y-5">
+                  <h3 className="prepare-group-heading">{uiText("Where it goes")}</h3>
                   {deliveryMode === "queue" && (
                     <div className="grid gap-4">
                       {preparingModel && user?.is_superuser && (

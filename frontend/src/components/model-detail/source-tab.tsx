@@ -299,7 +299,7 @@ function SourceTags({ tags, last = false }: { tags: string[]; last?: boolean }) 
         {tags.map((tag) => (
           <span
             key={tag}
-            className="min-w-0 max-w-full text-sm text-muted-foreground [overflow-wrap:anywhere]"
+            className="min-w-0 max-w-full rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground [overflow-wrap:anywhere]"
           >
             {tag}
           </span>
@@ -605,6 +605,14 @@ function SourceTabContent({
             const fieldCount = source.fields.length + (source.tags?.length ? 1 : 0);
             const titleField = source.fields.find((item) => item.field_name === "title");
             const creatorField = source.fields.find((item) => item.field_name === "creator_name");
+            const licenseField = source.fields.find((item) => item.field_name === "license_code");
+            const licenseUrl = safeHttpUrl(
+              source.fields.find((item) => item.field_name === "license_url")?.effective_value ?? "",
+            );
+            const shownFields = source.fields.filter(
+              (item) =>
+                editingSource || !(item.field_name === "license_code" || item.field_name === "license_url"),
+            );
             return (
               <article key={source.id} className="min-w-0">
                 <section aria-labelledby={`source-heading-${source.id}`}>
@@ -639,6 +647,38 @@ function SourceTabContent({
                     </p>
                   </div>
                 </section>
+                {licenseField?.effective_value && (
+                  <section aria-labelledby={`license-heading-${source.id}`} className="mt-4">
+                    <h2
+                      id={`license-heading-${source.id}`}
+                      className="mb-2 text-sm font-medium text-muted-foreground"
+                    >
+                      {uiText("License")}
+                    </h2>
+                    <div className="space-y-1 rounded-lg border border-border p-4">
+                      <p className="text-sm font-semibold">{licenseField.effective_value}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {uiText("source.licenseNote", {
+                          site: sourceProviderName(source.provider),
+                        })}
+                      </p>
+                      {(licenseUrl ?? canonicalUrl) && (
+                        <a
+                          href={licenseUrl ?? canonicalUrl ?? undefined}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-sm text-foreground underline-offset-4 hover:underline"
+                        >
+                          {uiText("source.licenseTerms", {
+                            site: sourceProviderName(source.provider),
+                          })}
+                          <ExternalLink className="size-3.5 shrink-0" aria-hidden />
+                          <span className="sr-only">{uiText("Opens in a new tab")}</span>
+                        </a>
+                      )}
+                    </div>
+                  </section>
+                )}
                 <SourceCover
                   modelId={modelId}
                   source={source}
@@ -654,7 +694,7 @@ function SourceTabContent({
                       {t("source.metadata")}
                     </h2>
                     <div>
-                      {source.fields.map((field, index) => (
+                      {shownFields.map((field, index) => (
                         <SourceField
                           modelName={modelName}
                           key={field.field_name}
@@ -672,7 +712,7 @@ function SourceTabContent({
                               ? feedback
                               : null
                           }
-                          last={index === source.fields.length - 1}
+                          last={index === shownFields.length - 1}
                         />
                       ))}
                       <SourceTags tags={source.tags ?? []} last />
