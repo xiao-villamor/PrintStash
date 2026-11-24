@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -24,6 +24,7 @@ export function PricingTemplateControls({
   onSave: (data: Omit<PricingTemplate, "id">) => Promise<boolean>;
   onDelete: (id: string) => Promise<boolean>;
 }) {
+  const templateSelectId = useId();
   const [offset, setOffset] = useState(0);
   const [selected, select] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -35,8 +36,13 @@ export function PricingTemplateControls({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
-        <FormField className="min-w-48 flex-1" label={uiText("Pricing template")}>
+        <FormField
+          className="min-w-48 flex-1"
+          label={uiText("Pricing template")}
+          htmlFor={templateSelectId}
+        >
           <select
+            id={templateSelectId}
             className={inputClasses}
             value={template?.id ?? ""}
             disabled={templates.isPending || templates.isError}
